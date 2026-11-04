@@ -17,7 +17,7 @@ class ProfileScreen extends StatelessWidget {
     this.externalLinkService,
   });
 
-  static const _githubUrl = 'https://github.com/arrry-07/chaoxing-journal';
+  static const _githubUrl = AppUpdateService.repositoryUrl;
 
   final AssignmentStore store;
   final AppUpdateService? updateService;
@@ -70,13 +70,13 @@ class ProfileScreen extends StatelessWidget {
                       _SettingsTile(
                         icon: Icons.info_outline,
                         title: '关于我们',
-                        subtitle: 'HY · MIT License · v${AppVersion.display}',
+                        subtitle: 'arrry-07 · MIT License · v${AppVersion.display}',
                         onTap: () => _showAbout(context),
                       ),
                       _SettingsTile(
                         icon: Icons.system_update_alt,
                         title: '检查更新',
-                        subtitle: '查看手记更新；私有仓库需登录 GitHub',
+                        subtitle: '打开本仓库 Releases，登录后下载新版',
                         onTap: () => _checkForUpdates(context),
                       ),
                       _SettingsTile(
@@ -141,6 +141,17 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Future<void> _checkForUpdates(BuildContext context) async {
+    // Private release assets require the user's GitHub browser session.
+    // Never embed a repository access token in an Android application.
+    if (AppUpdateService.privateRepository && updateService == null) {
+      final opened = await (externalLinkService ?? ExternalLinkService())
+          .openUrl(AppUpdateService.releasesUrl);
+      if (!opened && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('无法打开更新页面，请在浏览器登录 GitHub 后重试')));
+      }
+      return;
+    }
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     messenger.showSnackBar(

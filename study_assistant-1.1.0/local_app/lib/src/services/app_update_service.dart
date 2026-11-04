@@ -40,6 +40,9 @@ class AppUpdateService {
 
   static const owner = 'arrry-07';
   static const repo = 'chaoxing-journal';
+  static const repositoryUrl = 'https://github.com/$owner/$repo';
+  static const releasesUrl = '$repositoryUrl/releases';
+  static const privateRepository = true;
 
   final Dio _dio;
 

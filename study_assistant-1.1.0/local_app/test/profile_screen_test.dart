@@ -213,7 +213,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(
             body: ProfileScreen(store: store, externalLinkService: external))));
-    for (final label in ['帮助与反馈', 'GitHub 源码', '关于我们']) {
+    for (final label in ['帮助与反馈', 'GitHub 源码', '检查更新', '关于我们']) {
       final row = find.widgetWithText(ListTile, label);
       await tester.ensureVisible(row);
       await tester.pumpAndSettle();
@@ -222,7 +222,8 @@ void main() {
     }
     expect(external.openedUrls, [
       'https://github.com/arrry-07/chaoxing-journal/issues',
-      'https://github.com/arrry-07/chaoxing-journal'
+      'https://github.com/arrry-07/chaoxing-journal',
+      'https://github.com/arrry-07/chaoxing-journal/releases'
     ]);
     expect(find.byType(AboutDialog), findsOneWidget);
   });

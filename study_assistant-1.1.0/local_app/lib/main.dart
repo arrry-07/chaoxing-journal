@@ -74,6 +74,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
   }
 
   Future<void> _checkUpdateOnStartup() async {
+    if (AppUpdateService.privateRepository) return;
     debugPrint('[UpdateCheck] _checkUpdateOnStartup START, version=${AppVersion.name}');
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
