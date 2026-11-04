@@ -27,6 +27,9 @@ class HomeSyncPresentation {
           hasCache ? '正在更新…' : '正在读取作业…', HomeSyncAction.none);
     }
     if (report.phase == SyncPhase.failed || report.phase == SyncPhase.partial) {
+      final detailOnly = report.phase == SyncPhase.partial &&
+          report.issues.isNotEmpty &&
+          report.issues.every((i) => i.stage == 'detail');
       final action =
           report.issues.any((i) => i.kind == SyncIssueKind.authExpired)
               ? HomeSyncAction.login
@@ -36,12 +39,14 @@ class HomeSyncPresentation {
                   : HomeSyncAction.retry;
       return HomeSyncPresentation(
           report.phase == SyncPhase.partial
-              ? '部分课程未更新'
+              ? detailOnly
+                  ? '部分截止时间待确认'
+                  : '部分课程未更新'
               : hasCache
                   ? '更新失败，以下为上次记录'
                   : '暂时无法读取作业',
           action,
-          showCached: hasCache);
+          showCached: hasCache && !detailOnly);
     }
     if (serviceWarning) {
       return const HomeSyncPresentation(

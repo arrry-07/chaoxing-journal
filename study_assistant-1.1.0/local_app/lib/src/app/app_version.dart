@@ -1,8 +1,8 @@
 ﻿class AppVersion {
   const AppVersion._();
 
-  static const name = '1.2.3';
-  static const code = 33;
+  static const name = '1.2.4';
+  static const code = 34;
 
   static String get display => '$name ($code)';
 }

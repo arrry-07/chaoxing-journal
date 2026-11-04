@@ -44,7 +44,9 @@ class WidgetSnapshotService {
             deadlineAt:
                 assignment.deadlineTrusted ? assignment.deadlineAt : null,
             remainingText: !assignment.deadlineTrusted
-                ? '截止待确认'
+                ? assignment.deadlineAt == null
+                    ? assignment.deadlineLabel
+                    : '截止待确认'
                 : assignment.deadlineAt == null
                     ? assignment.deadlineLabel
                     : _remainingText(assignment.deadlineAt!, now),

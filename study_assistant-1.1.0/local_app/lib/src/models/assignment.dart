@@ -90,7 +90,9 @@ class Assignment {
           .where((s) => s.name == json['source'])
           .firstOrNull,
       deadlineReadFailed: json['deadlineReadFailed'] == true,
-      deadlineTrusted: json['deadlineTrusted'] == true,
+      // Versions 32–33 incorrectly interpreted list endTime=0 as no deadline.
+      deadlineTrusted: json['deadlineTrusted'] == true &&
+          !(json['deadlineAt'] == null && json['deadlineRawText'] == '0'),
       deadlineRawText: json['deadlineRawText'] as String?,
       id: json['id'] as String,
       courseName: json['courseName'] as String,
@@ -170,9 +172,18 @@ class Assignment {
       !isCompleted &&
       (deadlineAt?.isBefore(DateTime.now()) ?? false);
 
-  String get deadlineLabel => deadlineReadFailed
-      ? (deadlineAt == null ? '截止时间读取失败' : '截止时间为上次读取记录')
-      : '未设置截止时间';
+  String get deadlineLabel {
+    if (deadlineAt == null && deadlineRawText == '尚未开放') {
+      return '尚未开放，截止时间待确认';
+    }
+    if (deadlineAt == null && deadlineRawText?.endsWith('（年份待确认）') == true) {
+      return '截止 $deadlineRawText';
+    }
+    if (deadlineReadFailed) {
+      return deadlineAt == null ? '截止时间读取失败，请查看同步详情' : '截止时间为上次读取记录';
+    }
+    return deadlineTrusted ? '未设置截止时间' : '截止时间待确认';
+  }
 
   String get statusLabel => switch (status) {
         'returned' => '已退回',

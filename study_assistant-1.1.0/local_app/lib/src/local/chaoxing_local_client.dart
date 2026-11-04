@@ -56,6 +56,7 @@ class ChaoxingLocalClient {
   Uri? _verificationTarget;
   Uri? _courseVerificationProbe;
   bool _v3FormalApiConfirmed = false;
+  SyncIssueKind? _deadlineReadsBlockedBy;
 
   Future<bool> verifyInBrowser() async {
     final generation = _sessionGeneration;
@@ -197,6 +198,7 @@ class ChaoxingLocalClient {
 
   Future<List<Assignment>> fetchAssignments() async {
     lastSyncWarning = null;
+    _deadlineReadsBlockedBy = null;
     issues = [];
     hasCourseResponse = false;
     succeededCourses = 0;
@@ -262,12 +264,22 @@ class ChaoxingLocalClient {
         assignments.addAll(work);
         if (work.any((a) => a.deadlineReadFailed)) {
           failedCourses++;
-          issues.add(SyncIssue(SyncIssueKind.partial, '$label 部分截止时间未读取，保留上次记录',
+          issues.add(SyncIssue(SyncIssueKind.partial, '$label 部分截止时间尚未确认',
               courseKey: '${course.courseId}:${course.clazzId}',
               stage: 'detail',
               elapsedMs: watch.elapsedMilliseconds));
           problems.add('$label 部分截止时间未读取');
         }
+      }
+      if (_deadlineReadsBlockedBy != null) {
+        final unread = courses.length - courses.indexOf(course) - 1;
+        if (unread > 0) {
+          issues.add(SyncIssue(
+              _deadlineReadsBlockedBy!, '本次读取已暂停，另有 $unread 门课程尚未更新',
+              stage: 'workList'));
+        }
+        failedCourses = courses.length - succeededCourses + 1;
+        break;
       }
     }
     if (problems.isNotEmpty) {
@@ -331,32 +343,87 @@ class ChaoxingLocalClient {
         courseName: course.courseName,
         baseUri: uri);
     if (parsed == null) return null;
+    return _hydrateWorkDeadlines(parsed);
+  }
+
+  Future<List<Assignment>> _hydrateWorkDeadlines(List<Assignment> rows,
+      {Map<String, DateTime> starts = const {}}) async {
     final result = <Assignment>[];
-    for (final item in parsed) {
+    for (final item in rows) {
       if (item.isCompleted) {
+        final prior = previousAssignments[item.id];
         result.add(item.copyWith(
-            deadlineAt: previousAssignments[item.id]?.deadlineAt));
+            deadlineAt: item.deadlineAt ?? prior?.deadlineAt,
+            deadlineTrusted:
+                item.deadlineAt != null || prior?.deadlineTrusted == true,
+            deadlineRawText: prior?.deadlineRawText));
         continue;
       }
-      Response<dynamic>? detail;
-      try {
-        detail = await _courseGet(Uri.parse(item.submitUrl!));
-      } on ChaoxingAuthenticationException {
-        rethrow;
-      } on SyncReadException catch (e) {
-        if (e.issue.kind == SyncIssueKind.verificationRequired) rethrow;
-        /* Keep the work row when only its deadline request fails. */
+      if (item.deadlineTrusted && item.deadlineAt != null) {
+        result.add(item);
+        continue;
       }
-      final content = detail?.data?.toString() ?? '';
-      final date = ChaoxingAssignmentParser.parseDetailDeadline(content);
-      final noLimit = RegExp(r'(?:作答时间|截止时间)\s*[:：]\s*(?:不限|无截止时间|长期有效)')
-          .hasMatch(_stripTags(content));
+      DeadlineEvidence evidence = const DeadlineEvidence();
+      SyncIssue? failure;
+      if (_deadlineReadsBlockedBy == null) {
+        final watch = Stopwatch()..start();
+        try {
+          final response = await _courseGet(Uri.parse(item.submitUrl!));
+          final body = response?.data?.toString() ?? '';
+          if (body.contains('没有此页面访问权限')) {
+            throw SyncReadException(SyncIssue(
+                SyncIssueKind.forbidden, '学习通未允许访问此作业详情',
+                httpStatus: response?.statusCode));
+          }
+          evidence = ChaoxingAssignmentParser.readDetailDeadline(body,
+              startedAt: starts[item.id]);
+          if (kDebugMode) {
+            debugPrint(
+                '[DeadlineRead] status=${response?.statusCode} bytes=${body.length} startAnchor=${starts.containsKey(item.id)} exact=${evidence.deadlineAt != null} noLimit=${evidence.noLimit} missingYear=${evidence.missingYear} notOpen=${evidence.notOpen}');
+          }
+          if (evidence.deadlineAt == null && !evidence.noLimit) {
+            failure = SyncIssue(
+                evidence.notOpen
+                    ? SyncIssueKind.partial
+                    : SyncIssueKind.schemaChanged,
+                evidence.notOpen
+                    ? '作业尚未开放，开放后可读取截止时间'
+                    : evidence.missingYear
+                        ? '作业详情只提供月日，截止年份待确认'
+                        : '作业详情未提供可识别的截止信息',
+                stage: 'detail',
+                courseKey: item.courseKey,
+                httpStatus: response?.statusCode,
+                elapsedMs: watch.elapsedMilliseconds);
+          }
+        } on ChaoxingAuthenticationException {
+          // The list has already been read successfully. Save those rows and
+          // ask for reauthentication instead of discarding this sync's data.
+          _deadlineReadsBlockedBy = SyncIssueKind.authExpired;
+          failure = SyncIssue(SyncIssueKind.authExpired, '作业详情登录已失效，请重新登录',
+              stage: 'detail',
+              courseKey: item.courseKey,
+              elapsedMs: watch.elapsedMilliseconds);
+        } on SyncReadException catch (e) {
+          failure = SyncIssue(e.issue.kind, e.issue.message,
+              stage: 'detail',
+              courseKey: item.courseKey,
+              httpStatus: e.issue.httpStatus,
+              elapsedMs: watch.elapsedMilliseconds);
+          if (e.issue.kind == SyncIssueKind.verificationRequired) {
+            _deadlineReadsBlockedBy = e.issue.kind;
+          }
+        }
+      }
+      if (failure != null) issues.add(failure);
       result.add(item.copyWith(
-          deadlineTrusted: date != null || noLimit,
-          deadlineRawText: RegExp(r'(?:作答时间|截止时间)\s*[:：].{0,160}')
-              .firstMatch(_stripTags(content))?[0],
-          deadlineAt: date,
-          deadlineReadFailed: date == null && !noLimit));
+          deadlineAt: evidence.deadlineAt,
+          clearDeadlineAt: evidence.noLimit,
+          deadlineTrusted: evidence.deadlineAt != null || evidence.noLimit,
+          deadlineReadFailed: evidence.deadlineAt == null && !evidence.noLimit,
+          deadlineRawText: evidence.missingYear
+              ? '${evidence.rawText}（年份待确认）'
+              : evidence.rawText));
     }
     return result;
   }
@@ -464,6 +531,7 @@ class ChaoxingLocalClient {
   Future<List<Assignment>> _fetchV3FormalHomework(
       ChaoxingCourseRef course) async {
     final result = <Assignment>[];
+    final starts = <String, DateTime>{};
     final seen = <String>{};
     for (var page = 1; page <= 100; page++) {
       final response = await _safeGet<dynamic>(
@@ -547,8 +615,13 @@ class ChaoxingLocalClient {
                 _ => 'unknown'
               };
         final end = int.tryParse('${row['endTime']}');
-        final trusted = end != null &&
-            (end == 0 || end >= 946684800000 && end <= 4102444800000);
+        final start = int.tryParse('${row['startTime']}');
+        if (start != null && start >= 946684800000 && start <= 4102444800000) {
+          starts['cx:work:${course.courseId}:${course.clazzId}:$id'] =
+              DateTime.fromMillisecondsSinceEpoch(start, isUtc: true);
+        }
+        final trusted =
+            end != null && (end >= 946684800000 && end <= 4102444800000);
         result.add(Assignment(
             id: 'cx:work:${course.courseId}:${course.clazzId}:$id',
             courseName: course.courseName,
@@ -557,14 +630,16 @@ class ChaoxingLocalClient {
                 ? DateTime.fromMillisecondsSinceEpoch(end)
                 : null,
             deadlineTrusted: trusted,
-            deadlineRawText: end?.toString(),
-            deadlineReadFailed: !trusted,
+            deadlineRawText: trusted ? end.toString() : null,
+            deadlineReadFailed: false,
             requirementsText: '',
             status: state,
             submitUrl: url.toString(),
             lastSyncedAt: DateTime.now()));
       }
-      if (result.length == total) return result;
+      if (result.length == total) {
+        return _hydrateWorkDeadlines(result, starts: starts);
+      }
       if (rows.isEmpty) {
         throw const SyncReadException(SyncIssue(
             SyncIssueKind.schemaChanged, '正式作业总数与分页不匹配',
