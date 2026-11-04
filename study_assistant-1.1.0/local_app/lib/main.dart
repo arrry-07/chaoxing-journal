@@ -1,3 +1,8 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'src/features/help_feedback_screen.dart';
+import 'src/features/local_records_screen.dart';
+import 'src/features/course_list_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -13,7 +18,7 @@ import 'src/features/reminder_settings_screen.dart';
 import 'src/features/stats_screen.dart';
 import 'src/features/sync_status_screen.dart';
 import 'src/services/app_update_service.dart';
-import 'src/services/external_link_service.dart';
+import 'src/features/widgets/update_dialog.dart';
 import 'src/app/app_version.dart';
 import 'src/services/assignment_store.dart';
 import 'src/services/local_notification_service.dart';
@@ -23,6 +28,17 @@ import 'src/services/widget_snapshot_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  LicenseRegistry.addLicense(() async* {
+    for (final entry in const {
+      'HY': 'assets/licenses/HY.txt',
+      'xuexitong-cli': 'assets/licenses/xuexitong-cli.txt',
+      '中文宋体标题': 'assets/type/OFL.txt',
+      '中文正文字体': 'assets/type/OFL-Sans.txt',
+    }.entries) {
+      yield LicenseEntryWithLineBreaks(
+          [entry.key], await rootBundle.loadString(entry.value));
+    }
+  });
   await initializeDateFormatting('zh_CN');
 
   final sessionStore = SecureSessionStore();
@@ -70,163 +86,28 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
     super.initState();
     _router = _buildRouter();
     widget.notificationService.setPayloadHandler(_handleNotificationPayload);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkUpdateOnStartup());
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _checkUpdateOnStartup());
   }
 
   Future<void> _checkUpdateOnStartup() async {
-    if (AppUpdateService.privateRepository) return;
-    debugPrint('[UpdateCheck] _checkUpdateOnStartup START, version=${AppVersion.name}');
-    for (var attempt = 0; attempt < 2; attempt++) {
-      try {
-        debugPrint('[UpdateCheck] Attempt $attempt...');
-        final update = await AppUpdateService().checkForUpdate(
-          currentVersionName: AppVersion.name,
-          currentVersionCode: AppVersion.code,
-        );
-        debugPrint('[UpdateCheck] checkForUpdate result: $update');
-        if (update == null || !mounted) return;
-        // Use postFrameCallback to ensure Navigator is ready
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _showUpdateDialog(update);
-        });
-        return;
-      } catch (e, stack) {
-        debugPrint('[UpdateCheck] Attempt $attempt failed: $e');
-        debugPrint('[UpdateCheck] Stack: $stack');
-        if (attempt < 1) {
-          await Future.delayed(const Duration(seconds: 3));
-        }
-      }
+    const manifest = String.fromEnvironment('UPDATE_MANIFEST_URL');
+    if (manifest.isEmpty) return;
+    final r = await AppUpdateService()
+        .checkConfigured(currentVersionCode: AppVersion.code);
+    final c = _navigatorKey.currentContext;
+    if (mounted &&
+        c != null &&
+        c.mounted &&
+        r.status == UpdateCheckStatus.available) {
+      await showDialog<void>(
+          context: c,
+          builder: (_) => UpdateDialog(service: AppUpdateService()));
     }
   }
-
-  void _showUpdateDialog(AppUpdateInfo update) {
-    if (!mounted) return;
-    final navigatorContext = _navigatorKey.currentContext;
-    if (navigatorContext == null) return;
-    showDialog<void>(
-      context: navigatorContext,
-      builder: (ctx) => AlertDialog(
-        title: const Text('发现新版本'),
-        content: Text('v${update.versionName} 已发布，是否更新？\n\n${update.releaseNotes}'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('稍后'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              _downloadAndInstall(update);
-            },
-            child: const Text('立即更新'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _downloadAndInstall(AppUpdateInfo update) async {
-    final navigatorContext = _navigatorKey.currentContext;
-    if (navigatorContext == null) return;
-
-    showDialog<void>(
-      context: navigatorContext,
-      barrierDismissible: false,
-      builder: (dialogCtx) {
-        var started = false;
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            var received = 0;
-            var total = 0;
-            var done = false;
-            var error = false;
-
-            if (!started) {
-              started = true;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                _doDownload(
-                  update: update,
-                  onProgress: (r, t) {
-                    if (ctx.mounted) {
-                      setDialogState(() { received = r; total = t; });
-                    }
-                  },
-                  onDone: () {
-                    if (ctx.mounted) {
-                      setDialogState(() => done = true);
-                      try { Navigator.of(ctx).pop(); } catch (_) {}
-                    }
-                  },
-                  onError: () {
-                    if (ctx.mounted) {
-                      setDialogState(() => error = true);
-                    }
-                  },
-                );
-              });
-            }
-
-            return AlertDialog(
-              title: Text(error ? '\u4e0b\u8f7d\u5931\u8d25' : (done ? '\u4e0b\u8f7d\u5b8c\u6210' : '\u6b63\u5728\u4e0b\u8f7d\u66f4\u65b0\u5305...')),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (!error && !done) ...[
-                    LinearProgressIndicator(
-                      value: total > 0 ? received / total : null,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      total > 0
-                          ? '${(received * 100 / total).toStringAsFixed(0)}%'
-                          : '\u8fde\u63a5\u4e2d...',
-                      style: Theme.of(ctx).textTheme.bodySmall,
-                    ),
-                  ],
-                  if (error) const Text('\u4e0b\u8f7d\u66f4\u65b0\u5305\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5'),
-                ],
-              ),
-              actions: error
-                  ? [
-                      TextButton(
-                        onPressed: () { try { Navigator.of(ctx).pop(); } catch (_) {} },
-                        child: const Text('\u5173\u95ed'),
-                      ),
-                    ]
-                  : null,
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<void> _doDownload({
-    required AppUpdateInfo update,
-    required void Function(int, int) onProgress,
-    required void Function() onDone,
-    required void Function() onError,
-  }) async {
-    try {
-      final file = await AppUpdateService().downloadApk(update, onProgress: onProgress);
-      onDone();
-      final success = await ExternalLinkService().installApk(file.path);
-      final mc = _navigatorKey.currentContext;
-      if (!success && mc != null && mc.mounted) {
-        ScaffoldMessenger.of(mc).showSnackBar(
-          const SnackBar(content: Text('\u65e0\u6cd5\u6253\u5f00\u7cfb\u7edf\u5b89\u88c5\u5668')),
-        );
-      }
-    } catch (_) {
-      onError();
-    }
-  }
-
 
   @override
   void dispose() {
-
     _router.dispose();
     widget.notificationService.setPayloadHandler(null);
     super.dispose();
@@ -235,7 +116,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: '课业手记',
+      title: '学习通课业手记',
       debugShowCheckedModeBanner: false,
       theme: StudyAssistantTheme.light,
       routerConfig: _router,
@@ -290,6 +171,14 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
                 assignmentStore: assignmentStore,
               ),
             ),
+            GoRoute(
+                path: '/help', builder: (_, __) => const HelpFeedbackScreen()),
+            GoRoute(
+                path: '/records',
+                builder: (_, __) => LocalRecordsScreen(store: assignmentStore)),
+            GoRoute(
+                path: '/courses',
+                builder: (_, __) => CourseListScreen(store: assignmentStore)),
             GoRoute(
               path: '/profile',
               builder: (_, __) => ProfileScreen(store: assignmentStore),

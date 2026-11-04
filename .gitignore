@@ -26,3 +26,6 @@
 **/session.json
 **/credentials.json
 **/.DS_Store
+
+# Local delivery APKs and device screenshots may contain user data.
+/artifacts/

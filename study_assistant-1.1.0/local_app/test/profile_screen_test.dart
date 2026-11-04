@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -14,7 +16,51 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
-  testWidgets('profile offers learning account synchronization', (tester) async {
+  testWidgets('source open is an independent labeled button', (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = AssignmentStore(
+        sessionStore: _MemorySessionStore(),
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService());
+    addTearDown(store.dispose);
+    await t.pumpWidget(
+        MaterialApp(home: Scaffold(body: ProfileScreen(store: store))));
+    await t.scrollUntilVisible(find.text('GitHub 源码'), 400);
+    expect(find.byTooltip('打开链接'), findsOneWidget);
+  });
+  testWidgets('hidden assignments can be restored from profile',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = AssignmentStore(
+        sessionStore: _MemorySessionStore(),
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService());
+    addTearDown(store.dispose);
+    await store.repository.mergeAndSave([
+      Assignment(
+          id: 'cx:work:1:2:hidden-1',
+          courseName: '数学',
+          title: '隐藏样例',
+          deadlineAt: null,
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: DateTime.now())
+    ]);
+    await store.updateCompletion('cx:work:1:2:hidden-1', true);
+    await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: ProfileScreen(store: store))));
+    await tester.ensureVisible(find.text('已隐藏作业'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('已隐藏作业'));
+    await tester.pumpAndSettle();
+    expect(find.text('隐藏样例'), findsOneWidget);
+    await tester.tap(find.text('恢复'));
+    await tester.pumpAndSettle();
+    expect(find.text('暂无隐藏作业'), findsOneWidget);
+    expect(store.visibleAssignments.single.id, 'cx:work:1:2:hidden-1');
+  });
+  testWidgets('profile offers learning account synchronization',
+      (tester) async {
     SharedPreferences.setMockInitialValues({});
     final store = AssignmentStore(
       sessionStore: _MemorySessionStore(),
@@ -144,7 +190,7 @@ void main() {
     await tester.tap(find.text('检查更新'));
     await tester.pumpAndSettle();
 
-    expect(find.text('发现新版本 1.0.7'), findsOneWidget);
+    expect(find.textContaining('版本 1.0.7'), findsOneWidget);
     expect(find.text('下载并安装'), findsOneWidget);
 
     await tester.tap(find.text('下载并安装'));
@@ -202,30 +248,45 @@ void main() {
   });
 
   testWidgets(
-      'feedback opens issues, source opens repository, about opens credits',
-      (tester) async {
+      'source copies link while independent button opens it; about keeps credits accessible',
+      (t) async {
+    SharedPreferences.setMockInitialValues({});
     final external = _FakeExternalLinkService();
     final store = AssignmentStore(
         sessionStore: _MemorySessionStore(),
         notificationService: _NoopNotificationService(),
         widgetSnapshotService: _NoopWidgetSnapshotService());
     addTearDown(store.dispose);
-    await tester.pumpWidget(MaterialApp(
+    final copied = <String>[];
+    t.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied.add((call.arguments as Map)['text'] as String);
+      }
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+    await t.pumpWidget(MaterialApp(
         home: Scaffold(
             body: ProfileScreen(store: store, externalLinkService: external))));
-    for (final label in ['帮助与反馈', 'GitHub 源码', '检查更新', '关于我们']) {
-      final row = find.widgetWithText(ListTile, label);
-      await tester.ensureVisible(row);
-      await tester.pumpAndSettle();
-      await tester.tap(row);
-      await tester.pumpAndSettle();
-    }
-    expect(external.openedUrls, [
-      'https://github.com/arrry-07/chaoxing-journal/issues',
-      'https://github.com/arrry-07/chaoxing-journal',
-      'https://github.com/arrry-07/chaoxing-journal/releases'
-    ]);
+    final row = find.widgetWithText(ListTile, 'GitHub 源码');
+    await t.ensureVisible(row);
+    await t.pumpAndSettle();
+    await t.tap(find.text('GitHub 源码'));
+    await t.pumpAndSettle();
+    expect(copied, ['https://github.com/arrry-07/chaoxing-journal']);
+    expect(external.openedUrls, isEmpty);
+    await t.tap(find.byTooltip('打开链接'));
+    await t.pumpAndSettle();
+    expect(copied.length, 1);
+    expect(external.openedUrls.length, 1);
+    await t.ensureVisible(find.text('关于我们'));
+    await t.tap(find.text('关于我们'));
+    await t.pumpAndSettle();
     expect(find.byType(AboutDialog), findsOneWidget);
+    expect(find.textContaining('基于 HY'), findsNothing);
+    expect(find.textContaining('维护者 arrry-07'), findsOneWidget);
   });
 
   testWidgets('profile settings contain reminder and sync entries',
@@ -249,8 +310,8 @@ void main() {
     expect(find.text('同步学习通'), findsOneWidget);
     final storage =
         tester.widget<ListTile>(find.widgetWithText(ListTile, '本地记录'));
-    expect(storage.onTap, isNull);
-    expect(storage.trailing, isNull);
+    expect(storage.onTap, isNotNull);
+    expect(storage.trailing, isNotNull);
     expect(find.text('帮助与反馈'), findsOneWidget);
     expect(find.text('关于我们'), findsOneWidget);
   });
@@ -264,17 +325,19 @@ class _FakeUpdateService extends AppUpdateService {
   AppUpdateInfo? downloadedUpdate;
 
   @override
-  Future<AppUpdateInfo?> checkForUpdate({
-    required String currentVersionName,
-    required int currentVersionCode,
-  }) async {
-    return update;
-  }
+  Future<UpdateCheckResult> checkConfigured(
+          {required int currentVersionCode, CancelToken? cancelToken}) async =>
+      UpdateCheckResult(
+          update == null
+              ? UpdateCheckStatus.upToDate
+              : UpdateCheckStatus.available,
+          update: update);
 
   @override
   Future<File> downloadApk(
     AppUpdateInfo update, {
     String? targetDirectory,
+    CancelToken? cancelToken,
     void Function(int receivedBytes, int totalBytes)? onProgress,
   }) async {
     downloadedUpdate = update;
@@ -294,25 +357,25 @@ class _SlowUpdateService extends AppUpdateService {
   Completer<File>? downloadCompleter;
 
   @override
-  Future<AppUpdateInfo?> checkForUpdate({
-    required String currentVersionName,
-    required int currentVersionCode,
-  }) async {
-    return const AppUpdateInfo(
-      versionName: '1.0.11',
-      releaseUrl:
-          'https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.0.11',
-      apkName: 'study-assistant-v1.0.11.apk',
-      apkDownloadUrl:
-          'https://github.com/arrry-07/chaoxing-journal/releases/download/v1.0.11/study-assistant-v1.0.11.apk',
-      releaseNotes: '',
-    );
+  Future<UpdateCheckResult> checkConfigured(
+      {required int currentVersionCode, CancelToken? cancelToken}) async {
+    return const UpdateCheckResult(UpdateCheckStatus.available,
+        update: AppUpdateInfo(
+          versionName: '1.0.11',
+          releaseUrl:
+              'https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.0.11',
+          apkName: 'study-assistant-v1.0.11.apk',
+          apkDownloadUrl:
+              'https://github.com/arrry-07/chaoxing-journal/releases/download/v1.0.11/study-assistant-v1.0.11.apk',
+          releaseNotes: '',
+        ));
   }
 
   @override
   Future<File> downloadApk(
     AppUpdateInfo update, {
     String? targetDirectory,
+    CancelToken? cancelToken,
     void Function(int receivedBytes, int totalBytes)? onProgress,
   }) {
     progressCallback = onProgress;
@@ -333,6 +396,9 @@ class _FakeExternalLinkService extends ExternalLinkService {
   final openedUrls = <String>[];
   final installedApkPaths = <String>[];
 
+  @override
+  Future<Map<String, dynamic>> inspectApk(String filePath) async =>
+      {'compatible': true};
   @override
   Future<bool> openUrl(String url) async {
     openedUrls.add(url);

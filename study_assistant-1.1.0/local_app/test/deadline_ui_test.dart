@@ -27,15 +27,17 @@ void main() {
     addTearDown(store.dispose);
     const title = '学期末综合实验报告修订稿及补充说明材料';
     final work = Assignment(
-        id: 'task',
+        id: 'cx:work:1:2:task',
         courseName: '计算机课程综合实践与应用专题研讨班',
         title: title,
         deadlineAt: null,
         requirementsText: '见批注',
         status: 'returned',
         lastSyncedAt: DateTime.now());
-    store.replaceAssignmentsForTest(
-        [work, work.copyWith(id: 'submitted', status: 'submitted')]);
+    store.replaceAssignmentsForTest([
+      work,
+      work.copyWith(id: 'cx:work:1:2:submitted', status: 'submitted')
+    ]);
     Future<void> show(Widget page) async {
       await t.pumpWidget(MaterialApp(
           home: MediaQuery(
@@ -46,16 +48,19 @@ void main() {
 
     await show(AssignmentListScreen(store: store));
     expect(find.text('下一份要交'), findsNothing);
-    expect(find.text('暂无截止时间'), findsOneWidget);
+    await t.scrollUntilVisible(find.textContaining('截止 / 提交待确认'), 150);
+    await t.tap(find.textContaining('截止 / 提交待确认'));
+    await t.pumpAndSettle();
     expect(find.text(title), findsOneWidget);
     expect(find.text('已退回'), findsOneWidget);
     expect(t.takeException(), isNull);
-    await show(AssignmentDetailScreen(store: store, assignmentId: 'task'));
+    await show(
+        AssignmentDetailScreen(store: store, assignmentId: 'cx:work:1:2:task'));
     expect(find.text('未设置截止时间'), findsOneWidget);
     expect(find.text('已退回'), findsOneWidget);
     expect(t.takeException(), isNull);
     await show(CalendarScreen(store: store));
-    await t.scrollUntilVisible(find.text('暂无已知截止时间的作业'), 180,
+    await t.scrollUntilVisible(find.text('所选范围没有已知截止作业'), 180,
         scrollable: find.byType(Scrollable).first);
     expect(find.text(title), findsNothing);
     expect(t.takeException(), isNull);
@@ -68,8 +73,10 @@ void main() {
           deadlineReadFailed: true)
     ]);
     await show(AssignmentListScreen(store: store));
+    await t.scrollUntilVisible(find.text('截止时间为上次读取记录'), 150);
     expect(find.text('截止时间为上次读取记录'), findsWidgets);
-    await show(AssignmentDetailScreen(store: store, assignmentId: 'task'));
+    await show(
+        AssignmentDetailScreen(store: store, assignmentId: 'cx:work:1:2:task'));
     expect(find.text('截止时间为上次读取记录'), findsOneWidget);
   });
 }

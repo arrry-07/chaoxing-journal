@@ -150,7 +150,8 @@ void main() {
       expect(assignments, hasLength(2));
       expect(assignments.first.id, 'cx:activity:111:222:555');
       expect(assignments.first.isCompleted, isTrue);
-      expect(assignments.where((a) => !a.isCompleted).single.id, 'cx:activity:111:222:556');
+      expect(assignments.where((a) => !a.isCompleted).single.id,
+          'cx:activity:111:222:556');
     },
   );
 

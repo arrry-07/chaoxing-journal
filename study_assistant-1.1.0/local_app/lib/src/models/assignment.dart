@@ -1,3 +1,11 @@
+enum AssignmentSource {
+  courseWork,
+  classroomActivity,
+  exam,
+  manual,
+  legacyUnknown
+}
+
 class Assignment {
   Assignment({
     required this.id,
@@ -10,9 +18,62 @@ class Assignment {
     this.submitUrl,
     this.completedAt,
     this.deadlineReadFailed = false,
-  });
+    this.deadlineTrusted = true,
+    this.deadlineRawText,
+    AssignmentSource? source,
+  }) : source = source ?? inferSource(id, submitUrl);
+
+  final AssignmentSource source;
+  String? get courseId => _identity?[0];
+  String? get clazzId => _identity?[1];
+  String? get workId => _identity?[2];
+  String? get courseKey => courseId == null ? null : '$courseId:$clazzId';
+  bool get isFormal =>
+      source == AssignmentSource.courseWork && _identity != null;
+  bool get isPendingConfirmed =>
+      const {'pending', 'returned', 'overdue'}.contains(status);
+  List<String>? get _identity {
+    final parts = id.split(':');
+    if (parts.length == 5 &&
+        parts[0] == 'cx' &&
+        parts[1] == 'work' &&
+        parts.sublist(2).every((v) => v.isNotEmpty)) {
+      return parts.sublist(2);
+    }
+    final uri = Uri.tryParse(submitUrl ?? '');
+    if (uri == null ||
+        !uri.host.endsWith('.chaoxing.com') ||
+        !uri.path.contains('work')) {
+      return null;
+    }
+    final q = uri.queryParameters.map((k, v) => MapEntry(k.toLowerCase(), v));
+    final c = q['courseid'],
+        cl = q['classid'] ?? q['clazzid'] ?? q['jclassid'],
+        w = q['workid'] ?? q['taskrefid'];
+    return c == null || cl == null || w == null ? null : [c, cl, w];
+  }
+
+  static AssignmentSource inferSource(String id, String? url) {
+    if (id.startsWith('cx:work:')) return AssignmentSource.courseWork;
+    if (id.startsWith('cx:activity:')) {
+      return AssignmentSource.classroomActivity;
+    }
+    if (id.startsWith('cx:exam:')) return AssignmentSource.exam;
+    if (id.startsWith('cx:manual:')) return AssignmentSource.manual;
+    final u = Uri.tryParse(url ?? '');
+    if (u != null &&
+        u.host.endsWith('.chaoxing.com') &&
+        u.path.contains('work') &&
+        u.queryParameters.keys.any((k) =>
+            k.toLowerCase() == 'workid' || k.toLowerCase() == 'taskrefid')) {
+      return AssignmentSource.courseWork;
+    }
+    return AssignmentSource.legacyUnknown;
+  }
 
   final bool deadlineReadFailed;
+  final bool deadlineTrusted;
+  final String? deadlineRawText;
   final String id;
   final String courseName;
   final String title;
@@ -25,7 +86,12 @@ class Assignment {
 
   factory Assignment.fromJson(Map<String, dynamic> json) {
     return Assignment(
+      source: AssignmentSource.values
+          .where((s) => s.name == json['source'])
+          .firstOrNull,
       deadlineReadFailed: json['deadlineReadFailed'] == true,
+      deadlineTrusted: json['deadlineTrusted'] == true,
+      deadlineRawText: json['deadlineRawText'] as String?,
       id: json['id'] as String,
       courseName: json['courseName'] as String,
       title: json['title'] as String,
@@ -44,6 +110,9 @@ class Assignment {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'source': source.name,
+        'deadlineTrusted': deadlineTrusted,
+        if (deadlineRawText != null) 'deadlineRawText': deadlineRawText,
         if (deadlineReadFailed) 'deadlineReadFailed': true,
         'courseName': courseName,
         'title': title,
@@ -66,11 +135,16 @@ class Assignment {
     DateTime? completedAt,
     DateTime? lastSyncedAt,
     bool? deadlineReadFailed,
+    bool? deadlineTrusted,
+    String? deadlineRawText,
     bool clearCompletedAt = false,
     bool clearDeadlineAt = false,
   }) {
     return Assignment(
       id: id ?? this.id,
+      source: source,
+      deadlineTrusted: deadlineTrusted ?? this.deadlineTrusted,
+      deadlineRawText: deadlineRawText ?? this.deadlineRawText,
       deadlineReadFailed: deadlineReadFailed ?? this.deadlineReadFailed,
       courseName: courseName ?? this.courseName,
       title: title ?? this.title,
@@ -91,7 +165,10 @@ class Assignment {
       status == 'graded';
 
   bool get isOverdue =>
-      !isCompleted && (deadlineAt?.isBefore(DateTime.now()) ?? false);
+      deadlineTrusted &&
+      isPendingConfirmed &&
+      !isCompleted &&
+      (deadlineAt?.isBefore(DateTime.now()) ?? false);
 
   String get deadlineLabel => deadlineReadFailed
       ? (deadlineAt == null ? '截止时间读取失败' : '截止时间为上次读取记录')

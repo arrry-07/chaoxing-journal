@@ -11,12 +11,15 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
-  test('recovered signed list still refreshes previously cached activities',
+  test(
+      'failed formal work never requests activities; legacy remains in records',
       () async {
     SharedPreferences.setMockInitialValues({});
     var recovered = false;
+    var activityRequests = 0;
     final dio = Dio()
       ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        if (o.uri.path.contains('activelist')) activityRequests++;
         final dynamic body = switch (o.uri.path) {
           '/mycourse/backclazzdata' => {
               'courses': [
@@ -32,7 +35,9 @@ void main() {
               'data': {
                 'activeList': [
                   {
-                    'id': '88', 'name': '作业', 'activeType': '6',
+                    'id': '88',
+                    'name': '作业',
+                    'activeType': '6',
                     'submitStatusName': recovered ? '已提交' : '未提交',
                     'endTime': '2026-12-01 18:00:00'
                   },
@@ -50,12 +55,17 @@ void main() {
         widgetSnapshotService: _NoopWidgetSnapshotService(),
         chaoxingClient: ChaoxingLocalClient(dio: dio));
     addTearDown(store.dispose);
+    await store.repository
+        .mergeAndSave([_assignment(id: 'cx:activity:7:11:88', title: '旧课堂题')]);
     await store.restoreSession();
     await store.syncAssignments();
-    expect(store.visibleAssignments.single.id, 'cx:activity:7:11:88');
+    expect(store.visibleAssignments, isEmpty);
+    expect(store.error, isNotNull);
+    expect(activityRequests, 0);
     recovered = true;
     await store.syncAssignments();
     expect(store.error, isNull);
+    expect(activityRequests, 0);
     expect(store.visibleAssignments, isEmpty);
     expect(store.assignments.map((a) => a.id),
         unorderedEquals(['cx:activity:7:11:88', 'cx:work:7:11:9']));

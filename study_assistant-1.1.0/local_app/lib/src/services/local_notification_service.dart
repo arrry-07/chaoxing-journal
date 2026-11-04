@@ -8,11 +8,14 @@ import 'reminder_rule_store.dart';
 typedef NotificationPayloadHandler = void Function(String payload);
 
 class LocalNotificationService {
-  LocalNotificationService({NotificationPayloadHandler? onPayload})
-      : _onPayload = onPayload;
+  LocalNotificationService(
+      {NotificationPayloadHandler? onPayload,
+      FlutterLocalNotificationsPlugin? plugin})
+      : _onPayload = onPayload,
+        _plugin = plugin ?? FlutterLocalNotificationsPlugin();
 
-  final FlutterLocalNotificationsPlugin _plugin =
-      FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _plugin;
+  String? lastWarning;
   NotificationPayloadHandler? _onPayload;
   String? _pendingPayload;
 
@@ -41,7 +44,9 @@ class LocalNotificationService {
   Future<void> initializeSafely({NotificationPayloadHandler? onPayload}) async {
     try {
       await initialize(onPayload: onPayload);
-    } catch (_) {}
+    } catch (_) {
+      lastWarning = '提醒初始化失败，请检查系统通知设置';
+    }
   }
 
   Future<void> initialize({NotificationPayloadHandler? onPayload}) async {
@@ -79,25 +84,39 @@ class LocalNotificationService {
     List<Assignment> assignments, {
     List<int>? offsetsMinutes,
   }) async {
+    lastWarning = null;
     try {
       await _requestNotificationPermission();
-      await _cancelAssignments();
+      final active = await _plugin.pendingNotificationRequests();
+      final desiredIds = <int>{};
       final offsets = ReminderRuleStore.normalizeOffsets(offsetsMinutes);
+      // Replace matching IDs first. Keep previous schedules if replacement fails.
       for (final assignment in assignments.where((item) => !item.isCompleted)) {
         for (final offset in offsets) {
+          final at = assignment.deadlineAt?.subtract(Duration(minutes: offset));
+          if (at == null || !at.isAfter(DateTime.now())) continue;
+          desiredIds.add(_notificationId(assignment.id, offset));
           await _scheduleAssignmentReminder(assignment, offset);
         }
       }
-    } catch (_) {}
+      for (final request in active) {
+        if ((request.payload?.startsWith('a:') ?? false) &&
+            !desiredIds.contains(request.id)) {
+          await _plugin.cancel(request.id);
+        }
+      }
+    } catch (_) {
+      lastWarning = '部分提醒未能更新，旧提醒可能仍有效；请检查通知权限后重试';
+    }
   }
 
-  Future<void> _cancelAssignments() async {
-    final active = await _plugin.pendingNotificationRequests();
-    for (final request in active) {
-      if (request.payload?.startsWith('a:') ?? false) {
-        await _plugin.cancel(request.id);
-      }
+  static int _notificationId(String assignmentId, int offset) {
+    // Object.hash is seeded per process, so it cannot identify persisted alarms.
+    var hash = 2166136261;
+    for (final code in '$assignmentId:$offset'.codeUnits) {
+      hash = ((hash ^ code) * 16777619) & 0x7fffffff;
     }
+    return hash;
   }
 
   Future<void> _scheduleAssignmentReminder(
@@ -109,7 +128,7 @@ class LocalNotificationService {
       return;
     }
     await _zonedSchedule(
-      id: Object.hash('a', assignment.id, offset),
+      id: _notificationId(assignment.id, offset),
       channelId: 'assignment_deadlines',
       title: '作业即将截止',
       body:
@@ -136,10 +155,13 @@ class LocalNotificationService {
   }
 
   Future<void> _requestNotificationPermission() async {
-    await _plugin
+    final allowed = await _plugin
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.requestNotificationsPermission();
+    if (allowed == false) {
+      lastWarning = '通知权限未开启，提醒可能无法显示，请在系统设置中允许通知';
+    }
     await _plugin
         .resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin>()
@@ -221,6 +243,9 @@ class LocalNotificationService {
           payload: payload,
           mode: AndroidScheduleMode.inexactAllowWhileIdle,
         );
+        lastWarning = '精确提醒不可用，已改为系统允许的近似时间提醒';
+      } else {
+        rethrow;
       }
     }
   }

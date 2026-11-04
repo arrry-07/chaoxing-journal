@@ -7,6 +7,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.RemoteViews
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import kotlin.math.ceil
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -51,9 +55,25 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
     }
 
     private fun itemMeta(item: JSONObject): String =
-        listOf(item.optString("deadlineText"), item.optString("remainingText"), item.optString("courseName"))
+        listOf(item.optString("deadlineText"), remainingText(item), item.optString("courseName"))
             .filter { it.isNotEmpty() }
             .joinToString(" · ")
+
+    private fun remainingText(item: JSONObject): String {
+        val raw = item.optString("deadlineAt")
+        if (raw.isEmpty() || raw == "null") return item.optString("remainingText")
+        return try {
+            val instant = try { OffsetDateTime.parse(raw).toInstant() }
+                catch (_: Exception) { LocalDateTime.parse(raw).atZone(ZoneId.systemDefault()).toInstant() }
+            val minutes = ceil((instant.toEpochMilli() - System.currentTimeMillis()) / 60000.0).toLong()
+            when {
+                minutes <= 0 -> "已截止"
+                minutes < 60 -> "${minutes}分钟"
+                minutes < 1440 -> "${ceil(minutes / 60.0).toLong()}小时"
+                else -> "${ceil(minutes / 1440.0).toLong()}天"
+            }
+        } catch (_: Exception) { "截止时间读取失败" }
+    }
 
     private fun normalizeDeepLink(target: String): Uri {
         if (target.startsWith("studyassistant://assignments/")) {

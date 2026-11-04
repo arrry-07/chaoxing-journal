@@ -1,4 +1,6 @@
-import 'dart:io';
+import 'widgets/update_dialog.dart';
+import 'open_source_screen.dart';
+import 'package:flutter/services.dart';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -28,8 +30,13 @@ class ProfileScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) {
-        final courses =
-            store.assignments.map((a) => a.courseName).toSet().toList()..sort();
+        final courses = store.courses.map((c) {
+          final same =
+              store.courses.where((other) => other.name == c.name).toList();
+          return same.length > 1
+              ? '${c.name}（${same.indexWhere((other) => other.key == c.key) + 1}班）'
+              : c.name;
+        }).toList();
         return ListView(
           padding: EdgeInsets.zero,
           children: [
@@ -43,7 +50,10 @@ class ProfileScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _CourseCard(courses: courses),
+                  _CourseCard(courses: courses.take(4).toList()),
+                  TextButton(
+                      onPressed: () => context.push('/courses'),
+                      child: const Text('管理全部课程')),
                   const SizedBox(height: 14),
                   _SettingsCard(
                     children: [
@@ -61,22 +71,37 @@ class ProfileScreen extends StatelessWidget {
                         icon: Icons.inventory_2_outlined,
                         title: '本地记录',
                         subtitle: '${store.assignments.length} 条作业记录保存在本机',
+                        onTap: () => context.push('/records'),
+                      ),
+                      _SettingsTile(
+                        icon: Icons.visibility_off_outlined,
+                        title: '已隐藏作业',
+                        subtitle:
+                            '${store.hiddenAssignments.length} 条，可恢复到作业清单',
+                        onTap: () => _showHiddenAssignments(context),
                       ),
                       _SettingsTile(
                         icon: Icons.help_outline,
                         title: '帮助与反馈',
-                        onTap: () => _openGithub(context, issues: true),
+                        onTap: () => context.push('/help'),
                       ),
                       _SettingsTile(
                         icon: Icons.info_outline,
                         title: '关于我们',
-                        subtitle: 'arrry-07 · MIT License · v${AppVersion.display}',
+                        subtitle:
+                            'arrry-07 · MIT License · v${AppVersion.display}',
                         onTap: () => _showAbout(context),
                       ),
                       _SettingsTile(
+                          icon: Icons.description_outlined,
+                          title: '开源许可',
+                          onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                  builder: (_) => const OpenSourceScreen()))),
+                      _SettingsTile(
                         icon: Icons.system_update_alt,
                         title: '检查更新',
-                        subtitle: '打开本仓库 Releases，登录后下载新版',
+                        subtitle: '在应用内检查版本和下载更新',
                         onTap: () => _checkForUpdates(context),
                       ),
                       _SettingsTile(
@@ -84,7 +109,15 @@ class ProfileScreen extends StatelessWidget {
                         title: 'GitHub 源码',
                         subtitle: 'github.com/arrry-07/chaoxing-journal',
                         trailing: Icons.open_in_new,
-                        onTap: () => _openGithub(context),
+                        onTap: () async {
+                          await Clipboard.setData(
+                              const ClipboardData(text: _githubUrl));
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('链接已复制')));
+                          }
+                        },
+                        trailingOnPressed: () => _openGithub(context),
                       ),
                     ],
                   ),
@@ -115,6 +148,43 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
+  void _showHiddenAssignments(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.7,
+        child: AnimatedBuilder(
+          animation: store,
+          builder: (context, _) => Column(children: [
+            const Padding(padding: EdgeInsets.all(16), child: Text('已隐藏作业')),
+            if (store.error != null)
+              Padding(
+                  padding: const EdgeInsets.all(12), child: Text(store.error!)),
+            Expanded(
+                child: store.hiddenAssignments.isEmpty
+                    ? const Center(child: Text('暂无隐藏作业'))
+                    : ListView.builder(
+                        itemCount: store.hiddenAssignments.length,
+                        itemBuilder: (context, index) {
+                          final item = store.hiddenAssignments[index];
+                          return ListTile(
+                              title: Text(item.title),
+                              subtitle: Text(item.courseName),
+                              trailing: TextButton(
+                                  onPressed: store.isLoading
+                                      ? null
+                                      : () => store.updateCompletion(
+                                          item.id, false),
+                                  child: const Text('恢复')));
+                        })),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openGithub(BuildContext context, {bool issues = false}) async {
     final messenger = ScaffoldMessenger.of(context);
     final opened = await (externalLinkService ?? ExternalLinkService()).openUrl(
@@ -130,9 +200,9 @@ class ProfileScreen extends StatelessWidget {
   void _showAbout(BuildContext context) {
     showAboutDialog(
       context: context,
-      applicationName: '课业手记',
+      applicationName: '学习通课业手记',
       applicationVersion: AppVersion.display,
-      applicationLegalese: '基于 HY / study_assistant 二次开发\n原项目版权 © 2026 HY · MIT License',
+      applicationLegalese: '维护者 arrry-07',
       children: const [
         SizedBox(height: 8),
         Text('本应用用于本地同步学习通作业提醒，账号和作业数据仅保存在本机。'),
@@ -140,205 +210,11 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _checkForUpdates(BuildContext context) async {
-    // Private release assets require the user's GitHub browser session.
-    // Never embed a repository access token in an Android application.
-    if (AppUpdateService.privateRepository && updateService == null) {
-      final opened = await (externalLinkService ?? ExternalLinkService())
-          .openUrl(AppUpdateService.releasesUrl);
-      if (!opened && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('无法打开更新页面，请在浏览器登录 GitHub 后重试')));
-      }
-      return;
-    }
-    final messenger = ScaffoldMessenger.of(context);
-    final navigator = Navigator.of(context);
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('正在检查更新...'),
-        duration: Duration(seconds: 1),
-      ),
-    );
-    try {
-      final update = await (updateService ?? AppUpdateService()).checkForUpdate(
-        currentVersionName: AppVersion.name,
-        currentVersionCode: AppVersion.code,
-      );
-      if (!context.mounted) {
-        return;
-      }
-      if (update == null) {
-        messenger.showSnackBar(const SnackBar(content: Text('暂无可用更新信息；私有仓库请登录 GitHub 查看 Releases')));
-        return;
-      }
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) {
-          return AlertDialog(
-            title: Text('发现新版本 ${update.versionName}'),
-            content: Text(
-              [
-                '安装包：${update.apkName}',
-                if (update.releaseNotes.trim().isNotEmpty) '',
-                if (update.releaseNotes.trim().isNotEmpty)
-                  update.releaseNotes.trim(),
-              ].join('\n'),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('稍后'),
-              ),
-              FilledButton.icon(
-                onPressed: () async {
-                  Navigator.of(dialogContext).pop();
-                  final apkFile = await _downloadUpdateWithProgress(
-                    context,
-                    update,
-                  );
-                  if (apkFile == null) {
-                    return;
-                  }
-                  if (context.mounted) {
-                    messenger.showSnackBar(
-                      const SnackBar(content: Text('安装包已下载，正在打开系统安装器')),
-                    );
-                  }
-                  final opened =
-                      await (externalLinkService ?? ExternalLinkService())
-                          .installApk(apkFile.path);
-                  if (!opened && context.mounted) {
-                    messenger.showSnackBar(
-                      const SnackBar(content: Text('无法打开系统安装器')),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.download),
-                label: const Text('下载并安装'),
-              ),
-            ],
-          );
-        },
-      );
-    } catch (_) {
-      if (!context.mounted) {
-        return;
-      }
-      navigator.popUntil((route) => route.isFirst || route.isCurrent);
-      messenger.showSnackBar(const SnackBar(content: Text('检查更新失败，请稍后再试')));
-    }
-  }
-
-  Future<File?> _downloadUpdateWithProgress(
-    BuildContext context,
-    AppUpdateInfo update,
-  ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final notifier = ValueNotifier<_DownloadProgress>(
-      const _DownloadProgress(receivedBytes: 0, totalBytes: 0),
-    );
-    File? apkFile;
-    Object? downloadError;
-    Future<void>? downloadFuture;
-    var started = false;
-
-    await showDialog<void>(
+  Future<void> _checkForUpdates(BuildContext context) => showDialog<void>(
       context: context,
-      barrierDismissible: false,
-      builder: (progressContext) {
-        if (!started) {
-          started = true;
-          downloadFuture = (updateService ?? AppUpdateService()).downloadApk(
-            update,
-            onProgress: (received, total) {
-              notifier.value = _DownloadProgress(
-                receivedBytes: received,
-                totalBytes: total,
-              );
-            },
-          ).then((file) {
-            apkFile = file;
-          }).catchError((error) {
-            downloadError = error;
-          }).whenComplete(() {
-            if (progressContext.mounted) {
-              Navigator.of(progressContext).pop();
-            }
-          });
-        }
-        return PopScope(
-          canPop: false,
-          child: AlertDialog(
-            title: const Text('正在下载更新包'),
-            content: ValueListenableBuilder<_DownloadProgress>(
-              valueListenable: notifier,
-              builder: (context, progress, _) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    LinearProgressIndicator(
-                      value: progress.hasTotal ? progress.ratio : null,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(progress.label),
-                  ],
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-    await downloadFuture;
-    notifier.dispose();
-
-    if (downloadError != null) {
-      if (context.mounted) {
-        messenger.showSnackBar(const SnackBar(content: Text('下载更新包失败，请稍后再试')));
-      }
-      return null;
-    }
-    return apkFile;
-  }
-}
-
-class _DownloadProgress {
-  const _DownloadProgress({
-    required this.receivedBytes,
-    required this.totalBytes,
-  });
-
-  final int receivedBytes;
-  final int totalBytes;
-
-  bool get hasTotal => totalBytes > 0;
-
-  double? get ratio {
-    if (!hasTotal) {
-      return null;
-    }
-    return (receivedBytes / totalBytes).clamp(0, 1).toDouble();
-  }
-
-  String get label {
-    if (!hasTotal) {
-      return '已下载 ${_formatBytes(receivedBytes)}';
-    }
-    final percent = ((ratio ?? 0) * 100).clamp(0, 100).round();
-    return '$percent% · ${_formatBytes(receivedBytes)} / ${_formatBytes(totalBytes)}';
-  }
-
-  static String _formatBytes(int bytes) {
-    if (bytes >= 1024 * 1024) {
-      return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
-    }
-    if (bytes >= 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    }
-    return '$bytes B';
-  }
+      builder: (_) => UpdateDialog(
+          service: updateService ?? AppUpdateService(),
+          links: externalLinkService));
 }
 
 class _ProfileHeader extends StatelessWidget {
@@ -461,10 +337,14 @@ class _CourseCard extends StatelessWidget {
               const Text('我的课程', style: Journal.section),
               const SizedBox(height: 10),
               if (courses.isEmpty) const Text('同步后，有作业的课程会记在这里。'),
-              Wrap(
-                spacing: 18,
-                runSpacing: 10,
-                children: [for (final name in courses) CourseLabel(name)],
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final name in courses)
+                    Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: CourseLabel(name))
+                ],
               ),
             ],
           ),
@@ -510,6 +390,7 @@ class _SettingsTile extends StatelessWidget {
     this.onTap,
     this.subtitle,
     this.trailing = Icons.chevron_right,
+    this.trailingOnPressed,
   });
 
   final IconData icon;
@@ -517,6 +398,7 @@ class _SettingsTile extends StatelessWidget {
   final String? subtitle;
   final IconData trailing;
   final VoidCallback? onTap;
+  final VoidCallback? trailingOnPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -524,7 +406,14 @@ class _SettingsTile extends StatelessWidget {
       leading: Icon(icon, color: Journal.ink, size: 22),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
       subtitle: subtitle == null ? null : Text(subtitle!),
-      trailing: onTap == null ? null : Icon(trailing, color: Journal.muted),
+      trailing: trailingOnPressed != null
+          ? IconButton(
+              tooltip: '打开链接',
+              onPressed: trailingOnPressed,
+              icon: Icon(trailing))
+          : onTap == null
+              ? null
+              : Icon(trailing, color: Journal.muted),
       onTap: onTap,
     );
   }

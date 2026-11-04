@@ -1,194 +1,85 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
-
 import '../app/journal.dart';
 import '../models/assignment.dart';
+import '../models/sync_report.dart';
 import '../services/assignment_store.dart';
+import '../services/assignment_query.dart';
+import 'widgets/assignment_card.dart';
 
 class AssignmentListScreen extends StatelessWidget {
   const AssignmentListScreen({super.key, required this.store});
   final AssignmentStore store;
-
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-        animation: store,
-        builder: (context, _) {
-          final now = DateTime.now();
-          final sorted = [...store.visibleAssignments]
-            ..sort(Assignment.compareByDeadline);
-          final next = sorted
-              .where((a) => a.deadlineAt?.isBefore(now) == false)
-              .firstOrNull;
-          final groups = <DateTime?, List<Assignment>>{};
-          for (final item in sorted) {
-            final date = item.deadlineAt;
-            groups
-                .putIfAbsent(
-                    date == null ? null : DateUtils.dateOnly(date), () => [])
-                .add(item);
-          }
-          final labels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-          return RefreshIndicator(
+      animation: store,
+      builder: (context, _) {
+        final now = DateTime.now(),
+            g = AssignmentQuery.home(
+                store.visibleAssignments, DateTime.now(), {});
+        Widget card(Assignment a) => AssignmentCard(
+            key: ValueKey('assignment-${a.id}'),
+            assignment: a,
+            now: now,
+            onTap: () =>
+                context.push('/assignments/${Uri.encodeComponent(a.id)}'));
+        Widget folded(String name, List<Assignment> list) => ExpansionTile(
+            title: Text('$name（${list.length}）'),
+            children: list.map(card).toList());
+        return RefreshIndicator(
             onRefresh: store.syncAssignments,
             child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 22, 20, 32),
-              children: [
-                Row(
-                  children: [
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(20, 22, 20, 32),
+                children: [
+                  Row(children: [
                     const Expanded(
-                      child: JournalHeading(
-                        '课业手记',
-                        eyebrow: 'CAMPUS JOURNAL   /   01',
-                      ),
-                    ),
+                        child: JournalHeading('学习通课业手记',
+                            eyebrow: 'CAMPUS JOURNAL   /   01')),
                     IconButton(
-                      tooltip: '刷新作业',
-                      onPressed: store.isLoading ? null : store.syncAssignments,
-                      icon: const Icon(Icons.sync_rounded),
-                    ),
+                        tooltip: '刷新作业',
+                        onPressed:
+                            store.isLoading ? null : store.syncAssignments,
+                        icon: const Icon(Icons.sync_rounded))
+                  ]),
+                  const SizedBox(height: 16),
+                  Text(store.syncSummary,
+                      style: TextStyle(
+                          color: store.error == null
+                              ? Journal.muted
+                              : Journal.berry)),
+                  if (store.visibleAssignments.isNotEmpty &&
+                      (store.error != null || store.lastSyncAt == null))
+                    const Text('显示上次记录'),
+                  TextButton(
+                      onPressed: () => context.push('/sync'),
+                      child: const Text('查看同步详情 / 重试')),
+                  if (g.near.isNotEmpty) ...[
+                    const Text('下一份要交', style: Journal.section),
+                    card(g.near.first)
                   ],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                    store.lastSyncAt == null
-                        ? '尚无成功同步记录'
-                        : '最近成功同步 ${DateFormat('M月d日 HH:mm').format(store.lastSyncAt!)}',
-                    style: const TextStyle(color: Journal.muted)),
-                const SizedBox(height: 12),
-                if (store.error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      store.error!,
-                      style: const TextStyle(color: Journal.berry),
-                    ),
-                  ),
-                if (next != null)
-                  InkWell(
-                    onTap: () => context.push(
-                      '/assignments/${Uri.encodeComponent(next.id)}',
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        color: Journal.sage,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      padding: const EdgeInsets.all(18),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Row(
-                            children: [
-                              Icon(Icons.bookmark_border_rounded, size: 18),
-                              SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  '下一份要交',
-                                  style: TextStyle(fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            next.title,
-                            style: const TextStyle(
-                              fontSize: 25,
-                              fontWeight: FontWeight.w600,
-                              height: 1.35,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '${next.courseName}　·　${DateFormat('M月d日 HH:mm').format(next.deadlineAt!)}',
-                          ),
-                          if (next.deadlineReadFailed) Text(next.deadlineLabel),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (sorted.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 30),
-                    child: Text('手帐里暂时没有待交作业。下拉可以同步。'),
-                  ),
-                for (final group in groups.entries) ...[
-                  const SizedBox(height: 22),
-                  Text(
-                    group.key == null
-                        ? '暂无截止时间'
-                        : '${DateFormat(group.key!.year == now.year ? 'M月d日' : 'yyyy年M月d日').format(group.key!)}　${labels[group.key!.weekday - 1]}',
-                    style: Journal.section,
-                  ),
-                  const Divider(),
-                  for (final item in group.value)
-                    InkWell(
-                      key: ValueKey('assignment-${item.id}'),
-                      onTap: () => context.push(
-                        '/assignments/${Uri.encodeComponent(item.id)}',
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (item.deadlineAt != null)
-                              Text(
-                                DateFormat('HH:mm').format(item.deadlineAt!),
-                                style: const TextStyle(
-                                  fontFamily: 'monospace',
-                                  fontSize: 17,
-                                  color: Journal.ink,
-                                ),
-                              ),
-                            if (item.deadlineAt != null)
-                              const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.title,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      height: 1.35,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    item.courseName,
-                                    style:
-                                        const TextStyle(color: Journal.muted),
-                                  ),
-                                  if (item.status == 'returned' ||
-                                      item.status == 'unknown')
-                                    Text(item.statusLabel),
-                                  if (item.deadlineReadFailed)
-                                    Text(item.deadlineLabel),
-                                  if (item.isOverdue ||
-                                      DateUtils.isSameDay(now, item.deadlineAt))
-                                    Text(
-                                      item.isOverdue ? '已逾期' : '今天截止',
-                                      style: const TextStyle(
-                                        color: Journal.berry,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ],
-            ),
-          );
-        },
-      );
+                  const SizedBox(height: 18),
+                  const Text('近期待交', style: Journal.section),
+                  if (g.near.isEmpty)
+                    Text(store.syncReport.phase == SyncPhase.failed &&
+                            store.assignments.isNotEmpty
+                        ? '本次读取失败，可查看本机记录与待确认作业。'
+                        : store.syncReport.lastDataSuccessAt == null &&
+                                store.lastSyncAt == null &&
+                                store.assignments.isEmpty
+                            ? '尚未获取作业，请先同步。'
+                            : '未来30天暂无确认待交作业。'),
+                  for (final a in g.near.skip(g.near.isEmpty ? 0 : 1)) card(a),
+                  if (store.assignments.isNotEmpty &&
+                      store.visibleAssignments.isEmpty) ...[
+                    const Text('本机有历史、已完成或未关注的记录，当前筛选未显示。'),
+                    TextButton(
+                        onPressed: () => context.push('/records'),
+                        child: const Text('查看全部本地记录')),
+                  ],
+                  if (g.far.isNotEmpty) folded('更远期待交', g.far),
+                  if (g.uncertain.isNotEmpty) folded('截止 / 提交待确认', g.uncertain),
+                  if (g.overdue.isNotEmpty) folded('已逾期', g.overdue),
+                ]));
+      });
 }

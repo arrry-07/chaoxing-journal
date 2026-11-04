@@ -1,7 +1,7 @@
 name: study_assistant_mobile
 description: 学习通作业提醒本地版 App。
 publish_to: "none"
-version: 1.2.1+31
+version: 1.2.2+32
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  crypto: ^3.0.7
   dio: ^5.7.0
   flutter_secure_storage: ^9.2.2
   flutter_local_notifications: ^18.0.1
@@ -34,5 +35,7 @@ flutter:
       fonts:
         - asset: assets/type/JournalTitle.ttf
   assets:
+    - assets/licenses/HY.txt
+    - assets/licenses/xuexitong-cli.txt
     - assets/type/OFL.txt
     - assets/type/OFL-Sans.txt

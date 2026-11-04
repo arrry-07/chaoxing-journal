@@ -1,5 +1,7 @@
 package com.example.studyassistant
 
+import android.content.pm.PackageManager
+import java.util.zip.ZipFile
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -11,9 +13,25 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var verificationBrowser: VerificationBrowser? = null
+    override fun onDestroy() {
+        verificationBrowser?.close()
+        verificationBrowser = null
+        super.onDestroy()
+    }
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/external_links").setMethodCallHandler { call, result ->
+            if(call.method == "verifySession") {
+                verificationBrowser?.close()
+                verificationBrowser = VerificationBrowser(this)
+                verificationBrowser!!.open(call.argument<String>("url"), call.argument<List<Map<String, String>>>("cookies") ?: emptyList(), call.argument<String>("userAgent"), result)
+                return@setMethodCallHandler
+            }
+            if(call.method == "inspectApk") {
+                result.success(inspectApk(call.argument<String>("filePath")))
+                return@setMethodCallHandler
+            }
             val opened = when (call.method) {
                 "openUrl" -> openExternalUrl(call.argument<String>("url"))
                 "installApk" -> installApk(call.argument<String>("filePath"))
@@ -93,8 +111,42 @@ class MainActivity : FlutterActivity() {
         return openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 
+    @Suppress("DEPRECATION")
+    private fun inspectApk(filePath: String?): Map<String, Any> {
+        if (filePath.isNullOrBlank()) return mapOf("compatible" to false, "reason" to "安装包不存在")
+        return runCatching {
+            val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+            val candidate = packageManager.getPackageArchiveInfo(filePath, flags)
+                ?: return mapOf("compatible" to false, "reason" to "无法读取APK身份")
+            val installed = packageManager.getPackageInfo(packageName, flags)
+            val candidateCode = if (Build.VERSION.SDK_INT >= 28) candidate.longVersionCode else candidate.versionCode.toLong()
+            val installedCode = if (Build.VERSION.SDK_INT >= 28) installed.longVersionCode else installed.versionCode.toLong()
+            val candidateSigs = if(Build.VERSION.SDK_INT >= 28) candidate.signingInfo?.apkContentsSigners else candidate.signatures
+            val installedSigs = if(Build.VERSION.SDK_INT >= 28) installed.signingInfo?.apkContentsSigners else installed.signatures
+            val signaturesMatch = !candidateSigs.isNullOrEmpty() && !installedSigs.isNullOrEmpty() && candidateSigs.toSet() == installedSigs.toSet()
+            val appInfo = candidate.applicationInfo
+            val sdkOk = appInfo != null && appInfo.minSdkVersion <= Build.VERSION.SDK_INT
+            val nativeAbis = ZipFile(filePath).use { zip -> zip.entries().asSequence().map { it.name }.filter { it.startsWith("lib/") && it.endsWith(".so") }.map { it.split('/')[1] }.toSet() }
+            val abiOk = nativeAbis.isEmpty() || Build.SUPPORTED_ABIS.any { nativeAbis.contains(it) }
+            val reason = when {
+                candidate.packageName != packageName -> "安装包名不一致，无法覆盖升级"
+                !signaturesMatch -> "安装签名不一致，无法覆盖升级"
+                candidateCode <= installedCode -> "安装包版本未增加"
+                !sdkOk -> "系统版本不满足要求"
+                !abiOk -> "安装包不支持此设备架构"
+                else -> ""
+            }
+            mapOf("compatible" to reason.isEmpty(), "reason" to reason, "applicationId" to candidate.packageName, "versionCode" to candidateCode)
+        }.getOrElse { mapOf("compatible" to false, "reason" to "安装包身份检查失败") }
+    }
+
     private fun installApk(filePath: String?): Boolean {
         if (filePath.isNullOrBlank()) {
+            return false
+        }
+        if (inspectApk(filePath)["compatible"] != true) return false
+        if(Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            openIntent(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).setData(Uri.parse("package:$packageName")))
             return false
         }
         val apkFile = File(filePath)

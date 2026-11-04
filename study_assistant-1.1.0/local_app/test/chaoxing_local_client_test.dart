@@ -3,6 +3,92 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 
 void main() {
+  test('explicit logged-out JSON is an authentication error even with cookies',
+      () async {
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: o.uri.path == '/v11/loginregister'
+                ? {'status': true}
+                : o.uri.path == '/mycourse/backclazzdata'
+                    ? {'result': false, 'msg': '请先登录'}
+                    : '',
+            headers: Headers.fromMap({
+              'set-cookie': ['UID=dummy; Domain=chaoxing.com; Path=/']
+            })));
+      }));
+    final client = ChaoxingLocalClient(dio: dio);
+    await client.login(account: 'dummy', password: 'dummy');
+    await expectLater(client.fetchAssignments(),
+        throwsA(isA<ChaoxingAuthenticationException>()));
+  });
+  test('login preserves tracked activities for the authenticated retry',
+      () async {
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: o.uri.path == '/v11/loginregister' ? {'status': true} : ''));
+      }));
+    final client = ChaoxingLocalClient(dio: dio)
+      ..trackedActivityIds = {'cx:activity:1'};
+    await client.login(account: 'dummy', password: 'dummy');
+    expect(client.trackedActivityIds, {'cx:activity:1'});
+  });
+  test('host-only cookies stay scoped and expired cookies are removed',
+      () async {
+    final sent = <String, String>{};
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        sent[o.uri.host] = o.headers['Cookie']?.toString() ?? '';
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: o.uri.path == '/v11/loginregister'
+                ? {'status': true, 'url': 'https://sso.chaoxing.com/login'}
+                : '',
+            headers: Headers.fromMap({
+              'set-cookie': o.uri.host == 'passport2-api.chaoxing.com'
+                  ? [
+                      'private=secret; Path=/',
+                      'shared=ok; Domain=chaoxing.com; Path=/',
+                      'gone=no; Domain=chaoxing.com; Max-Age=0; Path=/'
+                    ]
+                  : []
+            })));
+      }));
+    await ChaoxingLocalClient(dio: dio)
+        .login(account: 'dummy', password: 'dummy');
+    expect(sent['sso.chaoxing.com'], contains('shared=ok'));
+    expect(sent['sso.chaoxing.com'], isNot(contains('private=')));
+    expect(sent['sso.chaoxing.com'], isNot(contains('gone=')));
+  });
+  test('login does not send session to an unrelated redirect host', () async {
+    final hosts = <String>[];
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        hosts.add(o.uri.host);
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: o.uri.path == '/v11/loginregister'
+                ? {
+                    'status': true,
+                    'url': 'https://chaoxing.com.example.org/collect'
+                  }
+                : '',
+            headers: Headers.fromMap({
+              'set-cookie': ['UID=dummy; Path=/']
+            })));
+      }));
+    final result = await ChaoxingLocalClient(dio: dio)
+        .login(account: 'dummy', password: 'dummy');
+    expect(result.success, isTrue);
+    expect(hosts, isNot(contains('chaoxing.com.example.org')));
+  });
   test(
       'reads same-name classes separately with course signatures and a per-work detail link',
       () async {
@@ -59,8 +145,8 @@ void main() {
     expect(work.first.deadlineAt!.toUtc(), DateTime.utc(2027, 1, 2, 4));
     expect(work.last.status, 'reviewing');
     expect(work.last.deadlineAt, isNull);
-    expect(work.last.deadlineReadFailed, isTrue);
-    expect(client.lastSyncWarning, contains('22'));
+    expect(work.last.deadlineReadFailed, isFalse);
+    expect(client.lastSyncWarning, isNull);
   });
 
   test('confirmed empty work list succeeds but permission and login pages fail',
@@ -133,7 +219,9 @@ void main() {
                   statusCode: 200,
                   data: 'ok',
                   headers: Headers.fromMap({
-                    'set-cookie': ['UID=998877; Path=/; HttpOnly'],
+                    'set-cookie': [
+                      'UID=998877; Domain=.chaoxing.com; Path=/; HttpOnly'
+                    ],
                   }),
                 ),
               );

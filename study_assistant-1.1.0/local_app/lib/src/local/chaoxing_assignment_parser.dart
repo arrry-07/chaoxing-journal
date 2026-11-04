@@ -296,14 +296,14 @@ class ChaoxingAssignmentParser {
         .firstMatch(raw);
     if (m == null) return null;
     final year = int.tryParse(m[1] ?? '');
+    if (year == null) return null;
     final month = int.parse(m[2]!), day = int.parse(m[3]!);
     final hour = int.parse(m[4]!),
         minute = int.parse(m[5]!),
         second = int.parse(m[6] ?? '0');
     if (hour > 23 || minute > 59 || second > 59) return null;
     DateTime? best;
-    for (final y
-        in year == null ? [now.year - 1, now.year, now.year + 1] : [year]) {
+    for (final y in [year]) {
       final wall = DateTime.utc(y, month, day, hour, minute, second);
       if (wall.month != month || wall.day != day) continue;
       final dt = wall.subtract(const Duration(hours: 8)).toLocal();
@@ -399,12 +399,25 @@ class ChaoxingAssignmentParser {
   static DateTime? parseDetailDeadline(String html, {DateTime? now}) {
     final text =
         _decodeEntities(_stripTags(html)).replaceAll(RegExp(r'\s+'), ' ');
-    final end = RegExp(
-            r'作答时间\s*[:：]\s*(?:20\d{2}-)?\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}\s*至\s*((?:20\d{2}-)?\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2})')
-        .firstMatch(text)?[1];
-    return end == null
-        ? _extractDeadline(text, now ?? DateTime.now())?.value
-        : _parseChinaTime(end, now ?? DateTime.now());
+    final period = RegExp(
+            r'作答时间\s*[:：]\s*((?:20\d{2}-)?\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2})\s*至\s*((?:20\d{2}-)?\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2})')
+        .firstMatch(text);
+    if (period == null) {
+      return _extractDeadline(text, now ?? DateTime.now())?.value;
+    }
+    var end = period[2]!;
+    if (!RegExp(r'^20\d{2}-').hasMatch(end)) {
+      final start = period[1]!;
+      final startMatch =
+          RegExp(r'^(20\d{2})-(\d{1,2})-(\d{1,2})').firstMatch(start);
+      if (startMatch == null) return null;
+      var year = int.parse(startMatch[1]!);
+      final startMonth = int.parse(startMatch[2]!);
+      final endMonth = int.parse(end.split('-')[0]);
+      if (endMonth < startMonth) year++;
+      end = '$year-$end';
+    }
+    return _parseChinaTime(end, now ?? DateTime.now());
   }
 
   static int? _firstInt(String text, RegExp pattern) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/sync_report.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
 import 'package:intl/intl.dart';
@@ -82,7 +83,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                             ? Icons.warning_amber
                             : Icons.check_circle_outline,
                       ),
-                      title: Text(stale ? '建议刷新作业数据' : '本地数据较新'),
+                      title: Text(store.syncSummary),
                       subtitle: Text(
                         lastSyncAt == null
                             ? '尚无完整同步记录'
@@ -90,6 +91,12 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                       ),
                     ),
                   ),
+                  if (store.syncReport.attemptedAt != null)
+                    Text(
+                        '最后尝试：${DateFormat('M月d日 HH:mm').format(store.syncReport.attemptedAt!)}'),
+                  if (store.syncReport.lastDataSuccessAt != null)
+                    Text(
+                        '最近数据成功：${DateFormat('M月d日 HH:mm').format(store.syncReport.lastDataSuccessAt!)}'),
                   const SizedBox(height: 12),
                   Card(
                     child: Padding(
@@ -205,6 +212,35 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                     icon: const Icon(Icons.sync),
                     label: Text(store.isLoading ? '正在刷新...' : '刷新作业数据'),
                   ),
+                  if (store.syncReport.issues.any((i) =>
+                      i.kind == SyncIssueKind.verificationRequired ||
+                      i.kind == SyncIssueKind.schemaChanged))
+                    FilledButton.icon(
+                        onPressed: store.isLoading
+                            ? null
+                            : () async {
+                                try {
+                                  final continued = await store.chaoxingClient
+                                      .verifyInBrowser();
+                                  if (continued) await store.syncAssignments();
+                                } catch (_) {
+                                  if (context.mounted) {
+                                    _showMessage('验证页面未能打开，请稍后重试');
+                                  }
+                                }
+                              },
+                        icon: const Icon(Icons.verified_user_outlined),
+                        label: const Text('完成安全验证')),
+                  if (store.syncReport.issues.isNotEmpty)
+                    ExpansionTile(
+                        title: Text('问题明细（${store.syncReport.issues.length}）'),
+                        children: [
+                          for (final issue in store.syncReport.issues)
+                            ListTile(
+                                title: Text(issue.message),
+                                subtitle:
+                                    Text('${issue.stage} · ${issue.kind.name}'))
+                        ]),
                   if (store.error != null) ...[
                     const SizedBox(height: 12),
                     Card(

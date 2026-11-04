@@ -17,9 +17,9 @@ class StatsScreen extends StatelessWidget {
       animation: store,
       builder: (context, _) {
         final visible = store.visibleAssignments;
-        final total = store.assignments.length;
+        final total = store.formalAssignments.length;
         final completed =
-            store.assignments.where((item) => item.isCompleted).length;
+            store.formalAssignments.where((item) => item.isCompleted).length;
         final overdue = visible.where((item) => item.isOverdue).length;
         final percent = total == 0 ? 0.0 : completed / total;
         final byCourse = _courseCounts(visible);

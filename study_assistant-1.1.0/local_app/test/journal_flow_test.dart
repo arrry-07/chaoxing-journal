@@ -114,7 +114,7 @@ void main() {
     final due = DateTime(now.year, now.month, now.day + 1, 17, 45);
     store.replaceAssignmentsForTest([
       Assignment(
-          id: 'tomorrow',
+          id: 'cx:work:1:2:tomorrow',
           courseName: '数学',
           title: '下周预习',
           deadlineAt: due,
@@ -125,8 +125,8 @@ void main() {
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: store))));
     expect(find.text('今天截止'), findsNothing);
-    expect(find.text('17:45'), findsOneWidget);
-    expect(find.textContaining('${due.month}月${due.day}日'), findsNWidgets(2));
+    expect(find.textContaining('17:45'), findsOneWidget);
+    expect(find.textContaining('${due.month}月${due.day}日'), findsOneWidget);
   });
 
   testWidgets(
@@ -141,10 +141,10 @@ void main() {
       store.replaceAssignmentsForTest([
         for (final hour in [22, 14, 10, 19])
           Assignment(
-            id: 'a$hour',
+            id: 'cx:work:1:2:a$hour',
             courseName: '程序设计',
             title: '$title $hour',
-            deadlineAt: DateTime(now.year, now.month, now.day, hour),
+            deadlineAt: DateTime(now.year, now.month, now.day + 1, hour),
             requirementsText: '',
             status: 'pending',
             lastSyncedAt: now,
@@ -159,12 +159,12 @@ void main() {
         ),
       );
       for (final hour in [10, 14, 19, 22]) {
-        final target = find.byKey(ValueKey('assignment-a$hour'));
+        final target = find.byKey(ValueKey('assignment-cx:work:1:2:a$hour'));
         await t.scrollUntilVisible(target, 180);
         expect(target, findsOneWidget);
         expect(t.takeException(), isNull);
       }
-      expect(find.text('22:00'), findsOneWidget);
+      expect(find.textContaining('22:00'), findsOneWidget);
     },
   );
 }

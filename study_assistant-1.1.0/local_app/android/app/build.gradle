@@ -55,7 +55,7 @@ android {
             applicationIdSuffix ".journal"
         }
         release {
-            signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
@@ -68,4 +68,13 @@ flutter {
 dependencies {
     implementation "androidx.core:core-ktx:1.16.0"
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.5"
+}
+
+// Debug builds remain available; publishing must never silently use a debug key.
+gradle.taskGraph.whenReady { graph ->
+    if (!keystorePropertiesFile.exists() && graph.allTasks.any {
+        it.project == project && it.name.toLowerCase().contains("release")
+    }) {
+        throw new GradleException("Release requires android/key.properties and a private signing key")
+    }
 }

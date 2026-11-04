@@ -8,6 +8,11 @@ class ExternalLinkService {
     return opened ?? false;
   }
 
+  Future<Map<String, dynamic>> inspectApk(String filePath) async =>
+      Map<String, dynamic>.from(await _channel
+              .invokeMethod<Map>('inspectApk', {'filePath': filePath}) ??
+          {});
+
   Future<bool> installApk(String filePath) async {
     final opened = await _channel.invokeMethod<bool>(
       'installApk',

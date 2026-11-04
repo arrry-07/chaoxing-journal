@@ -20,16 +20,17 @@ void main() {
     ]);
 
     expect(store.visibleAssignments.map((item) => item.id), [
-      'pending',
-      'overdue',
+      'cx:work:1:2:pending',
+      'cx:work:1:2:overdue',
     ]);
-    expect(store.findAssignment('completed')?.id, 'completed');
+    expect(store.findAssignment('cx:work:1:2:completed')?.id,
+        'cx:work:1:2:completed');
   });
 }
 
 Assignment _assignment({required String id, required String status}) {
   return Assignment(
-    id: id,
+    id: 'cx:work:1:2:$id',
     courseName: '大学英语',
     title: id,
     deadlineAt: DateTime(2026, 5, 7, 8),
