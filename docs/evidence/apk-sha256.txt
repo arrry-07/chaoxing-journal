@@ -1,0 +1,5 @@
+
+Algorithm : SHA256
+Hash      : 034DE37CD27F60C6772C8BF248AF629A89A0A5773EE40211C859148DA9E35CE6
+Path      : D:\codex\学习通助手\chaoxing-journal-1.2.0.apk
+

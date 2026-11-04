@@ -1,0 +1,308 @@
+import 'package:dio/dio.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
+
+void main() {
+  test(
+      'reads same-name classes separately with course signatures and a per-work detail link',
+      () async {
+    final queried = <String>[];
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        final q = o.uri.queryParameters;
+        dynamic body;
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                for (final id in ['11', '22'])
+                  {
+                    'courseId': '7',
+                    'clazzId': id,
+                    'courseName': '数学',
+                    'cpi': '8'
+                  }
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            body =
+                '<input value="work${q['clazzid']}" id="workEnc"><input id="enc" value="student"><input id="openc" value="open">';
+          case '/mooc2/work/list':
+            final id = q['classId']!;
+            expect(q['enc'], 'work$id');
+            expect(q['stuenc'], 'student');
+            expect(q['openc'], 'open');
+            queried.add(id);
+            final url = Uri.encodeComponent(
+                'https://mooc1.chaoxing.com/work/task?workId=9&classId=$id&enc=detail');
+            body =
+                '<li onclick="goTask(this);" data="$url"><p class="overHidden2 fl">已提交格式示例</p><p class="status fl">${id == '11' ? '未提交' : '待批阅'}</p></li>';
+          case '/work/task':
+            expect(q['enc'], 'detail');
+            body = q['classId'] == '11'
+                ? '作答时间：2026-12-30 09:00 至 2027-01-02 12:00'
+                : '<html>请登录</html>';
+          case '/v2/apis/active/student/activelist':
+            body = {
+              'data': {'activeList': []}
+            };
+          default:
+            fail('unexpected request ${o.uri}');
+        }
+        h.resolve(Response(requestOptions: o, statusCode: 200, data: body));
+      }));
+    final client = ChaoxingLocalClient(dio: dio);
+    final work = await client.fetchAssignments();
+    expect(queried, ['11', '22']);
+    expect(work.map((a) => a.id), ['cx:work:7:11:9', 'cx:work:7:22:9']);
+    expect(work.first.status, 'pending');
+    expect(work.first.deadlineAt!.toUtc(), DateTime.utc(2027, 1, 2, 4));
+    expect(work.last.status, 'reviewing');
+    expect(work.last.deadlineAt, isNull);
+    expect(work.last.deadlineReadFailed, isTrue);
+    expect(client.lastSyncWarning, contains('22'));
+  });
+
+  test('confirmed empty work list succeeds but permission and login pages fail',
+      () async {
+    var workPage = '<span>0/0</span>';
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        final data = switch (o.uri.path) {
+          '/mycourse/backclazzdata' => {
+              'courses': [
+                {'courseId': '7', 'clazzId': '11', 'courseName': '数学'}
+              ]
+            },
+          '/visit/stucoursemiddle' => '<input id="workEnc" value="signature">',
+          '/mooc2/work/list' => workPage,
+          _ => {
+              'data': {'activeList': []}
+            },
+        };
+        h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
+      }));
+    final client = ChaoxingLocalClient(dio: dio);
+    expect(await client.fetchAssignments(), isEmpty);
+    expect(client.lastSyncWarning, isNull);
+    for (final bad in ['没有此页面访问权限', '请登录', '<html></html>']) {
+      workPage = bad;
+      await expectLater(client.fetchAssignments(), throwsStateError);
+    }
+  });
+
+  test(
+      'login follows Chaoxing redirect before resolving profile name and avatar',
+      () async {
+    final requests = <_RecordedRequest>[];
+    final dio = Dio(
+      BaseOptions(
+        validateStatus: (status) => status != null && status < 500,
+      ),
+    )..interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            requests.add(
+              _RecordedRequest(
+                method: options.method,
+                host: options.uri.host,
+                path: options.uri.path,
+                headers: Map<String, dynamic>.from(options.headers),
+              ),
+            );
+
+            if (options.uri.host == 'passport2-api.chaoxing.com' &&
+                options.uri.path == '/v11/loginregister') {
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  statusCode: 200,
+                  data: {
+                    'status': true,
+                    'url': 'https://sso.chaoxing.com/login?token=ok',
+                  },
+                ),
+              );
+              return;
+            }
+
+            if (options.uri.host == 'sso.chaoxing.com') {
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  statusCode: 200,
+                  data: 'ok',
+                  headers: Headers.fromMap({
+                    'set-cookie': ['UID=998877; Path=/; HttpOnly'],
+                  }),
+                ),
+              );
+              return;
+            }
+
+            if (options.uri.host == 'i.chaoxing.com' &&
+                options.uri.path == '/base') {
+              final cookie = options.headers['Cookie']?.toString() ?? '';
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  statusCode: 200,
+                  data: cookie.contains('UID=998877')
+                      ? '<html><span class="user-name">李雷</span></html>'
+                      : '<html>未登录</html>',
+                ),
+              );
+              return;
+            }
+
+            if (options.uri.host == 'photo.chaoxing.com') {
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  statusCode: 302,
+                  headers: Headers.fromMap({
+                    'location': [
+                      'https://p.cldisk.com/star3/160_160c/998877.png',
+                    ],
+                  }),
+                ),
+              );
+              return;
+            }
+
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                statusCode: 404,
+                data: 'not found',
+              ),
+            );
+          },
+        ),
+      );
+    final client = ChaoxingLocalClient(dio: dio);
+
+    final result = await client.login(account: 'student', password: 'password');
+
+    expect(result.success, isTrue);
+    expect(result.displayName, '李雷');
+    expect(result.avatarUrl, 'https://p.cldisk.com/star3/160_160c/998877.png');
+    expect(requests.map((request) => '${request.host}${request.path}'), [
+      'passport2-api.chaoxing.com/v11/loginregister',
+      'sso.chaoxing.com/login',
+      'i.chaoxing.com/base',
+      'photo.chaoxing.com/p/998877_160',
+    ]);
+    expect(requests.last.headers['Cookie'], contains('UID=998877'));
+  });
+
+  test('extracts Chaoxing profile from nested SSO msg payload', () async {
+    final dio = Dio(
+      BaseOptions(
+        validateStatus: (status) => status != null && status < 500,
+      ),
+    )..interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            if (options.uri.host == 'passport2-api.chaoxing.com') {
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  statusCode: 200,
+                  data: {
+                    'status': true,
+                    'url':
+                        'https://sso.chaoxing.com/apis/login/userLogin4Uname.do',
+                  },
+                ),
+              );
+              return;
+            }
+            if (options.uri.host == 'sso.chaoxing.com') {
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  statusCode: 200,
+                  data: {
+                    'msg': {
+                      'name': '郜小展',
+                      'nick': '郜小展',
+                      'uid': 354629555,
+                      'puid': 402733611,
+                      'pic': 'http://photo.chaoxing.com/p/402733611_120?flag=1',
+                    },
+                    'status': true,
+                  },
+                  headers: Headers.fromMap({
+                    'set-cookie': ['UID=354629555; Path=/; HttpOnly'],
+                  }),
+                ),
+              );
+              return;
+            }
+            if (options.uri.host == 'i.chaoxing.com' &&
+                options.uri.path == '/base') {
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  statusCode: 200,
+                  data:
+                      '<html><head><meta name="viewport" content="width=device-width"></head></html>',
+                ),
+              );
+              return;
+            }
+            if (options.uri.host == 'photo.chaoxing.com') {
+              expect(options.uri.path, '/p/402733611_120');
+              expect(options.uri.queryParameters['flag'], '1');
+              expect(options.uri.queryParameters['psize'], '160_160c');
+              expect(options.uri.queryParameters['ext'], 'png');
+              handler.resolve(
+                Response(
+                  requestOptions: options,
+                  statusCode: 302,
+                  headers: Headers.fromMap({
+                    'location': [
+                      'https://p.cldisk.com/star3/160_160c/05055cacb0d79d5f723c99d1beca393a.png',
+                    ],
+                  }),
+                ),
+              );
+              return;
+            }
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                statusCode: 404,
+                data: 'not found',
+              ),
+            );
+          },
+        ),
+      );
+    final client = ChaoxingLocalClient(dio: dio);
+
+    final result = await client.login(account: 'student', password: 'password');
+
+    expect(result.success, isTrue);
+    expect(result.displayName, '郜小展');
+    expect(
+      result.avatarUrl,
+      'https://p.cldisk.com/star3/160_160c/05055cacb0d79d5f723c99d1beca393a.png',
+    );
+  });
+}
+
+class _RecordedRequest {
+  const _RecordedRequest({
+    required this.method,
+    required this.host,
+    required this.path,
+    required this.headers,
+  });
+
+  final String method;
+  final String host;
+  final String path;
+  final Map<String, dynamic> headers;
+}

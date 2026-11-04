@@ -1,0 +1,26 @@
+PASS  test_aes_output_is_b64_of_cbc_padding
+PASS  test_aes_roundtrip
+PASS  test_build_ics
+PASS  test_cached_schedule_freshness
+PASS  test_compress_weeks
+PASS  test_current_week_derived_from_first_week_date
+PASS  test_escape_ics
+PASS  test_expand_weeks
+PASS  test_hidden_value
+PASS  test_is_antispider_location
+PASS  test_is_homework_pending
+PASS  test_json_output_format
+PASS  test_ms_to_date
+PASS  test_nearest_datetime_for
+PASS  test_parse_cd_filename
+PASS  test_parse_courses
+PASS  test_parse_courses_teacher_line2_color3
+PASS  test_parse_homework_detail
+PASS  test_parse_materials
+PASS  test_parse_section_times
+PASS  test_sanitize_filename
+PASS  test_strip_tags
+PASS  test_week_in_schedule
+PASS  test_widget_helpers
+
+ȫ��ͨ��

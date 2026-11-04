@@ -1,0 +1,147 @@
+00:00 +0: loading D:/campus-tools/app/test/android_manifest_test.dart
+00:00 +0: D:/campus-tools/app/test/android_manifest_test.dart: Android manifest declares internet permission for local Chaoxing login
+00:00 +1: D:/campus-tools/app/test/android_manifest_test.dart: Android manifest declares scheduled notification boot recovery
+00:00 +2: D:/campus-tools/app/test/android_manifest_test.dart: Android manifest declares exact alarm permission for timely reminders
+00:00 +3: D:/campus-tools/app/test/android_manifest_test.dart: local notifications prefer exact alarm scheduling
+00:00 +4: D:/campus-tools/app/test/android_manifest_test.dart: Android host exposes reminder permission settings actions
+00:00 +5: D:/campus-tools/app/test/android_manifest_test.dart: Android host can open downloaded apk updates
+00:00 +6: D:/campus-tools/app/test/android_manifest_test.dart: Android FileProvider exposes update apk cache directory
+00:00 +7: D:/campus-tools/app/test/app_deep_links_test.dart: normalizes legacy widget assignment deep links
+00:00 +8: D:/campus-tools/app/test/app_deep_links_test.dart: normalizes canonical assignment deep links
+00:00 +9: D:/campus-tools/app/test/app_deep_links_test.dart: keeps internal app locations untouched
+00:00 +10: D:/campus-tools/app/test/app_deep_links_test.dart: redirects legacy exam links to assignments
+00:00 +11: D:/campus-tools/app/test/app_deep_links_test.dart: builds canonical assignment widget uri
+00:00 +12: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:00 +12: D:/campus-tools/app/test/app_update_service_test.dart: finds newer GitHub release apk asset
+[UpdateCheck] checkForUpdate called, current=1.0.6
+[UpdateCheck] GitHub API status: 200
+[UpdateCheck] Remote tag: v1.0.7
+[UpdateCheck] Remote version: 1.0.7, Current: 1.0.6
+[UpdateCheck] Update found! version=1.0.7
+00:00 +13: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:00 +13: D:/campus-tools/app/test/app_update_service_test.dart: ignores release when remote version is not newer
+[UpdateCheck] checkForUpdate called, current=1.0.6
+[UpdateCheck] GitHub API status: 200
+[UpdateCheck] Remote tag: v1.0.6
+[UpdateCheck] Remote version: 1.0.6, Current: 1.0.6
+[UpdateCheck] Remote version not newer
+00:00 +14: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:00 +15: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:00 +16: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:00 +17: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +18: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +19: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +20: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +21: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +22: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +23: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +24: D:/campus-tools/app/test/assignment_store_login_test.dart: refreshing Chaoxing session saves recovered profile data
+00:01 +24 -1: D:/campus-tools/app/test/assignment_store_login_test.dart: refreshing Chaoxing session saves recovered profile data [E]
+  Expected: '郜小展'
+    Actual: 'student'
+     Which: is different.
+            Expected: 郜小展
+              Actual: student
+                      ^
+             Differ at offset 0
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test\assignment_store_login_test.dart 122:5         main.<fn>
+  
+00:01 +24 -1: D:/campus-tools/app/test/assignment_store_reminder_test.dart: saveReminderRule persists custom offsets and reschedules assignments
+00:01 +25 -1: D:/campus-tools/app/test/assignment_store_shuni_zuiling_test.dart: syncAssignments merges Chaoxing and Shuni Zuiling homework
+00:01 +26 -1: D:/campus-tools/app/test/assignment_store_shuni_zuiling_test.dart: partial sync failure keeps assignments from failed source
+00:02 +27 -1: D:/campus-tools/app/test/assignment_store_visibility_test.dart: visibleAssignments only contains unfinished assignments
+00:02 +28 -1: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: parses backclazzdata course list
+00:02 +29 -1: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: parses active list homework items into assignments
+00:02 +30 -1: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: parses active list exams into assignment items
+00:02 +31 -1: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: keeps unfinished peer review homework and skips completed peer review homework
+00:02 +32 -1: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: marks numeric completed homework status as submitted
+00:02 +33 -1: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: keeps peer review homework when description asks to complete review
+00:02 +34 -1: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: parses ISO UTC homework deadline as local time
+00:02 +35 -1: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: parses exams that only provide start time
+00:02 +36 -1: D:/campus-tools/app/test/chaoxing_assignment_parser_test.dart: parses Chaoxing work HTML into local assignments
+00:02 +37 -1: D:/campus-tools/app/test/chaoxing_assignment_parser_test.dart: parses Chaoxing stu-work nav items with remaining time
+00:02 +38 -1: D:/campus-tools/app/test/chaoxing_assignment_parser_test.dart: keeps unfinished peer review work and skips completed peer review work
+00:02 +39 -1: D:/campus-tools/app/test/chaoxing_assignment_parser_test.dart: keeps peer review work when description asks to complete review
+00:02 +40 -1: D:/campus-tools/app/test/chaoxing_local_client_test.dart: login follows Chaoxing redirect before resolving profile name and avatar
+00:02 +41 -1: D:/campus-tools/app/test/chaoxing_local_client_test.dart: extracts Chaoxing profile from nested SSO msg payload
+00:02 +42 -1: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +42 -2: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +42 -2: D:/campus-tools/app/test/local_assignment_repository_test.dart: mergeAssignments skips previously completed assignments when refreshed [E]
+  Expected: empty
+    Actual: [Instance of 'Assignment']
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test\local_assignment_repository_test.dart 35:7     main.<fn>
+  
+00:03 +43 -2: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +43 -3: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +43 -3: D:/campus-tools/app/test/local_assignment_repository_test.dart: mergeAndSave hides assignments that are waiting for review [E]
+  Expected: empty
+    Actual: [Instance of 'Assignment']
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test\local_assignment_repository_test.dart 75:5     main.<fn>
+  
+00:03 +44 -3: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +45 -3: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +46 -3: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +46 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +46 -4: D:/campus-tools/app/test/local_assignment_repository_test.dart: updateCompletion hides assignment across later syncs [E]
+  Expected: empty
+    Actual: [Instance of 'Assignment']
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test\local_assignment_repository_test.dart 198:5    main.<fn>
+  
+00:03 +47 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +48 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +49 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +50 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:03 +51 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +52 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +53 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +54 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +55 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +56 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +57 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +58 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +59 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +60 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +61 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +62 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +63 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +64 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +65 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +66 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +67 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +68 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:04 +69 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:05 +70 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:05 +71 -4: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:05 +72 -4: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:05 +73 -4: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:05 +74 -4: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:05 +75 -4: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:05 +76 -4: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:05 +77 -4: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:05 +78 -4: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:05 +79 -4: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:05 +80 -4: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:05 +81 -4: D:/campus-tools/app/test/reminder_settings_screen_test.dart: adds a custom reminder with hours and minutes
+00:05 +82 -4: D:/campus-tools/app/test/reminder_settings_screen_test.dart: adds a custom reminder with hours and minutes
+00:05 +83 -4: D:/campus-tools/app/test/login_screen_test.dart: login failure is shown without additional typing
+00:06 +84 -4: D:/campus-tools/app/test/login_screen_test.dart: login failure is shown without additional typing
+00:06 +85 -4: D:/campus-tools/app/test/sync_status_screen_test.dart: saves custom auto sync interval in minutes
+00:06 +86 -4: Some tests failed.
+
+Failing tests:
+  D:/campus-tools/app/test/assignment_store_login_test.dart: refreshing Chaoxing session saves recovered profile data
+  D:/campus-tools/app/test/local_assignment_repository_test.dart: mergeAndSave hides assignments that are waiting for review
+  D:/campus-tools/app/test/local_assignment_repository_test.dart: mergeAssignments skips previously completed assignments when refreshed
+  D:/campus-tools/app/test/local_assignment_repository_test.dart: updateCompletion hides assignment across later syncs
