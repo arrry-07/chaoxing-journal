@@ -48,16 +48,15 @@ void main() {
 
     await show(AssignmentListScreen(store: store));
     expect(find.text('下一份要交'), findsNothing);
-    await t.scrollUntilVisible(find.textContaining('截止 / 提交待确认'), 150);
-    await t.tap(find.textContaining('截止 / 提交待确认'));
+    await t.scrollUntilVisible(find.text(title), 150);
     await t.pumpAndSettle();
     expect(find.text(title), findsOneWidget);
-    expect(find.text('已退回'), findsOneWidget);
+    expect(find.textContaining('已退回'), findsOneWidget);
     expect(t.takeException(), isNull);
     await show(
         AssignmentDetailScreen(store: store, assignmentId: 'cx:work:1:2:task'));
     expect(find.text('未设置截止时间'), findsOneWidget);
-    expect(find.text('已退回'), findsOneWidget);
+    expect(find.textContaining('已退回'), findsOneWidget);
     expect(t.takeException(), isNull);
     await show(CalendarScreen(store: store));
     await t.scrollUntilVisible(find.text('所选范围没有已知截止作业'), 180,
@@ -65,7 +64,7 @@ void main() {
     expect(find.text(title), findsNothing);
     expect(t.takeException(), isNull);
     await show(StatsScreen(store: store));
-    expect(find.text('已完成 50%'), findsOneWidget);
+    expect(find.text('已确认完成 50%'), findsOneWidget);
     expect(t.takeException(), isNull);
     store.replaceAssignmentsForTest([
       work.copyWith(
@@ -73,10 +72,10 @@ void main() {
           deadlineReadFailed: true)
     ]);
     await show(AssignmentListScreen(store: store));
-    await t.scrollUntilVisible(find.text('截止时间为上次读取记录'), 150);
-    expect(find.text('截止时间为上次读取记录'), findsWidgets);
+    await t.scrollUntilVisible(find.textContaining('截止时间为上次读取记录'), 150);
+    expect(find.textContaining('截止时间为上次读取记录'), findsWidgets);
     await show(
         AssignmentDetailScreen(store: store, assignmentId: 'cx:work:1:2:task'));
-    expect(find.text('截止时间为上次读取记录'), findsOneWidget);
+    expect(find.textContaining('截止时间为上次读取记录'), findsOneWidget);
   });
 }

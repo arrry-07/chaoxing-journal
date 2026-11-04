@@ -30,6 +30,7 @@ class WidgetSnapshotService {
     final pending = [
       ...groups.near,
       ...groups.uncertain,
+      ...groups.noDeadline,
       ...groups.far,
       ...groups.overdue
     ];

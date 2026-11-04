@@ -44,8 +44,8 @@ void main() {
             .getSemanticsData()
             .hasAction(SemanticsAction.tap),
         isTrue);
-    expect(find.text('近期待交'), findsOneWidget);
-    expect(find.text('三月旧题'), findsNothing);
+    expect(find.text('近期截止  1'), findsOneWidget);
+    expect(find.text('三月旧题'), findsOneWidget);
     expect(find.text('课堂题'), findsNothing);
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: CalendarScreen(store: s))));

@@ -198,7 +198,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
         if (!loggedIn && !loggingIn) {
           return '/login';
         }
-        if (loggedIn && loggingIn) {
+        if (loggedIn && loggingIn && state.uri.queryParameters['reauth'] != '1') {
           return '/assignments';
         }
         return null;

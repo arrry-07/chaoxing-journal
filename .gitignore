@@ -29,3 +29,6 @@
 
 # Local delivery APKs and device screenshots may contain user data.
 /artifacts/
+
+# Candidate UI captures stay local until visually reviewed.
+/docs/evidence/2026-11-04/home-stats-redesign/candidates/

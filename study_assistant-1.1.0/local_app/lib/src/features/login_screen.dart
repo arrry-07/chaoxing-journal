@@ -157,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
       agreementAccepted: _accepted,
     );
     if (!mounted) return;
-    if (widget.store.isAuthenticated) {
+    if (widget.store.isAuthenticated && widget.store.error == null) {
       context.go('/assignments');
     }
   }

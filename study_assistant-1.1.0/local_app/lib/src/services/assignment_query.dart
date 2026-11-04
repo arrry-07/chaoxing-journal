@@ -4,7 +4,8 @@ class HomeAssignmentGroups {
   final near = <Assignment>[],
       far = <Assignment>[],
       overdue = <Assignment>[],
-      uncertain = <Assignment>[];
+      uncertain = <Assignment>[],
+      noDeadline = <Assignment>[];
 }
 
 class AssignmentQuery {
@@ -28,8 +29,10 @@ class AssignmentQuery {
     final g = HomeAssignmentGroups();
     for (final a in scope(records, followed).where((a) => !a.isCompleted)) {
       final d = a.deadlineAt;
-      if (!a.isPendingConfirmed || d == null || !a.deadlineTrusted) {
+      if (!a.isPendingConfirmed || a.deadlineReadFailed || !a.deadlineTrusted) {
         g.uncertain.add(a);
+      } else if (d == null) {
+        g.noDeadline.add(a);
       } else if (d.isBefore(now)) {
         g.overdue.add(a);
       } else if (d.isAfter(now.add(const Duration(days: 30)))) {
@@ -38,7 +41,7 @@ class AssignmentQuery {
         g.near.add(a);
       }
     }
-    for (final list in [g.near, g.far, g.uncertain]) {
+    for (final list in [g.near, g.far, g.uncertain, g.noDeadline]) {
       list.sort(Assignment.compareByDeadline);
     }
     g.overdue.sort((a, b) => Assignment.compareByDeadline(b, a));
