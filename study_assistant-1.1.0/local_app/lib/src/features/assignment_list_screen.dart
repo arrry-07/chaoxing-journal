@@ -67,8 +67,23 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             now: now,
             onTap: () =>
                 context.push('/assignments/${Uri.encodeComponent(a.id)}'));
+        List<Widget> timeline(List<Assignment> list) {
+          DateTime? previous;
+          return [
+            for (final a in list) ...[
+              if (a.deadlineAt != null &&
+                  a.deadlineTrusted &&
+                  !a.deadlineReadFailed &&
+                  previous != AssignmentQuery.dayKey(a.deadlineAt!))
+                dayHeading(
+                    previous = AssignmentQuery.dayKey(a.deadlineAt!), now),
+              card(a),
+            ]
+          ];
+        }
+
         Widget heading(String label, int count) => Padding(
-            padding: const EdgeInsets.only(top: 16, bottom: 4),
+            padding: const EdgeInsets.only(top: 20, bottom: 4),
             child: Text('$label  $count',
                 style: const TextStyle(
                     fontSize: 18, fontWeight: FontWeight.w600)));
@@ -87,7 +102,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   title: Text('$label  ${list.length}',
                       style: const TextStyle(
                           fontSize: 18, fontWeight: FontWeight.w600)),
-                  children: list.map(card).toList()));
+                  children: timeline(list)));
         }
 
         final noUrgent = groups.near.isEmpty && groups.overdue.isEmpty;
@@ -96,24 +111,19 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             child: ListView(
                 key: const PageStorageKey('home-list'),
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                padding: const EdgeInsets.fromLTRB(20, 22, 20, 24),
                 children: [
-                  Row(children: [
-                    const Expanded(
-                        child: Text('学习通课业手记',
-                            style: TextStyle(
-                                fontFamily: 'JournalTitle',
-                                fontSize: 23,
-                                height: 1.25,
-                                color: Journal.ink))),
-                    IconButton(
-                        tooltip: '刷新作业',
-                        onPressed: store.isLoading ||
-                                store.syncReport.phase == SyncPhase.running
-                            ? null
-                            : store.syncAssignments,
-                        icon: const Icon(Icons.sync_rounded))
-                  ]),
+                  JournalHeading('课业手记',
+                      eyebrow: 'CAMPUS JOURNAL   /   01',
+                      bookTitle: true,
+                      trailing: IconButton(
+                          tooltip: '刷新作业',
+                          onPressed: store.isLoading ||
+                                  store.syncReport.phase == SyncPhase.running
+                              ? null
+                              : store.syncAssignments,
+                          icon: const Icon(Icons.sync_rounded))),
+                  const SizedBox(height: 12),
                   Wrap(
                       crossAxisAlignment: WrapCrossAlignment.center,
                       spacing: 12,
@@ -146,9 +156,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                               color: Journal.muted, fontSize: 14)),
                     if (groups.overdue.isNotEmpty) ...[
                       heading('已逾期', groups.overdue.length),
-                      for (final a in groups.overdue
-                          .take(allOverdue ? groups.overdue.length : 3))
-                        card(a),
+                      ...timeline(groups.overdue
+                          .take(allOverdue ? groups.overdue.length : 3)
+                          .toList()),
                       if (groups.overdue.length > 3)
                         TextButton(
                             onPressed: () =>
@@ -159,7 +169,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                     ],
                     if (groups.near.isNotEmpty) ...[
                       heading('近期截止', groups.near.length),
-                      ...groups.near.map(card)
+                      ...timeline(groups.near)
                     ],
                     if (groups.noDeadline.isNotEmpty)
                       group('undated', '未设置截止时间', groups.noDeadline, noUrgent),
@@ -197,4 +207,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                                     : '首次读取后，会在这里整理需要处理的作业。')),
                 ]));
       });
+
+  Widget dayHeading(DateTime day, DateTime now) => Padding(
+      padding: const EdgeInsets.only(top: 12, bottom: 4),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(
+            '${day.year == AssignmentQuery.beijing(now).year ? '' : '${day.year}年'}'
+            '${day.month}月${day.day}日  周${'一二三四五六日'[day.weekday - 1]}',
+            style: Journal.metadata.copyWith(
+                color: Journal.ink, fontSize: 16, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        const Divider(height: 1),
+      ]));
 }

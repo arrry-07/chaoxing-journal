@@ -1,7 +1,7 @@
 name: study_assistant_mobile
 description: 学习通作业提醒本地版 App。
 publish_to: "none"
-version: 1.2.4+34
+version: 1.2.5+35
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -31,9 +31,13 @@ flutter:
     - family: JournalBody
       fonts:
         - asset: assets/type/JournalBody.ttf
+          weight: 400
+        - asset: assets/type/JournalBody-Semibold.ttf
+          weight: 600
     - family: JournalTitle
       fonts:
         - asset: assets/type/JournalTitle.ttf
+          weight: 400
   assets:
     - assets/licenses/HY.txt
     - assets/licenses/xuexitong-cli.txt

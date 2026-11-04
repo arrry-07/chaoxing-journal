@@ -60,11 +60,7 @@ class StatsScreen extends StatelessWidget {
             key: const PageStorageKey('stats-list'),
             padding: const EdgeInsets.all(16),
             children: [
-              const Text('课业统计',
-                  style: TextStyle(
-                      fontFamily: 'JournalTitle',
-                      fontSize: 24,
-                      color: Journal.ink)),
+              const Text('课业统计', style: Journal.section),
               const SizedBox(height: 8),
               const Text('当前关注课程 · 本机已读取记录',
                   style: TextStyle(color: Journal.muted, fontSize: 14)),

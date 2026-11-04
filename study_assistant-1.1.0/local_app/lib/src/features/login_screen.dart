@@ -46,16 +46,13 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 Text(
                   '学习通登录',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: const Color(0xFF17211D),
-                      ),
+                  style: Journal.section.copyWith(fontSize: 26),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   '使用学习通账号同步课程作业和截止时间。',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF8B9290),
+                        color: Journal.muted,
                       ),
                 ),
                 const SizedBox(height: 18),
@@ -69,17 +66,16 @@ class _LoginScreenState extends State<LoginScreen> {
                   _LoginErrorCard(message: widget.store.error!),
                 ],
                 const SizedBox(height: 22),
-                SizedBox(
-                  height: 46,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
                   child: FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor:
-                          canLogin ? Journal.ink : const Color(0xFFD6D6D8),
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: const Color(0xFFD6D6D8),
-                      disabledForegroundColor: Colors.white,
+                      backgroundColor: canLogin ? Journal.ink : Journal.sage,
+                      foregroundColor: Journal.sheet,
+                      disabledBackgroundColor: Journal.sage,
+                      disabledForegroundColor: Journal.muted,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(7),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
                     onPressed: canLogin ? _login : null,
@@ -112,8 +108,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         _accepted
                             ? Icons.check_circle
                             : Icons.radio_button_unchecked,
-                        color:
-                            _accepted ? Journal.ink : const Color(0xFFB7B7B7),
+                        color: _accepted ? Journal.ink : Journal.muted,
                         size: 18,
                       ),
                     ),
@@ -135,7 +130,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
                         ),
                         style: TextStyle(
-                          color: Color(0xFF68706D),
+                          color: Journal.muted,
                           fontSize: 14,
                         ),
                       ),
@@ -233,12 +228,12 @@ class _ChaoxingForm extends StatelessWidget {
 InputDecoration _fieldDecoration(String hint) {
   return InputDecoration(
     hintText: hint,
-    hintStyle: const TextStyle(color: Color(0xFFC6C8CC)),
+    hintStyle: Journal.metadata,
     filled: true,
-    fillColor: const Color(0xFFF7F7F8),
+    fillColor: Journal.sheet,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
     border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(7),
+      borderRadius: BorderRadius.circular(12),
       borderSide: BorderSide.none,
     ),
   );

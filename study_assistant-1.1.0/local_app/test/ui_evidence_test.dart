@@ -43,6 +43,9 @@ void main() {
     for (final name in ['JournalBody', 'JournalTitle']) {
       final f = FontLoader(name)
         ..addFont(rootBundle.load('assets/type/$name.ttf'));
+      if (name == 'JournalBody') {
+        f.addFont(rootBundle.load('assets/type/JournalBody-Semibold.ttf'));
+      }
       await f.load();
     }
     final s = AssignmentStore(

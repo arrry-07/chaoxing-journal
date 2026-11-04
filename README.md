@@ -1,14 +1,14 @@
 # 学习通课业手记
 
-专门服务学习通的 Android 作业手帐。暖纸底色、深墨正文、宋体短标题；优先展示下一份待交作业，按日期和准确时间排列。
+专门服务学习通的 Android 作业手帐。暖纸底色、深墨正文、宋体展示标题和课程手绘；作业按分组、日期和准确时间排列。
 
 基于 [mshzy/study_assistant](https://github.com/mshzy/study_assistant) 二次开发，保留原项目 MIT 版权声明。接口查询参考 [DanMo661/xuexitong-cli](https://github.com/DanMo661/xuexitong-cli)。
 
 ## 安装与使用
 
-本轮本地交付 `学习通课业手记-1.2.4-deadline34.apk`，未上传 APK。历史发行版见 [Releases](https://github.com/arrry-07/chaoxing-journal/releases)，仓库为私有，需访问权限。Android 8.0 及以上，ARM64 / x86_64。
+本轮本地交付 `学习通课业手记-1.2.5-手账35.apk`，未上传 APK。历史发行版见 [Releases](https://github.com/arrry-07/chaoxing-journal/releases)，仓库为私有，需访问权限。Android 8.0 及以上，ARM64 / x86_64。
 
-此体验包包名 `com.example.studyassistant.journal`、版本 `1.2.4+34`。与此前《课业手记》体验包保持同包名、同签名，可覆盖安装；与上游原版应用并行。不要卸载上一体验版后再装，否则会丢失本机数据。体验包采用本机调试签名，后续覆盖包需使用同一密钥；密钥不上传仓库。
+此体验包包名 `com.example.studyassistant.journal`、版本 `1.2.5+35`。与此前《课业手记》体验包保持同包名、同签名，可覆盖安装；与上游原版应用并行。不要卸载上一体验版后再装，否则会丢失本机数据。体验包采用本机调试签名，后续覆盖包需使用同一密钥；密钥不上传仓库。
 
 登录学习通后下拉首页或点击刷新。成功读取到已提交/待批阅状态后，作业退出待交清单，取消后续提醒并更新小组件。退回重做会重新进入待交。未识别的状态保持“提交状态未知”，读取失败保留旧数据。手动操作“仅在本机隐藏”不会向学习通提交作业。
 
@@ -20,7 +20,7 @@
 
 | 首页 | 我的 |
 |---|---|
-| ![首页](study_assistant-1.1.0/docs/images/journal-home.png) | ![我的](study_assistant-1.1.0/docs/images/journal-profile.png) |
+| ![首页](docs/evidence/2026-11-05/journal-ui/mixed-360-1.0.png) | ![我的](docs/evidence/2026-11-05/journal-ui/profile-360-1.0.png) |
 
 ## 开发
 
@@ -63,3 +63,7 @@ flutter build apk --debug --target-platform android-arm64,android-x64
 ## 截止时间修复（1.2.4 / 34）
 
 修正新版列表零值被误认作无截止的问题，访问原作业详情，并用同一份作业的绝对开始时间核对年份。MuMu真实同步11份待交中恢复10份精确截止；1份尚未开放，保留待确认。失败保留列表与旧日期，不猜年份。方案、证据和安装说明见 [截止时间验收](docs/2026-11-04-截止时间读取验收.md)。
+
+## 手账视觉统一（1.2.5 / 35）
+
+恢复首页眉题与课业手记展示标题；日期分隔和时间列复用课程手绘标记，统一正文真实400/600字重及导航、表单和弹窗字体。178项测试、静态分析、180张渲染矩阵和MuMu覆盖安装检查通过，见 [验收记录](docs/2026-11-05-手账视觉统一验收.md)。本地安装包位于 artifacts/2026-11-05/journal-ui，未上传APK。

@@ -31,8 +31,7 @@ class AssignmentCard extends StatelessWidget {
                 today
             ? '今天截止'
             : null;
-    final state =
-        !a.isPendingConfirmed && !a.isCompleted ? '提交状态待确认' : a.statusLabel;
+    final state = a.statusLabel;
     final deadline = a.deadlineReadFailed
         ? d == null
             ? a.deadlineLabel
@@ -43,10 +42,22 @@ class AssignmentCard extends StatelessWidget {
                 ? '未设置截止时间'
                 : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}';
     final color = urgent != null ? Journal.berry : Journal.ink;
+    final hasTime = d != null && a.deadlineTrusted && !a.deadlineReadFailed;
+    final clock =
+        hasTime ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d)) : '—';
+    // Measure at the user's text scale: a fixed rail clips times at 2× size.
+    final measure = TextPainter(
+        text: const TextSpan(text: '00:00', style: Journal.time),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context))
+      ..layout();
+    final railWidth = measure.width.ceilToDouble() + 4;
+    measure.dispose();
     return Semantics(
         button: true,
         onTap: onTap,
-        label: '${a.title}，${a.courseName}，${urgent ?? state}，$deadline',
+        label:
+            '${a.title}，${a.courseName}，$state，${urgent == null ? '' : '$urgent，'}$deadline',
         excludeSemantics: true,
         child: SizedBox(
             width: double.infinity,
@@ -61,34 +72,41 @@ class AssignmentCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                     child: Padding(
                         padding: const EdgeInsets.all(12),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Text(a.title,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w600,
-                                      height: 1.25)),
-                              if (urgent != null)
-                                Padding(
-                                    padding: const EdgeInsets.only(top: 3),
-                                    child: Text(urgent,
-                                        style: TextStyle(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: railWidth,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(clock, style: Journal.time),
+                                  const SizedBox(height: 12),
+                                  CourseMark(a.courseName),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                                child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                  Text(a.title, style: Journal.entryTitle),
+                                  const SizedBox(height: 4),
+                                  Text(a.courseName, style: Journal.metadata),
+                                  const SizedBox(height: 4),
+                                  Text(state,
+                                      style: Journal.metadata
+                                          .copyWith(color: Journal.ink)),
+                                  if (urgent != null)
+                                    Text(urgent,
+                                        style: Journal.metadata.copyWith(
                                             color: color,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600))),
-                              const SizedBox(height: 4),
-                              Text(a.courseName,
-                                  style: const TextStyle(
-                                      color: Journal.muted,
-                                      fontSize: 14,
-                                      height: 1.3)),
-                              const SizedBox(height: 4),
-                              Text('$deadline · $state',
-                                  style: TextStyle(
-                                      color: color, fontSize: 14, height: 1.3)),
-                            ]))))));
+                                            fontWeight: FontWeight.w600)),
+                                  Text(deadline, style: Journal.metadata),
+                                ])),
+                          ],
+                        ))))));
   }
 }

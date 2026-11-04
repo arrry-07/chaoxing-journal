@@ -11,6 +11,12 @@ import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart'
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
+import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
+import 'package:study_assistant_mobile/src/features/login_screen.dart';
+import 'package:study_assistant_mobile/src/features/reminder_settings_screen.dart';
+import 'package:study_assistant_mobile/src/features/sync_status_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/update_dialog.dart';
+import 'package:study_assistant_mobile/src/services/app_update_service.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
@@ -34,11 +40,14 @@ void main() {
       (t) async {
     await initializeDateFormatting('zh_CN');
     for (final f in ['JournalBody', 'JournalTitle', 'MaterialIcons']) {
-      await (FontLoader(f)
-            ..addFont(rootBundle.load(f == 'MaterialIcons'
-                ? 'fonts/MaterialIcons-Regular.otf'
-                : 'assets/type/$f.ttf')))
-          .load();
+      final loader = FontLoader(f)
+        ..addFont(rootBundle.load(f == 'MaterialIcons'
+            ? 'fonts/MaterialIcons-Regular.otf'
+            : 'assets/type/$f.ttf'));
+      if (f == 'JournalBody') {
+        loader.addFont(rootBundle.load('assets/type/JournalBody-Semibold.ttf'));
+      }
+      await loader.load();
     }
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.resetDevicePixelRatio);
@@ -61,8 +70,8 @@ void main() {
             deadlineTrusted: trusted,
             deadlineReadFailed: failed);
     final root = Directory.current.resolveSymbolicLinksSync();
-    final output = Directory(
-        '$root/../../docs/evidence/2026-11-04/home-stats-redesign/candidates');
+    final output =
+        Directory('$root/../../artifacts/2026-11-05/journal-ui/candidates');
     if (const bool.fromEnvironment('CAPTURE_UI')) {
       output.createSync(recursive: true);
     }
@@ -84,16 +93,27 @@ void main() {
             a(1, days: null, trusted: false)
           ],
         'empty' || 'failed-empty' || 'stats-empty' => <Assignment>[],
-        'stats' || 'stats-unknown' || 'stats-completed' || 'stats-pending' || 'stats-tiny' => [
+        'stats' ||
+        'stats-unknown' ||
+        'stats-completed' ||
+        'stats-pending' ||
+        'stats-tiny' =>
+          [
             for (var i = 0; i < (scene == 'stats-tiny' ? 1000 : 31); i++)
               a(i,
-                  status: scene == 'stats-completed' ? 'submitted' : scene == 'stats-pending' ? 'pending' : scene == 'stats-tiny' ? (i == 0 ? 'submitted' : 'pending') : scene == 'stats-unknown'
-                      ? 'unknown'
-                      : i < 20
-                          ? 'submitted'
-                          : i < 28
-                              ? 'pending'
-                              : 'unknown')
+                  status: scene == 'stats-completed'
+                      ? 'submitted'
+                      : scene == 'stats-pending'
+                          ? 'pending'
+                          : scene == 'stats-tiny'
+                              ? (i == 0 ? 'submitted' : 'pending')
+                              : scene == 'stats-unknown'
+                                  ? 'unknown'
+                                  : i < 20
+                                      ? 'submitted'
+                                      : i < 28
+                                          ? 'pending'
+                                          : 'unknown')
           ],
         _ => [
             a(0, days: -2),
@@ -118,12 +138,19 @@ void main() {
               : []);
       final route = scene.startsWith('stats')
           ? '/stats'
-          : scene == 'calendar'
-              ? '/calendar'
-              : scene == 'profile'
-                  ? '/profile'
-                  : '/assignments';
+          : [
+              'calendar',
+              'profile',
+              'detail',
+              'login',
+              'reminders',
+              'sync',
+              'dialog'
+            ].contains(scene)
+              ? '/$scene'
+              : '/assignments';
       final router = GoRouter(initialLocation: route, routes: [
+        GoRoute(path: '/login', builder: (_, __) => LoginScreen(store: s)),
         ShellRoute(
             builder: (_, __, child) =>
                 AppShell(assignmentStore: s, child: child),
@@ -139,6 +166,18 @@ void main() {
               GoRoute(
                   path: '/profile',
                   builder: (_, __) => ProfileScreen(store: s)),
+              GoRoute(
+                  path: '/detail',
+                  builder: (_, __) => AssignmentDetailScreen(
+                      store: s, assignmentId: rows.first.id)),
+              GoRoute(
+                  path: '/reminders',
+                  builder: (_, __) =>
+                      ReminderSettingsScreen(assignmentStore: s)),
+              GoRoute(
+                  path: '/sync',
+                  builder: (_, __) => SyncStatusScreen(store: s)),
+              GoRoute(path: '/dialog', builder: (_, __) => const SizedBox()),
             ])
       ]);
       final boundary = GlobalKey();
@@ -171,6 +210,13 @@ void main() {
                   ])))));
       await t.pump(const Duration(milliseconds: 250));
       await t.pump(const Duration(milliseconds: 250));
+      if (scene == 'dialog') {
+        final context = router.routerDelegate.navigatorKey.currentContext!;
+        showDialog<void>(
+            context: context,
+            builder: (_) => UpdateDialog(service: AppUpdateService()));
+        await t.pumpAndSettle();
+      }
       expect(t.takeException(), isNull, reason: '$scene $width $scale');
       if (scene == 'mixed' && scale == 1) {
         final cards = find
@@ -179,7 +225,10 @@ void main() {
             .map((e) => t.getRect(find.byWidget(e.widget)))
             .where((r) => r.bottom < height - 96 && r.top >= 0)
             .length;
-        expect(cards, greaterThanOrEqualTo(width == 320 ? 2 : 3),
+        // Restored book heading and dated timeline intentionally use more room
+        // than the previous compact toolbar. Keep a complete entry visible on
+        // narrow phones and at least two on standard phones.
+        expect(cards, greaterThanOrEqualTo(width == 320 ? 1 : 2),
             reason: 'first-screen density $width: $cards');
       }
       if (const bool.fromEnvironment('CAPTURE_UI')) {
@@ -219,7 +268,12 @@ void main() {
           'stats-pending',
           'stats-tiny',
           'calendar',
-          'profile'
+          'profile',
+          'detail',
+          'login',
+          'reminders',
+          'sync',
+          'dialog'
         ]) {
           await capture(scene, size.width, size.height, scale);
         }

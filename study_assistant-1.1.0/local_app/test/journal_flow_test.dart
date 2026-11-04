@@ -125,8 +125,8 @@ void main() {
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: store))));
     expect(find.text('今天截止'), findsNothing);
-    expect(find.textContaining('17:45'), findsOneWidget);
-    expect(find.textContaining('${due.month}月${due.day}日'), findsOneWidget);
+    expect(find.text('17:45'), findsOneWidget);
+    expect(find.text('截止 ${due.month}月${due.day}日 17:45'), findsOneWidget);
   });
 
   testWidgets(
@@ -164,7 +164,7 @@ void main() {
         expect(target, findsOneWidget);
         expect(t.takeException(), isNull);
       }
-      expect(find.textContaining('22:00'), findsOneWidget);
+      expect(find.text('22:00'), findsOneWidget);
     },
   );
 }
