@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
@@ -39,16 +40,12 @@ void main() {
   testWidgets('redesign candidates include real shell, states and text scaling',
       (t) async {
     await initializeDateFormatting('zh_CN');
-    for (final f in ['JournalBody', 'JournalTitle', 'MaterialIcons']) {
-      final loader = FontLoader(f)
-        ..addFont(rootBundle.load(f == 'MaterialIcons'
-            ? 'fonts/MaterialIcons-Regular.otf'
-            : 'assets/type/$f.ttf'));
-      if (f == 'JournalBody') {
-        loader.addFont(rootBundle.load('assets/type/JournalBody-Semibold.ttf'));
-      }
-      await loader.load();
-    }
+    await (FontLoader(Journal.bodyFamily)
+          ..addFont(rootBundle.load('assets/type/LXGWWenKaiScreen.ttf')))
+        .load();
+    await (FontLoader('MaterialIcons')
+          ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')))
+        .load();
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.resetDevicePixelRatio);
     addTearDown(t.view.resetPhysicalSize);
@@ -70,8 +67,7 @@ void main() {
             deadlineTrusted: trusted,
             deadlineReadFailed: failed);
     final root = Directory.current.resolveSymbolicLinksSync();
-    final output =
-        Directory('$root/../../artifacts/2026-11-05/journal-ui/candidates');
+    final output = Directory('$root/../../artifacts/current/ui-candidates');
     if (const bool.fromEnvironment('CAPTURE_UI')) {
       output.createSync(recursive: true);
     }
@@ -201,7 +197,7 @@ void main() {
                             child: const Center(
                                 child: Text('样例数据 · 布局验收',
                                     style: TextStyle(
-                                        fontFamily: 'JournalBody',
+                                        fontFamily: Journal.bodyFamily,
                                         fontSize: 11,
                                         height: 1.2,
                                         color: Color(0xFF53645A),
@@ -218,6 +214,27 @@ void main() {
         await t.pumpAndSettle();
       }
       expect(t.takeException(), isNull, reason: '$scene $width $scale');
+      // Inspect the effective rendered spans, not just ThemeData: Material
+      // controls, overlays and editable fields must all use the bundled face.
+      void checkFont(InlineSpan span, [String? inherited]) {
+        if (span is! TextSpan) return;
+        final family = span.style?.fontFamily ?? inherited;
+        if (RegExp(r'[A-Za-z0-9\u4e00-\u9fff]').hasMatch(span.text ?? '')) {
+          expect(family, Journal.bodyFamily,
+              reason: '$scene $width $scale: ${span.text}');
+        }
+        for (final child in span.children ?? <InlineSpan>[]) {
+          checkFont(child, family);
+        }
+      }
+
+      for (final e in find.byType(RichText).evaluate()) {
+        checkFont((e.widget as RichText).text);
+      }
+      for (final e in find.byType(EditableText).evaluate()) {
+        expect((e.widget as EditableText).style.fontFamily, Journal.bodyFamily,
+            reason: '$scene input font');
+      }
       if (scene == 'mixed' && scale == 1) {
         final cards = find
             .byType(AssignmentCard)
@@ -250,6 +267,7 @@ void main() {
     for (final size in [
       const Size(320, 640),
       const Size(360, 800),
+      const Size(393, 852),
       const Size(432, 900)
     ]) {
       for (final scale in [1.0, 1.3, 2.0]) {

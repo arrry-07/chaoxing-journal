@@ -126,7 +126,7 @@ void main() {
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: store))));
     expect(find.text('今天截止'), findsNothing);
     expect(find.text('17:45'), findsOneWidget);
-    expect(find.text('截止 ${due.month}月${due.day}日 17:45'), findsOneWidget);
+    expect(find.textContaining('${due.month}月${due.day}日  周'), findsOneWidget);
   });
 
   testWidgets(

@@ -1,7 +1,7 @@
 name: study_assistant_mobile
 description: 学习通作业提醒本地版 App。
 publish_to: "none"
-version: 1.2.5+35
+version: 1.2.6+36
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -28,18 +28,11 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   fonts:
-    - family: JournalBody
+    - family: LXGW WenKai Screen
       fonts:
-        - asset: assets/type/JournalBody.ttf
-          weight: 400
-        - asset: assets/type/JournalBody-Semibold.ttf
-          weight: 600
-    - family: JournalTitle
-      fonts:
-        - asset: assets/type/JournalTitle.ttf
+        - asset: assets/type/LXGWWenKaiScreen.ttf
           weight: 400
   assets:
     - assets/licenses/HY.txt
     - assets/licenses/xuexitong-cli.txt
-    - assets/type/OFL.txt
-    - assets/type/OFL-Sans.txt
+    - assets/type/OFL-WenKai.txt

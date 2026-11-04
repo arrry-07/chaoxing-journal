@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 import 'package:study_assistant_mobile/src/features/help_feedback_screen.dart';
 import 'package:study_assistant_mobile/src/features/open_source_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
@@ -40,14 +43,9 @@ class _EvidenceWidget extends WidgetSnapshotService {
 void main() {
   testWidgets('sample UI evidence at narrow and large font sizes', (t) async {
     await initializeDateFormatting('zh_CN');
-    for (final name in ['JournalBody', 'JournalTitle']) {
-      final f = FontLoader(name)
-        ..addFont(rootBundle.load('assets/type/$name.ttf'));
-      if (name == 'JournalBody') {
-        f.addFont(rootBundle.load('assets/type/JournalBody-Semibold.ttf'));
-      }
-      await f.load();
-    }
+    await (FontLoader(Journal.bodyFamily)
+          ..addFont(rootBundle.load('assets/type/LXGWWenKaiScreen.ttf')))
+        .load();
     final s = AssignmentStore(
         sessionStore: _EvidenceSession(),
         notificationService: _EvidenceNotifications(),
@@ -99,10 +97,19 @@ void main() {
       await t.pumpAndSettle();
       expect(t.takeException(), isNull);
       if (const bool.fromEnvironment('CAPTURE_UI')) {
-        await expectLater(
-            find.byKey(boundary),
-            matchesGoldenFile(Uri.file(
-                '${Directory(Directory.current.resolveSymbolicLinksSync()).parent.parent.path}/docs/evidence/2026-11-04/$name.png')));
+        final root = Directory.current.resolveSymbolicLinksSync();
+        final output =
+            Directory('$root/../../artifacts/current/secondary-scenes');
+        output.createSync(recursive: true);
+        final render = boundary.currentContext!.findRenderObject()!
+            as RenderRepaintBoundary;
+        await t.runAsync(() async {
+          final image = await render.toImage();
+          final data = await image.toByteData(format: ui.ImageByteFormat.png);
+          await File('${output.path}/$name.png')
+              .writeAsBytes(data!.buffer.asUint8List());
+          image.dispose();
+        });
       }
     }
 

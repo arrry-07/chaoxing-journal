@@ -57,11 +57,9 @@ void main() {
     expect(find.textContaining('班级'), findsNothing);
     expect(s.assignments.first.courseKey, '1:8888');
     expect(find.textContaining('未来30天暂无'), findsNothing);
-    await t.tap(find.text('未设置截止时间  2'));
-    await t.pumpAndSettle();
     s.changed();
     await t.pumpAndSettle();
-    expect(find.text('短题'), findsNothing);
+    expect(find.text('短题'), findsOneWidget);
   });
   testWidgets('retry performs sync and running state disables refresh',
       (t) async {
@@ -72,7 +70,7 @@ void main() {
     addTearDown(s.dispose);
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
-    await t.tap(find.text('重试'));
+    await t.tap(find.byTooltip('刷新作业'));
     expect(s.syncCalls, 1);
     s.syncReport = const SyncReport(phase: SyncPhase.running);
     s.changed();

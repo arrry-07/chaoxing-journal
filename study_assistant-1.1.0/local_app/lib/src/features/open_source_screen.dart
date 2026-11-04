@@ -28,8 +28,8 @@ class OpenSourceScreen extends StatelessWidget {
         const Text('字体与基础组件', style: Journal.section),
         const ListTile(
             contentPadding: EdgeInsets.zero,
-            title: Text('中文正文与宋体标题'),
-            subtitle: Text('离线阅读字体 · SIL 开放字体许可证；原文见完整声明')),
+            title: Text('霞鹜文楷 · LXGW WenKai Screen'),
+            subtitle: Text('手写风离线字体 · SIL OFL 1.1；原文见完整声明')),
         const ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text('Flutter 与第三方组件'),

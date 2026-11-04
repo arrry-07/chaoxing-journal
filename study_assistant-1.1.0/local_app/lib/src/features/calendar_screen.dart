@@ -180,6 +180,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 AssignmentCard(
                     assignment: a,
                     now: DateTime.now(),
+                    showFullDeadline: false,
                     onTap: () => context
                         .push('/assignments/${Uri.encodeComponent(a.id)}')),
               if (all.any((a) => a.deadlineAt == null))

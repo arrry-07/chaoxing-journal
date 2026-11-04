@@ -44,7 +44,13 @@ void main() {
             .getSemanticsData()
             .hasAction(SemanticsAction.tap),
         isTrue);
-    expect(find.text('近期截止  1'), findsOneWidget);
+    expect(find.textContaining('近期截止'), findsNothing);
+    expect(
+        t
+            .widget<AssignmentCard>(find.byType(AssignmentCard).first)
+            .assignment
+            .title,
+        '近期待交题');
     expect(find.text('三月旧题'), findsOneWidget);
     expect(find.text('课堂题'), findsNothing);
     await t.pumpWidget(

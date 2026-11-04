@@ -9,10 +9,10 @@ class Journal {
   static const sage = Color(0xFFDFE8D8);
   static const rule = Color(0xFFD6D8C9);
   static const berry = Color(0xFF813E53);
-  static const bodyFamily = 'JournalBody';
-  static const titleFamily = 'JournalTitle';
-  // The title asset is intentionally small. Missing glyphs must use our body
-  // face rather than a device-dependent Chinese serif fallback.
+  static const bodyFamily = 'LXGW WenKai Screen';
+  static const titleFamily = bodyFamily;
+  // One bundled handwriting face covers Chinese, Latin and numerals so native
+  // controls and custom text share the same journal voice offline.
   static const bodyFallback = [bodyFamily];
   static const display = TextStyle(
     fontFamily: titleFamily,
@@ -56,18 +56,21 @@ class JournalHeading extends StatelessWidget {
       {super.key,
       required this.eyebrow,
       this.bookTitle = false,
-      this.trailing});
+      this.trailing,
+      this.trailingWidth = 48});
   final String title;
   final String eyebrow;
   final bool bookTitle;
   final Widget? trailing;
+  final double trailingWidth;
   @override
   Widget build(BuildContext context) => Stack(children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: EdgeInsets.only(right: trailing == null ? 0 : 48),
+              padding:
+                  EdgeInsets.only(right: trailing == null ? 0 : trailingWidth),
               child: Text(
                 eyebrow,
                 style: const TextStyle(

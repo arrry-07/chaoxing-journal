@@ -5,6 +5,7 @@ import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dar
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/completion_pie_chart.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -64,7 +65,11 @@ void main() {
     expect(find.text(title), findsNothing);
     expect(t.takeException(), isNull);
     await show(StatsScreen(store: store));
-    expect(find.text('已确认完成 50%'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byType(CompletionPieChart), matching: find.text('50%')),
+        findsOneWidget);
+    expect(find.text('完成率'), findsOneWidget);
     expect(t.takeException(), isNull);
     store.replaceAssignmentsForTest([
       work.copyWith(

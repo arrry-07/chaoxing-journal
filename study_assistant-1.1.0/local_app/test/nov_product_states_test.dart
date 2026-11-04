@@ -23,7 +23,7 @@ void main() {
     addTearDown(s.dispose);
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
-    expect(find.text('暂时无法读取作业'), findsOneWidget);
+    expect(find.text('本次尚未取得作业，请点击右上角刷新继续。'), findsOneWidget);
     expect(find.text('显示上次记录'), findsNothing);
     expect(find.text('未来30天暂无确认待交作业。'), findsNothing);
     s.replaceAssignmentsForTest([

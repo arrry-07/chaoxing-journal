@@ -11,107 +11,126 @@ class StatsScreen extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: store,
       builder: (context, _) {
+        // Use one instant for the overview and each course, including deadlines
+        // that pass while the widget is building.
         final now = DateTime.now();
         final records = store.formalAssignments;
-        final stats = AssignmentStatistics(records);
-        final percent = stats.percentages;
+        final stats = AssignmentStatistics(records, now: now);
         final keys = records.map((a) => a.courseKey!).toSet().toList()..sort();
         final names = {
           for (final key in keys)
             key: records.firstWhere((a) => a.courseKey == key).courseName
         };
-        final overdue = records
-            .where((a) =>
-                !a.isCompleted &&
-                a.isPendingConfirmed &&
-                a.deadlineTrusted &&
-                !a.deadlineReadFailed &&
-                a.deadlineAt?.isBefore(now) == true)
-            .length;
         Widget legend() => ExcludeSemantics(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                  for (var i = 0; i < 3; i++)
-                    Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                  padding: const EdgeInsets.only(top: 5),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < 4; i++)
+                      if (i < 3 || stats.unknown > 0)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 9),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 7),
                                   child: Container(
-                                      width: 10,
-                                      height: 10,
-                                      color: CompletionPieChart.colors[i])),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                  child: Text(
-                                      '${[
-                                        '已完成',
-                                        '待提交',
-                                        '状态待确认'
-                                      ][i]}\n${stats.counts[i]} 份 · ${percent[i]}%',
-                                      style: const TextStyle(
-                                          fontSize: 15, height: 1.5)))
-                            ]))
-                ]));
+                                      width: 9,
+                                      height: 9,
+                                      decoration: BoxDecoration(
+                                          color: CompletionPieChart.colors[i],
+                                          shape: BoxShape.circle)),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                    child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Text(CompletionPieChart.labels[i],
+                                        style: Journal.time),
+                                    const SizedBox(height: 3),
+                                    Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Flexible(
+                                              child: Text(
+                                                  '${stats.counts[i]} 份',
+                                                  style: Journal.metadata)),
+                                          const SizedBox(width: 8),
+                                          Flexible(
+                                              child: Text(
+                                                  '${stats.percentages[i]}%',
+                                                  style: Journal.metadata,
+                                                  textAlign: TextAlign.right)),
+                                        ]),
+                                  ],
+                                )),
+                              ]),
+                        ),
+                  ]),
+            );
         return ListView(
             key: const PageStorageKey('stats-list'),
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             children: [
               const Text('课业统计', style: Journal.section),
               const SizedBox(height: 8),
-              const Text('当前关注课程 · 本机已读取记录',
-                  style: TextStyle(color: Journal.muted, fontSize: 14)),
-              const SizedBox(height: 20),
+              const Text('当前关注课程 · 本机已读取记录', style: Journal.metadata),
+              const SizedBox(height: 24),
               if (stats.total == 0)
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 32),
-                    child: Text('暂无可统计的作业'))
+                    child: Text('暂无可统计的作业', style: Journal.metadata))
               else ...[
-                Text(
-                    stats.unknown == stats.total
-                        ? '全部状态待确认'
-                        : '已确认完成 ${percent[0]}%',
-                    style: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 16),
+                if (stats.unknown == stats.total)
+                  const Padding(
+                      padding: EdgeInsets.only(bottom: 16),
+                      child: Text('全部状态待确认', style: Journal.entryTitle)),
                 LayoutBuilder(builder: (context, c) {
-                  final stacked = c.maxWidth < 320 ||
-                      MediaQuery.textScalerOf(context).scale(15) > 20;
+                  final stacked = c.maxWidth < 280 ||
+                      MediaQuery.textScalerOf(context).scale(16) > 22;
                   return stacked
                       ? Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                               Center(
                                   child: CompletionPieChart(statistics: stats)),
-                              const SizedBox(height: 12),
-                              legend()
+                              const SizedBox(height: 18),
+                              legend(),
                             ])
                       : Row(children: [
-                          CompletionPieChart(statistics: stats),
-                          const SizedBox(width: 24),
-                          Expanded(child: legend())
+                          CompletionPieChart(
+                              statistics: stats,
+                              diameter: (c.maxWidth * .45).clamp(136, 176)),
+                          const SizedBox(width: 20),
+                          Expanded(child: legend()),
                         ]);
                 }),
-                const SizedBox(height: 8),
-                Text('共 ${stats.total} 份 · 已逾期 $overdue 份（属于待提交）',
-                    style: const TextStyle(fontSize: 14, color: Journal.muted)),
-                if (stats.unknown > 0)
-                  const Text('待确认记录计入总数，请以学习通实际提交结果为准。',
-                      style: TextStyle(fontSize: 14, color: Journal.muted)),
+                const SizedBox(height: 16),
+                Text('共 ${stats.total} 份作业', style: Journal.metadata),
+                if (stats.unknown > 0) ...[
+                  const SizedBox(height: 4),
+                  const Text('提交未知记录计入总数，请以学习通实际提交结果为准。',
+                      style: Journal.metadata),
+                ],
               ],
               const SizedBox(height: 28),
-              const Text('各课程待处理',
-                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.w600)),
+              const Divider(height: 1, color: Journal.rule),
+              const SizedBox(height: 24),
+              const Text('各课程待处理', style: Journal.section),
               const SizedBox(height: 8),
-              if (!records.any((a) => !a.isCompleted)) const Text('当前没有待处理的课程'),
+              if (!records.any((a) => !a.isCompleted))
+                const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Text('当前没有待处理的课程', style: Journal.metadata)),
               for (final key in keys)
                 Builder(builder: (context) {
                   final own = AssignmentStatistics(
-                      records.where((a) => a.courseKey == key));
-                  if (own.pending + own.unknown == 0) {
+                      records.where((a) => a.courseKey == key),
+                      now: now);
+                  if (own.pending + own.expired + own.unknown == 0) {
                     return const SizedBox.shrink();
                   }
                   final same =
@@ -119,19 +138,33 @@ class StatsScreen extends StatelessWidget {
                   final name =
                       '${names[key]}${same.length > 1 ? ' · 分组${same.indexOf(key) + 1}' : ''}';
                   return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(name,
-                                style: const TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.w600)),
-                            const SizedBox(height: 4),
-                            Text('待提交 ${own.pending} 份 · 待确认 ${own.unknown} 份',
-                                style: const TextStyle(
-                                    color: Journal.muted, fontSize: 14)),
-                            const Divider(height: 20)
-                          ]));
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CourseMark(names[key]!, size: 32),
+                          const SizedBox(width: 12),
+                          Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Text(name, style: Journal.entryTitle),
+                                const SizedBox(height: 6),
+                                Wrap(spacing: 16, runSpacing: 4, children: [
+                                  Text('待完成 ${own.pending} 份',
+                                      style: Journal.metadata),
+                                  Text('已过期 ${own.expired} 份',
+                                      style: Journal.metadata.copyWith(
+                                          color: own.expired > 0
+                                              ? Journal.berry
+                                              : null)),
+                                  if (own.unknown > 0)
+                                    Text('提交未知 ${own.unknown} 份',
+                                        style: Journal.metadata),
+                                ]),
+                              ])),
+                        ]),
+                  );
                 }),
             ]);
       });

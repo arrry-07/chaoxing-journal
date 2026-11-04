@@ -32,8 +32,7 @@ Future<void> main() async {
     for (final entry in const {
       'HY': 'assets/licenses/HY.txt',
       'xuexitong-cli': 'assets/licenses/xuexitong-cli.txt',
-      '中文宋体标题': 'assets/type/OFL.txt',
-      '中文正文字体': 'assets/type/OFL-Sans.txt',
+      'LXGW WenKai Screen / 霞鹜文楷': 'assets/type/OFL-WenKai.txt',
     }.entries) {
       yield LicenseEntryWithLineBreaks(
           [entry.key], await rootBundle.loadString(entry.value));
@@ -198,7 +197,9 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
         if (!loggedIn && !loggingIn) {
           return '/login';
         }
-        if (loggedIn && loggingIn && state.uri.queryParameters['reauth'] != '1') {
+        if (loggedIn &&
+            loggingIn &&
+            state.uri.queryParameters['reauth'] != '1') {
           return '/assignments';
         }
         return null;

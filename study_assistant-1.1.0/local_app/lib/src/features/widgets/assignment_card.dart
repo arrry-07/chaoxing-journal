@@ -9,10 +9,12 @@ class AssignmentCard extends StatelessWidget {
       {super.key,
       required this.assignment,
       required this.now,
-      required this.onTap});
+      required this.onTap,
+      this.showFullDeadline = true});
   final Assignment assignment;
   final DateTime now;
   final VoidCallback onTap;
+  final bool showFullDeadline;
   @override
   Widget build(BuildContext context) {
     final a = assignment, d = a.deadlineAt;
@@ -61,17 +63,13 @@ class AssignmentCard extends StatelessWidget {
         excludeSemantics: true,
         child: SizedBox(
             width: double.infinity,
-            child: Card(
-                elevation: 0,
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                color: Journal.sheet,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+            child: Material(
+                type: MaterialType.transparency,
                 child: InkWell(
                     onTap: onTap,
                     borderRadius: BorderRadius.circular(12),
                     child: Padding(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -81,8 +79,6 @@ class AssignmentCard extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(clock, style: Journal.time),
-                                  const SizedBox(height: 12),
-                                  CourseMark(a.courseName),
                                 ],
                               ),
                             ),
@@ -104,7 +100,8 @@ class AssignmentCard extends StatelessWidget {
                                         style: Journal.metadata.copyWith(
                                             color: color,
                                             fontWeight: FontWeight.w600)),
-                                  Text(deadline, style: Journal.metadata),
+                                  if (showFullDeadline || !hasTime)
+                                    Text(deadline, style: Journal.metadata),
                                 ])),
                           ],
                         ))))));

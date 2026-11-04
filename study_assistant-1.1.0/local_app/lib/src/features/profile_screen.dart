@@ -51,9 +51,6 @@ class ProfileScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _CourseCard(courses: courses.take(4).toList()),
-                  TextButton(
-                      onPressed: () => context.push('/courses'),
-                      child: const Text('管理全部课程')),
                   const SizedBox(height: 14),
                   _SettingsCard(
                     children: [
@@ -334,7 +331,14 @@ class _CourseCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('我的课程', style: Journal.section),
+              Row(children: [
+                const Expanded(child: Text('我的课程', style: Journal.section)),
+                IconButton(
+                  tooltip: '管理全部课程',
+                  onPressed: () => context.push('/courses'),
+                  icon: const Icon(Icons.tune_rounded),
+                ),
+              ]),
               const SizedBox(height: 10),
               if (courses.isEmpty) const Text('同步后，有作业的课程会记在这里。'),
               Column(
