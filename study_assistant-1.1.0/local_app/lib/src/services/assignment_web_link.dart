@@ -27,7 +27,7 @@ class AssignmentWebLink {
           uri.hasFragment ||
           !(uri.host == 'chaoxing.com' || uri.host.endsWith('.chaoxing.com')) ||
           !RegExp(r'^[a-z0-9-]+(?:\.[a-z0-9-]+)*$').hasMatch(uri.host) ||
-          !RegExp(r'^/(?:mooc-ans/|mooc2/|mooc2-ans/)?work/[a-zA-Z0-9_.-]+$')
+          !RegExp(r'^/(?:mooc-ans/(?:mooc2/)?|mooc2/|mooc2-ans/)?work/[a-zA-Z0-9_.-]+$')
               .hasMatch(uri.path)) {
         return null;
       }

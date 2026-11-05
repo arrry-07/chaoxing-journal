@@ -198,7 +198,8 @@ class AssignmentStore extends ChangeNotifier {
     await stage('同步记录', () async {
       final prefs = await SharedPreferences.getInstance();
       _lastSyncAttemptAt =
-          DateTime.tryParse(prefs.getString('sync_attempt_at') ?? '');
+          DateTime.tryParse(prefs.getString('sync_attempt_at') ?? '')
+              ?.toLocal();
       final dataAt = DateTime.tryParse(prefs.getString('sync_data_at') ?? '');
       final report = prefs.getString('sync_report_v1');
       syncReport = report != null

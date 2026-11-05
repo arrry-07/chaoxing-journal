@@ -65,7 +65,8 @@ class SyncReport {
   factory SyncReport.fromJson(Map<String, dynamic> json) {
     final phase = SyncPhase.values.byName(json['phase'] as String);
     final interrupted = phase == SyncPhase.running;
-    DateTime? time(String key) => DateTime.tryParse(json[key] as String? ?? '');
+    DateTime? time(String key) =>
+        DateTime.tryParse(json[key] as String? ?? '')?.toLocal();
     return SyncReport(
         phase: interrupted ? SyncPhase.failed : phase,
         attemptedAt: time('attemptedAt'),

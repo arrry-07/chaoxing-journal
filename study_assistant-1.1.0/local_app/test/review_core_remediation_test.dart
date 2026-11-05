@@ -130,6 +130,17 @@ AssignmentStore makeStore(Session session,
         widgetSnapshotService: WidgetService(),
         chaoxingClient: client ?? Client());
 void main() {
+  test('restored synchronization timestamps preserve local display semantics',
+      () {
+    final local = DateTime(2030, 11, 6, 12, 30);
+    final restored = SyncReport.fromJson(SyncReport(
+            phase: SyncPhase.success,
+            attemptedAt: local,
+            lastDataSuccessAt: local)
+        .toJson());
+    expect(restored.attemptedAt, local);
+    expect(restored.lastDataSuccessAt!.isUtc, isFalse);
+  });
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
   test('switching account isolates completed, hidden and followed state',

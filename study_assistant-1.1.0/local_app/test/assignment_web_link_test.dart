@@ -3,6 +3,20 @@ import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_web_link.dart';
 
 void main() {
+  test('accepts the nested signed task path returned by the live work list',
+      () {
+    final item = Assignment(
+        id: 'cx:work:1:2:3',
+        courseName: '合成课程',
+        title: '合成作业',
+        deadlineAt: null,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: DateTime.now(),
+        submitUrl:
+            'https://mooc1.chaoxing.com/mooc-ans/mooc2/work/task?courseId=1&classId=2&workId=3&answerId=4&enc=sample');
+    expect(AssignmentWebLink.validatedUrl(item), item.submitUrl);
+  });
   Assignment record(String? url) => Assignment(
       id: 'cx:work:1:2:3',
       courseName: '合成课程',

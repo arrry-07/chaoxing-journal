@@ -28,9 +28,9 @@
 
 ## 下载安装
 
-当前体验版为 **1.2.8（38）**，支持 Android **8.0 及以上**，适用于 **ARM64 / x86_64**。
+当前体验版为 **1.2.9（39）**，支持 Android **8.0 及以上**，适用于 **ARM64 / x86_64**。
 
-1. 从 [Releases](https://github.com/arrry-07/chaoxing-journal/releases/latest) 下载 `chaoxing-journal-1.2.8.apk` 和 `SHA256SUMS.txt`。
+1. 从 [Releases](https://github.com/arrry-07/chaoxing-journal/releases/latest) 下载 `chaoxing-journal-1.2.9.apk` 和 `SHA256SUMS.txt`。
 2. 核对文件的 SHA-256，然后按 Android 提示安装。具体校验命令见[安装指南](docs/guides/安装与使用.md#下载安装)。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
