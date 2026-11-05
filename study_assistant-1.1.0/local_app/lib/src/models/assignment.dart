@@ -85,6 +85,7 @@ class Assignment {
   final DateTime lastSyncedAt;
 
   factory Assignment.fromJson(Map<String, dynamic> json) {
+    final rawDeadline = json['deadlineAt'] as String?;
     return Assignment(
       source: AssignmentSource.values
           .where((s) => s.name == json['source'])
@@ -92,6 +93,7 @@ class Assignment {
       deadlineReadFailed: json['deadlineReadFailed'] == true,
       // Versions 32–33 incorrectly interpreted list endTime=0 as no deadline.
       deadlineTrusted: json['deadlineTrusted'] == true &&
+          (rawDeadline == null || hasExplicitTimeZone(rawDeadline)) &&
           !(json['deadlineAt'] == null && json['deadlineRawText'] == '0'),
       deadlineRawText: json['deadlineRawText'] as String?,
       id: json['id'] as String,
@@ -106,7 +108,11 @@ class Assignment {
       completedAt: json['completedAt'] == null
           ? null
           : DateTime.parse(json['completedAt'] as String).toLocal(),
-      lastSyncedAt: DateTime.parse(json['lastSyncedAt'] as String).toLocal(),
+      // Old wall times have no recoverable offset. They must not prevent a
+      // fresh server result from replacing a cache after a timezone change.
+      lastSyncedAt: hasExplicitTimeZone(json['lastSyncedAt'] as String)
+          ? DateTime.parse(json['lastSyncedAt'] as String).toLocal()
+          : DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
     );
   }
 
@@ -118,13 +124,16 @@ class Assignment {
         if (deadlineReadFailed) 'deadlineReadFailed': true,
         'courseName': courseName,
         'title': title,
-        'deadlineAt': deadlineAt?.toIso8601String(),
+        'deadlineAt': deadlineAt?.toUtc().toIso8601String(),
         'requirementsText': requirementsText,
         'status': status,
         'submitUrl': submitUrl,
-        'completedAt': completedAt?.toIso8601String(),
-        'lastSyncedAt': lastSyncedAt.toIso8601String(),
+        'completedAt': completedAt?.toUtc().toIso8601String(),
+        'lastSyncedAt': lastSyncedAt.toUtc().toIso8601String(),
       };
+
+  static bool hasExplicitTimeZone(String value) =>
+      RegExp(r'(?:[zZ]|[+-]\d{2}:?\d{2})$').hasMatch(value);
 
   Assignment copyWith({
     String? id,

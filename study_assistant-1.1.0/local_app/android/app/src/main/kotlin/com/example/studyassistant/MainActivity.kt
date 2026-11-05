@@ -3,6 +3,7 @@ package com.example.studyassistant
 import android.content.pm.PackageManager
 import java.util.zip.ZipFile
 import android.content.Intent
+import android.content.ComponentName
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -14,7 +15,9 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var verificationBrowser: VerificationBrowser? = null
+    private var webSessionGeneration = 0L
     override fun onDestroy() {
+        webSessionGeneration++
         verificationBrowser?.close()
         verificationBrowser = null
         super.onDestroy()
@@ -23,9 +26,28 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/external_links").setMethodCallHandler { call, result ->
             if(call.method == "verifySession") {
-                verificationBrowser?.close()
-                verificationBrowser = VerificationBrowser(this)
-                verificationBrowser!!.open(call.argument<String>("url"), call.argument<List<Map<String, String>>>("cookies") ?: emptyList(), call.argument<String>("userAgent"), result)
+                val generation = ++webSessionGeneration
+                val previous = verificationBrowser
+                verificationBrowser = null
+                fun openNew(cleaned: Boolean) {
+                    if (generation != webSessionGeneration || isFinishing || isDestroyed) {
+                        result.success(null)
+                    } else if (!cleaned) {
+                        result.error("web_cleanup_failed", "验证网站数据清理失败，请重试", null)
+                    } else {
+                        verificationBrowser = VerificationBrowser(this)
+                        verificationBrowser!!.open(call.argument<String>("url"), call.argument<List<Map<String, String>>>("cookies") ?: emptyList(), call.argument<String>("userAgent"), result)
+                    }
+                }
+                if (previous == null) openNew(true) else previous.close(::openNew)
+                return@setMethodCallHandler
+            }
+            if(call.method == "clearWebSession") {
+                webSessionGeneration++
+                val previous = verificationBrowser
+                verificationBrowser = null
+                if (previous == null) WebSessionCleaner.clear(this) { result.success(it) }
+                else previous.close { result.success(it) }
                 return@setMethodCallHandler
             }
             if(call.method == "inspectApk") {
@@ -34,6 +56,7 @@ class MainActivity : FlutterActivity() {
             }
             val opened = when (call.method) {
                 "openUrl" -> openExternalUrl(call.argument<String>("url"))
+                "openBrowser" -> openBrowser(call.argument<String>("url"))
                 "installApk" -> installApk(call.argument<String>("filePath"))
                 else -> {
                     result.notImplemented()
@@ -109,6 +132,36 @@ class MainActivity : FlutterActivity() {
             return false
         }
         return openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+
+    @Suppress("DEPRECATION")
+    private fun openBrowser(url: String?): Boolean {
+        if (!BrowserPolicy.isAllowed(url)) return false
+        val uri = Uri.parse(url)
+        // Use only public SDK browser registration, intersected with HTTPS
+        // handlers. App-link-only packages cannot enter this explicit chooser.
+        val registeredBrowsers = packageManager.queryIntentActivities(
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_BROWSER), 0
+        ).filter { it.activityInfo.exported && it.activityInfo.enabled }
+            .map { it.activityInfo.packageName }
+        val probe = Intent(Intent.ACTION_VIEW, Uri.parse("https://browser.invalid/"))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+        val handlers = packageManager.queryIntentActivities(probe, PackageManager.MATCH_DEFAULT_ONLY)
+            .filter { it.activityInfo.exported && it.activityInfo.enabled }
+        val allowedPackages = BrowserPolicy.browserPackages(registeredBrowsers,
+            handlers.map { it.activityInfo.packageName })
+        val browsers = handlers.filter { allowedPackages.contains(it.activityInfo.packageName) }
+            .map { ComponentName(it.activityInfo.packageName, it.activityInfo.name) }
+            .distinct()
+        val targets = browsers.map { component ->
+            Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
+                .setComponent(component)
+        }
+        if (targets.isEmpty()) return false
+        return if (targets.size == 1) openIntent(targets.first()) else openIntent(
+            Intent.createChooser(targets.first(), "选择浏览器")
+                .putExtra(Intent.EXTRA_INITIAL_INTENTS, targets.drop(1).toTypedArray())
+        )
     }
 
     @Suppress("DEPRECATION")

@@ -1,4 +1,5 @@
 import 'package:intl/intl.dart';
+import '../services/assignment_query.dart';
 
 class WidgetSnapshotItem {
   WidgetSnapshotItem({
@@ -37,9 +38,10 @@ class WidgetSnapshotItem {
         'assignmentId': assignmentId,
         'title': title,
         'courseName': courseName,
-        'deadlineAt': deadlineAt?.toIso8601String(),
+        'deadlineAt': deadlineAt?.toUtc().toIso8601String(),
         if (deadlineAt != null)
-          'deadlineText': DateFormat('M月d日 HH:mm').format(deadlineAt!),
+          'deadlineText': DateFormat('M月d日 HH:mm')
+              .format(AssignmentQuery.beijing(deadlineAt!)),
         'remainingText': remainingText,
         'urgencyLevel': urgencyLevel,
         'deepLinkUrl': deepLinkUrl,

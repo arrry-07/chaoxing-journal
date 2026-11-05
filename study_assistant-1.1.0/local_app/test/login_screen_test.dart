@@ -41,6 +41,8 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: LoginScreen(store: store)));
     await tester.enterText(find.byType(TextField).at(0), 'student');
     await tester.enterText(find.byType(TextField).at(1), 'bad-password');
+    await tester.ensureVisible(find.byType(Checkbox));
+    await tester.tap(find.byType(Checkbox));
     await tester.pump();
     await tester.tap(find.text('登录学习通'));
     await tester.pumpAndSettle();

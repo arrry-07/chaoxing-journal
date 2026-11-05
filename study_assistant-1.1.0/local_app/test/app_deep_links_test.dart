@@ -40,4 +40,26 @@ void main() {
       'studyassistant:///assignments/cx%3Adefault%3A52795811',
     );
   });
+
+  test('rejects unexpected authorities and malformed assignment paths', () {
+    for (final raw in [
+      'studyassistant://evil.example/assignments/a',
+      'studyassistant://user@assignments/a',
+      'studyassistant://assignments:80/a',
+      'studyassistant:///assignments/a/b',
+      'studyassistant:///assignments/%2F%2Fevil.example',
+    ]) {
+      expect(AppDeepLinks.normalizeIncomingLocation(Uri.parse(raw)), isNull,
+          reason: raw);
+    }
+  });
+
+  test('malformed encoded notification and login targets are safely ignored',
+      () {
+    expect(
+        AppDeepLinks.normalizeIncomingLocation(
+            Uri.parse('studyassistant:///assignments/%FF')),
+        isNull);
+    expect(loginSuccessLocation('/assignments/%FF'), '/assignments');
+  });
 }

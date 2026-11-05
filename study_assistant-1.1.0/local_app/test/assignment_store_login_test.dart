@@ -10,6 +10,7 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
@@ -26,7 +27,7 @@ void main() {
         .loginChaoxing(
             account: 'student', password: 'p', agreementAccepted: true)
         .timeout(const Duration(milliseconds: 500));
-    expect(store.isAuthenticated, isTrue);
+    expect(store.isAuthenticated, isTrue, reason: store.error);
     client.gate.complete([]);
     await store.syncAssignments();
   });
@@ -47,7 +48,7 @@ void main() {
         agreementAccepted: true,
       );
 
-      expect(store.isAuthenticated, isTrue);
+      expect(store.isAuthenticated, isTrue, reason: store.error);
       expect(store.account, 'student');
       expect(store.profileDisplayName, '李雷');
       expect(store.profileAvatarUrl, 'https://photo.chaoxing.com/p/998877_160');

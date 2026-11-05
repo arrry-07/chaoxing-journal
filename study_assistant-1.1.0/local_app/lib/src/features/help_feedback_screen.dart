@@ -18,7 +18,7 @@ class HelpFeedbackScreen extends StatelessWidget {
     '如何开启截止提醒？': '在“我的 → 提醒设置”选择提前提醒时间，并允许系统通知。系统省电限制可能影响投递；请保留必要权限。本应用不会代交作业。',
     '隐藏的作业怎么恢复？': '进入“我的 → 已隐藏作业”点击恢复。隐藏只改变本机显示，不会改变学习通中的提交情况。',
     '怎样更新应用？':
-        '在“我的 → 检查更新”检查版本。有可用渠道时可在应用内下载、校验，并由系统确认安装。当前测试版的在线分发渠道尚未启用；请保留原应用数据，使用维护者提供的兼容安装包。',
+        '在“我的 → 检查更新”请求 GitHub Release，发现新版本后可下载并校验安装包，再由系统确认安装。网络不可达或没有可用版本时可稍后重试。升级需要兼容当前包名和签名；请保留原应用数据，不要通过卸载解决安装冲突。',
   };
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -56,7 +56,7 @@ class HelpFeedbackScreen extends StatelessWidget {
             subtitle: Text('当前版本 ${AppVersion.display}'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _detail(context, '版本说明',
-                '同步详情增加应用内访问验证；截止日历更紧凑；恢复课程手绘图标；新增中文开源说明和分层帮助入口。在线更新渠道尚待启用。')),
+                '支持应用内安全验证、作业截止日历和中文帮助。通过“我的 → 检查更新”访问 GitHub Release，按检查、下载、校验、系统确认安装的流程更新；网络不可达时可重试，安装包需与当前包名和签名兼容。')),
       ]));
   void _detail(BuildContext c, String title, String body) =>
       Navigator.of(c).push(MaterialPageRoute<void>(

@@ -58,6 +58,8 @@ void main() {
             String? title}) =>
         Assignment(
             id: 'cx:work:1:${i % 2 + 2}:$i',
+            submitUrl:
+                'https://mooc1.chaoxing.com/work/task?courseId=1&classId=${i % 2 + 2}&workId=$i&enc=sample',
             courseName: i == 3 ? '样例 · 高等数学2（下）与2026专题课程' : '样例 · 大学物理B（下）',
             title: title ?? '第${i + 1}次课后练习',
             deadlineAt: days == null ? null : now.add(Duration(days: days)),

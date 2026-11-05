@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 import '../app/journal.dart';
+import '../app/app_deep_links.dart';
 import 'package:go_router/go_router.dart';
 
 import '../services/assignment_store.dart';
+import 'agreement_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
     super.key,
     required this.store,
+    this.returnTo,
   });
 
   final AssignmentStore store;
+  final String? returnTo;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -19,7 +23,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _chaoxingAccount = TextEditingController();
   final _chaoxingPassword = TextEditingController();
-  bool _accepted = true;
+  bool _accepted = false;
 
   @override
   void dispose() {
@@ -99,46 +103,37 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 22),
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () => setState(() => _accepted = !_accepted),
-                      child: Icon(
-                        _accepted
-                            ? Icons.check_circle
-                            : Icons.radio_button_unchecked,
-                        color: _accepted ? Journal.ink : Journal.muted,
-                        size: 18,
+                    Semantics(
+                      container: true,
+                      child: Checkbox(
+                        value: _accepted,
+                        semanticLabel: '我已阅读并同意服务协议和隐私协议',
+                        materialTapTargetSize: MaterialTapTargetSize.padded,
+                        visualDensity: VisualDensity.standard,
+                        activeColor: Journal.ink,
+                        onChanged: widget.store.isLoading
+                            ? null
+                            : (value) =>
+                                setState(() => _accepted = value ?? false),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text.rich(
-                        TextSpan(
-                          text: '我已阅读并同意 ',
-                          children: [
-                            TextSpan(
-                              text: '服务协议',
-                              style: TextStyle(
-                                color: Journal.berry,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            TextSpan(text: ' 和 '),
-                            TextSpan(
-                              text: '隐私协议',
-                              style: TextStyle(
-                                color: Journal.berry,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                        style: TextStyle(
-                          color: Journal.muted,
-                          fontSize: 14,
-                        ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 14),
+                            child: Text('我已阅读并同意', style: Journal.metadata),
+                          ),
+                          Wrap(
+                            children: [
+                              _agreementButton(AgreementKind.service),
+                              _agreementButton(AgreementKind.privacy),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -156,6 +151,18 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  Widget _agreementButton(AgreementKind kind) => TextButton(
+        style: TextButton.styleFrom(
+          foregroundColor: Journal.berry,
+          minimumSize: const Size(48, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+        ),
+        onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => AgreementScreen(kind: kind),
+        )),
+        child: Text(kind.title),
+      );
+
   Future<void> _login() async {
     await widget.store.loginChaoxing(
       account: _chaoxingAccount.text,
@@ -164,7 +171,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
     if (!mounted) return;
     if (widget.store.isAuthenticated && widget.store.error == null) {
-      context.go('/assignments');
+      context.go(loginSuccessLocation(widget.returnTo));
     }
   }
 }

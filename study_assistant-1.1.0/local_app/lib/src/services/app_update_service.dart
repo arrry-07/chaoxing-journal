@@ -1,6 +1,7 @@
 import 'package:crypto/crypto.dart';
 import '../app/app_version.dart';
 import 'dart:io';
+import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
@@ -31,6 +32,8 @@ class AppUpdateInfo {
 class AppUpdateService {
   AppUpdateService(
       {Dio? dio,
+      this.maxDownloadBytes = 256 * 1024 * 1024,
+      this.totalDownloadTimeout = const Duration(minutes: 5),
       this.manifestUrl = const String.fromEnvironment('UPDATE_MANIFEST_URL')})
       : _dio = dio ??
             Dio(
@@ -52,6 +55,8 @@ class AppUpdateService {
   static const releasesUrl = '$repositoryUrl/releases';
 
   final Dio _dio;
+  final int maxDownloadBytes;
+  final Duration totalDownloadTimeout;
   final String manifestUrl;
   Future<UpdateCheckResult> checkConfigured(
       {required int currentVersionCode, CancelToken? cancelToken}) async {
@@ -243,36 +248,83 @@ class AppUpdateService {
     final file = File(
       '${baseDirectory.path}${Platform.pathSeparator}${_safeFileName(update.apkName)}',
     );
-    final partial = File('${file.path}.part');
+    // Every attempt owns its temporary directory; cancellation cannot delete a
+    // newer attempt's partial file or an already verified APK.
+    final working = await baseDirectory.createTemp('.apk-download-');
+    final partial =
+        File('${working.path}${Platform.pathSeparator}download.part');
+    final transfer = CancelToken();
+    var active = true;
+    if (cancelToken?.isCancelled == true) transfer.cancel('下载已取消');
+    cancelToken?.whenCancel.then((error) {
+      if (active) transfer.cancel(error.message);
+    });
+    final deadline = Timer(totalDownloadTimeout, () {
+      transfer.cancel('下载总时限已到，请重试');
+    });
+    Future<T> guarded<T>(Future<T> work) => Future.any([
+          work,
+          transfer.whenCancel.then<T>((error) => throw error),
+        ]);
+    void checkCancelled() {
+      if (transfer.isCancelled) throw transfer.cancelError!;
+    }
+
+    StreamIterator<List<int>>? chunks;
+    Stream<List<int>>? responseStream;
+    var streamStarted = false;
+    RandomAccessFile? output;
     try {
-      final response = await _dio.get<ResponseBody>(
+      checkCancelled();
+      final declared = update.apkSize;
+      if (maxDownloadBytes <= 0 ||
+          (declared != null &&
+              (declared <= 0 || declared > maxDownloadBytes))) {
+        throw StateError('安装包大小超出允许范围');
+      }
+      final response = await guarded(_dio.get<ResponseBody>(
         update.apkDownloadUrl,
-        cancelToken: cancelToken,
+        cancelToken: transfer,
         options: Options(responseType: ResponseType.stream),
-      );
+      ));
+      final body = response.data;
+      if (body != null) {
+        responseStream = body.stream;
+        chunks = StreamIterator<List<int>>(responseStream);
+      }
       final status = response.statusCode ?? 0;
-      if (status < 200 || status >= 300 || response.data == null) {
-        await response.data?.stream.drain<void>();
+      if (status < 200 || status >= 300 || chunks == null) {
         throw StateError('下载 APK 失败');
       }
-      final expectedSize =
-          _asInt(response.headers.value('content-length')) ?? update.apkSize;
-      var received = 0;
-      final sink = partial.openWrite();
-      try {
-        await sink.addStream(response.data!.stream.map((chunk) {
-          received += chunk.length;
-          onProgress?.call(received, expectedSize ?? -1);
-          return chunk;
-        }));
-        await sink.flush();
-      } finally {
-        await sink.close();
+      final header = response.headers.value('content-length');
+      final headerSize = header == null ? null : int.tryParse(header);
+      if ((header != null && (headerSize == null || headerSize <= 0)) ||
+          (headerSize != null && headerSize > maxDownloadBytes) ||
+          (headerSize != null && declared != null && headerSize != declared)) {
+        throw StateError('安装包响应长度异常');
       }
+      final expectedSize = declared ?? headerSize;
+      var received = 0;
+      output = await partial.open(mode: FileMode.write);
+      streamStarted = true;
+      while (await guarded(chunks.moveNext())) {
+        checkCancelled();
+        final chunk = chunks.current;
+        final nextSize = received + chunk.length;
+        if (nextSize > maxDownloadBytes ||
+            (expectedSize != null && nextSize > expectedSize)) {
+          throw StateError('安装包响应超出允许大小');
+        }
+        await output.writeFrom(chunk);
+        received = nextSize;
+        onProgress?.call(received, expectedSize ?? -1);
+      }
+      await output.close();
+      output = null;
       if (received == 0 || (expectedSize != null && received != expectedSize)) {
         throw StateError('安装包下载不完整，请重试');
       }
-      if (cancelToken?.isCancelled == true) throw StateError('下载已取消');
+      checkCancelled();
       if (update.sha256Hash != null) {
         final handle = await partial.open();
         late List<int> bytes;
@@ -285,15 +337,35 @@ class AppUpdateService {
           throw StateError('响应不是APK文件');
         }
         final digest = await sha256.bind(partial.openRead()).first;
+        checkCancelled();
         if (digest.toString() != update.sha256Hash) {
           throw StateError('安装包校验失败，请重新下载');
         }
       }
+      checkCancelled();
       await partial.rename(file.path);
+      // Renaming is the publication point: late cancellation must not remove
+      // this verified file or turn another attempt's completed file into a part.
       onProgress?.call(received, expectedSize ?? received);
-    } catch (_) {
-      if (await partial.exists()) await partial.delete();
-      rethrow;
+    } finally {
+      active = false;
+      deadline.cancel();
+      transfer.cancel('下载已结束');
+      // StreamIterator subscribes lazily: header/status rejection must close an
+      // unstarted response as well, instead of leaving its socket/body alive.
+      try {
+        if (streamStarted) {
+          await chunks?.cancel();
+        } else {
+          await responseStream?.listen((_) {}, onError: (Object _) {}).cancel();
+        }
+      } finally {
+        try {
+          await output?.close();
+        } finally {
+          if (await working.exists()) await working.delete(recursive: true);
+        }
+      }
     }
     return file;
   }

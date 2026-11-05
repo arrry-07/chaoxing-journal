@@ -23,45 +23,54 @@ public class UpgradeProbe extends Instrumentation {
       SharedPreferences prefs=c.getSharedPreferences("FlutterSharedPreferences",0);
       String mode=args.getString("mode","verify");
       String kind=args.getString("kind","both");
+      if(!Arrays.asList("seed","verify").contains(mode) || !Arrays.asList("both","chaoxing","retired").contains(kind)) throw new AssertionError("Unknown fixture mode/kind");
       boolean cx=!kind.equals("retired"), retired=!kind.equals("chaoxing");
       if(mode.equals("seed")) {
         storage.getMethod("deleteAll").invoke(secure);
-        if(cx) {
-          write("chaoxingAccount","journal-demo-student"); write("chaoxingPassword","SAMPLE_NOT_A_REAL_PASSWORD");
-          write("chaoxingDisplayName","手帐同学 · 示例数据");
-        }
+        for(Map.Entry<String,String> entry : UpgradeFixture.credentials(cx).entrySet()) write(entry.getKey(),entry.getValue());
         if(retired) { write("shuniZuilingSchoolUserLocalId","retired-demo"); write("shuniZuilingPassword","SAMPLE"); write("shuniZuilingSchoolCode","demo"); }
         JSONArray items=new JSONArray();
-        if(cx) {
-          String[] titles={"函数极限与连续：习题整理","阅读报告：把晚霞借给你","程序设计综合实验报告与项目复盘","预习下一章，整理想问的问题"};
-          String[] courses={"高等数学","大学语文","程序设计","大学英语"};
-          String[] dates={"2026-11-04T18:00:00.000","2026-11-04T20:30:00.000","2026-11-04T22:00:00.000","2026-11-05T18:00:00.000"};
-          for(int i=0;i<4;i++) items.put(item("cx:demo:"+i,titles[i],courses[i],dates[i]));
-        }
+        if(cx) for(int i=0;i<4;i++) items.put(UpgradeFixture.record(i));
         if(retired) items.put(item("snzl:demo","旧平台测试作业","旧课程","2026-11-04T19:00:00.000"));
-        prefs.edit().clear().putString("flutter.local_assignments",items.toString())
-          .putString("flutter.local_last_sync_at","2026-11-04T08:00:00.000")
+        boolean saved=prefs.edit().clear().putString("flutter.local_assignments",items.toString())
+          .putString("flutter.local_last_sync_at",UpgradeFixture.SYNC)
+          .putString("flutter.local_hidden_completed_assignment_ids",encodeList(cx ? Arrays.asList(UpgradeFixture.id(1), "snzl:demo") : Arrays.asList("snzl:demo")))
+          .putString("flutter.unfollowed_courses",encodeList(Arrays.asList("fixture-unfollowed:fixture-class")))
           .putString("flutter.reminder_offsets_minutes","VGhpcyBpcyB0aGUgcHJlZml4IGZvciBhIGxpc3Qu![\"60\",\"10\"]")
           .putLong("flutter.auto_sync_interval_minutes",0).commit();
+        if(!saved) throw new AssertionError("Synthetic fixture preferences were not saved");
         result.putString("result","SEEDED_"+kind);
       } else {
         Map<?,?> credentials=(Map<?,?>)storage.getMethod("readAll").invoke(secure);
-        for(Object key:credentials.keySet()) if(key.toString().startsWith("shuni")) throw new AssertionError("Retired credential survived");
-        if(cx != credentials.containsKey("chaoxingAccount")) throw new AssertionError("Account retention mismatch");
         JSONObject journal=new JSONObject(prefs.getString("flutter.chaoxing_journal_v2","{}"));
-        JSONArray records=journal.getJSONArray("records");
-        if(records.length()!=(cx?4:0)) throw new AssertionError("Record count mismatch "+records.length());
-        if(journal.toString().contains("snzl:")) throw new AssertionError("Retired records survived");
-        if(!prefs.getString("flutter.reminder_offsets_minutes","").contains("60")) throw new AssertionError("Reminder lost");
-        if(prefs.contains("flutter.local_assignments")) throw new AssertionError("Legacy key survived");
-        result.putString("result","PASS_"+kind+"_ACCOUNT_RECORDS_REMINDERS");
+        boolean legacy = prefs.contains("flutter.local_assignments") || prefs.contains("flutter.local_last_sync_at") || prefs.contains("flutter.local_hidden_completed_assignment_ids");
+        UpgradeFixture.verify(credentials,journal,readList(prefs,"flutter.reminder_offsets_minutes"),
+          readList(prefs,"flutter.unfollowed_courses"),legacy,kind);
+        result.putString("result","PASS_"+kind+"_CREDENTIALS_RECORD_FIELDS_STATUS_DEADLINE_HIDDEN_FOLLOW_REMINDERS");
       }
       finish(Activity.RESULT_OK,result);
     } catch(Throwable error) { result.putString("error",error.toString()); finish(Activity.RESULT_CANCELED,result); }
   }
+  static String encodeList(List<String> values) { return "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBhIGxpc3Qu!"+new JSONArray(values).toString(); }
+  static List<String> readList(SharedPreferences prefs,String key) throws Exception {
+    Object raw=prefs.getAll().get(key);
+    if(raw instanceof Set) {
+      List<String> values=new ArrayList<>();
+      for(Object value:(Set<?>)raw) values.add(value.toString());
+      Collections.sort(values, Collections.reverseOrder());
+      return values;
+    }
+    if(!(raw instanceof String)) throw new AssertionError("Missing preference list "+key);
+    String text=(String)raw;
+    int separator=text.indexOf('!');
+    JSONArray values=new JSONArray(separator<0?text:text.substring(separator+1));
+    List<String> result=new ArrayList<>();
+    for(int i=0;i<values.length();i++) result.add(values.getString(i));
+    return result;
+  }
   JSONObject item(String id,String title,String course,String deadline) throws Exception {
     JSONObject j=new JSONObject();j.put("id",id);j.put("title",title);j.put("courseName",course);
     j.put("deadlineAt",deadline==null?JSONObject.NULL:deadline);j.put("status","pending");
-    j.put("requirementsText","示例数据，仅用于本机升级验收");j.put("lastSyncedAt","2026-11-04T08:00:00.000");return j;
+    j.put("requirementsText","示例数据，仅用于本机升级验收");j.put("lastSyncedAt",UpgradeFixture.SYNC);return j;
   }
 }

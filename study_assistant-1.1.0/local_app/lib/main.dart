@@ -138,6 +138,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
           path: '/login',
           builder: (_, state) => LoginScreen(
             store: assignmentStore,
+            returnTo: state.uri.queryParameters['from'],
           ),
         ),
         ShellRoute(
@@ -200,12 +201,17 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
         final loggedIn = assignmentStore.isAuthenticated;
         final loggingIn = state.matchedLocation == '/login';
         if (!loggedIn && !loggingIn) {
-          return '/login';
+          final target =
+              AppDeepLinks.validatedAssignmentLocation(state.uri.toString());
+          return target == null
+              ? '/login'
+              : Uri(path: '/login', queryParameters: {'from': target})
+                  .toString();
         }
         if (loggedIn &&
             loggingIn &&
             state.uri.queryParameters['reauth'] != '1') {
-          return '/assignments';
+          return loginSuccessLocation(state.uri.queryParameters['from']);
         }
         return null;
       },
@@ -213,8 +219,10 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
   }
 
   void _handleNotificationPayload(String payload) {
+    final uri = Uri.tryParse(payload);
+    if (uri == null) return;
     final location = AppDeepLinks.normalizeIncomingLocation(
-      Uri.parse(payload),
+      uri,
     );
     if (location != null) {
       _router.go(location);

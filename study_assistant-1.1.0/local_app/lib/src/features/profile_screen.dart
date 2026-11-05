@@ -123,7 +123,9 @@ class ProfileScreen extends StatelessWidget {
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
-                      onPressed: store.logout,
+                      onPressed: store.isLoading
+                          ? null
+                          : () => _confirmLogout(context),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Theme.of(context).colorScheme.error,
                         side: const BorderSide(color: Color(0xFFFFE0E0)),
@@ -143,6 +145,46 @@ class ProfileScreen extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+
+  Future<void> _confirmLogout(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('退出并清理本机记录？'),
+        content: const SingleChildScrollView(
+          child: Text(
+            '退出将清除本机保存的账号密码、课程作业、隐藏状态、课程关注、提醒设置、同步记录、仓库损坏备份和账号切换备份（含其他账号），并清理作业通知与小组件。自动同步间隔会保留。\n\n学习通服务器上的课程作业不会删除。需要重新登录后同步，本机隐藏与关注选择无法从服务端恢复。',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('确认退出'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await store.logout();
+      if (!context.mounted) return;
+      if (store.error != null || store.isAuthenticated) {
+        _showLogoutFailure(context);
+      }
+    } catch (_) {
+      if (context.mounted) _showLogoutFailure(context);
+    }
+  }
+
+  void _showLogoutFailure(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('退出未完成，请稍后重试；本机记录可能尚未全部清理')),
     );
   }
 

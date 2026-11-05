@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:crypto/crypto.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -11,13 +12,125 @@ class LocalAssignmentRepository {
   static const _oldItems = 'local_assignments';
   static const _oldSync = 'local_last_sync_at';
   static const _oldHidden = 'local_hidden_completed_assignment_ids';
+  static const _ownerKey = 'journal_account_owner';
+  static const _switchKey = 'journal_account_switch';
+  static const _archivePrefix = 'journal_account_archive_';
+  static const _scopedKeys = [
+    _key,
+    _oldItems,
+    _oldSync,
+    _oldHidden,
+    'course_refs',
+    'unfollowed_courses',
+    'reminder_offsets_minutes',
+    'sync_attempt_at',
+    'sync_data_at',
+    'sync_report_v1',
+    '${_key}_recovery_backup',
+    '${_key}_recovery_backups',
+    'course_refs_recovery_backup',
+  ];
+
+  static String _owner(String account) =>
+      sha256.convert(utf8.encode(account.trim())).toString();
+
+  // Archive before switching. A durable checkpoint restores the old active
+  // scope if the process stops between individual SharedPreferences writes.
+  Future<void> activateAccount(String account, {String? previousAccount}) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        final pending = prefs.getString(_switchKey);
+        if (pending != null) {
+          await _restoreScope(
+              prefs, jsonDecode(pending) as Map<String, dynamic>);
+          await _require(prefs.remove(_switchKey));
+        }
+        final target = _owner(account);
+        final current = prefs.getString(_ownerKey);
+        if (current == target) return;
+        if (current == null && previousAccount?.trim() == account.trim()) {
+          await _require(prefs.setString(_ownerKey, target));
+          return;
+        }
+        final before = <String, dynamic>{
+          'owner': current ??
+              (previousAccount == null ? null : _owner(previousAccount)),
+          'values': {
+            for (final key in _scopedKeys)
+              if (prefs.containsKey(key)) key: prefs.get(key)
+          },
+        };
+        final archived = prefs.getString('$_archivePrefix$target');
+        final after = archived == null
+            ? <String, dynamic>{'owner': target, 'values': <String, dynamic>{}}
+            : jsonDecode(archived) as Map<String, dynamic>;
+        if (after['owner'] != target) throw StateError('账号本机记录归属不一致');
+        final checkpoint = jsonEncode(before);
+        await _require(prefs.setString(
+            '$_archivePrefix${before['owner'] ?? 'unclaimed'}', checkpoint));
+        await _require(prefs.setString(_switchKey, checkpoint));
+        try {
+          await _restoreScope(prefs, after);
+          await _require(prefs.remove(_switchKey));
+        } catch (_) {
+          // Keep the checkpoint if rollback itself fails; next activation will
+          // retry it before exposing or merging any active records.
+          await _restoreScope(prefs, before);
+          await _require(prefs.remove(_switchKey));
+          rethrow;
+        }
+      });
+
+  static Future<void> _require(Future<bool> write) async {
+    if (!await write) throw StateError('未能保存账号本机记录，原记录已保留');
+  }
+
+  static Future<void> _restoreScope(
+      SharedPreferences prefs, Map<String, dynamic> snapshot) async {
+    final values = snapshot['values'] as Map<String, dynamic>;
+    for (final key in _scopedKeys) {
+      final value = values[key];
+      if (value == null) {
+        await _require(prefs.remove(key));
+      } else if (value is String) {
+        await _require(prefs.setString(key, value));
+      } else if (value is List) {
+        await _require(prefs.setStringList(key, value.cast<String>()));
+      } else {
+        throw StateError('账号本机记录格式无法识别');
+      }
+    }
+    final owner = snapshot['owner'] as String?;
+    await _require(owner == null
+        ? prefs.remove(_ownerKey)
+        : prefs.setString(_ownerKey, owner));
+  }
 
   String? recoveryWarning;
   Future<List<CourseRef>> loadCourses() async {
     final p = await SharedPreferences.getInstance();
-    return (jsonDecode(p.getString('course_refs') ?? '[]') as List)
-        .map((j) => CourseRef.fromJson(j as Map<String, dynamic>))
-        .toList();
+    final raw = p.get('course_refs');
+    final valid = <CourseRef>[];
+    var damaged = false;
+    try {
+      for (final item in jsonDecode(raw as String? ?? '[]') as List) {
+        try {
+          valid.add(CourseRef.fromJson(item as Map<String, dynamic>));
+        } catch (_) {
+          damaged = true;
+        }
+      }
+    } catch (_) {
+      damaged = true;
+    }
+    if (damaged) {
+      if (!p.containsKey('course_refs_recovery_backup')) {
+        await _require(p.setString('course_refs_recovery_backup',
+            raw is String ? raw : jsonEncode(raw)));
+      }
+      recoveryWarning = '部分课程资料无法读取，原始资料已备份；已保留可读取的作业，请重新同步。';
+    }
+    return valid;
   }
 
   Future<void> saveCourses(List<CourseRef> courses) async {
@@ -85,7 +198,7 @@ class LocalAssignmentRepository {
 
   Future<void> clear() => _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
-        for (final key in [
+        for (final key in {
           'sync_attempt_at',
           'sync_data_at',
           'course_refs',
@@ -95,14 +208,21 @@ class LocalAssignmentRepository {
           _oldSync,
           _key,
           '${_key}_recovery_backup',
-          '${_key}_recovery_backups'
-        ]) {
-          await prefs.remove(key);
+          '${_key}_recovery_backups',
+          ..._scopedKeys,
+          _ownerKey,
+          _switchKey,
+          ...prefs.getKeys().where((key) => key.startsWith(_archivePrefix)),
+        }) {
+          await _require(prefs.remove(key));
         }
       });
 
   Future<_Journal> _read() async {
     final prefs = await SharedPreferences.getInstance();
+    if (prefs.containsKey(_switchKey)) {
+      throw StateError('账号本机记录切换未完成，请重新登录后恢复');
+    }
     final encoded = prefs.getString(_key);
     if (encoded != null) {
       try {
@@ -113,7 +233,7 @@ class LocalAssignmentRepository {
         final records = decoded['records'] as List;
         final valid = await _readRecords(records, prefs, encoded);
         return _Journal(valid, Set<String>.from(decoded['hidden'] as List),
-            DateTime.tryParse(decoded['lastSync'] as String? ?? ''));
+            DateTime.tryParse(decoded['lastSync'] as String? ?? '')?.toLocal());
       } on FormatException {
         await _backupDamaged(prefs, encoded);
         return _Journal([], {}, null);
@@ -219,7 +339,7 @@ class _Journal {
         'schemaVersion': 1,
         'records': byId.values.map((a) => a.toJson()).toList(),
         'hidden': hidden.toList()..sort(),
-        'lastSync': lastSync?.toIso8601String(),
+        'lastSync': lastSync?.toUtc().toIso8601String(),
       };
   List<Assignment> get journal =>
       byId.values.where((a) => !hidden.contains(a.id)).toList()

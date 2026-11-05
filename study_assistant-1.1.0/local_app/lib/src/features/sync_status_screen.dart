@@ -316,53 +316,62 @@ class _SyncIntervalOption extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final foreground =
         selected ? colorScheme.onPrimaryContainer : colorScheme.onSurface;
-    return SizedBox(
-      width: 140,
-      child: Material(
-        color: selected
-            ? colorScheme.primaryContainer
-            : colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: BorderSide(
-            color: selected ? colorScheme.primary : Journal.rule,
+    return Semantics(
+      label: label,
+      selected: selected,
+      inMutuallyExclusiveGroup: true,
+      enabled: enabled,
+      button: true,
+      onTap: enabled ? onTap : null,
+      excludeSemantics: true,
+      child: SizedBox(
+        width: 140,
+        child: Material(
+          color: selected
+              ? colorScheme.primaryContainer
+              : colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: selected ? colorScheme.primary : Journal.rule,
+            ),
           ),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: enabled ? onTap : null,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 150),
-                  child: selected
-                      ? Icon(
-                          Icons.check,
-                          key: const ValueKey('selected'),
-                          size: 18,
-                          color: foreground,
-                        )
-                      : const SizedBox(
-                          key: ValueKey('unselected'),
-                          width: 18,
-                          height: 18,
-                        ),
-                ),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    label,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: foreground,
-                          fontWeight:
-                              selected ? FontWeight.w700 : FontWeight.w600,
-                        ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: enabled ? onTap : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 150),
+                    child: selected
+                        ? Icon(
+                            Icons.check,
+                            key: const ValueKey('selected'),
+                            size: 18,
+                            color: foreground,
+                          )
+                        : const SizedBox(
+                            key: ValueKey('unselected'),
+                            width: 18,
+                            height: 18,
+                          ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: foreground,
+                            fontWeight:
+                                selected ? FontWeight.w700 : FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

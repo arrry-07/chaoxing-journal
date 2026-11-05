@@ -250,11 +250,17 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
-    final offsetsList = _offsets.toList();
-    await widget.assignmentStore.saveReminderRule(offsetsList);
-    if (!mounted) return;
-    setState(() => _saving = false);
-    _showMessage(widget.assignmentStore.error ?? '提醒时间已保存，作业通知已更新');
+    try {
+      await widget.assignmentStore.saveReminderRule(_offsets.toList());
+      if (!mounted) return;
+      _showMessage(widget.assignmentStore.error == null
+          ? '提醒时间已保存，作业通知已更新'
+          : '保存失败，请稍后重试；当前选择已保留');
+    } catch (_) {
+      if (mounted) _showMessage('保存失败，请稍后重试；当前选择已保留');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Future<void> _openPermissionSettings(

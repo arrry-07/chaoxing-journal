@@ -19,10 +19,16 @@ import java.io.ByteArrayInputStream
 /** Transient first-party browser. No JS bridge, credential logging, or external navigation. */
 class VerificationBrowser(private val activity: MainActivity) {
     private var closeAction: (() -> Unit)? = null
-    fun close() { closeAction?.invoke() }
+    private val closedCallbacks = mutableListOf<(Boolean) -> Unit>()
+    fun close(onCleared: (Boolean) -> Unit = {}) {
+        val action = closeAction
+        if (action == null) WebSessionCleaner.clear(activity, onComplete = onCleared)
+        else { closedCallbacks.add(onCleared); action() }
+    }
     private fun trusted(url: String): Boolean {
         val u = Uri.parse(url)
-        return u.scheme == "https" && (u.host == "chaoxing.com" || u.host?.endsWith(".chaoxing.com") == true)
+        return u.scheme == "https" && u.userInfo == null && (u.port == -1 || u.port == 443) &&
+            (u.host == "chaoxing.com" || u.host?.endsWith(".chaoxing.com") == true)
     }
     fun open(url: String?, cookies: List<Map<String, String>>, userAgent: String?, result: MethodChannel.Result) {
         if (url == null || !trusted(url)) { result.error("invalid_origin", "验证地址不可用", null); return }
@@ -66,11 +72,16 @@ class VerificationBrowser(private val activity: MainActivity) {
             val exported = if (collect) origins.mapNotNull { origin -> manager.getCookie(origin)?.let { mapOf("url" to origin, "cookies" to it) } } else emptyList()
             val agent = browser.settings.userAgentString
             browser.stopLoading()
-            browser.destroy()
-            // This jar belongs only to this new verification browser; journal and secure storage are untouched.
-            manager.removeAllCookies(null)
+            layout.removeView(browser)
             dialog.dismiss()
-            result.success(if (collect) exported + mapOf("userAgent" to agent) else null)
+            WebSessionCleaner.clear(activity, browser) { cleaned ->
+                // Export only after ending the persistent WebView session.
+                if (cleaned) result.success(if (collect) exported + mapOf("userAgent" to agent) else null)
+                else result.error("web_cleanup_failed", "验证网站数据清理失败，请重试", null)
+                val callbacks = closedCallbacks.toList()
+                closedCallbacks.clear()
+                callbacks.forEach { it(cleaned) }
+            }
         }
         closeAction = { finish(false) }
         dialog.setOnDismissListener { finish(false) }
@@ -83,8 +94,10 @@ class VerificationBrowser(private val activity: MainActivity) {
         dialog.setContentView(layout)
         dialog.setOnCancelListener { finish(false) }
         dialog.show()
-        // Seed only this app's in-memory authenticated session after clearing stale browser sessions.
-        manager.removeAllCookies {
+        // Clear the shared app profile before seeding this transient session.
+        // This initial cleanup must preserve the live View.
+        WebSessionCleaner.clear(activity) { cleaned ->
+            if (!cleaned) { finish(false); return@clear }
             fun seed(index: Int) {
                 if (finished) return
                 if (index == cookies.size) { browser.loadUrl(url); return }
