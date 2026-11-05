@@ -137,6 +137,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                const Text(
+                  '课程作业数据保存在本机，账号密码保存在本机安全存储中。登录与同步直接连接学习通，不经过开发者服务器。',
+                  style: Journal.metadata,
+                ),
               ],
             ),
           ),
