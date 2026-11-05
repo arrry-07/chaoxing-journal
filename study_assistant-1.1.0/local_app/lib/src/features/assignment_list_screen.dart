@@ -16,33 +16,96 @@ class AssignmentListScreen extends StatefulWidget {
 }
 
 class _AssignmentListScreenState extends State<AssignmentListScreen> {
+  bool _refreshing = false;
   AssignmentStore get store => widget.store;
-  Future<void> act(HomeSyncAction action) async {
+
+  void feedback(String message, {bool details = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Journal.ink,
+          content: Text(message,
+              style: Journal.metadata.copyWith(color: Journal.sheet)),
+          action: details
+              ? SnackBarAction(
+                  label: '查看详情',
+                  textColor: Journal.sheet,
+                  onPressed: () {
+                    if (mounted) context.push('/sync');
+                  })
+              : null));
+  }
+
+  Future<bool> act(HomeSyncAction action) async {
     switch (action) {
       case HomeSyncAction.read:
       case HomeSyncAction.retry:
         await store.syncAssignments();
+        return true;
       case HomeSyncAction.login:
         if (mounted) {
+          feedback('需要重新登录，登录后将继续读取作业');
           await context.push('/login?reauth=1');
         }
+        return false;
       case HomeSyncAction.verify:
         try {
+          feedback('请先完成安全验证，完成后将继续刷新');
           if (await store.chaoxingClient.verifyInBrowser()) {
             await store.syncAssignments();
+            return true;
           }
+          feedback('验证尚未完成，请在同步详情继续', details: true);
         } catch (_) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('验证页面未能打开，请到同步详情重试')));
-          }
+          feedback('验证页面未能打开，请到同步详情重试', details: true);
         }
+        return false;
       case HomeSyncAction.settings:
         if (mounted) {
           await context.push('/reminders');
         }
+        return false;
       case HomeSyncAction.none:
-        break;
+        return false;
+    }
+  }
+
+  Future<void> refresh(HomeSyncAction action) async {
+    // The store queues operations; give feedback and reject repeated taps even
+    // before it emits its first loading notification.
+    if (_refreshing ||
+        store.isLoading ||
+        store.syncReport.phase == SyncPhase.running) {
+      return;
+    }
+    setState(() => _refreshing = true);
+    final before = store.syncReport;
+    try {
+      final attempted = await act(action);
+      if (!mounted || !attempted) return;
+      final report = store.syncReport;
+      if (identical(report, before) ||
+          report.phase == SyncPhase.idle ||
+          report.phase == SyncPhase.running) {
+        feedback('刷新未完成，请查看同步详情', details: true);
+      } else if (report.phase == SyncPhase.success) {
+        feedback(store.error == null ? '作业已更新' : '作业已更新，本机服务需要处理',
+            details: store.error != null);
+      } else if (report.phase == SyncPhase.partial) {
+        final detailOnly = report.issues.isNotEmpty &&
+            report.issues.every((issue) => issue.stage == 'detail');
+        feedback(detailOnly ? '作业已更新，部分截止时间待确认' : report.summary,
+            details: true);
+      } else {
+        feedback(store.assignments.isEmpty ? '刷新失败，请查看同步详情' : '更新失败，已保留上次记录',
+            details: true);
+      }
+    } catch (_) {
+      feedback('刷新未完成，请查看同步详情', details: true);
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
     }
   }
 
@@ -50,6 +113,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: store,
       builder: (context, _) {
+        final busy = _refreshing ||
+            store.isLoading ||
+            store.syncReport.phase == SyncPhase.running;
         final now = DateTime.now(), items = store.visibleAssignments;
         final groups = AssignmentQuery.home(items, now, {});
         final sync = HomeSyncPresentation.from(store.syncReport,
@@ -95,20 +161,31 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     IconButton(
                         tooltip: '刷新作业',
-                        onPressed: store.isLoading ||
-                                store.syncReport.phase == SyncPhase.running
+                        onPressed: busy
                             ? null
-                            : () => act(sync.action == HomeSyncAction.login ||
-                                    sync.action == HomeSyncAction.verify
-                                ? sync.action
-                                : HomeSyncAction.retry),
-                        icon: const Icon(Icons.sync_rounded)),
+                            : () => refresh(
+                                sync.action == HomeSyncAction.login ||
+                                        sync.action == HomeSyncAction.verify
+                                    ? sync.action
+                                    : HomeSyncAction.retry),
+                        icon: busy
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Journal.ink))
+                            : const Icon(Icons.sync_rounded)),
                     IconButton(
                         tooltip: '同步详情',
                         onPressed: () => context.push('/sync'),
                         icon: const Icon(Icons.more_horiz_rounded)),
                   ])),
               const SizedBox(height: 20),
+              if (busy)
+                Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Semantics(
+                        liveRegion: true,
+                        child: const Text('正在刷新作业…', style: Journal.metadata))),
               if (items.isNotEmpty) ...[
                 ...timeline([...groups.near, ...groups.far]),
                 if (groups.noDeadline.isNotEmpty) ...[
