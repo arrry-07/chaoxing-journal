@@ -1,7 +1,10 @@
 allprojects {
     repositories {
-        maven { url "https://maven.aliyun.com/repository/google" }
-        maven { url "https://maven.aliyun.com/repository/central" }
+        // Keep local mirrors, but use official repositories on CI.
+        if (System.getenv("CI") != "true") {
+            maven { url "https://maven.aliyun.com/repository/google" }
+            maven { url "https://maven.aliyun.com/repository/central" }
+        }
         google()
         mavenCentral()
     }
