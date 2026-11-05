@@ -1,3 +1,4 @@
+import 'widgets/update_scope.dart';
 import 'widgets/update_dialog.dart';
 import 'open_source_screen.dart';
 import 'package:flutter/services.dart';
@@ -210,6 +211,7 @@ class ProfileScreen extends StatelessWidget {
   Future<void> _checkForUpdates(BuildContext context) => showDialog<void>(
       context: context,
       builder: (_) => UpdateDialog(
+          controller: AppUpdateScope.maybeOf(context),
           service: updateService ?? AppUpdateService(),
           links: externalLinkService));
 }

@@ -1,8 +1,8 @@
 import 'package:crypto/crypto.dart';
+import '../app/app_version.dart';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 class AppUpdateInfo {
@@ -50,14 +50,16 @@ class AppUpdateService {
   static const repo = 'chaoxing-journal';
   static const repositoryUrl = 'https://github.com/$owner/$repo';
   static const releasesUrl = '$repositoryUrl/releases';
-  static const privateRepository = true;
 
   final Dio _dio;
   final String manifestUrl;
   Future<UpdateCheckResult> checkConfigured(
       {required int currentVersionCode, CancelToken? cancelToken}) async {
     if (manifestUrl.isEmpty) {
-      return const UpdateCheckResult(UpdateCheckStatus.unconfigured);
+      return _checkGitHub(
+          currentVersionName: AppVersion.name,
+          currentVersionCode: currentVersionCode,
+          cancelToken: cancelToken);
     }
     final uri = Uri.tryParse(manifestUrl);
     if (uri == null || uri.scheme != 'https') {
@@ -115,73 +117,114 @@ class AppUpdateService {
     }
   }
 
+  /// Legacy nullable API; application UI uses the explicit result from checkConfigured.
   Future<AppUpdateInfo?> checkForUpdate({
     required String currentVersionName,
     required int currentVersionCode,
+  }) async =>
+      (await _checkGitHub(
+              currentVersionName: currentVersionName,
+              currentVersionCode: currentVersionCode))
+          .update;
+
+  Future<UpdateCheckResult> _checkGitHub({
+    required String currentVersionName,
+    required int currentVersionCode,
+    CancelToken? cancelToken,
   }) async {
     try {
-      debugPrint(
-          '[UpdateCheck] checkForUpdate called, current=$currentVersionName');
       final response = await _dio.get<dynamic>(
-        '/repos/$owner/$repo/releases/latest',
+        'https://api.github.com/repos/$owner/$repo/releases/latest',
+        cancelToken: cancelToken,
       );
-      final status = response.statusCode ?? 0;
-      debugPrint('[UpdateCheck] GitHub API status: $status');
-      if (status < 200 || status >= 300) {
-        debugPrint('[UpdateCheck] Non-2xx status, returning null');
-        return null;
+      final status = response.statusCode;
+      if (status == 429 ||
+          (status == 403 &&
+              (response.headers.value('x-ratelimit-remaining') == '0' ||
+                  response.headers.value('retry-after') != null))) {
+        return const UpdateCheckResult(UpdateCheckStatus.rateLimited);
       }
-      final data = response.data;
-      if (data == null) {
-        debugPrint('[UpdateCheck] response.data is null');
-        return null;
+      if (status == 401 || status == 403) {
+        return const UpdateCheckResult(UpdateCheckStatus.authRequired);
       }
-      final release = _asMap(data);
-      if (release == null) {
-        debugPrint('[UpdateCheck] release map is null');
-        return null;
+      if (status == 404) {
+        return const UpdateCheckResult(UpdateCheckStatus.noRelease);
       }
-      final rawTag = (release['tag_name'] ?? release['name'])?.toString();
-      if (rawTag == null || rawTag.trim().isEmpty) {
-        debugPrint('[UpdateCheck] rawTag is null/empty');
-        return null;
+      if (status != 200) {
+        return const UpdateCheckResult(UpdateCheckStatus.networkError);
       }
-      debugPrint('[UpdateCheck] Remote tag: $rawTag');
-      final remoteVersion = normalizeVersionName(rawTag);
-      debugPrint(
-          '[UpdateCheck] Remote version: $remoteVersion, Current: $currentVersionName');
-      if (!isRemoteVersionNewer(remoteVersion, currentVersionName)) {
-        debugPrint('[UpdateCheck] Remote version not newer');
-        return null;
+      final release = _asMap(response.data);
+      final tag = release?['tag_name']?.toString() ?? '';
+      final match =
+          RegExp(r'^[vV]?(\d+\.\d+\.\d+)(?:\+(\d+))?$').firstMatch(tag);
+      if (release == null ||
+          match == null ||
+          release['draft'] == true ||
+          release['prerelease'] == true) {
+        return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
       }
-      final asset = _findApkAsset(release['assets']);
+      final remoteVersion = match.group(1)!;
+      final remoteCode = int.tryParse(match.group(2) ?? '');
+      final sameVersion =
+          normalizeVersionName(currentVersionName) == remoteVersion;
+      if (!isRemoteVersionNewer(remoteVersion, currentVersionName) &&
+          !(sameVersion &&
+              remoteCode != null &&
+              remoteCode > currentVersionCode)) {
+        return const UpdateCheckResult(UpdateCheckStatus.upToDate);
+      }
+      if (remoteCode != null && remoteCode <= currentVersionCode) {
+        return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
+      }
+      final assets = release['assets'];
+      final apks = assets is List
+          ? assets
+              .map(_asMap)
+              .whereType<Map<String, dynamic>>()
+              .where((a) =>
+                  a['name'] is String && (a['name'] as String).endsWith('.apk'))
+              .toList()
+          : <Map<String, dynamic>>[];
+      final preferred = apks
+          .where((a) => a['name'] == 'chaoxing-journal-$remoteVersion.apk')
+          .toList();
+      final asset = preferred.length == 1
+          ? preferred.single
+          : (apks.length == 1 ? apks.single : null);
       if (asset == null) {
-        debugPrint('[UpdateCheck] No APK asset found');
-        return null;
+        return const UpdateCheckResult(UpdateCheckStatus.packageUnavailable);
       }
-      final apkUrl = asset['browser_download_url']?.toString();
-      final apkName = asset['name']?.toString();
-      if (apkUrl == null ||
-          apkUrl.isEmpty ||
-          apkName == null ||
-          apkName.isEmpty) {
-        debugPrint('[UpdateCheck] APK url or name invalid');
-        return null;
+      final url = asset['browser_download_url']?.toString() ?? '';
+      final digest = asset['digest']?.toString() ?? '';
+      final size = _asInt(asset['size']);
+      final uri = Uri.tryParse(url);
+      // Only a release asset in this repository is eligible for in-app installation.
+      if (uri == null ||
+          uri.scheme != 'https' ||
+          uri.host != 'github.com' ||
+          !uri.path.startsWith('/$owner/$repo/releases/download/') ||
+          !RegExp(r'^sha256:[a-fA-F0-9]{64}$').hasMatch(digest) ||
+          size == null ||
+          size <= 0) {
+        return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
       }
-      debugPrint('[UpdateCheck] Update found! version=$remoteVersion');
-      return AppUpdateInfo(
-        versionName: remoteVersion,
-        releaseUrl: release['html_url']?.toString() ??
-            'https://github.com/$owner/$repo/releases/tag/$rawTag',
-        apkName: apkName,
-        apkDownloadUrl: apkUrl,
-        releaseNotes: release['body']?.toString() ?? '',
-        apkSize: _asInt(asset['size']),
-      );
-    } catch (e, stack) {
-      debugPrint('[UpdateCheck] Exception: $e');
-      debugPrint('[UpdateCheck] Stack: $stack');
-      return null;
+      return UpdateCheckResult(UpdateCheckStatus.available,
+          update: AppUpdateInfo(
+            versionName: remoteVersion,
+            versionCode: remoteCode,
+            releaseUrl: '$releasesUrl/tag/${Uri.encodeComponent(tag)}',
+            apkName: asset['name'] as String,
+            apkDownloadUrl: url,
+            releaseNotes: release['body']?.toString() ?? '',
+            apkSize: size,
+            sha256Hash: digest.substring(7).toLowerCase(),
+          ));
+    } on DioException catch (e) {
+      return UpdateCheckResult(CancelToken.isCancel(e)
+          ? UpdateCheckStatus.cancelled
+          : UpdateCheckStatus.networkError);
+    } catch (_) {
+      return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
     }
   }
 
@@ -294,20 +337,6 @@ class AppUpdateService {
         .toList(growable: false);
   }
 
-  Map<String, dynamic>? _findApkAsset(dynamic assets) {
-    if (assets is! List) {
-      return null;
-    }
-    for (final item in assets) {
-      final asset = _asMap(item);
-      final name = asset?['name']?.toString().toLowerCase();
-      if (asset != null && name != null && name.endsWith('.apk')) {
-        return asset;
-      }
-    }
-    return null;
-  }
-
   Map<String, dynamic>? _asMap(dynamic value) {
     if (value is Map<String, dynamic>) {
       return value;
@@ -341,7 +370,10 @@ enum UpdateCheckStatus {
   authRequired,
   invalidManifest,
   unconfigured,
-  cancelled
+  cancelled,
+  noRelease,
+  rateLimited,
+  packageUnavailable
 }
 
 class UpdateCheckResult {
@@ -352,9 +384,12 @@ class UpdateCheckResult {
         UpdateCheckStatus.upToDate => '当前已是最新版本',
         UpdateCheckStatus.available => '发现新版本',
         UpdateCheckStatus.networkError => '检查更新失败，请重试',
-        UpdateCheckStatus.authRequired => '更新渠道需要授权，请使用浏览器备选',
+        UpdateCheckStatus.authRequired => '暂时无法访问更新渠道，请稍后重试或查看发行版',
         UpdateCheckStatus.invalidManifest => '更新清单无效，请联系维护者',
         UpdateCheckStatus.unconfigured => '更新渠道待配置',
-        UpdateCheckStatus.cancelled => '已取消检查'
+        UpdateCheckStatus.cancelled => '已取消检查',
+        UpdateCheckStatus.noRelease => '仓库尚未发布正式版本',
+        UpdateCheckStatus.rateLimited => '检查过于频繁，请稍后重试',
+        UpdateCheckStatus.packageUnavailable => '新版安装包尚未就绪，请稍后重试'
       };
 }

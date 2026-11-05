@@ -126,7 +126,10 @@ class MainActivity : FlutterActivity() {
             val signaturesMatch = !candidateSigs.isNullOrEmpty() && !installedSigs.isNullOrEmpty() && candidateSigs.toSet() == installedSigs.toSet()
             val appInfo = candidate.applicationInfo
             val sdkOk = appInfo != null && appInfo.minSdkVersion <= Build.VERSION.SDK_INT
-            val nativeAbis = ZipFile(filePath).use { zip -> zip.entries().asSequence().map { it.name }.filter { it.startsWith("lib/") && it.endsWith(".so") }.map { it.split('/')[1] }.toSet() }
+            val nativePaths = ZipFile(filePath).use { zip -> zip.entries().asSequence().map { it.name }.filter { it.startsWith("lib/") && it.endsWith(".so") }.toList() }
+            // A plugin can include a 32-bit library without a matching Flutter engine.
+            val enginePaths = nativePaths.filter { it.endsWith("/libflutter.so") }
+            val nativeAbis = (if (enginePaths.isNotEmpty()) enginePaths else nativePaths).map { it.split('/')[1] }.toSet()
             val abiOk = nativeAbis.isEmpty() || Build.SUPPORTED_ABIS.any { nativeAbis.contains(it) }
             val reason = when {
                 candidate.packageName != packageName -> "安装包名不一致，无法覆盖升级"
@@ -136,7 +139,7 @@ class MainActivity : FlutterActivity() {
                 !abiOk -> "安装包不支持此设备架构"
                 else -> ""
             }
-            mapOf("compatible" to reason.isEmpty(), "reason" to reason, "applicationId" to candidate.packageName, "versionCode" to candidateCode)
+            mapOf("compatible" to reason.isEmpty(), "reason" to reason, "applicationId" to candidate.packageName, "versionCode" to candidateCode, "versionName" to (candidate.versionName ?: ""))
         }.getOrElse { mapOf("compatible" to false, "reason" to "安装包身份检查失败") }
     }
 

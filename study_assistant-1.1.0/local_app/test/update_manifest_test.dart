@@ -68,11 +68,19 @@ void main() {
             .status,
         UpdateCheckStatus.cancelled);
   });
-  test('unconfigured channel must not be confused with no update', () async {
+  test('default GitHub channel reports an older release as up to date',
+      () async {
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(
+          onRequest: (o, h) => h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data: {'tag_name': 'v1.0.0'}))));
     expect(
-        (await AppUpdateService().checkConfigured(currentVersionCode: 31))
+        (await AppUpdateService(dio: dio)
+                .checkConfigured(currentVersionCode: 31))
             .status,
-        UpdateCheckStatus.unconfigured);
+        UpdateCheckStatus.upToDate);
   });
   test('same display version with higher code is an update', () async {
     final dio = Dio()
