@@ -1,46 +1,87 @@
-# 课业手记
+# 学习通课业手记
 
-专门服务学习通的 Android 作业手帐。暖纸底色、深墨正文、宋体短标题；优先展示下一份待交作业，按日期和准确时间排列。
+一款手账风格的学习通作业管理 Android 应用。把课程、作业、截止时间和本地提醒整理在一本暖纸色的手记里，使用霞鹜文楷、无框时间轴和课程手绘图案。
 
-基于 [mshzy/study_assistant](https://github.com/mshzy/study_assistant) 二次开发，保留原项目 MIT 版权声明。接口查询参考 [DanMo661/xuexitong-cli](https://github.com/DanMo661/xuexitong-cli)。
+[![Flutter checks](https://github.com/arrry-07/chaoxing-journal/actions/workflows/flutter-checks.yml/badge.svg?branch=main)](https://github.com/arrry-07/chaoxing-journal/actions/workflows/flutter-checks.yml)
+[![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-## 安装与使用
+**[下载 Android 体验版](https://github.com/arrry-07/chaoxing-journal/releases/latest)** · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
-从本仓库的 [Releases](https://github.com/arrry-07/chaoxing-journal/releases) 下载 `chaoxing-journal-1.2.0.apk`。仓库为私有，需使用有权限的 GitHub 账号下载。Android 8.0 及以上，ARM64 / x86_64。
+这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
-此体验包包名 `com.example.studyassistant.journal`、版本 `1.2.0+30`。与此前《课业手记》体验包保持同包名、同签名，可覆盖安装；与上游原版应用并行。不要卸载上一体验版后再装，否则会丢失本机数据。体验包采用本机调试签名，后续覆盖包需使用同一密钥；密钥不上传仓库。
+## 功能
 
-登录学习通后下拉首页或点击刷新。成功读取到已提交/待批阅状态后，作业退出待交清单，取消后续提醒并更新小组件。退回重做会重新进入待交。未识别的状态保持“提交状态未知”，读取失败保留旧数据。手动操作“仅在本机隐藏”不会向学习通提交作业。
+- **作业时间轴**：按北京时间显示日期与截止时刻，未逾期在前、逾期在后；不确定的日期或提交状态单独保留，不靠猜测补全。
+- **明确的同步反馈**：手动刷新有即时进度，完成、部分成功和失败分别提示；支持登录失效和安全验证后的恢复。
+- **截止日历与本地提醒**：选择提前提醒时间，查看已确认截止日期的作业；桌面小组件显示最近保存的本机快照。
+- **课程与本机记录**：按课程及班级管理关注范围，查看本地记录，隐藏与恢复作业。隐藏不等于提交。
+- **完成率统计**：区分已完成、待完成、已过期和提交未知，保留课程手绘标记。
 
-**同步不是推送实时同步**：手动刷新会请求学习通；返回前台或 App 运行期间的定时器按设置间隔尝试同步。Android 杀进程或冻结后台后，无法保证继续查询。已安排的系统通知与后台联网查询是两回事，锁屏/省电/自启动行为需在手机上确认。
+## 界面预览
 
-## 预览
+以下截图由当前界面实际渲染，使用**合成样例数据**，不包含真实账号资料。
 
-截图说明、测试结果与限制见 [验收记录](docs/验收记录.md)。所有展示数据均为测试样例，不包含真实学校账号。
+| 首页 | 统计 | 我的 |
+| --- | --- | --- |
+| <img src="docs/images/home.png" alt="作业时间轴，合成数据" width="240"> | <img src="docs/images/statistics.png" alt="完成率与课程统计，合成数据" width="240"> | <img src="docs/images/profile.png" alt="个人页与设置，合成数据" width="240"> |
 
-| 首页 | 我的 |
-|---|---|
-| ![首页](study_assistant-1.1.0/docs/images/journal-home.png) | ![我的](study_assistant-1.1.0/docs/images/journal-profile.png) |
+## 下载安装
 
-## 开发
+当前体验版为 **1.2.7（37）**，支持 Android **8.0 及以上**，适用于 **ARM64 / x86_64**。
 
-主应用位于 `study_assistant-1.1.0/local_app`。本轮使用 Flutter 3.44.9 / Dart 3.12.2 / JDK 17 / Android SDK 36 验证。
+1. 从 [Releases](https://github.com/arrry-07/chaoxing-journal/releases/latest) 下载 `chaoxing-journal-1.2.7.apk` 和 `SHA256SUMS.txt`。
+2. 核对文件的 SHA-256，然后按 Android 提示安装。具体校验命令见[安装指南](docs/guides/安装与使用.md#下载安装)。
+3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
+
+体验包使用 `com.example.studyassistant.journal` 包名和固定的维护者调试签名。**升级直接覆盖安装，勿先卸载**；自行编译的包不保证与发布包签名相同。当前没有应用内完整导出与恢复功能。
+
+## 使用边界
+
+- 登录与同步直接连接学习通，账号凭据保存在本机安全存储；课程作业记录保存在本机偏好文件。头像、GitHub 链接与已配置的更新检查也可能联网，详见[隐私与安全](docs/guides/隐私与安全.md)。
+- 读取失败不代表没有作业，“提交未知”不代表未交或过期。重要截止和提交结果请核对学习通原页面。
+- 自动同步依赖应用进程与恢复运行时的检查，不能保证被系统关闭后仍持续联网。通知还受权限、省电和厂商后台限制影响。
+- 当前发布包尚未配置应用内在线更新渠道；仓库公开不等于自动启用更新。请从 Releases 下载兼容版本。
+- Android 是当前交付目标；仓库保留 iOS 工程，但尚未完成 iOS 构建验收。
+
+## 本地开发
+
+主应用位于 [`study_assistant-1.1.0/local_app`](study_assistant-1.1.0/local_app)。当前验证环境为 Flutter **3.44.9** / Dart **3.12.2**、JDK **17**、Android SDK **36**。
 
 ```sh
-cd study_assistant-1.1.0/local_app
-flutter pub get
-flutter test
-flutter analyze
-flutter build apk --debug --target-platform android-arm64,android-x64
+git clone https://github.com/arrry-07/chaoxing-journal.git
+cd chaoxing-journal/study_assistant-1.1.0/local_app
+flutter pub get --enforce-lockfile
+flutter analyze --no-pub
+flutter test --no-pub
+flutter build apk --debug --no-pub --target-platform android-arm64,android-x64
 ```
 
-`pubspec.lock` 固定依赖。Android SDK、Flutter SDK、Gradle 缓存、`local.properties`、账号会话、签名密钥不提交。下载参考代码不表示 Android App 会启动 Python；Flutter 已实现对应的逐课程/逐班级查询逻辑。
+依赖由 `pubspec.lock` 固定；SDK 路径与签名配置由开发者在本机准备。正式 release 构建需要私有签名配置，不提供默认正式密钥。环境、目录职责、参考测试和提交要求见[开发指南](docs/guides/开发与贡献.md)。
 
-## 目录与来源
+## 仓库结构
 
-- `study_assistant-1.1.0/local_app`：Flutter / Android / iOS 源码、资源与测试。交付目标为 Android，iOS 尚未构建验收。
-- `references/xuexitong-cli`：固定版本的只读接口参考与核心测试。
-- `docs`：需求验收表、测试证据、来源和许可证说明。
-- `study_assistant-1.1.0/local_app/tool/android_upgrade_probe`：仅供测试模拟器的旧数据迁移夹具，不打入正式应用；不得用于已有真实账号数据的设备。
+```text
+.github/                       CI、Issue 表单与 PR 模板
+study_assistant-1.1.0/local_app/ Flutter 应用、Android/iOS 工程与测试
+references/xuexitong-cli/       固定版本的只读接口参考
+docs/guides/                   使用、开发、隐私指南
+docs/images/                   合成数据的界面预览
+docs/archive/                  历史验收与实施资料
+```
 
-详见 [第三方来源](docs/第三方来源.md)、[MIT 许可证](LICENSE)。
+当前验证范围见[验收记录](docs/验收.md)，全部文档入口见[文档索引](docs/README.md)。本地安装包、设备截图、工具输出与签名材料不进入 Git 源码历史。
+
+## 反馈与贡献
+
+欢迎通过 [Issues](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) 提交可复现的问题或功能建议。请提供应用版本、Android 版本和操作步骤，先去除账号、Cookie、个人资料及截图中的身份信息。
+
+开发贡献请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
+
+## 来源与许可
+
+- 应用基于 [mshzy/study_assistant](https://github.com/mshzy/study_assistant) v1.1.0 二次开发，保留 HY 的原始 [MIT 许可证](LICENSE)。
+- 学习通接口查询参考 [DanMo661/xuexitong-cli](https://github.com/DanMo661/xuexitong-cli/commit/74b843ad4a3439a6ee5ba33f6a3288d9be6ed990)，本仓库保留[参考代码与 MIT 许可](references/xuexitong-cli/LICENSE)。
+- 字体使用 [LXGW WenKai Screen](https://github.com/lxgw/LxgwWenKai-Screen)，遵循 [SIL OFL 1.1](study_assistant-1.1.0/local_app/assets/type/OFL-WenKai.txt)，保留[字体来源与校验信息](study_assistant-1.1.0/local_app/assets/type/README.md)。
+
+本仓库的 MIT 许可不替代第三方组件各自的许可。Dart 依赖及版本见 [pubspec.yaml](study_assistant-1.1.0/local_app/pubspec.yaml) 与 [pubspec.lock](study_assistant-1.1.0/local_app/pubspec.lock)。

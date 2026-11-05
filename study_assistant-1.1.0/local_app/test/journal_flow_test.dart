@@ -108,26 +108,34 @@ void main() {
     expect(t.widget<CheckboxListTile>(persisted).value, isTrue);
   });
 
-  testWidgets('tomorrow stays under its own date when today has no deadlines',
-      (t) async {
-    final now = DateTime.now();
-    final due = DateTime(now.year, now.month, now.day + 1, 17, 45);
-    store.replaceAssignmentsForTest([
-      Assignment(
-          id: 'tomorrow',
-          courseName: '数学',
-          title: '下周预习',
-          deadlineAt: due,
-          requirementsText: '',
-          status: 'pending',
-          lastSyncedAt: now)
-    ]);
-    await t.pumpWidget(
-        MaterialApp(home: Scaffold(body: AssignmentListScreen(store: store))));
-    expect(find.text('今天截止'), findsNothing);
-    expect(find.text('17:45'), findsOneWidget);
-    expect(find.textContaining('${due.month}月${due.day}日'), findsNWidgets(2));
-  });
+  for (final (hour, minute, label) in [(0, 15, '00:15'), (17, 45, '17:45')]) {
+    testWidgets(
+        'tomorrow at $label stays under its own date when today has no deadlines',
+        (t) async {
+      final now = DateTime.now().toUtc();
+      final beijingToday = now.add(const Duration(hours: 8));
+      final tomorrow = DateTime.utc(
+          beijingToday.year, beijingToday.month, beijingToday.day + 1);
+      // Beijing midnight can fall on the previous UTC date.
+      final due = tomorrow.add(Duration(hours: hour - 8, minutes: minute));
+      store.replaceAssignmentsForTest([
+        Assignment(
+            id: 'cx:work:1:2:tomorrow',
+            courseName: '数学',
+            title: '下周预习',
+            deadlineAt: due,
+            requirementsText: '',
+            status: 'pending',
+            lastSyncedAt: now)
+      ]);
+      await t.pumpWidget(MaterialApp(
+          home: Scaffold(body: AssignmentListScreen(store: store))));
+      expect(find.text('今天截止'), findsNothing);
+      expect(find.text(label), findsOneWidget);
+      expect(find.textContaining('${tomorrow.month}月${tomorrow.day}日  周'),
+          findsOneWidget);
+    });
+  }
 
   testWidgets(
     'narrow screen with large text shows every same-day assignment in order',
@@ -136,15 +144,17 @@ void main() {
       t.view.physicalSize = const Size(320, 720);
       addTearDown(t.view.resetPhysicalSize);
       addTearDown(t.view.resetDevicePixelRatio);
-      final now = DateTime.now();
+      final now = DateTime.now().toUtc();
+      final beijingToday = now.add(const Duration(hours: 8));
       const title = '面向对象程序设计课程综合实验报告与项目复盘';
       store.replaceAssignmentsForTest([
         for (final hour in [22, 14, 10, 19])
           Assignment(
-            id: 'a$hour',
+            id: 'cx:work:1:2:a$hour',
             courseName: '程序设计',
             title: '$title $hour',
-            deadlineAt: DateTime(now.year, now.month, now.day, hour),
+            deadlineAt: DateTime.utc(beijingToday.year, beijingToday.month,
+                beijingToday.day + 1, hour - 8),
             requirementsText: '',
             status: 'pending',
             lastSyncedAt: now,
@@ -159,7 +169,7 @@ void main() {
         ),
       );
       for (final hour in [10, 14, 19, 22]) {
-        final target = find.byKey(ValueKey('assignment-a$hour'));
+        final target = find.byKey(ValueKey('assignment-cx:work:1:2:a$hour'));
         await t.scrollUntilVisible(target, 180);
         expect(target, findsOneWidget);
         expect(t.takeException(), isNull);

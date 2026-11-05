@@ -20,6 +20,8 @@ class _Snapshot extends WidgetSnapshotService {
 Assignment work(String id, DateTime? date, {String status = 'pending'}) =>
     Assignment(
         id: id,
+        submitUrl:
+            'https://mooc1.chaoxing.com/work/task?courseId=1&classId=2&workId=${Uri.encodeComponent(id)}',
         courseName: '课程',
         title: id,
         deadlineAt: date,
@@ -54,7 +56,7 @@ void main() {
     expect(last.urgencyLevel, 'unknown');
   });
 
-  test('extension cancels and replaces reminder, removed deadline cancels only',
+  test('extension replaces same ID and removed deadline cancels reminder',
       () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
@@ -66,6 +68,7 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     final active = <int, Map>{};
     final cancelled = <int>[];
+    var failSchedule = false;
     messenger.setMockMethodCallHandler(channel, (call) async {
       switch (call.method) {
         case 'requestNotificationsPermission':
@@ -73,6 +76,7 @@ void main() {
         case 'pendingNotificationRequests':
           return active.values.toList();
         case 'zonedSchedule':
+          if (failSchedule) throw PlatformException(code: 'unavailable');
           final args = call.arguments as Map;
           active[args['id'] as int] = args;
           return null;
@@ -92,16 +96,28 @@ void main() {
     final extended = original.copyWith(
         deadlineAt: original.deadlineAt!.add(const Duration(days: 1)));
     await service.rescheduleAssignments([extended], offsetsMinutes: [30]);
-    expect(cancelled, [first['id']]);
+    expect(cancelled, isEmpty);
+    expect(active.keys.single, first['id']);
     final next = active.values.single;
     expect(
         DateTime.parse(next['scheduledDateTime'])
             .difference(DateTime.parse(first['scheduledDateTime'])),
         const Duration(days: 1));
+    failSchedule = true;
+    await service.rescheduleAssignments([
+      extended.copyWith(
+          deadlineAt: extended.deadlineAt!.add(const Duration(days: 1)))
+    ], offsetsMinutes: [
+      30
+    ]);
+    expect(service.lastWarning, contains('未能更新'));
+    expect(active.values.single, next);
+    expect(cancelled, isEmpty);
+    failSchedule = false;
     await service.rescheduleAssignments(
         [extended.copyWith(clearDeadlineAt: true)],
         offsetsMinutes: [30]);
-    expect(cancelled, [first['id'], next['id']]);
+    expect(cancelled, [next['id']]);
     expect(active, isEmpty);
   });
 }

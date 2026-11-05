@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -98,11 +99,17 @@ void main() {
     )..interceptors.add(
         InterceptorsWrapper(
           onRequest: (options, handler) {
+            expect(options.responseType, ResponseType.stream);
             handler.resolve(
-              Response<List<int>>(
+              Response<ResponseBody>(
                 requestOptions: options,
                 statusCode: 200,
-                data: [1, 2, 3, 4],
+                data: ResponseBody(
+                    Stream.fromIterable([
+                      Uint8List.fromList([1, 2]),
+                      Uint8List.fromList([3, 4])
+                    ]),
+                    200),
               ),
             );
           },

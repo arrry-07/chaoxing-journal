@@ -8,6 +8,56 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
+  test('cold session authenticates before requesting courses', () async {
+    SharedPreferences.setMockInitialValues({});
+    final client = _ColdClient();
+    final store = AssignmentStore(
+        sessionStore:
+            _MemorySessionStore(account: 'student', password: 'dummy'),
+        notificationService: _RecordingNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        chaoxingClient: client);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.syncAssignments();
+    expect(client.events, ['login', 'fetch']);
+    expect(store.error, isNull);
+  });
+  test('network failure does not trigger credential login', () async {
+    SharedPreferences.setMockInitialValues({});
+    final client = _OfflineClient();
+    final store = AssignmentStore(
+        sessionStore:
+            _MemorySessionStore(account: 'student', password: 'dummy'),
+        notificationService: _RecordingNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        chaoxingClient: client);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.syncAssignments();
+    expect(client.logins, 0);
+    expect(store.error, isNotNull);
+  });
+  test('partial sync attempt cools down repeated foreground refresh', () async {
+    SharedPreferences.setMockInitialValues({});
+    final client = _PartialClient();
+    final store = AssignmentStore(
+        sessionStore: _MemorySessionStore(account: 'student'),
+        notificationService: _RecordingNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        chaoxingClient: client);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final now = DateTime.now();
+    await store.runDueAutoSync(now: now);
+    expect(store.lastSyncAt, isNull);
+    expect(client.calls, 1);
+    expect(await store.runDueAutoSync(now: now.add(const Duration(minutes: 1))),
+        isFalse);
+    expect(client.calls, 1);
+    await store.runDueAutoSync(now: now.add(const Duration(minutes: 31)));
+    expect(client.calls, 2);
+  });
   test(
     'auto sync updates changed deadlines and reschedules reminders',
     () async {
@@ -32,7 +82,8 @@ void main() {
       await store.restoreSession();
 
       await store.syncAssignments();
-      expect(store.findAssignment('work-1')?.deadlineAt, initialDeadline);
+      expect(store.findAssignment('cx:work:1:2:work-1')?.deadlineAt,
+          initialDeadline);
       expect(notificationService.lastAssignments.single.deadlineAt,
           initialDeadline);
 
@@ -42,7 +93,8 @@ void main() {
       );
 
       expect(ran, isTrue);
-      expect(store.findAssignment('work-1')?.deadlineAt, updatedDeadline);
+      expect(store.findAssignment('cx:work:1:2:work-1')?.deadlineAt,
+          updatedDeadline);
       expect(notificationService.lastAssignments.single.deadlineAt,
           updatedDeadline);
       expect(client.fetchCount, 2);
@@ -98,7 +150,7 @@ void main() {
 
 Assignment _assignment({required DateTime deadlineAt}) {
   return Assignment(
-    id: 'work-1',
+    id: 'cx:work:1:2:work-1',
     courseName: '大学英语',
     title: '章节作业',
     deadlineAt: deadlineAt,
@@ -163,4 +215,50 @@ class _MemorySessionStore extends SecureSessionStore {
 class _NoopWidgetSnapshotService extends WidgetSnapshotService {
   @override
   Future<void> saveAssignments(List<Assignment> assignments) async {}
+}
+
+class _PartialClient extends ChaoxingLocalClient {
+  int calls = 0;
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    calls++;
+    lastSyncWarning = '部分课程未读取';
+    return [];
+  }
+}
+
+class _OfflineClient extends ChaoxingLocalClient {
+  @override
+  bool get needsSessionInitialization => false;
+  int logins = 0;
+  @override
+  Future<List<Assignment>> fetchAssignments() async =>
+      throw StateError('Connection timeout');
+  @override
+  Future<ChaoxingLoginResult> login(
+      {required String account, required String password}) async {
+    logins++;
+    return const ChaoxingLoginResult(success: true);
+  }
+}
+
+class _ColdClient extends ChaoxingLocalClient {
+  final events = <String>[];
+  bool ready = false;
+  @override
+  bool get needsSessionInitialization => !ready;
+  @override
+  Future<ChaoxingLoginResult> login(
+      {required String account, required String password}) async {
+    events.add('login');
+    ready = true;
+    return const ChaoxingLoginResult(success: true);
+  }
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    events.add('fetch');
+    if (!ready) throw StateError('result=false');
+    return [];
+  }
 }

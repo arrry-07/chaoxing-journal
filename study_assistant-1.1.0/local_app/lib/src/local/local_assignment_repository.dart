@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/assignment.dart';
+import '../models/course.dart';
 
 class LocalAssignmentRepository {
   static const _key = 'chaoxing_journal_v2';
@@ -10,6 +11,30 @@ class LocalAssignmentRepository {
   static const _oldItems = 'local_assignments';
   static const _oldSync = 'local_last_sync_at';
   static const _oldHidden = 'local_hidden_completed_assignment_ids';
+
+  String? recoveryWarning;
+  Future<List<CourseRef>> loadCourses() async {
+    final p = await SharedPreferences.getInstance();
+    return (jsonDecode(p.getString('course_refs') ?? '[]') as List)
+        .map((j) => CourseRef.fromJson(j as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> saveCourses(List<CourseRef> courses) async {
+    final p = await SharedPreferences.getInstance();
+    if (!await p.setString(
+        'course_refs', jsonEncode(courses.map((c) => c.toJson()).toList()))) {
+      throw StateError('课程保存失败');
+    }
+  }
+
+  Future<List<Assignment>> loadHiddenAssignments() => _serialized(() async {
+        final state = await _read();
+        return state.byId.values
+            .where((a) => state.hidden.contains(a.id))
+            .toList()
+          ..sort(Assignment.compareByDeadline);
+      });
 
   Future<void> _tail = Future.value();
 
@@ -60,7 +85,18 @@ class LocalAssignmentRepository {
 
   Future<void> clear() => _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
-        for (final key in [_oldItems, _oldHidden, _oldSync, _key]) {
+        for (final key in [
+          'sync_attempt_at',
+          'sync_data_at',
+          'course_refs',
+          'unfollowed_courses',
+          _oldItems,
+          _oldHidden,
+          _oldSync,
+          _key,
+          '${_key}_recovery_backup',
+          '${_key}_recovery_backups'
+        ]) {
           await prefs.remove(key);
         }
       });
@@ -68,10 +104,36 @@ class LocalAssignmentRepository {
   Future<_Journal> _read() async {
     final prefs = await SharedPreferences.getInstance();
     final encoded = prefs.getString(_key);
-    if (encoded != null) return _Journal.fromJson(jsonDecode(encoded));
-    final items = (jsonDecode(prefs.getString(_oldItems) ?? '[]') as List)
-        .map((e) => Assignment.fromJson(e as Map<String, dynamic>))
-        .toList();
+    if (encoded != null) {
+      try {
+        final decoded = jsonDecode(encoded) as Map<String, dynamic>;
+        if (decoded['schemaVersion'] != null && decoded['schemaVersion'] != 1) {
+          throw StateError('本机记录来自较新版本，请升级应用后重试');
+        }
+        final records = decoded['records'] as List;
+        final valid = await _readRecords(records, prefs, encoded);
+        return _Journal(valid, Set<String>.from(decoded['hidden'] as List),
+            DateTime.tryParse(decoded['lastSync'] as String? ?? ''));
+      } on FormatException {
+        await _backupDamaged(prefs, encoded);
+        return _Journal([], {}, null);
+      } on TypeError {
+        await _backupDamaged(prefs, encoded);
+        return _Journal([], {}, null);
+      }
+    }
+    final rawLegacy = prefs.getString(_oldItems) ?? '[]';
+    List<Assignment> items;
+    try {
+      items =
+          await _readRecords(jsonDecode(rawLegacy) as List, prefs, rawLegacy);
+    } on FormatException {
+      await _backupDamaged(prefs, rawLegacy);
+      items = [];
+    } on TypeError {
+      await _backupDamaged(prefs, rawLegacy);
+      items = [];
+    }
     // This was the other provider's unique prefix, including in old hidden IDs.
     bool obsolete(String id) => id.startsWith('snzl:');
     final hidden = (prefs.getStringList(_oldHidden) ?? [])
@@ -101,6 +163,37 @@ class LocalAssignmentRepository {
     return state;
   }
 
+  Future<List<Assignment>> _readRecords(
+      List records, SharedPreferences prefs, String raw) async {
+    final valid = <Assignment>[];
+    for (final record in records) {
+      try {
+        valid.add(Assignment.fromJson(record as Map<String, dynamic>));
+      } on FormatException {
+        await _backupDamaged(prefs, raw);
+      } on TypeError {
+        await _backupDamaged(prefs, raw);
+      }
+    }
+    return valid;
+  }
+
+  Future<void> _backupDamaged(SharedPreferences prefs, String raw) async {
+    final key = '${_key}_recovery_backup';
+    if (!prefs.containsKey(key) && !await prefs.setString(key, raw)) {
+      throw StateError('无法备份损坏记录，已停止写入以保护原数据');
+    }
+    if (prefs.getString(key) != raw) {
+      final additionalKey = '${_key}_recovery_backups';
+      final additional = prefs.getStringList(additionalKey) ?? [];
+      if (!additional.contains(raw) &&
+          !await prefs.setStringList(additionalKey, [...additional, raw])) {
+        throw StateError('无法备份损坏记录，已停止写入以保护原数据');
+      }
+    }
+    recoveryWarning = '部分本机记录无法读取，原始数据已保留备份；请重新同步作业。';
+  }
+
   Future<void> _save(_Journal state) async {
     final prefs = await SharedPreferences.getInstance();
     if (!await prefs.setString(_key, jsonEncode(state.toJson()))) {
@@ -115,22 +208,15 @@ class _Journal {
           // The UI reads the full journal, so migrate legacy completion labels
           // into status instead of filtering them only from the pending getter.
           for (final a in records)
-            a.id: _oldCompletedPeerReview(a)
-                ? a.copyWith(status: 'submitted')
-                : a
+            a.id:
+                _oldCompletedPeerReview(a) ? a.copyWith(status: 'submitted') : a
         };
   final Map<String, Assignment> byId;
   final Set<String> hidden;
   DateTime? lastSync;
 
-  factory _Journal.fromJson(Map<String, dynamic> json) => _Journal(
-        (json['records'] as List)
-            .map((e) => Assignment.fromJson(e as Map<String, dynamic>))
-            .toList(),
-        Set<String>.from(json['hidden'] as List),
-        DateTime.tryParse(json['lastSync'] as String? ?? ''),
-      );
   Map<String, dynamic> toJson() => {
+        'schemaVersion': 1,
         'records': byId.values.map((a) => a.toJson()).toList(),
         'hidden': hidden.toList()..sort(),
         'lastSync': lastSync?.toIso8601String(),
@@ -200,6 +286,7 @@ class _Journal {
         if (item.deadlineReadFailed) {
           item = item.copyWith(
               deadlineAt: prior.deadlineAt,
+              deadlineTrusted: prior.deadlineTrusted,
               clearDeadlineAt: prior.deadlineAt == null);
         }
         // An ambiguous response cannot undo a verified submission. Reopening

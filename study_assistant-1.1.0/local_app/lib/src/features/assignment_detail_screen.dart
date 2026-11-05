@@ -88,6 +88,11 @@ class AssignmentDetailScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(assignment.statusLabel),
+                      if (!assignment.deadlineTrusted &&
+                          assignment.deadlineAt != null)
+                        const Text('历史截止时间待确认，不参与日历和提醒'),
+                      if (assignment.deadlineRawText != null)
+                        Text(assignment.deadlineRawText!),
                       if (assignment.deadlineReadFailed &&
                           assignment.deadlineAt != null)
                         Text(assignment.deadlineLabel),

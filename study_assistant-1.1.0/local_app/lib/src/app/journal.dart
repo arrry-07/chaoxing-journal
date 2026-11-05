@@ -9,42 +9,89 @@ class Journal {
   static const sage = Color(0xFFDFE8D8);
   static const rule = Color(0xFFD6D8C9);
   static const berry = Color(0xFF813E53);
+  static const bodyFamily = 'LXGW WenKai Screen';
+  static const titleFamily = bodyFamily;
+  // One bundled handwriting face covers Chinese, Latin and numerals so native
+  // controls and custom text share the same journal voice offline.
+  static const bodyFallback = [bodyFamily];
+  static const display = TextStyle(
+    fontFamily: titleFamily,
+    fontFamilyFallback: bodyFallback,
+    fontSize: 32,
+    fontWeight: FontWeight.w400,
+    height: 1.3,
+    color: ink,
+  );
   static const section = TextStyle(
-    fontFamily: 'JournalTitle',
-    fontSize: 21,
+    fontFamily: bodyFamily,
+    fontSize: 20,
     color: ink,
     fontWeight: FontWeight.w600,
+    height: 1.4,
+  );
+  static const entryTitle = TextStyle(
+    fontFamily: bodyFamily,
+    fontSize: 17,
+    fontWeight: FontWeight.w600,
+    height: 1.4,
+    color: ink,
+  );
+  static const metadata = TextStyle(
+    fontFamily: bodyFamily,
+    fontSize: 14,
+    height: 1.45,
+    color: muted,
+  );
+  static const time = TextStyle(
+    fontFamily: bodyFamily,
+    fontSize: 16,
+    height: 1.5,
+    fontFeatures: [FontFeature.tabularFigures()],
+    color: ink,
   );
 }
 
 class JournalHeading extends StatelessWidget {
-  const JournalHeading(this.title, {super.key, required this.eyebrow});
+  const JournalHeading(this.title,
+      {super.key,
+      required this.eyebrow,
+      this.bookTitle = false,
+      this.trailing,
+      this.trailingWidth = 48});
   final String title;
   final String eyebrow;
+  final bool bookTitle;
+  final Widget? trailing;
+  final double trailingWidth;
   @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            eyebrow,
-            style: const TextStyle(
-              color: Journal.muted,
-              fontSize: 12,
-              letterSpacing: 1.8,
+  Widget build(BuildContext context) => Stack(children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding:
+                  EdgeInsets.only(right: trailing == null ? 0 : trailingWidth),
+              child: Text(
+                eyebrow,
+                style: const TextStyle(
+                  color: Journal.muted,
+                  fontFamily: Journal.bodyFamily,
+                  fontSize: 12,
+                  letterSpacing: 1.6,
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            style: const TextStyle(
-              fontFamily: 'JournalTitle',
-              fontSize: 32,
-              color: Journal.ink,
-              height: 1.4,
+            const SizedBox(height: 4),
+            Text(
+              title,
+              style: bookTitle
+                  ? Journal.display
+                  : Journal.section.copyWith(fontSize: 28),
             ),
-          ),
-        ],
-      );
+          ],
+        ),
+        if (trailing != null) Positioned(top: 0, right: 0, child: trailing!),
+      ]);
 }
 
 // Draw small margin illustrations in the same pen, keyed to the subject.
@@ -55,12 +102,24 @@ class CourseLabel extends StatelessWidget {
   Widget build(BuildContext context) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          CustomPaint(
-              size: const Size.square(40), painter: _CourseSketch(name)),
+          CourseMark(name, size: 40),
           const SizedBox(width: 8),
           Flexible(child: Text(name)),
         ],
       );
+}
+
+class CourseMark extends StatelessWidget {
+  const CourseMark(this.name, {super.key, this.size = 28});
+  final String name;
+  final double size;
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+      child: SizedBox.square(
+          dimension: size,
+          child: FittedBox(
+              child: CustomPaint(
+                  size: const Size.square(40), painter: _CourseSketch(name)))));
 }
 
 class _CourseSketch extends CustomPainter {

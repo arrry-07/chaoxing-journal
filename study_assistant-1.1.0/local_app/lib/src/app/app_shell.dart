@@ -119,10 +119,12 @@ class StudyAssistantTheme {
       ),
       scaffoldBackgroundColor: Journal.paper,
       useMaterial3: true,
-      fontFamily: 'JournalBody',
+      fontFamily: Journal.bodyFamily,
+      fontFamilyFallback: Journal.bodyFallback,
       dividerColor: Journal.rule,
-      textTheme: ThemeData.light().textTheme.apply(
-            fontFamily: 'JournalBody',
+      textTheme: Typography.material2021().black.apply(
+            fontFamily: Journal.bodyFamily,
+            fontFamilyFallback: Journal.bodyFallback,
             bodyColor: Journal.ink,
             displayColor: Journal.ink,
           ),
@@ -131,6 +133,7 @@ class StudyAssistantTheme {
         elevation: 0,
         backgroundColor: Journal.paper,
         foregroundColor: Journal.ink,
+        titleTextStyle: Journal.section,
       ),
       cardTheme: CardThemeData(
         color: Journal.sheet,
@@ -152,6 +155,18 @@ class StudyAssistantTheme {
       navigationBarTheme: const NavigationBarThemeData(
         backgroundColor: Journal.sheet,
         indicatorColor: Journal.sage,
+        labelTextStyle: WidgetStatePropertyAll(TextStyle(
+          fontFamily: Journal.bodyFamily,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: Journal.ink,
+        )),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: Journal.sheet,
+        titleTextStyle: Journal.section,
+        contentTextStyle: Journal.metadata.copyWith(color: Journal.ink),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
     );
   }

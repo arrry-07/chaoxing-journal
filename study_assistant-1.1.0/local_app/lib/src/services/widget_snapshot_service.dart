@@ -5,6 +5,7 @@ import 'package:home_widget/home_widget.dart';
 import '../app/app_deep_links.dart';
 import '../models/widget_snapshot.dart';
 import '../models/assignment.dart';
+import 'assignment_query.dart';
 
 class WidgetSnapshotService {
   static const _groupId = 'group.com.example.studyassistant';
@@ -25,8 +26,14 @@ class WidgetSnapshotService {
 
   Future<void> saveAssignments(List<Assignment> assignments) {
     final now = DateTime.now();
-    final pending = assignments.where((a) => !a.isCompleted).toList()
-      ..sort(Assignment.compareByDeadline);
+    final groups = AssignmentQuery.home(assignments, now, {});
+    final pending = [
+      ...groups.near,
+      ...groups.uncertain,
+      ...groups.noDeadline,
+      ...groups.far,
+      ...groups.overdue
+    ];
     final items = pending
         .take(6)
         .map(
@@ -34,11 +41,17 @@ class WidgetSnapshotService {
             assignmentId: assignment.id,
             title: assignment.title,
             courseName: assignment.courseName,
-            deadlineAt: assignment.deadlineAt,
-            remainingText: assignment.deadlineAt == null
-                ? assignment.deadlineLabel
-                : _remainingText(assignment.deadlineAt!, now),
-            urgencyLevel: _urgencyLevel(assignment.deadlineAt, now),
+            deadlineAt:
+                assignment.deadlineTrusted ? assignment.deadlineAt : null,
+            remainingText: !assignment.deadlineTrusted
+                ? assignment.deadlineAt == null
+                    ? assignment.deadlineLabel
+                    : '截止待确认'
+                : assignment.deadlineAt == null
+                    ? assignment.deadlineLabel
+                    : _remainingText(assignment.deadlineAt!, now),
+            urgencyLevel: _urgencyLevel(
+                assignment.deadlineTrusted ? assignment.deadlineAt : null, now),
             deepLinkUrl: AppDeepLinks.assignmentUri(assignment.id),
           ),
         )

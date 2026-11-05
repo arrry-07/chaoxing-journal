@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安装与使用指南
+    url: https://github.com/arrry-07/chaoxing-journal/blob/main/docs/guides/安装与使用.md
+    about: 先查看安装、覆盖升级、同步与提醒说明。
+  - name: 私密报告安全问题
+    url: https://github.com/arrry-07/chaoxing-journal/security/advisories/new
+    about: 请勿在公开问题中发布凭据或真实个人数据。

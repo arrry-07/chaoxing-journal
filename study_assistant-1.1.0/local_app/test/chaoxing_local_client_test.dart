@@ -3,6 +3,92 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 
 void main() {
+  test('explicit logged-out JSON is an authentication error even with cookies',
+      () async {
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: o.uri.path == '/v11/loginregister'
+                ? {'status': true}
+                : o.uri.path == '/mycourse/backclazzdata'
+                    ? {'result': false, 'msg': '请先登录'}
+                    : '',
+            headers: Headers.fromMap({
+              'set-cookie': ['UID=dummy; Domain=chaoxing.com; Path=/']
+            })));
+      }));
+    final client = ChaoxingLocalClient(dio: dio);
+    await client.login(account: 'dummy', password: 'dummy');
+    await expectLater(client.fetchAssignments(),
+        throwsA(isA<ChaoxingAuthenticationException>()));
+  });
+  test('login preserves tracked activities for the authenticated retry',
+      () async {
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: o.uri.path == '/v11/loginregister' ? {'status': true} : ''));
+      }));
+    final client = ChaoxingLocalClient(dio: dio)
+      ..trackedActivityIds = {'cx:activity:1'};
+    await client.login(account: 'dummy', password: 'dummy');
+    expect(client.trackedActivityIds, {'cx:activity:1'});
+  });
+  test('host-only cookies stay scoped and expired cookies are removed',
+      () async {
+    final sent = <String, String>{};
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        sent[o.uri.host] = o.headers['Cookie']?.toString() ?? '';
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: o.uri.path == '/v11/loginregister'
+                ? {'status': true, 'url': 'https://sso.chaoxing.com/login'}
+                : '',
+            headers: Headers.fromMap({
+              'set-cookie': o.uri.host == 'passport2-api.chaoxing.com'
+                  ? [
+                      'private=secret; Path=/',
+                      'shared=ok; Domain=chaoxing.com; Path=/',
+                      'gone=no; Domain=chaoxing.com; Max-Age=0; Path=/'
+                    ]
+                  : []
+            })));
+      }));
+    await ChaoxingLocalClient(dio: dio)
+        .login(account: 'dummy', password: 'dummy');
+    expect(sent['sso.chaoxing.com'], contains('shared=ok'));
+    expect(sent['sso.chaoxing.com'], isNot(contains('private=')));
+    expect(sent['sso.chaoxing.com'], isNot(contains('gone=')));
+  });
+  test('login does not send session to an unrelated redirect host', () async {
+    final hosts = <String>[];
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        hosts.add(o.uri.host);
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: o.uri.path == '/v11/loginregister'
+                ? {
+                    'status': true,
+                    'url': 'https://chaoxing.com.example.org/collect'
+                  }
+                : '',
+            headers: Headers.fromMap({
+              'set-cookie': ['UID=dummy; Path=/']
+            })));
+      }));
+    final result = await ChaoxingLocalClient(dio: dio)
+        .login(account: 'dummy', password: 'dummy');
+    expect(result.success, isTrue);
+    expect(hosts, isNot(contains('chaoxing.com.example.org')));
+  });
   test(
       'reads same-name classes separately with course signatures and a per-work detail link',
       () async {
@@ -59,8 +145,8 @@ void main() {
     expect(work.first.deadlineAt!.toUtc(), DateTime.utc(2027, 1, 2, 4));
     expect(work.last.status, 'reviewing');
     expect(work.last.deadlineAt, isNull);
-    expect(work.last.deadlineReadFailed, isTrue);
-    expect(client.lastSyncWarning, contains('22'));
+    expect(work.last.deadlineReadFailed, isFalse);
+    expect(client.lastSyncWarning, isNull);
   });
 
   test('confirmed empty work list succeeds but permission and login pages fail',
@@ -133,7 +219,9 @@ void main() {
                   statusCode: 200,
                   data: 'ok',
                   headers: Headers.fromMap({
-                    'set-cookie': ['UID=998877; Path=/; HttpOnly'],
+                    'set-cookie': [
+                      'UID=998877; Domain=.chaoxing.com; Path=/; HttpOnly'
+                    ],
                   }),
                 ),
               );
@@ -225,16 +313,16 @@ void main() {
                   statusCode: 200,
                   data: {
                     'msg': {
-                      'name': '郜小展',
-                      'nick': '郜小展',
-                      'uid': 354629555,
-                      'puid': 402733611,
-                      'pic': 'http://photo.chaoxing.com/p/402733611_120?flag=1',
+                      'name': '样例同学',
+                      'nick': '样例同学',
+                      'uid': 100001,
+                      'puid': 200002,
+                      'pic': 'http://photo.chaoxing.com/p/200002_120?flag=1',
                     },
                     'status': true,
                   },
                   headers: Headers.fromMap({
-                    'set-cookie': ['UID=354629555; Path=/; HttpOnly'],
+                    'set-cookie': ['UID=100001; Path=/; HttpOnly'],
                   }),
                 ),
               );
@@ -253,7 +341,7 @@ void main() {
               return;
             }
             if (options.uri.host == 'photo.chaoxing.com') {
-              expect(options.uri.path, '/p/402733611_120');
+              expect(options.uri.path, '/p/200002_120');
               expect(options.uri.queryParameters['flag'], '1');
               expect(options.uri.queryParameters['psize'], '160_160c');
               expect(options.uri.queryParameters['ext'], 'png');
@@ -263,7 +351,7 @@ void main() {
                   statusCode: 302,
                   headers: Headers.fromMap({
                     'location': [
-                      'https://p.cldisk.com/star3/160_160c/05055cacb0d79d5f723c99d1beca393a.png',
+                      'https://p.cldisk.com/star3/160_160c/sample-avatar.png',
                     ],
                   }),
                 ),
@@ -285,10 +373,10 @@ void main() {
     final result = await client.login(account: 'student', password: 'password');
 
     expect(result.success, isTrue);
-    expect(result.displayName, '郜小展');
+    expect(result.displayName, '样例同学');
     expect(
       result.avatarUrl,
-      'https://p.cldisk.com/star3/160_160c/05055cacb0d79d5f723c99d1beca393a.png',
+      'https://p.cldisk.com/star3/160_160c/sample-avatar.png',
     );
   });
 }

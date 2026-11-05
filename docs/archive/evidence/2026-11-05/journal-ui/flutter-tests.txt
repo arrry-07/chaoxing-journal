@@ -1,0 +1,399 @@
+00:00 +0: loading D:/campus-tools/app/test/android_manifest_test.dart
+00:00 +0: D:/campus-tools/app/test/android_manifest_test.dart: Android manifest declares internet permission for local Chaoxing login
+00:00 +1: D:/campus-tools/app/test/android_manifest_test.dart: Android manifest declares scheduled notification boot recovery
+00:00 +2: D:/campus-tools/app/test/android_manifest_test.dart: Android manifest declares exact alarm permission for timely reminders
+00:00 +3: D:/campus-tools/app/test/android_manifest_test.dart: local notifications prefer exact alarm scheduling
+00:00 +4: D:/campus-tools/app/test/android_manifest_test.dart: Android host exposes reminder permission settings actions
+00:00 +5: D:/campus-tools/app/test/android_manifest_test.dart: Android host can open downloaded apk updates
+00:00 +6: D:/campus-tools/app/test/android_manifest_test.dart: Android FileProvider exposes update apk cache directory
+00:00 +7: D:/campus-tools/app/test/app_deep_links_test.dart: normalizes legacy widget assignment deep links
+00:00 +8: D:/campus-tools/app/test/app_deep_links_test.dart: normalizes canonical assignment deep links
+00:00 +9: D:/campus-tools/app/test/app_deep_links_test.dart: keeps internal app locations untouched
+00:00 +10: D:/campus-tools/app/test/app_deep_links_test.dart: redirects legacy exam links to assignments
+00:00 +11: D:/campus-tools/app/test/app_deep_links_test.dart: builds canonical assignment widget uri
+00:00 +12: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:00 +12: D:/campus-tools/app/test/app_update_service_test.dart: finds newer GitHub release apk asset
+[UpdateCheck] checkForUpdate called, current=1.0.6
+[UpdateCheck] GitHub API status: 200
+[UpdateCheck] Remote tag: v1.0.7
+[UpdateCheck] Remote version: 1.0.7, Current: 1.0.6
+[UpdateCheck] Update found! version=1.0.7
+00:00 +13: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:00 +13: D:/campus-tools/app/test/app_update_service_test.dart: ignores release when remote version is not newer
+[UpdateCheck] checkForUpdate called, current=1.0.6
+[UpdateCheck] GitHub API status: 200
+[UpdateCheck] Remote tag: v1.0.6
+[UpdateCheck] Remote version: 1.0.6, Current: 1.0.6
+[UpdateCheck] Remote version not newer
+00:00 +14: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:00 +15: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:00 +16: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +17: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +18: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +19: D:/campus-tools/app/test/app_shell_test.dart: bottom navigation uses assignments calendar stats and profile
+00:01 +20: D:/campus-tools/app/test/assignment_store_auto_sync_test.dart: cold session authenticates before requesting courses
+00:01 +21: D:/campus-tools/app/test/assignment_store_auto_sync_test.dart: network failure does not trigger credential login
+00:01 +22: D:/campus-tools/app/test/assignment_store_auto_sync_test.dart: partial sync attempt cools down repeated foreground refresh
+00:01 +23: D:/campus-tools/app/test/assignment_store_auto_sync_test.dart: auto sync updates changed deadlines and reschedules reminders
+00:01 +24: D:/campus-tools/app/test/assignment_store_auto_sync_test.dart: custom auto sync interval is saved and used by due checks
+00:01 +25: D:/campus-tools/app/test/assignment_store_login_test.dart: authentication returns while homework remains blocked
+00:01 +26: D:/campus-tools/app/test/assignment_store_login_test.dart: login marks session authenticated even when first assignment sync fails
+00:01 +27: D:/campus-tools/app/test/assignment_store_login_test.dart: restores account after upgrade from shuniZuilingSchoolUserLocalId,shuniZuilingPassword,shuniZuilingSchoolCode
+00:01 +28: D:/campus-tools/app/test/assignment_store_login_test.dart: restores account after upgrade from chaoxingAccount,chaoxingPassword,shuniZuilingSchoolUserLocalId
+00:01 +29: D:/campus-tools/app/test/assignment_store_login_test.dart: restores account after upgrade from chaoxingAccount,chaoxingPassword
+00:01 +30: D:/campus-tools/app/test/assignment_store_login_test.dart: refreshing Chaoxing session saves recovered profile data
+00:02 +31: D:/campus-tools/app/test/assignment_store_reminder_test.dart: saveReminderRule persists custom offsets and reschedules assignments
+00:02 +32: D:/campus-tools/app/test/assignment_store_sync_test.dart: failed formal work never requests activities; legacy remains in records
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+00:02 +33: D:/campus-tools/app/test/assignment_store_sync_test.dart: partial course sync retains old work and last successful sync time
+00:02 +34: D:/campus-tools/app/test/assignment_store_sync_test.dart: overlapping refreshes share one fetch and logout clears its result
+00:02 +35: D:/campus-tools/app/test/assignment_store_sync_test.dart: syncAssignments stores Chaoxing homework
+00:02 +36: D:/campus-tools/app/test/assignment_store_sync_test.dart: failed sync preserves cached Chaoxing homework
+00:02 +37: D:/campus-tools/app/test/assignment_store_visibility_test.dart: visibleAssignments only contains unfinished assignments
+00:02 +38: D:/campus-tools/app/test/browser_verification_test.dart: browser verification imports only trusted session cookies and does not claim data success
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=false
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=false
+00:02 +39: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: parses backclazzdata course list
+00:02 +40: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: parses active list homework items into assignments
+00:02 +41: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: parses active list exams into assignment items
+00:02 +42: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: emits submitted peer review to clear cached pending work
+00:02 +43: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: keeps numeric activity lifecycle status unknown
+00:02 +44: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: keeps peer review homework when description asks to complete review
+00:02 +45: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: parses ISO UTC homework deadline as local time
+00:02 +46: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: an exam start in the past does not establish personal submission
+00:02 +47: D:/campus-tools/app/test/chaoxing_api_parser_test.dart: parses exams that only provide start time
+00:03 +48: D:/campus-tools/app/test/chaoxing_assignment_parser_test.dart: parses Chaoxing work HTML into local assignments
+00:03 +49: D:/campus-tools/app/test/chaoxing_assignment_parser_test.dart: parses Chaoxing stu-work nav items with remaining time
+00:03 +50: D:/campus-tools/app/test/chaoxing_assignment_parser_test.dart: keeps unfinished peer review work and skips completed peer review work
+00:03 +51: D:/campus-tools/app/test/chaoxing_assignment_parser_test.dart: keeps peer review work when description asks to complete review
+00:03 +52: D:/campus-tools/app/test/chaoxing_local_client_test.dart: explicit logged-out JSON is an authentication error even with cookies
+00:03 +53: D:/campus-tools/app/test/chaoxing_local_client_test.dart: login preserves tracked activities for the authenticated retry
+00:03 +54: D:/campus-tools/app/test/chaoxing_local_client_test.dart: host-only cookies stay scoped and expired cookies are removed
+[SyncTerminal] host=sso.chaoxing.com route=*/login status=200
+00:03 +55: D:/campus-tools/app/test/chaoxing_local_client_test.dart: login does not send session to an unrelated redirect host
+00:03 +56: D:/campus-tools/app/test/chaoxing_local_client_test.dart: reads same-name classes separately with course signatures and a per-work detail link
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+[SyncTerminal] host=mooc1.chaoxing.com route=*/work/task status=200
+[DeadlineRead] status=200 bytes=40 startAnchor=false exact=true noLimit=false missingYear=false notOpen=false
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+00:03 +57: D:/campus-tools/app/test/chaoxing_local_client_test.dart: confirmed empty work list succeeds but permission and login pages fail
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+00:03 +58: D:/campus-tools/app/test/chaoxing_local_client_test.dart: login follows Chaoxing redirect before resolving profile name and avatar
+[SyncTerminal] host=sso.chaoxing.com route=*/login status=200
+00:03 +59: D:/campus-tools/app/test/chaoxing_local_client_test.dart: extracts Chaoxing profile from nested SSO msg payload
+[SyncTerminal] host=sso.chaoxing.com route=*/apis/login/userLogin4Uname.do status=200
+00:03 +60: D:/campus-tools/app/test/course_redirect_test.dart: legacy HTTP course redirect is upgraded before session is sent
+[SyncShape] stage=coursePage status=302 workEnc=false captchaLibrary=false challenge=false
+[SyncRedirect] legacyHttp=true trusted=true
+[SyncTerminal] host=mooc1-1.chaoxing.com route=*/mycourse/studentcourse status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+00:03 +61: D:/campus-tools/app/test/deadline_consumers_test.dart: snapshot uses extended date and ranks undated work last
+00:03 +62: D:/campus-tools/app/test/deadline_consumers_test.dart: extension replaces same ID and removed deadline cancels reminder
+00:04 +63: D:/campus-tools/app/test/deadline_evidence_test.dart: same-work absolute start anchors year only when displayed start matches
+00:04 +64: D:/campus-tools/app/test/deadline_evidence_test.dart: details distinguish exact dates, no-limit, ambiguous years and invalid dates
+00:04 +65: D:/campus-tools/app/test/deadline_hydration_test.dart: detail authentication expiry retains fresh rows and stops later reads
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=2 total=2
+00:04 +66: D:/campus-tools/app/test/deadline_hydration_test.dart: detail challenge with unread courses cannot claim detail-only failure
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+00:04 +67: D:/campus-tools/app/test/deadline_hydration_test.dart: HTTP200 permission page is forbidden rather than unknown schema
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+[SyncTerminal] host=mooc1.chaoxing.com route=*/work/task status=200
+00:04 +68: D:/campus-tools/app/test/deadline_hydration_test.dart: not-open detail reports its actual boundary without inventing cutoff
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+[SyncTerminal] host=mooc1.chaoxing.com route=*/work/task status=200
+[DeadlineRead] status=200 bytes=35 startAnchor=true exact=false noLimit=false missingYear=false notOpen=true
+00:04 +69: D:/campus-tools/app/test/deadline_hydration_test.dart: same-work start restores historical cutoff and calendar day
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+[SyncTerminal] host=mooc1.chaoxing.com route=*/work/task status=200
+[DeadlineRead] status=200 bytes=30 startAnchor=true exact=true noLimit=false missingYear=false notOpen=false
+00:04 +70: D:/campus-tools/app/test/deadline_hydration_test.dart: SyncIssueKind.network retains new work and the previously verified deadline
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+00:04 +71: D:/campus-tools/app/test/deadline_hydration_test.dart: SyncIssueKind.forbidden retains new work and the previously verified deadline
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+00:04 +72: D:/campus-tools/app/test/deadline_hydration_test.dart: only explicit unlimited detail clears a previous date
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+[SyncTerminal] host=mooc1.chaoxing.com route=*/work/task status=200
+[DeadlineRead] status=200 bytes=7 startAnchor=true exact=false noLimit=true missingYear=false notOpen=false
+00:04 +73: D:/campus-tools/app/test/deadline_hydration_test.dart: challenge stops remaining details without discarding list rows
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=2 total=2
+00:04 +74: D:/campus-tools/app/test/deadline_hydration_test.dart: known list timestamps and completed work avoid detail requests
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=2 total=2
+00:04 +75: D:/campus-tools/app/test/deadline_hydration_test.dart: mismatched year remains visible and excluded from calendar
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+[SyncTerminal] host=mooc1.chaoxing.com route=*/work/task status=200
+[DeadlineRead] status=200 bytes=30 startAnchor=true exact=false noLimit=false missingYear=true notOpen=false
+00:04 +76: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:04 +77: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:04 +77: D:/campus-tools/app/test/experience_boundaries_test.dart: unrecognized course entries count as failed and have an issue
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+00:04 +78: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:04 +79: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:04 +80: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:04 +81: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:04 +82: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:04 +83: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:04 +84: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:05 +85: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:05 +86: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:05 +87: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:05 +87: D:/campus-tools/app/test/fanyav3_invalid_data_test.dart: formal work rejects negativeTotal instead of complete success
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+00:05 +88: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:05 +88: D:/campus-tools/app/test/fanyav3_invalid_data_test.dart: formal work rejects wrongClass instead of complete success
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+00:05 +89: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:05 +89: D:/campus-tools/app/test/fanyav3_invalid_data_test.dart: formal work rejects tooManyRows instead of complete success
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+00:05 +90: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:05 +90: D:/campus-tools/app/test/fanyav3_navigation_test.dart: fanyav3 uses server-provided signed formal homework navigation
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=true
+[SyncNavShape] ok=true paths=*/mooc2/work/list
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+00:05 +91: D:/campus-tools/app/test/deadline_ui_test.dart: undated returned work remains readable without date or countdown
+00:05 +92: D:/campus-tools/app/test/experience_ui_test.dart: history folds and unknown work never takes next recommendation
+00:05 +92: D:/campus-tools/app/test/fanyav3_request_budget_test.dart: confirmed V3 session reads each next formal list without repeating page and navigation requests
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=0 total=0
+[SyncFormal] status=200 page=1 rows=0 total=0
+[SyncFormal] status=200 page=1 rows=0 total=0
+00:06 +93: D:/campus-tools/app/test/experience_ui_test.dart: history folds and unknown work never takes next recommendation
+00:06 +93: D:/campus-tools/app/test/fanyav3_work_api_test.dart: fanyav3 formal homework API keeps submitted and unknown distinct, follows all pages
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+00:06 +94: D:/campus-tools/app/test/fanyav3_work_api_test.dart: fanyav3 formal homework API keeps submitted and unknown distinct, follows all pages
+[SyncFormal] status=200 page=1 rows=1 total=2
+[SyncFormal] status=200 page=2 rows=1 total=2
+00:06 +95: D:/campus-tools/app/test/home_classification_test.dart: home separates confirmed no deadline from unknown and failed dates
+00:06 +96: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:06 +97: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:06 +98: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +99: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +100: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +101: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +102: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +103: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +104: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +105: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +106: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +107: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +108: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +109: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +110: D:/campus-tools/app/test/home_redesign_test.dart: expanded cards share exact list bounds and keep numeric course titles
+00:07 +111: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:07 +112: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:07 +113: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +114: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +115: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +116: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +117: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +118: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +119: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +120: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +121: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +122: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +123: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +124: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +125: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +126: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +127: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:08 +128: D:/campus-tools/app/test/journal_flow_test.dart: profile opens settings, saves changes and returns
+00:09 +129: D:/campus-tools/app/test/login_screen_test.dart: shows the learning account and password fields
+00:09 +130: D:/campus-tools/app/test/login_screen_test.dart: shows the learning account and password fields
+00:09 +131: D:/campus-tools/app/test/nov_product_states_test.dart: failed first sync never claims cached or empty success
+00:09 +132: D:/campus-tools/app/test/nov_product_states_test.dart: failed first sync never claims cached or empty success
+00:09 +133: D:/campus-tools/app/test/profile_pages_test.dart: help contains offline guidance and a credential-free feedback template
+00:09 +134: D:/campus-tools/app/test/profile_pages_test.dart: help contains offline guidance and a credential-free feedback template
+00:10 +135: D:/campus-tools/app/test/profile_pages_test.dart: help contains offline guidance and a credential-free feedback template
+00:10 +136: D:/campus-tools/app/test/profile_screen_test.dart: source open is an independent labeled button
+00:10 +137: D:/campus-tools/app/test/profile_screen_test.dart: source open is an independent labeled button
+00:10 +138: D:/campus-tools/app/test/profile_screen_test.dart: source open is an independent labeled button
+00:10 +139: D:/campus-tools/app/test/profile_screen_test.dart: source open is an independent labeled button
+00:10 +140: D:/campus-tools/app/test/profile_screen_test.dart: source open is an independent labeled button
+00:10 +141: D:/campus-tools/app/test/profile_screen_test.dart: source open is an independent labeled button
+00:10 +142: D:/campus-tools/app/test/profile_screen_test.dart: source open is an independent labeled button
+00:10 +143: D:/campus-tools/app/test/profile_screen_test.dart: source open is an independent labeled button
+00:10 +144: D:/campus-tools/app/test/profile_screen_test.dart: source open is an independent labeled button
+00:10 +145: D:/campus-tools/app/test/profile_screen_test.dart: source open is an independent labeled button
+00:10 +146: D:/campus-tools/app/test/profile_pages_test.dart: records keep other sources separate and restore hidden work
+00:10 +147: D:/campus-tools/app/test/reminder_settings_screen_test.dart: shows permission controls needed for reminders
+00:10 +147: D:/campus-tools/app/test/sync_regression_nov_test.dart: normal signed course page can include captcha library without a challenge
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=true challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+00:10 +148: D:/campus-tools/app/test/reminder_settings_screen_test.dart: shows permission controls needed for reminders
+00:10 +149: D:/campus-tools/app/test/reminder_settings_screen_test.dart: shows permission controls needed for reminders
+00:10 +149: D:/campus-tools/app/test/sync_regression_nov_test.dart: login completes every trusted SSO redirect before returning
+[SyncRedirect] legacyHttp=false trusted=true
+[SyncTerminal] host=i.chaoxing.com route=*/sso/end status=200
+00:10 +150: D:/campus-tools/app/test/reminder_settings_screen_test.dart: shows permission controls needed for reminders
+00:10 +151: D:/campus-tools/app/test/reminder_settings_screen_test.dart: shows permission controls needed for reminders
+00:11 +152: D:/campus-tools/app/test/reminder_settings_screen_test.dart: shows permission controls needed for reminders
+00:11 +153: D:/campus-tools/app/test/reminder_settings_screen_test.dart: shows permission controls needed for reminders
+00:11 +154: D:/campus-tools/app/test/reminder_settings_screen_test.dart: shows permission controls needed for reminders
+00:11 +155: D:/campus-tools/app/test/reminder_settings_screen_test.dart: shows permission controls needed for reminders
+00:11 +156: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:11 +157: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:11 +158: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:11 +159: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:12 +160: D:/campus-tools/app/test/sync_status_screen_test.dart: renders auto sync interval choices as compact option tiles
+00:12 +161: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +162: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +163: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +164: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +165: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +166: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +167: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +168: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +169: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +170: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +171: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +172: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +172: D:/campus-tools/app/test/v3_deadline_detail_test.dart: V3 0 is not no-limit: fetch original detail URL for exact cutoff
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+[SyncTerminal] host=mooc1.chaoxing.com route=*/work/task status=200
+[DeadlineRead] status=200 bytes=40 startAnchor=false exact=true noLimit=false missingYear=false notOpen=false
+00:12 +173: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +173: D:/campus-tools/app/test/v3_deadline_detail_test.dart: V3 null is not no-limit: fetch original detail URL for exact cutoff
+[SyncShape] stage=coursePage status=200 workEnc=false captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=false vue=true
+[SyncNavigation] status=200 formalWorkLink=false
+[SyncNavShape] ok=true paths=
+[SyncFormal] status=200 page=1 rows=1 total=1
+[SyncTerminal] host=mooc1.chaoxing.com route=*/work/task status=200
+[DeadlineRead] status=200 bytes=40 startAnchor=false exact=true noLimit=false missingYear=false notOpen=false
+00:12 +174: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +175: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:12 +175: D:/campus-tools/app/test/verification_recovery_test.dart: real antispider redirect stops course batch; only a valid signed probe confirms verification
+[SyncShape] stage=coursePage status=302 workEnc=false captchaLibrary=false challenge=true
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+[SyncShape] stage=coursePage status=200 workEnc=true captchaLibrary=false challenge=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/visit/stucoursemiddle status=200
+[SyncCourse] status=200 signed=true vue=false
+[SyncTerminal] host=mooc1.chaoxing.com route=*/mooc2/work/list status=200
+00:12 +176: D:/campus-tools/app/test/ui_evidence_test.dart: sample UI evidence at narrow and large font sizes
+00:13 +177: D:/campus-tools/app/test/ui_redesign_evidence_test.dart: redesign candidates include real shell, states and text scaling
+00:19 +178: All tests passed!

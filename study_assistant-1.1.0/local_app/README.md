@@ -2,7 +2,7 @@
 
 主入口 `lib/main.dart`。页面在 `lib/src/features`，同步与提醒状态在 `lib/src/services/assignment_store.dart`，学习通客户端/解析器/本机迁移仓库在 `lib/src/local`。Android 原生小组件位于 `android/app/src/main`。
 
-完整说明：[仓库首页](../../README.md)、[需求与验收](../../docs/验收记录.md)。
+完整说明：[仓库首页](../../README.md)、[本轮验收](../../docs/验收.md)、[历史文档](../../docs/README.md)。
 
 ```sh
 flutter pub get

@@ -1,0 +1,3 @@
+00:00 +0: loading D:/campus-tools/app/test/ui_redesign_evidence_test.dart
+00:00 +0: redesign candidates include real shell, states and text scaling
+00:17 +1: All tests passed!

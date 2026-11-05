@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
@@ -13,6 +14,22 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  test('authentication returns while homework remains blocked', () async {
+    final client = _BlockedClient();
+    final store = AssignmentStore(
+        sessionStore: _MemorySessionStore(),
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        chaoxingClient: client);
+    addTearDown(store.dispose);
+    await store
+        .loginChaoxing(
+            account: 'student', password: 'p', agreementAccepted: true)
+        .timeout(const Duration(milliseconds: 500));
+    expect(store.isAuthenticated, isTrue);
+    client.gate.complete([]);
+    await store.syncAssignments();
+  });
   test(
     'login marks session authenticated even when first assignment sync fails',
     () async {
@@ -39,6 +56,7 @@ void main() {
         await store.sessionStore.readChaoxingAvatarUrl(),
         'https://photo.chaoxing.com/p/998877_160',
       );
+      await store.syncAssignments();
       expect(store.error, contains('同步'));
     },
   );
@@ -189,4 +207,12 @@ class _NoopNotificationService extends LocalNotificationService {
 class _NoopWidgetSnapshotService extends WidgetSnapshotService {
   @override
   Future<void> saveAssignments(List<Assignment> assignments) async {}
+}
+
+class _BlockedClient extends _LoginOnlyChaoxingClient {
+  final gate = Completer<List<Assignment>>();
+  @override
+  bool get needsSessionInitialization => false;
+  @override
+  Future<List<Assignment>> fetchAssignments() => gate.future;
 }

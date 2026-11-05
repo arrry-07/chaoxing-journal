@@ -24,5 +24,12 @@
 **/config.json
 **/cookies.json
 **/session.json
+**/session_cookies.json
 **/credentials.json
 **/.DS_Store
+
+# Local delivery APKs and device screenshots may contain user data.
+/artifacts/
+
+# Candidate UI captures stay local until visually reviewed.
+/docs/archive/evidence/2026-11-04/home-stats-redesign/candidates/

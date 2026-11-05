@@ -7,6 +7,9 @@ import '../local/chaoxing_assignment_parser.dart';
 import '../local/chaoxing_local_client.dart';
 import '../local/local_assignment_repository.dart';
 import '../models/assignment.dart';
+import '../models/sync_report.dart';
+import '../models/course.dart';
+import 'assignment_query.dart';
 import 'local_notification_service.dart';
 import 'reminder_rule_store.dart';
 import 'secure_session_store.dart';
@@ -34,6 +37,13 @@ class AssignmentStore extends ChangeNotifier {
   final ChaoxingLocalClient chaoxingClient;
   final ReminderRuleStore reminderRuleStore;
 
+  SyncReport syncReport = const SyncReport();
+  int _generation = 0;
+  bool _disposed = false, _loginRunning = false;
+  String get syncSummary =>
+      _serviceWarnings.isNotEmpty && syncReport.phase == SyncPhase.success
+          ? '作业已更新，提醒或小组件需要处理'
+          : syncReport.summary;
   bool _authenticated = false;
   bool _loading = false;
   bool _agreementAccepted = false;
@@ -51,7 +61,19 @@ class AssignmentStore extends ChangeNotifier {
   bool get isAuthenticated => _authenticated;
   bool get isLoading => _loading;
   bool get agreementAccepted => _agreementAccepted;
-  String? get error => _error;
+  final List<String> _serviceWarnings = [];
+  String? get error {
+    final messages = [_error, repository.recoveryWarning, ..._serviceWarnings]
+        .whereType<String>()
+        .where((s) => s.isNotEmpty)
+        .toSet();
+    return messages.isEmpty ? null : messages.join('；');
+  }
+
+  List<Assignment> _hiddenAssignments = [];
+  List<Assignment> get hiddenAssignments =>
+      List.unmodifiable(_hiddenAssignments);
+  DateTime? _lastSyncAttemptAt;
   String? get account => _account;
   String? get profileAvatarUrl => _chaoxingAvatarUrl;
 
@@ -72,8 +94,28 @@ class AssignmentStore extends ChangeNotifier {
   List<int> get reminderOffsetsMinutes =>
       List.unmodifiable(_reminderOffsetsMinutes);
   List<Assignment> get assignments => List.unmodifiable(_assignments);
+  final Set<String> _unfollowed = {};
+  List<CourseRef> _courses = [];
+  List<CourseRef> get courses => List.unmodifiable(_courses);
+  bool follows(String key) => !_unfollowed.contains(key);
+  List<Assignment> get formalAssignments =>
+      AssignmentQuery.scope(_assignments, {})
+          .where((a) => follows(a.courseKey!))
+          .toList();
   List<Assignment> get visibleAssignments =>
-      _assignments.where((item) => !item.isCompleted).toList(growable: false);
+      formalAssignments.where((a) => !a.isCompleted).toList();
+  Future<void> followCourse(String key, bool followed) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (followed) {
+      _unfollowed.remove(key);
+    } else {
+      _unfollowed.add(key);
+    }
+    await prefs.setStringList('unfollowed_courses', _unfollowed.toList());
+    await _afterAssignmentsChanged();
+    notifyListeners();
+  }
+
   Map<String, dynamic>? get syncStatus => {
         'localOnly': true,
         'lastSyncedAt': _lastSyncAt?.toIso8601String(),
@@ -91,15 +133,29 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> restoreSession() async {
-    _account = await sessionStore.readChaoxingAccount();
-    _chaoxingDisplayName = await sessionStore.readChaoxingDisplayName();
-    _chaoxingAvatarUrl = await sessionStore.readChaoxingAvatarUrl();
-    _authenticated = _account?.trim().isNotEmpty == true;
-    _needsProfileRecovery = _authenticated &&
-        (_chaoxingDisplayName == null || _chaoxingAvatarUrl == null);
-    _reminderOffsetsMinutes = await reminderRuleStore.loadOffsetsMinutes();
-    _autoSyncIntervalMinutes = await _loadAutoSyncIntervalMinutes();
-    await _reloadJournal();
+    try {
+      _account = await sessionStore.readChaoxingAccount();
+      _chaoxingDisplayName = await sessionStore.readChaoxingDisplayName();
+      _chaoxingAvatarUrl = await sessionStore.readChaoxingAvatarUrl();
+      _authenticated = _account?.trim().isNotEmpty == true;
+      _needsProfileRecovery = _authenticated &&
+          (_chaoxingDisplayName == null || _chaoxingAvatarUrl == null);
+      _reminderOffsetsMinutes = await reminderRuleStore.loadOffsetsMinutes();
+      _autoSyncIntervalMinutes = await _loadAutoSyncIntervalMinutes();
+      final prefs = await SharedPreferences.getInstance();
+      _lastSyncAttemptAt =
+          DateTime.tryParse(prefs.getString('sync_attempt_at') ?? '');
+      final dataAt = DateTime.tryParse(prefs.getString('sync_data_at') ?? '');
+      syncReport = SyncReport(
+          phase: dataAt == null ? SyncPhase.idle : SyncPhase.success,
+          attemptedAt: _lastSyncAttemptAt,
+          lastDataSuccessAt: dataAt);
+      _unfollowed.addAll(prefs.getStringList('unfollowed_courses') ?? []);
+      _courses = await repository.loadCourses();
+      await _reloadJournal();
+    } catch (error) {
+      _error = '本机数据恢复未完成：${_friendlyError(error)}';
+    }
     _restartAutoSyncTimer();
     notifyListeners();
   }
@@ -109,16 +165,21 @@ class AssignmentStore extends ChangeNotifier {
     required String password,
     required bool agreementAccepted,
   }) async {
+    if (_loginRunning) return;
     if (!agreementAccepted) {
       _error = '请先阅读并同意服务协议和隐私协议';
       notifyListeners();
       return;
     }
+    _loginRunning = true;
+    final generation = ++_generation;
+    chaoxingClient.deferProfile = true;
     await _run(() async {
       final result = await chaoxingClient.login(
         account: account,
         password: password,
       );
+      if (generation != _generation) return;
       if (!result.success) {
         throw StateError(result.message ?? '登录失败');
       }
@@ -134,12 +195,40 @@ class AssignmentStore extends ChangeNotifier {
       _agreementAccepted = true;
       _authenticated = true;
       _restartAutoSyncTimer();
-      try {
-        await _syncAssignmentsBody();
-      } catch (error) {
-        _error = _friendlyError(error);
-      }
     });
+    _loginRunning = false;
+    if (_authenticated && generation == _generation) {
+      unawaited(syncAssignments());
+      unawaited(_hydrateProfile(generation));
+    }
+  }
+
+  Future<void> _hydrateProfile(int generation) async {
+    if (!chaoxingClient.canHydrateProfile) return;
+    try {
+      final profile = await chaoxingClient.loadProfile();
+      if (generation != _generation || _disposed || !_authenticated) return;
+      final pending = _operations.then((_) async {
+        if (generation != _generation || _disposed || !_authenticated) return;
+        final password = await sessionStore.readChaoxingPassword();
+        if (password == null || generation != _generation) return;
+        final name = profile.displayName ?? _chaoxingDisplayName;
+        final avatar = profile.avatarUrl ?? _chaoxingAvatarUrl;
+        await sessionStore.saveChaoxingAccount(
+            account: _account!,
+            password: password,
+            displayName: name,
+            avatarUrl: avatar);
+        _chaoxingDisplayName = name;
+        _chaoxingAvatarUrl = avatar;
+        if (!_disposed) notifyListeners();
+      });
+      _operations =
+          pending.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+      await pending;
+    } catch (_) {
+      /* Optional profile loading must not prevent homework access. */
+    }
   }
 
   Future<void>? _syncInFlight;
@@ -171,6 +260,7 @@ class AssignmentStore extends ChangeNotifier {
     _assignments
       ..clear()
       ..addAll(journal);
+    _hiddenAssignments = await repository.loadHiddenAssignments();
     _lastSyncAt = await repository.lastSyncAt();
     await _afterAssignmentsChanged();
   }
@@ -192,10 +282,7 @@ class AssignmentStore extends ChangeNotifier {
       offsetsMinutes,
     );
     _reminderOffsetsMinutes = normalized;
-    await notificationService.rescheduleAssignments(
-      _assignments,
-      offsetsMinutes: _reminderOffsetsMinutes,
-    );
+    await _afterAssignmentsChanged();
     notifyListeners();
   }
 
@@ -216,13 +303,17 @@ class AssignmentStore extends ChangeNotifier {
       return false;
     }
     final currentNow = now ?? DateTime.now();
-    final lastSyncAt = _lastSyncAt;
+    final lastSyncAt = _lastSyncAttemptAt != null &&
+            (_lastSyncAt == null || _lastSyncAttemptAt!.isAfter(_lastSyncAt!))
+        ? _lastSyncAttemptAt
+        : _lastSyncAt;
     if (lastSyncAt != null &&
         currentNow.difference(lastSyncAt).inMinutes <
             _autoSyncIntervalMinutes) {
       return false;
     }
 
+    _lastSyncAttemptAt = currentNow;
     _autoSyncRunning = true;
     try {
       await syncAssignments();
@@ -232,24 +323,35 @@ class AssignmentStore extends ChangeNotifier {
     }
   }
 
-  Future<void> logout() => _run(() async {
-        chaoxingClient.clearSession();
-        await sessionStore.clear();
-        await repository.clear();
-        await reminderRuleStore.clear();
-        _authenticated = false;
-        _account = null;
-        _agreementAccepted = false;
-        _needsProfileRecovery = false;
-        _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
-        _chaoxingDisplayName = null;
-        _chaoxingAvatarUrl = null;
-        _error = null;
-        _assignments.clear();
-        _lastSyncAt = null;
-        _restartAutoSyncTimer();
-        await _afterAssignmentsChanged();
-      });
+  Future<void> logout() {
+    _generation++;
+    return _run(() async {
+      chaoxingClient.clearSession();
+      chaoxingClient.previousAssignments = {};
+      chaoxingClient.trackedActivityIds = {};
+      await sessionStore.clear();
+      await repository.clear();
+      await reminderRuleStore.clear();
+      _authenticated = false;
+      _account = null;
+      _agreementAccepted = false;
+      _needsProfileRecovery = false;
+      _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
+      _chaoxingDisplayName = null;
+      _chaoxingAvatarUrl = null;
+      _error = null;
+      _assignments.clear();
+      _lastSyncAt = null;
+      _lastSyncAttemptAt = null;
+      _hiddenAssignments = [];
+      _courses = [];
+      _unfollowed.clear();
+      syncReport = const SyncReport();
+      repository.recoveryWarning = null;
+      _restartAutoSyncTimer();
+      await _afterAssignmentsChanged();
+    });
+  }
 
   @visibleForTesting
   void replaceAssignmentsForTest(List<Assignment> assignments) {
@@ -259,29 +361,71 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _afterAssignmentsChanged() async {
-    await notificationService.rescheduleAssignments(
-      _assignments,
-      offsetsMinutes: _reminderOffsetsMinutes,
-    );
-    await widgetSnapshotService.saveAssignments(_assignments);
+    _serviceWarnings.clear();
+    try {
+      await notificationService.rescheduleAssignments(
+          formalAssignments.where((a) => a.deadlineTrusted).toList(),
+          offsetsMinutes: _reminderOffsetsMinutes);
+    } catch (_) {
+      _serviceWarnings.add('提醒安排失败，请检查通知权限后重试');
+    }
+    if (notificationService.lastWarning != null) {
+      _serviceWarnings.add(notificationService.lastWarning!);
+    }
+    try {
+      await widgetSnapshotService.saveAssignments(formalAssignments);
+    } catch (_) {
+      _serviceWarnings.add('作业已保存在本机，小组件更新失败，请稍后刷新');
+    }
   }
 
   bool _needsProfileRecovery = false;
 
   Future<void> _syncAssignmentsBody() async {
+    final generation = _generation;
+    final attempted = DateTime.now();
+    syncReport = SyncReport(
+        phase: SyncPhase.running,
+        attemptedAt: attempted,
+        lastDataSuccessAt: syncReport.lastDataSuccessAt,
+        lastFullSuccessAt: _lastSyncAt);
+    notifyListeners();
+    if (!_autoSyncRunning) _lastSyncAttemptAt = DateTime.now();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        'sync_attempt_at', _lastSyncAttemptAt!.toIso8601String());
+    if (chaoxingClient.needsSessionInitialization) {
+      await _refreshChaoxingSession();
+      _needsProfileRecovery = false;
+    }
+    chaoxingClient.previousAssignments = {
+      for (final a in _assignments) a.id: a
+    };
     chaoxingClient.trackedActivityIds = _assignments
         .where((a) => a.id.startsWith('cx:activity:'))
-        .map((a) => a.id).toSet();
+        .map((a) => a.id)
+        .toSet();
     List<Assignment> incoming;
     try {
       incoming = await chaoxingClient.fetchAssignments();
-    } catch (_) {
+    } on ChaoxingAuthenticationException {
       _needsProfileRecovery = false;
       await _refreshChaoxingSession();
       incoming = await chaoxingClient.fetchAssignments();
+    } finally {
+      if (generation == _generation &&
+          !_disposed &&
+          chaoxingClient.hasCourseResponse) {
+        _courses = chaoxingClient.courses
+            .map((c) => CourseRef(
+                courseId: c.courseId, clazzId: c.clazzId, name: c.courseName))
+            .toList();
+        await repository.saveCourses(_courses);
+      }
     }
+    if (generation != _generation || _disposed) return;
     final warning = chaoxingClient.lastSyncWarning;
-    if (_needsProfileRecovery) {
+    if (_needsProfileRecovery && !chaoxingClient.deferProfile) {
       _needsProfileRecovery = false;
       try {
         await _refreshChaoxingSession();
@@ -289,12 +433,23 @@ class AssignmentStore extends ChangeNotifier {
         // Profile recovery is optional after a successful homework fetch.
       }
     }
+    if (generation != _generation || _disposed) return;
     await repository.mergeAndSave(incoming, completeSync: warning == null);
+    syncReport = SyncReport(
+        phase: warning == null ? SyncPhase.success : SyncPhase.partial,
+        attemptedAt: attempted,
+        lastDataSuccessAt: DateTime.now(),
+        lastFullSuccessAt: warning == null ? DateTime.now() : _lastSyncAt,
+        succeededCourses: chaoxingClient.succeededCourses,
+        failedCourses: chaoxingClient.failedCourses,
+        issues: List.of(chaoxingClient.issues));
+    await prefs.setString('sync_data_at', DateTime.now().toIso8601String());
     await _reloadJournal();
     _error = warning;
   }
 
   Future<void> _refreshChaoxingSession() async {
+    final generation = _generation;
     final account = _account ?? await sessionStore.readChaoxingAccount();
     final password = await sessionStore.readChaoxingPassword();
     if (account == null ||
@@ -303,6 +458,9 @@ class AssignmentStore extends ChangeNotifier {
         password.isEmpty) {
       return;
     }
+    // Restored sessions also skip optional profile/avatar requests. A profile
+    // challenge must not prevent the authenticated course request from running.
+    chaoxingClient.deferProfile = true;
     final result = await chaoxingClient.login(
       account: account,
       password: password,
@@ -310,6 +468,7 @@ class AssignmentStore extends ChangeNotifier {
     if (!result.success) {
       throw StateError(result.message ?? '登录失败');
     }
+    if (generation != _generation || _disposed) return;
     _account = account;
     if (result.displayName != null || result.avatarUrl != null) {
       final displayName = result.displayName ??
@@ -368,6 +527,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _execute(Future<void> Function() action) async {
+    if (_disposed) return;
     _loading = true;
     _error = null;
     notifyListeners();
@@ -375,9 +535,27 @@ class AssignmentStore extends ChangeNotifier {
       await action();
     } catch (error) {
       _error = _friendlyError(error);
+      if (syncReport.phase == SyncPhase.running) {
+        syncReport = SyncReport(
+            phase: SyncPhase.failed,
+            attemptedAt: _lastSyncAttemptAt,
+            lastDataSuccessAt: syncReport.lastDataSuccessAt,
+            lastFullSuccessAt: _lastSyncAt,
+            issues: chaoxingClient.issues.isNotEmpty
+                ? List.of(chaoxingClient.issues)
+                : [
+                    error is SyncReadException
+                        ? error.issue
+                        : SyncIssue(
+                            error is ChaoxingAuthenticationException
+                                ? SyncIssueKind.authExpired
+                                : SyncIssueKind.network,
+                            _error!)
+                  ]);
+      }
     } finally {
       _loading = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -404,6 +582,8 @@ class AssignmentStore extends ChangeNotifier {
   @override
   void dispose() {
     _autoSyncTimer?.cancel();
+    _disposed = true;
+    _generation++;
     super.dispose();
   }
 }

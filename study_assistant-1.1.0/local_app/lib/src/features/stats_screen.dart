@@ -1,173 +1,171 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import '../app/journal.dart';
-
-import '../models/assignment.dart';
 import '../services/assignment_store.dart';
+import '../services/assignment_statistics.dart';
+import 'widgets/completion_pie_chart.dart';
 
 class StatsScreen extends StatelessWidget {
   const StatsScreen({super.key, required this.store});
-
   final AssignmentStore store;
-
   @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
+  Widget build(BuildContext context) => AnimatedBuilder(
       animation: store,
       builder: (context, _) {
-        final visible = store.visibleAssignments;
-        final total = store.assignments.length;
-        final completed =
-            store.assignments.where((item) => item.isCompleted).length;
-        final overdue = visible.where((item) => item.isOverdue).length;
-        final percent = total == 0 ? 0.0 : completed / total;
-        final byCourse = _courseCounts(visible);
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-          children: [
-            const JournalHeading('课业统计', eyebrow: 'CAMPUS JOURNAL   /   03'),
-            const SizedBox(height: 18),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(
+        // Use one instant for the overview and each course, including deadlines
+        // that pass while the widget is building.
+        final now = DateTime.now();
+        final records = store.formalAssignments;
+        final stats = AssignmentStatistics(records, now: now);
+        final keys = records.map((a) => a.courseKey!).toSet().toList()..sort();
+        final names = {
+          for (final key in keys)
+            key: records.firstWhere((a) => a.courseKey == key).courseName
+        };
+        Widget legend() => ExcludeSemantics(
+              child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      '已完成 ${(percent * 100).round()}%',
-                      style: Journal.section,
-                    ),
-                    const SizedBox(height: 10),
-                    LinearProgressIndicator(
-                      value: percent,
-                      backgroundColor: Journal.sage,
-                    ),
-                    const SizedBox(height: 12),
-                    _StatRow(label: '已完成', value: completed),
-                    _StatRow(label: '待完成', value: visible.length),
-                    _StatRow(label: '已过期', value: overdue),
-                    _StatRow(
-                        label: '暂无截止时间',
-                        value: visible
-                            .where((item) => item.deadlineAt == null)
-                            .length),
-                    const Divider(),
-                    _StatRow(label: '总计', value: total),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '课程完成情况',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                          ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (byCourse.isEmpty)
-                      const Text('暂无待完成课程')
-                    else
-                      for (final entry in byCourse.entries)
-                        _CourseProgress(
-                          courseName: entry.key,
-                          pendingCount: entry.value,
-                          maxCount: byCourse.values.reduce(math.max),
+                    for (var i = 0; i < 4; i++)
+                      if (i < 3 || stats.unknown > 0)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 9),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 7),
+                                  child: Container(
+                                      width: 9,
+                                      height: 9,
+                                      decoration: BoxDecoration(
+                                          color: CompletionPieChart.colors[i],
+                                          shape: BoxShape.circle)),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                    child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Text(CompletionPieChart.labels[i],
+                                        style: Journal.time),
+                                    const SizedBox(height: 3),
+                                    Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Flexible(
+                                              child: Text(
+                                                  '${stats.counts[i]} 份',
+                                                  style: Journal.metadata)),
+                                          const SizedBox(width: 8),
+                                          Flexible(
+                                              child: Text(
+                                                  '${stats.percentages[i]}%',
+                                                  style: Journal.metadata,
+                                                  textAlign: TextAlign.right)),
+                                        ]),
+                                  ],
+                                )),
+                              ]),
                         ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Map<String, int> _courseCounts(List<Assignment> assignments) {
-    final result = <String, int>{};
-    for (final item in assignments) {
-      result[item.courseName] = (result[item.courseName] ?? 0) + 1;
-    }
-    return Map.fromEntries(
-      result.entries.toList()..sort((a, b) => b.value.compareTo(a.value)),
-    );
-  }
-}
-
-class _StatRow extends StatelessWidget {
-  const _StatRow({required this.label, required this.value});
-
-  final String label;
-  final int value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Expanded(child: Text(label)),
-          Text(
-            '$value',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CourseProgress extends StatelessWidget {
-  const _CourseProgress({
-    required this.courseName,
-    required this.pendingCount,
-    required this.maxCount,
-  });
-
-  final String courseName;
-  final int pendingCount;
-  final int maxCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final value = maxCount == 0 ? 0.0 : pendingCount / maxCount;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 5,
-            child: Text(
-              courseName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          Expanded(
-            flex: 4,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: value,
-                minHeight: 5,
-                backgroundColor: Journal.rule,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Text('$pendingCount'),
-        ],
-      ),
-    );
-  }
+                  ]),
+            );
+        return ListView(
+            key: const PageStorageKey('stats-list'),
+            padding: const EdgeInsets.all(20),
+            children: [
+              const Text('课业统计', style: Journal.section),
+              const SizedBox(height: 8),
+              const Text('当前关注课程 · 本机已读取记录', style: Journal.metadata),
+              const SizedBox(height: 24),
+              if (stats.total == 0)
+                const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Text('暂无可统计的作业', style: Journal.metadata))
+              else ...[
+                if (stats.unknown == stats.total)
+                  const Padding(
+                      padding: EdgeInsets.only(bottom: 16),
+                      child: Text('全部状态待确认', style: Journal.entryTitle)),
+                LayoutBuilder(builder: (context, c) {
+                  final stacked = c.maxWidth < 280 ||
+                      MediaQuery.textScalerOf(context).scale(16) > 22;
+                  return stacked
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                              Center(
+                                  child: CompletionPieChart(statistics: stats)),
+                              const SizedBox(height: 18),
+                              legend(),
+                            ])
+                      : Row(children: [
+                          CompletionPieChart(
+                              statistics: stats,
+                              diameter: (c.maxWidth * .45).clamp(136, 176)),
+                          const SizedBox(width: 20),
+                          Expanded(child: legend()),
+                        ]);
+                }),
+                const SizedBox(height: 16),
+                Text('共 ${stats.total} 份作业', style: Journal.metadata),
+                if (stats.unknown > 0) ...[
+                  const SizedBox(height: 4),
+                  const Text('提交未知记录计入总数，请以学习通实际提交结果为准。',
+                      style: Journal.metadata),
+                ],
+              ],
+              const SizedBox(height: 28),
+              const Divider(height: 1, color: Journal.rule),
+              const SizedBox(height: 24),
+              const Text('各课程待处理', style: Journal.section),
+              const SizedBox(height: 8),
+              if (!records.any((a) => !a.isCompleted))
+                const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Text('当前没有待处理的课程', style: Journal.metadata)),
+              for (final key in keys)
+                Builder(builder: (context) {
+                  final own = AssignmentStatistics(
+                      records.where((a) => a.courseKey == key),
+                      now: now);
+                  if (own.pending + own.expired + own.unknown == 0) {
+                    return const SizedBox.shrink();
+                  }
+                  final same =
+                      keys.where((k) => names[k] == names[key]).toList();
+                  final name =
+                      '${names[key]}${same.length > 1 ? ' · 分组${same.indexOf(key) + 1}' : ''}';
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CourseMark(names[key]!, size: 32),
+                          const SizedBox(width: 12),
+                          Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Text(name, style: Journal.entryTitle),
+                                const SizedBox(height: 6),
+                                Wrap(spacing: 16, runSpacing: 4, children: [
+                                  Text('待完成 ${own.pending} 份',
+                                      style: Journal.metadata),
+                                  Text('已过期 ${own.expired} 份',
+                                      style: Journal.metadata.copyWith(
+                                          color: own.expired > 0
+                                              ? Journal.berry
+                                              : null)),
+                                  if (own.unknown > 0)
+                                    Text('提交未知 ${own.unknown} 份',
+                                        style: Journal.metadata),
+                                ]),
+                              ])),
+                        ]),
+                  );
+                }),
+            ]);
+      });
 }

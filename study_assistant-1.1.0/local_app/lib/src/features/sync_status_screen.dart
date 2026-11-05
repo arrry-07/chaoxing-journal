@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/sync_report.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
 import 'package:intl/intl.dart';
@@ -55,177 +56,205 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                     onPressed: () => context.canPop()
                         ? context.pop()
                         : context.go('/profile'))),
-            body: RefreshIndicator(
-              onRefresh: store.syncAssignments,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  const JournalHeading(
-                    '作业数据同步',
-                    eyebrow: 'CAMPUS JOURNAL   /   SYNC',
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '账号凭证保存在本机安全存储中。登录和同步时，应用直接连接学习通。',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '刷新时会用已保存的账号信息获取学习通作业，并重新安排提醒。',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 16),
-                  Card(
-                    child: ListTile(
-                      leading: Icon(
-                        stale
-                            ? Icons.warning_amber
-                            : Icons.check_circle_outline,
-                      ),
-                      title: Text(stale ? '建议刷新作业数据' : '本地数据较新'),
-                      subtitle: Text(
-                        lastSyncAt == null
-                            ? '尚无完整同步记录'
-                            : '最近完整同步：${DateFormat('M月d日 HH:mm', 'zh_CN').format(lastSyncAt)}',
-                      ),
+            body: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const JournalHeading(
+                  '作业数据同步',
+                  eyebrow: 'CAMPUS JOURNAL   /   SYNC',
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '账号凭证保存在本机安全存储中。登录和同步时，应用直接连接学习通。',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '刷新时会用已保存的账号信息获取学习通作业，并重新安排提醒。',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  child: ListTile(
+                    leading: Icon(
+                      stale ? Icons.warning_amber : Icons.check_circle_outline,
+                    ),
+                    title: Text(store.syncSummary),
+                    subtitle: Text(
+                      lastSyncAt == null
+                          ? '尚无完整同步记录'
+                          : '最近完整同步：${DateFormat('M月d日 HH:mm', 'zh_CN').format(lastSyncAt)}',
                     ),
                   ),
+                ),
+                if (store.syncReport.attemptedAt != null)
+                  Text(
+                      '最后尝试：${DateFormat('M月d日 HH:mm').format(store.syncReport.attemptedAt!)}'),
+                if (store.syncReport.lastDataSuccessAt != null)
+                  Text(
+                      '最近数据成功：${DateFormat('M月d日 HH:mm').format(store.syncReport.lastDataSuccessAt!)}'),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.update,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                '自动同步',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'App 运行或重新打开时会按间隔同步作业和截止时间，提醒会跟着新截止时间更新。',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '同步间隔设置过短会增加耗电量和网络请求次数，建议不要低于 15 分钟。',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _SyncIntervalOption(
+                              key: const ValueKey('auto-sync-option-15'),
+                              label: '15 分钟',
+                              selected: selectedInterval == 15,
+                              enabled: !store.isLoading,
+                              onTap: () => _selectPresetInterval(15),
+                            ),
+                            _SyncIntervalOption(
+                              key: const ValueKey('auto-sync-option-30'),
+                              label: '30 分钟',
+                              selected: selectedInterval == 30,
+                              enabled: !store.isLoading,
+                              onTap: () => _selectPresetInterval(30),
+                            ),
+                            _SyncIntervalOption(
+                              key: const ValueKey('auto-sync-option-60'),
+                              label: '1 小时',
+                              selected: selectedInterval == 60,
+                              enabled: !store.isLoading,
+                              onTap: () => _selectPresetInterval(60),
+                            ),
+                            _SyncIntervalOption(
+                              key: const ValueKey('auto-sync-option-custom'),
+                              label: '自定义',
+                              selected: selectedInterval == -1,
+                              enabled: !store.isLoading,
+                              onTap: () => _customSyncFocus.requestFocus(),
+                            ),
+                            _SyncIntervalOption(
+                              key: const ValueKey('auto-sync-option-off'),
+                              label: '关闭',
+                              selected: selectedInterval == 0,
+                              enabled: !store.isLoading,
+                              onTap: () => _selectPresetInterval(0),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _customSyncController,
+                                focusNode: _customSyncFocus,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  hintText: '自定义分钟数',
+                                  prefixIcon: Icon(Icons.timer_outlined),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            FilledButton(
+                              onPressed: store.isLoading
+                                  ? null
+                                  : _saveCustomSyncInterval,
+                              child: const Text('保存'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: store.isLoading ? null : store.syncAssignments,
+                  icon: const Icon(Icons.sync),
+                  label: Text(store.isLoading ? '正在刷新...' : '刷新作业数据'),
+                ),
+                if (store.syncReport.issues.any((i) =>
+                    i.kind == SyncIssueKind.verificationRequired ||
+                    i.kind == SyncIssueKind.schemaChanged))
+                  FilledButton.icon(
+                      onPressed: store.isLoading
+                          ? null
+                          : () async {
+                              try {
+                                final continued = await store.chaoxingClient
+                                    .verifyInBrowser();
+                                if (continued) await store.syncAssignments();
+                              } catch (_) {
+                                if (context.mounted) {
+                                  _showMessage('验证页面未能打开，请稍后重试');
+                                }
+                              }
+                            },
+                      icon: const Icon(Icons.verified_user_outlined),
+                      label: const Text('完成安全验证')),
+                if (store.syncReport.issues.isNotEmpty)
+                  ExpansionTile(
+                      title: Text('问题明细（${store.syncReport.issues.length}）'),
+                      children: [
+                        for (final issue in store.syncReport.issues)
+                          ListTile(
+                              title: Text(issue.message),
+                              subtitle:
+                                  Text('${issue.stage} · ${issue.kind.name}'))
+                      ]),
+                if (store.error != null) ...[
                   const SizedBox(height: 12),
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(14),
-                      child: Column(
+                      child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.update,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  '自动同步',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium
-                                      ?.copyWith(fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                            ],
+                          Icon(
+                            Icons.info_outline,
+                            color: Theme.of(context).colorScheme.primary,
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'App 运行或重新打开时会按间隔同步作业和截止时间，提醒会跟着新截止时间更新。',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '同步间隔设置过短会增加耗电量和网络请求次数，建议不要低于 15 分钟。',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _SyncIntervalOption(
-                                key: const ValueKey('auto-sync-option-15'),
-                                label: '15 分钟',
-                                selected: selectedInterval == 15,
-                                enabled: !store.isLoading,
-                                onTap: () => _selectPresetInterval(15),
-                              ),
-                              _SyncIntervalOption(
-                                key: const ValueKey('auto-sync-option-30'),
-                                label: '30 分钟',
-                                selected: selectedInterval == 30,
-                                enabled: !store.isLoading,
-                                onTap: () => _selectPresetInterval(30),
-                              ),
-                              _SyncIntervalOption(
-                                key: const ValueKey('auto-sync-option-60'),
-                                label: '1 小时',
-                                selected: selectedInterval == 60,
-                                enabled: !store.isLoading,
-                                onTap: () => _selectPresetInterval(60),
-                              ),
-                              _SyncIntervalOption(
-                                key: const ValueKey('auto-sync-option-custom'),
-                                label: '自定义',
-                                selected: selectedInterval == -1,
-                                enabled: !store.isLoading,
-                                onTap: () => _customSyncFocus.requestFocus(),
-                              ),
-                              _SyncIntervalOption(
-                                key: const ValueKey('auto-sync-option-off'),
-                                label: '关闭',
-                                selected: selectedInterval == 0,
-                                enabled: !store.isLoading,
-                                onTap: () => _selectPresetInterval(0),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: _customSyncController,
-                                  focusNode: _customSyncFocus,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(
-                                    hintText: '自定义分钟数',
-                                    prefixIcon: Icon(Icons.timer_outlined),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              FilledButton(
-                                onPressed: store.isLoading
-                                    ? null
-                                    : _saveCustomSyncInterval,
-                                child: const Text('保存'),
-                              ),
-                            ],
-                          ),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(store.error!)),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: store.isLoading ? null : store.syncAssignments,
-                    icon: const Icon(Icons.sync),
-                    label: Text(store.isLoading ? '正在刷新...' : '刷新作业数据'),
-                  ),
-                  if (store.error != null) ...[
-                    const SizedBox(height: 12),
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              Icons.info_outline,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(child: Text(store.error!)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
                 ],
-              ),
+              ],
             ));
       },
     );

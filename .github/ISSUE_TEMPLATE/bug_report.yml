@@ -1,0 +1,46 @@
+name: 问题反馈
+description: 报告可以复现的安装、同步、提醒或界面问题
+title: "[问题] "
+body:
+  - type: markdown
+    attributes:
+      value: 请先搜索已有问题。不要填写密码、Cookie、会话文件或个人身份资料；安全缺陷请使用 SECURITY.md 中的私密渠道。
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本
+      placeholder: 例如 1.2.7（37），以及是否自行编译
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Android 版本与设备型号
+      placeholder: 无需提供设备序列号或账号
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从哪个页面开始、点击了什么、出现了什么提示？
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: 预期与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏后的截图或错误提示（可选）
+      description: 请移除姓名、手机号、学号、学校/班级标识、头像、Cookie 和带签名链接，不要上传完整本机数据或账号响应。
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已检查内容，不包含密码、会话凭据或未经脱敏的个人资料。
+          required: true

@@ -1,5 +1,17 @@
 import '../models/assignment.dart';
 
+class DeadlineEvidence {
+  const DeadlineEvidence(
+      {this.deadlineAt,
+      this.rawText,
+      this.noLimit = false,
+      this.notOpen = false,
+      this.missingYear = false});
+  final DateTime? deadlineAt;
+  final String? rawText;
+  final bool noLimit, missingYear, notOpen;
+}
+
 class ChaoxingAssignmentParser {
   static List<Assignment> parseWorkHtml(
     String html, {
@@ -296,14 +308,14 @@ class ChaoxingAssignmentParser {
         .firstMatch(raw);
     if (m == null) return null;
     final year = int.tryParse(m[1] ?? '');
+    if (year == null) return null;
     final month = int.parse(m[2]!), day = int.parse(m[3]!);
     final hour = int.parse(m[4]!),
         minute = int.parse(m[5]!),
         second = int.parse(m[6] ?? '0');
     if (hour > 23 || minute > 59 || second > 59) return null;
     DateTime? best;
-    for (final y
-        in year == null ? [now.year - 1, now.year, now.year + 1] : [year]) {
+    for (final y in [year]) {
       final wall = DateTime.utc(y, month, day, hour, minute, second);
       if (wall.month != month || wall.day != day) continue;
       final dt = wall.subtract(const Duration(hours: 8)).toLocal();
@@ -396,15 +408,85 @@ class ChaoxingAssignmentParser {
         : null;
   }
 
-  static DateTime? parseDetailDeadline(String html, {DateTime? now}) {
-    final text =
-        _decodeEntities(_stripTags(html)).replaceAll(RegExp(r'\s+'), ' ');
-    final end = RegExp(
-            r'作答时间\s*[:：]\s*(?:20\d{2}-)?\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}\s*至\s*((?:20\d{2}-)?\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2})')
+  static DateTime? parseDetailDeadline(String html, {DateTime? now}) =>
+      readDetailDeadline(html, now: now).deadlineAt;
+
+  static DeadlineEvidence readDetailDeadline(String html,
+      {DateTime? now, DateTime? startedAt}) {
+    final clean = html
+        .replaceAll(
+            RegExp(r'<(script|style)\b[^>]*>[\s\S]*?</\1>',
+                caseSensitive: false),
+            ' ')
+        .replaceAll(RegExp(r'<!--[\s\S]*?-->'), ' ');
+    final text = _decodeEntities(_stripTags(clean))
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    const token =
+        r'(?:20\d{2}[-/年])?\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?:[:：]\d{2})?';
+    final period = RegExp(
+            '(?:作答时间|答题时间|作业时间)\\s*[:：]?\\s*($token)\\s*(?:至|~|～|—|--)\\s*($token|不限|无截止时间|长期有效)')
+        .firstMatch(text);
+    String? raw;
+    String? start;
+    if (period != null) {
+      raw = period[2];
+      start = period[1];
+    }
+    raw ??= RegExp(
+            '(?:作答截止时间|提交截止时间|答题结束时间|截止时间|截止日期|结束时间)\\s*[:：]?\\s*($token|不限|无截止时间|长期有效)')
         .firstMatch(text)?[1];
-    return end == null
-        ? _extractDeadline(text, now ?? DateTime.now())?.value
-        : _parseChinaTime(end, now ?? DateTime.now());
+    if (raw == null &&
+        RegExp(r'(?:作答时间|答题时间)\s*[:：]?\s*(?:不限|无截止时间|长期有效)').hasMatch(text)) {
+      return const DeadlineEvidence(noLimit: true, rawText: '不限');
+    }
+    if (raw == null) {
+      return text.contains('未开始') || text.contains('尚未开放')
+          ? const DeadlineEvidence(notOpen: true, rawText: '尚未开放')
+          : const DeadlineEvidence();
+    }
+    if (const ['不限', '无截止时间', '长期有效'].contains(raw)) {
+      return DeadlineEvidence(noLimit: true, rawText: raw);
+    }
+    final parts = RegExp(
+            r'^(?:(20\d{2})[-/年])?(\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?$')
+        .firstMatch(raw);
+    if (parts == null) return const DeadlineEvidence();
+    var year = int.tryParse(parts[1] ?? '');
+    if (year == null && start != null) {
+      DateTime? matchedStart;
+      if (RegExp(r'^20\d{2}[-/年]').hasMatch(start)) {
+        matchedStart =
+            _parseChinaTime(start.replaceAll('：', ':'), now ?? DateTime.now());
+      } else if (startedAt != null) {
+        // Only the same work's absolute start can disambiguate a yearless
+        // period. Match the displayed start to the minute in Beijing time;
+        // current date, course term and upload tokens are not evidence.
+        final absoluteStart = startedAt.toUtc().add(const Duration(hours: 8));
+        final visibleStart = _parseChinaTime(
+            '${absoluteStart.year}-$start', now ?? DateTime.now());
+        if (visibleStart != null &&
+            visibleStart.toUtc().millisecondsSinceEpoch ~/ 60000 ==
+                startedAt.toUtc().millisecondsSinceEpoch ~/ 60000) {
+          matchedStart = visibleStart;
+        }
+      }
+      if (matchedStart != null) {
+        year = matchedStart.toUtc().add(const Duration(hours: 8)).year;
+        final candidate = _parseChinaTime(
+            '$year-${parts[2]}-${parts[3]} ${parts[4]}:${parts[5]}:${parts[6] ?? '00'}',
+            now ?? DateTime.now());
+        if (candidate != null && candidate.isBefore(matchedStart)) {
+          year++;
+        }
+      }
+    }
+    if (year == null) return DeadlineEvidence(rawText: raw, missingYear: true);
+    final normalized =
+        '$year-${parts[2]}-${parts[3]} ${parts[4]}:${parts[5]}:${parts[6] ?? '00'}';
+    return DeadlineEvidence(
+        deadlineAt: _parseChinaTime(normalized, now ?? DateTime.now()),
+        rawText: raw);
   }
 
   static int? _firstInt(String text, RegExp pattern) {
