@@ -1,3 +1,4 @@
+import '../features/widgets/update_scope.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -46,48 +47,52 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final location = GoRouterState.of(context).matchedLocation;
     return Scaffold(
       body: SafeArea(bottom: false, child: widget.child),
-      bottomNavigationBar: NavigationBar(
-        height: 76,
-        selectedIndex: _indexFor(location),
-        onDestinationSelected: (index) {
-          switch (index) {
-            case 0:
-              context.go('/assignments');
-              break;
-            case 1:
-              context.go('/calendar');
-              break;
-            case 2:
-              context.go('/stats');
-              break;
-            case 3:
-              context.go('/profile');
-              break;
-          }
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.assignment_outlined),
-            selectedIcon: Icon(Icons.assignment),
-            label: '作业',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.calendar_today_outlined),
-            selectedIcon: Icon(Icons.calendar_today),
-            label: '日历',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.bar_chart_outlined),
-            selectedIcon: Icon(Icons.bar_chart),
-            label: '统计',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: '我的',
-          ),
-        ],
-      ),
+      bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (AppUpdateScope.maybeOf(context) case final updates?)
+          UpdateDownloadBanner(controller: updates),
+        NavigationBar(
+          height: 76,
+          selectedIndex: _indexFor(location),
+          onDestinationSelected: (index) {
+            switch (index) {
+              case 0:
+                context.go('/assignments');
+                break;
+              case 1:
+                context.go('/calendar');
+                break;
+              case 2:
+                context.go('/stats');
+                break;
+              case 3:
+                context.go('/profile');
+                break;
+            }
+          },
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.assignment_outlined),
+              selectedIcon: Icon(Icons.assignment),
+              label: '作业',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.calendar_today_outlined),
+              selectedIcon: Icon(Icons.calendar_today),
+              label: '日历',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.bar_chart_outlined),
+              selectedIcon: Icon(Icons.bar_chart),
+              label: '统计',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline),
+              selectedIcon: Icon(Icons.person),
+              label: '我的',
+            ),
+          ],
+        ),
+      ]),
     );
   }
 

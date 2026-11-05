@@ -28,6 +28,7 @@ void main() {
                       'browser_download_url':
                           'https://github.com/arrry-07/chaoxing-journal/releases/download/v1.0.7/study-assistant-v1.0.7.apk',
                       'size': 123456,
+                      'digest': 'sha256:${'a' * 64}',
                     },
                   ],
                 },

@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
@@ -56,12 +57,21 @@ void main() {
     expect(find.textContaining('版权与许可声明'), findsOneWidget);
     expect(find.text('完整依赖与原始许可'), findsOneWidget);
   });
-  testWidgets('missing update channel provides no useless retry', (t) async {
+  testWidgets('latest version has an explicit result and a release link',
+      (t) async {
     await t.pumpWidget(
-        MaterialApp(home: UpdateDialog(service: AppUpdateService())));
+        MaterialApp(home: UpdateDialog(service: _LatestUpdateService())));
     await t.pumpAndSettle();
-    expect(find.text('更新渠道待配置'), findsOneWidget);
-    expect(find.text('重试'), findsNothing);
+    expect(find.text('当前已是最新版本'), findsOneWidget);
+    expect(find.text('查看 GitHub 发行版'), findsOneWidget);
+    expect(find.text('重新检查'), findsOneWidget);
     expect(find.text('下载并安装'), findsNothing);
   });
+}
+
+class _LatestUpdateService extends AppUpdateService {
+  @override
+  Future<UpdateCheckResult> checkConfigured(
+          {required int currentVersionCode, CancelToken? cancelToken}) async =>
+      const UpdateCheckResult(UpdateCheckStatus.upToDate);
 }

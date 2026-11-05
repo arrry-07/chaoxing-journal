@@ -1,3 +1,5 @@
+import 'src/services/app_update_controller.dart';
+import 'src/features/widgets/update_scope.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'src/features/help_feedback_screen.dart';
@@ -19,7 +21,6 @@ import 'src/features/stats_screen.dart';
 import 'src/features/sync_status_screen.dart';
 import 'src/services/app_update_service.dart';
 import 'src/features/widgets/update_dialog.dart';
-import 'src/app/app_version.dart';
 import 'src/services/assignment_store.dart';
 import 'src/services/local_notification_service.dart';
 import 'src/services/reminder_rule_store.dart';
@@ -79,10 +80,12 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
   AssignmentStore get assignmentStore => widget.assignmentStore;
   final _navigatorKey = GlobalKey<NavigatorState>();
   late final GoRouter _router;
+  late final AppUpdateController _updates;
 
   @override
   void initState() {
     super.initState();
+    _updates = AppUpdateController();
     _router = _buildRouter();
     widget.notificationService.setPayloadHandler(_handleNotificationPayload);
     WidgetsBinding.instance
@@ -92,21 +95,21 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
   Future<void> _checkUpdateOnStartup() async {
     const manifest = String.fromEnvironment('UPDATE_MANIFEST_URL');
     if (manifest.isEmpty) return;
-    final r = await AppUpdateService()
-        .checkConfigured(currentVersionCode: AppVersion.code);
+    await _updates.check();
+    final r = _updates.result;
     final c = _navigatorKey.currentContext;
     if (mounted &&
         c != null &&
         c.mounted &&
-        r.status == UpdateCheckStatus.available) {
+        r?.status == UpdateCheckStatus.available) {
       await showDialog<void>(
-          context: c,
-          builder: (_) => UpdateDialog(service: AppUpdateService()));
+          context: c, builder: (_) => UpdateDialog(controller: _updates));
     }
   }
 
   @override
   void dispose() {
+    _updates.dispose();
     _router.dispose();
     widget.notificationService.setPayloadHandler(null);
     super.dispose();
@@ -114,12 +117,14 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: '学习通课业手记',
-      debugShowCheckedModeBanner: false,
-      theme: StudyAssistantTheme.light,
-      routerConfig: _router,
-    );
+    return AppUpdateScope(
+        controller: _updates,
+        child: MaterialApp.router(
+          title: '学习通课业手记',
+          debugShowCheckedModeBanner: false,
+          theme: StudyAssistantTheme.light,
+          routerConfig: _router,
+        ));
   }
 
   GoRouter _buildRouter() {

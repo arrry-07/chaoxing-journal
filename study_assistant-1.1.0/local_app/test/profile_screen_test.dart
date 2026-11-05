@@ -239,6 +239,7 @@ void main() {
     expect(find.text('正在下载更新包'), findsOneWidget);
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
     expect(find.textContaining('50%'), findsOneWidget);
+    expect(find.text('后台下载'), findsOneWidget);
 
     updateService.completeDownload();
     await tester.pumpAndSettle();
