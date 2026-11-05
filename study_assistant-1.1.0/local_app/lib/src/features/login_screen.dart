@@ -120,12 +120,18 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             TextSpan(
                               text: '服务协议',
-                              style: TextStyle(color: Journal.ink),
+                              style: TextStyle(
+                                color: Journal.berry,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                             TextSpan(text: ' 和 '),
                             TextSpan(
                               text: '隐私协议',
-                              style: TextStyle(color: Journal.ink),
+                              style: TextStyle(
+                                color: Journal.berry,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ],
                         ),
