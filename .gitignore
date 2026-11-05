@@ -24,6 +24,7 @@
 **/config.json
 **/cookies.json
 **/session.json
+**/session_cookies.json
 **/credentials.json
 **/.DS_Store
 

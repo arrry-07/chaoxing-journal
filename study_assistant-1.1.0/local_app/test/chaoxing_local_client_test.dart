@@ -313,16 +313,16 @@ void main() {
                   statusCode: 200,
                   data: {
                     'msg': {
-                      'name': '郜小展',
-                      'nick': '郜小展',
-                      'uid': 354629555,
-                      'puid': 402733611,
-                      'pic': 'http://photo.chaoxing.com/p/402733611_120?flag=1',
+                      'name': '样例同学',
+                      'nick': '样例同学',
+                      'uid': 100001,
+                      'puid': 200002,
+                      'pic': 'http://photo.chaoxing.com/p/200002_120?flag=1',
                     },
                     'status': true,
                   },
                   headers: Headers.fromMap({
-                    'set-cookie': ['UID=354629555; Path=/; HttpOnly'],
+                    'set-cookie': ['UID=100001; Path=/; HttpOnly'],
                   }),
                 ),
               );
@@ -341,7 +341,7 @@ void main() {
               return;
             }
             if (options.uri.host == 'photo.chaoxing.com') {
-              expect(options.uri.path, '/p/402733611_120');
+              expect(options.uri.path, '/p/200002_120');
               expect(options.uri.queryParameters['flag'], '1');
               expect(options.uri.queryParameters['psize'], '160_160c');
               expect(options.uri.queryParameters['ext'], 'png');
@@ -351,7 +351,7 @@ void main() {
                   statusCode: 302,
                   headers: Headers.fromMap({
                     'location': [
-                      'https://p.cldisk.com/star3/160_160c/05055cacb0d79d5f723c99d1beca393a.png',
+                      'https://p.cldisk.com/star3/160_160c/sample-avatar.png',
                     ],
                   }),
                 ),
@@ -373,10 +373,10 @@ void main() {
     final result = await client.login(account: 'student', password: 'password');
 
     expect(result.success, isTrue);
-    expect(result.displayName, '郜小展');
+    expect(result.displayName, '样例同学');
     expect(
       result.avatarUrl,
-      'https://p.cldisk.com/star3/160_160c/05055cacb0d79d5f723c99d1beca393a.png',
+      'https://p.cldisk.com/star3/160_160c/sample-avatar.png',
     );
   });
 }

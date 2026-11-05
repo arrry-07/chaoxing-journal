@@ -101,8 +101,7 @@ void main() {
     final store = AssignmentStore(
       sessionStore: _MemorySessionStore(
         displayName: '鏉庨浄',
-        avatarUrl:
-            'https://p.cldisk.com/star3/160_160c/05055cacb0d79d5f723c99d1beca393a.png',
+        avatarUrl: 'https://p.cldisk.com/star3/160_160c/sample-avatar.png',
       ),
       notificationService: _NoopNotificationService(),
       widgetSnapshotService: _NoopWidgetSnapshotService(),
@@ -116,7 +115,7 @@ void main() {
     final provider = image.image as NetworkImage;
     expect(
       provider.url,
-      'https://p.cldisk.com/star3/160_160c/05055cacb0d79d5f723c99d1beca393a.png',
+      'https://p.cldisk.com/star3/160_160c/sample-avatar.png',
     );
     expect(provider.headers?['Referer'], 'https://photo.chaoxing.com/');
     expect(provider.headers?['User-Agent'], contains('Mozilla/5.0'));
@@ -128,7 +127,7 @@ void main() {
     final store = AssignmentStore(
       sessionStore: _MemorySessionStore(
         displayName: '鏉庨浄',
-        avatarUrl: 'http://photo.chaoxing.com/p/402733611_120?flag=1',
+        avatarUrl: 'http://photo.chaoxing.com/p/200002_120?flag=1',
       ),
       notificationService: _NoopNotificationService(),
       widgetSnapshotService: _NoopWidgetSnapshotService(),
@@ -142,7 +141,7 @@ void main() {
     final provider = image.image as NetworkImage;
     expect(
       provider.url,
-      'https://photo.chaoxing.com/p/402733611_120?flag=1&psize=160_160c&ext=png',
+      'https://photo.chaoxing.com/p/200002_120?flag=1&psize=160_160c&ext=png',
     );
     expect(provider.headers?['Referer'], 'https://photo.chaoxing.com/');
   });

@@ -234,8 +234,33 @@ void main() {
       now: DateTime(2026, 5, 5, 8),
     );
 
-    expect(
-        assignments.single.deadlineAt, DateTime(2026, 6, 1, 23, 59, 10, 900));
+    final deadline = assignments.single.deadlineAt!;
+    expect(deadline.isUtc, isFalse);
+    expect(deadline.toUtc(), DateTime.utc(2026, 6, 1, 15, 59, 10, 900));
+  });
+
+  test(
+      'preserves the instant of an offset deadline across the UTC date boundary',
+      () {
+    final assignments = ChaoxingApiParser.parseActivityAssignments(
+      {
+        'activeList': [
+          {
+            'id': 892,
+            'nameOne': '凌晨截止作业',
+            'activeType': 47,
+            'endTime': '2026-06-02T00:15:10.900+08:00',
+          },
+        ],
+      },
+      const ChaoxingCourseRef(
+          courseId: '111', clazzId: '222', courseName: '大学英语'),
+      now: DateTime.utc(2026, 5, 5),
+    );
+
+    final deadline = assignments.single.deadlineAt!;
+    expect(deadline.isUtc, isFalse);
+    expect(deadline.toUtc(), DateTime.utc(2026, 6, 1, 16, 15, 10, 900));
   });
 
   test('an exam start in the past does not establish personal submission', () {
