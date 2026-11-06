@@ -56,6 +56,16 @@ class ProfileScreen extends StatelessWidget {
                   _SettingsCard(
                     children: [
                       _SettingsTile(
+                          icon: Icons.event_note_outlined,
+                          title: '个人待办与考试',
+                          subtitle: '手动安排，独立于学习通作业',
+                          onTap: () => context.push('/agenda')),
+                      _SettingsTile(
+                          icon: Icons.inventory_2_outlined,
+                          title: '学期归档',
+                          subtitle: '保存与回看本机学期快照',
+                          onTap: () => context.push('/terms')),
+                      _SettingsTile(
                         icon: Icons.notifications_none,
                         title: '每日计划',
                         subtitle: '个人安排与预计耗时，不改变提交状态',

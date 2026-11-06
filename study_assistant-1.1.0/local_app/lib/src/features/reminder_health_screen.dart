@@ -109,7 +109,7 @@ class _HealthState extends State<ReminderHealthScreen>
                   onTap: () =>
                       const PermissionSettingsService().openBatterySettings()),
               Text(
-                  '已安排截止提醒：${health?.pending ?? '未知'} 条\n已安排摘要：${health?.summaryPending ?? '未知'} 条\n最近完整同步：${widget.store.lastSyncAt?.toLocal().toString().substring(0, 16) ?? '尚无完整同步'}'),
+                  '已安排截止提醒：${health?.pending ?? '未知'} 条\n已安排摘要：${health?.summaryPending ?? '未知'} 条\n已安排个人提醒：${health?.manualPending ?? '未知'} 条\n最近完整同步：${widget.store.lastSyncAt?.toLocal().toString().substring(0, 16) ?? '尚无完整同步'}'),
               const SizedBox(height: 12),
               Wrap(spacing: 12, children: [
                 OutlinedButton(

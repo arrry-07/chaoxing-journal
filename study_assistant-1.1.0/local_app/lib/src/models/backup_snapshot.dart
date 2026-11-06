@@ -3,6 +3,7 @@ import 'package:crypto/crypto.dart';
 import 'assignment.dart';
 import 'course.dart';
 import 'personal_workspace.dart';
+import 'study_notebook.dart';
 
 /// Portable, explicitly validated data only. Session and signed links never enter
 /// this format; decoded records are still historical observations, not a sync.
@@ -16,7 +17,8 @@ class BackupSnapshot {
       Set<String> unfollowed,
       List<int> reminderOffsets,
       this.autoSyncIntervalMinutes,
-      this.personal)
+      this.personal,
+      this.notebook)
       : records = List.unmodifiable(records),
         hidden = Set.unmodifiable(hidden),
         courses = List.unmodifiable(courses),
@@ -33,6 +35,7 @@ class BackupSnapshot {
   final List<int> reminderOffsets;
   final int autoSyncIntervalMinutes;
   final PersonalWorkspace personal;
+  final StudyNotebook notebook;
   static String ownerFor(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
 
@@ -59,9 +62,11 @@ class BackupSnapshot {
           required Set<String> unfollowed,
           required List<int> reminderOffsets,
           required int autoSyncIntervalMinutes,
-          PersonalWorkspace? personal}) =>
+          PersonalWorkspace? personal,
+          StudyNotebook? notebook}) =>
       BackupSnapshot.decode(jsonEncode({
-        'schema': 2,
+        'schema': 3,
+        'notebook': (notebook ?? StudyNotebook()).toJson(),
         'personal': (personal ?? PersonalWorkspace()).toJson(portable: true),
         'owner': owner,
         'createdAt': createdAt.toUtc().toIso8601String(),
@@ -74,7 +79,8 @@ class BackupSnapshot {
       }));
 
   String encode() => jsonEncode({
-        'schema': 2,
+        'schema': 3,
+        'notebook': notebook.toJson(),
         'personal': personal.toJson(portable: true),
         'owner': owner,
         'createdAt': createdAt.toUtc().toIso8601String(),
@@ -132,9 +138,10 @@ class BackupSnapshot {
     }
     final decoded = jsonDecode(plaintext);
     final version = decoded is Map ? decoded['schema'] : null;
-    if (version is! int || (version != 1 && version != 2)) _bad();
+    if (version is! int || !{1, 2, 3}.contains(version)) _bad();
     final j = _map(decoded, {
-      if (version == 2) 'personal',
+      if (version >= 2) 'personal',
+      if (version >= 3) 'notebook',
       'schema',
       'owner',
       'createdAt',
@@ -221,6 +228,7 @@ class BackupSnapshot {
         interval,
         version == 1
             ? PersonalWorkspace()
-            : PersonalWorkspace.fromJson(j['personal']));
+            : PersonalWorkspace.fromJson(j['personal']),
+        version < 3 ? StudyNotebook() : StudyNotebook.decode(jsonEncode(j['notebook'])));
   }
 }

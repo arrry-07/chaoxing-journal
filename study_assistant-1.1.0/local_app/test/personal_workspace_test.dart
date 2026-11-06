@@ -113,6 +113,7 @@ void main() {
     expect(backup.personal.work['id']!.files, isEmpty);
     final old = jsonDecode(backup.encode()) as Map<String, dynamic>;
     old.remove('personal');
+    old.remove('notebook');
     old['schema'] = 1;
     expect(BackupSnapshot.decode(jsonEncode(old)).personal.work, isEmpty);
     await repo.savePersonalWorkspace(

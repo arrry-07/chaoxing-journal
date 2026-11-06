@@ -1,3 +1,5 @@
+import 'review_core_remediation_test.dart' as f;
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -90,5 +92,93 @@ void main() {
             .where((c) => c.method == 'cancel')
             .map((c) => (c.arguments as Map)['id']),
         [1900000000]);
+  });
+  test('personal reminder schedules only future unfinished opted-in entries',
+      () async {
+    final s = LocalNotificationService();
+    await s.initialize();
+    calls.clear();
+    final at = DateTime.now().toUtc().add(const Duration(days: 2));
+    final entry = ManualEntry(
+        id: 'm1', title: 'exam', kind: 'exam', at: at, remind: true);
+    await s.rescheduleManual([
+      entry,
+      entry.completed(true),
+      const ManualEntry(id: 'none', title: 'none', kind: 'todo')
+    ]);
+    final scheduled = calls.where((c) => c.method == 'zonedSchedule').single;
+    expect((scheduled.arguments as Map)['payload'], 'p:m1');
+    final id = (scheduled.arguments as Map)['id'];
+    calls.clear();
+    await s.rescheduleManual([entry]);
+    expect(
+        (calls.singleWhere((c) => c.method == 'zonedSchedule').arguments
+            as Map)['id'],
+        id);
+    calls.clear();
+    await s.rescheduleManual([]);
+    expect(calls.where((c) => c.method == 'cancel'), isEmpty);
+  });
+  test('personal IDs cannot overwrite homework IDs with known colliding inputs',
+      () async {
+    final s = LocalNotificationService();
+    await s.initialize();
+    calls.clear();
+    await s.rescheduleAssignments([f.sample('106040')], offsetsMinutes: [30]);
+    final workId = (calls
+        .singleWhere((c) => c.method == 'zonedSchedule')
+        .arguments as Map)['id'];
+    calls.clear();
+    await s.rescheduleManual([
+      ManualEntry(
+          id: 'm1800000000086842',
+          title: 'personal',
+          kind: 'todo',
+          at: DateTime.utc(2030),
+          remind: true)
+    ]);
+    final manualId = (calls
+        .singleWhere((c) => c.method == 'zonedSchedule')
+        .arguments as Map)['id'];
+    expect(manualId, isNot(workId));
+  });
+
+  test('deleted personal reminder is cancelled even if another schedule fails',
+      () async {
+    final service = LocalNotificationService();
+    await service.initialize();
+    calls.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (c) async {
+      calls.add(c);
+      if (c.method == 'pendingNotificationRequests') {
+        return [
+          {
+            'id': 1800000001,
+            'title': 'removed',
+            'body': '',
+            'payload': 'p:removed'
+          }
+        ];
+      }
+      if (c.method == 'zonedSchedule') {
+        throw PlatformException(code: 'schedule_failed');
+      }
+      return true;
+    });
+    await expectLater(
+        service.rescheduleManual([
+          ManualEntry(
+              id: 'other',
+              title: 'other',
+              kind: 'todo',
+              at: DateTime.utc(2030),
+              remind: true)
+        ]),
+        throwsA(isA<PlatformException>()));
+    expect(
+        calls.any((c) =>
+            c.method == 'cancel' && (c.arguments as Map)['id'] == 1800000001),
+        isTrue);
   });
 }

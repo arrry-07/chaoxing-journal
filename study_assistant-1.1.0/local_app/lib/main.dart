@@ -2,6 +2,8 @@ import 'src/services/app_update_controller.dart';
 import 'src/features/assignment_changes_screen.dart';
 import 'src/features/backup_screen.dart';
 import 'src/features/daily_plan_screen.dart';
+import 'src/features/manual_agenda_screen.dart';
+import 'src/features/term_archives_screen.dart';
 import 'src/features/personal_work_screen.dart';
 import 'src/features/reminder_health_screen.dart';
 import 'src/features/widgets/update_scope.dart';
@@ -168,6 +170,12 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
           ),
           routes: [
             GoRoute(
+                path: '/agenda',
+                builder: (_, __) => ManualAgendaScreen(store: assignmentStore)),
+            GoRoute(
+                path: '/terms',
+                builder: (_, __) => TermArchivesScreen(store: assignmentStore)),
+            GoRoute(
                 path: '/plan',
                 builder: (_, __) => DailyPlanScreen(store: assignmentStore)),
             GoRoute(
@@ -258,6 +266,10 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   }
 
   void _handleNotificationPayload(String payload) {
+    if (payload.startsWith('p:')) {
+      _router.go('/agenda');
+      return;
+    }
     if (payload == 'd:summary') {
       _router.go('/assignments');
       return;

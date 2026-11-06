@@ -7,6 +7,7 @@ import '../models/assignment.dart';
 import '../models/course.dart';
 import '../models/backup_snapshot.dart';
 import '../models/personal_workspace.dart';
+import '../models/study_notebook.dart';
 import '../services/reminder_rule_store.dart';
 
 class LocalAssignmentRepository {
@@ -31,6 +32,7 @@ class LocalAssignmentRepository {
     'sync_report_v1',
     'assignment_changes_v1',
     'personal_workspace_v1',
+    'notebook_v1',
     '${_key}_recovery_backup',
     '${_key}_recovery_backups',
     'course_refs_recovery_backup',
@@ -38,6 +40,20 @@ class LocalAssignmentRepository {
 
   static String _owner(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
+
+  Future<StudyNotebook> loadNotebook() => _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        final raw = p.getString('notebook_v1');
+        return raw == null ? StudyNotebook() : StudyNotebook.decode(raw);
+      });
+  Future<void> saveNotebook(StudyNotebook value, String account) =>
+      _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        _checkOwner(p, account);
+        final raw = value.encode();
+        StudyNotebook.decode(raw);
+        await _require(p.setString('notebook_v1', raw));
+      });
 
   Future<PersonalWorkspace> loadPersonalWorkspace() => _serialized(() async {
         final p = await SharedPreferences.getInstance();
@@ -86,6 +102,9 @@ class LocalAssignmentRepository {
             reminderOffsets: await ReminderRuleStore().loadOffsetsMinutes(),
             autoSyncIntervalMinutes:
                 prefs.getInt('auto_sync_interval_minutes') ?? 30,
+            notebook: prefs.getString('notebook_v1') == null
+                ? StudyNotebook()
+                : StudyNotebook.decode(prefs.getString('notebook_v1')!),
             personal: prefs.getString('personal_workspace_v1') == null
                 ? PersonalWorkspace()
                 : PersonalWorkspace.decode(
@@ -169,6 +188,14 @@ class LocalAssignmentRepository {
           final encoded = merged.encode();
           PersonalWorkspace.decode(encoded);
           await _require(prefs.setString('personal_workspace_v1', encoded));
+          final rawNotebook = prefs.getString('notebook_v1');
+          final notebook = (rawNotebook == null
+                  ? StudyNotebook()
+                  : StudyNotebook.decode(rawNotebook))
+              .mergeMissing(validated.notebook);
+          final notebookRaw = notebook.encode();
+          StudyNotebook.decode(notebookRaw);
+          await _require(prefs.setString('notebook_v1', notebookRaw));
           await _require(prefs.remove(_switchKey));
           return true;
         } catch (_) {

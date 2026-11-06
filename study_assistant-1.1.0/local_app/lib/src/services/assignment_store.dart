@@ -19,6 +19,7 @@ import 'assignment_change_log.dart';
 import '../models/assignment_change.dart';
 import '../models/backup_snapshot.dart';
 import '../models/personal_workspace.dart';
+import '../models/study_notebook.dart';
 
 class AssignmentStore extends ChangeNotifier {
   static const defaultAutoSyncIntervalMinutes = 30;
@@ -43,6 +44,28 @@ class AssignmentStore extends ChangeNotifier {
   final ReminderRuleStore reminderRuleStore;
   final changeLog = AssignmentChangeLog();
   PersonalWorkspace personal = PersonalWorkspace();
+  StudyNotebook notebook = StudyNotebook();
+  Future<bool> saveNotebook(
+      StudyNotebook Function(StudyNotebook) update, int expectedEpoch) async {
+    final account = _account;
+    var saved = false;
+    await _run(() async {
+      if (account == null ||
+          !_authenticated ||
+          _generation != expectedEpoch ||
+          account != _account) {
+        return;
+      }
+      final next = update(notebook);
+      await repository.saveNotebook(next, account);
+      if (_generation != expectedEpoch || !_authenticated) return;
+      notebook = StudyNotebook.decode(next.encode());
+      saved = true;
+      await _afterAssignmentsChanged();
+    });
+    return saved;
+  }
+
   int get accountEpoch => _generation;
   Future<bool> savePersonal(
       PersonalWorkspace Function(PersonalWorkspace) update,
@@ -310,6 +333,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _restoreAccountData() async {
+    notebook = StudyNotebook();
     personal = PersonalWorkspace();
     changes = [];
     _assignments.clear();
@@ -364,6 +388,9 @@ class AssignmentStore extends ChangeNotifier {
     });
     await stage('个人计划与记录', () async {
       personal = await repository.loadPersonalWorkspace();
+    });
+    await stage('个人待办与学期归档', () async {
+      notebook = await repository.loadNotebook();
     });
     await stage('作业记录', () async {
       await _reloadJournal();
@@ -420,10 +447,11 @@ class AssignmentStore extends ChangeNotifier {
             throw StateError('旧账号提醒未能清理，请重试后再切换账号');
           }
           try {
+            await notificationService.rescheduleManual([]);
             await notificationService
                 .rescheduleSummary([], PersonalWorkspace(), null);
           } catch (_) {
-            throw StateError('旧账号摘要未能清理，请重试后再切换账号');
+            throw StateError('旧账号个人提醒或摘要未能清理，请重试后再切换账号');
           }
           await widgetSnapshotService.saveAssignments([]);
         }
@@ -659,6 +687,7 @@ class AssignmentStore extends ChangeNotifier {
       _authenticated = false;
       _account = null;
       personal = PersonalWorkspace();
+      notebook = StudyNotebook();
       _agreementAccepted = false;
       _needsProfileRecovery = false;
       _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
@@ -714,6 +743,12 @@ class AssignmentStore extends ChangeNotifier {
       _serviceWarnings.add(_authenticated && personal.summaryEnabled
           ? '每日摘要未能更新，请在提醒体检中重试'
           : '旧摘要未能清理，仍可能显示；请重试或在系统中关闭本应用通知');
+    }
+    try {
+      await notificationService
+          .rescheduleManual(_authenticated ? notebook.entries : []);
+    } catch (_) {
+      _serviceWarnings.add('个人日程提醒未能更新或清理，旧提醒可能仍显示；请重试或在系统中关闭本应用通知');
     }
     try {
       await widgetSnapshotService.saveAssignments(scoped);

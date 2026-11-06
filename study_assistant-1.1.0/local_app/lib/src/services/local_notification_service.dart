@@ -6,6 +6,7 @@ import '../models/assignment.dart';
 import 'reminder_rule_store.dart';
 import 'daily_summary.dart';
 import '../models/personal_workspace.dart';
+import '../models/study_notebook.dart';
 
 typedef NotificationPayloadHandler = void Function(String payload);
 
@@ -21,6 +22,42 @@ class LocalNotificationService {
   NotificationPayloadHandler? _onPayload;
   String? _pendingPayload;
   static const summaryChannel = 'daily_summary';
+  Future<void> rescheduleManual(List<ManualEntry> entries) async {
+    final active = await _plugin.pendingNotificationRequests();
+    final desired = <int>{};
+    final schedules = <(ManualEntry, DateTime, int)>[];
+    var collision = false;
+    for (final e in entries.where((e) => !e.done && e.remind && e.at != null)) {
+      final at = e.at!.subtract(const Duration(minutes: 30));
+      if (!at.isAfter(DateTime.now())) continue;
+      final id = 1800000000 + (_notificationId(e.id, 30) % 10000000);
+      if (!desired.add(id)) collision = true;
+      schedules.add((e, at, id));
+    }
+    // Removal is independent of whether another entry can be scheduled today.
+    Object? cancellationError;
+    for (final n in active.where((n) => n.payload?.startsWith('p:') ?? false)) {
+      if (!desired.contains(n.id)) {
+        try {
+          await _plugin.cancel(n.id);
+        } catch (error) {
+          cancellationError ??= error;
+        }
+      }
+    }
+    if (cancellationError != null) throw cancellationError;
+    if (collision) throw StateError('个人提醒标识冲突，请修改后重试');
+    for (final (e, at, id) in schedules) {
+      await _zonedSchedule(
+          id: id,
+          channelId: 'personal_schedule',
+          title: e.kind == 'exam' ? '个人考试提醒' : '个人待办提醒',
+          body: '${e.title} · 30分钟后到时，请核对个人安排',
+          notifyAt: at,
+          payload: 'p:${e.id}');
+    }
+  }
+
   Future<ReminderHealth> inspectHealth() async {
     AndroidFlutterLocalNotificationsPlugin? android;
     try {
@@ -28,7 +65,7 @@ class LocalNotificationService {
           AndroidFlutterLocalNotificationsPlugin>();
     } catch (_) {}
     bool? allowed, exact, channel;
-    int? pending, summary;
+    int? pending, summary, manual;
     try {
       allowed = await android?.areNotificationsEnabled();
     } catch (_) {}
@@ -45,13 +82,15 @@ class LocalNotificationService {
       final list = await _plugin.pendingNotificationRequests();
       pending = list.where((n) => n.payload?.startsWith('a:') ?? false).length;
       summary = list.where((n) => n.payload == 'd:summary').length;
+      manual = list.where((n) => n.payload?.startsWith('p:') ?? false).length;
     } catch (_) {}
     return ReminderHealth(
         notifications: allowed,
         exact: exact,
         channelEnabled: channel,
         pending: pending,
-        summaryPending: summary);
+        summaryPending: summary,
+        manualPending: manual);
   }
 
   Future<bool> showTestNotification() async {
@@ -210,7 +249,9 @@ class LocalNotificationService {
     for (final code in '$assignmentId:$offset'.codeUnits) {
       hash = ((hash ^ code) * 16777619) & 0x7fffffff;
     }
-    return hash;
+    // Reserve disjoint spaces for personal (1.8b) and summary (1.9b) IDs.
+    // Replanning cancels legacy a: IDs after successful replacement.
+    return hash % 1700000000;
   }
 
   Future<void> _scheduleAssignmentReminder(
@@ -306,7 +347,7 @@ class LocalNotificationService {
         NotificationDetails(
           android: AndroidNotificationDetails(
             channelId,
-            '作业截止提醒',
+            channelId == 'personal_schedule' ? '个人待办与考试提醒' : '作业截止提醒',
             importance: Importance.high,
             priority: Priority.high,
             category: AndroidNotificationCategory.reminder,

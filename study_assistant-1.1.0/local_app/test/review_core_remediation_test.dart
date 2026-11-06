@@ -1,3 +1,4 @@
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
@@ -83,6 +84,9 @@ class Client extends ChaoxingLocalClient {
 }
 
 class Notifications extends LocalNotificationService {
+  @override
+  Future<void> rescheduleManual(List<ManualEntry> items) async {}
+
   @override
   Future<void> rescheduleSummary(List<Assignment> items,
       PersonalWorkspace personal, DateTime? lastSync) async {}

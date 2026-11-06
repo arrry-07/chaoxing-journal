@@ -6,6 +6,7 @@ import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import 'widgets/assignment_card.dart';
+import 'manual_agenda_screen.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({super.key, required this.store});
@@ -27,6 +28,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
       animation: widget.store,
       builder: (context, _) {
         final all = widget.store.visibleAssignments;
+        final manual = widget.store.notebook.entries
+            .where((e) => !e.done && e.at != null)
+            .toList();
+        final manualAgenda = manual.where((e) {
+          final d = AssignmentQuery.dayKey(e.at!);
+          return selected == null
+              ? d.year == month.year && d.month == month.month
+              : d == selected;
+        }).toList()
+          ..sort((a, b) => a.at!.compareTo(b.at!));
         final dated = all
             .where((a) => a.deadlineAt != null && a.deadlineTrusted)
             .toList();
@@ -45,6 +56,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             children: [
               const Text('截止日历', style: Journal.section),
+              TextButton.icon(
+                  onPressed: () => context.push('/agenda'),
+                  icon: const Icon(Icons.event_note_outlined),
+                  label: const Text('个人待办与考试')),
               Row(children: [
                 TextButton(
                     onPressed: () => setState(() {
@@ -117,9 +132,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                 final unknown = items
                                     .where((a) => !a.isPendingConfirmed)
                                     .length;
+                                final personalCount = manual
+                                    .where((e) =>
+                                        AssignmentQuery.dayKey(e.at!) == date)
+                                    .length;
                                 return Semantics(
                                     label:
-                                        '${month.month}月$day日，${items.length - unknown}份待交，$unknown份待确认',
+                                        '${month.month}月$day日，${items.length - unknown}份待交，$unknown份待确认，$personalCount项个人安排',
                                     selected: selected == date,
                                     button: true,
                                     onTap: () =>
@@ -148,8 +167,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                                   Text('$day',
                                                       style: const TextStyle(
                                                           fontSize: 14)),
-                                                  if (items.isNotEmpty)
-                                                    Text('${items.length}',
+                                                  if (items.isNotEmpty ||
+                                                      personalCount > 0)
+                                                    Text(
+                                                        '${items.length + personalCount}',
                                                         style: const TextStyle(
                                                             fontSize: 11,
                                                             color:
@@ -160,14 +181,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       ]))),
               const Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text('日期下方数字为待交与待确认的作业份数',
+                  child: Text('日期下方数字为作业与未完成个人安排的合计，均按北京时间',
                       style: TextStyle(fontSize: 12, color: Journal.muted))),
               Text(
                   selected == null
                       ? '本月议程'
                       : DateFormat('M月d日').format(selected!),
                   style: Journal.section),
-              if (agenda.isEmpty)
+              if (agenda.isEmpty && manualAgenda.isEmpty)
                 Padding(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     child:
@@ -183,6 +204,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     showFullDeadline: false,
                     onTap: () => context
                         .push('/assignments/${Uri.encodeComponent(a.id)}')),
+              for (final e in manualAgenda)
+                ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(e.kind == 'exam'
+                        ? Icons.school_outlined
+                        : Icons.event_note_outlined),
+                    title: Text(
+                        '${e.kind == 'exam' ? '手动考试' : '个人待办'} · ${e.title}'),
+                    subtitle: Text(manualTime(e.at)),
+                    onTap: () => context.push('/agenda')),
               if (all.any((a) => a.deadlineAt == null))
                 TextButton(
                     onPressed: () => context.go('/assignments'),

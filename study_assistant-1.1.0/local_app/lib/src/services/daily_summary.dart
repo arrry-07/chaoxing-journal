@@ -44,7 +44,8 @@ class ReminderHealth {
       this.exact,
       this.channelEnabled,
       this.pending,
-      this.summaryPending});
+      this.summaryPending,
+      this.manualPending});
   final bool? notifications, exact, channelEnabled;
-  final int? pending, summaryPending;
+  final int? pending, summaryPending, manualPending;
 }
