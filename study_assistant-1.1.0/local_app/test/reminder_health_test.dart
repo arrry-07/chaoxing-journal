@@ -52,6 +52,61 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
   });
+  test('privacy tightening cancels existing app reminders before replanning',
+      () async {
+    final s = LocalNotificationService();
+    await s.cancelPrivateSchedules();
+    final ids = calls
+        .where((c) => c.method == 'cancel')
+        .map((c) => (c.arguments as Map)['id']);
+    expect(ids, containsAll([11, 1900000000]));
+  });
+  test('privacy cancellation failure is propagated instead of claiming hidden',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (c) async {
+      if (c.method == 'pendingNotificationRequests') {
+        return [
+          {'id': 11, 'title': 'sample', 'body': '', 'payload': 'a:sample'}
+        ];
+      }
+      if (c.method == 'cancel') throw PlatformException(code: 'blocked');
+      return true;
+    });
+    await expectLater(LocalNotificationService().cancelPrivateSchedules(),
+        throwsA(isA<PlatformException>()));
+  });
+  test('initialization and background rescheduling never request permissions',
+      () async {
+    final s = LocalNotificationService();
+    await s.initialize();
+    await s.rescheduleAssignments([]);
+    expect(calls.where((c) => c.method.startsWith('request')), isEmpty);
+  });
+  test(
+      'private reminders hide personal titles by default and allow explicit detail',
+      () async {
+    final s = LocalNotificationService();
+    await s.initialize();
+    calls.clear();
+    final now = DateTime.now();
+    final item = ManualEntry(
+        id: 'private',
+        title: 'PRIVATE TITLE',
+        kind: 'exam',
+        at: now.add(const Duration(hours: 2)),
+        remind: true);
+    await s.rescheduleManual([item]);
+    final hidden =
+        calls.firstWhere((c) => c.method == 'zonedSchedule').arguments as Map;
+    expect(hidden['body'].toString(), isNot(contains('PRIVATE TITLE')));
+    s.showDetails = true;
+    calls.clear();
+    await s.rescheduleManual([item]);
+    final detail =
+        calls.firstWhere((c) => c.method == 'zonedSchedule').arguments as Map;
+    expect(detail['body'], contains('PRIVATE TITLE'));
+  });
   test(
       'health inspects without permission prompts and test notification is explicit',
       () async {

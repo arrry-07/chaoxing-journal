@@ -51,6 +51,8 @@ Assignment _assignment({required String id}) {
 }
 
 class _RecordingNotificationService extends LocalNotificationService {
+  @override
+  Future<void> cancelPrivateSchedules() async {}
   List<int>? lastOffsets;
 
   @override

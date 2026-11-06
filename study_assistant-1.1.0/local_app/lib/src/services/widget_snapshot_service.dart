@@ -17,6 +17,8 @@ class WidgetSnapshotService {
       _snapshotKey,
       jsonEncode(items.map((item) => item.toJson()).toList()),
     );
+    await HomeWidget.saveWidgetData<String>(
+        'assignment_snapshot_at', DateTime.now().toUtc().toIso8601String());
     await HomeWidget.updateWidget(
       iOSName: 'AssignmentWidget',
       qualifiedAndroidName:
@@ -42,16 +44,23 @@ class WidgetSnapshotService {
             title: assignment.title,
             courseName: assignment.courseName,
             deadlineAt:
-                assignment.deadlineTrusted ? assignment.deadlineAt : null,
-            remainingText: !assignment.deadlineTrusted
-                ? assignment.deadlineAt == null
-                    ? assignment.deadlineLabel
-                    : '截止待确认'
-                : assignment.deadlineAt == null
-                    ? assignment.deadlineLabel
-                    : _remainingText(assignment.deadlineAt!, now),
+                assignment.deadlineTrusted && !assignment.deadlineReadFailed
+                    ? assignment.deadlineAt
+                    : null,
+            remainingText: assignment.deadlineReadFailed
+                ? assignment.deadlineLabel
+                : !assignment.deadlineTrusted
+                    ? assignment.deadlineAt == null
+                        ? assignment.deadlineLabel
+                        : '截止待确认'
+                    : assignment.deadlineAt == null
+                        ? assignment.deadlineLabel
+                        : _remainingText(assignment.deadlineAt!, now),
             urgencyLevel: _urgencyLevel(
-                assignment.deadlineTrusted ? assignment.deadlineAt : null, now),
+                assignment.deadlineTrusted && !assignment.deadlineReadFailed
+                    ? assignment.deadlineAt
+                    : null,
+                now),
             deepLinkUrl: AppDeepLinks.assignmentUri(assignment.id),
           ),
         )

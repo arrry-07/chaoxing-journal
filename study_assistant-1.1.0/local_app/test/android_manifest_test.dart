@@ -37,7 +37,10 @@ void main() {
       'lib/src/services/local_notification_service.dart',
     ).readAsStringSync();
 
-    expect(service, contains('requestExactAlarmsPermission'));
+    expect(service, isNot(contains('requestExactAlarmsPermission')));
+    final settings = File('lib/src/services/permission_settings_service.dart')
+        .readAsStringSync();
+    expect(settings, contains('openExactAlarmSettings'));
     expect(service, contains('AndroidScheduleMode.exactAllowWhileIdle'));
   });
 

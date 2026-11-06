@@ -42,6 +42,8 @@ Assignment _assignment({required String id, required String status}) {
 
 class _NoopNotificationService extends LocalNotificationService {
   @override
+  Future<void> cancelPrivateSchedules() async {}
+  @override
   Future<void> rescheduleAssignments(
     List<Assignment> assignments, {
     List<int>? offsetsMinutes,

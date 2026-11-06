@@ -15,6 +15,8 @@ import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart
 
 class _Notifications extends LocalNotificationService {
   @override
+  Future<void> cancelPrivateSchedules() async {}
+  @override
   Future<void> rescheduleAssignments(
     List<Assignment> a, {
     List<int>? offsetsMinutes,

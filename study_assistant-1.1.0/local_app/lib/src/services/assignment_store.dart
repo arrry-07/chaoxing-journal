@@ -267,6 +267,28 @@ class AssignmentStore extends ChangeNotifier {
       AssignmentQuery.scope(_assignments, {})
           .where((a) => follows(a.courseKey!))
           .toList();
+  bool _privacyCleanupPending = false;
+  bool get notificationPrivacyPending => _privacyCleanupPending;
+  bool get notificationDetails => notificationService.showDetails;
+  Future<void> saveNotificationDetails(bool value) => _run(() async {
+        final prefs = await SharedPreferences.getInstance();
+        if (!value) {
+          try {
+            await notificationService.cancelPrivateSchedules();
+          } catch (_) {
+            throw StateError('旧提醒未能清理，通知详情尚未关闭，请在提醒体检重试');
+          }
+        }
+        if (!await prefs.setBool('notification_details_v1', value)) {
+          throw StateError('通知隐私设置未能保存');
+        }
+        notificationService.showDetails = value;
+        _privacyCleanupPending = false;
+        await _afterAssignmentsChanged();
+        if (_serviceWarnings.isNotEmpty) {
+          throw StateError('隐私设置已保存，部分旧提醒未更新，请在提醒体检重试');
+        }
+      });
   DisplayPreferences display = const DisplayPreferences();
   Future<void> saveDisplay(DisplayPreferences next) => _run(() async {
         final prefs = await SharedPreferences.getInstance();
@@ -368,6 +390,17 @@ class AssignmentStore extends ChangeNotifier {
       }
     }
 
+    await stage('通知隐私', () async {
+      final prefs = await SharedPreferences.getInstance();
+      final details = prefs.getBool('notification_details_v1') ?? false;
+      notificationService.showDetails = details;
+      _privacyCleanupPending = !details;
+      if (!details) {
+        // Keep policy private even when cleaning legacy alarms fails.
+        await notificationService.cancelPrivateSchedules();
+        _privacyCleanupPending = false;
+      }
+    });
     await stage('显示设置', () async {
       final prefs = await SharedPreferences.getInstance();
       display =
@@ -747,29 +780,39 @@ class AssignmentStore extends ChangeNotifier {
     // Restored app preferences can outlive excluded/nonportable credentials.
     // Do not publish their private content to lockscreen or widget before login.
     final scoped = _authenticated ? formalAssignments : <Assignment>[];
-    try {
-      await notificationService.rescheduleAssignments(
-          scoped.where((a) => a.deadlineTrusted).toList(),
-          offsetsMinutes: _reminderOffsetsMinutes);
-    } catch (_) {
-      _serviceWarnings.add('提醒安排失败，请检查通知权限后重试');
+    if (_privacyCleanupPending) {
+      try {
+        await notificationService.cancelPrivateSchedules();
+        _privacyCleanupPending = false;
+      } catch (_) {
+        _serviceWarnings.add('旧详细提醒尚未清理，通知隐私未完全生效，请保存隐私设置重试');
+      }
     }
-    if (notificationService.lastWarning != null) {
-      _serviceWarnings.add(notificationService.lastWarning!);
-    }
-    try {
-      await notificationService.rescheduleSummary(
-          scoped, _authenticated ? personal : PersonalWorkspace(), _lastSyncAt);
-    } catch (_) {
-      _serviceWarnings.add(_authenticated && personal.summaryEnabled
-          ? '每日摘要未能更新，请在提醒体检中重试'
-          : '旧摘要未能清理，仍可能显示；请重试或在系统中关闭本应用通知');
-    }
-    try {
-      await notificationService
-          .rescheduleManual(_authenticated ? notebook.entries : []);
-    } catch (_) {
-      _serviceWarnings.add('个人日程提醒未能更新或清理，旧提醒可能仍显示；请重试或在系统中关闭本应用通知');
+    if (!_privacyCleanupPending) {
+      try {
+        await notificationService.rescheduleAssignments(
+            scoped.where((a) => a.deadlineTrusted).toList(),
+            offsetsMinutes: _reminderOffsetsMinutes);
+      } catch (_) {
+        _serviceWarnings.add('提醒安排失败，请检查通知权限后重试');
+      }
+      if (notificationService.lastWarning != null) {
+        _serviceWarnings.add(notificationService.lastWarning!);
+      }
+      try {
+        await notificationService.rescheduleSummary(scoped,
+            _authenticated ? personal : PersonalWorkspace(), _lastSyncAt);
+      } catch (_) {
+        _serviceWarnings.add(_authenticated && personal.summaryEnabled
+            ? '每日摘要未能更新，请在提醒体检中重试'
+            : '旧摘要未能清理，仍可能显示；请重试或在系统中关闭本应用通知');
+      }
+      try {
+        await notificationService
+            .rescheduleManual(_authenticated ? notebook.entries : []);
+      } catch (_) {
+        _serviceWarnings.add('个人日程提醒未能更新或清理，旧提醒可能仍显示；请重试或在系统中关闭本应用通知');
+      }
     }
     try {
       await widgetSnapshotService

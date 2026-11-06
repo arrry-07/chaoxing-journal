@@ -22,6 +22,8 @@ class _Session extends SecureSessionStore {
 
 class _Notification extends LocalNotificationService {
   @override
+  Future<void> cancelPrivateSchedules() async {}
+  @override
   Future<void> rescheduleAssignments(List<Assignment> a,
       {List<int>? offsetsMinutes}) async {}
 }

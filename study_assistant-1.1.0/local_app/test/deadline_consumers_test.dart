@@ -56,6 +56,17 @@ void main() {
     expect(last.urgencyLevel, 'unknown');
   });
 
+  test('widget does not show a failed deadline read as a current countdown',
+      () async {
+    final snapshot = _Snapshot();
+    final item = work('failed', DateTime.now().add(const Duration(days: 1)))
+        .copyWith(deadlineReadFailed: true);
+    await snapshot.saveAssignments([item]);
+    expect(snapshot.items.single.deadlineAt, isNull);
+    expect(snapshot.items.single.remainingText, contains('上次'));
+    expect(snapshot.items.single.urgencyLevel, 'unknown');
+  });
+
   test('extension replaces same ID and removed deadline cancels reminder',
       () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;

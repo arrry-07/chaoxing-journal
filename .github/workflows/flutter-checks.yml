@@ -17,6 +17,8 @@ jobs:
         working-directory: study_assistant-1.1.0/local_app
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -28,6 +30,15 @@ jobs:
           cache: true
       - name: Install locked dependencies
         run: flutter pub get --enforce-lockfile
+      - name: Check release metadata and changed Dart formatting
+        run: |
+          python3 tool/check_release_metadata.py
+          python3 tool/check_changed_format.py
+      - name: Run synthetic JVM checks
+        run: |
+          curl --fail --location --retry 2 https://repo.maven.apache.org/maven2/org/json/json/20180813/json-20180813.jar -o "$RUNNER_TEMP/json.jar"
+          echo "518080049ba83181914419d11a25d9bc9833a2d729b6a6e7469fa52851356da8  $RUNNER_TEMP/json.jar" | sha256sum --check
+          python3 tool/run_native_checks.py --json-jar "$RUNNER_TEMP/json.jar"
       - name: Analyze Dart code
         run: flutter analyze --no-pub
       - name: Run all tests in UTC

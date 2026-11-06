@@ -19,6 +19,24 @@ class LocalNotificationService {
 
   final FlutterLocalNotificationsPlugin _plugin;
   String? lastWarning;
+  bool showDetails = false;
+
+  /// Privacy tightening must not retain detailed alarms if replacement fails.
+  Future<void> cancelPrivateSchedules() async {
+    final pending = await _plugin.pendingNotificationRequests();
+    Object? failure;
+    for (final item in pending) {
+      final payload = item.payload ?? '';
+      if (!['a:', 'p:', 'd:'].any(payload.startsWith)) continue;
+      try {
+        await _plugin.cancel(item.id);
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure != null) throw failure;
+  }
+
   NotificationPayloadHandler? _onPayload;
   String? _pendingPayload;
   static const summaryChannel = 'daily_summary';
@@ -52,7 +70,9 @@ class LocalNotificationService {
           id: id,
           channelId: 'personal_schedule',
           title: e.kind == 'exam' ? '个人考试提醒' : '个人待办提醒',
-          body: '${e.title} · 30分钟后到时，请核对个人安排',
+          body: showDetails
+              ? '${e.title} · 30分钟后到时，请核对个人安排'
+              : '有个人安排即将到时，请打开课业手记查看',
           notifyAt: at,
           payload: 'p:${e.id}');
     }
@@ -137,11 +157,12 @@ class LocalNotificationService {
       await _plugin.zonedSchedule(
           n.id,
           '今日课业摘要',
-          n.body,
+          showDetails ? n.body : '今日课业摘要已准备好，请打开课业手记查看',
           tz.TZDateTime.from(n.at, tz.local),
-          const NotificationDetails(
+          NotificationDetails(
               android: AndroidNotificationDetails(summaryChannel, '每日课业摘要',
-                  importance: Importance.defaultImportance)),
+                  importance: Importance.defaultImportance,
+                  visibility: NotificationVisibility.private)),
           androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
           uiLocalNotificationDateInterpretation:
               UILocalNotificationDateInterpretation.absoluteTime,
@@ -186,7 +207,10 @@ class LocalNotificationService {
     timezone_data.initializeTimeZones();
     tz.setLocalLocation(tz.getLocation('Asia/Shanghai'));
     const android = AndroidInitializationSettings('@drawable/app_icon');
-    const ios = DarwinInitializationSettings();
+    const ios = DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false);
     await _plugin.initialize(
       const InitializationSettings(android: android, iOS: ios),
       onDidReceiveNotificationResponse: _handleNotificationResponse,
@@ -206,8 +230,6 @@ class LocalNotificationService {
           description: '学习通作业截止前提醒',
           importance: Importance.high,
         ));
-    await _requestNotificationPermission();
-    await _requestExactAlarmPermission();
   }
 
   Future<void> rescheduleAssignments(
@@ -216,7 +238,6 @@ class LocalNotificationService {
   }) async {
     lastWarning = null;
     try {
-      await _requestNotificationPermission();
       final active = await _plugin.pendingNotificationRequests();
       final desiredIds = <int>{};
       final offsets = ReminderRuleStore.normalizeOffsets(offsetsMinutes);
@@ -266,8 +287,9 @@ class LocalNotificationService {
       id: _notificationId(assignment.id, offset),
       channelId: 'assignment_deadlines',
       title: '作业即将截止',
-      body:
-          '${assignment.courseName} · ${assignment.title}，${formatDeadlineRemainingText(offset)}',
+      body: showDetails
+          ? '${assignment.courseName} · ${assignment.title}，${formatDeadlineRemainingText(offset)}'
+          : '有作业即将截止，请打开课业手记查看',
       notifyAt: notifyAt,
       payload:
           'a:studyassistant:///assignments/${Uri.encodeComponent(assignment.id)}',
@@ -287,27 +309,6 @@ class LocalNotificationService {
       return;
     }
     handler(routePayload);
-  }
-
-  Future<void> _requestNotificationPermission() async {
-    final allowed = await _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
-    if (allowed == false) {
-      lastWarning = '通知权限未开启，提醒可能无法显示，请在系统设置中允许通知';
-    }
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            IOSFlutterLocalNotificationsPlugin>()
-        ?.requestPermissions(alert: true, badge: true, sound: true);
-  }
-
-  Future<void> _requestExactAlarmPermission() async {
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestExactAlarmsPermission();
   }
 
   Future<void> _zonedSchedule({
@@ -351,7 +352,9 @@ class LocalNotificationService {
             importance: Importance.high,
             priority: Priority.high,
             category: AndroidNotificationCategory.reminder,
-            visibility: NotificationVisibility.public,
+            visibility: showDetails
+                ? NotificationVisibility.public
+                : NotificationVisibility.private,
             ticker: title,
           ),
           iOS: DarwinNotificationDetails(

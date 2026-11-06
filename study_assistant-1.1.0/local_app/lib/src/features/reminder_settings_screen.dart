@@ -72,6 +72,19 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 16),
+              if (widget.assignmentStore.notificationPrivacyPending) ...[
+                const Text('旧详细提醒尚未清理，隐私设置未完全生效。'),
+                TextButton(
+                    onPressed: _saving ? null : () => _savePrivacy(false),
+                    child: const Text('重试清理旧提醒')),
+              ],
+              SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('通知显示详细内容'),
+                  subtitle:
+                      const Text('默认隐藏课程、作业与个人事项详情；开启后可能在锁屏显示。系统设置仍会影响显示。'),
+                  value: widget.assignmentStore.notificationDetails,
+                  onChanged: _saving ? null : _savePrivacy),
               OutlinedButton.icon(
                   onPressed: () => context.push('/reminder-health'),
                   icon: const Icon(Icons.health_and_safety_outlined),
@@ -250,6 +263,18 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
       _customHoursController.clear();
       _customMinutesController.clear();
     });
+  }
+
+  Future<void> _savePrivacy(bool value) async {
+    setState(() => _saving = true);
+    try {
+      await widget.assignmentStore.saveNotificationDetails(value);
+      if (mounted) {
+        _showMessage(widget.assignmentStore.error ?? '通知隐私已保存，待发提醒已更新');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Future<void> _save() async {

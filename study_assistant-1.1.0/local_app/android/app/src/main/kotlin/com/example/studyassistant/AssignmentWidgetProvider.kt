@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.RemoteViews
+import java.time.format.DateTimeFormatter
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -24,8 +25,13 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
     private fun buildViews(context: Context): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.assignment_widget)
         val items = loadItems(context)
+        val savedAt = context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
+            .getString("assignment_snapshot_at", null)
+        val stamp = try { OffsetDateTime.parse(savedAt).atZoneSameInstant(ZoneId.of("Asia/Shanghai"))
+            .format(DateTimeFormatter.ofPattern("M/d HH:mm")) } catch (_: Exception) { null }
+        views.setTextViewText(R.id.widget_header, if (stamp == null) "本机快照 · 更新时间未知" else "本机快照 · $stamp")
         if (items.length() == 0) {
-            views.setTextViewText(R.id.assignment_title_1, "暂无作业")
+            views.setTextViewText(R.id.assignment_title_1, "当前范围暂无作业")
             views.setTextViewText(R.id.assignment_meta_1, "打开 App 同步学习通")
             views.setTextViewText(R.id.assignment_title_2, "")
             views.setTextViewText(R.id.assignment_meta_2, "")
@@ -51,6 +57,15 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
         val intent = Intent(Intent.ACTION_VIEW, normalizeDeepLink(target)).setPackage(context.packageName)
         val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         views.setOnClickPendingIntent(R.id.assignment_widget_root, pendingIntent)
+        for (index in 0 until minOf(2, items.length())) {
+            val rowIntent = Intent(Intent.ACTION_VIEW, normalizeDeepLink(items.getJSONObject(index)
+                .optString("deepLinkUrl", "studyassistant://assignments"))).setPackage(context.packageName)
+            val rowPending = PendingIntent.getActivity(context, index + 1, rowIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val ids = if (index == 0) listOf(R.id.assignment_title_1, R.id.assignment_meta_1)
+                else listOf(R.id.assignment_title_2, R.id.assignment_meta_2)
+            for (id in ids) views.setOnClickPendingIntent(id, rowPending)
+        }
         return views
     }
 

@@ -122,6 +122,8 @@ class _BrokenSession extends _Session {
 
 class _Notifications extends LocalNotificationService {
   @override
+  Future<void> cancelPrivateSchedules() async {}
+  @override
   Future<void> rescheduleAssignments(List<Assignment> assignments,
       {List<int>? offsetsMinutes}) async {}
 }

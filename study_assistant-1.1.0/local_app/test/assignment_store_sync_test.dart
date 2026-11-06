@@ -258,6 +258,8 @@ class _MemorySessionStore extends SecureSessionStore {
 
 class _NoopNotificationService extends LocalNotificationService {
   @override
+  Future<void> cancelPrivateSchedules() async {}
+  @override
   Future<void> rescheduleManual(List<ManualEntry> items) async {}
 
   @override

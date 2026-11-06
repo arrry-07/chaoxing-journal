@@ -31,6 +31,8 @@ class _EvidenceSession extends SecureSessionStore {
 
 class _EvidenceNotifications extends LocalNotificationService {
   @override
+  Future<void> cancelPrivateSchedules() async {}
+  @override
   Future<void> rescheduleAssignments(List<Assignment> items,
       {List<int>? offsetsMinutes}) async {}
 }

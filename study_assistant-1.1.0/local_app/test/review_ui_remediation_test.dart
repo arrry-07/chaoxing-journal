@@ -300,6 +300,8 @@ class _Session extends SecureSessionStore {
 
 class _Notifications extends LocalNotificationService {
   @override
+  Future<void> cancelPrivateSchedules() async {}
+  @override
   Future<void> rescheduleManual(List<ManualEntry> items) async {}
 
   @override

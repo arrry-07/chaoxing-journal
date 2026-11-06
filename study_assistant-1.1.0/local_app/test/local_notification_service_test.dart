@@ -19,12 +19,13 @@ void main() {
     );
   });
 
-  test('Android notifications are visible on the lock screen', () {
+  test('Android notifications default to private lock screen visibility', () {
     final service = File(
       'lib/src/services/local_notification_service.dart',
     ).readAsStringSync();
 
-    expect(service, contains('NotificationVisibility.public'));
+    expect(service, contains('bool showDetails = false'));
+    expect(service, contains('NotificationVisibility.private'));
     expect(service, contains('AndroidNotificationCategory.reminder'));
   });
 

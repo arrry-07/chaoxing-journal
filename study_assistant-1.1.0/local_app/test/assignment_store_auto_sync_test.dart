@@ -185,6 +185,8 @@ class _QueuedChaoxingClient extends ChaoxingLocalClient {
 
 class _RecordingNotificationService extends LocalNotificationService {
   @override
+  Future<void> cancelPrivateSchedules() async {}
+  @override
   Future<void> rescheduleManual(List<ManualEntry> items) async {}
 
   @override
