@@ -1,0 +1,123 @@
+{
+  "provenance": "synthetic",
+  "network": [
+    {
+      "name": "empty-homework",
+      "file": "empty-homework.json",
+      "requests": 4,
+      "statuses": [],
+      "httpFailures": 0
+    },
+    {
+      "name": "empty-courses",
+      "file": "empty-courses.json",
+      "requests": 1,
+      "statuses": [],
+      "httpFailures": 0
+    },
+    {
+      "name": "login-expired",
+      "file": "login-expired.json",
+      "requests": 1,
+      "exception": "auth",
+      "httpFailures": 1
+    },
+    {
+      "name": "verification-required",
+      "file": "verification-required.json",
+      "requests": 1,
+      "exception": "read",
+      "httpFailures": 0,
+      "issueKind": "verificationRequired"
+    },
+    {
+      "name": "schema-changed",
+      "file": "schema-changed.json",
+      "requests": 1,
+      "exception": "read",
+      "httpFailures": 0,
+      "issueKind": "schemaChanged"
+    },
+    {
+      "name": "missing-course-fields",
+      "file": "missing-course-fields.json",
+      "requests": 1,
+      "exception": "read",
+      "httpFailures": 0,
+      "issueKind": "schemaChanged"
+    },
+    {
+      "name": "formal-statuses",
+      "file": "formal-statuses.json",
+      "requests": 4,
+      "statuses": [
+        "pending",
+        "reviewing",
+        "completed",
+        "returned",
+        "unknown"
+      ],
+      "httpFailures": 0
+    },
+    {
+      "name": "forbidden",
+      "file": "forbidden.json",
+      "requests": 1,
+      "exception": "read",
+      "httpFailures": 1,
+      "issueKind": "forbidden"
+    },
+    {
+      "name": "timeout",
+      "file": "timeout.json",
+      "requests": 1,
+      "exception": "read",
+      "httpFailures": 1,
+      "issueKind": "network"
+    }
+  ],
+  "deadlines": [
+    {
+      "file": "exact.html",
+      "noLimit": false,
+      "missingYear": false,
+      "notOpen": false,
+      "utc": "2026-11-09T15:59:00.000Z"
+    },
+    {
+      "file": "no-deadline.html",
+      "noLimit": true,
+      "missingYear": false,
+      "notOpen": false,
+      "utc": null
+    },
+    {
+      "file": "missing-year.html",
+      "noLimit": false,
+      "missingYear": true,
+      "notOpen": false,
+      "utc": null
+    },
+    {
+      "file": "not-open.html",
+      "noLimit": false,
+      "missingYear": false,
+      "notOpen": true,
+      "utc": null
+    },
+    {
+      "file": "invalid-date.html",
+      "noLimit": false,
+      "missingYear": false,
+      "notOpen": false,
+      "utc": null
+    },
+    {
+      "file": "script-only.html",
+      "noLimit": false,
+      "missingYear": false,
+      "notOpen": false,
+      "utc": null
+    }
+  ]
+}

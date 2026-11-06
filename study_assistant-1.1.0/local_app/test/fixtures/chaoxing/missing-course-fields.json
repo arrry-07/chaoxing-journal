@@ -1,0 +1,12 @@
+{
+  "/mycourse/backclazzdata": {
+    "status": 200,
+    "body": {
+      "courses": [
+        {
+          "courseName": "缺少身份的合成课程"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "/mycourse/backclazzdata": {
+    "status": 200,
+    "body": {
+      "courses": []
+    }
+  }
+}

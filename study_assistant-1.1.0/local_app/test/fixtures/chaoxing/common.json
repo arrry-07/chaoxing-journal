@@ -1,0 +1,33 @@
+{
+  "/mycourse/backclazzdata": {
+    "status": 200,
+    "body": {
+      "courses": [
+        {
+          "courseId": "1",
+          "clazzId": "2",
+          "courseName": "合成课程"
+        }
+      ]
+    }
+  },
+  "/visit/stucoursemiddle": {
+    "status": 200,
+    "body": "<script src=\"/mooc2-ans-vue/js/fanyav3.js\"></script>"
+  },
+  "/mooc2-ans/coursemanagev3/stu-base-info": {
+    "status": 200,
+    "body": {
+      "status": true,
+      "navigationList": []
+    }
+  },
+  "/mooc-ans/work/api/task": {
+    "status": 200,
+    "body": {
+      "status": true,
+      "total": 0,
+      "data": []
+    }
+  }
+}

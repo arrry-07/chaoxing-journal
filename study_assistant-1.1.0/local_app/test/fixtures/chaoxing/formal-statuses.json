@@ -1,0 +1,41 @@
+{
+  "/mooc-ans/work/api/task": {
+    "status": 200,
+    "body": {
+      "status": true,
+      "total": 5,
+      "data": [
+        {
+          "title": "合成作业1",
+          "stuStatus": 1,
+          "endTime": 1794052800000,
+          "taskUrl": "https://mooc1.chaoxing.com/work/task?workId=1&classId=2"
+        },
+        {
+          "title": "合成作业2",
+          "stuStatus": 3,
+          "endTime": 1794052800000,
+          "taskUrl": "https://mooc1.chaoxing.com/work/task?workId=2&classId=2"
+        },
+        {
+          "title": "合成作业3",
+          "stuStatus": 4,
+          "endTime": 1794052800000,
+          "taskUrl": "https://mooc1.chaoxing.com/work/task?workId=3&classId=2"
+        },
+        {
+          "title": "合成作业4",
+          "stuStatus": 5,
+          "endTime": 1794052800000,
+          "taskUrl": "https://mooc1.chaoxing.com/work/task?workId=4&classId=2"
+        },
+        {
+          "title": "合成作业5",
+          "stuStatus": null,
+          "endTime": 1794052800000,
+          "taskUrl": "https://mooc1.chaoxing.com/work/task?workId=5&classId=2"
+        }
+      ]
+    }
+  }
+}
