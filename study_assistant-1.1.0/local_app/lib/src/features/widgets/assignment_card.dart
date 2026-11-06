@@ -58,7 +58,21 @@ class AssignmentCard extends StatelessWidget {
         textScaler: MediaQuery.textScalerOf(context))
       ..layout();
     final railWidth = measure.width.ceilToDouble() + 4;
+    final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
     measure.dispose();
+    final metadata = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(state, style: Journal.metadata.copyWith(color: Journal.ink)),
+        if (urgent != null)
+          Text(urgent,
+              style: Journal.metadata
+                  .copyWith(color: color, fontWeight: FontWeight.w600)),
+        if (showFullDeadline || !hasTime)
+          Text(deadline, style: Journal.metadata),
+      ],
+    );
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Semantics(
           button: true,
@@ -74,7 +88,8 @@ class AssignmentCard extends StatelessWidget {
                       onTap: onTap,
                       borderRadius: BorderRadius.circular(12),
                       child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          padding: EdgeInsets.only(
+                              top: 8, bottom: onOpenAssignment == null ? 8 : 0),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -96,28 +111,39 @@ class AssignmentCard extends StatelessWidget {
                                     Text(a.title, style: Journal.entryTitle),
                                     const SizedBox(height: 4),
                                     Text(a.courseName, style: Journal.metadata),
-                                    const SizedBox(height: 4),
-                                    Text(state,
-                                        style: Journal.metadata
-                                            .copyWith(color: Journal.ink)),
-                                    if (urgent != null)
-                                      Text(urgent,
-                                          style: Journal.metadata.copyWith(
-                                              color: color,
-                                              fontWeight: FontWeight.w600)),
-                                    if (showFullDeadline || !hasTime)
-                                      Text(deadline, style: Journal.metadata),
+                                    if (onOpenAssignment == null) ...[
+                                      const SizedBox(height: 4),
+                                      metadata,
+                                    ],
                                   ])),
                             ],
                           )))))),
       if (onOpenAssignment != null)
-        Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: opening ? null : onOpenAssignment,
-              icon: const Icon(Icons.launch, size: 18),
-              label: Text(opening ? '正在打开…' : '去学习通完成'),
-            )),
+        Padding(
+          padding:
+              EdgeInsets.only(left: largeText ? 0 : railWidth + 12, bottom: 8),
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            children: [
+              Padding(
+                padding: EdgeInsets.only(left: largeText ? railWidth + 12 : 0),
+                child: ExcludeSemantics(
+                    child: InkWell(onTap: onTap, child: metadata)),
+              ),
+              TextButton.icon(
+                onPressed: opening ? null : onOpenAssignment,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(48, 48),
+                ),
+                icon: const Icon(Icons.launch, size: 18),
+                label: Text(opening ? '正在打开…' : '去学习通完成'),
+              ),
+            ],
+          ),
+        ),
     ]);
   }
 }
