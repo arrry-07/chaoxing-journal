@@ -13,6 +13,16 @@ public final class NativePoliciesTest {
     throw new AssertionError("Accepted corrupted fixture: " + label);
   }
   public static void main(String[] args) throws Exception {
+    String signed = "https://mooc1.chaoxing.com/mooc-ans/mooc2/work/task?workId=3&enc=a%2Bb%3D&x=1&x=2";
+    String wrapped = com.example.studyassistant.ChaoxingAssignmentLink.build(signed);
+    if (!wrapped.startsWith("chaoxingshareback://xuexitong.com?sharebacktype=1&url=")) throw new AssertionError("Wrong app scheme");
+    String encoded = new java.net.URI(wrapped).getRawQuery().split("url=", 2)[1].split("&title=", 2)[0];
+    if (!java.net.URLDecoder.decode(encoded, "UTF-8").equals(signed)) throw new AssertionError("Signed URL changed");
+    checks += 2;
+    for (String bad : new String[]{"https://evil.example/work/task?workId=3", "https://chaoxing.com.evil.example/work/task?workId=3", "https://chaoxing.com/login", signed + "#fragment", signed.replace("https:", "http:")}) {
+      if (com.example.studyassistant.ChaoxingAssignmentLink.build(bad) != null) throw new AssertionError("Unsafe app URI");
+      checks++;
+    }
     Set<String> selected = BrowserPolicy.browserPackages(Arrays.asList("browser.one", "browser.two", "browser.unavailable"),
       Arrays.asList("chaoxing.app", "browser.one", "browser.two", "browser.one"));
     if (!selected.equals(new LinkedHashSet<>(Arrays.asList("browser.one", "browser.two")))) throw new AssertionError("Browser selection accepted app-link handlers or unavailable browsers");

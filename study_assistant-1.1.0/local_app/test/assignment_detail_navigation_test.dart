@@ -34,7 +34,7 @@ void main() {
     expect(find.textContaining('2026年11月5日 08:30'), findsOneWidget);
   });
   testWidgets(
-      'go to Chaoxing keeps original URL and uses browser fallback without completing work',
+      'go to Chaoxing failure stays in assistant without browser or completing work',
       (tester) async {
     final requests = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -47,11 +47,10 @@ void main() {
     await tester.ensureVisible(button);
     await tester.tap(button);
     await tester.pumpAndSettle();
-    expect(requests.map((c) => c.method),
-        ['openChaoxingAssignment', 'openBrowser']);
+    expect(requests.map((c) => c.method), ['openChaoxingAssignment']);
     expect(requests.every((c) => c.arguments['url'] == _url), isTrue);
     expect(store.item.isCompleted, isFalse);
-    expect(find.textContaining('已请求浏览器'), findsOneWidget);
+    expect(find.textContaining('未能打开学习通'), findsOneWidget);
   });
 
   testWidgets(

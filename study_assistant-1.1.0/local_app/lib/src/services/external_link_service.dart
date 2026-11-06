@@ -8,7 +8,7 @@ enum AssignmentLaunchTarget {
   String get message => switch (this) {
         chaoxing => '已请求学习通打开此链接，请在学习通核对作业详情和登录状态。',
         browser => '当前学习通未提供此链接的直接入口，已请求浏览器打开作业网页，可能需要另行登录。',
-        unavailable => '未能打开学习通或浏览器，请重试，或刷新作业信息后复制链接。',
+        unavailable => '未能打开学习通，请确认已安装并登录后重试。需要网页时可单独选择“打开作业网页”。',
       };
 }
 
@@ -23,15 +23,13 @@ class ExternalLinkService {
   /// information about page loading, authentication, or homework submission.
   Future<bool> openBrowser(String url) => _open('openBrowser', url);
 
-  /// Send the original HTTPS URL only to a registered public handler in the
-  /// official package. No private activity names, invented schemes or cookies.
+  /// The native bridge wraps the original signed URL in Chaoxing's verified
+  /// public share-back scheme. This action never silently opens a browser.
   Future<AssignmentLaunchTarget> openAssignment(String url) async {
     if (await _open('openChaoxingAssignment', url)) {
       return AssignmentLaunchTarget.chaoxing;
     }
-    return await openBrowser(url)
-        ? AssignmentLaunchTarget.browser
-        : AssignmentLaunchTarget.unavailable;
+    return AssignmentLaunchTarget.unavailable;
   }
 
   Future<bool> _open(String method, String url) async {

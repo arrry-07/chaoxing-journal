@@ -137,13 +137,8 @@ class MainActivity : FlutterActivity() {
 
     @Suppress("DEPRECATION")
     private fun openChaoxingAssignment(url: String?): Boolean {
-        if (!BrowserPolicy.isAllowed(url)) return false
-        val uri = Uri.parse(url)
-        val host = uri.host ?: return false
-        if (!(host == "chaoxing.com" || host.endsWith(".chaoxing.com")) ||
-            uri.fragment != null ||
-            !Regex("^/(?:mooc-ans/(?:mooc2/)?|mooc2/|mooc2-ans/)?work/[a-zA-Z0-9_.-]+$").matches(uri.path ?: "")) return false
-        val intent = Intent(Intent.ACTION_VIEW, uri)
+        val deepLink = ChaoxingAssignmentLink.build(url) ?: return false
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink))
             .addCategory(Intent.CATEGORY_BROWSABLE)
             .setPackage("com.chaoxing.mobile")
         val handlers = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)

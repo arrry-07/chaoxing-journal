@@ -20,7 +20,8 @@ void main() {
   const homework =
       'https://mooc1.chaoxing.com/mooc-ans/mooc2/work/task?workId=3&enc=a%2Bb';
   for (final appSupported in [true, false]) {
-    test('homework prefers registered app handler then browser: $appSupported',
+    test(
+        'homework only opens Chaoxing and never silently launches browser: $appSupported',
         () async {
       final calls = <MethodCall>[];
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -33,12 +34,12 @@ void main() {
           result,
           appSupported
               ? AssignmentLaunchTarget.chaoxing
-              : AssignmentLaunchTarget.browser);
+              : AssignmentLaunchTarget.unavailable);
       expect(
           calls.map((c) => c.method),
           appSupported
               ? ['openChaoxingAssignment']
-              : ['openChaoxingAssignment', 'openBrowser']);
+              : ['openChaoxingAssignment']);
       expect(calls.every((c) => c.arguments['url'] == homework), isTrue);
     });
   }

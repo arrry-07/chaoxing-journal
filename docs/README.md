@@ -29,3 +29,5 @@
 - [整理前的项目说明](archive/README-2026-11-05.md)
 
 本地安装包位于 `artifacts/packages/`；旧日志与工作账本位于 `artifacts/archive/`。本地材料不纳入版本控制。
+
+[App内作业直达修正（2026-11-06）](reviews/2026-11-06-App内作业直达修正.md)修正此前网页兜底与用户目标不一致的问题。

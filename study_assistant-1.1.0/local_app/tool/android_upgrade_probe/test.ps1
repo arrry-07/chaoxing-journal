@@ -10,7 +10,7 @@ if (!$JsonJar) {
 }
 if (!$JsonJar) { throw 'Provide -JsonJar pointing to an org.json JVM jar.' }
 New-Item -ItemType Directory -Force $Output | Out-Null
-$sources = @("$PSScriptRoot/NativePoliciesTest.java", "$PSScriptRoot/UpgradeFixture.java",
+$sources = @("$PSScriptRoot/NativePoliciesTest.java", "$PSScriptRoot/../../android/app/src/main/java/com/example/studyassistant/ChaoxingAssignmentLink.java", "$PSScriptRoot/UpgradeFixture.java",
   "$PSScriptRoot/../../android/app/src/main/java/com/example/studyassistant/BrowserPolicy.java")
 & "$Jdk/bin/javac.exe" -encoding UTF-8 -classpath $JsonJar -d $Output @sources
 if ($LASTEXITCODE) { throw 'Native synthetic tests failed to compile.' }
