@@ -89,8 +89,9 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                 ),
                 if (store.chaoxingClient.requestTimings.isNotEmpty)
                   ExpansionTile(
-                      title: const Text('当前会话请求采样'),
-                      subtitle: const Text('仅计次数和网络耗时，不代表整体同步耗时'),
+                      title: const Text('本机临时请求采样'),
+                      subtitle: const Text(
+                          '完整读取或会话重置时清空，单课读取追加；累计请求处理耗时包含本地解析，不代表纯网络或整体同步耗时'),
                       children: [
                         for (final e
                             in store.chaoxingClient.requestTimings.entries)
