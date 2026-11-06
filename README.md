@@ -28,13 +28,13 @@
 
 ## 下载安装
 
-当前体验版为 **1.2.11（41）**，支持 Android **8.0 及以上**，适用于 **ARM64 / x86_64**。
+当前体验版为 **1.3.0（42）**，支持 Android **8.0 及以上**，适用于 **ARM64 / x86_64**。
 
-1. 从 [Releases](https://github.com/arrry-07/chaoxing-journal/releases/latest) 下载 `chaoxing-journal-1.2.11.apk` 和 `SHA256SUMS.txt`。
+1. 从 [Releases](https://github.com/arrry-07/chaoxing-journal/releases/latest) 下载 `chaoxing-journal-1.3.0.apk` 和 `SHA256SUMS.txt`。
 2. 核对文件的 SHA-256，然后按 Android 提示安装。具体校验命令见[安装指南](docs/guides/安装与使用.md#下载安装)。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
-体验包使用 `com.example.studyassistant.journal` 包名和固定的维护者调试签名。**升级直接覆盖安装，勿先卸载**；自行编译的包不保证与发布包签名相同。当前没有应用内完整导出与恢复功能。
+体验包使用 `com.example.studyassistant.journal` 包名和固定的维护者调试签名。**升级直接覆盖安装，勿先卸载**；自行编译的包不保证与发布包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。
 
 ## 使用边界
 

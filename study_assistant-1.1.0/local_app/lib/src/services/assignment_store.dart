@@ -15,6 +15,9 @@ import 'local_notification_service.dart';
 import 'reminder_rule_store.dart';
 import 'secure_session_store.dart';
 import 'widget_snapshot_service.dart';
+import 'assignment_change_log.dart';
+import '../models/assignment_change.dart';
+import '../models/backup_snapshot.dart';
 
 class AssignmentStore extends ChangeNotifier {
   static const defaultAutoSyncIntervalMinutes = 30;
@@ -37,6 +40,115 @@ class AssignmentStore extends ChangeNotifier {
   final LocalAssignmentRepository repository;
   final ChaoxingLocalClient chaoxingClient;
   final ReminderRuleStore reminderRuleStore;
+  final changeLog = AssignmentChangeLog();
+  List<AssignmentChange> changes = [];
+  String? returnCheckMessage;
+  String? _visitedAssignment;
+  int? _visitGeneration;
+  bool _visitLeftApp = false;
+
+  void beginAssignmentVisit(String id) {
+    if (!_authenticated || findAssignment(id) == null) return;
+    _visitedAssignment = id;
+    _visitGeneration = _generation;
+    _visitLeftApp = false;
+    returnCheckMessage = null;
+  }
+
+  void cancelAssignmentVisit(String id) {
+    if (_visitedAssignment == id) {
+      _visitedAssignment = null;
+      _visitLeftApp = false;
+    }
+  }
+
+  void markAssignmentVisitLeftApp() {
+    if (_visitedAssignment != null) _visitLeftApp = true;
+  }
+
+  void dismissReturnCheck() {
+    returnCheckMessage = null;
+    notifyListeners();
+  }
+
+  Future<void> checkReturnedAssignment() async {
+    final id = _visitedAssignment, generation = _visitGeneration;
+    if (id == null || !_visitLeftApp) return;
+    _visitedAssignment = null;
+    _visitLeftApp = false;
+    if (generation != _generation || !_authenticated || _disposed) return;
+    final target = findAssignment(id);
+    if (target == null || target.courseId == null || target.clazzId == null) {
+      return;
+    }
+    returnCheckMessage = '正在核对刚才作业的提交状态…';
+    notifyListeners();
+    var confirmed = false;
+    await _run(() async {
+      if (generation != _generation || !_authenticated || _disposed) return;
+      if (chaoxingClient.needsSessionInitialization) {
+        await _refreshChaoxingSession();
+      }
+      chaoxingClient.previousAssignments = {
+        for (final a in [..._assignments, ..._hiddenAssignments]) a.id: a
+      };
+      late List<Assignment> incoming;
+      try {
+        incoming = await chaoxingClient.fetchAssignmentsForCourse(
+            courseId: target.courseId!, clazzId: target.clazzId!);
+      } on ChaoxingAuthenticationException {
+        await _refreshChaoxingSession();
+        incoming = await chaoxingClient.fetchAssignmentsForCourse(
+            courseId: target.courseId!, clazzId: target.clazzId!);
+      }
+      if (generation != _generation || !_authenticated || _disposed) return;
+      final observed = incoming.where((a) => a.id == id).firstOrNull;
+      final before = [..._assignments, ..._hiddenAssignments];
+      final accepted = incoming
+          .where((a) => a.id != id || a.statusLabel != '提交状态未知')
+          .toList();
+      await repository.mergeAndSave(accepted, completeSync: false);
+      if (generation != _generation || !_authenticated || _disposed) return;
+      await _reloadJournal();
+      if (generation != _generation || !_authenticated || _disposed) return;
+      await _recordChanges(before, accepted);
+      if (generation != _generation || !_authenticated || _disposed) return;
+      final latestBefore =
+          before.where((a) => a.id == id).firstOrNull ?? target;
+      final conflictsWithConfirmation = latestBefore.isCompleted &&
+          observed != null &&
+          !observed.isCompleted &&
+          observed.status != 'returned';
+      returnCheckMessage = observed == null ||
+              observed.statusLabel == '提交状态未知' ||
+              conflictsWithConfirmation
+          ? '本次未能确认提交状态，已保留原记录；请稍后刷新核对。'
+          : observed.isCompleted
+              ? '已确认提交：${observed.title}（${observed.statusLabel}）'
+              : '刚才的作业仍为${observed.statusLabel}，提醒继续保留。';
+      confirmed = true;
+    });
+    if (generation != _generation || !_authenticated || _disposed) return;
+    if (!confirmed) returnCheckMessage = '本次未能确认提交状态，已保留原记录和提醒；请稍后重试。';
+    notifyListeners();
+  }
+
+  Future<void> _recordChanges(
+      List<Assignment> before, List<Assignment> incoming,
+      {bool completeSync = false}) async {
+    final generation = _generation;
+    try {
+      await changeLog.record(before, [..._assignments, ..._hiddenAssignments],
+          incoming.map((a) => a.id).toSet(),
+          completeSync: completeSync);
+      if (generation != _generation || _disposed) return;
+      final loaded = await changeLog.load();
+      if (generation != _generation || _disposed) return;
+      changes = loaded;
+    } catch (_) {
+      _recoveryWarnings.add('部分作业变化记录未能保存或读取，请稍后重试');
+    }
+  }
 
   SyncReport syncReport = const SyncReport();
   int _generation = 0;
@@ -173,6 +285,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _restoreAccountData() async {
+    changes = [];
     _assignments.clear();
     _hiddenAssignments = [];
     _courses = [];
@@ -226,6 +339,9 @@ class AssignmentStore extends ChangeNotifier {
     await stage('作业记录', () async {
       await _reloadJournal();
     });
+    await stage('作业变化', () async {
+      changes = await changeLog.load();
+    });
   }
 
   Future<void> loginChaoxing({
@@ -241,6 +357,8 @@ class AssignmentStore extends ChangeNotifier {
     }
     _loginRunning = true;
     final generation = ++_generation;
+    _visitedAssignment = null;
+    returnCheckMessage = null;
     var loginSucceeded = false;
     chaoxingClient.deferProfile = true;
     await _run(() async {
@@ -390,16 +508,41 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _reloadJournal() async {
+    final generation = _generation;
     final journal = await repository.loadJournal();
+    if (generation != _generation || _disposed) return;
     _assignments
       ..clear()
       ..addAll(journal);
     _hiddenAssignments = await repository.loadHiddenAssignments();
+    if (generation != _generation || _disposed) return;
     _lastSyncAt = await repository.lastSyncAt();
     await _afterAssignmentsChanged();
   }
 
   Future<void> refreshAssignments() => _run(_reloadJournal);
+
+  Future<bool> restoreLocalBackup(BackupSnapshot snapshot) async {
+    final account = _account, generation = _generation;
+    if (account == null || !_authenticated) return false;
+    var restored = false;
+    await _run(() async {
+      if (generation != _generation || account != _account || !_authenticated) {
+        return;
+      }
+      restored = await repository.restoreBackupSnapshot(snapshot, account);
+      if (generation != _generation || account != _account || !_authenticated) {
+        restored = false;
+        return;
+      }
+      if (restored) {
+        _visitedAssignment = null;
+        returnCheckMessage = null;
+        await _restoreAccountData();
+      }
+    });
+    return restored;
+  }
 
   Future<void> updateCompletion(String assignmentId, bool completed) async {
     await _run(() async {
@@ -468,6 +611,9 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> logout() {
     _generation++;
+    _visitedAssignment = null;
+    returnCheckMessage = null;
+    changes = [];
     return _run(() async {
       chaoxingClient.clearSession();
       chaoxingClient.previousAssignments = {};
@@ -491,6 +637,9 @@ class AssignmentStore extends ChangeNotifier {
       _courses = [];
       _unfollowed.clear();
       syncReport = const SyncReport();
+      _visitedAssignment = null;
+      returnCheckMessage = null;
+      changes = [];
       repository.recoveryWarning = null;
       _restartAutoSyncTimer();
       await _afterAssignmentsChanged();
@@ -585,7 +734,9 @@ class AssignmentStore extends ChangeNotifier {
       }
     }
     if (generation != _generation || _disposed) return;
+    final before = [..._assignments, ..._hiddenAssignments];
     await repository.mergeAndSave(incoming, completeSync: warning == null);
+    if (generation != _generation || _disposed) return;
     syncReport = SyncReport(
         phase: warning == null ? SyncPhase.success : SyncPhase.partial,
         attemptedAt: attempted,
@@ -598,6 +749,8 @@ class AssignmentStore extends ChangeNotifier {
     await prefs.setString(
         'sync_data_at', DateTime.now().toUtc().toIso8601String());
     await _reloadJournal();
+    if (generation != _generation || _disposed) return;
+    await _recordChanges(before, incoming, completeSync: warning == null);
     _error = warning;
   }
 

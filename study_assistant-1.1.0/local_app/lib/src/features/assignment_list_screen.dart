@@ -32,7 +32,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
       return;
     }
     setState(() => _openingAssignments.add(id));
+    store.beginAssignmentVisit(id);
     final target = await ExternalLinkService().openAssignment(url);
+    if (target == AssignmentLaunchTarget.unavailable) {
+      store.cancelAssignmentVisit(id);
+    }
     if (!mounted) return;
     setState(() => _openingAssignments.remove(id));
     feedback(target.message);

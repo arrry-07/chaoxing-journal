@@ -43,7 +43,9 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
       _opening = true;
       _actionMessage = null;
     });
+    widget.store.beginAssignmentVisit(widget.assignmentId);
     final opened = await _links.openBrowser(url);
+    if (!opened) widget.store.cancelAssignmentVisit(widget.assignmentId);
     if (!mounted) return;
     setState(() {
       _opening = false;
@@ -61,7 +63,11 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
       _opening = true;
       _actionMessage = null;
     });
+    widget.store.beginAssignmentVisit(widget.assignmentId);
     final target = await _links.openAssignment(url);
+    if (target == AssignmentLaunchTarget.unavailable) {
+      widget.store.cancelAssignmentVisit(widget.assignmentId);
+    }
     if (!mounted) return;
     setState(() {
       _opening = false;

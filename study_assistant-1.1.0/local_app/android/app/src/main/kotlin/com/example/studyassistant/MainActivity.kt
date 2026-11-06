@@ -14,9 +14,12 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var backupBridge: BackupBridge? = null
     private var verificationBrowser: VerificationBrowser? = null
     private var webSessionGeneration = 0L
     override fun onDestroy() {
+        backupBridge?.close()
+        backupBridge = null
         webSessionGeneration++
         verificationBrowser?.close()
         verificationBrowser = null
@@ -24,6 +27,8 @@ class MainActivity : FlutterActivity() {
     }
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        backupBridge = BackupBridge(this,
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/backup"))
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/external_links").setMethodCallHandler { call, result ->
             if(call.method == "verifySession") {
                 val generation = ++webSessionGeneration
@@ -80,6 +85,11 @@ class MainActivity : FlutterActivity() {
             }
             result.success(opened)
         }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        backupBridge?.onActivityResult(requestCode, resultCode, data)
     }
 
     private fun openNotificationSettings(): Boolean {

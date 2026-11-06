@@ -3,6 +3,49 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 
 void main() {
+  test('return reconciliation reads only the selected class homework list',
+      () async {
+    final queried = <String>[];
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        final q = o.uri.queryParameters;
+        dynamic body;
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                for (final id in ['11', '22'])
+                  {
+                    'courseId': '7',
+                    'clazzId': id,
+                    'courseName': '样例',
+                    'cpi': '8'
+                  }
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            expect(q['clazzid'], '22');
+            body =
+                '<input id="workEnc" value="signature"><input id="enc" value="student">';
+          case '/mooc2/work/list':
+            queried.add(q['classId']!);
+            final url = Uri.encodeComponent(
+                'https://mooc1.chaoxing.com/work/task?courseId=7&classId=22&workId=9&enc=synthetic');
+            body =
+                '<li onclick="goTask(this);" data="$url"><p class="overHidden2 fl">样例作业</p><p class="status fl">已提交</p></li>';
+          case '/work/task':
+            body = '作答时间：2026-12-30 09:00 至 2027-01-02 12:00';
+          default:
+            fail('unexpected endpoint ${o.uri.path}');
+        }
+        h.resolve(Response(requestOptions: o, statusCode: 200, data: body));
+      }));
+    final rows = await ChaoxingLocalClient(dio: dio)
+        .fetchAssignmentsForCourse(courseId: '7', clazzId: '22');
+    expect(queried, ['22']);
+    expect(rows.single.clazzId, '22');
+    expect(rows.single.isCompleted, isTrue);
+  });
   test('explicit logged-out JSON is an authentication error even with cookies',
       () async {
     final dio = Dio()

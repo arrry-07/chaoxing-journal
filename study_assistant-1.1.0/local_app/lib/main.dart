@@ -1,4 +1,6 @@
 import 'src/services/app_update_controller.dart';
+import 'src/features/assignment_changes_screen.dart';
+import 'src/features/backup_screen.dart';
 import 'src/features/widgets/update_scope.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -162,6 +164,13 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             child: child,
           ),
           routes: [
+            GoRoute(
+                path: '/changes',
+                builder: (_, __) =>
+                    AssignmentChangesScreen(store: assignmentStore)),
+            GoRoute(
+                path: '/backup',
+                builder: (_, __) => BackupScreen(store: assignmentStore)),
             GoRoute(
               path: '/assignments',
               builder: (_, __) => AssignmentListScreen(store: assignmentStore),

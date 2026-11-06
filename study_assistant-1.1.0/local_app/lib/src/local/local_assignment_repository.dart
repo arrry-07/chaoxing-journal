@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/assignment.dart';
 import '../models/course.dart';
+import '../models/backup_snapshot.dart';
+import '../services/reminder_rule_store.dart';
 
 class LocalAssignmentRepository {
   static const _key = 'chaoxing_journal_v2';
@@ -26,6 +28,7 @@ class LocalAssignmentRepository {
     'sync_attempt_at',
     'sync_data_at',
     'sync_report_v1',
+    'assignment_changes_v1',
     '${_key}_recovery_backup',
     '${_key}_recovery_backups',
     'course_refs_recovery_backup',
@@ -33,6 +36,102 @@ class LocalAssignmentRepository {
 
   static String _owner(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
+
+  void _checkOwner(SharedPreferences prefs, String account) {
+    if (account.trim().isEmpty ||
+        prefs.getString(_ownerKey) != _owner(account) ||
+        prefs.containsKey(_switchKey)) {
+      throw StateError('当前账号已变化，请重新打开备份页面');
+    }
+  }
+
+  Future<void> validateBackupOwner(BackupSnapshot snapshot, String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        if (snapshot.owner != _owner(account)) throw StateError('此备份不属于当前账号');
+      });
+
+  Future<BackupSnapshot> createBackupSnapshot(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        final state = await _read();
+        return BackupSnapshot.create(
+            owner: _owner(account),
+            createdAt: DateTime.now(),
+            records: state.byId.values.toList(),
+            hidden: state.hidden.intersection(state.byId.keys.toSet()),
+            courses: await loadCourses(),
+            unfollowed:
+                (prefs.getStringList('unfollowed_courses') ?? []).toSet(),
+            reminderOffsets: await ReminderRuleStore().loadOffsetsMinutes(),
+            autoSyncIntervalMinutes:
+                prefs.getInt('auto_sync_interval_minutes') ?? 30);
+      });
+
+  /// Restore only absent records/preferences. Imported observations must be
+  /// confirmed by a real sync before they can drive submission UI or reminders.
+  Future<bool> restoreBackupSnapshot(BackupSnapshot snapshot, String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        if (snapshot.owner != _owner(account)) throw StateError('此备份不属于当前账号');
+        // Validate again at the trust boundary even for in-memory callers.
+        final validated = BackupSnapshot.decode(snapshot.encode());
+        final state = await _read();
+        for (final a in validated.records) {
+          if (state.byId.containsKey(a.id)) continue;
+          state.byId[a.id] = Assignment(
+              id: a.id,
+              source: a.source,
+              courseName: a.courseName,
+              title: a.title,
+              deadlineAt: a.deadlineAt,
+              requirementsText: a.requirementsText,
+              status: 'unknown',
+              // A backup's device clock is not a new server observation. A
+              // future source clock must never outrank the next real sync.
+              lastSyncedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+              deadlineTrusted: false,
+              deadlineRawText: '备份记录，待同步确认');
+          if (validated.hidden.contains(a.id)) state.hidden.add(a.id);
+        }
+        final courses = {for (final c in await loadCourses()) c.key: c};
+        for (final c in validated.courses) {
+          courses.putIfAbsent(c.key, () => c);
+        }
+        final before = <String, dynamic>{
+          'owner': prefs.getString(_ownerKey),
+          'values': {
+            for (final key in _scopedKeys)
+              if (prefs.containsKey(key)) key: prefs.get(key)
+          }
+        };
+        // The same durable checkpoint as account activation. On restart activation
+        // repairs an interrupted restore before exposing any records.
+        await _require(prefs.setString(_switchKey, jsonEncode(before)));
+        try {
+          await _save(state);
+          await _require(prefs.setString('course_refs',
+              jsonEncode(courses.values.map((c) => c.toJson()).toList())));
+          if (!prefs.containsKey('unfollowed_courses')) {
+            await _require(prefs.setStringList(
+                'unfollowed_courses', validated.unfollowed.toList()));
+          }
+          if (!prefs.containsKey('reminder_offsets_minutes')) {
+            await _require(prefs.setStringList('reminder_offsets_minutes',
+                validated.reminderOffsets.map((v) => '$v').toList()));
+          }
+          // Sync interval is global: a historical account backup must not alter it.
+          await _require(prefs.remove(_switchKey));
+          return true;
+        } catch (_) {
+          await _restoreScope(prefs, before);
+          await _require(prefs.remove(_switchKey));
+          rethrow;
+        }
+      });
 
   // Archive before switching. A durable checkpoint restores the old active
   // scope if the process stops between individual SharedPreferences writes.

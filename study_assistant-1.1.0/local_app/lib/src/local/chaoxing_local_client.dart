@@ -196,6 +196,28 @@ class ChaoxingLocalClient {
     );
   }
 
+  /// Refresh just the selected course; fetching the lightweight course index
+  /// supplies its current cpi/signatures without reading every homework list.
+  Future<List<Assignment>> fetchAssignmentsForCourse(
+      {required String courseId, required String clazzId}) async {
+    issues = [];
+    _deadlineReadsBlockedBy = null;
+    final mcode =
+        _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
+    final response = await _safeGet<dynamic>(
+        'https://mooc1-api.chaoxing.com/mycourse/backclazzdata',
+        queryParameters: {'view': 'json', if (mcode != null) 'mcode': mcode});
+    final refs =
+        ChaoxingApiParser.parseCourseRefs(_decodeJsonPayload(response?.data));
+    final course = refs
+        .where((c) => c.courseId == courseId && c.clazzId == clazzId)
+        .firstOrNull;
+    if (course == null) throw StateError('目标课程暂时无法读取，请刷新作业后重试');
+    final rows = await _fetchCourseWork(course);
+    if (rows == null) throw StateError('本次未能读取目标课程作业');
+    return _dedupeAssignments(rows);
+  }
+
   Future<List<Assignment>> fetchAssignments() async {
     lastSyncWarning = null;
     _deadlineReadsBlockedBy = null;

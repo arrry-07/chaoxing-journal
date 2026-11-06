@@ -1,4 +1,5 @@
 import '../features/widgets/update_scope.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -20,6 +21,7 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
+  Timer? _returnTimer;
   @override
   void initState() {
     super.initState();
@@ -31,6 +33,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _returnTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -38,7 +41,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      widget.assignmentStore.runDueAutoSync();
+      _returnTimer?.cancel();
+      _returnTimer = Timer(const Duration(milliseconds: 600), () async {
+        await widget.assignmentStore.checkReturnedAssignment();
+        if (mounted) widget.assignmentStore.runDueAutoSync();
+      });
+    } else {
+      _returnTimer?.cancel();
+      widget.assignmentStore.markAssignmentVisitLeftApp();
     }
   }
 
@@ -48,6 +58,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     return Scaffold(
       body: SafeArea(bottom: false, child: widget.child),
       bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
+        AnimatedBuilder(
+            animation: widget.assignmentStore,
+            builder: (context, _) {
+              final message = widget.assignmentStore.returnCheckMessage;
+              if (message == null) return const SizedBox.shrink();
+              return Material(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  child: Padding(
+                      padding: const EdgeInsets.only(left: 16),
+                      child: Row(children: [
+                        Expanded(
+                            child: Semantics(
+                                liveRegion: true, child: Text(message))),
+                        IconButton(
+                            tooltip: '关闭核对提示',
+                            onPressed:
+                                widget.assignmentStore.dismissReturnCheck,
+                            icon: const Icon(Icons.close)),
+                      ])));
+            }),
         if (AppUpdateScope.maybeOf(context) case final updates?)
           UpdateDownloadBanner(controller: updates),
         NavigationBar(
@@ -108,7 +138,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         location.startsWith('/reminders') ||
         location.startsWith('/courses') ||
         location.startsWith('/records') ||
-        location.startsWith('/help')) {
+        location.startsWith('/help') ||
+        location.startsWith('/changes') ||
+        location.startsWith('/backup')) {
       return 3;
     }
     return 0;

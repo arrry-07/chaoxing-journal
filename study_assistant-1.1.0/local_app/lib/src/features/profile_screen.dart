@@ -79,6 +79,18 @@ class ProfileScreen extends StatelessWidget {
                         onTap: () => _showHiddenAssignments(context),
                       ),
                       _SettingsTile(
+                        icon: Icons.history,
+                        title: '作业变化',
+                        subtitle: '${store.changes.length} 条最近变化',
+                        onTap: () => context.push('/changes'),
+                      ),
+                      _SettingsTile(
+                        icon: Icons.enhanced_encryption_outlined,
+                        title: '加密备份与恢复',
+                        subtitle: '仅备份本机课业记录，不含登录凭据',
+                        onTap: () => context.push('/backup'),
+                      ),
+                      _SettingsTile(
                         icon: Icons.help_outline,
                         title: '帮助与反馈',
                         onTap: () => context.push('/help'),
