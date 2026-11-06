@@ -52,6 +52,21 @@ class ChaoxingLocalClient {
             );
 
   final Dio _dio;
+  final _requestTimings =
+      <String, ({int count, int elapsedMs, int httpFailures})>{};
+  Map<String, ({int count, int elapsedMs, int httpFailures})>
+      get requestTimings => Map.unmodifiable(_requestTimings);
+  static String _requestKind(String path) {
+    if (path == '/mycourse/backclazzdata') return '课程列表';
+    if (path.contains('stucoursemiddle')) return '课程入口';
+    if (path.contains('stu-base-info')) return '课程导航';
+    if (path.endsWith('/work/list') || path.endsWith('/work/api/task')) {
+      return '作业列表';
+    }
+    if (path.contains('/work/')) return '作业详情';
+    return '其他';
+  }
+
   final List<_SessionCookie> _cookies = [];
   Uri? _verificationTarget;
   Uri? _courseVerificationProbe;
@@ -138,6 +153,7 @@ class ChaoxingLocalClient {
   Set<String> trackedActivityIds = {};
   Map<String, Assignment> previousAssignments = {};
   void clearSession() {
+    _requestTimings.clear();
     _sessionGeneration++;
     _cookies.clear();
     _verificationTarget = null;
@@ -219,6 +235,7 @@ class ChaoxingLocalClient {
   }
 
   Future<List<Assignment>> fetchAssignments() async {
+    _requestTimings.clear();
     lastSyncWarning = null;
     _deadlineReadsBlockedBy = null;
     issues = [];
@@ -720,8 +737,9 @@ class ChaoxingLocalClient {
     Map<String, String>? headers,
   }) async {
     final generation = _sessionGeneration;
+    final watch = Stopwatch()..start();
+    int? observedStatus;
     try {
-      final watch = Stopwatch()..start();
       final response = await _dio.get<T>(
         uri,
         queryParameters: queryParameters,
@@ -730,6 +748,7 @@ class ChaoxingLocalClient {
       if (generation != _sessionGeneration) return null;
       _rememberCookies(response);
       final status = response.statusCode ?? 0;
+      observedStatus = status;
       final location = response.headers.value('location') ?? '';
       final body = response.data is String ? response.data as String : '';
       final payload = _decodeJsonPayload(response.data);
@@ -792,6 +811,18 @@ class ChaoxingLocalClient {
           SyncIssue(SyncIssueKind.network, '连接学习通失败，请稍后重试'));
     } catch (_) {
       // Chaoxing endpoints differ by school/session. Keep the sync pipeline best-effort.
+    } finally {
+      // Aggregate fixed labels only: never retain URL parameters, IDs or response bodies.
+      if (generation == _sessionGeneration) {
+        final kind = _requestKind(Uri.parse(uri).path);
+        final prior = _requestTimings[kind];
+        _requestTimings[kind] = (
+          count: (prior?.count ?? 0) + 1,
+          elapsedMs: (prior?.elapsedMs ?? 0) + watch.elapsedMilliseconds,
+          httpFailures: (prior?.httpFailures ?? 0) +
+              (observedStatus == null || observedStatus >= 400 ? 1 : 0)
+        );
+      }
     }
     return null;
   }

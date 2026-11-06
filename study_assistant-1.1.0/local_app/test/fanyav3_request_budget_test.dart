@@ -38,5 +38,13 @@ void main() {
     expect(middle, 1);
     expect(nav, 1);
     expect(work, 3);
+    expect(c.requestTimings.values.fold<int>(0, (v, m) => v + m.count), 6);
+    expect(c.requestTimings.keys, contains('作业列表'));
+    expect(
+        c.requestTimings.values
+            .every((m) => m.elapsedMs >= 0 && m.httpFailures == 0),
+        true);
+    await c.fetchAssignments();
+    expect(c.requestTimings.values.fold<int>(0, (v, m) => v + m.count), 4);
   });
 }

@@ -87,6 +87,18 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                     ),
                   ),
                 ),
+                if (store.chaoxingClient.requestTimings.isNotEmpty)
+                  ExpansionTile(
+                      title: const Text('当前会话请求采样'),
+                      subtitle: const Text('仅计次数和网络耗时，不代表整体同步耗时'),
+                      children: [
+                        for (final e
+                            in store.chaoxingClient.requestTimings.entries)
+                          ListTile(
+                              title: Text(e.key),
+                              subtitle: Text(
+                                  '${e.value.count}次 · 累计${e.value.elapsedMs}毫秒 · 网络/HTTP失败${e.value.httpFailures}次')),
+                      ]),
                 if (store.syncReport.attemptedAt != null)
                   Text(
                       '最后尝试：${DateFormat('M月d日 HH:mm').format(store.syncReport.attemptedAt!)}'),
