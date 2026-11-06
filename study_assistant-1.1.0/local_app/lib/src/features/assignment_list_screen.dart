@@ -6,6 +6,8 @@ import '../models/sync_report.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
 import '../services/home_sync_presentation.dart';
+import '../services/assignment_web_link.dart';
+import '../services/external_link_service.dart';
 import 'widgets/assignment_card.dart';
 
 class AssignmentListScreen extends StatefulWidget {
@@ -17,7 +19,24 @@ class AssignmentListScreen extends StatefulWidget {
 
 class _AssignmentListScreenState extends State<AssignmentListScreen> {
   bool _refreshing = false;
+  final _openingAssignments = <String>{};
   AssignmentStore get store => widget.store;
+
+  Future<void> openAssignment(String id) async {
+    if (_openingAssignments.contains(id)) return;
+    final assignment = store.findAssignment(id);
+    final url =
+        assignment == null ? null : AssignmentWebLink.validatedUrl(assignment);
+    if (url == null) {
+      feedback('作业链接暂不可用，请刷新作业信息');
+      return;
+    }
+    setState(() => _openingAssignments.add(id));
+    final target = await ExternalLinkService().openAssignment(url);
+    if (!mounted) return;
+    setState(() => _openingAssignments.remove(id));
+    feedback(target.message);
+  }
 
   void feedback(String message, {bool details = false}) {
     if (!mounted) return;
@@ -130,6 +149,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             assignment: a,
             now: now,
             showFullDeadline: false,
+            onOpenAssignment: AssignmentWebLink.validatedUrl(a) == null
+                ? null
+                : () => openAssignment(a.id),
+            opening: _openingAssignments.contains(a.id),
             onTap: () =>
                 context.push('/assignments/${Uri.encodeComponent(a.id)}'));
         List<Widget> timeline(List<Assignment> list) {

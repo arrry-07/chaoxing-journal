@@ -250,12 +250,16 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _checkForUpdates(BuildContext context) => showDialog<void>(
-      context: context,
-      builder: (_) => UpdateDialog(
-          controller: AppUpdateScope.maybeOf(context),
-          service: updateService ?? AppUpdateService(),
-          links: externalLinkService));
+  Future<void> _checkForUpdates(BuildContext context) {
+    final controller = AppUpdateScope.maybeOf(context);
+    if (controller != null) return showUpdateDialog(context, controller);
+    return showDialog<void>(
+        context: context,
+        builder: (_) => UpdateDialog(
+            controller: AppUpdateScope.maybeOf(context),
+            service: updateService ?? AppUpdateService(),
+            links: externalLinkService));
+  }
 }
 
 class _ProfileHeader extends StatelessWidget {

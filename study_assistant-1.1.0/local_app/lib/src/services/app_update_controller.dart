@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app/app_version.dart';
 import 'app_update_service.dart';
@@ -34,8 +35,61 @@ class AppUpdateController extends ChangeNotifier {
   String? downloadedPath;
   int receivedBytes = 0;
   int totalBytes = -1;
+  double bytesPerSecond = 0;
+  bool dialogIsOpen = false;
+  bool hasShownDialog = false;
+  String get transferSummary {
+    final received = (receivedBytes / 1048576).toStringAsFixed(1);
+    final total =
+        totalBytes > 0 ? ' / ${(totalBytes / 1048576).toStringAsFixed(1)}' : '';
+    final speed = bytesPerSecond > 0
+        ? ' · ${(bytesPerSecond / 1048576).toStringAsFixed(2)} MB/s'
+        : '';
+    return '$received$total MB$speed';
+  }
+
   CancelToken? _cancel;
   bool _disposed = false;
+  bool _startupChecked = false;
+  static const _ignoredVersionKey = 'update.ignoredVersion';
+  String get _candidateKey =>
+      '${update?.versionName}+${update?.versionCode ?? 0}';
+
+  /// Only cold starts check automatically. Manual checks deliberately bypass
+  /// the ignored release, so the user can change their mind from Settings.
+  Future<bool> checkOnStartup() async {
+    if (_startupChecked || _disposed) return false;
+    _startupChecked = true;
+    await check();
+    if (_disposed || update == null || phase != UpdatePhase.available) {
+      return false;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return !_disposed &&
+          !hasShownDialog &&
+          prefs.getString(_ignoredVersionKey) != _candidateKey;
+    } catch (_) {
+      // A preference read failure must not prevent discovery of a new release.
+      return !_disposed && !hasShownDialog;
+    }
+  }
+
+  Future<bool> ignoreCurrentVersion() async {
+    if (_disposed || update == null || busy) return false;
+    final key = _candidateKey;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (await prefs.setString(_ignoredVersionKey, key)) return true;
+    } catch (_) {
+      // Keep the prompt open so the user knows the preference was not saved.
+    }
+    if (!_disposed) {
+      message = '未能保存忽略设置，请重试或直接关闭';
+      _emit();
+    }
+    return false;
+  }
 
   AppUpdateInfo? get update => result?.update;
   bool get busy => {
@@ -89,11 +143,13 @@ class AppUpdateController extends ChangeNotifier {
     }
     phase = UpdatePhase.downloading;
     receivedBytes = 0;
+    bytesPerSecond = 0;
     totalBytes = candidate.apkSize ?? -1;
     message = '正在下载更新包';
     _cancel = CancelToken();
     final watch = Stopwatch()..start();
     var lastNotification = -100;
+    var speedAt = 0, speedBytes = 0;
     _emit();
     File? file;
     try {
@@ -102,6 +158,12 @@ class AppUpdateController extends ChangeNotifier {
         if (_disposed || _cancel!.isCancelled) return;
         receivedBytes = received;
         totalBytes = total;
+        final elapsed = watch.elapsedMilliseconds;
+        if (elapsed - speedAt >= 500) {
+          bytesPerSecond = (received - speedBytes) * 1000 / (elapsed - speedAt);
+          speedAt = elapsed;
+          speedBytes = received;
+        }
         if (watch.elapsedMilliseconds - lastNotification >= 100 ||
             received == total) {
           lastNotification = watch.elapsedMilliseconds;

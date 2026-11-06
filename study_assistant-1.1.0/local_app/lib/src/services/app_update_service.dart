@@ -2,6 +2,8 @@ import 'package:crypto/crypto.dart';
 import '../app/app_version.dart';
 import 'dart:io';
 import 'dart:async';
+import 'dart:typed_data';
+import 'parallel_apk_transfer.dart';
 
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
@@ -33,6 +35,7 @@ class AppUpdateService {
   AppUpdateService(
       {Dio? dio,
       this.maxDownloadBytes = 256 * 1024 * 1024,
+      this.parallelDownloads = false,
       this.totalDownloadTimeout = const Duration(minutes: 5),
       this.manifestUrl = const String.fromEnvironment('UPDATE_MANIFEST_URL')})
       : _dio = dio ??
@@ -56,6 +59,7 @@ class AppUpdateService {
 
   final Dio _dio;
   final int maxDownloadBytes;
+  bool parallelDownloads;
   final Duration totalDownloadTimeout;
   final String manifestUrl;
   Future<UpdateCheckResult> checkConfigured(
@@ -282,45 +286,76 @@ class AppUpdateService {
               (declared <= 0 || declared > maxDownloadBytes))) {
         throw StateError('安装包大小超出允许范围');
       }
-      final response = await guarded(_dio.get<ResponseBody>(
-        update.apkDownloadUrl,
-        cancelToken: transfer,
-        options: Options(responseType: ResponseType.stream),
-      ));
-      final body = response.data;
-      if (body != null) {
-        responseStream = body.stream;
-        chunks = StreamIterator<List<int>>(responseStream);
+      Response<ResponseBody>? response;
+      final parallel = parallelDownloads &&
+          declared != null &&
+          declared >= ParallelApkTransfer.minimumSize &&
+          update.sha256Hash != null;
+      if (parallel) {
+        response = await ParallelApkTransfer.download(
+            dio: _dio,
+            url: update.apkDownloadUrl,
+            size: declared,
+            destination: partial,
+            working: working,
+            token: transfer,
+            onProgress: onProgress);
       }
-      final status = response.statusCode ?? 0;
-      if (status < 200 || status >= 300 || chunks == null) {
-        throw StateError('下载 APK 失败');
-      }
-      final header = response.headers.value('content-length');
-      final headerSize = header == null ? null : int.tryParse(header);
-      if ((header != null && (headerSize == null || headerSize <= 0)) ||
-          (headerSize != null && headerSize > maxDownloadBytes) ||
-          (headerSize != null && declared != null && headerSize != declared)) {
-        throw StateError('安装包响应长度异常');
-      }
-      final expectedSize = declared ?? headerSize;
       var received = 0;
-      output = await partial.open(mode: FileMode.write);
-      streamStarted = true;
-      while (await guarded(chunks.moveNext())) {
-        checkCancelled();
-        final chunk = chunks.current;
-        final nextSize = received + chunk.length;
-        if (nextSize > maxDownloadBytes ||
-            (expectedSize != null && nextSize > expectedSize)) {
-          throw StateError('安装包响应超出允许大小');
+      int? expectedSize = declared;
+      if (!parallel || response != null) {
+        final fullResponse = response ??
+            await guarded<Response<ResponseBody>>(_dio.get<ResponseBody>(
+              update.apkDownloadUrl,
+              cancelToken: transfer,
+              options: Options(responseType: ResponseType.stream, headers: {
+                'Accept': 'application/octet-stream',
+                'Accept-Encoding': 'identity'
+              }),
+            ));
+        final body = fullResponse.data;
+        if (body != null) {
+          responseStream = body.stream;
+          chunks = StreamIterator<List<int>>(responseStream);
         }
-        await output.writeFrom(chunk);
-        received = nextSize;
-        onProgress?.call(received, expectedSize ?? -1);
+        final status = fullResponse.statusCode ?? 0;
+        if (status != 200 || chunks == null) {
+          throw StateError('下载 APK 失败');
+        }
+        final header = fullResponse.headers.value('content-length');
+        final headerSize = header == null ? null : int.tryParse(header);
+        if ((header != null && (headerSize == null || headerSize <= 0)) ||
+            (headerSize != null && headerSize > maxDownloadBytes) ||
+            (headerSize != null &&
+                declared != null &&
+                headerSize != declared)) {
+          throw StateError('安装包响应长度异常');
+        }
+        expectedSize = declared ?? headerSize;
+        output = await partial.open(mode: FileMode.write);
+        final buffer = BytesBuilder(copy: false);
+        streamStarted = true;
+        while (await guarded(chunks.moveNext())) {
+          checkCancelled();
+          final chunk = chunks.current;
+          final nextSize = received + chunk.length;
+          if (nextSize > maxDownloadBytes ||
+              (expectedSize != null && nextSize > expectedSize)) {
+            throw StateError('安装包响应超出允许大小');
+          }
+          buffer.add(chunk);
+          if (buffer.length >= ParallelApkTransfer.bufferSize) {
+            await output.writeFrom(buffer.takeBytes());
+          }
+          received = nextSize;
+          onProgress?.call(received, expectedSize ?? -1);
+        }
+        if (buffer.isNotEmpty) await output.writeFrom(buffer.takeBytes());
+        await output.close();
+        output = null;
+      } else {
+        received = await partial.length();
       }
-      await output.close();
-      output = null;
       if (received == 0 || (expectedSize != null && received != expectedSize)) {
         throw StateError('安装包下载不完整，请重试');
       }

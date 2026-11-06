@@ -41,9 +41,7 @@ class UpdateDownloadBanner extends StatelessWidget {
                           child: Text(label,
                               maxLines: 2, overflow: TextOverflow.ellipsis))),
                   TextButton(
-                      onPressed: () => showDialog<void>(
-                          context: context,
-                          builder: (_) => UpdateDialog(controller: controller)),
+                      onPressed: () => showUpdateDialog(context, controller),
                       child: Text(controller.phase == UpdatePhase.ready
                           ? '安装更新'
                           : '查看进度')),

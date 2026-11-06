@@ -53,6 +53,22 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
     });
   }
 
+  Future<void> _openAssignment() async {
+    if (_opening) return;
+    final url = _currentUrl;
+    if (url == null) return;
+    setState(() {
+      _opening = true;
+      _actionMessage = null;
+    });
+    final target = await _links.openAssignment(url);
+    if (!mounted) return;
+    setState(() {
+      _opening = false;
+      _actionMessage = target.message;
+    });
+  }
+
   Future<void> _refresh() async {
     if (_refreshing || widget.store.isLoading) return;
     setState(() {
@@ -229,6 +245,14 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
               ),
             ),
             const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: _opening || _hiding || _currentUrl == null
+                  ? null
+                  : _openAssignment,
+              icon: const Icon(Icons.launch),
+              label: Text(_opening ? '正在打开…' : '去学习通完成'),
+            ),
+            const SizedBox(height: 8),
             FilledButton.icon(
               onPressed:
                   _opening || _hiding || _currentUrl == null ? null : _openWeb,

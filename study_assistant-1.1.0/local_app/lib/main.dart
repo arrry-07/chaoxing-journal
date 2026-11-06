@@ -19,7 +19,6 @@ import 'src/features/profile_screen.dart';
 import 'src/features/reminder_settings_screen.dart';
 import 'src/features/stats_screen.dart';
 import 'src/features/sync_status_screen.dart';
-import 'src/services/app_update_service.dart';
 import 'src/features/widgets/update_dialog.dart';
 import 'src/services/assignment_store.dart';
 import 'src/services/local_notification_service.dart';
@@ -67,25 +66,30 @@ class StudyAssistantApp extends StatefulWidget {
     super.key,
     required this.assignmentStore,
     required this.notificationService,
+    this.updateController,
   });
 
   final AssignmentStore assignmentStore;
   final LocalNotificationService notificationService;
+  final AppUpdateController? updateController;
 
   @override
   State<StudyAssistantApp> createState() => _StudyAssistantAppState();
 }
 
-class _StudyAssistantAppState extends State<StudyAssistantApp> {
+class _StudyAssistantAppState extends State<StudyAssistantApp>
+    with WidgetsBindingObserver {
   AssignmentStore get assignmentStore => widget.assignmentStore;
   final _navigatorKey = GlobalKey<NavigatorState>();
   late final GoRouter _router;
   late final AppUpdateController _updates;
+  bool _pendingUpdatePrompt = false;
 
   @override
   void initState() {
     super.initState();
-    _updates = AppUpdateController();
+    WidgetsBinding.instance.addObserver(this);
+    _updates = widget.updateController ?? AppUpdateController();
     _router = _buildRouter();
     widget.notificationService.setPayloadHandler(_handleNotificationPayload);
     WidgetsBinding.instance
@@ -93,23 +97,34 @@ class _StudyAssistantAppState extends State<StudyAssistantApp> {
   }
 
   Future<void> _checkUpdateOnStartup() async {
-    const manifest = String.fromEnvironment('UPDATE_MANIFEST_URL');
-    if (manifest.isEmpty) return;
-    await _updates.check();
-    final r = _updates.result;
+    _pendingUpdatePrompt = await _updates.checkOnStartup();
+    _showPendingUpdate();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _showPendingUpdate();
+  }
+
+  void _showPendingUpdate() {
+    if (!mounted || !_pendingUpdatePrompt) return;
+    if (_updates.hasShownDialog) {
+      _pendingUpdatePrompt = false;
+      return;
+    }
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
     final c = _navigatorKey.currentContext;
-    if (mounted &&
-        c != null &&
-        c.mounted &&
-        r?.status == UpdateCheckStatus.available) {
-      await showDialog<void>(
-          context: c, builder: (_) => UpdateDialog(controller: _updates));
+    if (c != null && c.mounted && _updates.phase == UpdatePhase.available) {
+      _pendingUpdatePrompt = false;
+      showUpdateDialog(c, _updates);
     }
   }
 
   @override
   void dispose() {
-    _updates.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    if (widget.updateController == null) _updates.dispose();
     _router.dispose();
     widget.notificationService.setPayloadHandler(null);
     super.dispose();

@@ -4,6 +4,19 @@ import '../../services/app_update_controller.dart';
 import '../../services/app_update_service.dart';
 import '../../services/external_link_service.dart';
 
+Future<void> showUpdateDialog(
+    BuildContext context, AppUpdateController task) async {
+  if (task.dialogIsOpen) return;
+  task.dialogIsOpen = true;
+  task.hasShownDialog = true;
+  try {
+    await showDialog<void>(
+        context: context, builder: (_) => UpdateDialog(controller: task));
+  } finally {
+    task.dialogIsOpen = false;
+  }
+}
+
 class UpdateDialog extends StatefulWidget {
   const UpdateDialog({super.key, this.controller, this.service, this.links});
   final AppUpdateController? controller;
@@ -15,6 +28,19 @@ class UpdateDialog extends StatefulWidget {
 
 class _UpdateDialogState extends State<UpdateDialog> {
   late final AppUpdateController task;
+  bool _savingIgnore = false;
+
+  Future<void> ignoreVersion() async {
+    setState(() => _savingIgnore = true);
+    final saved = await task.ignoreCurrentVersion();
+    if (!mounted) return;
+    if (saved && ModalRoute.of(context)?.isCurrent == true) {
+      Navigator.pop(context);
+    } else {
+      setState(() => _savingIgnore = false);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -89,7 +115,8 @@ class _UpdateDialogState extends State<UpdateDialog> {
                           progress != null)
                         Padding(
                             padding: const EdgeInsets.only(top: 8),
-                            child: Text('${(progress * 100).floor()}%')),
+                            child: Text(
+                                '${(progress * 100).floor()}% · ${task.transferSummary}')),
                     ],
                     if (update != null) ...[
                       const SizedBox(height: 16),
@@ -99,6 +126,16 @@ class _UpdateDialogState extends State<UpdateDialog> {
                       if (update.apkSize != null)
                         Text(
                             '下载大小 ${(update.apkSize! / 1048576).toStringAsFixed(1)} MB'),
+                      if (!task.busy && task.downloadedPath == null)
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          value: task.service.parallelDownloads,
+                          onChanged: (value) => setState(() =>
+                              task.service.parallelDownloads = value ?? false),
+                          title: const Text('尝试多连接加速'),
+                          subtitle: const Text('下载较慢时可尝试，实际速度取决于网络。'),
+                        ),
                       if (update.releaseNotes.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         Text(update.releaseNotes),
@@ -117,6 +154,11 @@ class _UpdateDialogState extends State<UpdateDialog> {
                       ),
                   ]))),
           actions: [
+            if (update != null && !task.busy && task.downloadedPath == null)
+              TextButton(
+                onPressed: _savingIgnore ? null : ignoreVersion,
+                child: Text(_savingIgnore ? '正在保存…' : '忽略此版本'),
+              ),
             if (task.phase == UpdatePhase.downloading)
               TextButton(
                   onPressed: task.cancelDownload, child: const Text('取消下载')),

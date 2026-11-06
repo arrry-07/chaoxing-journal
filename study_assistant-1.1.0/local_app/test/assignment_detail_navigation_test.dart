@@ -33,6 +33,26 @@ void main() {
     await launch(tester);
     expect(find.textContaining('2026年11月5日 08:30'), findsOneWidget);
   });
+  testWidgets(
+      'go to Chaoxing keeps original URL and uses browser fallback without completing work',
+      (tester) async {
+    final requests = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      requests.add(call);
+      return call.method == 'openBrowser';
+    });
+    final store = await launch(tester);
+    final button = find.text('去学习通完成');
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(requests.map((c) => c.method),
+        ['openChaoxingAssignment', 'openBrowser']);
+    expect(requests.every((c) => c.arguments['url'] == _url), isTrue);
+    expect(store.item.isCompleted, isFalse);
+    expect(find.textContaining('已请求浏览器'), findsOneWidget);
+  });
 
   testWidgets(
       'target missing from the current account offers refresh without stale data',

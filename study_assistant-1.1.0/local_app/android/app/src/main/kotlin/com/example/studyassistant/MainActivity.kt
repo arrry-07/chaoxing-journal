@@ -57,6 +57,7 @@ class MainActivity : FlutterActivity() {
             val opened = when (call.method) {
                 "openUrl" -> openExternalUrl(call.argument<String>("url"))
                 "openBrowser" -> openBrowser(call.argument<String>("url"))
+                "openChaoxingAssignment" -> openChaoxingAssignment(call.argument<String>("url"))
                 "installApk" -> installApk(call.argument<String>("filePath"))
                 else -> {
                     result.notImplemented()
@@ -132,6 +133,23 @@ class MainActivity : FlutterActivity() {
             return false
         }
         return openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+
+    @Suppress("DEPRECATION")
+    private fun openChaoxingAssignment(url: String?): Boolean {
+        if (!BrowserPolicy.isAllowed(url)) return false
+        val uri = Uri.parse(url)
+        val host = uri.host ?: return false
+        if (!(host == "chaoxing.com" || host.endsWith(".chaoxing.com")) ||
+            uri.fragment != null ||
+            !Regex("^/(?:mooc-ans/(?:mooc2/)?|mooc2/|mooc2-ans/)?work/[a-zA-Z0-9_.-]+$").matches(uri.path ?: "")) return false
+        val intent = Intent(Intent.ACTION_VIEW, uri)
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+            .setPackage("com.chaoxing.mobile")
+        val handlers = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        if (handlers.none { it.activityInfo.exported && it.activityInfo.enabled &&
+                it.activityInfo.packageName == "com.chaoxing.mobile" }) return false
+        return openIntent(intent)
     }
 
     @Suppress("DEPRECATION")

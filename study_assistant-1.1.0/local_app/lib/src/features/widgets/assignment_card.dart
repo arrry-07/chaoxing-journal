@@ -10,10 +10,14 @@ class AssignmentCard extends StatelessWidget {
       required this.assignment,
       required this.now,
       required this.onTap,
+      this.onOpenAssignment,
+      this.opening = false,
       this.showFullDeadline = true});
   final Assignment assignment;
   final DateTime now;
   final VoidCallback onTap;
+  final VoidCallback? onOpenAssignment;
+  final bool opening;
   final bool showFullDeadline;
   @override
   Widget build(BuildContext context) {
@@ -55,55 +59,65 @@ class AssignmentCard extends StatelessWidget {
       ..layout();
     final railWidth = measure.width.ceilToDouble() + 4;
     measure.dispose();
-    return Semantics(
-        button: true,
-        onTap: onTap,
-        label:
-            '${a.title}，${a.courseName}，$state，${urgent == null ? '' : '$urgent，'}$deadline',
-        excludeSemantics: true,
-        child: SizedBox(
-            width: double.infinity,
-            child: Material(
-                type: MaterialType.transparency,
-                child: InkWell(
-                    onTap: onTap,
-                    borderRadius: BorderRadius.circular(12),
-                    child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: railWidth,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(clock, style: Journal.time),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Semantics(
+          button: true,
+          onTap: onTap,
+          label:
+              '${a.title}，${a.courseName}，$state，${urgent == null ? '' : '$urgent，'}$deadline',
+          excludeSemantics: true,
+          child: SizedBox(
+              width: double.infinity,
+              child: Material(
+                  type: MaterialType.transparency,
+                  child: InkWell(
+                      onTap: onTap,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: railWidth,
                                 child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                  Text(a.title, style: Journal.entryTitle),
-                                  const SizedBox(height: 4),
-                                  Text(a.courseName, style: Journal.metadata),
-                                  const SizedBox(height: 4),
-                                  Text(state,
-                                      style: Journal.metadata
-                                          .copyWith(color: Journal.ink)),
-                                  if (urgent != null)
-                                    Text(urgent,
-                                        style: Journal.metadata.copyWith(
-                                            color: color,
-                                            fontWeight: FontWeight.w600)),
-                                  if (showFullDeadline || !hasTime)
-                                    Text(deadline, style: Journal.metadata),
-                                ])),
-                          ],
-                        ))))));
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(clock, style: Journal.time),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                    Text(a.title, style: Journal.entryTitle),
+                                    const SizedBox(height: 4),
+                                    Text(a.courseName, style: Journal.metadata),
+                                    const SizedBox(height: 4),
+                                    Text(state,
+                                        style: Journal.metadata
+                                            .copyWith(color: Journal.ink)),
+                                    if (urgent != null)
+                                      Text(urgent,
+                                          style: Journal.metadata.copyWith(
+                                              color: color,
+                                              fontWeight: FontWeight.w600)),
+                                    if (showFullDeadline || !hasTime)
+                                      Text(deadline, style: Journal.metadata),
+                                  ])),
+                            ],
+                          )))))),
+      if (onOpenAssignment != null)
+        Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: opening ? null : onOpenAssignment,
+              icon: const Icon(Icons.launch, size: 18),
+              label: Text(opening ? '正在打开…' : '去学习通完成'),
+            )),
+    ]);
   }
 }
