@@ -148,6 +148,8 @@ class Assignment {
     bool? deadlineReadFailed,
     bool? deadlineTrusted,
     String? deadlineRawText,
+    bool clearDeadlineRawText = false,
+    bool clearSubmitUrl = false,
     bool clearCompletedAt = false,
     bool clearDeadlineAt = false,
   }) {
@@ -155,14 +157,15 @@ class Assignment {
       id: id ?? this.id,
       source: source,
       deadlineTrusted: deadlineTrusted ?? this.deadlineTrusted,
-      deadlineRawText: deadlineRawText ?? this.deadlineRawText,
+      deadlineRawText:
+          clearDeadlineRawText ? null : deadlineRawText ?? this.deadlineRawText,
       deadlineReadFailed: deadlineReadFailed ?? this.deadlineReadFailed,
       courseName: courseName ?? this.courseName,
       title: title ?? this.title,
       deadlineAt: clearDeadlineAt ? null : deadlineAt ?? this.deadlineAt,
       requirementsText: requirementsText ?? this.requirementsText,
       status: status ?? this.status,
-      submitUrl: submitUrl ?? this.submitUrl,
+      submitUrl: clearSubmitUrl ? null : submitUrl ?? this.submitUrl,
       completedAt: clearCompletedAt ? null : completedAt ?? this.completedAt,
       lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
     );
