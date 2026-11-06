@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
@@ -19,7 +20,24 @@ class AssignmentListScreen extends StatefulWidget {
 }
 
 class _AssignmentListScreenState extends State<AssignmentListScreen> {
+  Timer? _clock;
+  @override
+  void initState() {
+    super.initState();
+    _clock = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    super.dispose();
+  }
+
   bool _refreshing = false;
+  String? _courseKey;
+  int? _filterEpoch;
   final _openingAssignments = <String>{};
   AssignmentStore get store => widget.store;
 
@@ -140,7 +158,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         final busy = _refreshing ||
             store.isLoading ||
             store.syncReport.phase == SyncPhase.running;
-        final now = DateTime.now(), items = store.visibleAssignments;
+        if (_filterEpoch != store.accountEpoch) {
+          _filterEpoch = store.accountEpoch;
+          _courseKey = null;
+        }
+        final options = {
+          for (final a in store.visibleAssignments) a.courseKey: a.courseName
+        };
+        if (!options.containsKey(_courseKey)) _courseKey = null;
+        final now = DateTime.now(),
+            items = store.visibleAssignments
+                .where((a) => _courseKey == null || a.courseKey == _courseKey)
+                .toList();
         final groups = AssignmentQuery.home(items, now, {});
         final sync = HomeSyncPresentation.from(store.syncReport,
             loading: store.isLoading,
@@ -154,6 +183,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             assignment: a,
             now: now,
             showFullDeadline: false,
+            compact: store.display.compact,
+            countdown: store.display.countdown,
             onOpenAssignment: AssignmentWebLink.validatedUrl(a) == null
                 ? null
                 : () => openAssignment(a.id),
@@ -226,6 +257,24 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                     onTap: () => context.push('/plan'));
               }),
               const Divider(height: 24),
+              DropdownButtonFormField<String>(
+                  initialValue: _courseKey ?? '',
+                  key: ValueKey(
+                      'course-${store.accountEpoch}-${_courseKey ?? "all"}'),
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: '课程筛选'),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('全部课程')),
+                    for (final entry in options.entries)
+                      DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(
+                              '${entry.value}${options.values.where((v) => v == entry.value).length > 1 ? '（${options.keys.toList().indexOf(entry.key) + 1}班）' : ''}',
+                              overflow: TextOverflow.ellipsis))
+                  ],
+                  onChanged: (value) =>
+                      setState(() => _courseKey = value == '' ? null : value)),
+              const SizedBox(height: 12),
               if (busy)
                 Padding(
                     padding: const EdgeInsets.only(bottom: 12),

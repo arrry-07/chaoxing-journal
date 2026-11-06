@@ -1,3 +1,4 @@
+import 'display_settings_screen.dart';
 import 'widgets/update_scope.dart';
 import 'widgets/update_dialog.dart';
 import 'open_source_screen.dart';
@@ -55,6 +56,14 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 14),
                   _SettingsCard(
                     children: [
+                      _SettingsTile(
+                          icon: Icons.tune,
+                          title: '显示与小组件',
+                          subtitle: '密度、日期与桌面显示范围',
+                          onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      DisplaySettingsScreen(store: store)))),
                       _SettingsTile(
                           icon: Icons.event_note_outlined,
                           title: '个人待办与考试',

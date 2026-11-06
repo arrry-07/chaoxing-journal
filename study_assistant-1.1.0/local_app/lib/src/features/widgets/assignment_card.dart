@@ -1,3 +1,4 @@
+import '../../models/display_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../app/journal.dart';
@@ -12,6 +13,8 @@ class AssignmentCard extends StatelessWidget {
       required this.onTap,
       this.onOpenAssignment,
       this.opening = false,
+      this.compact = false,
+      this.countdown = false,
       this.showFullDeadline = true});
   final Assignment assignment;
   final DateTime now;
@@ -19,6 +22,7 @@ class AssignmentCard extends StatelessWidget {
   final VoidCallback? onOpenAssignment;
   final bool opening;
   final bool showFullDeadline;
+  final bool compact, countdown;
   @override
   Widget build(BuildContext context) {
     final a = assignment, d = a.deadlineAt;
@@ -46,7 +50,9 @@ class AssignmentCard extends StatelessWidget {
             ? '截止待确认'
             : d == null
                 ? '未设置截止时间'
-                : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}';
+                : countdown
+                    ? DisplayPreferences.remaining(d, now)
+                    : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}';
     final color = urgent != null ? Journal.berry : Journal.ink;
     final hasTime = d != null && a.deadlineTrusted && !a.deadlineReadFailed;
     final clock =
@@ -69,7 +75,7 @@ class AssignmentCard extends StatelessWidget {
           Text(urgent,
               style: Journal.metadata
                   .copyWith(color: color, fontWeight: FontWeight.w600)),
-        if (showFullDeadline || !hasTime)
+        if (showFullDeadline || countdown || !hasTime)
           Text(deadline, style: Journal.metadata),
       ],
     );
@@ -89,7 +95,10 @@ class AssignmentCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                       child: Padding(
                           padding: EdgeInsets.only(
-                              top: 8, bottom: onOpenAssignment == null ? 8 : 0),
+                              top: compact ? 4 : 12,
+                              bottom: onOpenAssignment == null
+                                  ? (compact ? 4 : 12)
+                                  : 0),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [

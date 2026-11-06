@@ -51,6 +51,8 @@ void main() {
             .assignment
             .title,
         '近期待交题');
+    await t.scrollUntilVisible(find.text('三月旧题'), 160,
+        scrollable: find.byType(Scrollable).first);
     expect(find.text('三月旧题'), findsOneWidget);
     expect(find.text('课堂题'), findsNothing);
     await t.pumpWidget(

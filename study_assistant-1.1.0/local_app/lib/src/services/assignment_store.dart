@@ -1,3 +1,4 @@
+import '../models/display_preferences.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -266,6 +267,21 @@ class AssignmentStore extends ChangeNotifier {
       AssignmentQuery.scope(_assignments, {})
           .where((a) => follows(a.courseKey!))
           .toList();
+  DisplayPreferences display = const DisplayPreferences();
+  Future<void> saveDisplay(DisplayPreferences next) => _run(() async {
+        final prefs = await SharedPreferences.getInstance();
+        if (!await prefs.setString('display_preferences_v1', next.encode())) {
+          throw StateError('显示设置未能保存，请重试');
+        }
+        display = next;
+        try {
+          await widgetSnapshotService.saveAssignments(display.forWidget(
+              _authenticated ? formalAssignments : <Assignment>[],
+              DateTime.now()));
+        } catch (_) {
+          throw StateError('显示设置已保存，小组件更新失败，请稍后刷新');
+        }
+      });
   List<Assignment> get visibleAssignments =>
       formalAssignments.where((a) => !a.isCompleted).toList();
   Future<void> followCourse(String key, bool followed) => _run(() async {
@@ -352,6 +368,11 @@ class AssignmentStore extends ChangeNotifier {
       }
     }
 
+    await stage('显示设置', () async {
+      final prefs = await SharedPreferences.getInstance();
+      display =
+          DisplayPreferences.decode(prefs.getString('display_preferences_v1'));
+    });
     await stage('提醒设置', () async {
       _reminderOffsetsMinutes = await reminderRuleStore.loadOffsetsMinutes();
     });
@@ -751,7 +772,8 @@ class AssignmentStore extends ChangeNotifier {
       _serviceWarnings.add('个人日程提醒未能更新或清理，旧提醒可能仍显示；请重试或在系统中关闭本应用通知');
     }
     try {
-      await widgetSnapshotService.saveAssignments(scoped);
+      await widgetSnapshotService
+          .saveAssignments(display.forWidget(scoped, DateTime.now()));
     } catch (_) {
       _serviceWarnings.add('作业已保存在本机，小组件更新失败，请稍后刷新');
     }
