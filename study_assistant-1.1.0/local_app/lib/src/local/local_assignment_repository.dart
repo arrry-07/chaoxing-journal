@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/assignment.dart';
 import '../models/course.dart';
 import '../models/backup_snapshot.dart';
+import '../models/personal_workspace.dart';
 import '../services/reminder_rule_store.dart';
 
 class LocalAssignmentRepository {
@@ -29,6 +30,7 @@ class LocalAssignmentRepository {
     'sync_data_at',
     'sync_report_v1',
     'assignment_changes_v1',
+    'personal_workspace_v1',
     '${_key}_recovery_backup',
     '${_key}_recovery_backups',
     'course_refs_recovery_backup',
@@ -36,6 +38,22 @@ class LocalAssignmentRepository {
 
   static String _owner(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
+
+  Future<PersonalWorkspace> loadPersonalWorkspace() => _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        final raw = p.getString('personal_workspace_v1');
+        return raw == null
+            ? PersonalWorkspace()
+            : PersonalWorkspace.decode(raw);
+      });
+  Future<void> savePersonalWorkspace(PersonalWorkspace value, String account) =>
+      _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        _checkOwner(p, account);
+        final raw = value.encode();
+        PersonalWorkspace.decode(raw);
+        await _require(p.setString('personal_workspace_v1', raw));
+      });
 
   void _checkOwner(SharedPreferences prefs, String account) {
     if (account.trim().isEmpty ||
@@ -67,7 +85,11 @@ class LocalAssignmentRepository {
                 (prefs.getStringList('unfollowed_courses') ?? []).toSet(),
             reminderOffsets: await ReminderRuleStore().loadOffsetsMinutes(),
             autoSyncIntervalMinutes:
-                prefs.getInt('auto_sync_interval_minutes') ?? 30);
+                prefs.getInt('auto_sync_interval_minutes') ?? 30,
+            personal: prefs.getString('personal_workspace_v1') == null
+                ? PersonalWorkspace()
+                : PersonalWorkspace.decode(
+                    prefs.getString('personal_workspace_v1')!));
       });
 
   /// Restore only absent records/preferences. Imported observations must be
@@ -124,6 +146,29 @@ class LocalAssignmentRepository {
                 validated.reminderOffsets.map((v) => '$v').toList()));
           }
           // Sync interval is global: a historical account backup must not alter it.
+          final rawPersonal = prefs.getString('personal_workspace_v1');
+          final local = rawPersonal == null
+              ? PersonalWorkspace()
+              : PersonalWorkspace.decode(rawPersonal);
+          final imported = validated.personal;
+          final keys =
+              local.plans.map((p) => '${p.day}:${p.assignmentId}').toSet();
+          final merged = PersonalWorkspace(
+              work: {
+                ...imported.work,
+                ...local.work
+              },
+              plans: [
+                ...local.plans,
+                ...imported.plans
+                    .where((p) => !keys.contains('${p.day}:${p.assignmentId}'))
+              ],
+              summaryEnabled: local.summaryEnabled,
+              summaryHour: local.summaryHour,
+              summaryMinute: local.summaryMinute);
+          final encoded = merged.encode();
+          PersonalWorkspace.decode(encoded);
+          await _require(prefs.setString('personal_workspace_v1', encoded));
           await _require(prefs.remove(_switchKey));
           return true;
         } catch (_) {

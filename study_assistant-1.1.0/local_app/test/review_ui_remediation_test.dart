@@ -1,3 +1,4 @@
+import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -297,6 +298,10 @@ class _Session extends SecureSessionStore {
 }
 
 class _Notifications extends LocalNotificationService {
+  @override
+  Future<void> rescheduleSummary(List<Assignment> items,
+      PersonalWorkspace personal, DateTime? lastSync) async {}
+
   @override
   Future<void> rescheduleAssignments(List<Assignment> a,
       {List<int>? offsetsMinutes}) async {}

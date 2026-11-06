@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
 import '../models/assignment.dart';
 import '../models/sync_report.dart';
+import '../models/personal_workspace.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
 import '../services/home_sync_presentation.dart';
@@ -207,6 +208,24 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                         icon: const Icon(Icons.more_horiz_rounded)),
                   ])),
               const SizedBox(height: 20),
+              Builder(builder: (context) {
+                final today = PersonalWorkspace.dayKey(now);
+                final plans =
+                    store.personal.plans.where((p) => p.day == today).toList();
+                final minutes = plans
+                    .where((p) => !p.done)
+                    .fold<int>(0, (v, p) => v + p.minutes);
+                return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.checklist),
+                    title: const Text('今日计划'),
+                    subtitle: Text(plans.isEmpty
+                        ? '选两三份作业，安排今天要做的事'
+                        : '${plans.where((p) => p.done).length}/${plans.length} 项已勾选 · 预计剩余 $minutes 分钟'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => context.push('/plan'));
+              }),
+              const Divider(height: 24),
               if (busy)
                 Padding(
                     padding: const EdgeInsets.only(bottom: 12),

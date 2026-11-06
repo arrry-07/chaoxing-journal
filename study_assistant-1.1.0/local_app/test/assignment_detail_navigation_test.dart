@@ -69,6 +69,7 @@ void main() {
       (tester) async {
     final store = await launch(tester);
     await tester.ensureVisible(find.text('在本机隐藏此作业'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('在本机隐藏此作业'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

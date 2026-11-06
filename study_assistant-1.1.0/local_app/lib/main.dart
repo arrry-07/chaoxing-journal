@@ -1,6 +1,9 @@
 import 'src/services/app_update_controller.dart';
 import 'src/features/assignment_changes_screen.dart';
 import 'src/features/backup_screen.dart';
+import 'src/features/daily_plan_screen.dart';
+import 'src/features/personal_work_screen.dart';
+import 'src/features/reminder_health_screen.dart';
 import 'src/features/widgets/update_scope.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -165,6 +168,18 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
           ),
           routes: [
             GoRoute(
+                path: '/plan',
+                builder: (_, __) => DailyPlanScreen(store: assignmentStore)),
+            GoRoute(
+                path: '/personal/:id',
+                builder: (_, s) => PersonalWorkScreen(
+                    store: assignmentStore,
+                    assignmentId: s.pathParameters['id']!)),
+            GoRoute(
+                path: '/reminder-health',
+                builder: (_, __) =>
+                    ReminderHealthScreen(store: assignmentStore)),
+            GoRoute(
                 path: '/changes',
                 builder: (_, __) =>
                     AssignmentChangesScreen(store: assignmentStore)),
@@ -243,6 +258,10 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   }
 
   void _handleNotificationPayload(String payload) {
+    if (payload == 'd:summary') {
+      _router.go('/assignments');
+      return;
+    }
     final uri = Uri.tryParse(payload);
     if (uri == null) return;
     final location = AppDeepLinks.normalizeIncomingLocation(

@@ -86,7 +86,8 @@ void main() {
     await t.pumpAndSettle();
     final row = find.widgetWithText(ListTile, '同步学习通');
     await t.ensureVisible(row);
-    await t.tapAt(t.getTopRight(row) + const Offset(-18, 24));
+    await t.pumpAndSettle();
+    await t.tap(row);
     await t.pumpAndSettle();
     final interval = find.byKey(const ValueKey('auto-sync-option-60'));
     await t.scrollUntilVisible(interval, 150,

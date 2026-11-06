@@ -15,9 +15,12 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var backupBridge: BackupBridge? = null
+    private var personalFileBridge: PersonalFileBridge? = null
     private var verificationBrowser: VerificationBrowser? = null
     private var webSessionGeneration = 0L
     override fun onDestroy() {
+        personalFileBridge?.close()
+        personalFileBridge = null
         backupBridge?.close()
         backupBridge = null
         webSessionGeneration++
@@ -27,6 +30,8 @@ class MainActivity : FlutterActivity() {
     }
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        personalFileBridge = PersonalFileBridge(this,
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/personal_files"))
         backupBridge = BackupBridge(this,
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/backup"))
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/external_links").setMethodCallHandler { call, result ->
@@ -90,6 +95,7 @@ class MainActivity : FlutterActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         backupBridge?.onActivityResult(requestCode, resultCode, data)
+        personalFileBridge?.onActivityResult(requestCode, resultCode, data)
     }
 
     private fun openNotificationSettings(): Boolean {

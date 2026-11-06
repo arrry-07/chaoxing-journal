@@ -1,3 +1,4 @@
+import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -198,6 +199,10 @@ class _MemorySessionStore extends SecureSessionStore {
 }
 
 class _NoopNotificationService extends LocalNotificationService {
+  @override
+  Future<void> rescheduleSummary(List<Assignment> items,
+      PersonalWorkspace personal, DateTime? lastSync) async {}
+
   @override
   Future<void> rescheduleAssignments(
     List<Assignment> assignments, {

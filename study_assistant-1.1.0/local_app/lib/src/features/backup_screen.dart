@@ -193,7 +193,7 @@ class _BackupScreenState extends State<BackupScreen> {
           const Text('给课业记录留一份副本', style: Journal.section),
           const SizedBox(height: 8),
           const Text(
-              '备份当前账号的作业、课程、隐藏记录及提醒设置。登录凭据、个人资料、访问链接和作业说明正文不导出；正文与新链接可在恢复后同步获取。',
+              '备份当前账号的作业、课程、计划、个人清单备注与提醒设置。登录凭据、个人资料、作业访问签名、说明正文和本地文件关联不导出；手动添加的资料链接会随加密备份保存。',
               style: Journal.metadata),
           const SizedBox(height: 24),
           TextField(
@@ -249,6 +249,9 @@ class _BackupScreenState extends State<BackupScreen> {
                 '提醒：${snapshot.reminderOffsets.map((m) => "$m 分钟前").join("、")}\n备份的自动同步间隔：${snapshot.autoSyncIntervalMinutes == 0 ? "关闭" : "${snapshot.autoSyncIntervalMinutes} 分钟"}。恢复保留本机自动同步设置。',
                 style: Journal.metadata),
             const SizedBox(height: 12),
+            Text(
+                '个人备注 ${snapshot.personal.work.length} 份 · 计划 ${snapshot.personal.plans.length} 项。个人记录仅补缺，摘要设置保持本机当前值；文件关联不迁移。',
+                style: Journal.metadata),
             const Text('现有记录保持不变。补入的作业需同步确认状态与截止时间，确认前不会安排提醒。预览10分钟后失效。',
                 style: Journal.metadata),
             const SizedBox(height: 16),

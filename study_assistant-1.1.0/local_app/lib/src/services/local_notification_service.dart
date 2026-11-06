@@ -4,6 +4,8 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../models/assignment.dart';
 import 'reminder_rule_store.dart';
+import 'daily_summary.dart';
+import '../models/personal_workspace.dart';
 
 typedef NotificationPayloadHandler = void Function(String payload);
 
@@ -18,6 +20,95 @@ class LocalNotificationService {
   String? lastWarning;
   NotificationPayloadHandler? _onPayload;
   String? _pendingPayload;
+  static const summaryChannel = 'daily_summary';
+  Future<ReminderHealth> inspectHealth() async {
+    AndroidFlutterLocalNotificationsPlugin? android;
+    try {
+      android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+    } catch (_) {}
+    bool? allowed, exact, channel;
+    int? pending, summary;
+    try {
+      allowed = await android?.areNotificationsEnabled();
+    } catch (_) {}
+    try {
+      exact = await android?.canScheduleExactNotifications();
+    } catch (_) {}
+    try {
+      final channels = await android?.getNotificationChannels();
+      final c =
+          channels?.where((c) => c.id == 'assignment_deadlines').firstOrNull;
+      channel = c == null ? null : c.importance != Importance.none;
+    } catch (_) {}
+    try {
+      final list = await _plugin.pendingNotificationRequests();
+      pending = list.where((n) => n.payload?.startsWith('a:') ?? false).length;
+      summary = list.where((n) => n.payload == 'd:summary').length;
+    } catch (_) {}
+    return ReminderHealth(
+        notifications: allowed,
+        exact: exact,
+        channelEnabled: channel,
+        pending: pending,
+        summaryPending: summary);
+  }
+
+  Future<bool> showTestNotification() async {
+    try {
+      final health = await inspectHealth();
+      if (health.notifications != true || health.channelEnabled == false) {
+        return false;
+      }
+      await _plugin.show(
+          DailySummary.baseId + 8,
+          '课业手记测试通知',
+          '如果看到了这条通知，当前显示链路可用；不代表未来后台提醒一定送达。',
+          const NotificationDetails(
+              android: AndroidNotificationDetails(
+                  'assignment_deadlines', '作业截止提醒',
+                  importance: Importance.high, priority: Priority.high)),
+          payload: 'd:summary');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> rescheduleSummary(List<Assignment> assignments,
+      PersonalWorkspace personal, DateTime? lastSync) async {
+    final desired =
+        DailySummary.build(assignments, personal, DateTime.now(), lastSync);
+    if (desired.isEmpty) {
+      // Only query/cancel when supported; fake/test platforms may have no plugin.
+      final active = await _plugin.pendingNotificationRequests();
+      for (final n in active.where((n) => n.payload == 'd:summary')) {
+        await _plugin.cancel(n.id);
+      }
+      return;
+    }
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(const AndroidNotificationChannel(
+            summaryChannel, '每日课业摘要',
+            description: '基于最近一次本机快照的课业摘要',
+            importance: Importance.defaultImportance));
+    for (final n in desired) {
+      await _plugin.zonedSchedule(
+          n.id,
+          '今日课业摘要',
+          n.body,
+          tz.TZDateTime.from(n.at, tz.local),
+          const NotificationDetails(
+              android: AndroidNotificationDetails(summaryChannel, '每日课业摘要',
+                  importance: Importance.defaultImportance)),
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+          payload: 'd:summary');
+    }
+  }
 
   static String formatDeadlineRemainingText(int offsetMinutes) {
     final safeMinutes = offsetMinutes < 0 ? 0 : offsetMinutes;
@@ -91,7 +182,10 @@ class LocalNotificationService {
       final desiredIds = <int>{};
       final offsets = ReminderRuleStore.normalizeOffsets(offsetsMinutes);
       // Replace matching IDs first. Keep previous schedules if replacement fails.
-      for (final assignment in assignments.where((item) => !item.isCompleted)) {
+      for (final assignment in assignments.where((item) =>
+          !item.isCompleted &&
+          item.deadlineTrusted &&
+          !item.deadlineReadFailed)) {
         for (final offset in offsets) {
           final at = assignment.deadlineAt?.subtract(Duration(minutes: offset));
           if (at == null || !at.isAfter(DateTime.now())) continue;

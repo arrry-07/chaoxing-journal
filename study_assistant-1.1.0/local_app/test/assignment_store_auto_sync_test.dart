@@ -1,3 +1,4 @@
+import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
@@ -182,6 +183,10 @@ class _QueuedChaoxingClient extends ChaoxingLocalClient {
 }
 
 class _RecordingNotificationService extends LocalNotificationService {
+  @override
+  Future<void> rescheduleSummary(List<Assignment> items,
+      PersonalWorkspace personal, DateTime? lastSync) async {}
+
   List<Assignment> lastAssignments = [];
 
   @override

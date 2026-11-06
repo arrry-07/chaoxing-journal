@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
@@ -82,6 +83,9 @@ class Client extends ChaoxingLocalClient {
 }
 
 class Notifications extends LocalNotificationService {
+  @override
+  Future<void> rescheduleSummary(List<Assignment> items,
+      PersonalWorkspace personal, DateTime? lastSync) async {}
   final starts = <List<String>>[];
   Completer<void>? gate, started;
   @override

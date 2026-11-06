@@ -72,6 +72,10 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 16),
+              OutlinedButton.icon(
+                  onPressed: () => context.push('/reminder-health'),
+                  icon: const Icon(Icons.health_and_safety_outlined),
+                  label: const Text('提醒体检与每日摘要')),
               Text(
                 '提醒权限',
                 style: Theme.of(

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'assignment.dart';
 import 'course.dart';
+import 'personal_workspace.dart';
 
 /// Portable, explicitly validated data only. Session and signed links never enter
 /// this format; decoded records are still historical observations, not a sync.
@@ -14,7 +15,8 @@ class BackupSnapshot {
       List<CourseRef> courses,
       Set<String> unfollowed,
       List<int> reminderOffsets,
-      this.autoSyncIntervalMinutes)
+      this.autoSyncIntervalMinutes,
+      this.personal)
       : records = List.unmodifiable(records),
         hidden = Set.unmodifiable(hidden),
         courses = List.unmodifiable(courses),
@@ -30,6 +32,7 @@ class BackupSnapshot {
   final Set<String> unfollowed;
   final List<int> reminderOffsets;
   final int autoSyncIntervalMinutes;
+  final PersonalWorkspace personal;
   static String ownerFor(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
 
@@ -55,9 +58,11 @@ class BackupSnapshot {
           required List<CourseRef> courses,
           required Set<String> unfollowed,
           required List<int> reminderOffsets,
-          required int autoSyncIntervalMinutes}) =>
+          required int autoSyncIntervalMinutes,
+          PersonalWorkspace? personal}) =>
       BackupSnapshot.decode(jsonEncode({
-        'schema': 1,
+        'schema': 2,
+        'personal': (personal ?? PersonalWorkspace()).toJson(portable: true),
         'owner': owner,
         'createdAt': createdAt.toUtc().toIso8601String(),
         'records': records.map(_record).toList(),
@@ -69,7 +74,8 @@ class BackupSnapshot {
       }));
 
   String encode() => jsonEncode({
-        'schema': 1,
+        'schema': 2,
+        'personal': personal.toJson(portable: true),
         'owner': owner,
         'createdAt': createdAt.toUtc().toIso8601String(),
         'records': records.map(_record).toList(),
@@ -124,7 +130,11 @@ class BackupSnapshot {
         utf8.encode(plaintext).length > maxPlaintextBytes) {
       _bad();
     }
-    final j = _map(jsonDecode(plaintext), {
+    final decoded = jsonDecode(plaintext);
+    final version = decoded is Map ? decoded['schema'] : null;
+    if (version is! int || (version != 1 && version != 2)) _bad();
+    final j = _map(decoded, {
+      if (version == 2) 'personal',
       'schema',
       'owner',
       'createdAt',
@@ -135,7 +145,6 @@ class BackupSnapshot {
       'reminderOffsets',
       'autoSyncIntervalMinutes'
     });
-    if (j['schema'] is! int || j['schema'] != 1) _bad();
     final owner = _text(j['owner'], max: 64);
     if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(owner)) _bad();
     final records = <Assignment>[];
@@ -201,7 +210,17 @@ class BackupSnapshot {
     }
     final interval = j['autoSyncIntervalMinutes'];
     if (interval is! int || interval < 0 || interval > 1440) _bad();
-    return BackupSnapshot._(owner, _date(j['createdAt']), records, hidden,
-        courses, _strings(j['unfollowed']), offsets.cast<int>(), interval);
+    return BackupSnapshot._(
+        owner,
+        _date(j['createdAt']),
+        records,
+        hidden,
+        courses,
+        _strings(j['unfollowed']),
+        offsets.cast<int>(),
+        interval,
+        version == 1
+            ? PersonalWorkspace()
+            : PersonalWorkspace.fromJson(j['personal']));
   }
 }

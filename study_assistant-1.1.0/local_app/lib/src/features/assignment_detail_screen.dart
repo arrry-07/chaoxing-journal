@@ -251,6 +251,15 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
               ),
             ),
             const SizedBox(height: 20),
+            OutlinedButton.icon(
+                onPressed: () => context.push(
+                    '/personal/${Uri.encodeComponent(widget.assignmentId)}'),
+                icon: const Icon(Icons.edit_note),
+                label: const Text('个人清单与备注')),
+            TextButton.icon(
+                onPressed: () => context.push('/plan'),
+                icon: const Icon(Icons.checklist),
+                label: const Text('安排每日计划')),
             FilledButton.icon(
               onPressed: _opening || _hiding || _currentUrl == null
                   ? null

@@ -57,6 +57,18 @@ class ProfileScreen extends StatelessWidget {
                     children: [
                       _SettingsTile(
                         icon: Icons.notifications_none,
+                        title: '每日计划',
+                        subtitle: '个人安排与预计耗时，不改变提交状态',
+                        onTap: () => context.push('/plan'),
+                      ),
+                      _SettingsTile(
+                        icon: Icons.health_and_safety_outlined,
+                        title: '提醒体检',
+                        subtitle: '权限、测试通知与每日摘要',
+                        onTap: () => context.push('/reminder-health'),
+                      ),
+                      _SettingsTile(
+                        icon: Icons.notifications_none,
                         title: '提醒设置',
                         onTap: () => context.push('/reminders'),
                       ),
@@ -167,7 +179,7 @@ class ProfileScreen extends StatelessWidget {
         title: const Text('退出并清理本机记录？'),
         content: const SingleChildScrollView(
           child: Text(
-            '退出将清除本机保存的账号密码、课程作业、隐藏状态、课程关注、提醒设置、同步记录、仓库损坏备份和账号切换备份（含其他账号），并清理作业通知与小组件。自动同步间隔会保留。\n\n学习通服务器上的课程作业不会删除。需要重新登录后同步，本机隐藏与关注选择无法从服务端恢复。',
+            '退出将清除本机保存的账号密码、课程作业、隐藏状态、课程关注、个人计划与备注清单、文件关联、提醒与摘要设置、同步记录、仓库损坏备份和账号切换备份（含其他账号），并清理作业通知与小组件。自动同步间隔会保留。\n\n学习通服务器上的课程作业不会删除。需要重新登录后同步；个人记录请先加密备份，本地文件关联需重新选择。',
           ),
         ),
         actions: [
