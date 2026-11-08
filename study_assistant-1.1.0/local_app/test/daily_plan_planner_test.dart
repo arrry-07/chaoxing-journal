@@ -41,6 +41,93 @@ Future<AssignmentStore> _setupFailingSave() async {
 }
 
 void main() {
+  Future<void> openPlanner(WidgetTester tester, AssignmentStore store) async {
+    tester.view.physicalSize = const Size(800, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(home: DailyPlanScreen(store: store)));
+    await tester.tap(find.text('智能规划建议'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('planning-budget')), '60');
+    await tester.tap(
+        find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')));
+    await tester.pump();
+    await tester.enterText(
+        find.byKey(const ValueKey('planning-estimate-cx:work:1:2:shared')),
+        '25');
+  }
+
+  Future<void> failDeadlineRead(AssignmentStore store) async {
+    final original = store.findAssignment('cx:work:1:2:shared')!;
+    await store.repository.mergeAndSave([
+      original.copyWith(
+          clearDeadlineAt: true,
+          deadlineTrusted: false,
+          deadlineReadFailed: true,
+          lastSyncedAt: DateTime.now())
+    ], completeSync: false);
+    await store.refreshAssignments();
+    expect(store.findAssignment(original.id)!.deadlineAt, original.deadlineAt);
+    expect(store.findAssignment(original.id)!.deadlineReadFailed, isTrue);
+  }
+
+  testWidgets('planner shows a confirmed deadline in Beijing time',
+      (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    await store.repository.mergeAndSave([
+      f.sample('shared').copyWith(deadlineAt: DateTime.utc(2030, 11, 6, 16, 30))
+    ]);
+    await store.refreshAssignments();
+    await openPlanner(tester, store);
+    expect(find.textContaining('2030年11月7日 00:30'), findsOneWidget);
+    expect(find.textContaining('未设置截止时间'), findsNothing);
+  });
+
+  testWidgets('regenerating uses a newly failed deadline read', (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    await openPlanner(tester, store);
+    await failDeadlineRead(store);
+    await tester.tap(find.byKey(const ValueKey('planning-generate')));
+    await tester.pumpAndSettle();
+    expect(find.text('自动纳入'), findsNothing);
+    expect(find.textContaining('截止时间读取失败'), findsOneWidget);
+    expect(store.personal.plans, isEmpty);
+  });
+
+  testWidgets('confirmation rejects a newly failed deadline read',
+      (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    await openPlanner(tester, store);
+    await tester.tap(find.byKey(const ValueKey('planning-generate')));
+    await tester.pumpAndSettle();
+    await failDeadlineRead(store);
+    await tester.tap(find.byKey(const ValueKey('planning-save')));
+    await tester.pumpAndSettle();
+    expect(store.personal.plans, isEmpty);
+    expect(find.textContaining('重新生成规划预览'), findsOneWidget);
+  });
+
+  testWidgets('confirmation rechecks budget consumed by new same-day plans',
+      (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    await openPlanner(tester, store);
+    await tester.tap(find.byKey(const ValueKey('planning-generate')));
+    await tester.pumpAndSettle();
+    final day = PersonalWorkspace.dayKey(DateTime.now());
+    await store.savePersonal(
+        (w) => w.withPlans([DailyPlanItem('another-task', day, 50)]),
+        store.accountEpoch);
+    await tester.tap(find.byKey(const ValueKey('planning-save')));
+    await tester.pumpAndSettle();
+    expect(store.personal.plans.map((p) => p.assignmentId), ['another-task']);
+    expect(find.textContaining('重新生成规划预览'), findsOneWidget);
+  });
+
   testWidgets('rule planner previews and saves only explicitly confirmed work',
       (tester) async {
     final store = await _setup(f.Session());
