@@ -113,6 +113,12 @@ class WidgetService extends WidgetSnapshotService {
 
 class BoundaryNotifications extends Notifications {
   final pending = <String>{};
+
+  @override
+  Future<void> cancelPrivateSchedules() async {
+    pending.clear();
+  }
+
   @override
   Future<void> rescheduleAssignments(List<Assignment> items,
       {List<int>? offsetsMinutes}) async {

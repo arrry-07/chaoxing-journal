@@ -38,14 +38,61 @@ class DailySummary {
   }
 }
 
+enum ReminderChannelStatus {
+  enabled,
+  disabled,
+  missing,
+  unsupported,
+  queryFailed,
+}
+
+class ReminderChannelHealth {
+  const ReminderChannelHealth(this.status, {this.importance});
+
+  final ReminderChannelStatus status;
+  final int? importance;
+
+  bool? get enabled => switch (status) {
+        ReminderChannelStatus.enabled => true,
+        ReminderChannelStatus.disabled => false,
+        _ => null,
+      };
+
+  String get label => switch (status) {
+        ReminderChannelStatus.enabled => switch (importance) {
+            1 => '已开启（最低重要性）',
+            2 => '已开启（低重要性）',
+            3 => '已开启（默认重要性）',
+            4 => '已开启（高重要性）',
+            5 => '已开启（最高重要性）',
+            _ => '已开启',
+          },
+        ReminderChannelStatus.disabled => '已关闭（系统设置）',
+        ReminderChannelStatus.missing => '渠道未创建（请重新初始化提醒）',
+        ReminderChannelStatus.unsupported => '系统不支持通知渠道',
+        ReminderChannelStatus.queryFailed => '读取失败，请重新体检',
+      };
+}
+
 class ReminderHealth {
   const ReminderHealth(
       {this.notifications,
       this.exact,
-      this.channelEnabled,
+      this.assignmentChannel,
+      this.summaryChannel,
+      this.manualChannel,
       this.pending,
       this.summaryPending,
-      this.manualPending});
-  final bool? notifications, exact, channelEnabled;
+      this.manualPending,
+      this.scheduleRecoveryPending = false});
+
+  final bool? notifications, exact;
+  final ReminderChannelHealth? assignmentChannel, summaryChannel, manualChannel;
   final int? pending, summaryPending, manualPending;
+  final bool scheduleRecoveryPending;
+
+  // Missing, unsupported and failed channel checks must not collapse to false.
+  bool? get channelEnabled => assignmentChannel?.enabled;
+  bool? get summaryChannelEnabled => summaryChannel?.enabled;
+  bool? get manualChannelEnabled => manualChannel?.enabled;
 }

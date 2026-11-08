@@ -74,7 +74,8 @@ void main() {
     expect(find.byType(AssignmentListScreen), findsOneWidget);
   });
 
-  testWidgets('malformed encoded internal login target falls back without crashing',
+  testWidgets(
+      'malformed encoded internal login target falls back without crashing',
       (tester) async {
     await launch(tester, '/login?from=%2Fassignments%2F%25FF');
     expect(tester.takeException(), isNull);

@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../models/study_notebook.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
+import 'widgets/data_recovery_warning.dart';
 
 String manualTime(DateTime? at) => at == null
     ? '未安排时间'
@@ -33,7 +34,11 @@ class _AgendaState extends State<ManualAgendaScreen> {
     if (mounted) {
       setState(() {
         busy = false;
-        message = ok ? widget.store.error : '未能保存，请核对账号后重试';
+        message = widget.store.saveFeedback(
+          ok,
+          successMessage: '个人安排已保存',
+          failureMessage: '个人安排保存失败，请核对账号后重试',
+        );
       });
     }
   }
@@ -79,6 +84,10 @@ class _AgendaState extends State<ManualAgendaScreen> {
         return Scaffold(
             appBar: AppBar(title: const Text('个人待办与考试')),
             body: ListView(padding: const EdgeInsets.all(16), children: [
+              if (widget.store.recoveryWarning case final warning?) ...[
+                DataRecoveryWarning(warning: warning),
+                const SizedBox(height: 12),
+              ],
               const Text('手动记录的个人安排，与学习通作业分开；考试时间请自行核对教务通知。'),
               const SizedBox(height: 12),
               Wrap(spacing: 8, children: [
@@ -211,13 +220,22 @@ class _EditorState extends State<ManualEntryEditor> {
         epoch);
     if (ok) await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
+    final feedback = widget.store.saveFeedback(
+      ok,
+      successMessage: '个人安排已保存',
+      failureMessage: '保存失败，输入仍保留，请核对账号后重试',
+    );
     if (ok && editorRoute?.isCurrent != false) {
+      if (widget.store.serviceWarnings.isNotEmpty) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(feedback)));
+      }
       Navigator.pop(context);
       return;
     }
     setState(() {
       busy = false;
-      error = ok ? '个人安排已保存' : '保存失败，输入仍保留，请核对账号后重试';
+      error = feedback;
     });
   }
 
@@ -295,7 +313,12 @@ class _EditorState extends State<ManualEntryEditor> {
                 minLines: 3,
                 maxLines: 8,
                 decoration: const InputDecoration(labelText: '备注')),
-            if (error != null) Text(error!),
+            if (error != null)
+              Semantics(
+                key: const ValueKey('manual-editor-feedback'),
+                liveRegion: true,
+                child: Text(error!),
+              ),
             FilledButton(
                 onPressed: busy ? null : save,
                 child: Text(busy ? '正在保存…' : '保存个人安排'))

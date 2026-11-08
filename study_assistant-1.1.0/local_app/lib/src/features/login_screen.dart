@@ -102,46 +102,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 22),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Semantics(
-                      container: true,
-                      child: Checkbox(
-                        value: _accepted,
-                        semanticLabel: '我已阅读并同意服务协议和隐私协议',
-                        materialTapTargetSize: MaterialTapTargetSize.padded,
-                        visualDensity: VisualDensity.standard,
-                        activeColor: Journal.ink,
-                        onChanged: widget.store.isLoading
-                            ? null
-                            : (value) =>
-                                setState(() => _accepted = value ?? false),
-                      ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.only(top: 14),
-                            child: Text('我已阅读并同意', style: Journal.metadata),
-                          ),
-                          Wrap(
-                            children: [
-                              _agreementButton(AgreementKind.service),
-                              _agreementButton(AgreementKind.privacy),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  '课程作业数据保存在本机，账号密码保存在本机安全存储中。登录与同步直接连接学习通，不经过开发者服务器。',
-                  style: Journal.metadata,
+                _AgreementPanel(
+                  accepted: _accepted,
+                  enabled: !widget.store.isLoading,
+                  onChanged: (value) => setState(() => _accepted = value),
+                  onOpen: (kind) =>
+                      Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => AgreementScreen(kind: kind),
+                  )),
                 ),
               ],
             ),
@@ -150,18 +118,6 @@ class _LoginScreenState extends State<LoginScreen> {
       },
     );
   }
-
-  Widget _agreementButton(AgreementKind kind) => TextButton(
-        style: TextButton.styleFrom(
-          foregroundColor: Journal.berry,
-          minimumSize: const Size(48, 48),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-        ),
-        onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => AgreementScreen(kind: kind),
-        )),
-        child: Text(kind.title),
-      );
 
   Future<void> _login() async {
     await widget.store.loginChaoxing(
@@ -174,6 +130,139 @@ class _LoginScreenState extends State<LoginScreen> {
       context.go(loginSuccessLocation(widget.returnTo));
     }
   }
+}
+
+class _AgreementPanel extends StatelessWidget {
+  const _AgreementPanel({
+    required this.accepted,
+    required this.enabled,
+    required this.onChanged,
+    required this.onOpen,
+  });
+
+  final bool accepted;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+  final ValueChanged<AgreementKind> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 16, 16),
+      decoration: BoxDecoration(
+        color: Journal.sheet,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Journal.ink.withValues(alpha: 0.055),
+            blurRadius: 18,
+            offset: const Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Semantics(
+                container: true,
+                child: Checkbox(
+                  value: accepted,
+                  semanticLabel: '我已阅读并同意服务协议和隐私协议',
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  visualDensity: VisualDensity.standard,
+                  shape: const CircleBorder(),
+                  checkColor: Journal.sheet,
+                  fillColor: WidgetStateProperty.resolveWith((states) =>
+                      states.contains(WidgetState.selected)
+                          ? Journal.ink
+                          : Journal.sage),
+                  side: BorderSide(
+                    color: Journal.rule,
+                    width: 1,
+                  ),
+                  onChanged:
+                      enabled ? (value) => onChanged(value ?? false) : null,
+                ),
+              ),
+              const SizedBox(width: 2),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '我已阅读并同意',
+                        style: Journal.metadata.copyWith(
+                          color: Journal.ink,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14.5,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Wrap(
+                        spacing: 7,
+                        runSpacing: 1,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          _link(AgreementKind.service),
+                          Text(
+                            '·',
+                            style: Journal.metadata.copyWith(
+                              color: Journal.muted,
+                              fontSize: 15,
+                              height: 1,
+                            ),
+                          ),
+                          _link(AgreementKind.privacy),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(2, 12, 2, 0),
+            child: Text(
+              '课程作业数据保存在本机，账号密码保存在本机安全存储中。\n'
+              '登录与同步直接连接学习通，不经过开发者服务器。',
+              style: Journal.metadata.copyWith(
+                fontSize: 13.5,
+                height: 1.58,
+                color: Journal.muted,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _link(AgreementKind kind) => TextButton(
+        style: TextButton.styleFrom(
+          foregroundColor: Journal.ink,
+          minimumSize: const Size(48, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: VisualDensity.compact,
+          textStyle: Journal.metadata.copyWith(
+            color: Journal.ink,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+            decoration: TextDecoration.underline,
+            decorationColor: Journal.ink.withValues(alpha: 0.72),
+            decorationThickness: 1,
+          ),
+        ),
+        onPressed: enabled ? () => onOpen(kind) : null,
+        child: Text(kind.title),
+      );
 }
 
 class _LoginErrorCard extends StatelessWidget {

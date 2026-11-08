@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/services/app_update_service.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/external_link_service.dart';
@@ -314,6 +315,51 @@ void main() {
     expect(storage.trailing, isNotNull);
     expect(find.text('帮助与反馈'), findsOneWidget);
     expect(find.text('关于我们'), findsOneWidget);
+  });
+
+  testWidgets('profile summarizes and exposes every synchronized course',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.repository.saveCourses([
+      for (var index = 1; index <= 5; index += 1)
+        CourseRef(courseId: '$index', clazzId: '${index}0', name: '课程 $index')
+    ], account: 'student');
+    await store.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: ProfileScreen(store: store))),
+    );
+
+    expect(find.text('课程 1'), findsOneWidget);
+    expect(find.text('课程 4'), findsOneWidget);
+    expect(find.text('课程 5'), findsNothing);
+    expect(find.text('共 5 门课程 · 另有 1 门未在预览中展开'), findsOneWidget);
+    expect(find.text('查看全部课程'), findsOneWidget);
+  });
+
+  testWidgets('profile settings are grouped by user task', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: ProfileScreen(store: store))),
+    );
+
+    expect(find.text('学习与同步'), findsOneWidget);
+    expect(find.text('数据与安全'), findsOneWidget);
+    expect(find.text('关于与更新'), findsOneWidget);
   });
 }
 

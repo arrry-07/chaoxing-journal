@@ -82,5 +82,7 @@ void main() {
     await show(
         AssignmentDetailScreen(store: store, assignmentId: 'cx:work:1:2:task'));
     expect(find.textContaining('截止时间为上次读取记录'), findsOneWidget);
+    await show(CalendarScreen(store: store));
+    expect(find.text(title), findsNothing);
   });
 }

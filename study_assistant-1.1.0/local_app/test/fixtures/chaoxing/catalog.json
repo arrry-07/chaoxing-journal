@@ -70,9 +70,9 @@
     {
       "name": "timeout",
       "file": "timeout.json",
-      "requests": 1,
+      "requests": 2,
       "exception": "read",
-      "httpFailures": 1,
+      "httpFailures": 2,
       "issueKind": "network"
     }
   ],

@@ -21,7 +21,12 @@ class Notifications extends f.Notifications {
   Future<ReminderHealth> inspectHealth() async => const ReminderHealth(
       notifications: true,
       exact: false,
-      channelEnabled: true,
+      assignmentChannel:
+          ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 4),
+      summaryChannel:
+          ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 3),
+      manualChannel:
+          ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 4),
       pending: 3,
       summaryPending: 0);
   @override

@@ -39,7 +39,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
         }).toList()
           ..sort((a, b) => a.at!.compareTo(b.at!));
         final dated = all
-            .where((a) => a.deadlineAt != null && a.deadlineTrusted)
+            .where((a) =>
+                a.deadlineAt != null &&
+                a.deadlineTrusted &&
+                !a.deadlineReadFailed)
             .toList();
         final agenda = selected == null
             ? dated.where((a) {

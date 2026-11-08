@@ -54,6 +54,8 @@ void main() {
     expect(mainActivity, contains('openExactAlarmSettings'));
     expect(mainActivity, contains('openLockScreenNotificationSettings'));
     expect(mainActivity, contains('openBatterySettings'));
+    expect(mainActivity, contains('getAndroidSdkInt'));
+    expect(mainActivity, contains('Build.VERSION.SDK_INT'));
   });
 
   test('Android host can open downloaded apk updates', () {
@@ -80,5 +82,34 @@ void main() {
 
     expect(paths, contains('cache-path'));
     expect(paths, contains('updates'));
+  });
+
+  test('unsupported 32-bit JNI libraries cannot be packaged', () {
+    final gradle = File('android/app/build.gradle').readAsStringSync();
+
+    expect(gradle, contains('lib/armeabi-v7a/**'));
+    expect(gradle, isNot(contains('lib/armeabi-v7a/libdartjni.so')));
+  });
+
+  test('Android update inspection requires a supported Flutter engine', () {
+    final mainActivity = File(
+      'android/app/src/main/kotlin/com/example/studyassistant/MainActivity.kt',
+    ).readAsStringSync();
+
+    expect(
+      mainActivity,
+      contains('UpdateApkPolicy.hasSupportedFlutterEngine'),
+    );
+  });
+
+  test('backup allowlists do not contain out-of-scope exclusions', () {
+    for (final path in [
+      'android/app/src/main/res/xml/backup_rules.xml',
+      'android/app/src/main/res/xml/data_extraction_rules.xml',
+    ]) {
+      final rules = File(path).readAsStringSync();
+      expect(rules, contains('FlutterSharedPreferences.xml'), reason: path);
+      expect(rules, isNot(contains('<exclude')), reason: path);
+    }
   });
 }

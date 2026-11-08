@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/widget_snapshot.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -69,6 +70,7 @@ void main() {
 
   test('extension replaces same ID and removed deadline cancels reminder',
       () async {
+    SharedPreferences.setMockInitialValues({});
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
     AndroidFlutterLocalNotificationsPlugin.registerWith();
@@ -82,6 +84,14 @@ void main() {
     var failSchedule = false;
     messenger.setMockMethodCallHandler(channel, (call) async {
       switch (call.method) {
+        case 'initialize':
+          return true;
+        case 'getNotificationAppLaunchDetails':
+          return {'notificationLaunchedApp': false};
+        case 'getNotificationChannels':
+          return [];
+        case 'createNotificationChannel':
+          return true;
         case 'requestNotificationsPermission':
           return true;
         case 'pendingNotificationRequests':
@@ -107,8 +117,8 @@ void main() {
     final extended = original.copyWith(
         deadlineAt: original.deadlineAt!.add(const Duration(days: 1)));
     await service.rescheduleAssignments([extended], offsetsMinutes: [30]);
-    expect(cancelled, isEmpty);
-    expect(active.keys.single, first['id']);
+    expect(cancelled, [first['id']]);
+    expect(active.keys.single, isNot(first['id']));
     final next = active.values.single;
     expect(
         DateTime.parse(next['scheduledDateTime'])
@@ -121,14 +131,20 @@ void main() {
     ], offsetsMinutes: [
       30
     ]);
-    expect(service.lastWarning, contains('未能更新'));
+    expect(service.lastWarning, contains('未能完整更新'));
     expect(active.values.single, next);
-    expect(cancelled, isEmpty);
+    expect(cancelled, contains(first['id']));
+    expect(cancelled, hasLength(2),
+        reason:
+            'the failed staging ID is cancelled before the old batch is retained');
     failSchedule = false;
     await service.rescheduleAssignments(
         [extended.copyWith(clearDeadlineAt: true)],
         offsetsMinutes: [30]);
-    expect(cancelled, [next['id']]);
+    expect(cancelled, containsAll([first['id'], next['id']]));
+    expect(cancelled, hasLength(3),
+        reason:
+            'the failed staged ID is compensated before the active batch is retired');
     expect(active, isEmpty);
   });
 }

@@ -280,8 +280,12 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       return;
     }
     final normalized = AssignmentStore.normalizeAutoSyncIntervalMinutes(value);
-    await store.saveAutoSyncIntervalMinutes(normalized);
+    final saved = await store.saveAutoSyncIntervalMinutes(normalized);
     if (!mounted) {
+      return;
+    }
+    if (!saved) {
+      _showMessage(store.operationError ?? '自动同步设置未能保存，请重试');
       return;
     }
     _customSyncController.text = normalized.toString();
@@ -292,8 +296,12 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
     if (store.isLoading) {
       return;
     }
-    await store.saveAutoSyncIntervalMinutes(minutes);
+    final saved = await store.saveAutoSyncIntervalMinutes(minutes);
     if (!mounted) {
+      return;
+    }
+    if (!saved) {
+      _showMessage(store.operationError ?? '自动同步设置未能保存，请重试');
       return;
     }
     _customSyncController.text = minutes == 0 ? '' : minutes.toString();

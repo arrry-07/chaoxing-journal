@@ -11,6 +11,10 @@ import 'chaoxing_api_parser.dart';
 import 'chaoxing_assignment_parser.dart';
 
 class ChaoxingAuthenticationException implements Exception {
+  const ChaoxingAuthenticationException([this.httpStatus]);
+
+  final int? httpStatus;
+
   @override
   String toString() => '学习通登录已失效，请重新登录';
 }
@@ -33,7 +37,7 @@ class ChaoxingLocalClient {
   // The signed work list is the desktop course surface, as in the reference CLI.
   static const courseUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-  ChaoxingLocalClient({Dio? dio})
+  ChaoxingLocalClient({Dio? dio, Future<void> Function(Duration)? wait})
       : _dio = dio ??
             Dio(
               BaseOptions(
@@ -49,13 +53,49 @@ class ChaoxingLocalClient {
                   'Referer': 'https://i.chaoxing.com/',
                 },
               ),
-            );
+            ),
+        _wait = wait ?? _defaultWait;
+
+  static const _maxAttemptsPerRequest = 2;
+  static const _maxRetriesPerSync = 2;
+  static const _normalRetryDelay = Duration(milliseconds: 500);
+  static const _maxRetryDelay = Duration(seconds: 2);
 
   final Dio _dio;
-  final _requestTimings =
-      <String, ({int count, int elapsedMs, int httpFailures})>{};
+  final Future<void> Function(Duration) _wait;
+  static Future<void> _defaultWait(Duration delay) =>
+      Future<void>.delayed(delay);
+
+  final _requestStats = <String, _RequestStats>{};
+  final _openCircuits = <String, SyncIssue>{};
+  final _consecutiveTransientFailures = <String, int>{};
+  int _syncRetryCount = 0;
+  int? _fullSyncElapsedMs;
+
   Map<String, ({int count, int elapsedMs, int httpFailures})>
-      get requestTimings => Map.unmodifiable(_requestTimings);
+      get requestTimings => Map.unmodifiable({
+            for (final entry in _requestStats.entries)
+              entry.key: (
+                count: entry.value.count,
+                elapsedMs: entry.value.totalHttpMs + entry.value.totalParseMs,
+                httpFailures: entry.value.failures,
+              ),
+          });
+
+  SyncDiagnostics get diagnostics => SyncDiagnostics(
+        fullSyncElapsedMs: _fullSyncElapsedMs,
+        requests: Map.unmodifiable({
+          for (final entry in _requestStats.entries)
+            entry.key: SyncRequestDiagnostics(
+              count: entry.value.count,
+              failures: entry.value.failures,
+              parseFailures: entry.value.parseFailures,
+              httpSamples: entry.value.httpSamples,
+              parseSamples: entry.value.parseSamples,
+            ),
+        }),
+      );
+
   static String _requestKind(String path) {
     if (path == '/mycourse/backclazzdata') return '课程列表';
     if (path.contains('stucoursemiddle')) return '课程入口';
@@ -65,6 +105,88 @@ class ChaoxingLocalClient {
     }
     if (path.contains('/work/')) return '作业详情';
     return '其他';
+  }
+
+  void _resetSyncTracking({required bool clearRequestStats}) {
+    if (clearRequestStats) _requestStats.clear();
+    _openCircuits.clear();
+    _consecutiveTransientFailures.clear();
+    _syncRetryCount = 0;
+    _fullSyncElapsedMs = null;
+  }
+
+  void _recordHttp(
+    String kind,
+    int elapsedMs, {
+    required bool failed,
+    int? parseElapsedMs,
+    bool parseFailed = false,
+  }) {
+    final stats = _requestStats.putIfAbsent(kind, _RequestStats.new);
+    stats.count++;
+    stats.httpSamples.add(elapsedMs);
+    if (failed) stats.failures++;
+    if (parseElapsedMs != null) {
+      stats.parseSamples.add(parseElapsedMs);
+      if (parseFailed) stats.parseFailures++;
+    }
+  }
+
+  void _recordParse(String kind, int elapsedMs, {bool failed = false}) {
+    final stats = _requestStats.putIfAbsent(kind, _RequestStats.new);
+    stats.parseSamples.add(elapsedMs);
+    if (failed) stats.parseFailures++;
+  }
+
+  void _noteParseFailure(String kind) {
+    _requestStats.putIfAbsent(kind, _RequestStats.new).parseFailures++;
+  }
+
+  T _measureParse<T>(String kind, T Function() action) {
+    final watch = Stopwatch()..start();
+    try {
+      final result = action();
+      _recordParse(kind, watch.elapsedMilliseconds);
+      return result;
+    } catch (_) {
+      _recordParse(kind, watch.elapsedMilliseconds, failed: true);
+      rethrow;
+    }
+  }
+
+  bool _registerTransientFailure(String kind, _AttemptFailure failure) {
+    if (!failure.transient) {
+      _consecutiveTransientFailures.remove(kind);
+      return false;
+    }
+    final count = (_consecutiveTransientFailures[kind] ?? 0) + 1;
+    _consecutiveTransientFailures[kind] = count;
+    if (count >= 2) {
+      _openCircuits[kind] = failure.issue;
+      return true;
+    }
+    return false;
+  }
+
+  Duration? _retryDelay(
+    String kind,
+    int attempt,
+    _AttemptFailure failure, {
+    required bool circuitOpened,
+  }) {
+    if (!failure.transient ||
+        circuitOpened ||
+        attempt >= _maxAttemptsPerRequest ||
+        _syncRetryCount >= _maxRetriesPerSync) {
+      return null;
+    }
+    if (failure.issue.kind == SyncIssueKind.rateLimited ||
+        failure.retryAfter != null) {
+      final retryAfter = failure.retryAfter;
+      if (retryAfter == null || retryAfter > _maxRetryDelay) return null;
+      return retryAfter;
+    }
+    return _normalRetryDelay;
   }
 
   final List<_SessionCookie> _cookies = [];
@@ -142,23 +264,36 @@ class ChaoxingLocalClient {
   List<SyncIssue> issues = [];
   int succeededCourses = 0, failedCourses = 0;
   Future<ChaoxingLoginResult> loadProfile() async {
+    final generation = _sessionGeneration;
     final p = await _fetchProfile(_loginPayload, const _ChaoxingProfile());
+    if (generation != _sessionGeneration) {
+      return const ChaoxingLoginResult(success: false, message: '会话已切换，请重试');
+    }
+    final avatarUrl = await _resolveAvatarUrl(p.avatarUrl);
+    if (generation != _sessionGeneration) {
+      return const ChaoxingLoginResult(success: false, message: '会话已切换，请重试');
+    }
     return ChaoxingLoginResult(
-        success: true,
-        displayName: p.displayName,
-        avatarUrl: await _resolveAvatarUrl(p.avatarUrl));
+        success: true, displayName: p.displayName, avatarUrl: avatarUrl);
   }
 
   List<ChaoxingCourseRef> courses = [];
   Set<String> trackedActivityIds = {};
   Map<String, Assignment> previousAssignments = {};
   void clearSession() {
-    _requestTimings.clear();
+    _resetSyncTracking(clearRequestStats: true);
     _sessionGeneration++;
     _cookies.clear();
+    _loginPayload = null;
+    courses = [];
+    hasCourseResponse = false;
+    issues = [];
+    succeededCourses = 0;
+    failedCourses = 0;
     _verificationTarget = null;
     _courseVerificationProbe = null;
     _v3FormalApiConfirmed = false;
+    _deadlineReadsBlockedBy = null;
     lastSyncWarning = null;
   }
 
@@ -196,6 +331,9 @@ class ChaoxingLocalClient {
       );
     }
     final sessionProfile = await _completeLoginSession(response.data);
+    if (generation != _sessionGeneration) {
+      return const ChaoxingLoginResult(success: false, message: '会话已切换，请重试');
+    }
     _loginPayload = response.data;
     if (deferProfile) {
       return ChaoxingLoginResult(
@@ -204,7 +342,13 @@ class ChaoxingLocalClient {
           avatarUrl: sessionProfile.avatarUrl);
     }
     final profile = await _fetchProfile(response.data, sessionProfile);
+    if (generation != _sessionGeneration) {
+      return const ChaoxingLoginResult(success: false, message: '会话已切换，请重试');
+    }
     final avatarUrl = await _resolveAvatarUrl(profile.avatarUrl);
+    if (generation != _sessionGeneration) {
+      return const ChaoxingLoginResult(success: false, message: '会话已切换，请重试');
+    }
     return ChaoxingLoginResult(
       success: true,
       displayName: profile.displayName,
@@ -216,119 +360,173 @@ class ChaoxingLocalClient {
   /// supplies its current cpi/signatures without reading every homework list.
   Future<List<Assignment>> fetchAssignmentsForCourse(
       {required String courseId, required String clazzId}) async {
+    final generation = _sessionGeneration;
+    final syncWatch = Stopwatch()..start();
+    _resetSyncTracking(clearRequestStats: false);
     issues = [];
     _deadlineReadsBlockedBy = null;
-    final mcode =
-        _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
-    final response = await _safeGet<dynamic>(
-        'https://mooc1-api.chaoxing.com/mycourse/backclazzdata',
-        queryParameters: {'view': 'json', if (mcode != null) 'mcode': mcode});
-    final refs =
-        ChaoxingApiParser.parseCourseRefs(_decodeJsonPayload(response?.data));
-    final course = refs
-        .where((c) => c.courseId == courseId && c.clazzId == clazzId)
-        .firstOrNull;
-    if (course == null) throw StateError('目标课程暂时无法读取，请刷新作业后重试');
-    final rows = await _fetchCourseWork(course);
-    if (rows == null) throw StateError('本次未能读取目标课程作业');
-    return _dedupeAssignments(rows);
+    try {
+      final mcode =
+          _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
+      final response = await _safeGet<dynamic>(
+          'https://mooc1-api.chaoxing.com/mycourse/backclazzdata',
+          queryParameters: {'view': 'json', if (mcode != null) 'mcode': mcode});
+      if (generation != _sessionGeneration) return const [];
+      final refs = _measureParse(
+          '课程列表',
+          () => ChaoxingApiParser.parseCourseRefs(
+              _decodeJsonPayload(response?.data)));
+      final course = refs
+          .where((c) => c.courseId == courseId && c.clazzId == clazzId)
+          .firstOrNull;
+      if (course == null) {
+        _noteParseFailure('课程列表');
+        throw const SyncReadException(SyncIssue(
+            SyncIssueKind.notFound, '目标课程暂时无法读取，请刷新作业后重试',
+            stage: 'courses'));
+      }
+      final rows = await _fetchCourseWork(course, generation: generation);
+      if (generation != _sessionGeneration) return const [];
+      if (rows == null) {
+        final issue = issues.isNotEmpty
+            ? issues.first
+            : const SyncIssue(SyncIssueKind.schemaChanged, '本次未能读取目标课程作业',
+                stage: 'work');
+        throw SyncReadException(issue);
+      }
+      return _dedupeAssignments(rows);
+    } finally {
+      if (generation == _sessionGeneration) {
+        _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
+      }
+    }
   }
 
   Future<List<Assignment>> fetchAssignments() async {
-    _requestTimings.clear();
+    final generation = _sessionGeneration;
+    final syncWatch = Stopwatch()..start();
+    _resetSyncTracking(clearRequestStats: true);
     lastSyncWarning = null;
     _deadlineReadsBlockedBy = null;
     issues = [];
     hasCourseResponse = false;
     succeededCourses = 0;
     failedCourses = 0;
-    final mcode =
-        _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
-    final response = await _safeGet<dynamic>(
-      'https://mooc1-api.chaoxing.com/mycourse/backclazzdata',
-      queryParameters: {'view': 'json', if (mcode != null) 'mcode': mcode},
-    );
-    final payload = _decodeJsonPayload(response?.data);
-    final raw = payload is Map
-        ? payload['channelList'] ?? payload['courses'] ?? payload['data']
-        : null;
-    courses = ChaoxingApiParser.parseCourseRefs(payload);
-    if (raw is! List ||
-        (raw.isNotEmpty && courses.isEmpty) ||
-        (payload is Map &&
-            (payload['result'] == false || payload['status'] == false))) {
-      throw const SyncReadException(
-          SyncIssue(SyncIssueKind.schemaChanged, '课程列表结构无法识别，请查看详情并重试'));
-    }
-    final problems = <String>{};
-    hasCourseResponse = true;
-    if (raw.length != courses.length) {
-      failedCourses = raw.length - courses.length;
-      issues.add(const SyncIssue(SyncIssueKind.schemaChanged, '部分课程结构无法识别'));
-      problems.add('部分课程无法识别');
-    }
-    final assignments = <Assignment>[];
-    var recognized = courses.isEmpty;
-    for (final course in courses) {
-      List<Assignment>? work;
-      final watch = Stopwatch()..start();
-      SyncIssue? failure;
-      try {
-        work = await _fetchCourseWork(course);
-      } on ChaoxingAuthenticationException {
-        rethrow;
-      } on SyncReadException catch (e) {
-        failure = e.issue;
-      } catch (_) {
-        failure = const SyncIssue(SyncIssueKind.schemaChanged, '作业响应无法识别');
+    try {
+      final mcode =
+          _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
+      final response = await _safeGet<dynamic>(
+        'https://mooc1-api.chaoxing.com/mycourse/backclazzdata',
+        queryParameters: {'view': 'json', if (mcode != null) 'mcode': mcode},
+      );
+      if (generation != _sessionGeneration) return const [];
+      final parsedCourses = _measureParse('课程列表', () {
+        final payload = _decodeJsonPayload(response?.data);
+        final raw = payload is Map
+            ? payload['channelList'] ?? payload['courses'] ?? payload['data']
+            : null;
+        final refs = ChaoxingApiParser.parseCourseRefs(payload);
+        return (payload: payload, raw: raw, refs: refs);
+      });
+      final payload = parsedCourses.payload;
+      final raw = parsedCourses.raw;
+      courses = parsedCourses.refs;
+      if (raw is! List ||
+          (raw.isNotEmpty && courses.isEmpty) ||
+          (payload is Map &&
+              (payload['result'] == false || payload['status'] == false))) {
+        _noteParseFailure('课程列表');
+        throw const SyncReadException(
+            SyncIssue(SyncIssueKind.schemaChanged, '课程列表结构无法识别，请查看详情并重试'));
       }
-      final label = '${course.courseName}（班级 ${course.clazzId}）';
-      if (work == null) {
-        failedCourses++;
-        final issue = SyncIssue(failure?.kind ?? SyncIssueKind.schemaChanged,
-            '$label ${failure?.message ?? '作业页签名或列表无法识别'}',
-            elapsedMs: watch.elapsedMilliseconds,
-            httpStatus: failure?.httpStatus,
-            courseKey: '${course.courseId}:${course.clazzId}',
-            stage: failure?.stage ?? 'work');
-        issues.add(issue);
-        problems.add(issue.message);
-        if (issue.kind == SyncIssueKind.verificationRequired) {
-          failedCourses = courses.length - succeededCourses;
+      final problems = <String>{};
+      hasCourseResponse = true;
+      if (raw.length != courses.length) {
+        failedCourses = raw.length - courses.length;
+        issues.add(const SyncIssue(SyncIssueKind.schemaChanged, '部分课程结构无法识别'));
+        problems.add('部分课程无法识别');
+      }
+      final assignments = <Assignment>[];
+      var recognized = courses.isEmpty;
+      for (final course in courses) {
+        List<Assignment>? work;
+        final watch = Stopwatch()..start();
+        SyncIssue? failure;
+        try {
+          work = await _fetchCourseWork(course, generation: generation);
+          if (generation != _sessionGeneration) return const [];
+        } on ChaoxingAuthenticationException {
+          rethrow;
+        } on SyncReadException catch (e) {
+          if (generation != _sessionGeneration) return const [];
+          failure = e.issue;
+        } catch (_) {
+          if (generation != _sessionGeneration) return const [];
+          failure = const SyncIssue(SyncIssueKind.schemaChanged, '作业响应无法识别');
+        }
+        final label = '${course.courseName}（班级 ${course.clazzId}）';
+        if (work == null) {
+          failedCourses++;
+          final issue = SyncIssue(failure?.kind ?? SyncIssueKind.schemaChanged,
+              '$label ${failure?.message ?? '作业页签名或列表无法识别'}',
+              elapsedMs: watch.elapsedMilliseconds,
+              httpStatus: failure?.httpStatus,
+              retryAfter: failure?.retryAfter,
+              retryAfterSeconds: failure?.retryAfterSeconds,
+              circuitOpen: failure?.circuitOpen ?? false,
+              courseKey: '${course.courseId}:${course.clazzId}',
+              stage: failure?.stage ?? 'work');
+          issues.add(issue);
+          problems.add(issue.message);
+          if (issue.kind == SyncIssueKind.verificationRequired) {
+            failedCourses = courses.length - succeededCourses;
+            break;
+          }
+        } else {
+          recognized = true;
+          succeededCourses++;
+          assignments.addAll(work);
+          if (work.any((a) => a.deadlineReadFailed)) {
+            failedCourses++;
+            issues.add(SyncIssue(SyncIssueKind.partial, '$label 部分截止时间尚未确认',
+                courseKey: '${course.courseId}:${course.clazzId}',
+                stage: 'detail',
+                elapsedMs: watch.elapsedMilliseconds));
+            problems.add('$label 部分截止时间未读取');
+          }
+        }
+        if (_deadlineReadsBlockedBy != null) {
+          final unread = courses.length - courses.indexOf(course) - 1;
+          if (unread > 0) {
+            issues.add(SyncIssue(
+                _deadlineReadsBlockedBy!, '本次读取已暂停，另有 $unread 门课程尚未更新',
+                stage: 'workList'));
+          }
+          failedCourses = courses.length - succeededCourses + 1;
           break;
         }
-      } else {
-        recognized = true;
-        succeededCourses++;
-        assignments.addAll(work);
-        if (work.any((a) => a.deadlineReadFailed)) {
-          failedCourses++;
-          issues.add(SyncIssue(SyncIssueKind.partial, '$label 部分截止时间尚未确认',
-              courseKey: '${course.courseId}:${course.clazzId}',
-              stage: 'detail',
-              elapsedMs: watch.elapsedMilliseconds));
-          problems.add('$label 部分截止时间未读取');
-        }
       }
-      if (_deadlineReadsBlockedBy != null) {
-        final unread = courses.length - courses.indexOf(course) - 1;
-        if (unread > 0) {
-          issues.add(SyncIssue(
-              _deadlineReadsBlockedBy!, '本次读取已暂停，另有 $unread 门课程尚未更新',
-              stage: 'workList'));
-        }
-        failedCourses = courses.length - succeededCourses + 1;
-        break;
+      if (problems.isNotEmpty) {
+        lastSyncWarning = '已更新 $succeededCourses 门课程，$failedCourses 门待重试';
+      }
+      if (!recognized) {
+        final issue = issues.isNotEmpty
+            ? issues.first
+            : const SyncIssue(SyncIssueKind.schemaChanged, '无法读取学习通作业',
+                stage: 'work');
+        throw SyncReadException(issue,
+            relatedIssues: List.unmodifiable(issues.skip(1)));
+      }
+      return _dedupeAssignments(assignments);
+    } finally {
+      if (generation == _sessionGeneration) {
+        _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
       }
     }
-    if (problems.isNotEmpty) {
-      lastSyncWarning = '已更新 $succeededCourses 门课程，$failedCourses 门待重试';
-    }
-    if (!recognized) throw StateError(lastSyncWarning ?? '无法读取学习通作业');
-    return _dedupeAssignments(assignments);
   }
 
-  Future<List<Assignment>?> _fetchCourseWork(ChaoxingCourseRef course) async {
+  Future<List<Assignment>?> _fetchCourseWork(ChaoxingCourseRef course,
+      {required int generation}) async {
     final courseUri =
         Uri.https('mooc1.chaoxing.com', '/visit/stucoursemiddle', {
       'courseid': course.courseId,
@@ -338,22 +536,36 @@ class ChaoxingLocalClient {
       'v': '2',
     });
     _courseVerificationProbe = courseUri;
-    if (_v3FormalApiConfirmed) return _fetchV3FormalHomework(course);
-    final middle = await _courseGet(courseUri);
-    final html = middle?.data?.toString() ?? '';
-    final workEnc = ChaoxingAssignmentParser.hiddenValue(html, 'workEnc');
+    if (_v3FormalApiConfirmed) {
+      return _fetchV3FormalHomework(course, generation: generation);
+    }
+    final middle = await _courseGet(courseUri, generation: generation);
+    if (generation != _sessionGeneration) return null;
+    final middlePage = _measureParse('课程入口', () {
+      final html = middle?.data?.toString() ?? '';
+      return (
+        html: html,
+        workEnc: ChaoxingAssignmentParser.hiddenValue(html, 'workEnc'),
+        openc: ChaoxingAssignmentParser.hiddenValue(html, 'openc'),
+        stuenc: ChaoxingAssignmentParser.hiddenValue(html, 'enc'),
+      );
+    });
+    final html = middlePage.html;
+    final workEnc = middlePage.workEnc;
     if (kDebugMode) {
       debugPrint(
           '[SyncCourse] status=${middle?.statusCode} signed=${workEnc?.isNotEmpty == true} vue=${html.contains('/mooc2-ans-vue/')}');
     }
     final navigationUri =
         (workEnc == null || workEnc.isEmpty) && html.contains('/mooc2-ans-vue/')
-            ? await _fetchNavigationWorkUri(course)
+            ? await _fetchNavigationWorkUri(course, generation: generation)
             : null;
+    if (generation != _sessionGeneration) return null;
     if ((workEnc == null || workEnc.isEmpty) &&
         navigationUri == null &&
         html.contains('/mooc2-ans-vue/')) {
-      final work = await _fetchV3FormalHomework(course);
+      final work = await _fetchV3FormalHomework(course, generation: generation);
+      if (generation != _sessionGeneration) return null;
       _v3FormalApiConfirmed = true;
       return work;
     }
@@ -369,24 +581,31 @@ class ChaoxingLocalClient {
           if (course.cpi != null) 'cpi': course.cpi!,
           'ut': 's',
           'enc': workEnc!,
-          'openc': ChaoxingAssignmentParser.hiddenValue(html, 'openc') ?? '',
-          'stuenc': ChaoxingAssignmentParser.hiddenValue(html, 'enc') ?? '',
+          'openc': middlePage.openc ?? '',
+          'stuenc': middlePage.stuenc ?? '',
           'isdisplaytable': '2',
           't': DateTime.now().millisecondsSinceEpoch.toString(),
         });
-    final list = await _courseGet(uri);
-    final parsed = ChaoxingAssignmentParser.parseSignedWorkList(
-        list?.data?.toString() ?? '',
-        courseId: course.courseId,
-        clazzId: course.clazzId,
-        courseName: course.courseName,
-        baseUri: uri);
-    if (parsed == null) return null;
-    return _hydrateWorkDeadlines(parsed);
+    final list = await _courseGet(uri, generation: generation);
+    if (generation != _sessionGeneration) return null;
+    final parsed = _measureParse(
+        '作业列表',
+        () => ChaoxingAssignmentParser.parseSignedWorkList(
+            list?.data?.toString() ?? '',
+            courseId: course.courseId,
+            clazzId: course.clazzId,
+            courseName: course.courseName,
+            baseUri: uri));
+    if (parsed == null) {
+      _noteParseFailure('作业列表');
+      return null;
+    }
+    return _hydrateWorkDeadlines(parsed, generation: generation);
   }
 
   Future<List<Assignment>> _hydrateWorkDeadlines(List<Assignment> rows,
-      {Map<String, DateTime> starts = const {}}) async {
+      {required int generation,
+      Map<String, DateTime> starts = const {}}) async {
     final result = <Assignment>[];
     for (final item in rows) {
       if (item.isCompleted) {
@@ -407,20 +626,29 @@ class ChaoxingLocalClient {
       if (_deadlineReadsBlockedBy == null) {
         final watch = Stopwatch()..start();
         try {
-          final response = await _courseGet(Uri.parse(item.submitUrl!));
-          final body = response?.data?.toString() ?? '';
-          if (body.contains('没有此页面访问权限')) {
-            throw SyncReadException(SyncIssue(
-                SyncIssueKind.forbidden, '学习通未允许访问此作业详情',
-                httpStatus: response?.statusCode));
-          }
-          evidence = ChaoxingAssignmentParser.readDetailDeadline(body,
-              startedAt: starts[item.id]);
+          final response = await _courseGet(Uri.parse(item.submitUrl!),
+              generation: generation);
+          if (generation != _sessionGeneration) return const [];
+          final detail = _measureParse('作业详情', () {
+            final body = response?.data?.toString() ?? '';
+            if (body.contains('没有此页面访问权限')) {
+              throw SyncReadException(SyncIssue(
+                  SyncIssueKind.forbidden, '学习通未允许访问此作业详情',
+                  httpStatus: response?.statusCode, stage: 'detail'));
+            }
+            return (
+              body: body,
+              evidence: ChaoxingAssignmentParser.readDetailDeadline(body,
+                  startedAt: starts[item.id]),
+            );
+          });
+          evidence = detail.evidence;
           if (kDebugMode) {
             debugPrint(
-                '[DeadlineRead] status=${response?.statusCode} bytes=${body.length} startAnchor=${starts.containsKey(item.id)} exact=${evidence.deadlineAt != null} noLimit=${evidence.noLimit} missingYear=${evidence.missingYear} notOpen=${evidence.notOpen}');
+                '[DeadlineRead] status=${response?.statusCode} bytes=${detail.body.length} startAnchor=${starts.containsKey(item.id)} exact=${evidence.deadlineAt != null} noLimit=${evidence.noLimit} missingYear=${evidence.missingYear} notOpen=${evidence.notOpen}');
           }
           if (evidence.deadlineAt == null && !evidence.noLimit) {
+            _noteParseFailure('作业详情');
             failure = SyncIssue(
                 evidence.notOpen
                     ? SyncIssueKind.partial
@@ -448,6 +676,9 @@ class ChaoxingLocalClient {
               stage: 'detail',
               courseKey: item.courseKey,
               httpStatus: e.issue.httpStatus,
+              retryAfter: e.issue.retryAfter,
+              retryAfterSeconds: e.issue.retryAfterSeconds,
+              circuitOpen: e.issue.circuitOpen,
               elapsedMs: watch.elapsedMilliseconds);
           if (e.issue.kind == SyncIssueKind.verificationRequired) {
             _deadlineReadsBlockedBy = e.issue.kind;
@@ -469,7 +700,8 @@ class ChaoxingLocalClient {
 
   // fanyav3 obtains its signed navigation from this first-party endpoint.
   // Only follow the formal homework page, with the same course/class identity.
-  Future<Uri?> _fetchNavigationWorkUri(ChaoxingCourseRef course) async {
+  Future<Uri?> _fetchNavigationWorkUri(ChaoxingCourseRef course,
+      {required int generation}) async {
     final response = await _safeGet<dynamic>(
         'https://mooc2-ans.chaoxing.com/mooc2-ans/coursemanagev3/stu-base-info',
         queryParameters: {
@@ -480,7 +712,9 @@ class ChaoxingLocalClient {
         headers: {
           'User-Agent': courseUserAgent
         });
-    final payload = _decodeJsonPayload(response?.data);
+    if (generation != _sessionGeneration) return null;
+    final payload =
+        _measureParse('课程导航', () => _decodeJsonPayload(response?.data));
     Uri? findWork(dynamic node) {
       if (node is List) {
         for (final child in node) {
@@ -523,8 +757,11 @@ class ChaoxingLocalClient {
       return null;
     }
 
-    final uri =
-        payload is Map && payload['status'] == true ? findWork(payload) : null;
+    final uri = _measureParse(
+        '课程导航',
+        () => payload is Map && payload['status'] == true
+            ? findWork(payload)
+            : null);
     if (kDebugMode) {
       debugPrint(
           '[SyncNavigation] status=${response?.statusCode} formalWorkLink=${uri != null}');
@@ -567,8 +804,8 @@ class ChaoxingLocalClient {
   }
 
   // fanyav3 fetches homework separately from its exam and activity APIs.
-  Future<List<Assignment>> _fetchV3FormalHomework(
-      ChaoxingCourseRef course) async {
+  Future<List<Assignment>> _fetchV3FormalHomework(ChaoxingCourseRef course,
+      {required int generation}) async {
     final result = <Assignment>[];
     final starts = <String, DateTime>{};
     final seen = <String>{};
@@ -584,107 +821,116 @@ class ChaoxingLocalClient {
           headers: {
             'User-Agent': courseUserAgent
           });
-      final payload = _decodeJsonPayload(response?.data);
-      if (payload is! Map ||
-          payload['status'] != true ||
-          payload['data'] is! List) {
-        throw SyncReadException(SyncIssue(
-            SyncIssueKind.schemaChanged, '正式作业接口响应无法识别',
-            stage: 'workList', httpStatus: response?.statusCode));
-      }
-      final rows = payload['data'] as List;
-      final total = int.tryParse('${payload['total']}');
-      if (total == null || total < 0 || result.length + rows.length > total) {
-        throw const SyncReadException(SyncIssue(
-            SyncIssueKind.schemaChanged, '正式作业总数与分页不匹配',
-            stage: 'workList'));
-      }
-      if (kDebugMode) {
-        debugPrint(
-            '[SyncFormal] status=${response?.statusCode} page=$page rows=${rows.length} total=$total');
-      }
-      for (final row in rows) {
-        if (row is! Map ||
-            row['title'] is! String ||
-            (row['title'] as String).trim().isEmpty) {
+      if (generation != _sessionGeneration) return const [];
+      final pageResult = _measureParse('作业列表', () {
+        final payload = _decodeJsonPayload(response?.data);
+        if (payload is! Map ||
+            payload['status'] != true ||
+            payload['data'] is! List) {
+          throw SyncReadException(SyncIssue(
+              SyncIssueKind.schemaChanged, '正式作业接口响应无法识别',
+              stage: 'workList', httpStatus: response?.statusCode));
+        }
+        final rows = payload['data'] as List;
+        final total = int.tryParse('${payload['total']}');
+        if (total == null || total < 0 || result.length + rows.length > total) {
           throw const SyncReadException(SyncIssue(
-              SyncIssueKind.schemaChanged, '正式作业条目不完整',
+              SyncIssueKind.schemaChanged, '正式作业总数与分页不匹配',
               stage: 'workList'));
         }
-        var url =
-            Uri.tryParse('${row['taskUrl'] ?? ''}'.replaceAll('&amp;', '&'));
-        if (url != null &&
-            url.scheme == 'http' &&
-            url.host.endsWith('.chaoxing.com')) {
-          url = url.replace(scheme: 'https', port: 443);
+        if (kDebugMode) {
+          debugPrint(
+              '[SyncFormal] status=${response?.statusCode} page=$page rows=${rows.length} total=$total');
         }
-        final id =
-            url?.queryParameters['workId'] ?? url?.queryParameters['taskrefId'];
-        final linkedCourse = url?.queryParameters['courseId'] ??
-            url?.queryParameters['courseid'];
-        final linkedClass = url?.queryParameters['classId'] ??
-            url?.queryParameters['clazzId'] ??
-            url?.queryParameters['clazzid'];
-        if (url == null ||
-            url.scheme != 'https' ||
-            !url.host.endsWith('.chaoxing.com') ||
-            id == null ||
-            id.isEmpty ||
-            !url.path.contains('/work/') ||
-            (linkedCourse != null && linkedCourse != course.courseId) ||
-            (linkedClass != null && linkedClass != course.clazzId)) {
-          throw const SyncReadException(SyncIssue(
-              SyncIssueKind.schemaChanged, '正式作业详情身份无法确认',
-              stage: 'workList'));
+        for (final row in rows) {
+          if (row is! Map ||
+              row['title'] is! String ||
+              (row['title'] as String).trim().isEmpty) {
+            throw const SyncReadException(SyncIssue(
+                SyncIssueKind.schemaChanged, '正式作业条目不完整',
+                stage: 'workList'));
+          }
+          var url =
+              Uri.tryParse('${row['taskUrl'] ?? ''}'.replaceAll('&amp;', '&'));
+          if (url != null &&
+              url.scheme == 'http' &&
+              url.host.endsWith('.chaoxing.com')) {
+            url = url.replace(scheme: 'https', port: 443);
+          }
+          final id = url?.queryParameters['workId'] ??
+              url?.queryParameters['taskrefId'];
+          final linkedCourse = url?.queryParameters['courseId'] ??
+              url?.queryParameters['courseid'];
+          final linkedClass = url?.queryParameters['classId'] ??
+              url?.queryParameters['clazzId'] ??
+              url?.queryParameters['clazzid'];
+          if (url == null ||
+              url.scheme != 'https' ||
+              !url.host.endsWith('.chaoxing.com') ||
+              id == null ||
+              id.isEmpty ||
+              !url.path.contains('/work/') ||
+              (linkedCourse != null && linkedCourse != course.courseId) ||
+              (linkedClass != null && linkedClass != course.clazzId)) {
+            throw const SyncReadException(SyncIssue(
+                SyncIssueKind.schemaChanged, '正式作业详情身份无法确认',
+                stage: 'workList'));
+          }
+          if (!seen.add(id)) {
+            throw const SyncReadException(SyncIssue(
+                SyncIssueKind.schemaChanged, '正式作业分页重复，请稍后重试',
+                stage: 'workList'));
+          }
+          final status = int.tryParse('${row['stuStatus']}');
+          final evaluation = int.tryParse('${row['evaluation'] ?? 0}') ?? 0;
+          final state = evaluation != 0
+              ? (status == 4 ? 'completed' : 'unknown')
+              : switch (status) {
+                  0 || 1 || 2 => 'pending',
+                  3 => 'reviewing',
+                  4 => 'completed',
+                  5 => 'returned',
+                  _ => 'unknown'
+                };
+          final end = int.tryParse('${row['endTime']}');
+          final start = int.tryParse('${row['startTime']}');
+          if (start != null &&
+              start >= 946684800000 &&
+              start <= 4102444800000) {
+            starts['cx:work:${course.courseId}:${course.clazzId}:$id'] =
+                DateTime.fromMillisecondsSinceEpoch(start, isUtc: true);
+          }
+          final trusted =
+              end != null && (end >= 946684800000 && end <= 4102444800000);
+          result.add(Assignment(
+              id: 'cx:work:${course.courseId}:${course.clazzId}:$id',
+              courseName: course.courseName,
+              title: (row['title'] as String).trim(),
+              deadlineAt: trusted && end > 0
+                  ? DateTime.fromMillisecondsSinceEpoch(end)
+                  : null,
+              deadlineTrusted: trusted,
+              deadlineRawText: trusted ? end.toString() : null,
+              deadlineReadFailed: false,
+              requirementsText: '',
+              status: state,
+              submitUrl: url.toString(),
+              lastSyncedAt: DateTime.now()));
         }
-        if (!seen.add(id)) {
-          throw const SyncReadException(SyncIssue(
-              SyncIssueKind.schemaChanged, '正式作业分页重复，请稍后重试',
-              stage: 'workList'));
-        }
-        final status = int.tryParse('${row['stuStatus']}');
-        final evaluation = int.tryParse('${row['evaluation'] ?? 0}') ?? 0;
-        final state = evaluation != 0
-            ? (status == 4 ? 'completed' : 'unknown')
-            : switch (status) {
-                0 || 1 || 2 => 'pending',
-                3 => 'reviewing',
-                4 => 'completed',
-                5 => 'returned',
-                _ => 'unknown'
-              };
-        final end = int.tryParse('${row['endTime']}');
-        final start = int.tryParse('${row['startTime']}');
-        if (start != null && start >= 946684800000 && start <= 4102444800000) {
-          starts['cx:work:${course.courseId}:${course.clazzId}:$id'] =
-              DateTime.fromMillisecondsSinceEpoch(start, isUtc: true);
-        }
-        final trusted =
-            end != null && (end >= 946684800000 && end <= 4102444800000);
-        result.add(Assignment(
-            id: 'cx:work:${course.courseId}:${course.clazzId}:$id',
-            courseName: course.courseName,
-            title: (row['title'] as String).trim(),
-            deadlineAt: trusted && end > 0
-                ? DateTime.fromMillisecondsSinceEpoch(end)
-                : null,
-            deadlineTrusted: trusted,
-            deadlineRawText: trusted ? end.toString() : null,
-            deadlineReadFailed: false,
-            requirementsText: '',
-            status: state,
-            submitUrl: url.toString(),
-            lastSyncedAt: DateTime.now()));
+        return (rowCount: rows.length, total: total);
+      });
+      if (result.length == pageResult.total) {
+        return _hydrateWorkDeadlines(result,
+            generation: generation, starts: starts);
       }
-      if (result.length == total) {
-        return _hydrateWorkDeadlines(result, starts: starts);
-      }
-      if (rows.isEmpty) {
+      if (pageResult.rowCount == 0) {
+        _noteParseFailure('作业列表');
         throw const SyncReadException(SyncIssue(
             SyncIssueKind.schemaChanged, '正式作业总数与分页不匹配',
             stage: 'workList'));
       }
     }
+    _noteParseFailure('作业列表');
     throw const SyncReadException(SyncIssue(
         SyncIssueKind.schemaChanged, '正式作业分页超出读取范围',
         stage: 'workList'));
@@ -692,7 +938,8 @@ class ChaoxingLocalClient {
 
   // Only forward the authenticated session within Chaoxing when the course
   // middle page redirects to the current deployment.
-  Future<Response<dynamic>?> _courseGet(Uri uri) async {
+  Future<Response<dynamic>?> _courseGet(Uri uri, {int? generation}) async {
+    final expectedGeneration = generation ?? _sessionGeneration;
     for (var i = 0; i < 5; i++) {
       // Some deployments still advertise HTTP in Location. Upgrade locally;
       // cookies and signed parameters must never travel over plaintext HTTP.
@@ -704,7 +951,8 @@ class ChaoxingLocalClient {
       }
       final response = await _safeGet<dynamic>(uri.toString(),
           headers: {'User-Agent': courseUserAgent});
-      if (response == null || response.statusCode! < 300) {
+      if (expectedGeneration != _sessionGeneration) return null;
+      if (response == null || (response.statusCode ?? 0) < 300) {
         if (kDebugMode) {
           final route = uri.path
               .split('/')
@@ -736,96 +984,267 @@ class ChaoxingLocalClient {
     Map<String, dynamic>? queryParameters,
     Map<String, String>? headers,
   }) async {
+    final parsedUri = Uri.parse(uri);
+    final kind = _requestKind(parsedUri.path);
     final generation = _sessionGeneration;
-    final watch = Stopwatch()..start();
-    int? observedStatus;
-    try {
-      final response = await _dio.get<T>(
-        uri,
-        queryParameters: queryParameters,
-        options: Options(headers: _headers(Uri.parse(uri), headers)),
-      );
+    var attempt = 0;
+    while (true) {
       if (generation != _sessionGeneration) return null;
-      _rememberCookies(response);
-      final status = response.statusCode ?? 0;
-      observedStatus = status;
-      final location = response.headers.value('location') ?? '';
-      final body = response.data is String ? response.data as String : '';
-      final payload = _decodeJsonPayload(response.data);
-      final message = payload is Map
-          ? (payload['msg'] ?? payload['message'] ?? '').toString()
-          : '';
-      if (payload is Map &&
-          (payload['result'] == false || payload['status'] == false) &&
-          RegExp(r'未登录|请先登录|登录已失效|登录失效|登录超时|login required|unauthorized',
-                  caseSensitive: false)
-              .hasMatch(message)) {
-        throw ChaoxingAuthenticationException();
-      }
-      if (status == 401 ||
-          (status >= 300 &&
-              status < 400 &&
-              (location.contains('passport2') ||
-                  location.contains('/login'))) ||
-          (body.contains('<html') &&
-              (body.contains('请登录') ||
-                  body.contains('passport2.chaoxing.com/login')))) {
-        throw ChaoxingAuthenticationException();
-      }
-      if (status == 403) {
+      final circuit = _openCircuits[kind];
+      if (circuit != null) {
         throw SyncReadException(SyncIssue(
-            SyncIssueKind.forbidden, '接口拒绝访问，请稍后重试',
-            httpStatus: status, elapsedMs: watch.elapsedMilliseconds));
+          circuit.kind,
+          '连续请求失败，已暂停本次刷新中的$kind请求',
+          stage: circuit.stage,
+          httpStatus: circuit.httpStatus,
+          retryAfter: circuit.retryAfter,
+          retryAfterSeconds: circuit.retryAfterSeconds,
+          circuitOpen: true,
+        ));
       }
-      // Shared course scripts include captcha libraries even without a challenge.
-      // Inspect visible text, never library names or hidden script configuration.
-      final visible = body.replaceAll(
-          RegExp(r'<(script|style)\b[^>]*>[\s\S]*?</\1>', caseSensitive: false),
-          '');
-      final challenge = RegExp(
-                  r'请输入验证码|请完成.{0,12}(?:验证|校验)|安全验证|访问异常|人机验证|verify\.chaoxing',
-                  caseSensitive: false)
-              .hasMatch(_stripTags(visible)) ||
-          location.contains('antispider');
-      if (kDebugMode && Uri.parse(uri).path.contains('stucoursemiddle')) {
-        debugPrint(
-            '[SyncShape] stage=coursePage status=$status workEnc=${ChaoxingAssignmentParser.hiddenValue(body, 'workEnc') != null} captchaLibrary=${body.toLowerCase().contains('captcha')} challenge=$challenge');
-      }
-      if (challenge) {
-        _verificationTarget = _courseVerificationProbe ?? Uri.parse(uri);
-        throw SyncReadException(SyncIssue(
-            SyncIssueKind.verificationRequired, '学习通要求人工验证，请点击完成安全验证',
-            stage: 'coursePage',
-            httpStatus: status,
-            elapsedMs: watch.elapsedMilliseconds));
-      }
-      if (status >= 200 && status < 400) {
-        return response;
-      }
-    } on SyncReadException {
-      rethrow;
-    } on ChaoxingAuthenticationException {
-      rethrow;
-    } on DioException {
-      throw const SyncReadException(
-          SyncIssue(SyncIssueKind.network, '连接学习通失败，请稍后重试'));
-    } catch (_) {
-      // Chaoxing endpoints differ by school/session. Keep the sync pipeline best-effort.
-    } finally {
-      // Aggregate fixed labels only: never retain URL parameters, IDs or response bodies.
-      if (generation == _sessionGeneration) {
-        final kind = _requestKind(Uri.parse(uri).path);
-        final prior = _requestTimings[kind];
-        _requestTimings[kind] = (
-          count: (prior?.count ?? 0) + 1,
-          elapsedMs: (prior?.elapsedMs ?? 0) + watch.elapsedMilliseconds,
-          httpFailures: (prior?.httpFailures ?? 0) +
-              (observedStatus == null || observedStatus >= 400 ? 1 : 0)
+      attempt++;
+      final watch = Stopwatch()..start();
+      Response<T>? response;
+      DioException? transportError;
+      try {
+        // ResponseType.plain keeps Dio's JSON transformer out of the measured
+        // network window; JSON/HTML parsing is measured separately below.
+        response = await _dio.get<T>(
+          uri,
+          queryParameters: queryParameters,
+          options: Options(
+            responseType: ResponseType.plain,
+            validateStatus: (status) => status != null,
+            headers: _headers(parsedUri, headers),
+          ),
         );
+      } on DioException catch (error) {
+        transportError = error;
       }
+      final httpElapsedMs = watch.elapsedMilliseconds;
+      if (generation != _sessionGeneration) return null;
+      if (transportError != null) {
+        final failure = _networkFailure(transportError, kind);
+        _recordHttp(kind, httpElapsedMs, failed: true);
+        final opened = _registerTransientFailure(kind, failure);
+        final delay =
+            _retryDelay(kind, attempt, failure, circuitOpened: opened);
+        if (delay != null) {
+          _syncRetryCount++;
+          await _wait(delay);
+          continue;
+        }
+        throw SyncReadException(failure.issue);
+      }
+      final received = response!;
+      _rememberCookies(received);
+      final parseWatch = Stopwatch()..start();
+      _ResponseOutcome outcome;
+      try {
+        outcome = _evaluateResponse(received, parsedUri, kind);
+      } catch (_) {
+        outcome = _ResponseOutcome.issue(SyncIssue(
+            SyncIssueKind.schemaChanged, '学习通响应无法解析，请稍后重试',
+            stage: _stageForKind(kind), httpStatus: received.statusCode));
+      }
+      final parseElapsedMs = parseWatch.elapsedMilliseconds;
+      final status = received.statusCode ?? 0;
+      final httpFailed = status < 200 || status >= 400;
+      _recordHttp(
+        kind,
+        httpElapsedMs,
+        failed: httpFailed,
+        parseElapsedMs: parseElapsedMs,
+        parseFailed:
+            !httpFailed && (outcome.auth != null || outcome.issue != null),
+      );
+      if (outcome.auth != null) {
+        _consecutiveTransientFailures.remove(kind);
+        throw outcome.auth!;
+      }
+      final issue = outcome.issue;
+      if (issue != null) {
+        final failure = _AttemptFailure(
+          issue,
+          transient: _isTransient(issue),
+          retryAfter: outcome.retryAfter,
+        );
+        final opened = _registerTransientFailure(kind, failure);
+        final delay =
+            _retryDelay(kind, attempt, failure, circuitOpened: opened);
+        if (delay != null) {
+          _syncRetryCount++;
+          await _wait(delay);
+          continue;
+        }
+        throw SyncReadException(issue);
+      }
+      _consecutiveTransientFailures.remove(kind);
+      return received;
     }
-    return null;
   }
+
+  _ResponseOutcome _evaluateResponse(
+      Response<dynamic> response, Uri uri, String kind) {
+    final status = response.statusCode ?? 0;
+    final stage = _stageForKind(kind);
+    final location = response.headers.value('location') ?? '';
+    final body = response.data is String ? response.data as String : '';
+    final payload = _decodeJsonPayload(response.data);
+    final message = payload is Map
+        ? (payload['msg'] ?? payload['message'] ?? '').toString()
+        : '';
+    if (payload is Map &&
+        (payload['result'] == false || payload['status'] == false) &&
+        RegExp(r'未登录|请先登录|登录已失效|登录失效|登录超时|login required|unauthorized',
+                caseSensitive: false)
+            .hasMatch(message)) {
+      return _ResponseOutcome.auth(ChaoxingAuthenticationException(status));
+    }
+    if (status == 401 ||
+        (status >= 300 &&
+            status < 400 &&
+            (location.contains('passport2') || location.contains('/login'))) ||
+        (body.contains('<html') &&
+            (body.contains('请登录') ||
+                body.contains('passport2.chaoxing.com/login')))) {
+      return _ResponseOutcome.auth(ChaoxingAuthenticationException(status));
+    }
+    if (status == 403 || status == 404 || status == 429 || status >= 500) {
+      final retryAfterRaw = response.headers.value('retry-after');
+      final retryAfter = _parseRetryAfter(retryAfterRaw);
+      return _ResponseOutcome.issue(
+          _httpIssue(status, kind,
+              retryAfterRaw: retryAfterRaw, retryAfter: retryAfter),
+          retryAfter: retryAfter);
+    }
+    // Shared course scripts include captcha libraries even without a challenge.
+    // Inspect visible text, never library names or hidden script configuration.
+    final visible = body.replaceAll(
+        RegExp(r'<(script|style)\b[^>]*>[\s\S]*?</\1>', caseSensitive: false),
+        '');
+    final challenge = RegExp(
+                r'请输入验证码|请完成.{0,12}(?:验证|校验)|安全验证|访问异常|人机验证|verify\.chaoxing',
+                caseSensitive: false)
+            .hasMatch(_stripTags(visible)) ||
+        location.contains('antispider');
+    if (kDebugMode && uri.path.contains('stucoursemiddle')) {
+      debugPrint(
+          '[SyncShape] stage=coursePage status=$status workEnc=${ChaoxingAssignmentParser.hiddenValue(body, 'workEnc') != null} captchaLibrary=${body.toLowerCase().contains('captcha')} challenge=$challenge');
+    }
+    if (challenge) {
+      _verificationTarget = _courseVerificationProbe ?? uri;
+      return _ResponseOutcome.issue(SyncIssue(
+          SyncIssueKind.verificationRequired, '学习通要求人工验证，请点击完成安全验证',
+          stage: stage, httpStatus: status));
+    }
+    if (status >= 200 && status < 400) {
+      return const _ResponseOutcome.success();
+    }
+    return _ResponseOutcome.issue(SyncIssue(
+        SyncIssueKind.network, '接口返回 HTTP $status，请稍后重试',
+        stage: stage, httpStatus: status));
+  }
+
+  SyncIssue _httpIssue(int status, String kind,
+      {String? retryAfterRaw, Duration? retryAfter}) {
+    final stage = _stageForKind(kind);
+    if (status == 403) {
+      return SyncIssue(SyncIssueKind.forbidden, '接口拒绝访问，请稍后重试',
+          stage: stage, httpStatus: status);
+    }
+    if (status == 404) {
+      return SyncIssue(SyncIssueKind.notFound, '请求的学习通内容不存在（HTTP 404）',
+          stage: stage, httpStatus: status);
+    }
+    if (status == 429) {
+      return SyncIssue(SyncIssueKind.rateLimited, '学习通请求过于频繁，请稍后重试',
+          stage: stage,
+          httpStatus: status,
+          retryAfter: retryAfterRaw,
+          retryAfterSeconds: retryAfter?.inSeconds);
+    }
+    if (status >= 500) {
+      return SyncIssue(
+          SyncIssueKind.serverError, '学习通服务暂时不可用（HTTP $status），请稍后重试',
+          stage: stage,
+          httpStatus: status,
+          retryAfter: retryAfterRaw,
+          retryAfterSeconds: retryAfter?.inSeconds);
+    }
+    if (status == 408 || status == 425) {
+      return SyncIssue(SyncIssueKind.network, '学习通请求超时（HTTP $status），请稍后重试',
+          stage: stage, httpStatus: status);
+    }
+    return SyncIssue(SyncIssueKind.network, '接口返回 HTTP $status，请稍后重试',
+        stage: stage, httpStatus: status);
+  }
+
+  _AttemptFailure _networkFailure(DioException error, String kind) {
+    final response = error.response;
+    if (response != null && response.statusCode != null) {
+      final status = response.statusCode!;
+      final retryAfterRaw = response.headers.value('retry-after');
+      final retryAfter = _parseRetryAfter(retryAfterRaw);
+      final issue = _httpIssue(status, kind,
+          retryAfterRaw: retryAfterRaw, retryAfter: retryAfter);
+      return _AttemptFailure(issue,
+          transient: _isTransient(issue), retryAfter: retryAfter);
+    }
+    final transient = switch (error.type) {
+      DioExceptionType.connectionTimeout ||
+      DioExceptionType.sendTimeout ||
+      DioExceptionType.receiveTimeout ||
+      DioExceptionType.connectionError ||
+      DioExceptionType.unknown =>
+        true,
+      _ => false,
+    };
+    return _AttemptFailure(
+      SyncIssue(
+        SyncIssueKind.network,
+        transient ? '连接学习通失败，请稍后重试' : '学习通网络请求未能完成',
+        stage: _stageForKind(kind),
+      ),
+      transient: transient,
+    );
+  }
+
+  bool _isTransient(SyncIssue issue) {
+    if (issue.kind == SyncIssueKind.serverError ||
+        issue.kind == SyncIssueKind.rateLimited) {
+      return true;
+    }
+    if (issue.kind == SyncIssueKind.network) {
+      final status = issue.httpStatus;
+      return status == null || status == 408 || status == 425;
+    }
+    return false;
+  }
+
+  Duration? _parseRetryAfter(String? raw) {
+    final value = raw?.trim();
+    if (value == null || value.isEmpty) return null;
+    final seconds = int.tryParse(value);
+    if (seconds != null) {
+      return seconds < 0 ? null : Duration(seconds: seconds);
+    }
+    try {
+      final target = HttpDate.parse(value).toUtc();
+      final wait = target.difference(DateTime.now().toUtc());
+      return wait.isNegative ? Duration.zero : wait;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _stageForKind(String kind) => switch (kind) {
+        '课程列表' => 'courses',
+        '课程入口' => 'coursePage',
+        '课程导航' || '作业列表' => 'workList',
+        '作业详情' => 'detail',
+        _ => 'courses',
+      };
 
   Map<String, String> _headers(Uri uri, [Map<String, String>? extra]) {
     _cookies.removeWhere((c) => c.expired);
@@ -1219,6 +1638,42 @@ class _ChaoxingProfile {
 
   final String? displayName;
   final String? avatarUrl;
+}
+
+class _RequestStats {
+  int count = 0;
+  int failures = 0;
+  int parseFailures = 0;
+  final List<int> httpSamples = [];
+  final List<int> parseSamples = [];
+
+  int get totalHttpMs => httpSamples.fold(0, (sum, value) => sum + value);
+  int get totalParseMs => parseSamples.fold(0, (sum, value) => sum + value);
+}
+
+class _AttemptFailure {
+  const _AttemptFailure(this.issue, {required this.transient, this.retryAfter});
+
+  final SyncIssue issue;
+  final bool transient;
+  final Duration? retryAfter;
+}
+
+class _ResponseOutcome {
+  const _ResponseOutcome.success()
+      : auth = null,
+        issue = null,
+        retryAfter = null;
+
+  const _ResponseOutcome.auth(this.auth)
+      : issue = null,
+        retryAfter = null;
+
+  const _ResponseOutcome.issue(this.issue, {this.retryAfter}) : auth = null;
+
+  final ChaoxingAuthenticationException? auth;
+  final SyncIssue? issue;
+  final Duration? retryAfter;
 }
 
 class _SessionCookie {

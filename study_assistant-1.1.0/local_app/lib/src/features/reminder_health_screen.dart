@@ -36,15 +36,21 @@ class _HealthState extends State<ReminderHealthScreen>
   }
 
   Future<void> refresh() async {
-    if (busy) return;
+    if (!mounted || busy) return;
     setState(() => busy = true);
-    final value = await widget.store.notificationService.inspectHealth();
-    if (mounted) {
-      setState(() {
-        health = value;
-        busy = false;
-      });
+    ReminderHealth? value;
+    var failed = false;
+    try {
+      value = await widget.store.notificationService.inspectHealth();
+    } catch (_) {
+      failed = true;
     }
+    if (!mounted) return;
+    setState(() {
+      if (value != null) health = value;
+      busy = false;
+      if (failed) message = '提醒状态读取失败，请稍后重试';
+    });
   }
 
   String state(bool? v) => v == null
@@ -52,6 +58,7 @@ class _HealthState extends State<ReminderHealthScreen>
       : v
           ? '已开启'
           : '未开启';
+  String channelState(ReminderChannelHealth? value) => value?.label ?? '状态未知';
   Future<void> summary(bool enabled, int hour, int minute) async {
     if (busy) return;
     setState(() => busy = true);
@@ -92,9 +99,27 @@ class _HealthState extends State<ReminderHealthScreen>
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('截止提醒通知渠道'),
-                  subtitle: Text(state(health?.channelEnabled)),
+                  subtitle: Text(channelState(health?.assignmentChannel)),
                   onTap: () => const PermissionSettingsService()
                       .openNotificationSettings()),
+              ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('每日摘要通知渠道'),
+                  subtitle: Text(channelState(health?.summaryChannel)),
+                  onTap: () => const PermissionSettingsService()
+                      .openNotificationSettings()),
+              ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('个人日程通知渠道'),
+                  subtitle: Text(channelState(health?.manualChannel)),
+                  onTap: () => const PermissionSettingsService()
+                      .openNotificationSettings()),
+              ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('提醒批次恢复状态'),
+                  subtitle: Text(health?.scheduleRecoveryPending == true
+                      ? '有未完成的调度事务，旧提醒已保留或正在清理；请重试恢复'
+                      : '没有待恢复的调度事务')),
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('精确提醒权限'),
@@ -115,6 +140,28 @@ class _HealthState extends State<ReminderHealthScreen>
                 OutlinedButton(
                     onPressed: busy ? null : refresh,
                     child: const Text('重新体检')),
+                if (health?.scheduleRecoveryPending == true)
+                  OutlinedButton(
+                      onPressed: busy
+                          ? null
+                          : () async {
+                              setState(() => busy = true);
+                              try {
+                                await widget.store.notificationService
+                                    .recoverPendingSchedules();
+                                if (mounted) {
+                                  setState(() => message = '提醒恢复操作已完成，请核对安排数量');
+                                }
+                              } catch (error) {
+                                if (mounted) {
+                                  setState(() => message = '提醒恢复仍未完成：$error');
+                                }
+                              }
+                              if (mounted) setState(() => busy = false);
+                              if (!mounted) return;
+                              await refresh();
+                            },
+                      child: const Text('重试提醒恢复')),
                 FilledButton(
                     onPressed: busy
                         ? null

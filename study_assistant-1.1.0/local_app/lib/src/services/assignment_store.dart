@@ -25,6 +25,8 @@ import '../models/study_notebook.dart';
 class AssignmentStore extends ChangeNotifier {
   static const defaultAutoSyncIntervalMinutes = 30;
   static const _autoSyncIntervalKey = 'auto_sync_interval_minutes';
+  static const _privacyCleanupPendingKey =
+      'notification_privacy_cleanup_pending_v1';
 
   AssignmentStore({
     required this.sessionStore,
@@ -225,6 +227,9 @@ class AssignmentStore extends ChangeNotifier {
   bool get agreementAccepted => _agreementAccepted;
   final List<String> _serviceWarnings = [];
   final List<String> _recoveryWarnings = [];
+  List<String> get serviceWarnings => List.unmodifiable(_serviceWarnings);
+  String? get recoveryWarning => repository.recoveryWarning;
+  String? get operationError => _error;
   String? get error {
     final messages = [
       _error,
@@ -233,6 +238,21 @@ class AssignmentStore extends ChangeNotifier {
       ..._recoveryWarnings
     ].whereType<String>().where((s) => s.isNotEmpty).toSet();
     return messages.isEmpty ? null : messages.join('；');
+  }
+
+  String saveFeedback(
+    bool saved, {
+    required String successMessage,
+    required String failureMessage,
+  }) {
+    final warnings = {
+      if (repository.recoveryWarning != null) repository.recoveryWarning!,
+      ..._serviceWarnings,
+    };
+    return [
+      saved ? successMessage : failureMessage,
+      ...warnings,
+    ].join('；');
   }
 
   List<Assignment> _hiddenAssignments = [];
@@ -274,7 +294,7 @@ class AssignmentStore extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         if (!value) {
           try {
-            await notificationService.cancelPrivateSchedules();
+            await _cancelPrivateNotifications();
           } catch (_) {
             throw StateError('旧提醒未能清理，通知详情尚未关闭，请在提醒体检重试');
           }
@@ -393,12 +413,15 @@ class AssignmentStore extends ChangeNotifier {
     await stage('通知隐私', () async {
       final prefs = await SharedPreferences.getInstance();
       final details = prefs.getBool('notification_details_v1') ?? false;
+      final cleanupPending = prefs.getBool(_privacyCleanupPendingKey) ?? false;
       notificationService.showDetails = details;
-      _privacyCleanupPending = !details;
-      if (!details) {
-        // Keep policy private even when cleaning legacy alarms fails.
-        await notificationService.cancelPrivateSchedules();
-        _privacyCleanupPending = false;
+      _privacyCleanupPending = !details || cleanupPending;
+      if (_privacyCleanupPending) {
+        try {
+          await _cancelPrivateNotifications();
+        } catch (error) {
+          _recoveryWarnings.add(_privacyCleanupMessage(error));
+        }
       }
     });
     await stage('显示设置', () async {
@@ -419,26 +442,124 @@ class AssignmentStore extends ChangeNotifier {
               ?.toLocal();
       final dataAt = DateTime.tryParse(prefs.getString('sync_data_at') ?? '');
       final report = prefs.getString('sync_report_v1');
-      syncReport = report != null
-          ? SyncReport.fromJson(jsonDecode(report) as Map<String, dynamic>)
-          : SyncReport(
-              // A legacy data timestamp proves cache existence, not that the last
-              // attempt succeeded. Preserve a visible retry path after upgrade.
-              phase: dataAt == null ? SyncPhase.idle : SyncPhase.partial,
-              attemptedAt: _lastSyncAttemptAt,
-              lastDataSuccessAt: dataAt,
-              issues: dataAt == null
-                  ? const []
-                  : const [
-                      SyncIssue(SyncIssueKind.partial, '上次同步结果待确认，请重新读取作业')
-                    ]);
+      Map<String, dynamic>? reportJson;
+      var reportDamaged = false;
+      if (report != null) {
+        try {
+          final decoded = jsonDecode(report);
+          if (decoded is Map<String, dynamic>) {
+            reportJson = decoded;
+          } else {
+            reportDamaged = true;
+          }
+        } catch (_) {
+          reportDamaged = true;
+        }
+      }
+      if (reportJson != null) {
+        try {
+          SyncReport.fromJson(reportJson);
+        } catch (_) {
+          reportJson = null;
+          reportDamaged = true;
+        }
+      }
+      if (reportDamaged) {
+        _recoveryWarnings.add('同步记录恢复未完成：原同步报告损坏，已依据可验证的本机时间重建部分状态');
+      }
+      var reportNeedsRepair = reportDamaged;
+      if (reportJson != null) {
+        final rawPhase = reportJson['phase'];
+        syncReport = SyncReport.fromJson(reportJson);
+        final reportAttempt = syncReport.attemptedAt;
+        if (reportAttempt != null &&
+            (_lastSyncAttemptAt == null ||
+                reportAttempt.isAfter(_lastSyncAttemptAt!))) {
+          // The v1 report is the canonical attempt timestamp. The legacy
+          // mirror may be missing if its SharedPreferences write failed.
+          _lastSyncAttemptAt = reportAttempt;
+        }
+        if (dataAt != null &&
+            (syncReport.lastDataSuccessAt == null ||
+                dataAt.isAfter(syncReport.lastDataSuccessAt!))) {
+          // sync_data_at is written only after mergeAndSave has completed.
+          // If it is newer than the report, the report is stale even when its
+          // old phase says success/failed; do not present that attempt as a
+          // fully successful sync whose final status was never persisted.
+          final interruptedAfterDataSave = rawPhase == 'running' ||
+              syncReport.attemptedAt == null ||
+              dataAt.isAfter(syncReport.attemptedAt!);
+          syncReport = syncReport.copyWith(
+            phase: interruptedAfterDataSave ? SyncPhase.partial : null,
+            lastDataSuccessAt: dataAt.toLocal(),
+            issues: interruptedAfterDataSave
+                ? [
+                    ...syncReport.issues,
+                    const SyncIssue(SyncIssueKind.storage,
+                        '上次同步已写入作业数据，但在保存最终同步报告前中断；请重新同步核对',
+                        stage: 'persistence')
+                  ]
+                : null,
+          );
+          // Persist the mirror reconciliation even when the existing phase
+          // remains failed (for example, a newer failed attempt after older
+          // durable data). The timestamps are still independently useful.
+          reportNeedsRepair = true;
+        }
+      } else {
+        DateTime? durableFullAt;
+        try {
+          durableFullAt = await repository.lastSyncAt();
+        } catch (error) {
+          // The independent data timestamp is still useful if the journal
+          // cannot currently be read. Do not let a damaged repository hide
+          // evidence that a partial sync had already saved records.
+          _recoveryWarnings.add('完整同步时间暂时无法从作业仓库读取：$error');
+        }
+        final recoveredDataAt = dataAt?.toLocal();
+        final lastDataAt = recoveredDataAt == null ||
+                (durableFullAt != null &&
+                    durableFullAt.isAfter(recoveredDataAt))
+            ? durableFullAt
+            : recoveredDataAt;
+        final hasDurableData = lastDataAt != null;
+        final hasAttempt = _lastSyncAttemptAt != null;
+        syncReport = SyncReport(
+            // sync_data_at advances after any data merge, including partial
+            // course reads. Repository.lastSyncAt advances only after a full
+            // sync, so never promote the mirror to a full-success timestamp.
+            phase: hasDurableData
+                ? SyncPhase.partial
+                : hasAttempt || reportDamaged
+                    ? SyncPhase.failed
+                    : SyncPhase.idle,
+            attemptedAt: _lastSyncAttemptAt,
+            lastDataSuccessAt: lastDataAt,
+            lastFullSuccessAt: durableFullAt,
+            issues: !hasDurableData && !hasAttempt && !reportDamaged
+                ? const []
+                : [
+                    SyncIssue(
+                        SyncIssueKind.storage,
+                        reportDamaged
+                            ? '上次同步结果记录损坏；已依据本机数据时间恢复可确认部分，请重新同步核对'
+                            : hasDurableData
+                                ? '上次同步结果记录缺失；已依据本机数据时间恢复可确认部分，请重新同步核对'
+                                : '上次同步尝试记录存在，但结果报告缺失且没有可确认的数据写入，请重新同步',
+                        stage: 'persistence')
+                  ]);
+        reportNeedsRepair = reportNeedsRepair || hasDurableData || hasAttempt;
+      }
+      if (reportNeedsRepair) {
+        await _persistSyncReport();
+      }
     });
     await stage('课程关注', () async {
       final prefs = await SharedPreferences.getInstance();
       _unfollowed.addAll(prefs.getStringList('unfollowed_courses') ?? []);
     });
     await stage('课程资料', () async {
-      _courses = await repository.loadCourses();
+      _courses = await repository.loadCourses(account: _account);
     });
     await stage('个人计划与记录', () async {
       personal = await repository.loadPersonalWorkspace();
@@ -494,19 +615,9 @@ class AssignmentStore extends ChangeNotifier {
       final oldName = _chaoxingDisplayName, oldAvatar = _chaoxingAvatarUrl;
       try {
         if (oldAccount?.trim() != normalizedAccount) {
-          // Cross-account privacy takes precedence over the normal refresh
-          // policy of retaining old schedules on replacement failure.
-          await notificationService.rescheduleAssignments([]);
-          if (notificationService.lastWarning != null) {
-            throw StateError('旧账号提醒未能清理，请重试后再切换账号');
-          }
-          try {
-            await notificationService.rescheduleManual([]);
-            await notificationService
-                .rescheduleSummary([], PersonalWorkspace(), null);
-          } catch (_) {
-            throw StateError('旧账号个人提醒或摘要未能清理，请重试后再切换账号');
-          }
+          // Full privacy cleanup also removes delivered notifications that
+          // are no longer pending and have no v2 active-ID manifest.
+          await _cancelPrivateNotifications();
           await widgetSnapshotService.saveAssignments([]);
         }
         await repository.activateAccount(normalizedAccount,
@@ -633,7 +744,58 @@ class AssignmentStore extends ChangeNotifier {
       ..addAll(journal);
     _hiddenAssignments = await repository.loadHiddenAssignments();
     if (generation != _generation || _disposed) return;
-    _lastSyncAt = await repository.lastSyncAt();
+    final durableSyncAt = await repository.lastSyncAt();
+    if (generation != _generation || _disposed) return;
+    _lastSyncAt = durableSyncAt;
+    var reportReconciled = false;
+    if (durableSyncAt != null) {
+      final fullTimestampMissingOrStale =
+          syncReport.lastFullSuccessAt == null ||
+              durableSyncAt.isAfter(syncReport.lastFullSuccessAt!);
+      final dataTimestampMissingOrStale =
+          syncReport.lastDataSuccessAt == null ||
+              durableSyncAt.isAfter(syncReport.lastDataSuccessAt!);
+      final interruptedAfterFullSave = fullTimestampMissingOrStale &&
+          (syncReport.attemptedAt == null ||
+              durableSyncAt.isAfter(syncReport.attemptedAt!));
+      final reportMissingForDurableData = syncReport.phase == SyncPhase.idle;
+      if (fullTimestampMissingOrStale ||
+          dataTimestampMissingOrStale ||
+          interruptedAfterFullSave ||
+          reportMissingForDurableData) {
+        syncReport = syncReport.copyWith(
+          phase: interruptedAfterFullSave || reportMissingForDurableData
+              ? SyncPhase.partial
+              : null,
+          lastDataSuccessAt: dataTimestampMissingOrStale ? durableSyncAt : null,
+          lastFullSuccessAt: fullTimestampMissingOrStale ? durableSyncAt : null,
+          issues: interruptedAfterFullSave
+              ? [
+                  ...syncReport.issues,
+                  const SyncIssue(SyncIssueKind.storage,
+                      '本机作业数据已完成保存，但最终同步报告中断；已从数据仓库恢复时间记录',
+                      stage: 'persistence')
+                ]
+              : reportMissingForDurableData
+                  ? [
+                      ...syncReport.issues,
+                      const SyncIssue(SyncIssueKind.storage,
+                          '本机作业数据存在，但同步结果报告缺失或损坏；已从数据仓库恢复时间记录',
+                          stage: 'persistence')
+                    ]
+                  : null,
+        );
+        reportReconciled = true;
+      }
+    }
+    if (reportReconciled) {
+      try {
+        await _persistSyncReport();
+      } catch (error) {
+        _recoveryWarnings.add('已从作业仓库恢复同步时间，但同步报告未能重新保存：$error');
+      }
+    }
+    if (generation != _generation || _disposed) return;
     await _afterAssignmentsChanged();
   }
 
@@ -681,21 +843,33 @@ class AssignmentStore extends ChangeNotifier {
     return saved;
   }
 
-  Future<void> saveReminderRule(List<int> offsetsMinutes) => _run(() async {
-        final normalized = await reminderRuleStore.saveOffsetsMinutes(
-          offsetsMinutes,
-        );
-        _reminderOffsetsMinutes = normalized;
-        await _afterAssignmentsChanged();
-      });
+  Future<bool> saveReminderRule(List<int> offsetsMinutes) async {
+    var saved = false;
+    await _run(() async {
+      final normalized = await reminderRuleStore.saveOffsetsMinutes(
+        offsetsMinutes,
+      );
+      _reminderOffsetsMinutes = normalized;
+      saved = true;
+      await _afterAssignmentsChanged();
+    });
+    return saved;
+  }
 
-  Future<void> saveAutoSyncIntervalMinutes(int minutes) async {
-    final normalized = normalizeAutoSyncIntervalMinutes(minutes);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_autoSyncIntervalKey, normalized);
-    _autoSyncIntervalMinutes = normalized;
-    _restartAutoSyncTimer();
-    notifyListeners();
+  Future<bool> saveAutoSyncIntervalMinutes(int minutes) async {
+    var saved = false;
+    await _run(() async {
+      final normalized = normalizeAutoSyncIntervalMinutes(minutes);
+      final prefs = await SharedPreferences.getInstance();
+      if (!await prefs.setInt(_autoSyncIntervalKey, normalized)) {
+        await prefs.reload();
+        throw StateError('自动同步设置未能保存，请重试');
+      }
+      _autoSyncIntervalMinutes = normalized;
+      _restartAutoSyncTimer();
+      saved = true;
+    });
+    return saved;
   }
 
   Future<bool> runDueAutoSync({DateTime? now}) async {
@@ -732,6 +906,13 @@ class AssignmentStore extends ChangeNotifier {
     returnCheckMessage = null;
     changes = [];
     return _run(() async {
+      try {
+        await _cancelPrivateNotifications();
+      } catch (_) {
+        // Logout must still remove the local identity. Keep cleanup pending so
+        // a later refresh or app start can retry cancellable notifications.
+        _privacyCleanupPending = true;
+      }
       chaoxingClient.clearSession();
       chaoxingClient.previousAssignments = {};
       chaoxingClient.trackedActivityIds = {};
@@ -782,10 +963,9 @@ class AssignmentStore extends ChangeNotifier {
     final scoped = _authenticated ? formalAssignments : <Assignment>[];
     if (_privacyCleanupPending) {
       try {
-        await notificationService.cancelPrivateSchedules();
-        _privacyCleanupPending = false;
-      } catch (_) {
-        _serviceWarnings.add('旧详细提醒尚未清理，通知隐私未完全生效，请保存隐私设置重试');
+        await _cancelPrivateNotifications();
+      } catch (error) {
+        _serviceWarnings.add(_privacyCleanupMessage(error));
       }
     }
     if (!_privacyCleanupPending) {
@@ -802,16 +982,24 @@ class AssignmentStore extends ChangeNotifier {
       try {
         await notificationService.rescheduleSummary(scoped,
             _authenticated ? personal : PersonalWorkspace(), _lastSyncAt);
-      } catch (_) {
+        if (notificationService.lastWarning != null) {
+          _serviceWarnings.add(notificationService.lastWarning!);
+        }
+      } catch (error) {
+        final detail = notificationService.lastWarning ?? error.toString();
         _serviceWarnings.add(_authenticated && personal.summaryEnabled
-            ? '每日摘要未能更新，请在提醒体检中重试'
-            : '旧摘要未能清理，仍可能显示；请重试或在系统中关闭本应用通知');
+            ? '每日摘要未能更新：$detail'
+            : '旧摘要未能清理：$detail');
       }
       try {
         await notificationService
             .rescheduleManual(_authenticated ? notebook.entries : []);
-      } catch (_) {
-        _serviceWarnings.add('个人日程提醒未能更新或清理，旧提醒可能仍显示；请重试或在系统中关闭本应用通知');
+        if (notificationService.lastWarning != null) {
+          _serviceWarnings.add('个人日程：${notificationService.lastWarning!}');
+        }
+      } catch (error) {
+        final detail = notificationService.lastWarning ?? error.toString();
+        _serviceWarnings.add('个人日程提醒未能更新或清理：$detail');
       }
     }
     try {
@@ -826,7 +1014,10 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> _syncAssignmentsBody() async {
     final generation = _generation;
-    final attempted = DateTime.now();
+    final attempted = _autoSyncRunning && _lastSyncAttemptAt != null
+        ? _lastSyncAttemptAt!
+        : DateTime.now();
+    _lastSyncAttemptAt = attempted;
     syncReport = SyncReport(
         phase: SyncPhase.running,
         attemptedAt: attempted,
@@ -834,18 +1025,17 @@ class AssignmentStore extends ChangeNotifier {
         lastFullSuccessAt: _lastSyncAt);
     await _persistSyncReport();
     notifyListeners();
-    if (!_autoSyncRunning) _lastSyncAttemptAt = DateTime.now();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-        'sync_attempt_at', _lastSyncAttemptAt!.toUtc().toIso8601String());
+    final attemptMirrorSaved = await _writePreferenceAndVerify(
+        prefs, 'sync_attempt_at', attempted.toUtc().toIso8601String());
     if (chaoxingClient.needsSessionInitialization) {
       await _refreshChaoxingSession();
       _needsProfileRecovery = false;
     }
-    chaoxingClient.previousAssignments = {
-      for (final a in _assignments) a.id: a
-    };
+    final previous = [..._assignments, ..._hiddenAssignments];
+    chaoxingClient.previousAssignments = {for (final a in previous) a.id: a};
     chaoxingClient.trackedActivityIds = _assignments
+        .followedBy(_hiddenAssignments)
         .where((a) => a.id.startsWith('cx:activity:'))
         .map((a) => a.id)
         .toSet();
@@ -864,7 +1054,11 @@ class AssignmentStore extends ChangeNotifier {
             .map((c) => CourseRef(
                 courseId: c.courseId, clazzId: c.clazzId, name: c.courseName))
             .toList();
-        await repository.saveCourses(_courses);
+        final account = _account;
+        if (account == null) {
+          throw StateError('当前学习通账号已变化，课程资料未保存');
+        }
+        await repository.saveCourses(_courses, account: account);
       }
     }
     if (generation != _generation || _disposed) return;
@@ -881,21 +1075,76 @@ class AssignmentStore extends ChangeNotifier {
     final before = [..._assignments, ..._hiddenAssignments];
     await repository.mergeAndSave(incoming, completeSync: warning == null);
     if (generation != _generation || _disposed) return;
+    final dataSuccessAt = DateTime.now();
+    final dataMirrorSaved = await _writePreferenceAndVerify(
+        prefs, 'sync_data_at', dataSuccessAt.toUtc().toIso8601String());
+    final timestampMirrorFailed = !attemptMirrorSaved || !dataMirrorSaved;
+    final reportIssues = List<SyncIssue>.of(chaoxingClient.issues);
+    if (timestampMirrorFailed) {
+      reportIssues.add(const SyncIssue(SyncIssueKind.storage,
+          '作业数据已保存，但兼容同步时间记录未能完整更新；当前同步报告保留了准确时间，请重试以修复记录',
+          stage: 'persistence'));
+    }
     syncReport = SyncReport(
-        phase: warning == null ? SyncPhase.success : SyncPhase.partial,
+        phase: warning == null && !timestampMirrorFailed
+            ? SyncPhase.success
+            : SyncPhase.partial,
         attemptedAt: attempted,
-        lastDataSuccessAt: DateTime.now(),
-        lastFullSuccessAt: warning == null ? DateTime.now() : _lastSyncAt,
+        lastDataSuccessAt: dataSuccessAt,
+        lastFullSuccessAt: warning == null ? dataSuccessAt : _lastSyncAt,
         succeededCourses: chaoxingClient.succeededCourses,
         failedCourses: chaoxingClient.failedCourses,
-        issues: List.of(chaoxingClient.issues));
-    await _persistSyncReport();
-    await prefs.setString(
-        'sync_data_at', DateTime.now().toUtc().toIso8601String());
-    await _reloadJournal();
-    if (generation != _generation || _disposed) return;
-    await _recordChanges(before, incoming, completeSync: warning == null);
-    _error = warning;
+        issues: reportIssues);
+    final timestampWarning =
+        timestampMirrorFailed ? '作业数据已保存，但同步时间记录未能完整保存；请重新同步核对' : null;
+    _error = [warning, timestampWarning]
+        .whereType<String>()
+        .where((value) => value.isNotEmpty)
+        .join('；');
+    if (_error!.isEmpty) _error = null;
+    try {
+      await _persistSyncReport();
+    } catch (_) {
+      // The journal already contains the data and last-full-sync timestamp.
+      // Keep the in-memory result non-successful and let the next launch
+      // recover the previous running report as failed rather than claiming
+      // that the status record was saved.
+      syncReport = SyncReport(
+          phase: SyncPhase.partial,
+          attemptedAt: attempted,
+          lastDataSuccessAt: dataSuccessAt,
+          lastFullSuccessAt: warning == null ? dataSuccessAt : _lastSyncAt,
+          succeededCourses: chaoxingClient.succeededCourses,
+          failedCourses: chaoxingClient.failedCourses,
+          issues: [
+            ...reportIssues,
+            const SyncIssue(
+                SyncIssueKind.storage, '作业数据已保存，但同步结果记录未能保存；请重新同步核对',
+                stage: 'persistence')
+          ]);
+      _error = '作业数据已保存，但同步结果记录未能保存；请重新同步核对';
+    }
+    try {
+      await _reloadJournal();
+      if (generation != _generation || _disposed) return;
+      await _recordChanges(before, incoming, completeSync: warning == null);
+      _error ??= warning;
+    } catch (error) {
+      syncReport = syncReport.copyWith(
+        phase: SyncPhase.partial,
+        issues: [
+          ...syncReport.issues,
+          SyncIssue(SyncIssueKind.storage, '作业数据已保存，但同步后的本机状态刷新未完成：$error',
+              stage: 'persistence')
+        ],
+      );
+      _error = '作业数据已保存，但同步后的本机状态刷新未完成；请重新打开或重新同步核对';
+      try {
+        await _persistSyncReport();
+      } catch (_) {
+        _error = '$_error；同步状态记录也未能保存';
+      }
+    }
   }
 
   Future<void> _refreshChaoxingSession() async {
@@ -990,7 +1239,7 @@ class AssignmentStore extends ChangeNotifier {
       if (syncReport.phase == SyncPhase.running) {
         syncReport = SyncReport(
             phase: SyncPhase.failed,
-            attemptedAt: _lastSyncAttemptAt,
+            attemptedAt: syncReport.attemptedAt ?? _lastSyncAttemptAt,
             lastDataSuccessAt: syncReport.lastDataSuccessAt,
             lastFullSuccessAt: _lastSyncAt,
             issues: chaoxingClient.issues.isNotEmpty
@@ -1018,9 +1267,72 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> _persistSyncReport() async {
     final prefs = await SharedPreferences.getInstance();
-    if (!await prefs.setString(
-        'sync_report_v1', jsonEncode(syncReport.toJson()))) {
+    final encoded = jsonEncode(syncReport.toJson());
+    if (!await _writePreferenceAndVerify(prefs, 'sync_report_v1', encoded)) {
       throw StateError('同步结果未能保存');
+    }
+  }
+
+  Future<void> _cancelPrivateNotifications() async {
+    _privacyCleanupPending = true;
+    try {
+      await _persistPrivacyCleanupPending(true);
+      await notificationService.cancelPrivateSchedules();
+      await _persistPrivacyCleanupPending(false);
+      _privacyCleanupPending = false;
+    } catch (error) {
+      _privacyCleanupPending = true;
+      try {
+        await _persistPrivacyCleanupPending(true);
+      } catch (_) {
+        // The in-memory state remains fail-closed even if persistence fails.
+      }
+      throw StateError(_privacyCleanupMessage(error));
+    }
+  }
+
+  Future<void> _persistPrivacyCleanupPending(bool pending) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (pending) {
+      if (prefs.getBool(_privacyCleanupPendingKey) != true) {
+        final saved = await prefs.setBool(_privacyCleanupPendingKey, true);
+        if (!saved) {
+          await prefs.reload();
+          if (prefs.getBool(_privacyCleanupPendingKey) != true) {
+            throw StateError('通知隐私待清理状态未能保存');
+          }
+        }
+      }
+      return;
+    }
+    final removed = await prefs.remove(_privacyCleanupPendingKey);
+    if (!removed) {
+      await prefs.reload();
+      if (prefs.getBool(_privacyCleanupPendingKey) == true) {
+        throw StateError('通知隐私待清理状态未能清除');
+      }
+    }
+  }
+
+  String _privacyCleanupMessage(Object error) =>
+      notificationService.lastWarning ??
+      error
+          .toString()
+          .replaceFirst('Bad state: ', '')
+          .replaceFirst('旧账号私人通知未能完整清理：', '');
+
+  Future<bool> _writePreferenceAndVerify(
+      SharedPreferences prefs, String key, String value) async {
+    try {
+      if (await prefs.setString(key, value)) return true;
+    } catch (_) {
+      // Verify below: a platform write can fail after the durable value changed.
+    }
+    try {
+      await prefs.reload();
+      return prefs.getString(key) == value;
+    } catch (_) {
+      return false;
     }
   }
 

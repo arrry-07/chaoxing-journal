@@ -62,16 +62,18 @@ void main() {
     expect((await repo.loadAssignments()).single.status, 'pending');
   });
   for (final label in ['已完成', '已互评']) {
-    test('legacy completed peer review is completed in journal: $label', () async {
-      final legacy = work('cx:peer').copyWith(
-          title: '互评作业', requirementsText: '互评作业 $label');
+    test('legacy completed peer review is completed in journal: $label',
+        () async {
+      final legacy = work('cx:peer')
+          .copyWith(title: '互评作业', requirementsText: '互评作业 $label');
       SharedPreferences.setMockInitialValues({
         'local_assignments': jsonEncode([legacy.toJson()]),
       });
       final repo = LocalAssignmentRepository();
       expect((await repo.loadJournal()).single.isCompleted, isTrue);
       expect(await repo.loadAssignments(), isEmpty);
-      expect((await LocalAssignmentRepository().loadJournal()).single.isCompleted,
+      expect(
+          (await LocalAssignmentRepository().loadJournal()).single.isCompleted,
           isTrue);
       await repo.mergeAndSave([legacy.copyWith(status: 'returned')]);
       expect((await repo.loadJournal()).single.status, 'returned');

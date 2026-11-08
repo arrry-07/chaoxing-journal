@@ -1,4 +1,5 @@
 import 'package:crypto/crypto.dart';
+import 'dart:convert';
 import '../app/app_version.dart';
 import 'dart:io';
 import 'dart:async';
@@ -37,6 +38,7 @@ class AppUpdateService {
       this.maxDownloadBytes = 256 * 1024 * 1024,
       this.parallelDownloads = false,
       this.totalDownloadTimeout = const Duration(minutes: 5),
+      this.staleDownloadAge = const Duration(hours: 24),
       this.manifestUrl = const String.fromEnvironment('UPDATE_MANIFEST_URL')})
       : _dio = dio ??
             Dio(
@@ -61,9 +63,16 @@ class AppUpdateService {
   final int maxDownloadBytes;
   bool parallelDownloads;
   final Duration totalDownloadTimeout;
+  final Duration staleDownloadAge;
   final String manifestUrl;
+  static const _downloadDirectoryPrefix = '.apk-download-';
+  static const _downloadOwnerFile = 'owner.marker';
+  static const _downloadOwnerValue = 'chaoxing-journal-apk-download-v1';
+  static final Set<String> _activeDownloadDirectories = {};
+
   Future<UpdateCheckResult> checkConfigured(
       {required int currentVersionCode, CancelToken? cancelToken}) async {
+    await cleanupStaleDownloads();
     if (manifestUrl.isEmpty) {
       return _checkGitHub(
           currentVersionName: AppVersion.name,
@@ -75,7 +84,13 @@ class AppUpdateService {
       return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
     }
     try {
-      final r = await _dio.get<dynamic>(manifestUrl, cancelToken: cancelToken);
+      // Read the manifest as text so COS metadata differences and a UTF-8 BOM
+      // cannot make Dio's automatic JSON transformer reject a valid document.
+      final r = await _dio.get<dynamic>(
+        manifestUrl,
+        cancelToken: cancelToken,
+        options: Options(responseType: ResponseType.plain),
+      );
       if (r.statusCode == 401 || r.statusCode == 403) {
         return const UpdateCheckResult(UpdateCheckStatus.authRequired);
       }
@@ -249,12 +264,15 @@ class AppUpdateService {
           )
         : Directory(targetDirectory);
     await baseDirectory.create(recursive: true);
+    await cleanupStaleDownloads(targetDirectory: baseDirectory.path);
     final file = File(
-      '${baseDirectory.path}${Platform.pathSeparator}${_safeFileName(update.apkName)}',
+      '${baseDirectory.path}${Platform.pathSeparator}${_downloadFileName(update)}',
     );
     // Every attempt owns its temporary directory; cancellation cannot delete a
     // newer attempt's partial file or an already verified APK.
-    final working = await baseDirectory.createTemp('.apk-download-');
+    final working = await baseDirectory.createTemp(_downloadDirectoryPrefix);
+    final workingKey = working.absolute.path;
+    _activeDownloadDirectories.add(workingKey);
     final partial =
         File('${working.path}${Platform.pathSeparator}download.part');
     final transfer = CancelToken();
@@ -280,6 +298,9 @@ class AppUpdateService {
     RandomAccessFile? output;
     try {
       checkCancelled();
+      await File(
+        '${working.path}${Platform.pathSeparator}$_downloadOwnerFile',
+      ).writeAsString(_downloadOwnerValue, flush: true);
       final declared = update.apkSize;
       if (maxDownloadBytes <= 0 ||
           (declared != null &&
@@ -398,11 +419,78 @@ class AppUpdateService {
         try {
           await output?.close();
         } finally {
-          if (await working.exists()) await working.delete(recursive: true);
+          try {
+            if (await working.exists()) await working.delete(recursive: true);
+          } finally {
+            _activeDownloadDirectories.remove(workingKey);
+          }
         }
       }
     }
     return file;
+  }
+
+  /// Removes only stale, direct child directories created by this downloader.
+  /// Cleanup is best-effort and never blocks a new download.
+  Future<void> cleanupStaleDownloads({String? targetDirectory}) async {
+    try {
+      final baseDirectory = targetDirectory == null
+          ? Directory(
+              '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}updates',
+            )
+          : Directory(targetDirectory);
+      if (!await baseDirectory.exists()) return;
+      final cutoff = DateTime.now().subtract(staleDownloadAge);
+      await for (final entry in baseDirectory.list(followLinks: false)) {
+        if (entry is! Directory ||
+            !entry.path
+                .split(Platform.pathSeparator)
+                .last
+                .startsWith(_downloadDirectoryPrefix)) {
+          continue;
+        }
+        final key = entry.absolute.path;
+        if (_activeDownloadDirectories.contains(key)) continue;
+        if ((await entry.stat()).modified.isAfter(cutoff)) continue;
+        if (!await _isOwnedDownloadDirectory(entry)) continue;
+        try {
+          await entry.delete(recursive: true);
+        } catch (_) {
+          // A lock or filesystem race must leave the directory for a later run.
+        }
+      }
+    } catch (_) {
+      // Startup cleanup must not interfere with update checking or downloading.
+    }
+  }
+
+  Future<bool> _isOwnedDownloadDirectory(Directory directory) async {
+    final marker = File(
+      '${directory.path}${Platform.pathSeparator}$_downloadOwnerFile',
+    );
+    try {
+      if (await marker.exists() &&
+          await marker.readAsString() == _downloadOwnerValue) {
+        return true;
+      }
+    } catch (_) {}
+
+    var hasPartial = false;
+    try {
+      await for (final entry in directory.list(followLinks: false)) {
+        if (entry is! File) return false;
+        final name = entry.path.split(Platform.pathSeparator).last;
+        if (name == 'download.part' ||
+            RegExp(r'^range-\d+\.part$').hasMatch(name)) {
+          hasPartial = true;
+          continue;
+        }
+        if (name != _downloadOwnerFile) return false;
+      }
+    } catch (_) {
+      return false;
+    }
+    return hasPartial;
   }
 
   static bool isRemoteVersionNewer(String remote, String current) {
@@ -445,6 +533,11 @@ class AppUpdateService {
   }
 
   Map<String, dynamic>? _asMap(dynamic value) {
+    if (value is String) {
+      final text = value.replaceFirst('\uFEFF', '').trim();
+      if (text.isEmpty) return null;
+      value = jsonDecode(text);
+    }
     if (value is Map<String, dynamic>) {
       return value;
     }
@@ -467,6 +560,19 @@ class AppUpdateService {
       return 'study-assistant-update.apk';
     }
     return sanitized;
+  }
+
+  String _downloadFileName(AppUpdateInfo update) {
+    final safeName = _safeFileName(update.apkName);
+    final digest = update.sha256Hash;
+    if (digest == null || !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(digest)) {
+      return safeName;
+    }
+    final stem = safeName.substring(0, safeName.length - 4);
+    // A different digest for the same release filename must not replace a
+    // previously verified APK before the controller validates package
+    // identity/signature. Equal digests represent the same file content.
+    return '$stem-${digest.toLowerCase()}.apk';
   }
 }
 

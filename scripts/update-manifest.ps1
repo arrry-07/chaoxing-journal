@@ -28,7 +28,9 @@ $manifest = [ordered]@{
   notes         = $Notes
   size          = $apk.Length
 }
-($manifest | ConvertTo-Json -Compress) | Set-Content -LiteralPath $OutPath -Encoding utf8
+$json = $manifest | ConvertTo-Json -Compress
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[System.IO.File]::WriteAllText([System.IO.Path]::GetFullPath($OutPath), $json, $utf8NoBom)
 Write-Output ("manifest written: " + $OutPath)
 Write-Output ("apk size bytes : " + $apk.Length)
 Write-Output ("apk sha256     : " + $sha)

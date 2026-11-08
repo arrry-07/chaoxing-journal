@@ -172,6 +172,34 @@ void main() {
           'cx:activity:old',
         ]));
   });
+
+  test('sync context includes hidden assignments for deadline reconciliation',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = LocalAssignmentRepository();
+    final hidden = _assignment(
+      id: 'cx:activity:7:11:88',
+      title: '隐藏课堂题',
+    ).copyWith(status: 'submitted');
+    await repository.mergeAndSave([hidden]);
+    await repository.updateCompletion(hidden.id, true);
+    final client = _InspectingClient();
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(account: 'student'),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      repository: repository,
+      chaoxingClient: client,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await store.syncAssignments();
+
+    expect(client.previousIds, contains(hidden.id));
+    expect(client.trackedIds, contains(hidden.id));
+    expect(store.hiddenAssignments.single.deadlineAt, hidden.deadlineAt);
+  });
 }
 
 Assignment _assignment({required String id, required String title}) {
@@ -228,6 +256,25 @@ class _FailingFetchChaoxingClient extends ChaoxingLocalClient {
   @override
   Future<List<Assignment>> fetchAssignments() async {
     throw StateError('学习通临时失败');
+  }
+}
+
+class _InspectingClient extends ChaoxingLocalClient {
+  Set<String> previousIds = {};
+  Set<String> trackedIds = {};
+
+  @override
+  Future<ChaoxingLoginResult> login({
+    required String account,
+    required String password,
+  }) async =>
+      const ChaoxingLoginResult(success: true);
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    previousIds = previousAssignments.keys.toSet();
+    trackedIds = Set.of(trackedActivityIds);
+    return [];
   }
 }
 

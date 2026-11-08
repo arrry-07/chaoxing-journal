@@ -52,9 +52,14 @@ class ProfileScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _CourseCard(courses: courses.take(4).toList()),
+                  _CourseCard(courses: courses),
                   const SizedBox(height: 14),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
+                    child: Text('设置', style: Journal.section),
+                  ),
                   _SettingsCard(
+                    title: '学习与同步',
                     children: [
                       _SettingsTile(
                           icon: Icons.tune,
@@ -81,17 +86,6 @@ class ProfileScreen extends StatelessWidget {
                         onTap: () => context.push('/plan'),
                       ),
                       _SettingsTile(
-                        icon: Icons.health_and_safety_outlined,
-                        title: '提醒体检',
-                        subtitle: '权限、测试通知与每日摘要',
-                        onTap: () => context.push('/reminder-health'),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.notifications_none,
-                        title: '提醒设置',
-                        onTap: () => context.push('/reminders'),
-                      ),
-                      _SettingsTile(
                         icon: Icons.sync,
                         title: '同步学习通',
                         onTap: () => context.push('/sync'),
@@ -115,12 +109,35 @@ class ProfileScreen extends StatelessWidget {
                         subtitle: '${store.changes.length} 条最近变化',
                         onTap: () => context.push('/changes'),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _SettingsCard(
+                    title: '数据与安全',
+                    children: [
+                      _SettingsTile(
+                        icon: Icons.health_and_safety_outlined,
+                        title: '提醒体检',
+                        subtitle: '权限、测试通知与每日摘要',
+                        onTap: () => context.push('/reminder-health'),
+                      ),
+                      _SettingsTile(
+                        icon: Icons.notifications_none,
+                        title: '提醒设置',
+                        onTap: () => context.push('/reminders'),
+                      ),
                       _SettingsTile(
                         icon: Icons.enhanced_encryption_outlined,
                         title: '加密备份与恢复',
                         subtitle: '仅备份本机课业记录，不含登录凭据',
                         onTap: () => context.push('/backup'),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _SettingsCard(
+                    title: '关于与更新',
+                    children: [
                       _SettingsTile(
                         icon: Icons.help_outline,
                         title: '帮助与反馈',
@@ -431,16 +448,31 @@ class _CourseCard extends StatelessWidget {
                 ),
               ]),
               const SizedBox(height: 10),
-              if (courses.isEmpty) const Text('同步后，有作业的课程会记在这里。'),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final name in courses)
-                    Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: CourseLabel(name))
+              if (courses.isEmpty)
+                const Text('同步后，有作业的课程会记在这里。')
+              else ...[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final name in courses.take(4))
+                      Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: CourseLabel(name))
+                  ],
+                ),
+                if (courses.length > 4) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                      '共 ${courses.length} 门课程 · 另有 ${courses.length - 4} 门未在预览中展开'),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () => context.push('/courses'),
+                      child: const Text('查看全部课程'),
+                    ),
+                  ),
                 ],
-              ),
+              ],
             ],
           ),
         ),
@@ -448,8 +480,9 @@ class _CourseCard extends StatelessWidget {
 }
 
 class _SettingsCard extends StatelessWidget {
-  const _SettingsCard({required this.children});
+  const _SettingsCard({required this.title, required this.children});
 
+  final String title;
   final List<Widget> children;
 
   @override
@@ -461,7 +494,7 @@ class _SettingsCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
             child: Text(
-              '设置',
+              title,
               style: Theme.of(
                 context,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),

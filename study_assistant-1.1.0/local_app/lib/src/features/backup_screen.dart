@@ -94,6 +94,9 @@ class _BackupScreenState extends State<BackupScreen> {
         }
         final snapshot =
             await widget.store.repository.createBackupSnapshot(account);
+        if (widget.store.recoveryWarning != null) {
+          throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
+        }
         final envelope = await _service.encrypt(snapshot, password);
         if (!mounted || _account() != account || _accountEpoch != epoch) {
           throw StateError('账号已变化，请重新导出');

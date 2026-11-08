@@ -3,6 +3,7 @@ import 'package:crypto/crypto.dart';
 import 'assignment.dart';
 import 'course.dart';
 import 'personal_workspace.dart';
+import 'reminder_rule_limits.dart';
 import 'study_notebook.dart';
 
 /// Portable, explicitly validated data only. Session and signed links never enter
@@ -210,8 +211,12 @@ class BackupSnapshot {
           name: _text(c['name'])));
     }
     if (courses.map((c) => c.key).toSet().length != courses.length) _bad();
-    final offsets = _list(j['reminderOffsets'], max: 32);
-    if (offsets.any((v) => v is! int || v <= 0 || v > 525600) ||
+    final offsets =
+        _list(j['reminderOffsets'], max: ReminderRuleLimits.maxLegacyRuleCount);
+    if (offsets.any((v) =>
+            v is! int ||
+            v <= 0 ||
+            v > ReminderRuleLimits.maxLegacyOffsetMinutes) ||
         offsets.toSet().length != offsets.length) {
       _bad();
     }
@@ -229,6 +234,8 @@ class BackupSnapshot {
         version == 1
             ? PersonalWorkspace()
             : PersonalWorkspace.fromJson(j['personal']),
-        version < 3 ? StudyNotebook() : StudyNotebook.decode(jsonEncode(j['notebook'])));
+        version < 3
+            ? StudyNotebook()
+            : StudyNotebook.decode(jsonEncode(j['notebook'])));
   }
 }

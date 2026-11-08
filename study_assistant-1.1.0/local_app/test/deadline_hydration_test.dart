@@ -40,7 +40,7 @@ ChaoxingLocalClient client(List<Map<String, dynamic>> rows,
       };
       h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
     }));
-  return ChaoxingLocalClient(dio: dio);
+  return ChaoxingLocalClient(dio: dio, wait: (_) async {});
 }
 
 Assignment oldWork() => Assignment(

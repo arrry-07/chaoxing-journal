@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/services/app_update_service.dart';
+import 'package:crypto/crypto.dart';
 
 const candidate = AppUpdateInfo(
   versionName: '99.0.0',
@@ -145,6 +146,111 @@ void main() {
     expect(await retry.readAsBytes(), [9, 8, 7]);
     expect((await dir.list().toList()).length, 1);
     await first.close();
+  });
+
+  test('different release digests never overwrite an earlier verified APK',
+      () async {
+    final firstBytes = Uint8List.fromList([0x50, 0x4b, 1, 2, 3]);
+    final secondBytes = Uint8List.fromList([0x50, 0x4b, 4, 5, 6]);
+    final firstDigest = sha256.convert(firstBytes).toString();
+    final secondDigest = sha256.convert(secondBytes).toString();
+    Dio dioFor(Uint8List bytes) => Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        handler.resolve(Response<ResponseBody>(
+            requestOptions: options,
+            statusCode: 200,
+            data: ResponseBody(Stream.value(bytes), 200)));
+      }));
+
+    final first = await AppUpdateService(dio: dioFor(firstBytes)).downloadApk(
+        AppUpdateInfo(
+          versionName: '99.0.0',
+          releaseUrl: 'https://example.invalid/release',
+          apkName: 'fixture.apk',
+          apkDownloadUrl: 'https://example.invalid/first.apk',
+          releaseNotes: '',
+          apkSize: firstBytes.length,
+          sha256Hash: firstDigest,
+        ),
+        targetDirectory: dir.path);
+    final second = await AppUpdateService(dio: dioFor(secondBytes)).downloadApk(
+        AppUpdateInfo(
+          versionName: '99.0.1',
+          releaseUrl: 'https://example.invalid/release',
+          apkName: 'fixture.apk',
+          apkDownloadUrl: 'https://example.invalid/second.apk',
+          releaseNotes: '',
+          apkSize: secondBytes.length,
+          sha256Hash: secondDigest,
+        ),
+        targetDirectory: dir.path);
+
+    expect(first.path, isNot(second.path));
+    expect(first.path, endsWith('-$firstDigest.apk'));
+    expect(second.path, endsWith('-$secondDigest.apk'));
+    expect(await first.readAsBytes(), firstBytes);
+    expect(await second.readAsBytes(), secondBytes);
+    expect((await dir.list().toList()).whereType<File>(), hasLength(2));
+  });
+
+  test('stale owned download directories expire without touching active data',
+      () async {
+    final service = AppUpdateService(
+      dio: Dio(),
+      staleDownloadAge: const Duration(seconds: 1),
+    );
+    final stale = await Directory('${dir.path}/.apk-download-stale').create();
+    await File('${stale.path}/download.part').writeAsBytes([1, 2]);
+    await File('${stale.path}/owner.marker')
+        .writeAsString('chaoxing-journal-apk-download-v1');
+    final legacy = await Directory('${dir.path}/.apk-download-legacy').create();
+    await File('${legacy.path}/download.part').writeAsBytes([3, 4]);
+    final unrelated =
+        await Directory('${dir.path}/.apk-download-user-folder').create();
+    await File('${unrelated.path}/notes.txt').writeAsString('keep');
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    final fresh = await Directory('${dir.path}/.apk-download-fresh').create();
+    await File('${fresh.path}/download.part').writeAsBytes([5]);
+    await File('${fresh.path}/owner.marker')
+        .writeAsString('chaoxing-journal-apk-download-v1');
+
+    await service.cleanupStaleDownloads(targetDirectory: dir.path);
+
+    expect(await stale.exists(), isFalse);
+    expect(await legacy.exists(), isFalse);
+    expect(await fresh.exists(), isTrue);
+    expect(await unrelated.exists(), isTrue);
+    expect(await File('${unrelated.path}/notes.txt').readAsString(), 'keep');
+  });
+
+  test('cleanup never removes another active download directory', () async {
+    final streamStarted = Completer<void>();
+    final stream =
+        StreamController<Uint8List>(onListen: streamStarted.complete);
+    final token = CancelToken();
+    final downloading = AppUpdateService(
+      dio: response(stream.stream),
+      staleDownloadAge: Duration.zero,
+    ).downloadApk(candidate, targetDirectory: dir.path, cancelToken: token);
+    final checked = expectLater(downloading, throwsA(isA<DioException>()));
+    await streamStarted.future;
+
+    await AppUpdateService(staleDownloadAge: Duration.zero)
+        .cleanupStaleDownloads(targetDirectory: dir.path);
+
+    final activeDirectories = (await dir.list().toList())
+        .whereType<Directory>()
+        .where((entry) => entry.path
+            .split(Platform.pathSeparator)
+            .last
+            .startsWith('.apk-download-'))
+        .toList();
+    expect(activeDirectories, hasLength(1));
+
+    token.cancel();
+    await checked;
+    expect(await dir.list().toList(), isEmpty);
+    await stream.close();
   });
 
   test('a failing transport cancellation still closes and removes the partial',

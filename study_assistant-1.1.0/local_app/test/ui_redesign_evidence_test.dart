@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -34,6 +35,13 @@ class _Store extends AssignmentStore {
             widgetSnapshotService: WidgetSnapshotService());
   @override
   Future<bool> runDueAutoSync({DateTime? now}) async => false;
+}
+
+class _LatestUpdateService extends AppUpdateService {
+  @override
+  Future<UpdateCheckResult> checkConfigured(
+          {required int currentVersionCode, CancelToken? cancelToken}) async =>
+      const UpdateCheckResult(UpdateCheckStatus.upToDate);
 }
 
 void main() {
@@ -212,7 +220,7 @@ void main() {
         final context = router.routerDelegate.navigatorKey.currentContext!;
         showDialog<void>(
             context: context,
-            builder: (_) => UpdateDialog(service: AppUpdateService()));
+            builder: (_) => UpdateDialog(service: _LatestUpdateService()));
         await t.pumpAndSettle();
       }
       expect(t.takeException(), isNull, reason: '$scene $width $scale');

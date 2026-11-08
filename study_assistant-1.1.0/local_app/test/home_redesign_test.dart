@@ -18,6 +18,9 @@ class _Store extends AssignmentStore {
             notificationService: LocalNotificationService(),
             widgetSnapshotService: WidgetSnapshotService());
   int syncCalls = 0;
+  int testEpoch = 0;
+  @override
+  int get accountEpoch => testEpoch;
   @override
   Future<void> syncAssignments() async {
     syncCalls++;
@@ -82,6 +85,77 @@ void main() {
                 (w) => w is IconButton && w.tooltip == '刷新作业'))
             .onPressed,
         isNull);
+  });
+  testWidgets('home supports search deadline filters and visible freshness',
+      (t) async {
+    final now = DateTime.now();
+    final s = _Store()
+      ..replaceAssignmentsForTest([
+        work(1, title: '高等数学练习', due: now.add(const Duration(days: 2))),
+        work(2, title: 'English Essay', due: now.add(const Duration(days: 20))),
+        work(3, title: '逾期的实验报告', due: now.subtract(const Duration(days: 1))),
+        work(4, title: '待确认作业', status: 'unknown'),
+      ])
+      ..syncReport = SyncReport(
+          phase: SyncPhase.success,
+          lastDataSuccessAt: now.subtract(const Duration(hours: 25)));
+    addTearDown(s.dispose);
+    await t.pumpWidget(
+        MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
+    await t.pumpAndSettle();
+
+    final updated = now.subtract(const Duration(hours: 25)).toLocal();
+    final freshness =
+        '${updated.hour.toString().padLeft(2, '0')}:${updated.minute.toString().padLeft(2, '0')} 更新 · 超过24小时未更新';
+    expect(find.text(freshness), findsOneWidget);
+
+    await t.tap(find.text('搜索与筛选'));
+    await t.pumpAndSettle();
+    await t.enterText(find.byType(TextField), 'English');
+    await t.tap(find.text('应用'));
+    await t.pumpAndSettle();
+    expect(find.text('English Essay'), findsOneWidget);
+    expect(find.text('高等数学练习'), findsNothing);
+
+    await t.tap(find.text('已筛选'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('7天内'));
+    await t.tap(find.text('应用'));
+    await t.pumpAndSettle();
+    expect(find.text('没有符合搜索或期限条件的作业'), findsOneWidget);
+    expect(find.text('English Essay'), findsNothing);
+
+    await t.tap(find.text('已筛选'));
+    await t.pumpAndSettle();
+    await t.enterText(find.byType(TextField), '');
+    await t.tap(find.text('应用'));
+    await t.pumpAndSettle();
+    expect(find.text('高等数学练习'), findsOneWidget);
+    expect(find.text('逾期的实验报告'), findsNothing);
+    expect(find.text('待确认作业'), findsNothing);
+
+    await t.tap(find.text('已筛选'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('已逾期'));
+    await t.tap(find.text('应用'));
+    await t.pumpAndSettle();
+    expect(find.text('逾期的实验报告'), findsOneWidget);
+    expect(find.text('高等数学练习'), findsNothing);
+
+    await t.tap(find.text('已筛选'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('期限待确认'));
+    await t.tap(find.text('应用'));
+    await t.pumpAndSettle();
+    expect(find.text('待确认作业'), findsOneWidget);
+    expect(find.text('逾期的实验报告'), findsNothing);
+
+    s.testEpoch++;
+    s.changed();
+    await t.pump();
+    expect(find.text('搜索与筛选'), findsOneWidget);
+    expect(find.text('高等数学练习'), findsOneWidget);
+    expect(find.text('English Essay'), findsOneWidget);
   });
   testWidgets(
       'statistics keep same-name classes separate and no fake empty percentage',

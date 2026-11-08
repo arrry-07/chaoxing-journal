@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -39,10 +40,10 @@ void main() {
         h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
       }));
     final c = ChaoxingLocalClient(dio: dio);
-    await expectLater(c.fetchAssignments(), throwsStateError);
+    await expectLater(c.fetchAssignments(), throwsA(isA<SyncReadException>()));
     expect(await c.verifyInBrowser(), isTrue);
     expect(c.succeededCourses, 0);
     importDone = true;
-    await expectLater(c.fetchAssignments(), throwsStateError);
+    await expectLater(c.fetchAssignments(), throwsA(isA<SyncReadException>()));
   });
 }

@@ -146,7 +146,8 @@ void main() {
         [incoming],
       );
 
-      expect(merged.map((item) => item.id), ['cx:stu-work:old-peer-review', 'cx:stu-work:new-work']);
+      expect(merged.map((item) => item.id),
+          ['cx:stu-work:old-peer-review', 'cx:stu-work:new-work']);
     },
   );
 

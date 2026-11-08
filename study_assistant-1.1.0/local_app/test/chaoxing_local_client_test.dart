@@ -1,8 +1,78 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 
 void main() {
+  Future<void> verifyStaleDetailFetchIsDiscarded(
+      {required bool singleCourse}) async {
+    final detailStarted = Completer<void>();
+    final detailResponse = Completer<Response<dynamic>>();
+    RequestOptions? detailRequest;
+    final dio = Dio()
+      ..interceptors
+          .add(InterceptorsWrapper(onRequest: (options, handler) async {
+        dynamic body;
+        switch (options.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                {
+                  'courseId': '7',
+                  'clazzId': '11',
+                  'courseName': '样例课程',
+                  'cpi': '8',
+                }
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            body = '<input id="workEnc" value="signature">';
+          case '/mooc2/work/list':
+            final url = Uri.encodeComponent(
+                'https://mooc1.chaoxing.com/work/task?courseId=7&classId=11&workId=9&enc=synthetic');
+            body =
+                '<li onclick="goTask(this);" data="$url"><p class="overHidden2 fl">样例作业</p><p class="status fl">未提交</p></li>';
+          case '/work/task':
+            detailRequest = options;
+            detailStarted.complete();
+            handler.resolve(await detailResponse.future);
+            return;
+          default:
+            fail('unexpected endpoint ${options.uri}');
+        }
+        handler.resolve(
+            Response(requestOptions: options, statusCode: 200, data: body));
+      }));
+    final client = ChaoxingLocalClient(dio: dio);
+    final fetch = singleCourse
+        ? client.fetchAssignmentsForCourse(courseId: '7', clazzId: '11')
+        : client.fetchAssignments();
+
+    await detailStarted.future;
+    client.clearSession();
+    detailResponse.complete(Response(
+        requestOptions: detailRequest!,
+        statusCode: 200,
+        data: '作答时间：2026-12-30 09:00 至 2027-01-02 12:00'));
+
+    expect(await fetch, isEmpty);
+    expect(client.courses, isEmpty);
+    expect(client.hasCourseResponse, isFalse);
+    expect(client.issues, isEmpty);
+    expect(client.requestTimings, isEmpty);
+    expect(client.diagnostics.requests, isEmpty);
+    expect(client.diagnostics.fullSyncElapsedMs, isNull);
+  }
+
+  test(
+      'full sync discards old rows when the session changes during detail read',
+      () => verifyStaleDetailFetchIsDiscarded(singleCourse: false));
+  test(
+      'single-course refresh discards old rows when the session changes during detail read',
+      () => verifyStaleDetailFetchIsDiscarded(singleCourse: true));
+
   test('return reconciliation reads only the selected class homework list',
       () async {
     final queried = <String>[];
@@ -80,6 +150,50 @@ void main() {
       ..trackedActivityIds = {'cx:activity:1'};
     await client.login(account: 'dummy', password: 'dummy');
     expect(client.trackedActivityIds, {'cx:activity:1'});
+  });
+  test('login cannot restore a session after clearSession during SSO redirect',
+      () async {
+    final ssoStarted = Completer<void>();
+    final ssoResponse = Completer<Response<dynamic>>();
+    final dio = Dio()
+      ..interceptors
+          .add(InterceptorsWrapper(onRequest: (options, handler) async {
+        if (options.uri.path == '/v11/loginregister') {
+          handler.resolve(Response(
+            requestOptions: options,
+            statusCode: 200,
+            data: {
+              'status': true,
+              'url': 'https://sso.chaoxing.com/login',
+            },
+          ));
+          return;
+        }
+        if (options.uri.host == 'sso.chaoxing.com') {
+          ssoStarted.complete();
+          handler.resolve(await ssoResponse.future);
+          return;
+        }
+        fail('unexpected endpoint ${options.uri}');
+      }));
+    final client = ChaoxingLocalClient(dio: dio);
+
+    final login = client.login(account: 'student', password: 'password');
+    await ssoStarted.future;
+    client.clearSession();
+    ssoResponse.complete(Response(
+      requestOptions:
+          RequestOptions(path: 'https://sso.chaoxing.com/login', method: 'GET'),
+      statusCode: 200,
+      data: 'ok',
+    ));
+
+    final result = await login;
+
+    expect(result.success, isFalse);
+    expect(result.message, contains('会话已切换'));
+    expect(client.canHydrateProfile, isFalse,
+        reason: 'a stale login must not repopulate _loginPayload');
   });
   test('host-only cookies stay scoped and expired cookies are removed',
       () async {
@@ -216,7 +330,8 @@ void main() {
     expect(client.lastSyncWarning, isNull);
     for (final bad in ['没有此页面访问权限', '请登录', '<html></html>']) {
       workPage = bad;
-      await expectLater(client.fetchAssignments(), throwsStateError);
+      await expectLater(
+          client.fetchAssignments(), throwsA(isA<SyncReadException>()));
     }
   });
 

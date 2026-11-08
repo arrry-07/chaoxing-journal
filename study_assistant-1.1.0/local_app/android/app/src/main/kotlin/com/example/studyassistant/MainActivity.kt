@@ -77,6 +77,10 @@ class MainActivity : FlutterActivity() {
             result.success(opened)
         }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/permissions").setMethodCallHandler { call, result ->
+            if (call.method == "getAndroidSdkInt") {
+                result.success(Build.VERSION.SDK_INT)
+                return@setMethodCallHandler
+            }
             val opened = when (call.method) {
                 "openNotificationSettings" -> openNotificationSettings()
                 "openExactAlarmSettings" -> openExactAlarmSettings()
@@ -209,10 +213,11 @@ class MainActivity : FlutterActivity() {
             val appInfo = candidate.applicationInfo
             val sdkOk = appInfo != null && appInfo.minSdkVersion <= Build.VERSION.SDK_INT
             val nativePaths = ZipFile(filePath).use { zip -> zip.entries().asSequence().map { it.name }.filter { it.startsWith("lib/") && it.endsWith(".so") }.toList() }
-            // A plugin can include a 32-bit library without a matching Flutter engine.
-            val enginePaths = nativePaths.filter { it.endsWith("/libflutter.so") }
-            val nativeAbis = (if (enginePaths.isNotEmpty()) enginePaths else nativePaths).map { it.split('/')[1] }.toSet()
-            val abiOk = nativeAbis.isEmpty() || Build.SUPPORTED_ABIS.any { nativeAbis.contains(it) }
+            // A plugin can include an ABI without a matching Flutter engine.
+            val abiOk = UpdateApkPolicy.hasSupportedFlutterEngine(
+                nativePaths,
+                Build.SUPPORTED_ABIS.toList()
+            )
             val reason = when {
                 candidate.packageName != packageName -> "安装包名不一致，无法覆盖升级"
                 !signaturesMatch -> "安装签名不一致，无法覆盖升级"

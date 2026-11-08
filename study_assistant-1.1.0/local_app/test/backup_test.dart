@@ -7,6 +7,7 @@ import 'package:shared_preferences_platform_interface/shared_preferences_platfor
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
+import 'package:study_assistant_mobile/src/models/reminder_rule_limits.dart';
 
 Assignment record(String id, String title) => Assignment(
       id: id,
@@ -119,6 +120,54 @@ void main() {
         () =>
             BackupSnapshot.decode(' ' * (BackupSnapshot.maxPlaintextBytes + 1)),
         throwsFormatException);
+  });
+
+  test('legacy reminder rules survive encrypted-backup export and restore',
+      () async {
+    final legacyRules = [
+      for (var value = 1; value <= 32; value++) value,
+      400 * 24 * 60,
+    ];
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      'reminder_offsets_minutes',
+      legacyRules.map((value) => '$value').toList(),
+    );
+
+    final snapshot = await repo.createBackupSnapshot('alice');
+
+    expect(snapshot.reminderOffsets, unorderedEquals(legacyRules));
+    await prefs.remove('reminder_offsets_minutes');
+    await repo.restoreBackupSnapshot(snapshot, 'alice');
+    final restored = prefs
+        .getStringList('reminder_offsets_minutes')!
+        .map(int.parse)
+        .toList();
+    expect(restored, unorderedEquals(legacyRules));
+  });
+
+  test('backup legacy reminder rules have bounded compatibility limits',
+      () async {
+    final data = jsonDecode((await repo.createBackupSnapshot('alice')).encode())
+        as Map<String, dynamic>;
+    data['reminderOffsets'] = List.generate(32, (index) => index + 1);
+    expect(
+        BackupSnapshot.decode(jsonEncode(data)).reminderOffsets, hasLength(32));
+
+    data['reminderOffsets'] = List.generate(33, (index) => index + 1);
+    expect(
+        BackupSnapshot.decode(jsonEncode(data)).reminderOffsets, hasLength(33));
+    data['reminderOffsets'] = List.generate(
+        ReminderRuleLimits.maxLegacyRuleCount + 1, (index) => index + 1);
+    expect(
+      () => BackupSnapshot.decode(jsonEncode(data)),
+      throwsFormatException,
+    );
+    data['reminderOffsets'] = [ReminderRuleLimits.maxLegacyOffsetMinutes + 1];
+    expect(
+      () => BackupSnapshot.decode(jsonEncode(data)),
+      throwsFormatException,
+    );
   });
 
   test('failed course write rolls journal and settings back, including disk',

@@ -54,7 +54,7 @@ void main() {
               statusCode: route['status'] as int,
               data: route['body']));
         }));
-      final client = ChaoxingLocalClient(dio: dio);
+      final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
       if (entry['exception'] == 'auth') {
         await expectLater(client.fetchAssignments(),
             throwsA(isA<ChaoxingAuthenticationException>()));

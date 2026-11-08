@@ -45,7 +45,8 @@ void main() {
     ).readAsStringSync();
 
     expect(service, contains("'a:studyassistant:///assignments/"));
-    expect(service, contains("request.payload?.startsWith('a:')"));
+    expect(service, contains("payload?.startsWith('a:')"));
+    expect(service, contains('_isPrivatePayload(item.payload)'));
   });
 
   test('notification taps are wired to route payloads', () {

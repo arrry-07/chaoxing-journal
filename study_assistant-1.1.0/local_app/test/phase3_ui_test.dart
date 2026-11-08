@@ -22,7 +22,12 @@ class Notifications extends f.Notifications {
   Future<ReminderHealth> inspectHealth() async => const ReminderHealth(
       notifications: true,
       exact: false,
-      channelEnabled: true,
+      assignmentChannel:
+          ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 4),
+      summaryChannel:
+          ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 3),
+      manualChannel:
+          ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 4),
       pending: 3,
       summaryPending: 0);
   @override
@@ -176,8 +181,14 @@ void main() {
             entry: const ManualEntry(
                 id: 'oldA', title: 'A private note', kind: 'todo'))));
     await t.pumpAndSettle();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('study_assistant/external_links'),(_)async=>true);
-    addTearDown(()=>TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('study_assistant/external_links'),null));
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('study_assistant/external_links'),
+            (_) async => true);
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('study_assistant/external_links'), null));
     await s.loginChaoxing(
         account: 'B', password: 'dummy', agreementAccepted: true);
     await t.pumpAndSettle();
@@ -189,6 +200,9 @@ void main() {
     expect(s.account, 'B');
     expect(s.notebook.entries, isEmpty);
     expect(find.textContaining('保存失败'), findsOneWidget);
+    final feedback = t.widget<Semantics>(
+        find.byKey(const ValueKey('manual-editor-feedback')));
+    expect(feedback.properties.liveRegion, isTrue);
     await t.pumpWidget(const SizedBox.shrink());
     s.dispose();
   });

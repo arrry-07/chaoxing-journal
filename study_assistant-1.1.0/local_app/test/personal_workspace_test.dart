@@ -35,7 +35,8 @@ void main() {
     expect(store.error, contains('账号已退出'));
     expect(store.error, contains('系统'));
   });
-  test('failed old summary cleanup prevents cross-account activation',
+  test(
+      'post-switch summary scheduling failure does not undo account activation',
       () async {
     final notifications = FailingSummaryNotifications();
     final session = f.Session();
@@ -45,8 +46,8 @@ void main() {
     notifications.fail = true;
     await store.loginChaoxing(
         account: 'B', password: 'dummy', agreementAccepted: true);
-    expect(store.account, 'A');
-    expect(session.account, 'A');
+    expect(store.account, 'B');
+    expect(session.account, 'B');
     expect(store.error, contains('摘要'));
   });
   test(

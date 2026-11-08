@@ -49,7 +49,10 @@ void main() {
             headers: Headers.fromMap(headers)));
       }));
     final c = ChaoxingLocalClient(dio: dio);
-    await expectLater(c.fetchAssignments(), throwsStateError);
+    await expectLater(
+        c.fetchAssignments(),
+        throwsA(isA<SyncReadException>().having(
+            (e) => e.issue.kind, 'kind', SyncIssueKind.verificationRequired)));
     expect(probes, 1);
     expect(c.failedCourses, 2);
     expect(c.issues.single.kind, SyncIssueKind.verificationRequired);

@@ -17,7 +17,10 @@ for name, main, files in [
     ('policies', 'journal.qa.NativePoliciesTest', [
         root / 'tool/android_upgrade_probe/NativePoliciesTest.java',
         root / 'tool/android_upgrade_probe/UpgradeFixture.java',
-        source / 'BrowserPolicy.java', source / 'ChaoxingAssignmentLink.java'])]:
+        source / 'BrowserPolicy.java', source / 'ChaoxingAssignmentLink.java']),
+    ('update-policy', 'com.example.studyassistant.UpdateApkPolicyTest', [
+        root / 'tool/android_upgrade_probe/UpdateApkPolicyTest.java',
+        source / 'UpdateApkPolicy.java'])]:
     out = root / 'build/native-checks' / name
     out.mkdir(parents=True, exist_ok=True)
     subprocess.run([str(java / ('javac' + suffix)), '-encoding', 'UTF-8',

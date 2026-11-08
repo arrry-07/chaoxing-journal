@@ -55,8 +55,23 @@ android {
             applicationIdSuffix ".journal"
         }
         release {
+            // The public 1.6.2 experience channel uses the .journal identity.
+            // Keep the Release applicationId identical so existing installs can
+            // receive the GitHub update without uninstalling or losing data.
+            applicationIdSuffix ".journal"
             signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // This app has no armeabi-v7a Flutter engine. Exclude the whole
+            // unsupported ABI so a future auxiliary JNI dependency cannot make
+            // PackageManager advertise an architecture that cannot start.
+            excludes += [
+                "lib/armeabi-v7a/**"
+            ]
         }
     }
 }

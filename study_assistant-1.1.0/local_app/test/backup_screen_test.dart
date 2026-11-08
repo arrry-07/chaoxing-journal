@@ -77,6 +77,34 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('恢复预览'), findsNothing);
   });
+
+  testWidgets('export blocks incomplete data and explains recovery warning',
+      (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = _Store();
+    addTearDown(store.dispose);
+    await store.repository.activateAccount('alice');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('personal_workspace_v1', '{personal-broken');
+    final service = _ExportService();
+    await t.pumpWidget(
+        MaterialApp(home: BackupScreen(store: store, service: service)));
+    await t.enterText(find.byType(TextField).at(0), 'password');
+    await t.enterText(find.byType(TextField).at(1), 'password');
+
+    await t.tap(find.text('导出加密备份'));
+    await t.pumpAndSettle();
+
+    expect(service.encryptCalls, 0);
+    expect(service.saveCalls, 0);
+    expect(find.textContaining('恢复警告'), findsOneWidget);
+    expect(find.textContaining('已阻止导出'), findsOneWidget);
+    expect(prefs.getString('personal_workspace_v1'), '{personal-broken');
+    expect(
+      prefs.getString('personal_workspace_v1_recovery_backup'),
+      '{personal-broken',
+    );
+  });
 }
 
 class _Store extends AssignmentStore {
@@ -117,4 +145,21 @@ class _PendingService extends BackupService {
   final pending = Completer<String?>();
   @override
   Future<String?> pick() => pending.future;
+}
+
+class _ExportService extends BackupService {
+  int encryptCalls = 0;
+  int saveCalls = 0;
+
+  @override
+  Future<String> encrypt(BackupSnapshot snapshot, String password) async {
+    encryptCalls++;
+    return 'encrypted';
+  }
+
+  @override
+  Future<bool> save(String content, {required String suggestedName}) async {
+    saveCalls++;
+    return true;
+  }
 }

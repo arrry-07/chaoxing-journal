@@ -59,9 +59,13 @@ void main() {
     ]);
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
+    await t.tap(find.text('搜索与筛选'));
+    await t.pumpAndSettle();
     await t.tap(find.byType(DropdownButtonFormField<String>));
     await t.pumpAndSettle();
     await t.tap(find.text('同名课程（2班）').last);
+    await t.pumpAndSettle();
+    await t.tap(find.text('应用'));
     await t.pumpAndSettle();
     expect(find.text('作业1'), findsNothing);
     expect(find.text('作业2'), findsOneWidget);

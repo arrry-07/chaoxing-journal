@@ -20,6 +20,10 @@ class AssignmentListScreen extends StatefulWidget {
 }
 
 class _AssignmentListScreenState extends State<AssignmentListScreen> {
+  // Keep both the label and icon button inside a narrow screen while allowing
+  // a larger tap target and readable text.
+  static const _compactFilterTextThreshold = 18.0;
+
   Timer? _clock;
   @override
   void initState() {
@@ -37,6 +41,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
 
   bool _refreshing = false;
   String? _courseKey;
+  String _query = '';
+  AssignmentDeadlineFilter _deadlineFilter = AssignmentDeadlineFilter.all;
   int? _filterEpoch;
   final _openingAssignments = <String>{};
   AssignmentStore get store => widget.store;
@@ -161,23 +167,37 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         if (_filterEpoch != store.accountEpoch) {
           _filterEpoch = store.accountEpoch;
           _courseKey = null;
+          _query = '';
+          _deadlineFilter = AssignmentDeadlineFilter.all;
         }
-        final options = {
-          for (final a in store.visibleAssignments) a.courseKey: a.courseName
+        final options = <String, String>{
+          for (final a in store.visibleAssignments)
+            if (a.courseKey case final key?) key: a.courseName
         };
         if (!options.containsKey(_courseKey)) _courseKey = null;
         final now = DateTime.now(),
-            items = store.visibleAssignments
-                .where((a) => _courseKey == null || a.courseKey == _courseKey)
-                .toList();
+            items = AssignmentQuery.filterHome(
+              store.visibleAssignments,
+              query: _query,
+              courseKey: _courseKey,
+              deadline: _deadlineFilter,
+              now: now,
+            );
         final groups = AssignmentQuery.home(items, now, {});
         final sync = HomeSyncPresentation.from(store.syncReport,
             loading: store.isLoading,
-            hasCache: items.isNotEmpty,
+            hasCache: store.visibleAssignments.isNotEmpty,
             now: now,
             successAt: store.lastSyncAt,
             serviceWarning: store.error != null &&
                 store.syncReport.phase == SyncPhase.success);
+        final freshness = _freshnessLabel(sync.summary,
+            store.syncReport.lastDataSuccessAt ?? store.lastSyncAt, now);
+        final filtersActive = _query.trim().isNotEmpty ||
+            _courseKey != null ||
+            _deadlineFilter != AssignmentDeadlineFilter.all;
+        final compactFilterAction = MediaQuery.textScalerOf(context).scale(14) >
+            _compactFilterTextThreshold;
         Widget card(Assignment a) => AssignmentCard(
             key: ValueKey('assignment-${a.id}'),
             assignment: a,
@@ -257,24 +277,36 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                     onTap: () => context.push('/plan'));
               }),
               const Divider(height: 24),
-              DropdownButtonFormField<String>(
-                  initialValue: _courseKey ?? '',
-                  key: ValueKey(
-                      'course-${store.accountEpoch}-${_courseKey ?? "all"}'),
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: '课程筛选'),
-                  items: [
-                    const DropdownMenuItem(value: '', child: Text('全部课程')),
-                    for (final entry in options.entries)
-                      DropdownMenuItem(
-                          value: entry.key,
-                          child: Text(
-                              '${entry.value}${options.values.where((v) => v == entry.value).length > 1 ? '（${options.keys.toList().indexOf(entry.key) + 1}班）' : ''}',
-                              overflow: TextOverflow.ellipsis))
-                  ],
-                  onChanged: (value) =>
-                      setState(() => _courseKey = value == '' ? null : value)),
-              const SizedBox(height: 12),
+              Row(children: [
+                const Icon(Icons.schedule, size: 16, color: Journal.muted),
+                const SizedBox(width: 6),
+                Expanded(
+                    child: Semantics(
+                  liveRegion: true,
+                  label: '数据新鲜度',
+                  child: Row(children: [
+                    Flexible(child: Text(freshness, style: Journal.metadata)),
+                    if (sync.showCached) ...[
+                      const SizedBox(width: 6),
+                      const Text('上次记录', style: Journal.metadata),
+                    ],
+                  ]),
+                )),
+                if (compactFilterAction)
+                  IconButton(
+                    tooltip: filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选',
+                    onPressed: () => _openFilters(options),
+                    icon: Badge(
+                        isLabelVisible: filtersActive,
+                        child: const Icon(Icons.filter_list)),
+                  )
+                else
+                  TextButton.icon(
+                    onPressed: () => _openFilters(options),
+                    icon: const Icon(Icons.filter_list, size: 18),
+                    label: Text(filtersActive ? '已筛选' : '搜索与筛选'),
+                  ),
+              ]),
               if (busy)
                 Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -293,15 +325,30 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                 ],
                 ...timeline(groups.overdue),
               ] else if (store.assignments.isNotEmpty) ...[
-                const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    child: Text('本机有已完成、已隐藏、未关注或历史来源的记录，当前首页未显示。')),
-                TextButton(
-                    onPressed: () => context.push('/records'),
-                    child: const Text('查看全部本地记录')),
-                TextButton(
-                    onPressed: () => context.push('/courses'),
-                    child: const Text('管理课程')),
+                if (filtersActive) ...[
+                  const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text('没有符合搜索或期限条件的作业')),
+                  TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _query = '';
+                          _courseKey = null;
+                          _deadlineFilter = AssignmentDeadlineFilter.all;
+                        });
+                      },
+                      child: const Text('清除搜索与期限条件')),
+                ] else ...[
+                  const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text('本机有已完成、已隐藏、未关注或历史来源的记录，当前首页未显示。')),
+                  TextButton(
+                      onPressed: () => context.push('/records'),
+                      child: const Text('查看全部本地记录')),
+                  TextButton(
+                      onPressed: () => context.push('/courses'),
+                      child: const Text('管理课程')),
+                ],
               ] else
                 Padding(
                     padding: const EdgeInsets.symmetric(vertical: 24),
@@ -327,4 +374,141 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         const SizedBox(height: 8),
         const Divider(height: 1),
       ]));
+
+  String _deadlineLabel(AssignmentDeadlineFilter filter) => switch (filter) {
+        AssignmentDeadlineFilter.all => '全部',
+        AssignmentDeadlineFilter.next7Days => '7天内',
+        AssignmentDeadlineFilter.next30Days => '30天内',
+        AssignmentDeadlineFilter.overdue => '已逾期',
+        AssignmentDeadlineFilter.uncertain => '期限待确认',
+        AssignmentDeadlineFilter.noDeadline => '无截止',
+      };
+
+  String _freshnessLabel(String summary, DateTime? updatedAt, DateTime now) {
+    if (updatedAt != null &&
+        now.difference(updatedAt) >= const Duration(hours: 24)) {
+      return '$summary · 超过24小时未更新';
+    }
+    return summary;
+  }
+
+  Future<void> _openFilters(Map<String, String> courseOptions) async {
+    final openingEpoch = store.accountEpoch;
+    final controller = TextEditingController(text: _query);
+    var query = _query;
+    var courseKey = _courseKey;
+    var deadline = _deadlineFilter;
+    final selection = await showModalBottomSheet<_HomeFilterSelection>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(
+              20, 20, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('搜索与期限筛选', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: controller,
+                  autofocus: _query.isNotEmpty,
+                  onChanged: (value) => setSheetState(() => query = value),
+                  textInputAction: TextInputAction.search,
+                  decoration: const InputDecoration(
+                    labelText: '搜索作业或课程',
+                    prefixIcon: Icon(Icons.search),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final filter in AssignmentDeadlineFilter.values)
+                      ChoiceChip(
+                        key: ValueKey('deadline-${filter.name}'),
+                        selected: deadline == filter,
+                        onSelected: (_) =>
+                            setSheetState(() => deadline = filter),
+                        label: Text(_deadlineLabel(filter)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  initialValue: courseKey ?? '',
+                  key: ValueKey(
+                      'course-${store.accountEpoch}-${courseKey ?? "all"}'),
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: '课程筛选'),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('全部课程')),
+                    for (final entry in courseOptions.entries)
+                      DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(
+                              '${entry.value}${courseOptions.values.where((v) => v == entry.value).length > 1 ? '（${courseOptions.keys.toList().indexOf(entry.key) + 1}班）' : ''}',
+                              overflow: TextOverflow.ellipsis))
+                  ],
+                  onChanged: (value) => setSheetState(
+                      () => courseKey = value == '' ? null : value),
+                ),
+                const SizedBox(height: 20),
+                Row(children: [
+                  TextButton(
+                    onPressed: () => setSheetState(() {
+                      query = '';
+                      courseKey = null;
+                      deadline = AssignmentDeadlineFilter.all;
+                      controller.clear();
+                    }),
+                    child: const Text('重置'),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                      onPressed: () => Navigator.pop(sheetContext),
+                      child: const Text('取消')),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(
+                        sheetContext,
+                        _HomeFilterSelection(
+                            query: query,
+                            courseKey: courseKey,
+                            deadline: deadline)),
+                    child: const Text('应用'),
+                  ),
+                ]),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    Future<void>.delayed(const Duration(milliseconds: 350), controller.dispose);
+    if (!mounted || selection == null || store.accountEpoch != openingEpoch) {
+      return;
+    }
+    setState(() {
+      _query = selection.query.trim();
+      _courseKey = selection.courseKey;
+      _deadlineFilter = selection.deadline;
+    });
+  }
+}
+
+class _HomeFilterSelection {
+  const _HomeFilterSelection({
+    required this.query,
+    required this.courseKey,
+    required this.deadline,
+  });
+
+  final String query;
+  final String? courseKey;
+  final AssignmentDeadlineFilter deadline;
 }

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
+import '../models/reminder_rule_limits.dart';
 
 import '../services/assignment_store.dart';
 import '../services/permission_settings_service.dart';
+import '../services/reminder_rule_store.dart';
 
 class ReminderSettingsScreen extends StatefulWidget {
   const ReminderSettingsScreen({
@@ -71,6 +73,19 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                 '保存后会重新安排所有未完成作业的本地通知，自定义提醒支持精确到分钟',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
+              if (ReminderRuleStore.requiresReview(_offsets.toList())) ...[
+                const SizedBox(height: 12),
+                Card(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  child: const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text(
+                      '旧版提醒规则已保留，但超过365天的规则目前不会参与提醒调度。请调整到365天以内后再使用。\n'
+                      '当前版本每份作业最多使用32条、最长365天；保存前请移除超出范围的规则。',
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               if (widget.assignmentStore.notificationPrivacyPending) ...[
                 const Text('旧详细提醒尚未清理，隐私设置未完全生效。'),
@@ -237,6 +252,12 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
   }
 
   void _toggleOffset(int offset, bool? checked) {
+    if ((checked ?? false) &&
+        !_offsets.contains(offset) &&
+        _offsets.length >= ReminderRuleLimits.maxRuleCount) {
+      _showMessage('最多保存 32 条提醒规则');
+      return;
+    }
     setState(() {
       if (checked ?? false) {
         _offsets.add(offset);
@@ -256,6 +277,15 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
     final totalMinutes = hours * 60 + minutes;
     if (totalMinutes <= 0) {
       _showMessage('请输入大于 0 的提醒时间');
+      return;
+    }
+    if (totalMinutes > ReminderRuleLimits.maxOffsetMinutes) {
+      _showMessage('自定义提醒最长提前 365 天');
+      return;
+    }
+    if (!_offsets.contains(totalMinutes) &&
+        _offsets.length >= ReminderRuleLimits.maxRuleCount) {
+      _showMessage('最多保存 32 条提醒规则');
       return;
     }
     setState(() {
@@ -278,13 +308,25 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
   }
 
   Future<void> _save() async {
+    if (ReminderRuleStore.requiresReview(_offsets.toList())) {
+      _showMessage('旧版提醒规则已保留，请先移除超出 32 条或 365 天的规则再保存');
+      return;
+    }
     setState(() => _saving = true);
     try {
-      await widget.assignmentStore.saveReminderRule(_offsets.toList());
+      final saved =
+          await widget.assignmentStore.saveReminderRule(_offsets.toList());
       if (!mounted) return;
-      _showMessage(widget.assignmentStore.error == null
-          ? '提醒时间已保存，作业通知已更新'
-          : '保存失败，请稍后重试；当前选择已保留');
+      final operationError = widget.assignmentStore.operationError;
+      final hasWarnings = widget.assignmentStore.serviceWarnings.isNotEmpty ||
+          widget.assignmentStore.recoveryWarning != null;
+      _showMessage(widget.assignmentStore.saveFeedback(
+        saved,
+        successMessage: hasWarnings ? '提醒时间已保存' : '提醒时间已保存，作业通知已更新',
+        failureMessage: operationError == null
+            ? '保存失败，请稍后重试；当前选择已保留'
+            : '保存失败：$operationError；当前选择已保留',
+      ));
     } catch (_) {
       if (mounted) _showMessage('保存失败，请稍后重试；当前选择已保留');
     } finally {

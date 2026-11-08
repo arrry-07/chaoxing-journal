@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
@@ -34,6 +35,30 @@ void main() {
                 .checkConfigured(currentVersionCode: 31))
             .status,
         UpdateCheckStatus.invalidManifest);
+  });
+  test('manifest JSON bytes accept UTF-8 BOM and non-JSON content type',
+      () async {
+    final manifest =
+        '{"applicationId":"com.example.studyassistant.journal","versionCode":32,"versionName":"1.6.3","apkUrl":"https://example.org/app.apk","sha256":"${'a' * 64}"}';
+    final bytes = Uint8List.fromList([239, 187, 191, ...utf8.encode(manifest)]);
+    final dio = Dio(BaseOptions(validateStatus: (_) => true))
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        expect(o.responseType, ResponseType.plain);
+        h.resolve(Response<String>(
+          requestOptions: o,
+          statusCode: 200,
+          data: utf8.decode(bytes),
+          headers: Headers.fromMap({
+            'content-type': ['application/octet-stream']
+          }),
+        ));
+      }));
+    final result = await AppUpdateService(
+      dio: dio,
+      manifestUrl: 'https://example.org/update.json',
+    ).checkConfigured(currentVersionCode: 31);
+    expect(result.status, UpdateCheckStatus.available);
+    expect(result.update?.versionCode, 32);
   });
   test('hash mismatch removes partial APK and does not publish a final file',
       () async {

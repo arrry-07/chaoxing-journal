@@ -12,6 +12,12 @@ import '../services/reminder_rule_store.dart';
 
 class LocalAssignmentRepository {
   static const _key = 'chaoxing_journal_v2';
+  static const _personalKey = 'personal_workspace_v1';
+  static const _notebookKey = 'notebook_v1';
+  static const _maxAdditionalRecoveryBackups = 3;
+  static const _maxRecoveryValueBytes = 4 * 1024 * 1024;
+  static const _recoveryWriteFailedWarning =
+      '恢复副本写入失败，恢复副本未保存；原始损坏数据仍保留在本机，已停止写入。请检查本机存储空间，不要清除应用数据。';
   // Old app versions stored account-independent data in three preferences.
   static const _oldItems = 'local_assignments';
   static const _oldSync = 'local_last_sync_at';
@@ -31,11 +37,15 @@ class LocalAssignmentRepository {
     'sync_data_at',
     'sync_report_v1',
     'assignment_changes_v1',
-    'personal_workspace_v1',
-    'notebook_v1',
+    _personalKey,
+    _notebookKey,
     '${_key}_recovery_backup',
     '${_key}_recovery_backups',
     'course_refs_recovery_backup',
+    '${_personalKey}_recovery_backup',
+    '${_personalKey}_recovery_backups',
+    '${_notebookKey}_recovery_backup',
+    '${_notebookKey}_recovery_backups',
   ];
 
   static String _owner(String account) =>
@@ -43,33 +53,90 @@ class LocalAssignmentRepository {
 
   Future<StudyNotebook> loadNotebook() => _serialized(() async {
         final p = await SharedPreferences.getInstance();
-        final raw = p.getString('notebook_v1');
-        return raw == null ? StudyNotebook() : StudyNotebook.decode(raw);
+        return _readProtected(
+          p,
+          _notebookKey,
+          StudyNotebook.decode,
+          StudyNotebook.new,
+          '部分个人待办与学期归档无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
+        );
       });
   Future<void> saveNotebook(StudyNotebook value, String account) =>
       _serialized(() async {
         final p = await SharedPreferences.getInstance();
         _checkOwner(p, account);
+        await _protectExisting(
+          p,
+          _notebookKey,
+          StudyNotebook.decode,
+          '部分个人待办与学期归档无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
+        );
         final raw = value.encode();
         StudyNotebook.decode(raw);
-        await _require(p.setString('notebook_v1', raw));
+        await _require(p.setString(_notebookKey, raw));
       });
 
   Future<PersonalWorkspace> loadPersonalWorkspace() => _serialized(() async {
         final p = await SharedPreferences.getInstance();
-        final raw = p.getString('personal_workspace_v1');
-        return raw == null
-            ? PersonalWorkspace()
-            : PersonalWorkspace.decode(raw);
+        return _readProtected(
+          p,
+          _personalKey,
+          PersonalWorkspace.decode,
+          PersonalWorkspace.new,
+          '部分个人计划与记录无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
+        );
       });
   Future<void> savePersonalWorkspace(PersonalWorkspace value, String account) =>
       _serialized(() async {
         final p = await SharedPreferences.getInstance();
         _checkOwner(p, account);
+        await _protectExisting(
+          p,
+          _personalKey,
+          PersonalWorkspace.decode,
+          '部分个人计划与记录无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
+        );
         final raw = value.encode();
         PersonalWorkspace.decode(raw);
-        await _require(p.setString('personal_workspace_v1', raw));
+        await _require(p.setString(_personalKey, raw));
       });
+
+  Future<T> _readProtected<T>(
+    SharedPreferences prefs,
+    String key,
+    T Function(String) decode,
+    T Function() fallback,
+    String warning,
+  ) async {
+    final raw = prefs.getString(key);
+    if (raw == null) return fallback();
+    try {
+      return decode(raw);
+    } on FormatException {
+      await _backupDamagedValue(prefs, key, raw, warning);
+      return fallback();
+    } on TypeError {
+      await _backupDamagedValue(prefs, key, raw, warning);
+      return fallback();
+    }
+  }
+
+  Future<void> _protectExisting(
+    SharedPreferences prefs,
+    String key,
+    Object? Function(String) decode,
+    String warning,
+  ) async {
+    final raw = prefs.getString(key);
+    if (raw == null) return;
+    try {
+      decode(raw);
+    } on FormatException {
+      await _backupDamagedValue(prefs, key, raw, warning);
+    } on TypeError {
+      await _backupDamagedValue(prefs, key, raw, warning);
+    }
+  }
 
   void _checkOwner(SharedPreferences prefs, String account) {
     if (account.trim().isEmpty ||
@@ -90,25 +157,39 @@ class LocalAssignmentRepository {
       _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
         _checkOwner(prefs, account);
+        if (recoveryWarning != null) {
+          throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
+        }
         final state = await _read();
-        return BackupSnapshot.create(
+        final snapshot = BackupSnapshot.create(
             owner: _owner(account),
             createdAt: DateTime.now(),
             records: state.byId.values.toList(),
             hidden: state.hidden.intersection(state.byId.keys.toSet()),
-            courses: await loadCourses(),
+            courses: await _loadCourses(account: account),
             unfollowed:
                 (prefs.getStringList('unfollowed_courses') ?? []).toSet(),
             reminderOffsets: await ReminderRuleStore().loadOffsetsMinutes(),
             autoSyncIntervalMinutes:
                 prefs.getInt('auto_sync_interval_minutes') ?? 30,
-            notebook: prefs.getString('notebook_v1') == null
-                ? StudyNotebook()
-                : StudyNotebook.decode(prefs.getString('notebook_v1')!),
-            personal: prefs.getString('personal_workspace_v1') == null
-                ? PersonalWorkspace()
-                : PersonalWorkspace.decode(
-                    prefs.getString('personal_workspace_v1')!));
+            notebook: await _readProtected(
+              prefs,
+              _notebookKey,
+              StudyNotebook.decode,
+              StudyNotebook.new,
+              '部分个人待办与学期归档无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
+            ),
+            personal: await _readProtected(
+              prefs,
+              _personalKey,
+              PersonalWorkspace.decode,
+              PersonalWorkspace.new,
+              '部分个人计划与记录无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
+            ));
+        if (recoveryWarning != null) {
+          throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
+        }
+        return snapshot;
       });
 
   /// Restore only absent records/preferences. Imported observations must be
@@ -138,7 +219,9 @@ class LocalAssignmentRepository {
               deadlineRawText: '备份记录，待同步确认');
           if (validated.hidden.contains(a.id)) state.hidden.add(a.id);
         }
-        final courses = {for (final c in await loadCourses()) c.key: c};
+        final courses = {
+          for (final c in await _loadCourses(account: account)) c.key: c
+        };
         for (final c in validated.courses) {
           courses.putIfAbsent(c.key, () => c);
         }
@@ -165,10 +248,13 @@ class LocalAssignmentRepository {
                 validated.reminderOffsets.map((v) => '$v').toList()));
           }
           // Sync interval is global: a historical account backup must not alter it.
-          final rawPersonal = prefs.getString('personal_workspace_v1');
-          final local = rawPersonal == null
-              ? PersonalWorkspace()
-              : PersonalWorkspace.decode(rawPersonal);
+          final local = await _readProtected(
+            prefs,
+            _personalKey,
+            PersonalWorkspace.decode,
+            PersonalWorkspace.new,
+            '部分个人计划与记录无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
+          );
           final imported = validated.personal;
           final keys =
               local.plans.map((p) => '${p.day}:${p.assignmentId}').toSet();
@@ -187,15 +273,18 @@ class LocalAssignmentRepository {
               summaryMinute: local.summaryMinute);
           final encoded = merged.encode();
           PersonalWorkspace.decode(encoded);
-          await _require(prefs.setString('personal_workspace_v1', encoded));
-          final rawNotebook = prefs.getString('notebook_v1');
-          final notebook = (rawNotebook == null
-                  ? StudyNotebook()
-                  : StudyNotebook.decode(rawNotebook))
+          await _require(prefs.setString(_personalKey, encoded));
+          final notebook = (await _readProtected(
+            prefs,
+            _notebookKey,
+            StudyNotebook.decode,
+            StudyNotebook.new,
+            '部分个人待办与学期归档无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
+          ))
               .mergeMissing(validated.notebook);
           final notebookRaw = notebook.encode();
           StudyNotebook.decode(notebookRaw);
-          await _require(prefs.setString('notebook_v1', notebookRaw));
+          await _require(prefs.setString(_notebookKey, notebookRaw));
           await _require(prefs.remove(_switchKey));
           return true;
         } catch (_) {
@@ -209,6 +298,7 @@ class LocalAssignmentRepository {
   // scope if the process stops between individual SharedPreferences writes.
   Future<void> activateAccount(String account, {String? previousAccount}) =>
       _serialized(() async {
+        recoveryWarning = null;
         final prefs = await SharedPreferences.getInstance();
         final pending = prefs.getString(_switchKey);
         if (pending != null) {
@@ -277,9 +367,27 @@ class LocalAssignmentRepository {
         : prefs.setString(_ownerKey, owner));
   }
 
-  String? recoveryWarning;
-  Future<List<CourseRef>> loadCourses() async {
+  final Map<String, String> _recoveryStatusByKey = {};
+  String? get recoveryWarning => _recoveryStatusByKey.isEmpty
+      ? null
+      : _recoveryStatusByKey.values.join('；');
+  set recoveryWarning(String? value) {
+    _recoveryStatusByKey.clear();
+    if (value != null && value.isNotEmpty) {
+      _recoveryStatusByKey['_external'] = value;
+    }
+  }
+
+  Future<List<CourseRef>> loadCourses({String? account}) =>
+      _serialized(() => _loadCourses(account: account));
+
+  Future<List<CourseRef>> _loadCourses({String? account}) async {
     final p = await SharedPreferences.getInstance();
+    if (account != null) {
+      _checkOwner(p, account);
+    } else if (p.containsKey(_switchKey)) {
+      throw StateError('账号本机记录切换未完成，请重新登录后恢复');
+    }
     final raw = p.get('course_refs');
     final valid = <CourseRef>[];
     var damaged = false;
@@ -299,18 +407,27 @@ class LocalAssignmentRepository {
         await _require(p.setString('course_refs_recovery_backup',
             raw is String ? raw : jsonEncode(raw)));
       }
-      recoveryWarning = '部分课程资料无法读取，原始资料已备份；已保留可读取的作业，请重新同步。';
+      _setRecoveryStatus(
+        'course_refs',
+        '部分课程资料无法读取，原始资料已备份；已保留可读取的作业，请重新同步。',
+      );
     }
     return valid;
   }
 
-  Future<void> saveCourses(List<CourseRef> courses) async {
-    final p = await SharedPreferences.getInstance();
-    if (!await p.setString(
-        'course_refs', jsonEncode(courses.map((c) => c.toJson()).toList()))) {
-      throw StateError('课程保存失败');
-    }
-  }
+  Future<void> saveCourses(List<CourseRef> courses, {String? account}) =>
+      _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        if (account != null) {
+          _checkOwner(p, account);
+        } else if (p.containsKey(_switchKey)) {
+          throw StateError('账号本机记录切换未完成，请重新登录后恢复');
+        }
+        if (!await p.setString('course_refs',
+            jsonEncode(courses.map((c) => c.toJson()).toList()))) {
+          throw StateError('课程保存失败');
+        }
+      });
 
   Future<List<Assignment>> loadHiddenAssignments() => _serialized(() async {
         final state = await _read();
@@ -470,19 +587,56 @@ class LocalAssignmentRepository {
   }
 
   Future<void> _backupDamaged(SharedPreferences prefs, String raw) async {
-    final key = '${_key}_recovery_backup';
+    await _backupDamagedValue(
+      prefs,
+      _key,
+      raw,
+      '部分本机记录无法读取，原始数据已保留备份；请重新同步作业。',
+    );
+  }
+
+  Future<void> _backupDamagedValue(
+    SharedPreferences prefs,
+    String dataKey,
+    String raw,
+    String warning,
+  ) async {
+    if (utf8.encode(raw).length > _maxRecoveryValueBytes) {
+      final message =
+          '损坏数据超过恢复副本容量上限（4 MiB），恢复副本未保存；原始损坏数据仍保留在本机，已停止写入。请勿清除应用数据。';
+      _setRecoveryStatus(dataKey, message);
+      throw StateError(message);
+    }
+    final key = '${dataKey}_recovery_backup';
     if (!prefs.containsKey(key) && !await prefs.setString(key, raw)) {
-      throw StateError('无法备份损坏记录，已停止写入以保护原数据');
+      _setRecoveryStatus(dataKey, _recoveryWriteFailedWarning);
+      await prefs.reload();
+      throw StateError(_recoveryWriteFailedWarning);
     }
     if (prefs.getString(key) != raw) {
-      final additionalKey = '${_key}_recovery_backups';
+      final additionalKey = '${dataKey}_recovery_backups';
       final additional = prefs.getStringList(additionalKey) ?? [];
-      if (!additional.contains(raw) &&
-          !await prefs.setStringList(additionalKey, [...additional, raw])) {
-        throw StateError('无法备份损坏记录，已停止写入以保护原数据');
+      if (!additional.contains(raw)) {
+        if (additional.length >= _maxAdditionalRecoveryBackups) {
+          final message =
+              '恢复副本已达上限（3 个），新恢复副本未保存；原始损坏数据仍保留在本机，旧恢复副本未删除，已停止写入。请勿清除应用数据。';
+          _setRecoveryStatus(dataKey, message);
+          throw StateError(message);
+        }
+        if (!await prefs.setStringList(additionalKey, [...additional, raw])) {
+          final message =
+              '历史恢复副本写入失败，新恢复副本未保存；原始损坏数据仍保留在本机，已停止写入。请检查本机存储空间，不要清除应用数据。';
+          _setRecoveryStatus(dataKey, message);
+          await prefs.reload();
+          throw StateError(message);
+        }
       }
     }
-    recoveryWarning = '部分本机记录无法读取，原始数据已保留备份；请重新同步作业。';
+    _setRecoveryStatus(dataKey, warning);
+  }
+
+  void _setRecoveryStatus(String dataKey, String warning) {
+    _recoveryStatusByKey[dataKey] = warning;
   }
 
   Future<void> _save(_Journal state) async {
