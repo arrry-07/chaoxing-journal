@@ -259,8 +259,13 @@ class AppUpdateController extends ChangeNotifier {
     }
   }
 
-  String _error(Object e, String fallback) =>
-      e is StateError ? e.message.toString() : fallback;
+  String _error(Object e, String fallback) => switch (e) {
+        StateError() => e.message.toString(),
+        DioException(type: DioExceptionType.connectionTimeout) =>
+          '连接更新服务器超时，请检查网络后重试',
+        DioException(type: DioExceptionType.receiveTimeout) => '下载响应超时，请稍后重试',
+        _ => fallback,
+      };
 
   @override
   void dispose() {

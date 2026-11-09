@@ -32,13 +32,6 @@ class ProfileScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) {
-        final courses = store.courses.map((c) {
-          final same =
-              store.courses.where((other) => other.name == c.name).toList();
-          return same.length > 1
-              ? '${c.name}（${same.indexWhere((other) => other.key == c.key) + 1}班）'
-              : c.name;
-        }).toList();
         return ListView(
           padding: EdgeInsets.zero,
           children: [
@@ -52,7 +45,17 @@ class ProfileScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _CourseCard(courses: courses),
+                  Card(
+                    child: _SettingsTile(
+                      icon: Icons.school_outlined,
+                      title: '我的课程',
+                      subtitle: store.courses.isEmpty
+                          ? '暂无课程，前往查看与同步'
+                          : '已同步 ${store.courses.length} 门课程',
+                      compactSubtitle: true,
+                      onTap: () => context.push('/courses'),
+                    ),
+                  ),
                   const SizedBox(height: 14),
                   const Padding(
                     padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
@@ -88,6 +91,8 @@ class ProfileScreen extends StatelessWidget {
                       _SettingsTile(
                         icon: Icons.sync,
                         title: '同步学习通',
+                        subtitle: '更新课程与作业等学习数据',
+                        compactSubtitle: true,
                         onTap: () => context.push('/sync'),
                       ),
                       _SettingsTile(
@@ -124,6 +129,8 @@ class ProfileScreen extends StatelessWidget {
                       _SettingsTile(
                         icon: Icons.notifications_none,
                         title: '提醒设置',
+                        subtitle: '管理作业提醒时间与通知权限',
+                        compactSubtitle: true,
                         onTap: () => context.push('/reminders'),
                       ),
                       _SettingsTile(
@@ -141,6 +148,8 @@ class ProfileScreen extends StatelessWidget {
                       _SettingsTile(
                         icon: Icons.help_outline,
                         title: '帮助与反馈',
+                        subtitle: '查看使用说明，反馈问题与建议',
+                        compactSubtitle: true,
                         onTap: () => context.push('/help'),
                       ),
                       _SettingsTile(
@@ -153,6 +162,8 @@ class ProfileScreen extends StatelessWidget {
                       _SettingsTile(
                           icon: Icons.description_outlined,
                           title: '开源许可',
+                          subtitle: '查看应用使用的开源组件及许可证',
+                          compactSubtitle: true,
                           onTap: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                   builder: (_) => const OpenSourceScreen()))),
@@ -429,56 +440,6 @@ Map<String, String>? _profileAvatarHeaders(String? avatarUrl) {
   };
 }
 
-class _CourseCard extends StatelessWidget {
-  const _CourseCard({required this.courses});
-  final List<String> courses;
-  @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                const Expanded(child: Text('我的课程', style: Journal.section)),
-                IconButton(
-                  tooltip: '管理全部课程',
-                  onPressed: () => context.push('/courses'),
-                  icon: const Icon(Icons.tune_rounded),
-                ),
-              ]),
-              const SizedBox(height: 10),
-              if (courses.isEmpty)
-                const Text('同步后，有作业的课程会记在这里。')
-              else ...[
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final name in courses.take(4))
-                      Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: CourseLabel(name))
-                  ],
-                ),
-                if (courses.length > 4) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                      '共 ${courses.length} 门课程 · 另有 ${courses.length - 4} 门未在预览中展开'),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton(
-                      onPressed: () => context.push('/courses'),
-                      child: const Text('查看全部课程'),
-                    ),
-                  ),
-                ],
-              ],
-            ],
-          ),
-        ),
-      );
-}
-
 class _SettingsCard extends StatelessWidget {
   const _SettingsCard({required this.title, required this.children});
 
@@ -517,6 +478,7 @@ class _SettingsTile extends StatelessWidget {
     required this.title,
     this.onTap,
     this.subtitle,
+    this.compactSubtitle = false,
     this.trailing = Icons.chevron_right,
     this.trailingOnPressed,
   });
@@ -524,6 +486,7 @@ class _SettingsTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String? subtitle;
+  final bool compactSubtitle;
   final IconData trailing;
   final VoidCallback? onTap;
   final VoidCallback? trailingOnPressed;
@@ -534,6 +497,13 @@ class _SettingsTile extends StatelessWidget {
       leading: Icon(icon, color: Journal.ink, size: 22),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
       subtitle: subtitle == null ? null : Text(subtitle!),
+      subtitleTextStyle: compactSubtitle
+          ? Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontSize: 12,
+                height: 1.4,
+                color: Journal.muted,
+              )
+          : null,
       trailing: trailingOnPressed != null
           ? IconButton(
               tooltip: '打开链接',

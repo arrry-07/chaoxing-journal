@@ -195,15 +195,22 @@ class StudyAssistantTheme {
           borderSide: BorderSide.none,
         ),
       ),
-      navigationBarTheme: const NavigationBarThemeData(
+      navigationBarTheme: NavigationBarThemeData(
         backgroundColor: Journal.sheet,
         indicatorColor: Journal.sage,
-        labelTextStyle: WidgetStatePropertyAll(TextStyle(
-          fontFamily: Journal.bodyFamily,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: Journal.ink,
-        )),
+        iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
+              color: states.contains(WidgetState.selected)
+                  ? Journal.ink
+                  : Journal.muted,
+            )),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
+              fontFamily: Journal.bodyFamily,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: states.contains(WidgetState.selected)
+                  ? Journal.ink
+                  : Journal.muted,
+            )),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: Journal.sheet,

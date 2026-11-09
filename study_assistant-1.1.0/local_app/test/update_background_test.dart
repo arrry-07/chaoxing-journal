@@ -98,6 +98,26 @@ void main() {
     expect(installer.launches, 0);
     expect(await service.file.exists(), isFalse);
   });
+  for (final type in [
+    DioExceptionType.connectionTimeout,
+    DioExceptionType.receiveTimeout
+  ]) {
+    test(
+        'a ${type.name} remains a failed retryable download, not user cancellation',
+        () async {
+      await task.check();
+      final future = task.download();
+      service.pending!.completeError(DioException(
+          requestOptions: RequestOptions(path: 'https://example.org/app.apk'),
+          type: type));
+      await future;
+      expect(task.phase, UpdatePhase.failed);
+      expect(task.message, contains('超时'));
+      expect(task.message, isNot(contains('已取消')));
+      expect(task.downloadedPath, isNull);
+      expect(installer.launches, 0);
+    });
+  }
 
   test(
       'duplicate download taps join one task and signature failure blocks install',

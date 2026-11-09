@@ -5,7 +5,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
+import 'package:study_assistant_mobile/src/features/course_list_screen.dart';
+import 'package:study_assistant_mobile/src/features/open_source_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
@@ -317,7 +322,7 @@ void main() {
     expect(find.text('关于我们'), findsOneWidget);
   });
 
-  testWidgets('profile summarizes and exposes every synchronized course',
+  testWidgets('compact course entry updates count and opens all courses',
       (tester) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     final store = AssignmentStore(
@@ -327,22 +332,107 @@ void main() {
     );
     addTearDown(store.dispose);
     await store.restoreSession();
-    await store.repository.saveCourses([
-      for (var index = 1; index <= 5; index += 1)
-        CourseRef(courseId: '$index', clazzId: '${index}0', name: '课程 $index')
-    ], account: 'student');
-    await store.restoreSession();
+    final router = GoRouter(initialLocation: '/profile', routes: [
+      GoRoute(
+          path: '/profile',
+          builder: (_, __) => Scaffold(body: ProfileScreen(store: store))),
+      GoRoute(
+          path: '/courses', builder: (_, __) => CourseListScreen(store: store)),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(
+        theme: StudyAssistantTheme.light, routerConfig: router));
 
-    await tester.pumpWidget(
-      MaterialApp(home: Scaffold(body: ProfileScreen(store: store))),
-    );
+    for (final count in [0, 1, 5, 40]) {
+      await store.repository.saveCourses([
+        for (var index = 1; index <= count; index += 1)
+          CourseRef(courseId: '$index', clazzId: '${index}0', name: '课程 $index')
+      ], account: 'student');
+      await store.restoreSession();
+      await tester.pumpAndSettle();
+      expect(find.text(count == 0 ? '暂无课程，前往查看与同步' : '已同步 $count 门课程'),
+          findsOneWidget);
+      expect(find.byType(CourseLabel), findsNothing);
+      expect(find.text('查看全部课程'), findsNothing);
+    }
 
-    expect(find.text('课程 1'), findsOneWidget);
-    expect(find.text('课程 4'), findsOneWidget);
-    expect(find.text('课程 5'), findsNothing);
-    expect(find.text('共 5 门课程 · 另有 1 门未在预览中展开'), findsOneWidget);
-    expect(find.text('查看全部课程'), findsOneWidget);
+    // Tap the row's padding, rather than just its title or arrow.
+    final entry = find.widgetWithText(ListTile, '我的课程');
+    await tester.tapAt(tester.getTopLeft(entry) + const Offset(8, 8));
+    await tester.pumpAndSettle();
+    expect(find.byType(CourseListScreen), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('课程 40'), 400);
+    expect(find.text('课程 40'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(ProfileScreen), findsOneWidget);
+    expect(find.text('已同步 40 门课程'), findsOneWidget);
   });
+
+  for (final width in [320.0, 360.0]) {
+    for (final scale in [1.0, 2.0]) {
+      testWidgets('profile subtitles and routes fit $width at scale $scale',
+          (tester) async {
+        tester.view.physicalSize = Size(width, 740);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        SharedPreferences.setMockInitialValues({});
+        final store = AssignmentStore(
+            sessionStore: _MemorySessionStore(),
+            notificationService: _NoopNotificationService(),
+            widgetSnapshotService: _NoopWidgetSnapshotService());
+        addTearDown(store.dispose);
+        const entries = {
+          '同步学习通': ('更新课程与作业等学习数据', '/sync'),
+          '提醒设置': ('管理作业提醒时间与通知权限', '/reminders'),
+          '帮助与反馈': ('查看使用说明，反馈问题与建议', '/help'),
+          '开源许可': ('查看应用使用的开源组件及许可证', null),
+        };
+        final router = GoRouter(initialLocation: '/profile', routes: [
+          GoRoute(
+              path: '/profile',
+              builder: (_, __) => Scaffold(body: ProfileScreen(store: store))),
+          for (final path in ['/sync', '/reminders', '/help'])
+            GoRoute(
+                path: path,
+                builder: (_, __) =>
+                    Scaffold(appBar: AppBar(title: Text('目标 $path')))),
+        ]);
+        addTearDown(router.dispose);
+        await tester.pumpWidget(MaterialApp.router(
+            theme: StudyAssistantTheme.light,
+            builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!),
+            routerConfig: router));
+        for (final entry in entries.entries) {
+          final row = find.widgetWithText(ListTile, entry.key);
+          await tester.scrollUntilVisible(row, 180);
+          await tester.ensureVisible(row);
+          await tester.pumpAndSettle();
+          final tile = tester.widget<ListTile>(row);
+          expect((tile.subtitle! as Text).data, entry.value.$1);
+          expect(tile.subtitleTextStyle?.fontSize, 12);
+          expect(tile.subtitleTextStyle?.color, Journal.muted);
+          expect((tile.title! as Text).style?.fontWeight, FontWeight.w700);
+          expect(tester.takeException(), isNull);
+          await tester.tap(row);
+          await tester.pumpAndSettle();
+          if (entry.value.$2 case final path?) {
+            expect(find.text('目标 $path'), findsOneWidget);
+            await tester.pageBack();
+          } else {
+            expect(find.byType(OpenSourceScreen), findsOneWidget);
+            await tester.tap(find.byTooltip('返回'));
+          }
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+        }
+      });
+    }
+  }
 
   testWidgets('profile settings are grouped by user task', (tester) async {
     SharedPreferences.setMockInitialValues({});
