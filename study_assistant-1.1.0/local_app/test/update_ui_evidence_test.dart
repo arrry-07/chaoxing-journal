@@ -77,7 +77,8 @@ void main() {
           await t.pumpAndSettle();
           await t.pump();
           expect(t.takeException(), isNull, reason: '$width/$scale/$status');
-          expect(find.text('关闭'), findsOneWidget);
+          final dismiss = status == UpdateCheckStatus.available ? '稍后更新' : '关闭';
+          expect(find.text(dismiss), findsOneWidget);
           if (const bool.fromEnvironment('CAPTURE_UI')) {
             await t.runAsync(() async {
               final image = await (boundary.currentContext!.findRenderObject()
@@ -93,7 +94,8 @@ void main() {
               image.dispose();
             });
           }
-          await t.tap(find.text('关闭'));
+          await t.ensureVisible(find.text(dismiss));
+          await t.tap(find.text(dismiss));
           await t.pumpAndSettle();
         }
       }

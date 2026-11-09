@@ -64,7 +64,8 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('当前已是最新版本'), findsOneWidget);
     expect(find.text('查看 GitHub 发行版'), findsOneWidget);
-    expect(find.text('重新检查'), findsOneWidget);
+    expect(find.text('关闭'), findsOneWidget);
+    expect(find.text('重新检查'), findsNothing);
     expect(find.text('下载并安装'), findsNothing);
   });
 }

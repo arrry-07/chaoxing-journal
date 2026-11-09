@@ -1,4 +1,5 @@
 import '../models/display_preferences.dart';
+import '../models/home_filters.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -48,6 +49,26 @@ class AssignmentStore extends ChangeNotifier {
   final changeLog = AssignmentChangeLog();
   PersonalWorkspace personal = PersonalWorkspace();
   StudyNotebook notebook = StudyNotebook();
+  HomeFilters homeFilters = const HomeFilters();
+
+  Future<bool> saveHomeFilters(HomeFilters next, int expectedEpoch) async {
+    final account = _account;
+    var saved = false;
+    await _run(() async {
+      if (account == null ||
+          !_authenticated ||
+          _generation != expectedEpoch ||
+          account != _account) {
+        return;
+      }
+      await repository.saveHomeFilters(next, account);
+      if (_generation != expectedEpoch || !_authenticated) return;
+      homeFilters = HomeFilters.decode(next.encode());
+      saved = true;
+    });
+    return saved;
+  }
+
   Future<bool> saveNotebook(
       StudyNotebook Function(StudyNotebook) update, int expectedEpoch) async {
     final account = _account;
@@ -391,6 +412,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _restoreAccountData() async {
+    homeFilters = const HomeFilters();
     notebook = StudyNotebook();
     personal = PersonalWorkspace();
     changes = [];
@@ -428,6 +450,9 @@ class AssignmentStore extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       display =
           DisplayPreferences.decode(prefs.getString('display_preferences_v1'));
+    });
+    await stage('首页筛选', () async {
+      if (_authenticated) homeFilters = await repository.loadHomeFilters();
     });
     await stage('提醒设置', () async {
       _reminderOffsetsMinutes = await reminderRuleStore.loadOffsetsMinutes();
@@ -921,6 +946,7 @@ class AssignmentStore extends ChangeNotifier {
       await reminderRuleStore.clear();
       _authenticated = false;
       _account = null;
+      homeFilters = const HomeFilters();
       personal = PersonalWorkspace();
       notebook = StudyNotebook();
       _agreementAccepted = false;
