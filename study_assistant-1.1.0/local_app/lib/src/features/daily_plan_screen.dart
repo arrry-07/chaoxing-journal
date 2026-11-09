@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../models/assignment.dart';
 import '../models/personal_workspace.dart';
 import '../services/assignment_store.dart';
+import '../services/assignment_query.dart';
 import '../services/rule_planning_service.dart';
 import 'widgets/data_recovery_warning.dart';
 
@@ -304,7 +306,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
     }
     try {
       final next = RulePlanningService.preview(
-        assignments: candidates,
+        assignments: widget.store.visibleAssignments,
         selectedIds: selected,
         estimates: minutes,
         existingPlans: widget.store.personal.plans,
@@ -353,6 +355,27 @@ class _PlannerSheetState extends State<_PlannerSheet> {
     final chosen = currentPreview.suggested
         .where((item) => accepted.contains(item.assignment.id))
         .toList();
+    var stale = false;
+    void validate(PersonalWorkspace workspace) {
+      currentPreview.ensureCurrentEpoch(widget.store.accountEpoch);
+      final refreshed = RulePlanningService.preview(
+        assignments: widget.store.visibleAssignments,
+        selectedIds: chosen.map((item) => item.assignment.id).toSet(),
+        estimates: {
+          for (final item in chosen) item.assignment.id: item.minutes,
+        },
+        existingPlans: workspace.plans,
+        day: widget.day,
+        budgetMinutes: currentPreview.budgetMinutes,
+        now: DateTime.now(),
+        accountEpoch: currentPreview.accountEpoch,
+      );
+      if (refreshed.suggested.length != chosen.length) {
+        stale = true;
+        throw StateError('作业或同日计划已变化，请重新生成规划预览');
+      }
+    }
+
     for (final item in chosen) {
       final current = assignments[item.assignment.id];
       if (current == null ||
@@ -365,9 +388,21 @@ class _PlannerSheetState extends State<_PlannerSheet> {
         return;
       }
     }
+    try {
+      validate(widget.store.personal);
+    } on StateError catch (value) {
+      setState(() => error = value.message.toString());
+      return;
+    } on ArgumentError {
+      setState(() => error = '规划条件已变化，请重新生成规划预览');
+      return;
+    }
     setState(() => saving = true);
     try {
       final ok = await widget.store.savePersonal((workspace) {
+        // Recheck inside the serialized write too: another save or sync may
+        // have completed while this operation was waiting for the store.
+        validate(workspace);
         final existing = workspace.plans
             .where((plan) => plan.day == widget.day)
             .map((plan) => plan.assignmentId)
@@ -383,7 +418,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
       final feedback = widget.store.saveFeedback(
         ok,
         successMessage: '规划建议已保存到个人计划',
-        failureMessage: '规划建议保存失败，请检查账号后重试',
+        failureMessage: stale ? '作业或同日计划已变化，请重新生成规划预览' : '规划建议保存失败，请检查账号后重试',
       );
       if (ok) {
         Navigator.pop(context, feedback);
@@ -553,6 +588,12 @@ class _PlannerSheetState extends State<_PlannerSheet> {
 
   Widget _candidate(Assignment assignment) {
     final chosen = selected.contains(assignment.id);
+    final deadline = assignment.deadlineAt;
+    final deadlineText = deadline != null &&
+            assignment.deadlineTrusted &&
+            !assignment.deadlineReadFailed
+        ? '截止 ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(deadline))}'
+        : assignment.deadlineLabel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -573,7 +614,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                   }),
           title: Text(assignment.title),
           subtitle: Text(
-              '${assignment.courseName} · ${assignment.statusLabel} · ${assignment.deadlineLabel}'),
+              '${assignment.courseName} · ${assignment.statusLabel} · $deadlineText'),
         ),
         if (chosen)
           Padding(

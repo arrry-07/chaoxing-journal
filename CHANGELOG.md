@@ -2,6 +2,13 @@
 
 安装包与原始发布说明见 [Releases](https://github.com/arrry-07/chaoxing-journal/releases)。1.2.2–1.2.6 曾以本地体验包验证，没有对应公开 Release；不要把历史本地包文件名当成可下载地址。
 
+## 1.6.4（49） — 待发布候选
+
+- 修正规划候选的可信截止时间展示，保留无截止与读取失败的区别。
+- 规划依赖变化后拒绝保存过期结果；生成和持久化前复核状态及同日预算。
+- 串行处理测试通知与退出/切号清理；兼容原生 active 通知不返回 payload 的情况。
+- 本地候选尚未发布，完整需求验收仍有限制。
+
 ## 1.6.3（48）
 
 - 完整 Flutter 回归 558 passed、1 skipped、0 failed；Dart 分析、格式、原生 JVM、双 ABI 和体验签名 Release 构建通过。最终 APK SHA-256 为 `3291F3C70BD9D6C404B9C021CB3B71C7779361D7506702718F9AD25AB5BB6B5B`。

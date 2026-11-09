@@ -328,6 +328,63 @@ void main() {
     expect(h.summaryChannelEnabled, isNull);
     expect(h.manualChannelEnabled, isNull);
   });
+  test('privacy cleanup waits for an in-flight test notification', () async {
+    final healthStarted = Completer<void>();
+    final releaseHealth = Completer<void>();
+    final events = <String>[];
+    final visible = <Map<String, Object?>>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'getNotificationAppLaunchDetails':
+          return {'notificationLaunchedApp': false};
+        case 'getNotificationChannels':
+          return [channelRow('assignment_deadlines', '作业截止提醒', 4)];
+        case 'areNotificationsEnabled':
+          healthStarted.complete();
+          await releaseHealth.future;
+          return true;
+        case 'canScheduleExactNotifications':
+          return false;
+        case 'pendingNotificationRequests':
+          return [];
+        case 'getActiveNotifications':
+          return visible.toList();
+        case 'show':
+          final args = call.arguments as Map;
+          events.add('show');
+          visible.add({
+            'id': args['id'],
+            'title': args['title'],
+            'body': args['body'],
+            'payload': args['payload'],
+          });
+          return true;
+        case 'cancel':
+          events.add('cancel');
+          final id = (call.arguments as Map)['id'];
+          visible.removeWhere((item) => item['id'] == id);
+          return true;
+        default:
+          return true;
+      }
+    });
+    final service = LocalNotificationService();
+    final showing = service.showTestNotification();
+    await healthStarted.future;
+    final cleaning = service.cancelPrivateSchedules().then((_) {
+      events.add('cleanup-complete');
+    });
+    // Let an unqueued cleanup finish while the earlier show is still blocked.
+    // A correctly serialized cleanup stays pending until releaseHealth completes.
+    await Future<void>.delayed(Duration.zero);
+    releaseHealth.complete();
+    expect(await showing, isTrue);
+    await cleaning;
+    expect(visible, isEmpty,
+        reason: 'an earlier test notification must not appear after cleanup');
+    expect(events, ['show', 'cancel', 'cleanup-complete']);
+  });
   test('health inspects deadline, summary and personal channels independently',
       () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

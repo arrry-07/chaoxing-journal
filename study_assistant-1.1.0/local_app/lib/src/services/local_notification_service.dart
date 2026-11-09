@@ -92,7 +92,8 @@ class LocalNotificationService {
       try {
         final active = await _plugin.getActiveNotifications();
         ids.addAll(active
-            .where((item) => _isPrivatePayload(item.payload) && item.id != null)
+            .where(
+                (item) => _isPrivateActiveNotification(item) && item.id != null)
             .map((item) => item.id!));
       } catch (error) {
         systemReadFailure ??= error;
@@ -279,29 +280,32 @@ class LocalNotificationService {
         scheduleRecoveryPending: scheduleRecoveryPending);
   }
 
-  Future<bool> showTestNotification() async {
-    try {
-      await _ensureReadyForScheduling(assignmentChannel);
-      final health = await inspectHealth();
-      final channelStatus = health.assignmentChannel?.status;
-      if (health.notifications != true ||
-          (channelStatus != ReminderChannelStatus.enabled &&
-              channelStatus != ReminderChannelStatus.unsupported)) {
-        return false;
-      }
-      await _plugin.show(
-          DailySummary.baseId + 8,
-          '课业手记测试通知',
-          '如果看到了这条通知，当前显示链路可用；不代表未来后台提醒一定送达。',
-          const NotificationDetails(
-              android: AndroidNotificationDetails(assignmentChannel, '作业截止提醒',
-                  importance: Importance.high, priority: Priority.high)),
-          payload: 't:notification-test');
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
+  Future<bool> showTestNotification() => _runScheduleMutation(() async {
+        // Enqueue before initialization/health awaits so account/privacy cleanup
+        // also retires a test notification whose display request is still in flight.
+        try {
+          await _ensureReadyForScheduling(assignmentChannel);
+          final health = await inspectHealth();
+          final channelStatus = health.assignmentChannel?.status;
+          if (health.notifications != true ||
+              (channelStatus != ReminderChannelStatus.enabled &&
+                  channelStatus != ReminderChannelStatus.unsupported)) {
+            return false;
+          }
+          await _plugin.show(
+              DailySummary.baseId + 8,
+              '课业手记测试通知',
+              '如果看到了这条通知，当前显示链路可用；不代表未来后台提醒一定送达。',
+              const NotificationDetails(
+                  android: AndroidNotificationDetails(
+                      assignmentChannel, '作业截止提醒',
+                      importance: Importance.high, priority: Priority.high)),
+              payload: 't:notification-test');
+          return true;
+        } catch (_) {
+          return false;
+        }
+      });
 
   Future<void> rescheduleSummary(List<Assignment> assignments,
       PersonalWorkspace personal, DateTime? lastSync) async {
@@ -1090,6 +1094,18 @@ class LocalNotificationService {
       // transaction, so it is cleaned by payload/active scanning rather than
       // being assigned to a category journal.
       payload?.startsWith('t:') == true;
+
+  static bool _isPrivateActiveNotification(ActiveNotification item) {
+    // Android plugin v18 returns id/channelId/tag for delivered notifications,
+    // but omits payload. These three app-owned channels contain private work
+    // content (including the test notification); all production posts are
+    // untagged. This fallback is only for full privacy cleanup, never journal
+    // recovery, where category ownership must remain fail-closed.
+    return item.tag == null &&
+        (_isPrivatePayload(item.payload) ||
+            const {assignmentChannel, summaryChannel, manualChannel}
+                .contains(item.channelId));
+  }
 
   static String? _scheduleCategoryForPayload(String? payload) {
     if (payload?.startsWith('a:') == true) return 'assignments';
