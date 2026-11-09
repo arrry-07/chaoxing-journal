@@ -200,6 +200,42 @@ void main() {
     expect(pending, isEmpty);
     expect(await service.hasPendingScheduleRecovery(), false);
   });
+  for (final category in ['assignments', 'summary']) {
+    test('retiring delivered $category uses native channel ownership',
+        () async {
+      final service = LocalNotificationService();
+      if (category == 'assignments') {
+        await service.rescheduleAssignments([
+          f
+              .sample('shared')
+              .copyWith(deadlineAt: DateTime.now().add(const Duration(days: 2)))
+        ], offsetsMinutes: [
+          30
+        ]);
+      } else {
+        await service.rescheduleSummary([f.sample('shared')],
+            PersonalWorkspace(summaryEnabled: true), DateTime.now());
+      }
+      expect(pending, isNotEmpty);
+      final first = pending.removeAt(0);
+      active.add({
+        'id': first['id'],
+        'channelId': category == 'assignments'
+            ? 'assignment_deadlines'
+            : 'daily_summary',
+        'tag': null
+      });
+      if (category == 'assignments') {
+        await service.rescheduleAssignments([], offsetsMinutes: [30]);
+      } else {
+        await service
+            .rescheduleSummary([], PersonalWorkspace(), DateTime.now());
+      }
+      expect(active, isEmpty);
+      expect(pending, isEmpty);
+      expect(await service.hasPendingScheduleRecovery(), false);
+    });
+  }
   for (final evidence in [
     {'channelId': 'assignment_deadlines', 'tag': null},
     {'channelId': 'unknown-channel', 'tag': null},
