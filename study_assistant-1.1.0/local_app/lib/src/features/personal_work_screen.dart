@@ -46,40 +46,60 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
       for (var i = 0; i < labels.length; i++)
         TextEditingController(text: initial?[i])
     ];
+    String? validationError;
     final result = await showDialog<List<String>>(
         context: context,
-        builder: (c) => AlertDialog(
-                title: Text(title),
-                content: SingleChildScrollView(
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  for (var i = 0; i < labels.length; i++)
-                    Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: TextField(
-                            controller: controllers[i],
-                            maxLength: i == 0 ? 200 : 4096,
-                            decoration: InputDecoration(labelText: labels[i])))
-                ])),
-                actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(c),
-                      child: const Text('取消')),
-                  FilledButton(
-                      onPressed: () {
-                        final values =
-                            controllers.map((v) => v.text.trim()).toList();
-                        if (values.any((v) => v.isEmpty)) return;
-                        if (values.length == 2 &&
-                            !PersonalWorkspace.validUrl(values[1])) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('请输入不含账号信息的 HTTPS 链接')));
-                          return;
-                        }
-                        Navigator.pop(c, values);
-                      },
-                      child: const Text('添加'))
-                ]));
+        builder: (c) => StatefulBuilder(
+            builder: (c, setDialogState) => AlertDialog(
+                    title: Text(title),
+                    content: SingleChildScrollView(
+                        child:
+                            Column(mainAxisSize: MainAxisSize.min, children: [
+                      for (var i = 0; i < labels.length; i++)
+                        Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: TextField(
+                                controller: controllers[i],
+                                onChanged: (_) {
+                                  if (validationError != null) {
+                                    setDialogState(
+                                        () => validationError = null);
+                                  }
+                                },
+                                maxLength: i == 0 ? 200 : 4096,
+                                decoration:
+                                    InputDecoration(labelText: labels[i]))),
+                      if (validationError != null)
+                        Semantics(
+                            liveRegion: true,
+                            child: Text(validationError!,
+                                style: TextStyle(
+                                    color: Theme.of(c).colorScheme.error)))
+                    ])),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(c),
+                          child: const Text('取消')),
+                      FilledButton(
+                          onPressed: () {
+                            final values =
+                                controllers.map((v) => v.text.trim()).toList();
+                            final missing = values.indexWhere((v) => v.isEmpty);
+                            if (missing >= 0) {
+                              setDialogState(() =>
+                                  validationError = '请填写${labels[missing]}');
+                              return;
+                            }
+                            if (values.length == 2 &&
+                                !PersonalWorkspace.validUrl(values[1])) {
+                              setDialogState(() =>
+                                  validationError = '请输入不含账号信息的 HTTPS 链接');
+                              return;
+                            }
+                            Navigator.pop(c, values);
+                          },
+                          child: const Text('添加'))
+                    ])));
     // Controllers belong to dialog fields until their exit animation completes.
     Future<void>.delayed(const Duration(milliseconds: 350), () {
       for (final c in controllers) {
@@ -155,19 +175,24 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
         Text('个人清单 · ${steps.where((s) => s.done).length}/${steps.length}',
             style: Theme.of(context).textTheme.titleMedium),
         for (var i = 0; i < steps.length; i++)
-          CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: steps[i].done,
-              onChanged: busy
-                  ? null
-                  : (v) => setState(() =>
-                      steps[i] = PersonalStep(steps[i].text, done: v ?? false)),
-              title: Text(steps[i].text),
-              secondary: IconButton(
-                  tooltip: '移除此项',
-                  onPressed:
-                      busy ? null : () => setState(() => steps.removeAt(i)),
-                  icon: const Icon(Icons.close))),
+          Row(children: [
+            // An interactive secondary inside CheckboxListTile is merged into
+            // its toggle semantics. Keep removal independently accessible.
+            IconButton(
+                tooltip: '移除清单项：${steps[i].text}',
+                onPressed:
+                    busy ? null : () => setState(() => steps.removeAt(i)),
+                icon: const Icon(Icons.close)),
+            Expanded(
+                child: CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: steps[i].done,
+                    onChanged: busy
+                        ? null
+                        : (v) => setState(() => steps[i] =
+                            PersonalStep(steps[i].text, done: v ?? false)),
+                    title: Text(steps[i].text))),
+          ]),
         TextButton.icon(
             onPressed: busy || steps.length >= 50
                 ? null
