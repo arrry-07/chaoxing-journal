@@ -92,7 +92,8 @@ class LocalNotificationService {
       try {
         final active = await _plugin.getActiveNotifications();
         ids.addAll(active
-            .where((item) => _isPrivatePayload(item.payload) && item.id != null)
+            .where(
+                (item) => _isPrivateActiveNotification(item) && item.id != null)
             .map((item) => item.id!));
       } catch (error) {
         systemReadFailure ??= error;
@@ -1093,6 +1094,18 @@ class LocalNotificationService {
       // transaction, so it is cleaned by payload/active scanning rather than
       // being assigned to a category journal.
       payload?.startsWith('t:') == true;
+
+  static bool _isPrivateActiveNotification(ActiveNotification item) {
+    // Android plugin v18 returns id/channelId/tag for delivered notifications,
+    // but omits payload. These three app-owned channels contain private work
+    // content (including the test notification); all production posts are
+    // untagged. This fallback is only for full privacy cleanup, never journal
+    // recovery, where category ownership must remain fail-closed.
+    return item.tag == null &&
+        (_isPrivatePayload(item.payload) ||
+            const {assignmentChannel, summaryChannel, manualChannel}
+                .contains(item.channelId));
+  }
 
   static String? _scheduleCategoryForPayload(String? payload) {
     if (payload?.startsWith('a:') == true) return 'assignments';
