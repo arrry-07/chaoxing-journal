@@ -175,19 +175,24 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
         Text('个人清单 · ${steps.where((s) => s.done).length}/${steps.length}',
             style: Theme.of(context).textTheme.titleMedium),
         for (var i = 0; i < steps.length; i++)
-          CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: steps[i].done,
-              onChanged: busy
-                  ? null
-                  : (v) => setState(() =>
-                      steps[i] = PersonalStep(steps[i].text, done: v ?? false)),
-              title: Text(steps[i].text),
-              secondary: IconButton(
-                  tooltip: '移除此项',
-                  onPressed:
-                      busy ? null : () => setState(() => steps.removeAt(i)),
-                  icon: const Icon(Icons.close))),
+          Row(children: [
+            // An interactive secondary inside CheckboxListTile is merged into
+            // its toggle semantics. Keep removal independently accessible.
+            IconButton(
+                tooltip: '移除此项',
+                onPressed:
+                    busy ? null : () => setState(() => steps.removeAt(i)),
+                icon: const Icon(Icons.close)),
+            Expanded(
+                child: CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: steps[i].done,
+                    onChanged: busy
+                        ? null
+                        : (v) => setState(() => steps[i] =
+                            PersonalStep(steps[i].text, done: v ?? false)),
+                    title: Text(steps[i].text))),
+          ]),
         TextButton.icon(
             onPressed: busy || steps.length >= 50
                 ? null

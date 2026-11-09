@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/personal_work_screen.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'review_core_remediation_test.dart' as f;
 
 Future<AssignmentStore> setup() async {
@@ -15,6 +16,34 @@ Future<AssignmentStore> setup() async {
 }
 
 void main() {
+  testWidgets('checklist removal has an independent accessible action',
+      (tester) async {
+    final store = await setup();
+    addTearDown(store.dispose);
+    await store.savePersonal(
+        (w) => w.withWork('cx:work:1:2:shared',
+            const PersonalWork(steps: [PersonalStep('QA step')])),
+        store.accountEpoch);
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(MaterialApp(
+        home: PersonalWorkScreen(
+            store: store, assignmentId: 'cx:work:1:2:shared')));
+    final remove = find.byTooltip('移除此项');
+    final removeId = tester.getSemantics(remove).id;
+    final toggleId = tester.getSemantics(find.byType(CheckboxListTile)).id;
+    handle.dispose();
+    expect(removeId, isNot(toggleId),
+        reason: 'delete must not disappear into the checkbox toggle semantics');
+    await tester.tap(remove);
+    await tester.pumpAndSettle();
+    expect(find.text('QA step'), findsNothing);
+    final save = find.text('保存个人记录');
+    await tester.scrollUntilVisible(save, 300,
+        scrollable: find.byType(Scrollable).first);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(store.personal.work['cx:work:1:2:shared']!.steps, isEmpty);
+  });
   testWidgets(
       'invalid link error belongs to the active dialog and correction can save',
       (tester) async {
