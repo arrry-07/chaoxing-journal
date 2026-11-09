@@ -179,7 +179,7 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
             // An interactive secondary inside CheckboxListTile is merged into
             // its toggle semantics. Keep removal independently accessible.
             IconButton(
-                tooltip: '移除此项',
+                tooltip: '移除清单项：${steps[i].text}',
                 onPressed:
                     busy ? null : () => setState(() => steps.removeAt(i)),
                 icon: const Icon(Icons.close)),

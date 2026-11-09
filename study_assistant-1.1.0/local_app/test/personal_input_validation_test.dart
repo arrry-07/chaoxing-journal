@@ -21,16 +21,24 @@ void main() {
     final store = await setup();
     addTearDown(store.dispose);
     await store.savePersonal(
-        (w) => w.withWork('cx:work:1:2:shared',
-            const PersonalWork(steps: [PersonalStep('QA step')])),
+        (w) => w.withWork(
+            'cx:work:1:2:shared',
+            const PersonalWork(steps: [
+              PersonalStep('QA step'),
+              PersonalStep('Keep this step'),
+            ])),
         store.accountEpoch);
     final handle = tester.ensureSemantics();
     await tester.pumpWidget(MaterialApp(
         home: PersonalWorkScreen(
             store: store, assignmentId: 'cx:work:1:2:shared')));
-    final remove = find.byTooltip('移除此项');
+    final remove = find.byTooltip('移除清单项：QA step');
+    expect(find.byTooltip('移除清单项：Keep this step'), findsOneWidget);
     final removeId = tester.getSemantics(remove).id;
-    final toggleId = tester.getSemantics(find.byType(CheckboxListTile)).id;
+    expect(tester.getSemantics(remove).getSemanticsData().tooltip,
+        '移除清单项：QA step');
+    final toggleId =
+        tester.getSemantics(find.byType(CheckboxListTile).first).id;
     handle.dispose();
     expect(removeId, isNot(toggleId),
         reason: 'delete must not disappear into the checkbox toggle semantics');
@@ -42,7 +50,8 @@ void main() {
         scrollable: find.byType(Scrollable).first);
     await tester.tap(save);
     await tester.pumpAndSettle();
-    expect(store.personal.work['cx:work:1:2:shared']!.steps, isEmpty);
+    expect(store.personal.work['cx:work:1:2:shared']!.steps.map((s) => s.text),
+        ['Keep this step']);
   });
   testWidgets(
       'invalid link error belongs to the active dialog and correction can save',
