@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:typed_data';
 import 'parallel_apk_transfer.dart';
+import 'apk_download_transport.dart';
 
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
@@ -320,39 +321,24 @@ class AppUpdateService {
             destination: partial,
             working: working,
             token: transfer,
+            validateFullResponse: (response) =>
+                _fullResponseSize(response, declared),
             onProgress: onProgress);
       }
       var received = 0;
       int? expectedSize = declared;
       if (!parallel || response != null) {
         final fullResponse = response ??
-            await guarded<Response<ResponseBody>>(_dio.get<ResponseBody>(
+            await guarded<Response<ResponseBody>>(
+                ApkDownloadTransport(_dio).open(
               update.apkDownloadUrl,
-              cancelToken: transfer,
-              options: Options(responseType: ResponseType.stream, headers: {
-                'Accept': 'application/octet-stream',
-                'Accept-Encoding': 'identity'
-              }),
+              token: transfer,
+              validateHeaders: (response) =>
+                  _fullResponseSize(response, declared),
             ));
-        final body = fullResponse.data;
-        if (body != null) {
-          responseStream = body.stream;
-          chunks = StreamIterator<List<int>>(responseStream);
-        }
-        final status = fullResponse.statusCode ?? 0;
-        if (status != 200 || chunks == null) {
-          throw StateError('下载 APK 失败');
-        }
-        final header = fullResponse.headers.value('content-length');
-        final headerSize = header == null ? null : int.tryParse(header);
-        if ((header != null && (headerSize == null || headerSize <= 0)) ||
-            (headerSize != null && headerSize > maxDownloadBytes) ||
-            (headerSize != null &&
-                declared != null &&
-                headerSize != declared)) {
-          throw StateError('安装包响应长度异常');
-        }
-        expectedSize = declared ?? headerSize;
+        expectedSize = _fullResponseSize(fullResponse, declared);
+        responseStream = fullResponse.data!.stream;
+        chunks = StreamIterator<List<int>>(responseStream);
         output = await partial.open(mode: FileMode.write);
         final buffer = BytesBuilder(copy: false);
         streamStarted = true;
@@ -428,6 +414,20 @@ class AppUpdateService {
       }
     }
     return file;
+  }
+
+  int? _fullResponseSize(Response<ResponseBody> response, int? declared) {
+    if (response.statusCode != 200 || response.data == null) {
+      throw StateError('下载 APK 失败');
+    }
+    final header = response.headers.value('content-length');
+    final size = header == null ? null : int.tryParse(header);
+    if ((header != null && (size == null || size <= 0)) ||
+        (size != null && size > maxDownloadBytes) ||
+        (size != null && declared != null && size != declared)) {
+      throw StateError('安装包响应长度异常');
+    }
+    return declared ?? size;
   }
 
   /// Removes only stale, direct child directories created by this downloader.

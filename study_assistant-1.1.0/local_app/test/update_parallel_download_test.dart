@@ -78,6 +78,61 @@ void main() {
         candidate().sha256Hash);
     expect((await dir.list().toList()).length, 1);
   });
+  for (final failFirstProbe in [true, false]) {
+    test(
+        failFirstProbe
+            ? 'only the initial range probe may use one full response fallback'
+            : 'a later range timeout is not retried', () async {
+      final calls = <int, int>{};
+      var fullCalls = 0;
+      final dio = Dio()
+        ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+          final header = o.headers['Range'] as String?;
+          if (header == null) {
+            expect(failFirstProbe, isTrue);
+            fullCalls++;
+            h.resolve(Response<ResponseBody>(
+                requestOptions: o,
+                statusCode: 200,
+                data: ResponseBody(Stream.value(bytes), 200)));
+            return;
+          }
+          final range = RegExp(r'bytes=(\d+)-(\d+)').firstMatch(header)!;
+          final begin = int.parse(range[1]!), end = int.parse(range[2]!);
+          calls[begin] = (calls[begin] ?? 0) + 1;
+          final failAt = failFirstProbe ? 0 : bytes.length ~/ 4;
+          if (begin == failAt && (calls[begin] == 1 || !failFirstProbe)) {
+            h.reject(DioException.receiveTimeout(
+                timeout: const Duration(seconds: 60), requestOptions: o));
+            return;
+          }
+          expect(o.connectTimeout, const Duration(seconds: 30));
+          expect(o.receiveTimeout, const Duration(seconds: 60));
+          h.resolve(Response<ResponseBody>(
+              requestOptions: o,
+              statusCode: 206,
+              headers: Headers.fromMap({
+                'content-range': ['bytes $begin-$end/${bytes.length}']
+              }),
+              data: ResponseBody(
+                  Stream.value(Uint8List.sublistView(bytes, begin, end + 1)),
+                  206)));
+        }));
+      final future = AppUpdateService(dio: dio, parallelDownloads: true)
+          .downloadApk(candidate(), targetDirectory: dir.path);
+      if (failFirstProbe) {
+        final file = await future;
+        expect(calls[0], 1);
+        expect(fullCalls, 1);
+        expect(calls.length, 1);
+        expect(await file.length(), bytes.length);
+      } else {
+        await expectLater(future, throwsA(isA<DioException>()));
+        expect(calls[bytes.length ~/ 4], 1);
+        expect(await dir.list().toList(), isEmpty);
+      }
+    });
+  }
   test(
       'a server ignoring Range reuses the full response without a second request',
       () async {
@@ -95,6 +150,36 @@ void main() {
     expect(calls, 1);
     expect(await file.length(), bytes.length);
   });
+  for (final invalidHash in [false, true]) {
+    test(
+        invalidHash
+            ? 'full fallback retains hash verification'
+            : 'full fallback failure never adds a third attempt', () async {
+      final requests = <String?>[];
+      final dio = Dio()
+        ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+          requests.add(o.headers['Range'] as String?);
+          if (requests.length == 1 || !invalidHash) {
+            h.reject(DioException.connectionTimeout(
+                timeout: const Duration(seconds: 30), requestOptions: o));
+          } else {
+            h.resolve(Response<ResponseBody>(
+                requestOptions: o,
+                statusCode: 200,
+                data: ResponseBody(Stream.value(bytes), 200)));
+          }
+        }));
+      await expectLater(
+          AppUpdateService(dio: dio, parallelDownloads: true).downloadApk(
+              candidate(hash: invalidHash ? 'a' * 64 : null),
+              targetDirectory: dir.path),
+          invalidHash ? throwsStateError : throwsA(isA<DioException>()));
+      expect(requests.length, 2);
+      expect(requests.first, isNotNull);
+      expect(requests.last, isNull);
+      expect(await dir.list().toList(), isEmpty);
+    });
+  }
   test('invalid Content-Range fails closed and leaves no partial APK',
       () async {
     final dio = Dio()
@@ -127,6 +212,7 @@ void main() {
           released++;
         });
         streams.add(stream);
+        if (begin == 0) stream.add(Uint8List.sublistView(bytes, 0, 4));
         h.resolve(Response<ResponseBody>(
             requestOptions: o,
             statusCode: 206,

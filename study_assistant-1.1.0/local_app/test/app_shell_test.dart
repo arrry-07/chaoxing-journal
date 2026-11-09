@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -48,8 +49,10 @@ void main() {
         ),
       ],
     );
+    addTearDown(router.dispose);
 
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpWidget(MaterialApp.router(
+        theme: StudyAssistantTheme.light, routerConfig: router));
 
     expect(find.text('作业'), findsOneWidget);
     expect(find.text('日历'), findsOneWidget);
@@ -58,13 +61,34 @@ void main() {
     expect(find.text('同步'), findsNothing);
     expect(find.text('提醒'), findsNothing);
 
-    await tester.tap(find.text('日历'));
-    await tester.pumpAndSettle();
-    expect(find.text('日历页'), findsOneWidget);
-
-    await tester.tap(find.text('统计'));
-    await tester.pumpAndSettle();
-    expect(find.text('统计页'), findsOneWidget);
+    const labels = ['作业', '日历', '统计', '我的'];
+    const icons = [
+      (Icons.assignment_outlined, Icons.assignment),
+      (Icons.calendar_today_outlined, Icons.calendar_today),
+      (Icons.bar_chart_outlined, Icons.bar_chart),
+      (Icons.person_outline, Icons.person),
+    ];
+    // Include both entering and leaving statistics, and returning to home.
+    for (final selected in [0, 1, 2, 3, 2, 0]) {
+      await tester.tap(find.text(labels[selected]));
+      await tester.pumpAndSettle();
+      expect(find.text('${labels[selected]}页'), findsOneWidget);
+      expect(
+          tester
+              .widget<NavigationBar>(find.byType(NavigationBar))
+              .selectedIndex,
+          selected);
+      for (var i = 0; i < labels.length; i++) {
+        final color = i == selected ? Journal.ink : Journal.muted;
+        final label = tester.widget<RichText>(find.descendant(
+            of: find.text(labels[i]), matching: find.byType(RichText)));
+        expect(label.text.style?.color, color, reason: '${labels[i]} label');
+        final icon = find.byIcon(i == selected ? icons[i].$2 : icons[i].$1);
+        final glyph = tester.widget<RichText>(
+            find.descendant(of: icon, matching: find.byType(RichText)));
+        expect(glyph.text.style?.color, color, reason: '${labels[i]} icon');
+      }
+    }
   });
 }
 
