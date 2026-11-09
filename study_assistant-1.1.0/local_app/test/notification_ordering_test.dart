@@ -69,6 +69,15 @@ void main() {
           return pending.toList();
         case 'getActiveNotifications':
           return active.toList();
+        case 'zonedSchedule':
+          final args = call.arguments as Map;
+          pending.add({
+            'id': args['id'],
+            'title': args['title'],
+            'body': args['body'],
+            'payload': args['payload']
+          });
+          return true;
         case 'show':
           events.add('show-start');
           showing?.complete();
@@ -171,6 +180,55 @@ void main() {
     await service.cancelPrivateSchedules();
     expect(active, isEmpty);
   });
+  test(
+      'deleting a delivered manual reminder uses native channel ownership without payload',
+      () async {
+    final service = LocalNotificationService();
+    await service.rescheduleManual([
+      ManualEntry(
+          id: 'qa-manual',
+          title: 'QA',
+          kind: 'exam',
+          at: DateTime.now().add(const Duration(hours: 1)),
+          remind: true)
+    ]);
+    final id = pending.single['id'];
+    pending.clear();
+    active.add({'id': id, 'channelId': 'personal_schedule', 'tag': null});
+    await service.rescheduleManual([]);
+    expect(active, isEmpty);
+    expect(pending, isEmpty);
+    expect(await service.hasPendingScheduleRecovery(), false);
+  });
+  for (final evidence in [
+    {'channelId': 'assignment_deadlines', 'tag': null},
+    {'channelId': 'unknown-channel', 'tag': null},
+    {'channelId': 'personal_schedule', 'tag': 'foreign-tag'},
+    {
+      'channelId': 'assignment_deadlines',
+      'tag': null,
+      'payload': 'p:qa-manual'
+    },
+  ]) {
+    test('v2 manual recovery rejects conflicting native evidence $evidence',
+        () async {
+      final service = LocalNotificationService();
+      await service.rescheduleManual([
+        ManualEntry(
+            id: 'qa-manual',
+            title: 'QA',
+            kind: 'exam',
+            at: DateTime.now().add(const Duration(hours: 1)),
+            remind: true)
+      ]);
+      final id = pending.single['id'];
+      pending.clear();
+      active.add({'id': id, ...evidence});
+      await expectLater(service.rescheduleManual([]), throwsFormatException);
+      expect(active.single['id'], id);
+      expect(await service.hasPendingScheduleRecovery(), true);
+    });
+  }
   test(
       'native delivered channels are cleaned while unrelated or tagged notices remain',
       () async {

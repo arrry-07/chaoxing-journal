@@ -885,9 +885,8 @@ class LocalNotificationService {
 
     final pending = await _plugin.pendingNotificationRequests();
     final active = await _plugin.getActiveNotifications();
-    void verifyVisible(int id, String? payload) {
+    void verifyVisible(int id, String? owner) {
       if (!transactionIds.contains(id)) return;
-      final owner = _scheduleCategoryForPayload(payload);
       if (owner == null) {
         throw FormatException('v2 $category 事务 ID 缺少可证明的类别归属');
       }
@@ -897,11 +896,26 @@ class LocalNotificationService {
     }
 
     for (final item in pending) {
-      verifyVisible(item.id, item.payload);
+      verifyVisible(item.id, _scheduleCategoryForPayload(item.payload));
     }
     for (final item in active) {
       final id = item.id;
-      if (id != null) verifyVisible(id, item.payload);
+      if (id == null || !transactionIds.contains(id)) continue;
+      var owner = _scheduleCategoryForPayload(item.payload);
+      final channelOwner = _scheduleCategoryForChannel(item.channelId);
+      if (owner != null && channelOwner != null && owner != channelOwner) {
+        throw FormatException('v2 $category 事务 ID 的 payload 与原生渠道归属冲突');
+      }
+      // Android v18 omits payload for delivered notifications. A matching
+      // native channel is independent category evidence for a v2 journal with
+      // explicit category and non-overlapping manifests. Do not guess from an
+      // ID alone, an unknown nonempty payload, or a tagged notification.
+      if (owner == null &&
+          (item.payload == null || item.payload!.isEmpty) &&
+          item.tag == null) {
+        owner = channelOwner;
+      }
+      verifyVisible(id, owner);
     }
   }
 
@@ -1113,6 +1127,14 @@ class LocalNotificationService {
     if (payload?.startsWith('d:') == true) return 'summary';
     return null;
   }
+
+  static String? _scheduleCategoryForChannel(String? channel) =>
+      switch (channel) {
+        assignmentChannel => 'assignments',
+        manualChannel => 'manual',
+        summaryChannel => 'summary',
+        _ => null,
+      };
 
   static String _appendWarning(String? current, String next) =>
       current == null || current.isEmpty ? next : '$next；$current';
