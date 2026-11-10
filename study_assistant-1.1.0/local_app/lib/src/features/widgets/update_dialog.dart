@@ -50,7 +50,8 @@ class _UpdateDialogState extends State<UpdateDialog> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted &&
           (task.phase == UpdatePhase.idle ||
-              task.phase == UpdatePhase.checked)) {
+              task.phase == UpdatePhase.checked ||
+              task.phase == UpdatePhase.checking)) {
         task.check();
       }
     });

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,6 +26,58 @@ Map<String, dynamic> release(String name,
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('manual intent suppresses a concurrent iteration startup prompt',
+      () async {
+    final gate = Completer<void>();
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) async {
+        final startup = o.uri.path.endsWith('/latest');
+        if (startup) await gate.future;
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: startup ? release('1.7.0') : [release('1.7.0')]));
+      }));
+    final task = AppUpdateController(service: AppUpdateService(dio: dio));
+    addTearDown(task.dispose);
+    final startup = task.checkOnStartup();
+    await Future<void>.delayed(Duration.zero);
+    final manual = task.check();
+    gate.complete();
+    expect(await startup, false);
+    await manual;
+    expect(task.update?.versionName, '1.7.0');
+  });
+
+  test('manual click during startup waits then checks the patch list',
+      () async {
+    final gate = Completer<void>();
+    final paths = <String>[];
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) async {
+        paths.add(o.uri.path);
+        final startup = o.uri.path.endsWith('/latest');
+        if (startup) await gate.future;
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: startup ? release('1.6.7') : [release('1.6.72')]));
+      }));
+    final task = AppUpdateController(service: AppUpdateService(dio: dio));
+    addTearDown(task.dispose);
+    final startup = task.checkOnStartup();
+    await Future<void>.delayed(Duration.zero);
+    final manual = task.check();
+    gate.complete();
+    expect(await startup, false);
+    await manual;
+    expect(task.update?.versionName, '1.6.72');
+    expect(paths, [
+      '/repos/arrry-07/chaoxing-journal/releases/latest',
+      '/repos/arrry-07/chaoxing-journal/releases'
+    ]);
+  });
 
   test('late startup check never replaces a manual candidate', () async {
     var calls = 0;

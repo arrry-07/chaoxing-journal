@@ -51,6 +51,8 @@ class AppUpdateController extends ChangeNotifier {
   CancelToken? _cancel;
   bool _disposed = false;
   bool _startupChecked = false;
+  Future<void>? _startupRequest;
+  bool _manualDuringStartup = false;
   static const _ignoredVersionKey = 'update.ignoredVersion';
   String get _candidateKey =>
       '${update?.versionName}+${update?.versionCode ?? 0}';
@@ -62,7 +64,15 @@ class AppUpdateController extends ChangeNotifier {
     _startupChecked = true;
     // A manual check/download already owns the task; startup must not replace it.
     if (phase != UpdatePhase.idle) return false;
-    await check(startup: true);
+    _manualDuringStartup = false;
+    final request = check(startup: true);
+    _startupRequest = request;
+    try {
+      await request;
+    } finally {
+      _startupRequest = null;
+    }
+    if (_manualDuringStartup) return false;
     if (_disposed || update == null || phase != UpdatePhase.available) {
       return false;
     }
@@ -114,6 +124,13 @@ class AppUpdateController extends ChangeNotifier {
   }
 
   Future<void> check({bool startup = false}) async {
+    // A manual request must not inherit latest-only results from an in-flight
+    // startup request. Wait for it, then perform the manual list check.
+    final pendingStartup = _startupRequest;
+    if (!startup && pendingStartup != null) {
+      _manualDuringStartup = true;
+      await pendingStartup;
+    }
     if (_disposed || busy || downloadedPath != null) return;
     phase = UpdatePhase.checking;
     message = '正在检查 GitHub 最新版本…';
