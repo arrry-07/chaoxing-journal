@@ -96,15 +96,20 @@ void main() {
     final existing =
         await File('${dir.path}/fixture.apk').writeAsBytes([9, 8, 7]);
     var cancelled = false;
-    final stream = StreamController<Uint8List>(onCancel: () {
-      cancelled = true;
-    });
+    final started = Completer<void>();
+    final stream = StreamController<Uint8List>(
+        onListen: started.complete,
+        onCancel: () {
+          cancelled = true;
+        });
     final token = CancelToken();
     final service = AppUpdateService(dio: response(stream.stream));
     final downloading = service.downloadApk(candidate,
         targetDirectory: dir.path, cancelToken: token);
     final checked = expectLater(downloading, throwsA(isA<DioException>()));
-    await Future<void>.delayed(const Duration(milliseconds: 20));
+    // Exercise cancellation of an owned HTTP body, not a race with the async
+    // directory setup on a busy runner before any body was requested.
+    await started.future.timeout(const Duration(seconds: 5));
     token.cancel();
     await checked.timeout(const Duration(seconds: 2));
     expect(cancelled, isTrue);
