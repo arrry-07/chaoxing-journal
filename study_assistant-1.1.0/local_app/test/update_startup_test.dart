@@ -24,6 +24,11 @@ class Releases extends AppUpdateService {
   int checks = 0;
   AppUpdateInfo candidate = next;
   @override
+  Future<UpdateCheckResult> checkForStartup(
+          {required int currentVersionCode, CancelToken? cancelToken}) =>
+      checkConfigured(
+          currentVersionCode: currentVersionCode, cancelToken: cancelToken);
+  @override
   Future<UpdateCheckResult> checkConfigured(
       {required int currentVersionCode, CancelToken? cancelToken}) async {
     checks++;

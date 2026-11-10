@@ -3,10 +3,10 @@
 一款手账风格的学习通作业管理 Android 应用。把课程、作业、截止时间和本地提醒整理在一本暖纸色的手记里，使用霞鹜文楷、无框时间轴和课程手绘图案。
 
 [![Flutter checks](https://github.com/arrry-07/chaoxing-journal/actions/workflows/flutter-checks.yml/badge.svg?branch=main)](https://github.com/arrry-07/chaoxing-journal/actions/workflows/flutter-checks.yml)
-[![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases/latest)
+[![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 体验版](https://github.com/arrry-07/chaoxing-journal/releases/latest)** · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载1.6.71静默补丁](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.6.71)** · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
@@ -32,9 +32,9 @@
 
 ## 下载安装
 
-本次版本为 **1.6.7（52）**，公开状态及下载以 [Releases](https://github.com/arrry-07/chaoxing-journal/releases) 为准；上一公开版本为 **1.6.6（51）**，包含首页筛选记忆与更新界面优化。旧 **1.6.4/1.6.5** 草稿和附件保持不变。发布来源、检查与冻结限制见[1.6.7发布记录](docs/reviews/2026-11-10-1.6.7发布记录.md)。支持 Android **8.0及以上**，适用于 **ARM64/x86_64**。
+本次版本为 **1.6.71（53）静默补丁**，公开状态及下载以 [Releases](https://github.com/arrry-07/chaoxing-journal/releases) 为准；自动更新通道latest保留 **1.6.7（52）**。首次安装此补丁请网页下载；新版手动检查可发现后续非latest补丁。发布策略见[更新渠道指南](docs/guides/更新渠道与国内分发.md)，支持Android8.0+、ARM64/x86_64。
 
-1. 从 [Releases](https://github.com/arrry-07/chaoxing-journal/releases/latest) 下载 `chaoxing-journal-1.6.3.apk` 和 `SHA256SUMS.txt`。
+1. 从 [1.6.71发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.6.71) 下载 `chaoxing-journal-1.6.71.apk` 和 `SHA256SUMS.txt`。此补丁不设latest，旧版首次需网页下载安装。
 2. 核对文件的 SHA-256，然后按 Android 提示安装。具体校验命令见[安装指南](docs/guides/安装与使用.md#下载安装)。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 

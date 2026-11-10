@@ -60,7 +60,9 @@ class AppUpdateController extends ChangeNotifier {
   Future<bool> checkOnStartup() async {
     if (_startupChecked || _disposed) return false;
     _startupChecked = true;
-    await check();
+    // A manual check/download already owns the task; startup must not replace it.
+    if (phase != UpdatePhase.idle) return false;
+    await check(startup: true);
     if (_disposed || update == null || phase != UpdatePhase.available) {
       return false;
     }
@@ -111,7 +113,7 @@ class AppUpdateController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  Future<void> check() async {
+  Future<void> check({bool startup = false}) async {
     if (_disposed || busy || downloadedPath != null) return;
     phase = UpdatePhase.checking;
     message = '正在检查 GitHub 最新版本…';
@@ -119,8 +121,17 @@ class AppUpdateController extends ChangeNotifier {
     _cancel = CancelToken();
     _emit();
     try {
-      final checked = await service.checkConfigured(
-          currentVersionCode: AppVersion.code, cancelToken: _cancel);
+      var checked = await (startup
+          ? service.checkForStartup(
+              currentVersionCode: AppVersion.code, cancelToken: _cancel)
+          : service.checkConfigured(
+              currentVersionCode: AppVersion.code, cancelToken: _cancel));
+      if (startup &&
+          checked.update != null &&
+          !AppUpdateService.isNewIteration(
+              checked.update!.versionName, AppVersion.name)) {
+        checked = const UpdateCheckResult(UpdateCheckStatus.upToDate);
+      }
       if (_disposed) return;
       result = checked;
       phase = checked.status == UpdateCheckStatus.available

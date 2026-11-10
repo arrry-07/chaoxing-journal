@@ -97,10 +97,10 @@ void main() {
       () async {
     final dio = Dio()
       ..interceptors.add(InterceptorsWrapper(
-          onRequest: (o, h) => h.resolve(Response(
-              requestOptions: o,
-              statusCode: 200,
-              data: {'tag_name': 'v1.0.0'}))));
+          onRequest: (o, h) =>
+              h.resolve(Response(requestOptions: o, statusCode: 200, data: [
+                {'tag_name': 'v1.0.0'}
+              ]))));
     expect(
         (await AppUpdateService(dio: dio)
                 .checkConfigured(currentVersionCode: 31))
