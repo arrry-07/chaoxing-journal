@@ -1,4 +1,10 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -48,6 +54,64 @@ Future<AssignmentStore> _setupFailingSave() async {
 }
 
 void main() {
+  testWidgets('bottom action guides selection and generates before saving',
+      (tester) async {
+    await (FontLoader(Journal.bodyFamily)
+          ..addFont(rootBundle.load('assets/type/LXGWWenKaiScreen.ttf')))
+        .load();
+    final boundary = GlobalKey();
+    Future<void> capture(String name) async {
+      if (!const bool.fromEnvironment('CAPTURE_UI')) return;
+      await tester.runAsync(() async {
+        final image = await (boundary.currentContext!.findRenderObject()
+                as RenderRepaintBoundary)
+            .toImage();
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        final out = Directory('../../artifacts/2026-11-10/planner-fix');
+        await out.create(recursive: true);
+        await File('${out.path}/$name.png')
+            .writeAsBytes(bytes!.buffer.asUint8List());
+        image.dispose();
+      });
+    }
+
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(RepaintBoundary(
+        key: boundary,
+        child: MaterialApp(
+            theme: StudyAssistantTheme.light,
+            home: DailyPlanScreen(store: store))));
+    await tester.tap(find.text('智能规划建议'));
+    await tester.pumpAndSettle();
+    final button = find.byKey(const ValueKey('planning-save'));
+    await capture('generate');
+    expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(find.text('请先勾选要规划的作业，再填写预计耗时。'), findsOneWidget);
+    await tester.ensureVisible(
+        find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')));
+    await tester.tap(
+        find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const ValueKey('planning-estimate-cx:work:1:2:shared')),
+        '25');
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    await capture('save');
+    expect(find.text('保存所选建议'), findsOneWidget);
+    expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(store.personal.plans.single.minutes, 25);
+  });
+
   Future<void> openPlanner(WidgetTester tester, AssignmentStore store) async {
     tester.view.physicalSize = const Size(800, 1000);
     tester.view.devicePixelRatio = 1;
@@ -100,7 +164,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('planning-generate')));
     await tester.pumpAndSettle();
     expect(find.text('自动纳入'), findsNothing);
-    expect(find.textContaining('截止时间读取失败'), findsOneWidget);
+    expect(find.textContaining('截止时间读取失败'), findsWidgets);
     expect(store.personal.plans, isEmpty);
   });
 
@@ -259,10 +323,14 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('planning-generate')));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('需要填写预计耗时'), findsOneWidget);
+    expect(find.textContaining('需要填写预计耗时'), findsWidgets);
     final save = tester
         .widget<FilledButton>(find.byKey(const ValueKey('planning-save')));
-    expect(save.onPressed, isNull);
+    expect(save.onPressed, isNotNull);
+    expect(find.text('保存所选建议'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('planning-save')));
+    await tester.pumpAndSettle();
+    expect(find.text('保存所选建议'), findsNothing);
     expect(store.personal.plans, isEmpty);
   });
 
@@ -294,7 +362,11 @@ void main() {
     expect(find.text('自动纳入'), findsNothing);
     final save = tester
         .widget<FilledButton>(find.byKey(const ValueKey('planning-save')));
-    expect(save.onPressed, isNull);
+    expect(save.onPressed, isNotNull);
+    expect(find.text('保存所选建议'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('planning-save')));
+    await tester.pumpAndSettle();
+    expect(find.text('保存所选建议'), findsNothing);
     expect(store.personal.plans, isEmpty);
   });
 

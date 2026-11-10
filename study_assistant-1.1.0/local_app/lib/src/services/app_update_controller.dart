@@ -51,6 +51,8 @@ class AppUpdateController extends ChangeNotifier {
   CancelToken? _cancel;
   bool _disposed = false;
   bool _startupChecked = false;
+  Future<void>? _startupRequest;
+  bool _manualDuringStartup = false;
   static const _ignoredVersionKey = 'update.ignoredVersion';
   String get _candidateKey =>
       '${update?.versionName}+${update?.versionCode ?? 0}';
@@ -60,7 +62,17 @@ class AppUpdateController extends ChangeNotifier {
   Future<bool> checkOnStartup() async {
     if (_startupChecked || _disposed) return false;
     _startupChecked = true;
-    await check();
+    // A manual check/download already owns the task; startup must not replace it.
+    if (phase != UpdatePhase.idle) return false;
+    _manualDuringStartup = false;
+    final request = check(startup: true);
+    _startupRequest = request;
+    try {
+      await request;
+    } finally {
+      _startupRequest = null;
+    }
+    if (_manualDuringStartup) return false;
     if (_disposed || update == null || phase != UpdatePhase.available) {
       return false;
     }
@@ -111,7 +123,14 @@ class AppUpdateController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  Future<void> check() async {
+  Future<void> check({bool startup = false}) async {
+    // A manual request must not inherit latest-only results from an in-flight
+    // startup request. Wait for it, then perform the manual list check.
+    final pendingStartup = _startupRequest;
+    if (!startup && pendingStartup != null) {
+      _manualDuringStartup = true;
+      await pendingStartup;
+    }
     if (_disposed || busy || downloadedPath != null) return;
     phase = UpdatePhase.checking;
     message = '正在检查 GitHub 最新版本…';
@@ -119,8 +138,17 @@ class AppUpdateController extends ChangeNotifier {
     _cancel = CancelToken();
     _emit();
     try {
-      final checked = await service.checkConfigured(
-          currentVersionCode: AppVersion.code, cancelToken: _cancel);
+      var checked = await (startup
+          ? service.checkForStartup(
+              currentVersionCode: AppVersion.code, cancelToken: _cancel)
+          : service.checkConfigured(
+              currentVersionCode: AppVersion.code, cancelToken: _cancel));
+      if (startup &&
+          checked.update != null &&
+          !AppUpdateService.isNewIteration(
+              checked.update!.versionName, AppVersion.name)) {
+        checked = const UpdateCheckResult(UpdateCheckStatus.upToDate);
+      }
       if (_disposed) return;
       result = checked;
       phase = checked.status == UpdateCheckStatus.available

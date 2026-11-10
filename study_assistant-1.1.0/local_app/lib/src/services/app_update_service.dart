@@ -75,7 +75,7 @@ class AppUpdateService {
       {required int currentVersionCode, CancelToken? cancelToken}) async {
     await cleanupStaleDownloads();
     if (manifestUrl.isEmpty) {
-      return _checkGitHub(
+      return checkForManualUpdate(
           currentVersionName: AppVersion.name,
           currentVersionCode: currentVersionCode,
           cancelToken: cancelToken);
@@ -142,6 +142,42 @@ class AppUpdateService {
     }
   }
 
+  Future<UpdateCheckResult> checkForManualUpdate({
+    required String currentVersionName,
+    required int currentVersionCode,
+    CancelToken? cancelToken,
+  }) =>
+      _checkGitHub(
+          currentVersionName: currentVersionName,
+          currentVersionCode: currentVersionCode,
+          cancelToken: cancelToken,
+          listReleases: true);
+
+  /// Startup follows only the explicitly promoted iteration release.
+  Future<UpdateCheckResult> checkForStartup(
+      {required int currentVersionCode, CancelToken? cancelToken}) async {
+    if (manifestUrl.isNotEmpty) {
+      return checkConfigured(
+          currentVersionCode: currentVersionCode, cancelToken: cancelToken);
+    }
+    await cleanupStaleDownloads();
+    return _checkGitHub(
+        currentVersionName: AppVersion.name,
+        currentVersionCode: currentVersionCode,
+        cancelToken: cancelToken);
+  }
+
+  static bool isNewIteration(String remote, String current) {
+    final pattern = RegExp(r'^\d+\.\d+\.\d+$');
+    if (!pattern.hasMatch(normalizeVersionName(remote)) ||
+        !pattern.hasMatch(normalizeVersionName(current))) {
+      return false;
+    }
+    final next = _versionParts(remote), installed = _versionParts(current);
+    return next[0] > installed[0] ||
+        (next[0] == installed[0] && next[1] > installed[1]);
+  }
+
   /// Legacy nullable API; application UI uses the explicit result from checkConfigured.
   Future<AppUpdateInfo?> checkForUpdate({
     required String currentVersionName,
@@ -156,12 +192,30 @@ class AppUpdateService {
     required String currentVersionName,
     required int currentVersionCode,
     CancelToken? cancelToken,
+    bool listReleases = false,
   }) async {
     try {
-      final response = await _dio.get<dynamic>(
-        'https://api.github.com/repos/$owner/$repo/releases/latest',
-        cancelToken: cancelToken,
-      );
+      final releases = <Map<String, dynamic>>[];
+      var page = 1;
+      late Response<dynamic> response;
+      while (true) {
+        response = await _dio.get<dynamic>(
+          'https://api.github.com/repos/$owner/$repo/releases${listReleases ? '' : '/latest'}',
+          queryParameters:
+              listReleases ? {'per_page': 100, 'page': page} : null,
+          cancelToken: cancelToken,
+        );
+        if (!listReleases || response.statusCode != 200) break;
+        final data = response.data;
+        if (data is! List || data.any((item) => _asMap(item) == null)) {
+          return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
+        }
+        releases.addAll(data.map((item) => _asMap(item)!));
+        final more = data.length == 100 ||
+            (response.headers.value('link')?.contains('rel="next"') ?? false);
+        if (!more) break;
+        page++;
+      }
       final status = response.statusCode;
       if (status == 429 ||
           (status == 403 &&
@@ -178,7 +232,33 @@ class AppUpdateService {
       if (status != 200) {
         return const UpdateCheckResult(UpdateCheckStatus.networkError);
       }
-      final release = _asMap(response.data);
+      Map<String, dynamic>? release;
+      if (listReleases) {
+        final stable = releases
+            .where((r) => r['draft'] != true && r['prerelease'] != true)
+            .toList();
+        if (stable.isEmpty) {
+          return const UpdateCheckResult(UpdateCheckStatus.noRelease);
+        }
+        final pattern = RegExp(r'^[vV]?(\d+\.\d+\.\d+)(?:\+(\d+))?$');
+        for (final item in stable) {
+          final name = pattern.firstMatch(item['tag_name']?.toString() ?? '');
+          if (name == null) continue;
+          if (release == null) {
+            release = item;
+            continue;
+          }
+          final prior = pattern.firstMatch(release['tag_name'].toString())!;
+          if (isRemoteVersionNewer(name.group(1)!, prior.group(1)!) ||
+              (name.group(1) == prior.group(1) &&
+                  (int.tryParse(name.group(2) ?? '') ?? 0) >
+                      (int.tryParse(prior.group(2) ?? '') ?? 0))) {
+            release = item;
+          }
+        }
+      } else {
+        release = _asMap(response.data);
+      }
       final tag = release?['tag_name']?.toString() ?? '';
       final match =
           RegExp(r'^[vV]?(\d+\.\d+\.\d+)(?:\+(\d+))?$').firstMatch(tag);

@@ -24,11 +24,11 @@ AppUpdateService serviceFor(dynamic body,
   final dio = Dio(BaseOptions(validateStatus: (_) => true))
     ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
       expect(o.uri.host, 'api.github.com');
-      expect(o.uri.path, '/repos/arrry-07/chaoxing-journal/releases/latest');
+      expect(o.uri.path, '/repos/arrry-07/chaoxing-journal/releases');
       h.resolve(Response(
           requestOptions: o,
           statusCode: status,
-          data: body,
+          data: status == 200 ? [body] : body,
           headers: Headers.fromMap(headers ?? {})));
     }));
   return AppUpdateService(dio: dio);
@@ -99,7 +99,11 @@ void main() {
       }
       final result =
           await serviceFor(data).checkConfigured(currentVersionCode: 37);
-      expect(result.status, UpdateCheckStatus.invalidManifest);
+      expect(
+          result.status,
+          kind == 'draft' || kind == 'prerelease'
+              ? UpdateCheckStatus.noRelease
+              : UpdateCheckStatus.invalidManifest);
       expect(result.update, isNull);
     });
   }
