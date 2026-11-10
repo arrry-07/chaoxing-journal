@@ -11,6 +11,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 
+class _CourseSession extends SecureSessionStore {
+  @override
+  Future<String?> readChaoxingAccount() async => 'synthetic-filter';
+  @override
+  Future<String?> readChaoxingDisplayName() async => null;
+  @override
+  Future<String?> readChaoxingAvatarUrl() async => null;
+}
+
 class _Widgets extends WidgetSnapshotService {
   List<Assignment> items = [];
   @override
@@ -43,7 +52,12 @@ void main() {
   testWidgets(
       'course filter uses class identity and preserves stored assignments',
       (t) async {
-    final s = store();
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final s = AssignmentStore(
+        sessionStore: _CourseSession(),
+        notificationService: LocalNotificationService(),
+        widgetSnapshotService: _Widgets());
+    await s.restoreSession();
     addTearDown(s.dispose);
     final now = DateTime.now();
     s.replaceAssignmentsForTest([

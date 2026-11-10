@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
 import '../models/assignment.dart';
+import '../models/home_filters.dart';
 import '../models/sync_report.dart';
 import '../models/personal_workspace.dart';
 import '../services/assignment_store.dart';
@@ -40,10 +41,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
   }
 
   bool _refreshing = false;
-  String? _courseKey;
-  String _query = '';
-  AssignmentDeadlineFilter _deadlineFilter = AssignmentDeadlineFilter.all;
-  int? _filterEpoch;
+  String? get _courseKey => store.homeFilters.courseKey;
+  String get _query => store.homeFilters.query;
+  AssignmentDeadlineFilter get _deadlineFilter => store.homeFilters.deadline;
   final _openingAssignments = <String>{};
   AssignmentStore get store => widget.store;
 
@@ -164,17 +164,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         final busy = _refreshing ||
             store.isLoading ||
             store.syncReport.phase == SyncPhase.running;
-        if (_filterEpoch != store.accountEpoch) {
-          _filterEpoch = store.accountEpoch;
-          _courseKey = null;
-          _query = '';
-          _deadlineFilter = AssignmentDeadlineFilter.all;
-        }
         final options = <String, String>{
           for (final a in store.visibleAssignments)
             if (a.courseKey case final key?) key: a.courseName
         };
-        if (!options.containsKey(_courseKey)) _courseKey = null;
+        if (_courseKey != null && !options.containsKey(_courseKey)) {
+          options[_courseKey!] = '已选课程（当前无可显示作业）';
+        }
         final now = DateTime.now(),
             items = AssignmentQuery.filterHome(
               store.visibleAssignments,
@@ -266,15 +262,17 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                 final minutes = plans
                     .where((p) => !p.done)
                     .fold<int>(0, (v, p) => v + p.minutes);
-                return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.checklist),
-                    title: const Text('今日计划'),
-                    subtitle: Text(plans.isEmpty
-                        ? '选两三份作业，安排今天要做的事'
-                        : '${plans.where((p) => p.done).length}/${plans.length} 项已勾选 · 预计剩余 $minutes 分钟'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/plan'));
+                return Material(
+                    type: MaterialType.transparency,
+                    child: ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.checklist),
+                        title: const Text('今日计划'),
+                        subtitle: Text(plans.isEmpty
+                            ? '选两三份作业，安排今天要做的事'
+                            : '${plans.where((p) => p.done).length}/${plans.length} 项已勾选 · 预计剩余 $minutes 分钟'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => context.push('/plan')));
               }),
               const Divider(height: 24),
               Row(children: [
@@ -313,6 +311,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                     child: Semantics(
                         liveRegion: true,
                         child: const Text('正在刷新作业…', style: Journal.metadata))),
+              if (_courseKey != null &&
+                  !store.visibleAssignments
+                      .any((a) => a.courseKey == _courseKey))
+                const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
+                        style: Journal.metadata)),
               if (items.isNotEmpty) ...[
                 ...timeline([...groups.near, ...groups.far]),
                 if (groups.noDeadline.isNotEmpty) ...[
@@ -330,13 +335,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                       padding: EdgeInsets.symmetric(vertical: 16),
                       child: Text('没有符合搜索或期限条件的作业')),
                   TextButton(
-                      onPressed: () {
-                        setState(() {
-                          _query = '';
-                          _courseKey = null;
-                          _deadlineFilter = AssignmentDeadlineFilter.all;
-                        });
-                      },
+                      onPressed: () =>
+                          _saveFilters(const HomeFilters(), store.accountEpoch),
                       child: const Text('清除搜索与期限条件')),
                 ] else ...[
                   const Padding(
@@ -390,6 +390,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
       return '$summary · 超过24小时未更新';
     }
     return summary;
+  }
+
+  Future<void> _saveFilters(HomeFilters filters, int epoch) async {
+    final saved = await store.saveHomeFilters(filters, epoch);
+    if (!mounted || epoch != store.accountEpoch) return;
+    if (!saved) feedback('筛选条件未能保存，请重试；原条件已保留');
   }
 
   Future<void> _openFilters(Map<String, String> courseOptions) async {
@@ -493,11 +499,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
     if (!mounted || selection == null || store.accountEpoch != openingEpoch) {
       return;
     }
-    setState(() {
-      _query = selection.query.trim();
-      _courseKey = selection.courseKey;
-      _deadlineFilter = selection.deadline;
-    });
+    await _saveFilters(
+        HomeFilters(
+            query: selection.query.trim(),
+            courseKey: selection.courseKey,
+            deadline: selection.deadline),
+        openingEpoch);
   }
 }
 

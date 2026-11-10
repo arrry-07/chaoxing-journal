@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../app/app_version.dart';
+import '../../app/journal.dart';
 import '../../services/app_update_controller.dart';
 import '../../services/app_update_service.dart';
 import '../../services/external_link_service.dart';
@@ -86,94 +87,216 @@ class _UpdateDialogState extends State<UpdateDialog> {
     }
   }
 
+  Widget actions(BuildContext context) {
+    void close() => Navigator.pop(context);
+    final phase = task.phase;
+    final ready = task.downloadedPath != null;
+    String? primary;
+    VoidCallback? action;
+    final secondary = <Widget>[];
+    if (task.downloading) {
+      primary = phase == UpdatePhase.verifying ? '收起，继续使用' : '后台下载';
+      action = close;
+      if (phase == UpdatePhase.downloading) {
+        secondary.add(TextButton(
+            onPressed: task.cancelDownload, child: const Text('取消下载')));
+      }
+    } else if (task.busy) {
+      secondary.add(TextButton(onPressed: close, child: const Text('关闭')));
+    } else if (task.update != null) {
+      primary = ready
+          ? '安装更新'
+          : (phase == UpdatePhase.failed || phase == UpdatePhase.cancelled)
+              ? '重新下载'
+              : '下载并安装';
+      action = ready ? task.install : downloadAndInstall;
+      secondary.add(TextButton(
+          onPressed: close,
+          child: Text(ready
+              ? '稍后安装'
+              : phase == UpdatePhase.available
+                  ? '稍后更新'
+                  : '稍后再说')));
+      if (!ready && phase == UpdatePhase.available) {
+        secondary.add(TextButton(
+            onPressed: _savingIgnore ? null : ignoreVersion,
+            child: Text(_savingIgnore ? '正在保存…' : '忽略此版本')));
+      }
+    } else {
+      if (phase == UpdatePhase.failed) {
+        primary = '重新检查';
+        action = task.check;
+      }
+      secondary.add(TextButton(onPressed: close, child: const Text('关闭')));
+    }
+    return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (primary != null)
+            FilledButton(
+                style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 14)),
+                onPressed: action,
+                child: Text(primary)),
+          if (secondary.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            LayoutBuilder(builder: (context, c) {
+              if (c.maxWidth < 260 ||
+                  MediaQuery.textScalerOf(context).scale(14) > 21) {
+                return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: secondary);
+              }
+              return Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (final button in secondary) Flexible(child: button)
+                  ]);
+            }),
+          ],
+        ]);
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: task,
       builder: (context, _) {
         final update = task.update;
-        final progress = task.progress;
-        return AlertDialog(
-          title: const Text('应用更新'),
-          content: SizedBox(
-              width: 380,
-              child: SingleChildScrollView(
-                  child: Column(
+        final phase = task.phase;
+        final title = switch (phase) {
+          UpdatePhase.downloading => '正在下载更新',
+          UpdatePhase.verifying => '正在校验更新',
+          UpdatePhase.ready => '更新已就绪',
+          UpdatePhase.installing => '准备安装更新',
+          UpdatePhase.failed => update == null ? '检查更新失败' : '更新未完成',
+          UpdatePhase.cancelled => '下载已取消',
+          _ => update == null ? '应用更新' : '发现新版本',
+        };
+        return Dialog(
+            backgroundColor: Journal.sheet,
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: LayoutBuilder(builder: (context, bounds) {
+                  final compact = bounds.maxHeight < 520 ||
+                      MediaQuery.textScalerOf(context).scale(14) > 21;
+                  final body = Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Text('当前版本 ${AppVersion.display}',
-                        style: Theme.of(context).textTheme.bodySmall),
-                    const SizedBox(height: 12),
-                    Semantics(liveRegion: true, child: Text(task.message)),
-                    if (task.busy) ...[
-                      const SizedBox(height: 12),
-                      LinearProgressIndicator(
-                          value: task.phase == UpdatePhase.downloading
-                              ? progress
-                              : null),
-                      if (task.phase == UpdatePhase.downloading &&
-                          progress != null)
-                        Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                                '${(progress * 100).floor()}% · ${task.transferSummary}')),
-                    ],
-                    if (update != null) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                          '版本 ${update.versionName}${update.versionCode == null ? '' : '（${update.versionCode}）'}',
-                          style: Theme.of(context).textTheme.titleMedium),
-                      if (update.apkSize != null)
-                        Text(
-                            '下载大小 ${(update.apkSize! / 1048576).toStringAsFixed(1)} MB'),
-                      if (!task.busy && task.downloadedPath == null)
-                        CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          controlAffinity: ListTileControlAffinity.leading,
-                          value: task.service.parallelDownloads,
-                          onChanged: (value) => setState(() =>
-                              task.service.parallelDownloads = value ?? false),
-                          title: const Text('尝试多连接加速'),
-                          subtitle: const Text('下载较慢时可尝试，实际速度取决于网络。'),
-                        ),
-                      if (update.releaseNotes.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Text(update.releaseNotes),
-                      ],
-                    ],
-                    if (task.downloading) ...[
-                      const SizedBox(height: 12),
-                      const Text('收起后可继续使用应用；下载完成后再确认安装。'),
-                    ],
-                    if (!task.busy)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton(
-                            onPressed: openRelease,
-                            child: const Text('查看 GitHub 发行版')),
-                      ),
-                  ]))),
-          actions: [
-            if (update != null && !task.busy && task.downloadedPath == null)
-              TextButton(
-                onPressed: _savingIgnore ? null : ignoreVersion,
-                child: Text(_savingIgnore ? '正在保存…' : '忽略此版本'),
-              ),
-            if (task.phase == UpdatePhase.downloading)
-              TextButton(
-                  onPressed: task.cancelDownload, child: const Text('取消下载')),
-            TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(task.downloading ? '后台下载' : '关闭')),
-            if (!task.busy && update == null)
-              TextButton(onPressed: task.check, child: const Text('重新检查')),
-            if (!task.busy && update != null)
-              FilledButton(
-                  onPressed: task.downloadedPath == null
-                      ? downloadAndInstall
-                      : task.install,
-                  child: Text(task.downloadedPath == null ? '下载并安装' : '安装更新')),
-          ],
-        );
+                        Text(title,
+                            style: Journal.section.copyWith(fontSize: 23)),
+                        const SizedBox(height: 16),
+                        if (update != null) ...[
+                          Text(update.versionName,
+                              style: Journal.display.copyWith(fontSize: 30)),
+                          const SizedBox(height: 4),
+                          Text(
+                              '当前版本 ${AppVersion.display}'
+                              '${update.apkSize == null ? '' : ' · ${(update.apkSize! / 1048576).toStringAsFixed(1)} MB'}',
+                              style: Journal.metadata),
+                          const SizedBox(height: 16),
+                        ] else ...[
+                          Text('当前版本 ${AppVersion.display}',
+                              style: Journal.metadata),
+                          const SizedBox(height: 12),
+                        ],
+                        if (task.message != title)
+                          Semantics(
+                              liveRegion: !task.downloading,
+                              child: Text(task.message,
+                                  style: Journal.metadata.copyWith(
+                                      color: phase == UpdatePhase.failed
+                                          ? Journal.berry
+                                          : Journal.muted))),
+                        if (task.busy) ...[
+                          const SizedBox(height: 16),
+                          ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                  minHeight: 6,
+                                  value: phase == UpdatePhase.downloading
+                                      ? task.progress
+                                      : null)),
+                          if (phase == UpdatePhase.downloading) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                                '${task.progress == null ? '' : '${(task.progress! * 100).floor()}% · '}${task.transferSummary}',
+                                style: Journal.metadata),
+                          ],
+                        ],
+                        if (task.downloading) ...[
+                          const SizedBox(height: 12),
+                          const Text('收起后可继续使用应用；下载完成后再确认安装。',
+                              style: Journal.metadata),
+                        ],
+                        if (update != null &&
+                            !task.downloading &&
+                            update.releaseNotes.isNotEmpty) ...[
+                          const SizedBox(height: 20),
+                          Text('更新内容', style: Journal.entryTitle),
+                          const SizedBox(height: 8),
+                          ConstrainedBox(
+                              constraints: BoxConstraints(
+                                  maxHeight: compact ? 140 : 180),
+                              child: Scrollbar(
+                                  child: SingleChildScrollView(
+                                      primary: false,
+                                      child: Text(update.releaseNotes,
+                                          style: Journal.metadata
+                                              .copyWith(color: Journal.ink))))),
+                        ],
+                        if (update != null &&
+                            !task.busy &&
+                            task.downloadedPath == null) ...[
+                          const SizedBox(height: 16),
+                          SwitchListTile.adaptive(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('尝试多连接加速',
+                                  style: Journal.metadata),
+                              subtitle: Text('下载较慢时可尝试，速度取决于网络。',
+                                  style:
+                                      Journal.metadata.copyWith(fontSize: 12)),
+                              value: task.service.parallelDownloads,
+                              onChanged: (v) => setState(
+                                  () => task.service.parallelDownloads = v)),
+                        ],
+                        if (!task.busy)
+                          TextButton(
+                              onPressed: openRelease,
+                              style: TextButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                  alignment: Alignment.centerLeft),
+                              child: const Text('查看 GitHub 发行版')),
+                      ]);
+                  final footer = Padding(
+                      padding: const EdgeInsets.only(top: 20),
+                      child: actions(context));
+                  return Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: compact
+                          ? SingleChildScrollView(
+                              child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [body, footer]))
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                  Flexible(
+                                      child:
+                                          SingleChildScrollView(child: body)),
+                                  footer
+                                ]));
+                })));
       });
 }

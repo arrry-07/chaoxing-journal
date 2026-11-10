@@ -76,7 +76,7 @@ void main() {
     source.pending.complete(
         const UpdateCheckResult(UpdateCheckStatus.available, update: next));
     await t.pumpAndSettle();
-    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.byType(UpdateDialog), findsNothing);
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
@@ -133,7 +133,7 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.text('忽略此版本'));
     await t.pump();
-    await t.tap(find.text('关闭'));
+    await t.tap(find.text('稍后更新'));
     task.pending.complete(true);
     await t.pumpAndSettle();
     expect(find.text('保留此页面'), findsOneWidget);
@@ -167,7 +167,7 @@ void main() {
     expect(find.text('忽略此版本'), findsOneWidget);
     await t.tap(find.text('忽略此版本'));
     await t.pumpAndSettle();
-    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.byType(UpdateDialog), findsNothing);
     await t.pumpWidget(const SizedBox.shrink());
     task.dispose();
     store.dispose();

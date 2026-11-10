@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
@@ -24,6 +25,13 @@ class _Store extends AssignmentStore {
   @override
   Future<void> syncAssignments() async {
     syncCalls++;
+  }
+
+  @override
+  Future<bool> saveHomeFilters(HomeFilters next, int expectedEpoch) async {
+    homeFilters = next;
+    notifyListeners();
+    return true;
   }
 
   void changed() => notifyListeners();
@@ -151,6 +159,7 @@ void main() {
     expect(find.text('逾期的实验报告'), findsNothing);
 
     s.testEpoch++;
+    s.homeFilters = const HomeFilters();
     s.changed();
     await t.pump();
     expect(find.text('搜索与筛选'), findsOneWidget);

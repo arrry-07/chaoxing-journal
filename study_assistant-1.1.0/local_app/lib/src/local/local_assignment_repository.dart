@@ -8,12 +8,14 @@ import '../models/course.dart';
 import '../models/backup_snapshot.dart';
 import '../models/personal_workspace.dart';
 import '../models/study_notebook.dart';
+import '../models/home_filters.dart';
 import '../services/reminder_rule_store.dart';
 
 class LocalAssignmentRepository {
   static const _key = 'chaoxing_journal_v2';
   static const _personalKey = 'personal_workspace_v1';
   static const _notebookKey = 'notebook_v1';
+  static const _homeFiltersKey = 'home_filters_v1';
   static const _maxAdditionalRecoveryBackups = 3;
   static const _maxRecoveryValueBytes = 4 * 1024 * 1024;
   static const _recoveryWriteFailedWarning =
@@ -39,6 +41,7 @@ class LocalAssignmentRepository {
     'assignment_changes_v1',
     _personalKey,
     _notebookKey,
+    _homeFiltersKey,
     '${_key}_recovery_backup',
     '${_key}_recovery_backups',
     'course_refs_recovery_backup',
@@ -50,6 +53,26 @@ class LocalAssignmentRepository {
 
   static String _owner(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
+
+  Future<HomeFilters> loadHomeFilters() => _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        final raw = prefs.get(_homeFiltersKey);
+        return HomeFilters.decode(raw is String ? raw : null);
+      });
+
+  Future<void> saveHomeFilters(HomeFilters filters, String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        try {
+          await _require(prefs.setString(_homeFiltersKey, filters.encode()));
+        } catch (_) {
+          // The plugin updates its cache before the platform write succeeds.
+          // Reload so a failed preference cannot reappear on route restoration.
+          await prefs.reload();
+          rethrow;
+        }
+      });
 
   Future<StudyNotebook> loadNotebook() => _serialized(() async {
         final p = await SharedPreferences.getInstance();
