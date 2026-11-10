@@ -288,6 +288,10 @@ class _PlannerSheetState extends State<_PlannerSheet> {
 
   void generate() {
     FocusManager.instance.primaryFocus?.unfocus();
+    if (selected.isEmpty) {
+      setState(() => error = '请先勾选要规划的作业，再填写预计耗时。');
+      return;
+    }
     final budget = int.tryParse(budgetController.text.trim());
     if (budget == null || budget < 1 || budget > 1440) {
       setState(() => error = '请输入1至1440分钟的总预算');
@@ -328,10 +332,11 @@ class _PlannerSheetState extends State<_PlannerSheet> {
   }
 
   void invalidatePreview() {
-    if (preview == null && accepted.isEmpty) return;
+    if (preview == null && accepted.isEmpty && error == null) return;
     setState(() {
       preview = null;
       accepted.clear();
+      error = null;
     });
   }
 
@@ -441,6 +446,18 @@ class _PlannerSheetState extends State<_PlannerSheet> {
   @override
   Widget build(BuildContext context) {
     final currentPreview = preview;
+    final needsPreview =
+        currentPreview == null || currentPreview.suggested.isEmpty;
+    final guidance = error ??
+        (currentPreview == null
+            ? '勾选作业并填写预计分钟，再生成预览；确认建议后才会保存。'
+            : currentPreview.suggested.isEmpty
+                ? currentPreview.manual.isNotEmpty
+                    ? '暂不能保存：${currentPreview.manual.map((item) => _planningReason(item.reason)).toSet().join('；')}。请调整后重新生成。'
+                    : '没有可新增的建议，请检查作业是否已在当日计划中，或调整选择后重新生成。'
+                : accepted.isEmpty
+                    ? '请至少勾选一项“自动纳入”的建议后保存。'
+                    : '已选 ${accepted.length} 项建议，确认后保存到个人计划。');
     return AnimatedPadding(
       duration: const Duration(milliseconds: 150),
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -498,15 +515,6 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                     icon: const Icon(Icons.auto_awesome_outlined),
                     label: const Text('生成预览'),
                   ),
-                  if (error != null) ...[
-                    const SizedBox(height: 10),
-                    Semantics(
-                      liveRegion: true,
-                      child: Text(error!,
-                          style: TextStyle(
-                              color: Theme.of(context).colorScheme.error)),
-                    ),
-                  ],
                   if (currentPreview != null) ...[
                     const SizedBox(height: 20),
                     const Divider(),
@@ -565,19 +573,46 @@ class _PlannerSheetState extends State<_PlannerSheet> {
               top: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    key: const ValueKey('planning-save'),
-                    onPressed: saving || accepted.isEmpty ? null : save,
-                    icon: saving
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.playlist_add_check),
-                    label: const Text('保存所选建议'),
-                  ),
-                ),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Semantics(
+                      liveRegion: true,
+                      child: Text(guidance,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                  color: error == null
+                                      ? null
+                                      : Theme.of(context).colorScheme.error))),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      key: const ValueKey('planning-save'),
+                      onPressed: saving
+                          ? null
+                          : needsPreview
+                              ? generate
+                              : accepted.isEmpty
+                                  ? null
+                                  : save,
+                      icon: saving
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : Icon(needsPreview
+                              ? Icons.auto_awesome_outlined
+                              : Icons.playlist_add_check),
+                      label: Text(saving
+                          ? '正在保存…'
+                          : needsPreview
+                              ? currentPreview == null
+                                  ? '生成规划预览'
+                                  : '重新生成规划预览'
+                              : '保存所选建议'),
+                    ),
+                  )
+                ]),
               ),
             ),
           ],
@@ -611,6 +646,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                     }
                     preview = null;
                     accepted.clear();
+                    error = null;
                   }),
           title: Text(assignment.title),
           subtitle: Text(
