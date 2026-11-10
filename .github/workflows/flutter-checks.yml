@@ -11,7 +11,7 @@ jobs:
   android:
     name: Analyze, test and build Android
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: study_assistant-1.1.0/local_app

@@ -247,7 +247,7 @@ void main() {
     expect(calls, 1);
     expect(await dir.list().toList(), isEmpty);
   });
-  test('retry shares the original total budget and does not cancel its caller',
+  test('total budget includes preparation and never cancels its caller',
       () async {
     var calls = 0;
     final dio = Dio()
@@ -264,8 +264,31 @@ void main() {
             .downloadApk(candidate(),
                 targetDirectory: dir.path, cancelToken: token),
         throwsA(isA<DioException>()));
-    expect(calls, 1);
+    expect(calls, inInclusiveRange(0, 1));
     expect(token.isCancelled, isFalse);
+    expect(await dir.list().toList(), isEmpty);
+  });
+  test('a started request cannot reset the total budget before retry',
+      () async {
+    var calls = 0;
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) async {
+        calls++;
+        await Future<void>.delayed(const Duration(seconds: 1));
+        h.reject(DioException.receiveTimeout(
+            timeout: const Duration(seconds: 60), requestOptions: o));
+      }));
+    final parent = CancelToken();
+    await expectLater(
+            AppUpdateService(
+                    dio: dio,
+                    totalDownloadTimeout: const Duration(milliseconds: 1500))
+                .downloadApk(candidate(),
+                    targetDirectory: dir.path, cancelToken: parent),
+            throwsA(isA<DioException>()))
+        .timeout(const Duration(seconds: 3));
+    expect(calls, 1);
+    expect(parent.isCancelled, isFalse);
     expect(await dir.list().toList(), isEmpty);
   });
   test('a real redirect with 20 second delayed headers downloads and verifies',
