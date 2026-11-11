@@ -80,3 +80,12 @@
 - 两名只读子代理分别核查界面与设置/更新链路。七项新增体验尚未实施；已将通知已发布基线、已有权限恢复刷新、已有启动补丁过滤及缺失接口写入原方案，不再等待旧通知任务提交。
 - GitHub查询确认v1.6.72正式资产57,523,043字节、digest与发布记录一致、latest仍v1.6.7。第八项改用正式包核对Gitee大小门槛并估算流量；匿名直链、国内网络与服务开通仍待验证，预算为少于10人/月10元、无云账号域名，未获付费开通授权。
 - 本轮只修订两份执行方案及状态摘要，未修改业务代码、未复跑667项测试或设备验收。保留真实官方通知链路的用户接受缺项，不重新启动等待。下一步按更新后的方案实施和取证。
+
+## 2026-11-12 1.7.3 正式发布
+
+- 最终 main：`db9dce5c47ec87bdee77241115fbcd8fd7a4bced`（PR #12）；Tag `v1.7.3`，公开且 latest。
+- 正式资产：`chaoxing-journal-1.7.3.apk`，57,698,755 字节；SHA-256 `e387e0b8fa9a1bcf92a10e88b68c5b70a273acdeed8d25e65ae1293889da9426`。`SHA256SUMS.txt` 93 字节，SHA-256 `6349559f77c703d1fada8a220a12a902b65603283a08527e6b227a2c7ff75a4b`。
+- 全量 Flutter 测试 `729 passed / 0 failed`；上海/洛杉矶时区用例各 35 项通过。PR head、main 和 Tag 的 Flutter checks 均成功；ASCII 导出后的 Flutter analyze、Debug/Release、双 ABI、ZIP、签名、aapt、zipalign 通过。
+- S9280 API35 模拟器同签名覆盖成功并保留原有数据；V2284A API35 首次安装和登录页启动成功，新图标在 Launcher 刷新后正确显示。最终物理设备安装因原 HUAWEI 设备离线未复验。
+- 公开 Release 草稿和公开后均完整下载 APK；GitHub digest、下载哈希、ZIP CRC 和两个模拟器安装后的 base.apk 哈希均为上述 SHA-256。GitHub latest API 已返回 `v1.7.3`。
+- 仍有限制：学习通同账号原生/网页布局对照、API26/31 最终设置页逐项点击、最终包 TalkBack/实体 ARM64 未复验；国内生产托管仍无项目 Gitee 仓库、域名或凭据，1.7.3 默认继续使用 GitHub。详见 `docs/reviews/2026-11-12-1.7.3体验改进与发布记录.md`。
