@@ -53,6 +53,22 @@ Future<AssignmentStore> _setupFailingSave() async {
   return store;
 }
 
+Future<void> _scrollPlannerTo(WidgetTester tester, Finder finder) async {
+  final plannerList = find.byType(ListView).last;
+  final plannerScrollable = find
+      .descendant(
+        of: plannerList,
+        matching: find.byType(Scrollable),
+      )
+      .first;
+  await tester.scrollUntilVisible(
+    finder,
+    180,
+    scrollable: plannerScrollable,
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('bottom action guides selection and generates before saving',
       (tester) async {
@@ -67,7 +83,8 @@ void main() {
                 as RenderRepaintBoundary)
             .toImage();
         final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        final out = Directory('../../artifacts/2026-11-10/planner-fix');
+        final out =
+            Directory('${Directory.systemTemp.path}/learning-assistant-visual');
         await out.create(recursive: true);
         await File('${out.path}/$name.png')
             .writeAsBytes(bytes!.buffer.asUint8List());
@@ -86,7 +103,7 @@ void main() {
         child: MaterialApp(
             theme: StudyAssistantTheme.light,
             home: DailyPlanScreen(store: store))));
-    await tester.tap(find.text('智能规划建议'));
+    await tester.tap(find.text('安排学习时间'));
     await tester.pumpAndSettle();
     final button = find.byKey(const ValueKey('planning-save'));
     await capture('generate');
@@ -105,7 +122,7 @@ void main() {
     await tester.tap(button);
     await tester.pumpAndSettle();
     await capture('save');
-    expect(find.text('保存所选建议'), findsOneWidget);
+    expect(find.text('加入当天计划'), findsOneWidget);
     expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
     await tester.tap(button);
     await tester.pumpAndSettle();
@@ -118,7 +135,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(MaterialApp(home: DailyPlanScreen(store: store)));
-    await tester.tap(find.text('智能规划建议'));
+    await tester.tap(find.text('安排学习时间'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('planning-budget')), '60');
     await tester.tap(
@@ -128,6 +145,169 @@ void main() {
         find.byKey(const ValueKey('planning-estimate-cx:work:1:2:shared')),
         '25');
   }
+
+  testWidgets('planner explains three sections with a fixed example',
+      (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MaterialApp(home: DailyPlanScreen(store: store)));
+    expect(find.text('安排学习时间'), findsOneWidget);
+    expect(
+      find.text('选作业、填预计耗时，根据可用时间生成安排。'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('安排学习时间'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('选择作业'), findsOneWidget);
+    await _scrollPlannerTo(
+      tester,
+      find.byKey(const ValueKey('planning-budget')),
+    );
+    expect(find.text('填写可用时间与耗时'), findsOneWidget);
+    final budget = tester.widget<TextField>(
+      find.byKey(const ValueKey('planning-budget')),
+    );
+    expect(budget.decoration?.labelText, '当天可用时间（分钟）');
+    expect(
+      find.text('示例：今天有 60 分钟，两份作业预计各 30 分钟，可生成安排后再确认。'),
+      findsOneWidget,
+    );
+
+    await _scrollPlannerTo(
+      tester,
+      find.byKey(const ValueKey('planning-generate')),
+    );
+    expect(find.text('查看安排'), findsOneWidget);
+    expect(find.text('生成安排'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('planner remains usable at 320dp with double text',
+      (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(
+          textScaler: const TextScaler.linear(2),
+        ),
+        child: child!,
+      ),
+      home: DailyPlanScreen(store: store),
+    ));
+    await tester.scrollUntilVisible(
+      find.text('安排学习时间'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('安排学习时间'));
+    await tester.pumpAndSettle();
+
+    await _scrollPlannerTo(
+      tester,
+      find.text('填写可用时间与耗时'),
+    );
+    expect(find.text('填写可用时间与耗时'), findsOneWidget);
+    await _scrollPlannerTo(
+      tester,
+      find.byKey(const ValueKey('planning-generate')),
+    );
+    expect(find.text('查看安排'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('planner validates available time and estimated duration',
+      (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    await openPlanner(tester, store);
+    final action = find.byKey(const ValueKey('planning-save'));
+
+    await tester.enterText(
+      find.byKey(const ValueKey('planning-budget')),
+      '0',
+    );
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+    expect(find.text('当天可用时间应为1至1440分钟'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('planning-budget')),
+      '60',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('planning-estimate-cx:work:1:2:shared')),
+      '0',
+    );
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('预计耗时应为1至1440分钟；未填写的作业不会被自动安排'),
+      findsOneWidget,
+    );
+    expect(store.personal.plans, isEmpty);
+  });
+
+  testWidgets('planner shows insufficient available time as manual work',
+      (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    await openPlanner(tester, store);
+    await tester.enterText(
+      find.byKey(const ValueKey('planning-budget')),
+      '20',
+    );
+    await tester.tap(find.byKey(const ValueKey('planning-save')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('预计耗时超过当天剩余可用时间'),
+      findsWidgets,
+    );
+    expect(find.text('重新生成安排'), findsWidgets);
+    expect(store.personal.plans, isEmpty);
+  });
+
+  testWidgets('planner displays and preserves existing same-day work',
+      (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    final day = PersonalWorkspace.dayKey(DateTime.now());
+    await store.savePersonal(
+      (workspace) => workspace.withPlans([
+        DailyPlanItem('existing', day, 20),
+      ]),
+      store.accountEpoch,
+    );
+    await openPlanner(tester, store);
+    await tester.tap(find.byKey(const ValueKey('planning-save')));
+    await tester.pumpAndSettle();
+
+    await _scrollPlannerTo(
+      tester,
+      find.text('已有未完成计划占用 20 分钟'),
+    );
+    expect(find.text('预计剩余 15 分钟'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('planning-save')));
+    await tester.pumpAndSettle();
+
+    expect(store.personal.plans.length, 2);
+    expect(
+      store.personal.plans.map((plan) => plan.assignmentId),
+      containsAll(['existing', 'cx:work:1:2:shared']),
+    );
+  });
 
   Future<void> failDeadlineRead(AssignmentStore store) async {
     final original = store.findAssignment('cx:work:1:2:shared')!;
@@ -236,7 +416,12 @@ void main() {
       await earlier;
       if (leaving != null) await leaving;
       expect(store.personal.plans, isEmpty);
-      expect(find.textContaining(logout ? '保存失败' : '重新生成规划预览'), findsOneWidget);
+      expect(
+        find.textContaining(
+          logout ? '加入当天计划失败' : '重新生成安排',
+        ),
+        findsWidgets,
+      );
     });
   }
 
@@ -251,7 +436,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('planning-save')));
     await tester.pumpAndSettle();
     expect(store.personal.plans, isEmpty);
-    expect(find.textContaining('重新生成规划预览'), findsOneWidget);
+    expect(find.textContaining('重新生成安排'), findsWidgets);
   });
 
   testWidgets('confirmation rechecks budget consumed by new same-day plans',
@@ -268,7 +453,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('planning-save')));
     await tester.pumpAndSettle();
     expect(store.personal.plans.map((p) => p.assignmentId), ['another-task']);
-    expect(find.textContaining('重新生成规划预览'), findsOneWidget);
+    expect(find.textContaining('重新生成安排'), findsWidgets);
   });
 
   testWidgets('rule planner previews and saves only explicitly confirmed work',
@@ -281,10 +466,10 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(MaterialApp(home: DailyPlanScreen(store: store)));
-    await tester.tap(find.text('智能规划建议'));
+    await tester.tap(find.text('安排学习时间'));
     await tester.pumpAndSettle();
 
-    expect(find.text('规则规划预览'), findsOneWidget);
+    expect(find.text('安排学习时间'), findsWidgets);
     await tester.enterText(find.byKey(const ValueKey('planning-budget')), '60');
     await tester.tap(
         find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')));
@@ -295,6 +480,12 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('planning-generate')));
     await tester.pumpAndSettle();
 
+    await _scrollPlannerTo(
+      tester,
+      find.byKey(
+        const ValueKey('planning-suggested-cx:work:1:2:shared'),
+      ),
+    );
     expect(find.text('自动纳入'), findsOneWidget);
     expect(find.byKey(const ValueKey('planning-suggested-cx:work:1:2:shared')),
         findsOneWidget);
@@ -303,7 +494,7 @@ void main() {
 
     expect(store.personal.plans.single.assignmentId, 'cx:work:1:2:shared');
     expect(store.personal.plans.single.minutes, 25);
-    expect(find.text('规划建议已保存到个人计划'), findsOneWidget);
+    expect(find.text('已加入当天计划'), findsOneWidget);
   });
 
   testWidgets('planner never guesses a missing estimate', (tester) async {
@@ -315,7 +506,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(MaterialApp(home: DailyPlanScreen(store: store)));
-    await tester.tap(find.text('智能规划建议'));
+    await tester.tap(find.text('安排学习时间'));
     await tester.pumpAndSettle();
     await tester.tap(
         find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')));
@@ -327,10 +518,10 @@ void main() {
     final save = tester
         .widget<FilledButton>(find.byKey(const ValueKey('planning-save')));
     expect(save.onPressed, isNotNull);
-    expect(find.text('保存所选建议'), findsNothing);
+    expect(find.text('加入当天计划'), findsNothing);
     await tester.tap(find.byKey(const ValueKey('planning-save')));
     await tester.pumpAndSettle();
-    expect(find.text('保存所选建议'), findsNothing);
+    expect(find.text('加入当天计划'), findsNothing);
     expect(store.personal.plans, isEmpty);
   });
 
@@ -344,7 +535,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(MaterialApp(home: DailyPlanScreen(store: store)));
-    await tester.tap(find.text('智能规划建议'));
+    await tester.tap(find.text('安排学习时间'));
     await tester.pumpAndSettle();
     await tester.tap(
         find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')));
@@ -363,10 +554,10 @@ void main() {
     final save = tester
         .widget<FilledButton>(find.byKey(const ValueKey('planning-save')));
     expect(save.onPressed, isNotNull);
-    expect(find.text('保存所选建议'), findsNothing);
+    expect(find.text('加入当天计划'), findsNothing);
     await tester.tap(find.byKey(const ValueKey('planning-save')));
     await tester.pumpAndSettle();
-    expect(find.text('保存所选建议'), findsNothing);
+    expect(find.text('加入当天计划'), findsNothing);
     expect(store.personal.plans, isEmpty);
   });
 
@@ -381,7 +572,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(MaterialApp(home: DailyPlanScreen(store: store)));
-    await tester.tap(find.text('智能规划建议'));
+    await tester.tap(find.text('安排学习时间'));
     await tester.pumpAndSettle();
     await tester.tap(
         find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')));
@@ -411,7 +602,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(MaterialApp(home: DailyPlanScreen(store: store)));
-    await tester.tap(find.text('智能规划建议'));
+    await tester.tap(find.text('安排学习时间'));
     await tester.pumpAndSettle();
     await tester.tap(
         find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')));
@@ -424,8 +615,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('planning-save')));
     await tester.pumpAndSettle();
 
-    expect(find.text('规则规划预览'), findsOneWidget);
-    expect(find.textContaining('规划建议保存失败'), findsOneWidget);
+    expect(find.text('安排学习时间'), findsWidgets);
+    expect(find.textContaining('加入当天计划失败'), findsOneWidget);
     expect(store.personal.plans, isEmpty);
   });
 }

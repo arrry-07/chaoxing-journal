@@ -32,6 +32,7 @@ void main() {
   testWidgets('detail renders the deadline in Beijing time', (tester) async {
     await launch(tester);
     expect(find.textContaining('2026年11月5日 08:30'), findsOneWidget);
+    expect(find.textContaining('通过学习通打开作业网页'), findsOneWidget);
   });
   testWidgets(
       'go to Chaoxing failure stays in assistant without browser or completing work',

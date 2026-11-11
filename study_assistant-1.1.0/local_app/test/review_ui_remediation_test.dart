@@ -68,13 +68,16 @@ void main() {
     await t.pumpWidget(MaterialApp(home: LoginScreen(store: s)));
     await t.enterText(find.byType(TextField).first, 'synthetic-student');
     await t.enterText(find.byType(TextField).last, 'synthetic-password');
-    for (final label in ['服务协议', '隐私协议']) {
-      final entry = find.widgetWithText(TextButton, label);
+    for (final agreement in [
+      ('《服务协议》', '服务协议'),
+      ('《隐私协议》', '隐私协议'),
+    ]) {
+      final entry = find.widgetWithText(TextButton, agreement.$1);
       expect(entry, findsOneWidget);
       await t.ensureVisible(entry);
       await t.tap(entry);
       await t.pumpAndSettle();
-      expect(find.widgetWithText(AppBar, label), findsOneWidget);
+      expect(find.widgetWithText(AppBar, agreement.$2), findsOneWidget);
       expect(find.byType(SelectableText), findsWidgets);
       await t.pageBack();
       await t.pumpAndSettle();

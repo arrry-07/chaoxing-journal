@@ -2,7 +2,154 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 
+Assignment _sortRecord(
+  String workId, {
+  required String courseName,
+  required String title,
+  DateTime? deadlineAt,
+  bool trusted = true,
+  bool failed = false,
+  String? rawDeadline,
+  String status = 'pending',
+  String courseId = '1',
+  String classId = '2',
+}) =>
+    Assignment(
+      id: 'cx:work:$courseId:$classId:$workId',
+      courseName: courseName,
+      title: title,
+      deadlineAt: deadlineAt,
+      deadlineTrusted: trusted,
+      deadlineReadFailed: failed,
+      deadlineRawText: rawDeadline,
+      requirementsText: '',
+      status: status,
+      lastSyncedAt: DateTime.utc(2026, 11, 12),
+    );
+
 void main() {
+  test('sortHome supports all orders without mutating the source list', () {
+    final now = DateTime.utc(2026, 11, 12, 2);
+    final alpha = _sortRecord(
+      'a',
+      courseName: ' course b ',
+      title: 'alpha',
+      deadlineAt: now.add(const Duration(days: 5)),
+    );
+    final bravo = _sortRecord(
+      'b',
+      courseName: 'course A',
+      title: 'Bravo',
+      deadlineAt: now.add(const Duration(days: 1)),
+    );
+    final cachedFailure = _sortRecord(
+      'c',
+      courseName: 'course C',
+      title: 'charlie',
+      deadlineAt: now.subtract(const Duration(days: 1)),
+      failed: true,
+    );
+    final unknownYear = _sortRecord(
+      'd',
+      courseName: 'course D',
+      title: 'delta',
+      trusted: false,
+      rawDeadline: '11月20日（年份待确认）',
+    );
+    final noDeadline = _sortRecord(
+      'e',
+      courseName: 'course E',
+      title: 'echo',
+    );
+    final records = [
+      noDeadline,
+      cachedFailure,
+      bravo,
+      unknownYear,
+      alpha,
+    ];
+    final originalOrder = records.toList();
+
+    List<String> ids(HomeSortOrder order) =>
+        AssignmentQuery.sortHome(records, order)
+            .map((assignment) => assignment.title)
+            .toList();
+
+    expect(ids(HomeSortOrder.grouped),
+        ['echo', 'charlie', 'Bravo', 'delta', 'alpha']);
+    expect(records, originalOrder);
+    expect(
+        identical(
+            AssignmentQuery.sortHome(records, HomeSortOrder.grouped), records),
+        isFalse);
+    expect(ids(HomeSortOrder.deadlineAsc),
+        ['Bravo', 'alpha', 'charlie', 'delta', 'echo']);
+    expect(ids(HomeSortOrder.deadlineDesc),
+        ['alpha', 'Bravo', 'charlie', 'delta', 'echo']);
+    expect(ids(HomeSortOrder.courseName),
+        ['Bravo', 'alpha', 'charlie', 'delta', 'echo']);
+    expect(ids(HomeSortOrder.title),
+        ['alpha', 'Bravo', 'charlie', 'delta', 'echo']);
+  });
+
+  test('sort ties preserve same-title classes with deterministic identity', () {
+    final now = DateTime.utc(2026, 11, 12, 2);
+    final sameDeadline = now.add(const Duration(days: 2));
+    final classNine = _sortRecord(
+      'same',
+      courseName: '同名课程',
+      title: '同名作业',
+      deadlineAt: sameDeadline,
+      courseId: '1',
+      classId: '9',
+    );
+    final classThree = _sortRecord(
+      'same',
+      courseName: '同名课程',
+      title: '同名作业',
+      deadlineAt: sameDeadline,
+      courseId: '1',
+      classId: '3',
+    );
+    final earlierTitle = _sortRecord(
+      'same',
+      courseName: '同名课程',
+      title: 'A 作业',
+      deadlineAt: sameDeadline,
+      courseId: '1',
+      classId: '1',
+    );
+    final idZulu = _sortRecord(
+      'id-z',
+      courseName: '同名课程',
+      title: '同名作业',
+      deadlineAt: sameDeadline,
+      courseId: '1',
+      classId: '2',
+    );
+    final idAlpha = _sortRecord(
+      'id-a',
+      courseName: '同名课程',
+      title: '同名作业',
+      deadlineAt: sameDeadline,
+      courseId: '1',
+      classId: '2',
+    );
+    final records = [classNine, idZulu, earlierTitle, classThree, idAlpha];
+
+    final sorted = AssignmentQuery.sortHome(records, HomeSortOrder.deadlineAsc);
+    expect(sorted.map((assignment) => assignment.courseKey),
+        ['1:1', '1:2', '1:2', '1:3', '1:9']);
+    expect(sorted[1].id, endsWith(':id-a'));
+    expect(sorted[2].id, endsWith(':id-z'));
+
+    final grouped = AssignmentQuery.home(records, now, {}).near;
+    expect(grouped.map((assignment) => assignment.courseKey),
+        ['1:1', '1:2', '1:2', '1:3', '1:9']);
+    expect(grouped[1].id, endsWith(':id-a'));
+    expect(grouped[2].id, endsWith(':id-z'));
+  });
+
   test('formal scope and horizon keep unknown discoverable and history folded',
       () {
     final now = DateTime.utc(2026, 11, 4, 2);

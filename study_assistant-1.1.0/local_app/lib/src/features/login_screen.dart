@@ -37,6 +37,8 @@ class _LoginScreenState extends State<LoginScreen> {
     return AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
+        final horizontalPadding =
+            MediaQuery.sizeOf(context).width < 360 ? 20.0 : 32.0;
         final canLogin = _chaoxingAccount.text.trim().isNotEmpty &&
             _chaoxingPassword.text.isNotEmpty &&
             _accepted &&
@@ -46,7 +48,12 @@ class _LoginScreenState extends State<LoginScreen> {
           backgroundColor: Journal.paper,
           body: SafeArea(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(32, 64, 32, 24),
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                64,
+                horizontalPadding,
+                24,
+              ),
               children: [
                 Text(
                   '学习通登录',
@@ -148,7 +155,7 @@ class _AgreementPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 14, 16, 16),
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 16),
       decoration: BoxDecoration(
         color: Journal.sheet,
         borderRadius: BorderRadius.circular(16),
@@ -187,12 +194,13 @@ class _AgreementPanel extends StatelessWidget {
                       enabled ? (value) => onChanged(value ?? false) : null,
                 ),
               ),
-              const SizedBox(width: 2),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Wrap(
+                    spacing: 0,
+                    runSpacing: 0,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
                         '我已阅读并同意',
@@ -200,27 +208,11 @@ class _AgreementPanel extends StatelessWidget {
                           color: Journal.ink,
                           fontWeight: FontWeight.w600,
                           fontSize: 14.5,
-                          height: 1.35,
+                          height: 1.45,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Wrap(
-                        spacing: 7,
-                        runSpacing: 1,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          _link(AgreementKind.service),
-                          Text(
-                            '·',
-                            style: Journal.metadata.copyWith(
-                              color: Journal.muted,
-                              fontSize: 15,
-                              height: 1,
-                            ),
-                          ),
-                          _link(AgreementKind.privacy),
-                        ],
-                      ),
+                      _link(AgreementKind.service),
+                      _link(AgreementKind.privacy),
                     ],
                   ),
                 ),
@@ -230,8 +222,7 @@ class _AgreementPanel extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(2, 12, 2, 0),
             child: Text(
-              '课程作业数据保存在本机，账号密码保存在本机安全存储中。\n'
-              '登录与同步直接连接学习通，不经过开发者服务器。',
+              '课程与作业数据保存在本机。',
               style: Journal.metadata.copyWith(
                 fontSize: 13.5,
                 height: 1.58,
@@ -244,24 +235,34 @@ class _AgreementPanel extends StatelessWidget {
     );
   }
 
-  Widget _link(AgreementKind kind) => TextButton(
-        style: TextButton.styleFrom(
-          foregroundColor: Journal.ink,
-          minimumSize: const Size(48, 36),
-          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          visualDensity: VisualDensity.compact,
-          textStyle: Journal.metadata.copyWith(
-            color: Journal.ink,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-            decoration: TextDecoration.underline,
-            decorationColor: Journal.ink.withValues(alpha: 0.72),
-            decorationThickness: 1,
+  Widget _link(AgreementKind kind) => Semantics(
+        container: true,
+        button: true,
+        link: true,
+        label: '查看《${kind.title}》',
+        onTap: enabled ? () => onOpen(kind) : null,
+        child: ExcludeSemantics(
+          child: TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: Journal.ink,
+              minimumSize: const Size(48, 48),
+              padding: EdgeInsets.zero,
+              tapTargetSize: MaterialTapTargetSize.padded,
+              visualDensity: VisualDensity.standard,
+              textStyle: Journal.metadata.copyWith(
+                color: Journal.ink,
+                fontWeight: FontWeight.w600,
+                fontSize: 14.5,
+                height: 1.45,
+                decoration: TextDecoration.underline,
+                decorationColor: Journal.ink.withValues(alpha: 0.72),
+                decorationThickness: 1,
+              ),
+            ),
+            onPressed: enabled ? () => onOpen(kind) : null,
+            child: Text('《${kind.title}》'),
           ),
         ),
-        onPressed: enabled ? () => onOpen(kind) : null,
-        child: Text(kind.title),
       );
 }
 

@@ -4,8 +4,11 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -32,6 +35,157 @@ void main() {
     expect(store.isAuthenticated, isTrue, reason: store.error);
     client.gate.complete([]);
     await store.syncAssignments();
+  });
+  test('foreground sync publishes an in-memory preview until persistence ends',
+      () async {
+    final client = _PreviewSyncClient();
+    final session = _MemorySessionStore()
+      ..account = 'student'
+      ..password = 'p';
+    final store = AssignmentStore(
+      sessionStore: session,
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      chaoxingClient: client,
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final syncing = store.syncAssignments();
+    await client.rowsPublished.future;
+    expect(store.assignments, isEmpty);
+    expect(store.homeDisplayAssignments, hasLength(2));
+    expect(store.isHomeAssignmentPreviewOnly('cx:work:1:2:1'), isTrue);
+    expect(store.isHomeDeadlinePending('cx:work:1:2:1'), isFalse);
+
+    client.firstDetailPublished.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    expect(store.isHomeDeadlinePending('cx:work:1:2:2'), isTrue);
+    expect(
+      store.homeDisplayAssignments
+          .singleWhere((item) => item.id == 'cx:work:1:2:1')
+          .deadlineAt,
+      isNotNull,
+    );
+
+    client.finishFetch.complete();
+    await syncing;
+    expect(store.homeSyncProgress, isNull);
+    expect(store.isHomeAssignmentPreviewOnly('cx:work:1:2:1'), isFalse);
+    expect(store.isHomeDeadlinePending('cx:work:1:2:2'), isFalse);
+    expect(store.assignments, hasLength(2));
+  });
+  test('failed journal save removes the preview and keeps old persisted data',
+      () async {
+    final client = _PreviewSyncClient();
+    final session = _MemorySessionStore()
+      ..account = 'student'
+      ..password = 'p';
+    final store = AssignmentStore(
+      sessionStore: session,
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      repository: _FailingMergeRepository(),
+      chaoxingClient: client,
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final syncing = store.syncAssignments();
+    await client.rowsPublished.future;
+    expect(store.homeDisplayAssignments, hasLength(2));
+    client.firstDetailPublished.complete();
+    client.finishFetch.complete();
+    await syncing;
+
+    expect(store.homeSyncProgress, isNull);
+    expect(store.homeDisplayAssignments, isEmpty);
+    expect(store.assignments, isEmpty);
+    expect(store.error, contains('disk full'));
+    expect(store.syncReport.phase, SyncPhase.failed);
+  });
+  test('foreground preview respects the account course-follow filter',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'unfollowed_courses': ['1:2'],
+    });
+    final client = _PreviewSyncClient();
+    final session = _MemorySessionStore()
+      ..account = 'student'
+      ..password = 'p';
+    final store = AssignmentStore(
+      sessionStore: session,
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      chaoxingClient: client,
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final syncing = store.syncAssignments();
+    await client.rowsPublished.future;
+    expect(store.homeDisplayAssignments, isEmpty);
+    client.firstDetailPublished.complete();
+    client.finishFetch.complete();
+    await syncing;
+  });
+  test('foreground preview never revives a locally hidden assignment',
+      () async {
+    final session = _MemorySessionStore()
+      ..account = 'student'
+      ..password = 'p';
+    final store = AssignmentStore(
+      sessionStore: session,
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.repository.mergeAndSave([
+      Assignment(
+        id: 'cx:work:1:2:1',
+        courseName: '高等数学',
+        title: '已隐藏作业',
+        deadlineAt: DateTime.now(),
+        requirementsText: '',
+        status: 'completed',
+        completedAt: DateTime.now(),
+        lastSyncedAt: DateTime.now(),
+      ),
+    ], completeSync: false);
+    await store.refreshAssignments();
+    expect(await store.hideAssignment('cx:work:1:2:1'), isTrue);
+    expect(store.homeDisplayAssignments, isEmpty);
+
+    final client = _PreviewSyncClient(firstStatus: 'returned');
+    final previewStore = AssignmentStore(
+      sessionStore: session,
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      chaoxingClient: client,
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(previewStore.dispose);
+    await previewStore.restoreSession();
+    final syncing = previewStore.syncAssignments();
+    await client.rowsPublished.future;
+    expect(
+      previewStore.homeDisplayAssignments
+          .any((item) => item.id == 'cx:work:1:2:1'),
+      isFalse,
+    );
+    client.firstDetailPublished.complete();
+    client.finishFetch.complete();
+    await syncing;
+    expect(
+      previewStore.homeDisplayAssignments
+          .any((item) => item.id == 'cx:work:1:2:1'),
+      isFalse,
+    );
   });
   test(
     'login marks session authenticated even when first assignment sync fails',
@@ -227,4 +381,92 @@ class _BlockedClient extends _LoginOnlyChaoxingClient {
   bool get needsSessionInitialization => false;
   @override
   Future<List<Assignment>> fetchAssignments() => gate.future;
+}
+
+class _PreviewSyncClient extends ChaoxingLocalClient {
+  _PreviewSyncClient({this.firstStatus = 'pending'});
+
+  final rowsPublished = Completer<void>();
+  final firstDetailPublished = Completer<void>();
+  final finishFetch = Completer<void>();
+  final String firstStatus;
+
+  @override
+  bool get needsSessionInitialization => false;
+
+  Assignment _row(
+    String id, {
+    DateTime? deadline,
+    String status = 'pending',
+  }) =>
+      Assignment(
+        id: 'cx:work:1:2:$id',
+        courseName: '高等数学',
+        title: '作业 $id',
+        deadlineAt: deadline,
+        deadlineTrusted: deadline != null,
+        requirementsText: '',
+        status: status,
+        submitUrl:
+            'https://mooc1.chaoxing.com/work/task?workId=$id&courseId=1&classId=2',
+        lastSyncedAt: DateTime.now(),
+      );
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    final first = _row('1', status: firstStatus);
+    final second = _row('2');
+    onProgress?.call(AssignmentSyncProgress(
+      stage: AssignmentSyncStage.courses,
+      assignments: const [],
+      pendingDetailIds: const {},
+      resolvedCount: 0,
+      attemptedCount: 0,
+    ));
+    onProgress?.call(AssignmentSyncProgress(
+      stage: AssignmentSyncStage.workLists,
+      assignments: [first, second],
+      pendingDetailIds: const {},
+      resolvedCount: 0,
+      attemptedCount: 0,
+    ));
+    rowsPublished.complete();
+    await firstDetailPublished.future;
+    final trustedFirst = first.copyWith(
+      deadlineAt: DateTime.now().add(const Duration(days: 2)),
+      deadlineTrusted: true,
+    );
+    onProgress?.call(AssignmentSyncProgress(
+      stage: AssignmentSyncStage.details,
+      assignments: [trustedFirst, second],
+      pendingDetailIds: {second.id},
+      resolvedCount: 1,
+      attemptedCount: 1,
+    ));
+    await finishFetch.future;
+    final trustedSecond = second.copyWith(
+      deadlineAt: DateTime.now().add(const Duration(days: 3)),
+      deadlineTrusted: true,
+    );
+    onProgress?.call(AssignmentSyncProgress(
+      stage: AssignmentSyncStage.details,
+      assignments: [trustedFirst, trustedSecond],
+      pendingDetailIds: const {},
+      resolvedCount: 2,
+      attemptedCount: 2,
+    ));
+    succeededCourses = 1;
+    return [trustedFirst, trustedSecond];
+  }
+}
+
+class _FailingMergeRepository extends LocalAssignmentRepository {
+  @override
+  Future<List<Assignment>> mergeAndSave(
+    List<Assignment> incoming, {
+    bool completeSync = true,
+    Future<bool> Function()? canCommit,
+  }) {
+    throw StateError('disk full');
+  }
 }

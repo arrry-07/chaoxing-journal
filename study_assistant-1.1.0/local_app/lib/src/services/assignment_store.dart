@@ -11,6 +11,7 @@ import '../local/chaoxing_assignment_parser.dart';
 import '../local/chaoxing_local_client.dart';
 import '../local/local_assignment_repository.dart';
 import '../models/assignment.dart';
+import '../models/assignment_sync_progress.dart';
 import '../models/sync_report.dart';
 import '../models/course.dart';
 import 'assignment_query.dart';
@@ -432,6 +433,91 @@ class AssignmentStore extends ChangeNotifier {
       });
   List<Assignment> get visibleAssignments =>
       formalAssignments.where((a) => !a.isCompleted).toList();
+  AssignmentSyncProgress? _homeSyncProgress;
+  List<Assignment> _homePreviewAssignments = [];
+  Set<String> _homePendingDeadlineIds = {};
+  AssignmentSyncProgress? _queuedHomeProgress;
+  Timer? _homeProgressTimer;
+
+  AssignmentSyncProgress? get homeSyncProgress => _homeSyncProgress;
+
+  List<Assignment> get homeDisplayAssignments {
+    if (_homePreviewAssignments.isEmpty) return visibleAssignments;
+    final merged = LocalAssignmentRepository.mergeAssignments(
+      [..._assignments, ..._hiddenAssignments],
+      _homePreviewAssignments,
+      hiddenCompletedIds: _hiddenAssignments.map((a) => a.id).toSet(),
+    );
+    return _visibleAssignmentsFrom(merged);
+  }
+
+  bool isHomeDeadlinePending(String assignmentId) =>
+      _homePendingDeadlineIds.contains(assignmentId);
+
+  bool isHomeAssignmentPreviewOnly(String assignmentId) =>
+      _homePreviewAssignments.any((a) => a.id == assignmentId) &&
+      !_assignments.any((a) => a.id == assignmentId);
+
+  List<Assignment> _visibleAssignmentsFrom(Iterable<Assignment> records) =>
+      AssignmentQuery.scope(records.toList(), {})
+          .where((a) => follows(a.courseKey!) && !a.isCompleted)
+          .toList();
+
+  void _handleHomeProgress(int generation, AssignmentSyncProgress progress) {
+    if (generation != _generation || !_authenticated || _disposed) return;
+    _queuedHomeProgress = progress;
+    final firstBatch =
+        _homePreviewAssignments.isEmpty && progress.assignments.isNotEmpty;
+    final finalDetails = progress.stage == AssignmentSyncStage.details &&
+        progress.pendingDetailIds.isEmpty &&
+        progress.resolvedCount >= progress.attemptedCount;
+    final firstState = _homeSyncProgress == null;
+    if (firstBatch || finalDetails || firstState) {
+      _publishHomeProgress(progress);
+      return;
+    }
+    _homeProgressTimer ??= Timer(const Duration(milliseconds: 100), () {
+      _homeProgressTimer = null;
+      final latest = _queuedHomeProgress;
+      if (latest != null) _publishHomeProgress(latest);
+    });
+  }
+
+  void _publishHomeProgress(AssignmentSyncProgress progress) {
+    if (_disposed || !_authenticated) return;
+    _homeProgressTimer?.cancel();
+    _homeProgressTimer = null;
+    _queuedHomeProgress = null;
+    _homeSyncProgress = progress;
+    _homePreviewAssignments = List.of(progress.assignments);
+    _homePendingDeadlineIds = Set.of(progress.pendingDetailIds);
+    notifyListeners();
+  }
+
+  void _markHomePreviewSaving() {
+    final progress = _homeSyncProgress;
+    if (progress == null) return;
+    _publishHomeProgress(AssignmentSyncProgress(
+      stage: AssignmentSyncStage.saving,
+      assignments: progress.assignments,
+      pendingDetailIds: const {},
+      resolvedCount: progress.resolvedCount,
+      attemptedCount: progress.attemptedCount,
+    ));
+  }
+
+  void _clearHomePreview({bool notify = false}) {
+    final hadPreview =
+        _homePreviewAssignments.isNotEmpty || _homeSyncProgress != null;
+    _homeProgressTimer?.cancel();
+    _homeProgressTimer = null;
+    _queuedHomeProgress = null;
+    _homeSyncProgress = null;
+    _homePreviewAssignments = [];
+    _homePendingDeadlineIds = {};
+    if (notify && hadPreview && !_disposed) notifyListeners();
+  }
+
   Future<void> followCourse(String key, bool followed) => _run(() async {
         await _markReminderMutationPending();
         final prefs = await SharedPreferences.getInstance();
@@ -516,6 +602,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _restoreAccountData() async {
+    _clearHomePreview();
     homeFilters = const HomeFilters();
     notebook = StudyNotebook();
     personal = PersonalWorkspace();
@@ -724,6 +811,7 @@ class AssignmentStore extends ChangeNotifier {
     }
     _loginRunning = true;
     final generation = ++_generation;
+    _clearHomePreview(notify: true);
     _visitedAssignment = null;
     returnCheckMessage = null;
     var loginSucceeded = false;
@@ -1249,6 +1337,7 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> logout() async {
     _generation++;
+    _clearHomePreview(notify: true);
     _visitedAssignment = null;
     returnCheckMessage = null;
     changes = [];
@@ -1493,13 +1582,25 @@ class AssignmentStore extends ChangeNotifier {
     final stopCheck =
         automatic ? () => !DaytimeCheckPolicy.isInWindow(DateTime.now()) : null;
     chaoxingClient.shouldStop = stopCheck;
+    final showPreview = trigger == BackgroundSyncTrigger.manual;
+    void attachProgress() {
+      chaoxingClient.onProgress = showPreview
+          ? (progress) => _handleHomeProgress(generation, progress)
+          : null;
+    }
+
+    attachProgress();
     try {
       incoming = await chaoxingClient.fetchAssignments();
     } on ChaoxingAuthenticationException {
       _needsProfileRecovery = false;
+      chaoxingClient.onProgress = null;
+      _clearHomePreview(notify: true);
       await _refreshChaoxingSession();
+      attachProgress();
       incoming = await chaoxingClient.fetchAssignments();
     } finally {
+      chaoxingClient.onProgress = null;
       chaoxingClient.shouldStop = null;
       if (generation == _generation &&
           !_disposed &&
@@ -1528,6 +1629,7 @@ class AssignmentStore extends ChangeNotifier {
     if (generation != _generation || _disposed) return;
     final before = [..._assignments, ..._hiddenAssignments];
     await _markReminderMutationPending();
+    _markHomePreviewSaving();
     await repository.mergeAndSave(
       incoming,
       completeSync: warning == null,
@@ -1598,6 +1700,7 @@ class AssignmentStore extends ChangeNotifier {
         completedAt: dataSuccessAt,
       );
       if (generation != _generation || _disposed) return;
+      _clearHomePreview(notify: true);
       await _recordChanges(before, incoming, completeSync: warning == null);
       _error ??= warning;
     } catch (error) {
@@ -1819,6 +1922,7 @@ class AssignmentStore extends ChangeNotifier {
       }
     } finally {
       _loading = false;
+      _clearHomePreview();
       if (!_disposed) notifyListeners();
     }
   }
@@ -1923,6 +2027,7 @@ class AssignmentStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _clearHomePreview();
     _generation++;
     super.dispose();
   }

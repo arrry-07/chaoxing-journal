@@ -37,7 +37,7 @@ void main() {
         h.resolve(Response(
             requestOptions: o,
             statusCode: 200,
-            data: startup ? release('1.7.0') : [release('1.7.0')]));
+            data: startup ? release('1.8.0') : [release('1.8.0')]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
@@ -47,7 +47,7 @@ void main() {
     gate.complete();
     expect(await startup, false);
     await manual;
-    expect(task.update?.versionName, '1.7.0');
+    expect(task.update?.versionName, '1.8.0');
   });
 
   test('manual click during startup waits then checks the patch list',
@@ -62,7 +62,7 @@ void main() {
         h.resolve(Response(
             requestOptions: o,
             statusCode: 200,
-            data: startup ? release('1.6.7') : [release('1.6.73')]));
+            data: startup ? release('1.7.3') : [release('1.7.4')]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
@@ -72,7 +72,7 @@ void main() {
     gate.complete();
     expect(await startup, false);
     await manual;
-    expect(task.update?.versionName, '1.6.73');
+    expect(task.update?.versionName, '1.7.4');
     expect(paths, [
       '/repos/arrry-07/chaoxing-journal/releases/latest',
       '/repos/arrry-07/chaoxing-journal/releases'
@@ -86,13 +86,13 @@ void main() {
         calls++;
         expect(o.uri.path.endsWith('/latest'), false);
         h.resolve(Response(
-            requestOptions: o, statusCode: 200, data: [release('1.6.73')]));
+            requestOptions: o, statusCode: 200, data: [release('1.7.4')]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
     await task.check();
     expect(await task.checkOnStartup(), false);
-    expect(task.update!.versionName, '1.6.73');
+    expect(task.update!.versionName, '1.7.4');
     expect(calls, 1);
   });
 
@@ -106,8 +106,8 @@ void main() {
             requestOptions: o,
             statusCode: 200,
             data: o.uri.path.endsWith('/latest')
-                ? release('1.6.7')
-                : [release('1.6.73'), release('1.6.7')]));
+                ? release('1.7.3')
+                : [release('1.7.4'), release('1.7.3')]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
@@ -115,14 +115,14 @@ void main() {
     expect(task.showBanner, false);
     expect(task.update, isNull);
     await task.check();
-    expect(task.update!.versionName, '1.6.73');
+    expect(task.update!.versionName, '1.7.4');
     expect(paths, [
       '/repos/arrry-07/chaoxing-journal/releases/latest',
       '/repos/arrry-07/chaoxing-journal/releases'
     ]);
   });
 
-  for (final row in [('1.6.999', false), ('1.7.0', true), ('2.0.0', true)]) {
+  for (final row in [('1.7.999', false), ('1.8.0', true), ('2.0.0', true)]) {
     test('startup iteration gate for ${row.$1}', () async {
       final dio = Dio()
         ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
@@ -146,8 +146,8 @@ void main() {
               requestOptions: o,
               statusCode: 200,
               data: o.uri.path.endsWith('/latest')
-                  ? release('1.7.0')
-                  : [release('1.7.0')]))));
+                  ? release('1.8.0')
+                  : [release('1.8.0')]))));
     final service = AppUpdateService(dio: dio);
     final first = AppUpdateController(service: service);
     addTearDown(first.dispose);
@@ -157,7 +157,7 @@ void main() {
     addTearDown(second.dispose);
     expect(await second.checkOnStartup(), false);
     await second.check();
-    expect(second.update!.versionName, '1.7.0');
+    expect(second.update!.versionName, '1.8.0');
   });
 
   test('manual reads all pages, excludes draft/prerelease and sorts by version',
@@ -176,14 +176,14 @@ void main() {
                 : [
                     release('99.0.0', draft: true),
                     release('98.0.0', prerelease: true),
-                    release('1.6.73'),
-                    release('1.7.0'),
-                    release('1.6.73')
+                    release('1.7.4'),
+                    release('1.8.0'),
+                    release('1.7.4')
                   ]));
       }));
     final result = await AppUpdateService(dio: dio)
         .checkConfigured(currentVersionCode: AppVersion.code);
-    expect(result.update!.versionName, '1.7.0');
+    expect(result.update!.versionName, '1.8.0');
     expect(pages, [1, 2]);
   });
 
@@ -191,7 +191,7 @@ void main() {
     test(
         'highest version ${malformed ? 'bad digest' : 'missing apk'} does not fall back',
         () async {
-      final newest = release('1.7.0');
+      final newest = release('2.0.0');
       if (malformed) {
         (newest['assets'] as List).single['digest'] = 'bad';
       } else {
@@ -202,7 +202,7 @@ void main() {
             onRequest: (o, h) => h.resolve(Response(
                 requestOptions: o,
                 statusCode: 200,
-                data: [release('1.6.73'), newest]))));
+                data: [release('1.8.0'), newest]))));
       final result = await AppUpdateService(dio: dio)
           .checkConfigured(currentVersionCode: AppVersion.code);
       expect(result.update, isNull);
@@ -222,7 +222,7 @@ void main() {
           onRequest: (o, h) => h.resolve(Response(
               requestOptions: o,
               statusCode: o.queryParameters['page'] == 1 ? 200 : 503,
-              data: List.generate(100, (_) => release('1.6.73'))))));
+              data: List.generate(100, (_) => release('1.8.0'))))));
     final result = await AppUpdateService(dio: dio)
         .checkConfigured(currentVersionCode: AppVersion.code);
     expect(result.status, UpdateCheckStatus.networkError);

@@ -1,12 +1,66 @@
 import '../models/assignment.dart';
+import '../models/home_filters.dart';
 
-enum AssignmentDeadlineFilter {
-  all,
-  next7Days,
-  next30Days,
-  overdue,
-  uncertain,
-  noDeadline,
+export '../models/home_filters.dart'
+    show AssignmentDeadlineFilter, HomeSortOrder;
+
+enum _HomeDeadlineGroup { dated, uncertain, noDeadline }
+
+int _compareText(String left, String right) =>
+    left.trim().toLowerCase().compareTo(right.trim().toLowerCase());
+
+int _compareCourseKey(Assignment left, Assignment right) =>
+    (left.courseKey ?? '').compareTo(right.courseKey ?? '');
+
+int _compareHomeTieBreak(Assignment left, Assignment right) {
+  final course = _compareText(left.courseName, right.courseName);
+  if (course != 0) return course;
+  final title = _compareText(left.title, right.title);
+  if (title != 0) return title;
+  final courseKey = _compareCourseKey(left, right);
+  if (courseKey != 0) return courseKey;
+  return left.id.compareTo(right.id);
+}
+
+_HomeDeadlineGroup _homeDeadlineGroup(Assignment assignment) {
+  if (assignment.deadlineTrusted &&
+      !assignment.deadlineReadFailed &&
+      assignment.deadlineAt != null) {
+    return _HomeDeadlineGroup.dated;
+  }
+  if (assignment.deadlineTrusted &&
+      !assignment.deadlineReadFailed &&
+      assignment.deadlineAt == null) {
+    return _HomeDeadlineGroup.noDeadline;
+  }
+  return _HomeDeadlineGroup.uncertain;
+}
+
+int _compareHomeAssignments(
+    Assignment left, Assignment right, HomeSortOrder order) {
+  switch (order) {
+    case HomeSortOrder.grouped:
+      return 0;
+    case HomeSortOrder.deadlineAsc:
+    case HomeSortOrder.deadlineDesc:
+      final group = _homeDeadlineGroup(left)
+          .index
+          .compareTo(_homeDeadlineGroup(right).index);
+      if (group != 0) return group;
+      if (_homeDeadlineGroup(left) == _HomeDeadlineGroup.dated) {
+        final deadline = left.deadlineAt!.compareTo(right.deadlineAt!);
+        if (deadline != 0) {
+          return order == HomeSortOrder.deadlineDesc ? -deadline : deadline;
+        }
+      }
+      return _compareHomeTieBreak(left, right);
+    case HomeSortOrder.courseName:
+      final course = _compareText(left.courseName, right.courseName);
+      return course == 0 ? _compareHomeTieBreak(left, right) : course;
+    case HomeSortOrder.title:
+      final title = _compareText(left.title, right.title);
+      return title == 0 ? _compareHomeTieBreak(left, right) : title;
+  }
 }
 
 class HomeAssignmentGroups {
@@ -85,6 +139,15 @@ class AssignmentQuery {
     }).toList();
   }
 
+  static List<Assignment> sortHome(
+      List<Assignment> records, HomeSortOrder order) {
+    final sorted = List<Assignment>.of(records);
+    if (order != HomeSortOrder.grouped) {
+      sorted.sort((left, right) => _compareHomeAssignments(left, right, order));
+    }
+    return sorted;
+  }
+
   static HomeAssignmentGroups home(
       List<Assignment> records, DateTime now, Set<String> followed) {
     final g = HomeAssignmentGroups();
@@ -103,9 +166,11 @@ class AssignmentQuery {
       }
     }
     for (final list in [g.near, g.far, g.uncertain, g.noDeadline]) {
-      list.sort(Assignment.compareByDeadline);
+      list.sort((left, right) =>
+          _compareHomeAssignments(left, right, HomeSortOrder.deadlineAsc));
     }
-    g.overdue.sort((a, b) => Assignment.compareByDeadline(b, a));
+    g.overdue.sort((left, right) =>
+        _compareHomeAssignments(left, right, HomeSortOrder.deadlineDesc));
     return g;
   }
 

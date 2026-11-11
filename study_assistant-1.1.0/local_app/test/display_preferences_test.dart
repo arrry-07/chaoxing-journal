@@ -79,6 +79,8 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.text('同名课程（2班）').last);
     await t.pumpAndSettle();
+    await t.ensureVisible(find.text('应用'));
+    await t.pumpAndSettle();
     await t.tap(find.text('应用'));
     await t.pumpAndSettle();
     expect(find.text('作业1'), findsNothing);

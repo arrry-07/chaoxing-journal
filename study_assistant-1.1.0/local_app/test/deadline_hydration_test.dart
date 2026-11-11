@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'package:study_assistant_mobile/src/services/home_sync_presentation.dart';
@@ -57,11 +60,13 @@ void main() {
   test('detail authentication expiry retains fresh rows and stops later reads',
       () async {
     var calls = 0;
+    final progress = <AssignmentSyncProgress>[];
     final c = client([row(1), row(2)], (o, h) {
       calls++;
       h.resolve(
           Response(requestOptions: o, statusCode: 401, data: 'login required'));
     }, courseCount: 2);
+    c.onProgress = progress.add;
     final work = await c.fetchAssignments();
     expect(work, hasLength(2));
     expect(calls, 1);
@@ -73,6 +78,8 @@ void main() {
         c.issues.any((i) =>
             i.stage == 'workList' && i.kind == SyncIssueKind.authExpired),
         isTrue);
+    expect(progress.last.pendingDetailIds, isEmpty);
+    expect(progress.last.resolvedCount, 2);
     final summary = HomeSyncPresentation.from(
         SyncReport(phase: SyncPhase.partial, issues: c.issues),
         loading: false,
@@ -213,6 +220,49 @@ void main() {
     final work = await c.fetchAssignments();
     expect(work.first.deadlineAt!.toUtc(), DateTime.utc(2026, 11, 5));
     expect(work.last.isCompleted, isTrue);
+  });
+
+  test('first trusted deadline is visible while the second detail is pending',
+      () async {
+    final secondStarted = Completer<void>();
+    final secondGate = Completer<void>();
+    final events = <AssignmentSyncProgress>[];
+    final c = client([row(1), row(2)], (options, handler) async {
+      final id = options.uri.queryParameters['workId'];
+      if (id == '2') {
+        secondStarted.complete();
+        await secondGate.future;
+      }
+      handler.resolve(Response(
+        requestOptions: options,
+        statusCode: 200,
+        data: '作答时间：10-27 08:00 至 11-05 23:59',
+      ));
+    });
+    c.onProgress = events.add;
+
+    final fetching = c.fetchAssignments();
+    await secondStarted.future;
+
+    final interim = events.last;
+    final first =
+        interim.assignments.singleWhere((item) => item.id == 'cx:work:1:2:1');
+    final second =
+        interim.assignments.singleWhere((item) => item.id == 'cx:work:1:2:2');
+    expect(interim.stage, AssignmentSyncStage.details);
+    expect(first.deadlineAt, isNotNull);
+    expect(first.deadlineTrusted, isTrue);
+    expect(second.deadlineAt, isNull);
+    expect(interim.pendingDetailIds, {'cx:work:1:2:2'});
+    expect(interim.attemptedCount, 2);
+    expect(interim.resolvedCount, 1);
+
+    secondGate.complete();
+    final complete = await fetching;
+    await pumpEventQueue();
+    expect(complete, hasLength(2));
+    expect(events.last.pendingDetailIds, isEmpty);
+    expect(events.last.resolvedCount, 2);
   });
 
   test('mismatched year remains visible and excluded from calendar', () async {

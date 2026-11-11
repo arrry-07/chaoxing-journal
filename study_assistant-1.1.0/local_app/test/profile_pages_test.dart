@@ -176,6 +176,7 @@ void main() {
     await s.restoreSession();
     await t.pumpWidget(MaterialApp(home: CourseListScreen(store: s)));
     expect(find.byType(SwitchListTile), findsNWidgets(2));
+    expect(find.byIcon(Icons.menu_book_outlined), findsNWidgets(2));
     expect(find.text('班级 2'), findsOneWidget);
     expect(find.text('班级 3'), findsOneWidget);
     await t.tap(find.byType(SwitchListTile).first);

@@ -6,6 +6,7 @@ import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart'
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/completion_pie_chart.dart';
+import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -84,5 +85,55 @@ void main() {
     expect(find.textContaining('截止时间为上次读取记录'), findsOneWidget);
     await show(CalendarScreen(store: store));
     expect(find.text(title), findsNothing);
+  });
+
+  testWidgets('card distinguishes confirming, unknown and unlimited deadlines',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    final assignment = Assignment(
+      id: 'cx:work:1:2:task',
+      courseName: '课程',
+      title: '作业',
+      deadlineAt: null,
+      deadlineTrusted: false,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: DateTime.now(),
+    );
+    Future<void> show({
+      required Assignment value,
+      bool deadlinePending = false,
+      bool previewOnly = false,
+      bool previewSaving = false,
+    }) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: AssignmentCard(
+            assignment: value,
+            now: DateTime.now(),
+            onTap: () {},
+            onOpenAssignment: () {},
+            deadlinePending: deadlinePending,
+            previewOnly: previewOnly,
+            previewSaving: previewSaving,
+          ),
+        ),
+      ));
+    }
+
+    await show(value: assignment, deadlinePending: true, previewOnly: true);
+    expect(find.text('正在确认截止时间'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.text('待保存预览'), findsOneWidget);
+    expect(
+      tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+      isNull,
+    );
+
+    await show(value: assignment);
+    expect(find.text('待确认'), findsOneWidget);
+
+    await show(value: assignment.copyWith(deadlineTrusted: true));
+    expect(find.text('无期限'), findsOneWidget);
   });
 }

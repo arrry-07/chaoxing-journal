@@ -230,9 +230,10 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                       ),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () async {
-                        await _openPermissionSettings(widget
-                            .permissionSettingsService
-                            .openNotificationListenerSettings);
+                        await _openPermissionSettings(
+                            widget.permissionSettingsService
+                                .openNotificationListenerSettingsResult,
+                            destination: '通知使用权设置');
                         await _refreshListenerGranted();
                       },
                     ),
@@ -243,28 +244,37 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                       subtitle: const Text('用于按分钟准时提醒，关闭后系统可能延迟通知'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => _openPermissionSettings(
-                        widget.permissionSettingsService.openExactAlarmSettings,
+                        widget.permissionSettingsService
+                            .openExactAlarmSettingsResult,
+                        destination: '精确闹钟设置',
                       ),
                     ),
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.lock_clock_outlined),
-                      title: const Text('锁屏提醒'),
-                      subtitle: const Text('允许提醒显示在锁屏、横幅和通知中心'),
+                      title: const Text('截止提醒通知渠道'),
+                      subtitle: const Text(
+                        '控制截止提醒的锁屏、横幅和声音；不提供独立锁屏设置页',
+                      ),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => _openPermissionSettings(
                         widget.permissionSettingsService
-                            .openLockScreenNotificationSettings,
+                            .openLockScreenNotificationSettingsResult,
+                        destination: '截止提醒通知渠道',
                       ),
                     ),
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.battery_saver_outlined),
-                      title: const Text('后台与自启动'),
-                      subtitle: const Text('降低系统休眠、清后台后漏提醒的概率'),
+                      title: const Text('电池优化'),
+                      subtitle: const Text(
+                        '打开系统电池优化列表；请找到“学习通课业手记”并自行核对',
+                      ),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => _openPermissionSettings(
-                        widget.permissionSettingsService.openBatterySettings,
+                        widget.permissionSettingsService
+                            .openBatterySettingsResult,
+                        destination: '电池优化设置',
                       ),
                     ),
                   ],
@@ -431,7 +441,8 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       if (!mounted) return;
       if (!granted) {
         await _openPermissionSettings(
-          widget.permissionSettingsService.openNotificationSettings,
+          widget.permissionSettingsService.openNotificationSettingsResult,
+          destination: '通知设置',
         );
       } else {
         _showMessage('通知权限已开启');
@@ -439,7 +450,8 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     } catch (_) {
       if (mounted) {
         await _openPermissionSettings(
-          widget.permissionSettingsService.openNotificationSettings,
+          widget.permissionSettingsService.openNotificationSettingsResult,
+          destination: '通知设置',
         );
       }
     }
@@ -471,12 +483,18 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
         return;
       }
       if (value && _listenerGranted != true) {
-        final opened = await widget.permissionSettingsService
-            .openNotificationListenerSettings();
+        final result = await widget.permissionSettingsService
+            .openNotificationListenerSettingsResult();
         if (!mounted) return;
-        _showMessage(opened
-            ? '请在系统列表中选择“课业手记”并授予通知使用权，返回后会自动刷新状态'
-            : '无法打开通知使用权设置，请手动在系统设置中授权');
+        _showMessage(switch (result) {
+          SettingsOpenResult.direct => '请在系统页面中授予“学习通课业手记”通知使用权，返回后会自动刷新状态',
+          SettingsOpenResult.listFallback =>
+            '已打开通知使用权列表，请选择“学习通课业手记”并授予权限，返回后会自动刷新状态',
+          SettingsOpenResult.appDetailsFallback =>
+            '未能直达通知使用权设置，已打开“学习通课业手记”的应用详情',
+          SettingsOpenResult.unavailable =>
+            '无法打开通知使用权设置，请手动在手机系统设置中搜索“学习通课业手记”',
+        });
       } else {
         _showMessage(value ? '通知触发核对已开启' : '通知触发核对已关闭');
       }
@@ -542,13 +560,21 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   }
 
   Future<void> _openPermissionSettings(
-    Future<bool> Function() openSettings,
-  ) async {
-    final opened = await openSettings();
+    Future<SettingsOpenResult> Function() openSettings, {
+    required String destination,
+  }) async {
+    final result = await openSettings();
     if (!mounted) return;
-    if (!opened) {
-      _showMessage('无法打开系统设置，请在手机设置里搜索"学习通作业提醒"');
-    }
+    if (result == SettingsOpenResult.direct) return;
+    _showMessage(switch (result) {
+      SettingsOpenResult.direct => '',
+      SettingsOpenResult.listFallback =>
+        '未能直达$destination，已打开相关系统设置列表；请查找“学习通课业手记”',
+      SettingsOpenResult.appDetailsFallback =>
+        '未能直达$destination，已打开“学习通课业手记”的应用详情',
+      SettingsOpenResult.unavailable =>
+        '无法打开$destination，请手动在手机系统设置中搜索“学习通课业手记”',
+    });
   }
 
   void _showMessage(String message) {

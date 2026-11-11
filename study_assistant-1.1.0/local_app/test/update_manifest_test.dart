@@ -3,11 +3,62 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:study_assistant_mobile/src/app/app_version.dart';
 import 'package:study_assistant_mobile/src/services/app_update_service.dart';
+
+const manifestHash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+String patchVersion() {
+  final parts = AppVersion.name.split('.').map(int.parse).toList();
+  return '${parts[0]}.${parts[1]}.${parts[2] + 1}';
+}
+
+String iterationVersion() {
+  final parts = AppVersion.name.split('.').map(int.parse).toList();
+  return '${parts[0]}.${parts[1] + 1}.0';
+}
+
+Map<String, dynamic> manifest({
+  String? versionName,
+  int? versionCode,
+  String applicationId = AppUpdateService.applicationId,
+  String apkUrl = 'https://download.example.org/app.apk',
+  String sha256 = manifestHash,
+  int size = 1234,
+  String? backupApkUrl,
+}) =>
+    {
+      'versionCode': versionCode ?? AppVersion.code + 1,
+      'versionName': versionName ?? patchVersion(),
+      'applicationId': applicationId,
+      'apkUrl': apkUrl,
+      'sha256': sha256,
+      'size': size,
+      if (backupApkUrl != null) 'backupApkUrl': backupApkUrl,
+    };
+
+Dio manifestDio(
+  dynamic Function(RequestOptions options) body, {
+  int Function(RequestOptions options)? status,
+  List<String>? paths,
+}) {
+  final dio = Dio(BaseOptions(validateStatus: (_) => true))
+    ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+      paths?.add(options.uri.toString());
+      handler.resolve(Response(
+        requestOptions: options,
+        statusCode: status?.call(options) ?? 200,
+        data: body(options),
+      ));
+    }));
+  return dio;
+}
 
 void main() {
   for (final pair in [
     (401, UpdateCheckStatus.authRequired),
+    (403, UpdateCheckStatus.authRequired),
     (404, UpdateCheckStatus.networkError),
     (429, UpdateCheckStatus.networkError)
   ]) {
@@ -39,11 +90,12 @@ void main() {
   test('manifest JSON bytes accept UTF-8 BOM and non-JSON content type',
       () async {
     final manifest =
-        '{"applicationId":"com.example.studyassistant.journal","versionCode":32,"versionName":"1.6.3","apkUrl":"https://example.org/app.apk","sha256":"${'a' * 64}"}';
+        '{"applicationId":"${AppUpdateService.applicationId}","versionCode":${AppVersion.code + 1},"versionName":"${patchVersion()}","apkUrl":"https://example.org/app.apk","sha256":"$manifestHash","size":1234}';
     final bytes = Uint8List.fromList([239, 187, 191, ...utf8.encode(manifest)]);
     final dio = Dio(BaseOptions(validateStatus: (_) => true))
       ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
-        expect(o.responseType, ResponseType.plain);
+        expect(o.responseType, ResponseType.stream);
+        expect(o.followRedirects, isFalse);
         h.resolve(Response<String>(
           requestOptions: o,
           statusCode: 200,
@@ -58,7 +110,28 @@ void main() {
       manifestUrl: 'https://example.org/update.json',
     ).checkConfigured(currentVersionCode: 31);
     expect(result.status, UpdateCheckStatus.available);
-    expect(result.update?.versionCode, 32);
+    expect(result.update?.versionCode, AppVersion.code + 1);
+  });
+  test('manifest redirects are rejected instead of followed', () async {
+    final dio = manifestDio(
+      (_) => manifest(),
+      status: (_) => 302,
+    );
+    final result = await AppUpdateService(
+      dio: dio,
+      manifestUrl: 'https://updates.example.org/update.json',
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.networkError);
+    expect(result.update, isNull);
+  });
+  test('manifest bodies are capped at 64 KiB', () async {
+    final dio = manifestDio((_) => ' ' * (64 * 1024 + 1));
+    final result = await AppUpdateService(
+      dio: dio,
+      manifestUrl: 'https://updates.example.org/update.json',
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.invalidManifest);
+    expect(result.update, isNull);
   });
   test('hash mismatch removes partial APK and does not publish a final file',
       () async {
@@ -110,18 +183,222 @@ void main() {
   test('same display version with higher code is an update', () async {
     final dio = Dio()
       ..interceptors.add(InterceptorsWrapper(
-          onRequest: (o, h) =>
-              h.resolve(Response(requestOptions: o, statusCode: 200, data: {
-                'applicationId': 'com.example.studyassistant',
-                'versionCode': 32,
-                'versionName': '1.2.1',
-                'apkUrl': 'https://example.org/app.apk',
-                'sha256': 'a' * 64
-              }))));
+          onRequest: (o, h) => h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data: manifest(versionName: AppVersion.name)))));
     final result = await AppUpdateService(
             dio: dio, manifestUrl: 'https://example.org/update.json')
         .checkConfigured(currentVersionCode: 31);
     expect(result.status, UpdateCheckStatus.available);
-    expect(result.update!.versionCode, 32);
+    expect(result.update!.versionCode, AppVersion.code + 1);
+  });
+
+  test('stable startup ignores a patch while manual checks the patch manifest',
+      () async {
+    final paths = <String>[];
+    final dio = manifestDio(
+      (options) => manifest(),
+      paths: paths,
+    );
+    final service = AppUpdateService(
+      dio: dio,
+      stableManifestUrl: 'https://updates.example.org/stable.json',
+      manualManifestUrl: 'https://updates.example.org/manual.json',
+    );
+
+    final startup =
+        await service.checkForStartup(currentVersionCode: AppVersion.code);
+    expect(startup.status, UpdateCheckStatus.upToDate);
+    expect(startup.update, isNull);
+
+    final manual =
+        await service.checkConfigured(currentVersionCode: AppVersion.code);
+    expect(manual.status, UpdateCheckStatus.available);
+    expect(manual.update!.versionName, patchVersion());
+    expect(paths, [
+      'https://updates.example.org/stable.json',
+      'https://updates.example.org/manual.json',
+    ]);
+  });
+
+  test('stable startup allows a major/minor iteration', () async {
+    final dio = manifestDio(
+      (_) => manifest(versionName: iterationVersion()),
+    );
+    final service = AppUpdateService(
+      dio: dio,
+      stableManifestUrl: 'https://updates.example.org/stable.json',
+    );
+    final result =
+        await service.checkForStartup(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.available);
+    expect(result.update!.versionName, iterationVersion());
+  });
+
+  test('legacy single manifest keeps startup gating and manual patches',
+      () async {
+    final paths = <String>[];
+    final service = AppUpdateService(
+      dio: manifestDio((_) => manifest(), paths: paths),
+      manifestUrl: 'https://updates.example.org/legacy.json',
+    );
+    expect(
+        (await service.checkForStartup(currentVersionCode: AppVersion.code))
+            .status,
+        UpdateCheckStatus.upToDate);
+    expect(
+        (await service.checkConfigured(currentVersionCode: AppVersion.code))
+            .status,
+        UpdateCheckStatus.available);
+    expect(paths, [
+      'https://updates.example.org/legacy.json',
+      'https://updates.example.org/legacy.json',
+    ]);
+  });
+
+  test('configured primary succeeds without contacting GitHub', () async {
+    var calls = 0;
+    final dio = Dio(BaseOptions(validateStatus: (_) => true))
+      ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        calls++;
+        if (options.uri.host == 'api.github.com') {
+          handler.reject(DioException.connectionError(
+            requestOptions: options,
+            reason: 'GitHub unreachable',
+          ));
+          return;
+        }
+        handler.resolve(Response(
+          requestOptions: options,
+          statusCode: 200,
+          data: manifest(),
+        ));
+      }));
+    final result = await AppUpdateService(
+      dio: dio,
+      manualManifestUrl: 'https://updates.example.org/manual.json',
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.available);
+    expect(calls, 1);
+  });
+
+  test('HTML with HTTP 200 is an invalid manifest', () async {
+    final result = await AppUpdateService(
+      dio: manifestDio((_) => '<!doctype html><html>login</html>'),
+      manualManifestUrl: 'https://updates.example.org/manual.json',
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.invalidManifest);
+  });
+
+  test('invalid configured manifest does not fall back to GitHub', () async {
+    final hosts = <String>[];
+    final dio = Dio(BaseOptions(validateStatus: (_) => true))
+      ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        hosts.add(options.uri.host);
+        handler.resolve(Response(
+          requestOptions: options,
+          statusCode: 200,
+          data: options.uri.host == 'api.github.com'
+              ? [
+                  {
+                    'tag_name': 'v99.0.0',
+                    'draft': false,
+                    'prerelease': false,
+                    'assets': []
+                  }
+                ]
+              : {'versionCode': AppVersion.code + 1},
+        ));
+      }));
+    final result = await AppUpdateService(
+      dio: dio,
+      manualManifestUrl: 'https://updates.example.org/manual.json',
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.invalidManifest);
+    expect(hosts, ['updates.example.org']);
+  });
+
+  test('non-HTTPS manifest URL fails before making a request', () async {
+    var calls = 0;
+    final dio = manifestDio((_) {
+      calls++;
+      return manifest();
+    });
+    final result = await AppUpdateService(
+      dio: dio,
+      manualManifestUrl: 'http://updates.example.org/manual.json',
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.invalidManifest);
+    expect(calls, 0);
+  });
+
+  final malformed = <String, Map<String, dynamic>>{
+    'wrong applicationId':
+        manifest(applicationId: 'com.example.studyassistant'),
+    'invalid versionName': manifest(versionName: '1.7'),
+    'HTTP APK URL': manifest(apkUrl: 'http://download.example.org/app.apk'),
+    'HTTP backup URL':
+        manifest(backupApkUrl: 'http://backup.example.org/app.apk'),
+    'string versionCode': manifest()
+      ..['versionCode'] = '${AppVersion.code + 1}',
+    'zero versionCode': manifest(versionCode: 0),
+    'invalid SHA-256': manifest(sha256: 'not-a-sha256'),
+    'zero size': manifest(size: 0),
+    'string size': manifest()..['size'] = '1234',
+    'missing size': manifest()..remove('size'),
+  };
+  for (final entry in malformed.entries) {
+    test('${entry.key} is rejected', () async {
+      final result = await AppUpdateService(
+        dio: manifestDio((_) => entry.value),
+        manualManifestUrl: 'https://updates.example.org/manual.json',
+      ).checkConfigured(currentVersionCode: AppVersion.code);
+      expect(result.status, UpdateCheckStatus.invalidManifest);
+      expect(result.update, isNull);
+    });
+  }
+
+  test('manifest larger than the APK download limit is rejected', () async {
+    final result = await AppUpdateService(
+      dio: manifestDio((_) => manifest(size: 1025)),
+      maxDownloadBytes: 1024,
+      manualManifestUrl: 'https://updates.example.org/manual.json',
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.invalidManifest);
+  });
+
+  test('backup APK URL is retained under the same manifest metadata', () async {
+    final result = await AppUpdateService(
+      dio: manifestDio((_) => manifest(
+            backupApkUrl: 'https://backup.example.org/app.apk',
+          )),
+      manualManifestUrl: 'https://updates.example.org/manual.json',
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.available);
+    expect(result.update!.backupApkUrls, [
+      'https://backup.example.org/app.apk',
+    ]);
+    expect(result.update!.apkSize, 1234);
+    expect(result.update!.sha256Hash, manifestHash);
+  });
+
+  test('older version with a higher versionCode is rejected', () async {
+    final parts = AppVersion.name.split('.').map(int.parse).toList();
+    final older = '${parts[0]}.${parts[1]}.${parts[2] - 1}';
+    final result = await AppUpdateService(
+      dio: manifestDio((_) => manifest(versionName: older)),
+      manualManifestUrl: 'https://updates.example.org/manual.json',
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.invalidManifest);
+  });
+
+  test('non-increasing versionCode is up to date, not offered', () async {
+    final result = await AppUpdateService(
+      dio: manifestDio((_) => manifest(versionCode: AppVersion.code)),
+      manualManifestUrl: 'https://updates.example.org/manual.json',
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+    expect(result.status, UpdateCheckStatus.upToDate);
+    expect(result.update, isNull);
   });
 }

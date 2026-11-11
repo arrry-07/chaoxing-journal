@@ -16,6 +16,7 @@ import 'package:study_assistant_mobile/src/services/local_notification_service.d
 import 'package:study_assistant_mobile/src/services/daily_summary.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/features/reminder_health_screen.dart';
+import 'package:study_assistant_mobile/src/services/permission_settings_service.dart';
 
 class InspectableNotifications extends f.Notifications {}
 
@@ -39,6 +40,36 @@ class PendingRecoveryNotifications extends f.Notifications {
     recoveryStarted.complete();
     await recoveryFinish.future;
     if (failAfterFinish) throw StateError('synthetic recovery failure');
+  }
+}
+
+class CountingHealthNotifications extends InspectableNotifications {
+  int inspections = 0;
+
+  @override
+  Future<ReminderHealth> inspectHealth() async {
+    inspections++;
+    return const ReminderHealth(
+      notifications: true,
+      exact: true,
+    );
+  }
+}
+
+class _HealthPermissionSettingsService extends PermissionSettingsService {
+  _HealthPermissionSettingsService({
+    this.channelResult = SettingsOpenResult.direct,
+  });
+
+  final SettingsOpenResult channelResult;
+  String? requestedChannelId;
+
+  @override
+  Future<SettingsOpenResult> openNotificationChannelSettingsResult(
+    String channelId,
+  ) async {
+    requestedChannelId = channelId;
+    return channelResult;
   }
 }
 
@@ -927,6 +958,77 @@ void main() {
     expect((deadline.subtitle as Text).data, '已开启（高重要性）');
     expect((summary.subtitle as Text).data, '已关闭（系统设置）');
     expect((personal.subtitle as Text).data, '已开启（低重要性）');
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
+  });
+  testWidgets('health page explains a missing channel list fallback',
+      (tester) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (c) async {
+      calls.add(c);
+      if (c.method == 'getNotificationChannels') {
+        return [
+          channelRow('assignment_updates', '作业变化提醒', 3),
+          channelRow('assignment_deadlines', '作业截止提醒', 4),
+        ];
+      }
+      if (c.method == 'areNotificationsEnabled') return true;
+      if (c.method == 'canScheduleExactNotifications') return true;
+      if (c.method == 'pendingNotificationRequests') return [];
+      return true;
+    });
+    final store =
+        f.makeStore(f.Session(), notifications: InspectableNotifications());
+    addTearDown(store.dispose);
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    await store.restoreSession();
+    final permissions = _HealthPermissionSettingsService(
+      channelResult: SettingsOpenResult.listFallback,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReminderHealthScreen(
+          store: store,
+          permissionSettingsService: permissions,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final tile = find.widgetWithText(ListTile, '作业变化通知渠道');
+    await tester.tap(tile);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(permissions.requestedChannelId, 'assignment_updates');
+    expect(find.textContaining('已打开相关系统设置列表'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
+  });
+  testWidgets('health page refreshes after returning to the foreground',
+      (tester) async {
+    final notifications = CountingHealthNotifications();
+    final store = f.makeStore(f.Session(), notifications: notifications);
+    addTearDown(store.dispose);
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    await store.restoreSession();
+    await tester
+        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(notifications.inspections, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(notifications.inspections, 2);
     await tester.pumpWidget(const SizedBox.shrink());
     debugDefaultTargetPlatformOverride = null;
   });

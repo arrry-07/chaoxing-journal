@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
 import '../models/assignment.dart';
+import '../models/assignment_sync_progress.dart';
 import '../models/home_filters.dart';
 import '../models/sync_report.dart';
 import '../models/personal_workspace.dart';
@@ -44,6 +45,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
   String? get _courseKey => store.homeFilters.courseKey;
   String get _query => store.homeFilters.query;
   AssignmentDeadlineFilter get _deadlineFilter => store.homeFilters.deadline;
+  HomeSortOrder get _sortOrder => store.homeFilters.sortOrder;
   final _openingAssignments = <String>{};
   AssignmentStore get store => widget.store;
 
@@ -164,8 +166,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         final busy = _refreshing ||
             store.isLoading ||
             store.syncReport.phase == SyncPhase.running;
+        final displayAssignments = store.homeDisplayAssignments;
         final options = <String, String>{
-          for (final a in store.visibleAssignments)
+          for (final a in displayAssignments)
             if (a.courseKey case final key?) key: a.courseName
         };
         if (_courseKey != null && !options.containsKey(_courseKey)) {
@@ -173,16 +176,20 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         }
         final now = DateTime.now(),
             items = AssignmentQuery.filterHome(
-              store.visibleAssignments,
+              displayAssignments,
               query: _query,
               courseKey: _courseKey,
               deadline: _deadlineFilter,
               now: now,
             );
-        final groups = AssignmentQuery.home(items, now, {});
+        final sortOrder = _sortOrder;
+        final sortedItems = AssignmentQuery.sortHome(items, sortOrder);
+        final groups = sortOrder == HomeSortOrder.grouped
+            ? AssignmentQuery.home(items, now, {})
+            : null;
         final sync = HomeSyncPresentation.from(store.syncReport,
             loading: store.isLoading,
-            hasCache: store.visibleAssignments.isNotEmpty,
+            hasCache: displayAssignments.isNotEmpty,
             now: now,
             successAt: store.lastSyncAt,
             serviceWarning: store.error != null &&
@@ -198,9 +205,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             key: ValueKey('assignment-${a.id}'),
             assignment: a,
             now: now,
-            showFullDeadline: false,
+            showFullDeadline: sortOrder != HomeSortOrder.grouped,
             compact: store.display.compact,
             countdown: store.display.countdown,
+            deadlinePending: store.isHomeDeadlinePending(a.id),
+            previewOnly: store.isHomeAssignmentPreviewOnly(a.id),
+            previewSaving:
+                store.homeSyncProgress?.stage == AssignmentSyncStage.saving,
             onOpenAssignment: AssignmentWebLink.validatedUrl(a) == null
                 ? null
                 : () => openAssignment(a.id),
@@ -305,50 +316,75 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                     label: Text(filtersActive ? '已筛选' : '搜索与筛选'),
                   ),
               ]),
+              if (sortOrder != HomeSortOrder.grouped)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.sort, size: 16, color: Journal.muted),
+                        const SizedBox(width: 6),
+                        Text(
+                          _sortLabel(sortOrder),
+                          key: const ValueKey('current-home-sort'),
+                          style: Journal.metadata,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               if (busy)
                 Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Semantics(
                         liveRegion: true,
-                        child: const Text('正在刷新作业…', style: Journal.metadata))),
+                        child: Text(_syncProgressLabel(store),
+                            style: Journal.metadata))),
               if (_courseKey != null &&
-                  !store.visibleAssignments
-                      .any((a) => a.courseKey == _courseKey))
+                  !displayAssignments.any((a) => a.courseKey == _courseKey))
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 12),
                     child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
                         style: Journal.metadata)),
-              if (items.isNotEmpty) ...[
-                ...timeline([...groups.near, ...groups.far]),
-                if (groups.noDeadline.isNotEmpty) ...[
-                  note('未设置截止时间'),
-                  ...timeline(groups.noDeadline),
-                ],
-                if (groups.uncertain.isNotEmpty) ...[
-                  note('需要确认'),
-                  ...timeline(groups.uncertain),
-                ],
-                ...timeline(groups.overdue),
+              if (sortedItems.isNotEmpty) ...[
+                if (groups != null) ...[
+                  ...timeline([...groups.near, ...groups.far]),
+                  if (groups.noDeadline.isNotEmpty) ...[
+                    note('未设置截止时间'),
+                    ...timeline(groups.noDeadline),
+                  ],
+                  if (groups.uncertain.isNotEmpty) ...[
+                    note('需要确认'),
+                    ...timeline(groups.uncertain),
+                  ],
+                  ...timeline(groups.overdue),
+                ] else
+                  ...sortedItems.map(card),
+              ] else if (filtersActive &&
+                  (displayAssignments.isNotEmpty ||
+                      store.assignments.isNotEmpty)) ...[
+                const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Text('没有符合搜索或期限条件的作业')),
+                TextButton(
+                    onPressed: () => _saveFilters(
+                          HomeFilters(sortOrder: _sortOrder),
+                          store.accountEpoch,
+                          store.account,
+                        ),
+                    child: const Text('清除搜索与期限条件')),
               ] else if (store.assignments.isNotEmpty) ...[
-                if (filtersActive) ...[
-                  const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      child: Text('没有符合搜索或期限条件的作业')),
-                  TextButton(
-                      onPressed: () =>
-                          _saveFilters(const HomeFilters(), store.accountEpoch),
-                      child: const Text('清除搜索与期限条件')),
-                ] else ...[
-                  const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      child: Text('本机有已完成、已隐藏、未关注或历史来源的记录，当前首页未显示。')),
-                  TextButton(
-                      onPressed: () => context.push('/records'),
-                      child: const Text('查看全部本地记录')),
-                  TextButton(
-                      onPressed: () => context.push('/courses'),
-                      child: const Text('管理课程')),
-                ],
+                const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Text('本机有已完成、已隐藏、未关注或历史来源的记录，当前首页未显示。')),
+                TextButton(
+                    onPressed: () => context.push('/records'),
+                    child: const Text('查看全部本地记录')),
+                TextButton(
+                    onPressed: () => context.push('/courses'),
+                    child: const Text('管理课程')),
               ] else
                 Padding(
                     padding: const EdgeInsets.symmetric(vertical: 24),
@@ -384,6 +420,24 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         AssignmentDeadlineFilter.noDeadline => '无截止',
       };
 
+  String _sortLabel(HomeSortOrder order) => switch (order) {
+        HomeSortOrder.grouped => '默认分组',
+        HomeSortOrder.deadlineAsc => '截止时间：近到远',
+        HomeSortOrder.deadlineDesc => '截止时间：远到近',
+        HomeSortOrder.courseName => '课程名称',
+        HomeSortOrder.title => '作业名称',
+      };
+
+  String _syncProgressLabel(AssignmentStore store) {
+    final progress = store.homeSyncProgress;
+    if (progress == null) return '正在刷新作业…';
+    if (progress.stage == AssignmentSyncStage.details &&
+        progress.attemptedCount > 0) {
+      return '${progress.stageLabel}，已处理 ${progress.resolvedCount} 项详情';
+    }
+    return progress.stageLabel;
+  }
+
   String _freshnessLabel(String summary, DateTime? updatedAt, DateTime now) {
     if (updatedAt != null &&
         now.difference(updatedAt) >= const Duration(hours: 24)) {
@@ -392,18 +446,28 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
     return summary;
   }
 
-  Future<void> _saveFilters(HomeFilters filters, int epoch) async {
+  Future<void> _saveFilters(
+      HomeFilters filters, int epoch, String? expectedAccount) async {
+    if (store.accountEpoch != epoch || store.account != expectedAccount) {
+      return;
+    }
     final saved = await store.saveHomeFilters(filters, epoch);
-    if (!mounted || epoch != store.accountEpoch) return;
-    if (!saved) feedback('筛选条件未能保存，请重试；原条件已保留');
+    if (!mounted ||
+        epoch != store.accountEpoch ||
+        store.account != expectedAccount) {
+      return;
+    }
+    if (!saved) feedback('搜索、筛选与排序未能保存，请重试；原偏好已保留');
   }
 
   Future<void> _openFilters(Map<String, String> courseOptions) async {
     final openingEpoch = store.accountEpoch;
+    final openingAccount = store.account;
     final controller = TextEditingController(text: _query);
     var query = _query;
     var courseKey = _courseKey;
     var deadline = _deadlineFilter;
+    var sortOrder = _sortOrder;
     final selection = await showModalBottomSheet<_HomeFilterSelection>(
       context: context,
       isScrollControlled: true,
@@ -417,7 +481,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('搜索与期限筛选', style: Theme.of(context).textTheme.titleLarge),
+                Text('搜索、筛选与排序', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 16),
                 TextField(
                   controller: controller,
@@ -463,32 +527,58 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   onChanged: (value) => setSheetState(
                       () => courseKey = value == '' ? null : value),
                 ),
+                const SizedBox(height: 16),
+                Text('排序', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 4),
+                RadioGroup<HomeSortOrder>(
+                  groupValue: sortOrder,
+                  onChanged: (value) {
+                    if (value != null) {
+                      setSheetState(() => sortOrder = value);
+                    }
+                  },
+                  child: Column(
+                    children: [
+                      for (final order in HomeSortOrder.values)
+                        RadioListTile<HomeSortOrder>(
+                          key: ValueKey('sort-${order.name}'),
+                          value: order,
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: Text(_sortLabel(order)),
+                        ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 20),
-                Row(children: [
-                  TextButton(
-                    onPressed: () => setSheetState(() {
-                      query = '';
-                      courseKey = null;
-                      deadline = AssignmentDeadlineFilter.all;
-                      controller.clear();
-                    }),
-                    child: const Text('重置'),
-                  ),
-                  const Spacer(),
-                  TextButton(
-                      onPressed: () => Navigator.pop(sheetContext),
-                      child: const Text('取消')),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(
-                        sheetContext,
-                        _HomeFilterSelection(
-                            query: query,
-                            courseKey: courseKey,
-                            deadline: deadline)),
-                    child: const Text('应用'),
-                  ),
-                ]),
+                OverflowBar(
+                    spacing: 8,
+                    overflowSpacing: 8,
+                    overflowAlignment: OverflowBarAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => setSheetState(() {
+                          query = '';
+                          courseKey = null;
+                          deadline = AssignmentDeadlineFilter.all;
+                          controller.clear();
+                        }),
+                        child: const Text('清空筛选'),
+                      ),
+                      TextButton(
+                          onPressed: () => Navigator.pop(sheetContext),
+                          child: const Text('取消')),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(
+                            sheetContext,
+                            _HomeFilterSelection(
+                                query: query,
+                                courseKey: courseKey,
+                                deadline: deadline,
+                                sortOrder: sortOrder)),
+                        child: const Text('应用'),
+                      ),
+                    ]),
               ],
             ),
           ),
@@ -496,15 +586,20 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
       ),
     );
     Future<void>.delayed(const Duration(milliseconds: 350), controller.dispose);
-    if (!mounted || selection == null || store.accountEpoch != openingEpoch) {
+    if (!mounted ||
+        selection == null ||
+        store.accountEpoch != openingEpoch ||
+        store.account != openingAccount) {
       return;
     }
     await _saveFilters(
         HomeFilters(
             query: selection.query.trim(),
             courseKey: selection.courseKey,
-            deadline: selection.deadline),
-        openingEpoch);
+            deadline: selection.deadline,
+            sortOrder: selection.sortOrder),
+        openingEpoch,
+        openingAccount);
   }
 }
 
@@ -513,9 +608,11 @@ class _HomeFilterSelection {
     required this.query,
     required this.courseKey,
     required this.deadline,
+    required this.sortOrder,
   });
 
   final String query;
   final String? courseKey;
   final AssignmentDeadlineFilter deadline;
+  final HomeSortOrder sortOrder;
 }

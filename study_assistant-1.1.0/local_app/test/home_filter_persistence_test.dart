@@ -62,13 +62,20 @@ Assignment work(DateTime due) => Assignment(
     status: 'pending',
     lastSyncedAt: DateTime.now());
 
+Future<void> tapSheetOption(WidgetTester tester, String label) async {
+  final target = find.text(label);
+  await tester.ensureVisible(target);
+  await tester.pumpAndSettle();
+  await tester.tap(target);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues(
       {'auto_sync_interval_minutes': 0}));
 
-  test(
-      'relative filters survive process-style restore and A B A; logout clears archives',
+  test('sort and filters survive restart A B A and same-account restore',
       () async {
     final session = Session();
     final a = makeStore(session);
@@ -79,7 +86,8 @@ void main() {
             const HomeFilters(
                 query: '数学',
                 courseKey: 'c:k',
-                deadline: AssignmentDeadlineFilter.next7Days),
+                deadline: AssignmentDeadlineFilter.next7Days,
+                sortOrder: HomeSortOrder.deadlineDesc),
             a.accountEpoch),
         true);
     final restored = makeStore(session);
@@ -87,24 +95,34 @@ void main() {
     await restored.restoreSession();
     expect(restored.homeFilters.query, '数学');
     expect(restored.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(restored.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     final repo = LocalAssignmentRepository();
+    expect(
+        (await repo.loadHomeFilters()).sortOrder, HomeSortOrder.deadlineDesc);
+    await repo.activateAccount('A');
+    expect(
+        (await repo.loadHomeFilters()).sortOrder, HomeSortOrder.deadlineDesc);
     await repo.activateAccount('B');
     session.account = 'B';
     await restored.restoreSession();
     expect(restored.homeFilters.query, '');
     await restored.saveHomeFilters(
-        const HomeFilters(query: '英语'), restored.accountEpoch);
+        const HomeFilters(query: '英语', sortOrder: HomeSortOrder.courseName),
+        restored.accountEpoch);
     await repo.activateAccount('A');
     session.account = 'A';
     await restored.restoreSession();
     expect(restored.homeFilters.query, '数学');
+    expect(restored.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     await restored.logout();
     expect(restored.homeFilters.query, '');
+    expect(restored.homeFilters.sortOrder, HomeSortOrder.grouped);
     await repo.activateAccount('B');
     expect((await repo.loadHomeFilters()).query, '');
+    expect((await repo.loadHomeFilters()).sortOrder, HomeSortOrder.grouped);
   });
 
-  test('absent invalid and unknown preferences safely use defaults', () async {
+  test('malformed preferences safely use defaults', () async {
     for (final raw in [
       null,
       '{bad',
@@ -115,9 +133,38 @@ void main() {
     ]) {
       expect(HomeFilters.decode(raw).query, '');
       expect(HomeFilters.decode(raw).deadline, AssignmentDeadlineFilter.all);
+      expect(HomeFilters.decode(raw).sortOrder, HomeSortOrder.grouped);
     }
     SharedPreferences.setMockInitialValues({'home_filters_v1': 42});
     expect((await LocalAssignmentRepository().loadHomeFilters()).query, '');
+  });
+
+  test('legacy and unknown sort values only replace the sort field', () {
+    final legacy = HomeFilters.decode(
+        '{"query":" 数学 ","courseKey":"c:k","deadline":"next7Days"}');
+    expect(legacy.query, '数学');
+    expect(legacy.courseKey, 'c:k');
+    expect(legacy.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(legacy.sortOrder, HomeSortOrder.grouped);
+
+    final unknown = HomeFilters.decode(
+        '{"query":"英语","courseKey":"b:k","deadline":"next30Days","sortOrder":"removed"}');
+    expect(unknown.query, '英语');
+    expect(unknown.courseKey, 'b:k');
+    expect(unknown.deadline, AssignmentDeadlineFilter.next30Days);
+    expect(unknown.sortOrder, HomeSortOrder.grouped);
+
+    final encoded = const HomeFilters(
+            query: '语文',
+            courseKey: 'a:k',
+            deadline: AssignmentDeadlineFilter.overdue,
+            sortOrder: HomeSortOrder.title)
+        .encode();
+    final decoded = HomeFilters.decode(encoded);
+    expect(decoded.query, '语文');
+    expect(decoded.courseKey, 'a:k');
+    expect(decoded.deadline, AssignmentDeadlineFilter.overdue);
+    expect(decoded.sortOrder, HomeSortOrder.title);
   });
 
   test('failed saving preserves last applied filters and reports failure',
@@ -125,18 +172,24 @@ void main() {
     final s = makeStore(Session());
     addTearDown(s.dispose);
     await s.restoreSession();
-    await s.saveHomeFilters(const HomeFilters(query: '原条件'), s.accountEpoch);
+    await s.saveHomeFilters(
+        const HomeFilters(query: '原条件', sortOrder: HomeSortOrder.courseName),
+        s.accountEpoch);
     final prefs = await SharedPreferences.getInstance();
     SharedPreferencesStorePlatform.instance = FailingPreferences({
       for (final key in prefs.getKeys()) 'flutter.$key': prefs.get(key)!,
     });
     expect(
         await s.saveHomeFilters(
-            const HomeFilters(query: '新条件'), s.accountEpoch),
+            const HomeFilters(query: '新条件', sortOrder: HomeSortOrder.title),
+            s.accountEpoch),
         false);
     expect(s.homeFilters.query, '原条件');
+    expect(s.homeFilters.sortOrder, HomeSortOrder.courseName);
     expect(s.error, isNotNull);
     expect((await LocalAssignmentRepository().loadHomeFilters()).query, '原条件');
+    expect((await LocalAssignmentRepository().loadHomeFilters()).sortOrder,
+        HomeSortOrder.courseName);
   });
 
   test('relative deadline is reevaluated and stale account epoch cannot write',
@@ -181,16 +234,47 @@ void main() {
     expect(find.text('已选课程（当前无可显示作业）'), findsOneWidget);
     expect(find.text('private:class'), findsNothing);
     await t.enterText(find.byType(TextField), '新条件');
-    await t.tap(find.text('应用'));
-    await t.pumpAndSettle();
-    expect(find.text('筛选条件未能保存，请重试；原条件已保留'), findsOneWidget);
+    await tapSheetOption(t, '应用');
+    expect(find.text('搜索、筛选与排序未能保存，请重试；原偏好已保留'), findsOneWidget);
     expect(s.homeFilters.query, '原条件');
     expect(s.homeFilters.courseKey, 'private:class');
     await t.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('sort panel actions remain usable at 320dp and 2x text',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 800);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final store = makeStore(Session());
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    store.replaceAssignmentsForTest(
+        [work(DateTime.now().add(const Duration(days: 1)))]);
+    await tester.pumpWidget(MaterialApp(
+      home: MediaQuery(
+        data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+        child: Scaffold(body: AssignmentListScreen(store: store)),
+      ),
+    ));
+    await tester.tap(find.byTooltip('搜索与筛选'));
+    await tester.pumpAndSettle();
+    expect(find.text('搜索、筛选与排序'), findsOneWidget);
+    await tester.ensureVisible(find.text('清空筛选'));
+    await tester.pump();
+    await tester.ensureVisible(find.text('取消'));
+    await tester.pump();
+    await tester.ensureVisible(find.text('应用'));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
-      'applied selection survives tabs, detail return, refresh and empty cache; cancel does not save',
+      'applied sort survives navigation refresh and account cache clearing',
       (t) async {
     final s = makeStore(Session());
     addTearDown(s.dispose);
@@ -221,9 +305,12 @@ void main() {
     await t.tap(find.text('搜索与筛选'));
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), '数学');
-    await t.tap(find.text('7天内'));
-    await t.tap(find.text('应用'));
-    await t.pumpAndSettle();
+    await tapSheetOption(t, '7天内');
+    await tapSheetOption(t, '作业名称');
+    await tapSheetOption(t, '应用');
+    expect(s.homeFilters.sortOrder, HomeSortOrder.title);
+    expect(find.byKey(const ValueKey('current-home-sort')), findsOneWidget);
+    expect(find.text('作业名称'), findsOneWidget);
     for (final tab in ['日历', '统计', '我的']) {
       await t.tap(find.text(tab));
       await t.pumpAndSettle();
@@ -231,6 +318,7 @@ void main() {
       await t.pumpAndSettle();
       expect(find.text('已筛选'), findsOneWidget);
       expect(s.homeFilters.query, '数学');
+      expect(s.homeFilters.sortOrder, HomeSortOrder.title);
     }
     router.push('/assignments/test');
     await t.pumpAndSettle();
@@ -239,23 +327,57 @@ void main() {
     await s.refreshAssignments();
     await t.pumpAndSettle();
     expect(s.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(s.homeFilters.sortOrder, HomeSortOrder.title);
     s.replaceAssignmentsForTest([]);
     await t.pump();
     expect(s.homeFilters.query, '数学');
     await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), '不保存');
-    await t.tap(find.text('重置'));
-    await t.tap(find.text('取消'));
-    await t.pumpAndSettle();
+    await tapSheetOption(t, '课程名称');
+    await tapSheetOption(t, '清空筛选');
+    await tapSheetOption(t, '取消');
     expect(s.homeFilters.query, '数学');
+    expect(s.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(s.homeFilters.sortOrder, HomeSortOrder.title);
     await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
-    await t.tap(find.text('重置'));
-    await t.tap(find.text('应用'));
-    await t.pumpAndSettle();
+    await tapSheetOption(t, '清空筛选');
+    await tapSheetOption(t, '应用');
     expect(s.homeFilters.query, '');
     expect(s.homeFilters.deadline, AssignmentDeadlineFilter.all);
+    expect(s.homeFilters.sortOrder, HomeSortOrder.title);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('account change while sort panel is open cannot write old choice',
+      (t) async {
+    final session = Session();
+    final s = makeStore(session);
+    addTearDown(s.dispose);
+    await s.restoreSession();
+    await s.saveHomeFilters(
+        const HomeFilters(sortOrder: HomeSortOrder.courseName), s.accountEpoch);
+    await t.pumpWidget(
+        MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
+    await t.pumpAndSettle();
+
+    await t.tap(find.text('搜索与筛选'));
+    await t.pumpAndSettle();
+    expect(find.text('搜索、筛选与排序'), findsOneWidget);
+    await tapSheetOption(t, '作业名称');
+
+    session.account = 'B';
+    await s.restoreSession();
+    await t.pumpAndSettle();
+    expect(s.homeFilters.sortOrder, HomeSortOrder.grouped);
+
+    await tapSheetOption(t, '应用');
+    expect(s.homeFilters.sortOrder, HomeSortOrder.grouped);
+
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('A');
+    expect((await repo.loadHomeFilters()).sortOrder, HomeSortOrder.courseName);
     await t.pumpWidget(const SizedBox.shrink());
   });
 }
