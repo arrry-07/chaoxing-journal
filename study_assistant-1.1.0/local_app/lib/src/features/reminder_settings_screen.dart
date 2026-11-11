@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
@@ -21,7 +23,8 @@ class ReminderSettingsScreen extends StatefulWidget {
   State<ReminderSettingsScreen> createState() => _ReminderSettingsScreenState();
 }
 
-class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
+class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
+    with WidgetsBindingObserver {
   static const _presetOffsets = {
     1440: '提前 1 天',
     180: '提前 3 小时',
@@ -33,18 +36,33 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
   final _customMinutesController = TextEditingController();
   final Set<int> _offsets = {};
   bool _saving = false;
+  bool? _listenerGranted;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _offsets.addAll(widget.assignmentStore.reminderOffsetsMinutes);
+    unawaited(_refreshListenerGranted());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _customHoursController.dispose();
     _customMinutesController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshListenerGranted();
+  }
+
+  Future<void> _refreshListenerGranted() async {
+    final granted =
+        await widget.permissionSettingsService.isNotificationListenerEnabled();
+    if (mounted) setState(() => _listenerGranted = granted);
   }
 
   @override
@@ -104,6 +122,86 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                   onPressed: () => context.push('/reminder-health'),
                   icon: const Icon(Icons.health_and_safety_outlined),
                   label: const Text('提醒体检与每日摘要')),
+              const SizedBox(height: 16),
+              Text(
+                '作业后台检查',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                child: Column(
+                  children: [
+                    SwitchListTile(
+                      key: const ValueKey('background-check-switch'),
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12),
+                      title: const Text('白天后台检查'),
+                      subtitle: const Text(
+                        '08:00 至次日 00:00 低频检查；默认每 4 小时，不承诺整点执行',
+                      ),
+                      value: widget.assignmentStore.backgroundCheckEnabled,
+                      onChanged: _saving ? null : _saveBackgroundCheckEnabled,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final option in const {
+                            120: '2 小时',
+                            240: '4 小时',
+                            360: '6 小时',
+                          }.entries)
+                            ChoiceChip(
+                              key:
+                                  ValueKey('background-interval-${option.key}'),
+                              label: Text(option.value),
+                              selected: widget.assignmentStore
+                                      .backgroundCheckIntervalMinutes ==
+                                  option.key,
+                              onSelected: _saving ||
+                                      !widget.assignmentStore
+                                          .backgroundCheckEnabled
+                                  ? null
+                                  : (_) => _saveBackgroundInterval(option.key),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      key: const ValueKey('notification-listener-switch'),
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12),
+                      title: const Text('学习通通知触发核对'),
+                      subtitle: Text(
+                        _listenerGranted == true
+                            ? '已授权；只处理学习通通知信号，正文不落盘'
+                            : '需单独授予系统通知使用权；默认关闭',
+                      ),
+                      value: widget.assignmentStore.notificationListenerEnabled,
+                      onChanged: _saving ? null : _saveNotificationListener,
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      key: const ValueKey('new-assignment-switch'),
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12),
+                      title: const Text('新增正式作业提醒'),
+                      subtitle: const Text(
+                        '首次完整同步只建立基线；之后同一次检查发现多条时合并提醒',
+                      ),
+                      value:
+                          widget.assignmentStore.newAssignmentReminderEnabled,
+                      onChanged: _saving ? null : _saveNewAssignmentReminder,
+                    ),
+                  ],
+                ),
+              ),
               Text(
                 '提醒权限',
                 style: Theme.of(
@@ -119,10 +217,24 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                       title: const Text('通知权限'),
                       subtitle: const Text('允许系统通知，关闭后不会弹出提醒'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => _openPermissionSettings(
-                        widget
-                            .permissionSettingsService.openNotificationSettings,
+                      onTap: _requestNotificationPermission,
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.notifications_paused_outlined),
+                      title: const Text('通知使用权'),
+                      subtitle: Text(
+                        _listenerGranted == true
+                            ? '系统已授权学习通通知信号核对'
+                            : '未授权；不影响白天定时检查',
                       ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () async {
+                        await _openPermissionSettings(widget
+                            .permissionSettingsService
+                            .openNotificationListenerSettings);
+                        await _refreshListenerGranted();
+                      },
                     ),
                     const Divider(height: 1),
                     ListTile(
@@ -293,6 +405,101 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
       _customHoursController.clear();
       _customMinutesController.clear();
     });
+  }
+
+  Future<void> _saveBackgroundCheckEnabled(bool value) async {
+    setState(() => _saving = true);
+    try {
+      final saved =
+          await widget.assignmentStore.saveBackgroundCheckEnabled(value);
+      if (mounted) {
+        _showMessage(saved
+            ? value
+                ? '白天后台检查已开启'
+                : '白天后台检查已关闭；通知监听和缓存截止提醒不受影响'
+            : widget.assignmentStore.operationError ?? '设置保存失败，请重试');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _requestNotificationPermission() async {
+    try {
+      final granted = await widget.assignmentStore.notificationService
+          .requestNotificationsPermission();
+      if (!mounted) return;
+      if (!granted) {
+        await _openPermissionSettings(
+          widget.permissionSettingsService.openNotificationSettings,
+        );
+      } else {
+        _showMessage('通知权限已开启');
+      }
+    } catch (_) {
+      if (mounted) {
+        await _openPermissionSettings(
+          widget.permissionSettingsService.openNotificationSettings,
+        );
+      }
+    }
+  }
+
+  Future<void> _saveBackgroundInterval(int minutes) async {
+    setState(() => _saving = true);
+    try {
+      final saved = await widget.assignmentStore
+          .saveBackgroundCheckIntervalMinutes(minutes);
+      if (mounted) {
+        _showMessage(saved
+            ? '后台检查间隔已保存'
+            : widget.assignmentStore.operationError ?? '设置保存失败，请重试');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _saveNotificationListener(bool value) async {
+    setState(() => _saving = true);
+    try {
+      final saved =
+          await widget.assignmentStore.saveNotificationListenerEnabled(value);
+      if (!mounted) return;
+      if (!saved) {
+        _showMessage(widget.assignmentStore.operationError ?? '设置保存失败，请重试');
+        return;
+      }
+      if (value && _listenerGranted != true) {
+        final opened = await widget.permissionSettingsService
+            .openNotificationListenerSettings();
+        if (!mounted) return;
+        _showMessage(opened
+            ? '请在系统列表中选择“课业手记”并授予通知使用权，返回后会自动刷新状态'
+            : '无法打开通知使用权设置，请手动在系统设置中授权');
+      } else {
+        _showMessage(value ? '通知触发核对已开启' : '通知触发核对已关闭');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _saveNewAssignmentReminder(bool value) async {
+    setState(() => _saving = true);
+    try {
+      final saved =
+          await widget.assignmentStore.saveNewAssignmentReminderEnabled(value);
+      if (mounted) {
+        _showMessage(saved
+            ? value
+                ? '新增正式作业提醒已开启'
+                : '新增正式作业提醒已关闭；截止提醒仍由原规则控制'
+            : widget.assignmentStore.operationError ?? '设置保存失败，请重试');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Future<void> _savePrivacy(bool value) async {

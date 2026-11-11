@@ -411,7 +411,7 @@ void main() {
     expect(
         calls.where((c) => c.method == 'createNotificationChannel'), isEmpty);
   });
-  test('initialization provisions all three Android channels in stable order',
+  test('initialization provisions all four Android channels in stable order',
       () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
@@ -430,14 +430,19 @@ void main() {
         calls
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
-        ['assignment_deadlines', 'daily_summary', 'personal_schedule']);
+        [
+          'assignment_deadlines',
+          'assignment_updates',
+          'daily_summary',
+          'personal_schedule'
+        ]);
     final channels = calls
         .where((call) => call.method == 'createNotificationChannel')
         .map((call) => call.arguments as Map)
         .toList();
-    expect(channels.map((channel) => channel['importance']), [4, 3, 4]);
+    expect(channels.map((channel) => channel['importance']), [4, 3, 3, 4]);
     expect(channels.map((channel) => channel['name']),
-        ['作业截止提醒', '每日课业摘要', '个人待办与考试提醒']);
+        ['作业截止提醒', '作业变化提醒', '每日课业摘要', '个人待办与考试提醒']);
     final initializeIndex =
         calls.indexWhere((call) => call.method == 'initialize');
     final launchIndex = calls
@@ -549,7 +554,7 @@ void main() {
     final service = LocalNotificationService();
     await service.initialize();
     expect(calls.where((call) => call.method == 'createNotificationChannel'),
-        hasLength(3));
+        hasLength(4));
     calls.clear();
     await service.initialize();
     expect(calls.where((call) => call.method == 'initialize'), isEmpty);
@@ -587,7 +592,7 @@ void main() {
     await Future.wait([service.initialize(), service.initialize()]);
     expect(calls.where((call) => call.method == 'initialize'), hasLength(1));
     expect(calls.where((call) => call.method == 'createNotificationChannel'),
-        hasLength(3));
+        hasLength(4));
   });
   test('existing channels are not re-registered over user preferences',
       () async {
@@ -597,6 +602,7 @@ void main() {
       if (call.method == 'getNotificationChannels') {
         return [
           channelRow('assignment_deadlines', '用户自定义作业名', 0),
+          channelRow('assignment_updates', '用户自定义作业变化名', 1),
           channelRow('daily_summary', '用户自定义摘要名', 2),
           channelRow('personal_schedule', '用户自定义日程名', 1),
         ];
@@ -709,7 +715,12 @@ void main() {
         calls
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
-        ['assignment_deadlines', 'daily_summary', 'personal_schedule']);
+        [
+          'assignment_deadlines',
+          'assignment_updates',
+          'daily_summary',
+          'personal_schedule'
+        ]);
   });
   test('a channel failure does not block other reminder categories', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -807,7 +818,7 @@ void main() {
     await service.initialize();
     expect(calls.where((call) => call.method == 'initialize'), hasLength(2));
     expect(calls.where((call) => call.method == 'createNotificationChannel'),
-        hasLength(3));
+        hasLength(4));
   });
   test('Android 7.1 reports notification channels unsupported, not missing',
       () async {

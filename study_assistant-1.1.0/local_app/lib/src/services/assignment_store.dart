@@ -2,6 +2,7 @@ import '../models/display_preferences.dart';
 import '../models/home_filters.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,14 +19,35 @@ import 'reminder_rule_store.dart';
 import 'secure_session_store.dart';
 import 'widget_snapshot_service.dart';
 import 'assignment_change_log.dart';
+import 'account_identity.dart';
+import 'assignment_reminder_planner.dart';
+import 'background_check_settings.dart';
+import 'background_reminder_gateway.dart';
+import 'daytime_check_policy.dart';
 import '../models/assignment_change.dart';
 import '../models/backup_snapshot.dart';
 import '../models/personal_workspace.dart';
 import '../models/study_notebook.dart';
 
+class BackgroundCheckResult {
+  const BackgroundCheckResult({
+    required this.success,
+    required this.skipped,
+    required this.nextTargetAt,
+    this.message,
+  });
+
+  final bool success;
+  final bool skipped;
+  final DateTime? nextTargetAt;
+  final String? message;
+}
+
 class AssignmentStore extends ChangeNotifier {
-  static const defaultAutoSyncIntervalMinutes = 30;
-  static const _autoSyncIntervalKey = 'auto_sync_interval_minutes';
+  static const defaultAutoSyncIntervalMinutes =
+      DaytimeCheckPolicy.defaultIntervalMinutes;
+  static const _serverBackoffKey = 'background_server_backoff_until_v1';
+  static const _notificationClickMissingKey = 'notification_click_missing_v1';
   static const _privacyCleanupPendingKey =
       'notification_privacy_cleanup_pending_v1';
 
@@ -36,9 +58,21 @@ class AssignmentStore extends ChangeNotifier {
     LocalAssignmentRepository? repository,
     ChaoxingLocalClient? chaoxingClient,
     ReminderRuleStore? reminderRuleStore,
-  })  : repository = repository ?? LocalAssignmentRepository(),
+    BackgroundReminderGateway backgroundReminderGateway =
+        const BackgroundReminderGateway(),
+    this.backgroundCheckSettingsStore = const BackgroundCheckSettingsStore(),
+    bool manageBackgroundSchedule = true,
+    this.nativeLeaseOwner,
+    this.nativeReminderDeliveryEnabled = false,
+  })  : repository = repository ??
+            LocalAssignmentRepository(
+              backgroundReminderGateway: backgroundReminderGateway,
+              writeLeaseOwner: nativeLeaseOwner,
+            ),
         chaoxingClient = chaoxingClient ?? ChaoxingLocalClient(),
-        reminderRuleStore = reminderRuleStore ?? ReminderRuleStore();
+        reminderRuleStore = reminderRuleStore ?? ReminderRuleStore(),
+        backgroundReminderGateway = backgroundReminderGateway,
+        _manageBackgroundSchedule = manageBackgroundSchedule;
 
   final SecureSessionStore sessionStore;
   final LocalNotificationService notificationService;
@@ -46,6 +80,11 @@ class AssignmentStore extends ChangeNotifier {
   final LocalAssignmentRepository repository;
   final ChaoxingLocalClient chaoxingClient;
   final ReminderRuleStore reminderRuleStore;
+  final BackgroundReminderGateway backgroundReminderGateway;
+  final BackgroundCheckSettingsStore backgroundCheckSettingsStore;
+  final bool _manageBackgroundSchedule;
+  final String? nativeLeaseOwner;
+  final bool nativeReminderDeliveryEnabled;
   final changeLog = AssignmentChangeLog();
   PersonalWorkspace personal = PersonalWorkspace();
   StudyNotebook notebook = StudyNotebook();
@@ -179,6 +218,7 @@ class AssignmentStore extends ChangeNotifier {
       final accepted = incoming
           .where((a) => a.id != id || a.statusLabel != '提交状态未知')
           .toList();
+      await _markReminderMutationPending();
       await repository.mergeAndSave(accepted, completeSync: false);
       if (generation != _generation || !_authenticated || _disposed) return;
       await _reloadJournal();
@@ -238,10 +278,21 @@ class AssignmentStore extends ChangeNotifier {
   String? _chaoxingAvatarUrl;
   DateTime? _lastSyncAt;
   List<int> _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
-  int _autoSyncIntervalMinutes = defaultAutoSyncIntervalMinutes;
+  BackgroundCheckSettings _backgroundCheckSettings =
+      const BackgroundCheckSettings(
+    enabled: true,
+    intervalMinutes: defaultAutoSyncIntervalMinutes,
+    notificationListenerEnabled: false,
+    newAssignmentReminderEnabled: true,
+    migratedFromLegacy: false,
+  );
   final List<Assignment> _assignments = [];
-  Timer? _autoSyncTimer;
   bool _autoSyncRunning = false;
+  bool _nativeReminderAvailable = false;
+  String? _accountHash;
+  int _nativeSessionEpoch = 0;
+  DateTime? _serverBackoffUntil;
+  String? _backgroundWarning;
 
   bool get isAuthenticated => _authenticated;
   bool get isLoading => _loading;
@@ -281,6 +332,8 @@ class AssignmentStore extends ChangeNotifier {
       List.unmodifiable(_hiddenAssignments);
   DateTime? _lastSyncAttemptAt;
   String? get account => _account;
+  String? get accountHash => _accountHash;
+  int get nativeSessionEpoch => _nativeSessionEpoch;
   String? get profileAvatarUrl => _chaoxingAvatarUrl;
 
   String get profileDisplayName {
@@ -296,7 +349,37 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   DateTime? get lastSyncAt => _lastSyncAt;
-  int get autoSyncIntervalMinutes => _autoSyncIntervalMinutes;
+  int get autoSyncIntervalMinutes => _backgroundCheckSettings.enabled
+      ? _backgroundCheckSettings.intervalMinutes
+      : 0;
+  int get backgroundCheckIntervalMinutes =>
+      _backgroundCheckSettings.intervalMinutes;
+  bool get backgroundCheckEnabled => _backgroundCheckSettings.enabled;
+  bool get notificationListenerEnabled =>
+      _backgroundCheckSettings.notificationListenerEnabled;
+  bool get newAssignmentReminderEnabled =>
+      _backgroundCheckSettings.newAssignmentReminderEnabled;
+  String? get backgroundWarning => _backgroundWarning;
+  DateTime? get nextBackgroundCheckAt {
+    if (!_authenticated || !_backgroundCheckSettings.enabled) return null;
+    return _nextBackgroundTarget(DateTime.now());
+  }
+
+  Future<BackgroundReminderHealth?> inspectBackgroundReminderHealth() async {
+    final accountHash = _accountHash;
+    if (!_nativeReminderAvailable || !_authenticated || accountHash == null) {
+      return null;
+    }
+    try {
+      return await backgroundReminderGateway.inspectHealth(
+        accountHash: accountHash,
+        sessionEpoch: _nativeSessionEpoch,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   List<int> get reminderOffsetsMinutes =>
       List.unmodifiable(_reminderOffsetsMinutes);
   List<Assignment> get assignments => List.unmodifiable(_assignments);
@@ -312,6 +395,7 @@ class AssignmentStore extends ChangeNotifier {
   bool get notificationPrivacyPending => _privacyCleanupPending;
   bool get notificationDetails => notificationService.showDetails;
   Future<void> saveNotificationDetails(bool value) => _run(() async {
+        await _markReminderMutationPending();
         final prefs = await SharedPreferences.getInstance();
         if (!value) {
           try {
@@ -325,6 +409,7 @@ class AssignmentStore extends ChangeNotifier {
         }
         notificationService.showDetails = value;
         _privacyCleanupPending = false;
+        await _reconcileBackgroundControls();
         await _afterAssignmentsChanged();
         if (_serviceWarnings.isNotEmpty) {
           throw StateError('隐私设置已保存，部分旧提醒未更新，请在提醒体检重试');
@@ -348,6 +433,7 @@ class AssignmentStore extends ChangeNotifier {
   List<Assignment> get visibleAssignments =>
       formalAssignments.where((a) => !a.isCompleted).toList();
   Future<void> followCourse(String key, bool followed) => _run(() async {
+        await _markReminderMutationPending();
         final prefs = await SharedPreferences.getInstance();
         final next = {..._unfollowed};
         if (followed) {
@@ -382,14 +468,32 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> restoreSession() async {
     _recoveryWarnings.clear();
+    _nativeReminderAvailable = nativeReminderDeliveryEnabled &&
+        await backgroundReminderGateway.isAvailable();
+    repository.crossEngineLockEnabled = _nativeReminderAvailable;
     try {
       _account = await sessionStore.readChaoxingAccount();
       _authenticated = _account?.trim().isNotEmpty == true;
+      _accountHash = _authenticated ? AccountIdentity.hash(_account!) : null;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final notificationClickMessage =
+          prefs.getString(_notificationClickMissingKey);
+      if (notificationClickMessage != null) {
+        _error = notificationClickMessage;
+        await prefs.remove(_notificationClickMissingKey);
+      }
     } catch (error) {
       _recoveryWarnings.add('本机数据恢复未完成：登录信息暂时无法读取，请重新登录');
     }
     try {
       if (_authenticated) {
+        if (_nativeReminderAvailable) {
+          _nativeSessionEpoch =
+              await backgroundReminderGateway.ensureActiveAccount(
+            _accountHash!,
+          );
+        }
         await repository.activateAccount(_account!, previousAccount: _account);
       }
       await _restoreAccountData();
@@ -407,7 +511,7 @@ class AssignmentStore extends ChangeNotifier {
     } catch (_) {
       _recoveryWarnings.add('个人资料暂时无法恢复，不影响重新登录和读取作业');
     }
-    _restartAutoSyncTimer();
+    await _reconcileBackgroundControls();
     notifyListeners();
   }
 
@@ -423,6 +527,7 @@ class AssignmentStore extends ChangeNotifier {
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
     _lastSyncAt = null;
     _lastSyncAttemptAt = null;
+    _serverBackoffUntil = null;
     syncReport = const SyncReport();
     Future<void> stage(String name, Future<void> Function() action) async {
       try {
@@ -458,7 +563,13 @@ class AssignmentStore extends ChangeNotifier {
       _reminderOffsetsMinutes = await reminderRuleStore.loadOffsetsMinutes();
     });
     await stage('自动同步设置', () async {
-      _autoSyncIntervalMinutes = await _loadAutoSyncIntervalMinutes();
+      _backgroundCheckSettings =
+          await backgroundCheckSettingsStore.loadAndMigrate();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      _serverBackoffUntil =
+          DateTime.tryParse(prefs.getString(_serverBackoffKey) ?? '')
+              ?.toLocal();
     });
     await stage('同步记录', () async {
       final prefs = await SharedPreferences.getInstance();
@@ -629,6 +740,18 @@ class AssignmentStore extends ChangeNotifier {
       }
       final normalizedAccount = account.trim();
       final oldAccount = _account;
+      final oldAccountHash = _accountHash;
+      final newAccountHash = AccountIdentity.hash(normalizedAccount);
+      var nativeSwitched = false;
+      if (_nativeReminderAvailable) {
+        _nativeSessionEpoch = await backgroundReminderGateway.switchAccount(
+          previousAccountHash: oldAccountHash ??
+              (oldAccount == null ? null : AccountIdentity.hash(oldAccount)),
+          accountHash: newAccountHash,
+        );
+        _accountHash = newAccountHash;
+        nativeSwitched = true;
+      }
       String? oldPassword;
       if (oldAccount != null) {
         try {
@@ -658,6 +781,21 @@ class AssignmentStore extends ChangeNotifier {
         // rollback must also invalidate those cookies before any old-account sync.
         chaoxingClient.clearSession();
         try {
+          if (_nativeReminderAvailable && nativeSwitched) {
+            if (oldAccount != null && oldAccountHash != null) {
+              _nativeSessionEpoch =
+                  await backgroundReminderGateway.switchAccount(
+                previousAccountHash: newAccountHash,
+                accountHash: oldAccountHash,
+              );
+              _accountHash = oldAccountHash;
+            } else {
+              await backgroundReminderGateway
+                  .clearActiveAccount(newAccountHash);
+              _accountHash = null;
+              _nativeSessionEpoch = 0;
+            }
+          }
           if (oldAccount != null) {
             await repository.activateAccount(oldAccount);
           }
@@ -692,6 +830,7 @@ class AssignmentStore extends ChangeNotifier {
       }
       _recoveryWarnings.clear();
       _account = normalizedAccount;
+      _accountHash = newAccountHash;
       _authenticated = true;
       await _restoreAccountData();
       _chaoxingDisplayName = result.displayName;
@@ -699,7 +838,7 @@ class AssignmentStore extends ChangeNotifier {
       _agreementAccepted = true;
       _authenticated = true;
       loginSucceeded = true;
-      _restartAutoSyncTimer();
+      await _reconcileBackgroundControls();
     });
     _loginRunning = false;
     if (loginSucceeded && _authenticated && generation == _generation) {
@@ -738,13 +877,69 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void>? _syncInFlight;
 
-  Future<void> syncAssignments() {
+  Future<void> syncAssignments() =>
+      syncAssignmentsForTrigger(BackgroundSyncTrigger.manual);
+
+  Future<void> syncAssignmentsForTrigger(BackgroundSyncTrigger trigger) {
     if (!_authenticated) return Future.value();
-    return _syncInFlight ??= _run(() async {
-      if (_authenticated) await _syncAssignmentsBody();
-    }).whenComplete(() {
+    return _syncInFlight ??= _performCoordinatedSync(trigger).whenComplete(() {
       _syncInFlight = null;
     });
+  }
+
+  Future<void> _performCoordinatedSync(BackgroundSyncTrigger trigger) async {
+    final accountHash = _accountHash;
+    final sessionEpoch = _nativeSessionEpoch;
+    String? leaseRequest;
+    if (_nativeReminderAvailable && accountHash != null) {
+      final requestedAt = DateTime.now();
+      leaseRequest = nativeLeaseOwner ??
+          '${accountHash.substring(0, min(8, accountHash.length))}-'
+              '${requestedAt.microsecondsSinceEpoch}-${Random().nextInt(1 << 31)}';
+      final lease = await backgroundReminderGateway.acquireSyncLease(
+        accountHash: accountHash,
+        requestId: leaseRequest,
+        requestedAt: requestedAt,
+      );
+      if (!lease.acquired) {
+        _backgroundWarning = '另一轮作业检查仍在进行，本次已合并等待';
+        notifyListeners();
+        return;
+      }
+      if (lease.waited &&
+          (lease.lastAttemptAt?.isAfter(requestedAt) ?? false)) {
+        if (lease.lastFullSuccessAt?.isAfter(requestedAt) ?? false) {
+          await _run(_reloadJournal);
+          return;
+        }
+        _error = '另一轮作业检查未成功，本次合并到现有节奏，不立即重试';
+        notifyListeners();
+        return;
+      }
+    }
+    try {
+      await _run(() async {
+        if (!_authenticated) return;
+        if (_nativeReminderAvailable &&
+            accountHash != null &&
+            !await backgroundReminderGateway.isSessionCurrent(
+              accountHash,
+              sessionEpoch,
+            )) {
+          return;
+        }
+        await _syncAssignmentsBody(trigger);
+      });
+    } finally {
+      if (_nativeReminderAvailable &&
+          accountHash != null &&
+          leaseRequest != null) {
+        await backgroundReminderGateway.releaseSyncLease(
+          accountHash: accountHash,
+          requestId: leaseRequest,
+        );
+      }
+    }
   }
 
   Future<void> importAssignmentsFromHtml(String html) async {
@@ -755,12 +950,19 @@ class AssignmentStore extends ChangeNotifier {
         sourcePrefix: 'manual',
         baseUri: Uri.parse('https://mooc1.chaoxing.com'),
       );
+      await _markReminderMutationPending();
       await repository.mergeAndSave(incoming, completeSync: false);
       await _reloadJournal();
     });
   }
 
-  Future<void> _reloadJournal() async {
+  Future<void> _reloadJournal({
+    bool completeSync = false,
+    bool detectNewAssignments = false,
+    bool syncCompleted = false,
+    String? syncFailure,
+    DateTime? completedAt,
+  }) async {
     final generation = _generation;
     final journal = await repository.loadJournal();
     if (generation != _generation || _disposed) return;
@@ -821,7 +1023,13 @@ class AssignmentStore extends ChangeNotifier {
       }
     }
     if (generation != _generation || _disposed) return;
-    await _afterAssignmentsChanged();
+    await _afterAssignmentsChanged(
+      completeSync: completeSync,
+      detectNewAssignments: detectNewAssignments,
+      syncCompleted: syncCompleted,
+      syncFailure: syncFailure,
+      completedAt: completedAt,
+    );
   }
 
   Future<void> refreshAssignments() => _run(_reloadJournal);
@@ -834,6 +1042,7 @@ class AssignmentStore extends ChangeNotifier {
       if (generation != _generation || account != _account || !_authenticated) {
         return;
       }
+      await _markReminderMutationPending();
       restored = await repository.restoreBackupSnapshot(snapshot, account);
       if (generation != _generation || account != _account || !_authenticated) {
         restored = false;
@@ -850,6 +1059,7 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> updateCompletion(String assignmentId, bool completed) async {
     await _run(() async {
+      await _markReminderMutationPending();
       await repository.updateCompletion(
         assignmentId,
         completed,
@@ -861,6 +1071,7 @@ class AssignmentStore extends ChangeNotifier {
   Future<bool> hideAssignment(String assignmentId) async {
     var saved = false;
     await _run(() async {
+      await _markReminderMutationPending();
       await repository.updateCompletion(assignmentId, true);
       await _reloadJournal();
       saved = true;
@@ -871,6 +1082,7 @@ class AssignmentStore extends ChangeNotifier {
   Future<bool> saveReminderRule(List<int> offsetsMinutes) async {
     var saved = false;
     await _run(() async {
+      await _markReminderMutationPending();
       final normalized = await reminderRuleStore.saveOffsetsMinutes(
         offsetsMinutes,
       );
@@ -882,16 +1094,63 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<bool> saveAutoSyncIntervalMinutes(int minutes) async {
+    if (minutes == 0) {
+      return saveBackgroundCheckEnabled(false);
+    }
+    return saveBackgroundCheckIntervalMinutes(minutes);
+  }
+
+  Future<bool> saveBackgroundCheckEnabled(bool enabled) async {
     var saved = false;
     await _run(() async {
-      final normalized = normalizeAutoSyncIntervalMinutes(minutes);
-      final prefs = await SharedPreferences.getInstance();
-      if (!await prefs.setInt(_autoSyncIntervalKey, normalized)) {
-        await prefs.reload();
-        throw StateError('自动同步设置未能保存，请重试');
-      }
-      _autoSyncIntervalMinutes = normalized;
-      _restartAutoSyncTimer();
+      final next = _backgroundCheckSettings.copyWith(enabled: enabled);
+      await backgroundCheckSettingsStore.save(next);
+      _backgroundCheckSettings = next;
+      await _reconcileBackgroundControls();
+      saved = true;
+    });
+    return saved;
+  }
+
+  Future<bool> saveBackgroundCheckIntervalMinutes(int minutes) async {
+    var saved = false;
+    await _run(() async {
+      final normalized = DaytimeCheckPolicy.normalizeIntervalMinutes(minutes);
+      final next = _backgroundCheckSettings.copyWith(
+        enabled: true,
+        intervalMinutes: normalized,
+      );
+      await backgroundCheckSettingsStore.save(next);
+      _backgroundCheckSettings = next;
+      await _reconcileBackgroundControls();
+      saved = true;
+    });
+    return saved;
+  }
+
+  Future<bool> saveNotificationListenerEnabled(bool enabled) async {
+    var saved = false;
+    await _run(() async {
+      final next = _backgroundCheckSettings.copyWith(
+        notificationListenerEnabled: enabled,
+      );
+      await backgroundCheckSettingsStore.save(next);
+      _backgroundCheckSettings = next;
+      await _reconcileBackgroundControls();
+      saved = true;
+    });
+    return saved;
+  }
+
+  Future<bool> saveNewAssignmentReminderEnabled(bool enabled) async {
+    var saved = false;
+    await _run(() async {
+      final next = _backgroundCheckSettings.copyWith(
+        newAssignmentReminderEnabled: enabled,
+      );
+      await backgroundCheckSettingsStore.save(next);
+      _backgroundCheckSettings = next;
+      await _reconcileBackgroundControls();
       saved = true;
     });
     return saved;
@@ -899,38 +1158,107 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<bool> runDueAutoSync({DateTime? now}) async {
     if (!_authenticated ||
-        _autoSyncIntervalMinutes <= 0 ||
+        !_backgroundCheckSettings.enabled ||
         _loading ||
         _autoSyncRunning) {
       return false;
     }
     final currentNow = now ?? DateTime.now();
-    final lastSyncAt = _lastSyncAttemptAt != null &&
-            (_lastSyncAt == null || _lastSyncAttemptAt!.isAfter(_lastSyncAt!))
-        ? _lastSyncAttemptAt
-        : _lastSyncAt;
-    if (lastSyncAt != null &&
-        currentNow.difference(lastSyncAt).inMinutes <
-            _autoSyncIntervalMinutes) {
+    if (!DaytimeCheckPolicy.isDue(
+          localNow: currentNow,
+          lastAttemptAt: _latestAttemptAt,
+          intervalMinutes: _backgroundCheckSettings.intervalMinutes,
+        ) ||
+        (_serverBackoffUntil?.isAfter(currentNow) ?? false)) {
       return false;
     }
 
     _lastSyncAttemptAt = currentNow;
     _autoSyncRunning = true;
     try {
-      await syncAssignments();
+      await syncAssignmentsForTrigger(BackgroundSyncTrigger.foregroundDue);
+      await _reconcileBackgroundControls(now: currentNow);
       return _error == null;
     } finally {
       _autoSyncRunning = false;
     }
   }
 
-  Future<void> logout() {
+  Future<BackgroundCheckResult> runBackgroundAutomaticCheck(
+    BackgroundSyncTrigger trigger,
+  ) async {
+    final now = DateTime.now();
+    if (!_authenticated) {
+      return const BackgroundCheckResult(
+        success: false,
+        skipped: true,
+        nextTargetAt: null,
+        message: '未登录',
+      );
+    }
+    if (trigger == BackgroundSyncTrigger.daytime &&
+        !_backgroundCheckSettings.enabled) {
+      return const BackgroundCheckResult(
+        success: false,
+        skipped: true,
+        nextTargetAt: null,
+        message: '白天后台检查已关闭',
+      );
+    }
+    if (trigger == BackgroundSyncTrigger.notificationSignal &&
+        !_backgroundCheckSettings.notificationListenerEnabled) {
+      return BackgroundCheckResult(
+        success: false,
+        skipped: true,
+        nextTargetAt: _nextBackgroundTarget(now),
+        message: '通知监听已关闭',
+      );
+    }
+    if (!DaytimeCheckPolicy.isInWindow(now)) {
+      return BackgroundCheckResult(
+        success: false,
+        skipped: true,
+        nextTargetAt: _nextBackgroundTarget(now),
+        message: '当前不在白天检查窗口',
+      );
+    }
+    if (trigger == BackgroundSyncTrigger.daytime &&
+        !DaytimeCheckPolicy.isDue(
+          localNow: now,
+          lastAttemptAt: _latestAttemptAt,
+          intervalMinutes: _backgroundCheckSettings.intervalMinutes,
+        )) {
+      return BackgroundCheckResult(
+        success: true,
+        skipped: true,
+        nextTargetAt: _nextBackgroundTarget(now),
+        message: '合并到已有检查节奏',
+      );
+    }
+    await syncAssignmentsForTrigger(trigger);
+    final success = _error == null ||
+        syncReport.phase == SyncPhase.success ||
+        syncReport.phase == SyncPhase.partial;
+    return BackgroundCheckResult(
+      success: success && !_loading,
+      skipped: false,
+      nextTargetAt: _nextBackgroundTarget(DateTime.now()),
+      message: _error,
+    );
+  }
+
+  Future<void> logout() async {
     _generation++;
     _visitedAssignment = null;
     returnCheckMessage = null;
     changes = [];
-    return _run(() async {
+    final accountHash = _accountHash;
+    if (_nativeReminderAvailable && accountHash != null) {
+      await backgroundReminderGateway.clearActiveAccount(accountHash);
+    }
+    _accountHash = null;
+    _nativeSessionEpoch = 0;
+    await _run(() async {
       try {
         await _cancelPrivateNotifications();
       } catch (_) {
@@ -959,6 +1287,7 @@ class AssignmentStore extends ChangeNotifier {
       _assignments.clear();
       _lastSyncAt = null;
       _lastSyncAttemptAt = null;
+      _serverBackoffUntil = null;
       _hiddenAssignments = [];
       _courses = [];
       _unfollowed.clear();
@@ -967,7 +1296,7 @@ class AssignmentStore extends ChangeNotifier {
       returnCheckMessage = null;
       changes = [];
       repository.recoveryWarning = null;
-      _restartAutoSyncTimer();
+      await _reconcileBackgroundControls();
       await _afterAssignmentsChanged();
       if (_serviceWarnings.isNotEmpty) {
         _error = '账号已退出，但部分提醒或桌面内容可能仍保留。请在系统中清除本应用通知并移除小组件。';
@@ -982,7 +1311,13 @@ class AssignmentStore extends ChangeNotifier {
       ..addAll(assignments);
   }
 
-  Future<void> _afterAssignmentsChanged() async {
+  Future<void> _afterAssignmentsChanged({
+    bool completeSync = false,
+    bool detectNewAssignments = false,
+    bool syncCompleted = false,
+    String? syncFailure,
+    DateTime? completedAt,
+  }) async {
     _serviceWarnings.clear();
     // Restored app preferences can outlive excluded/nonportable credentials.
     // Do not publish their private content to lockscreen or widget before login.
@@ -995,54 +1330,143 @@ class AssignmentStore extends ChangeNotifier {
       }
     }
     if (!_privacyCleanupPending) {
-      try {
-        await notificationService.rescheduleAssignments(
-            scoped.where((a) => a.deadlineTrusted).toList(),
-            offsetsMinutes: _reminderOffsetsMinutes);
-      } catch (_) {
-        _serviceWarnings.add('提醒安排失败，请检查通知权限后重试');
-      }
-      if (notificationService.lastWarning != null) {
-        _serviceWarnings.add(notificationService.lastWarning!);
-      }
-      try {
-        await notificationService.rescheduleSummary(scoped,
-            _authenticated ? personal : PersonalWorkspace(), _lastSyncAt);
+      if (_nativeReminderAvailable && _authenticated) {
+        try {
+          if (_manageBackgroundSchedule) {
+            await notificationService.removeLegacyAssignmentSchedules();
+          }
+          await _applyNativeReminderPlan(
+            completeSync: completeSync,
+            detectNewAssignments: detectNewAssignments,
+            syncCompleted: syncCompleted,
+            failure: syncFailure,
+            completedAt: completedAt,
+          );
+        } catch (error) {
+          _serviceWarnings.add('后台作业提醒状态未能更新：$error');
+        }
+      } else {
+        try {
+          await notificationService.rescheduleAssignments(
+              scoped.where((a) => a.deadlineTrusted).toList(),
+              offsetsMinutes: _reminderOffsetsMinutes);
+        } catch (_) {
+          _serviceWarnings.add('提醒安排失败，请检查通知权限后重试');
+        }
         if (notificationService.lastWarning != null) {
           _serviceWarnings.add(notificationService.lastWarning!);
         }
-      } catch (error) {
-        final detail = notificationService.lastWarning ?? error.toString();
-        _serviceWarnings.add(_authenticated && personal.summaryEnabled
-            ? '每日摘要未能更新：$detail'
-            : '旧摘要未能清理：$detail');
       }
-      try {
-        await notificationService
-            .rescheduleManual(_authenticated ? notebook.entries : []);
-        if (notificationService.lastWarning != null) {
-          _serviceWarnings.add('个人日程：${notificationService.lastWarning!}');
+      if (_manageBackgroundSchedule) {
+        try {
+          await notificationService.rescheduleSummary(scoped,
+              _authenticated ? personal : PersonalWorkspace(), _lastSyncAt);
+          if (notificationService.lastWarning != null) {
+            _serviceWarnings.add(notificationService.lastWarning!);
+          }
+        } catch (error) {
+          final detail = notificationService.lastWarning ?? error.toString();
+          _serviceWarnings.add(_authenticated && personal.summaryEnabled
+              ? '每日摘要未能更新：$detail'
+              : '旧摘要未能清理：$detail');
         }
-      } catch (error) {
-        final detail = notificationService.lastWarning ?? error.toString();
-        _serviceWarnings.add('个人日程提醒未能更新或清理：$detail');
+        try {
+          await notificationService
+              .rescheduleManual(_authenticated ? notebook.entries : []);
+          if (notificationService.lastWarning != null) {
+            _serviceWarnings.add('个人日程：${notificationService.lastWarning!}');
+          }
+        } catch (error) {
+          final detail = notificationService.lastWarning ?? error.toString();
+          _serviceWarnings.add('个人日程提醒未能更新或清理：$detail');
+        }
       }
     }
-    try {
-      await widgetSnapshotService
-          .saveAssignments(display.forWidget(scoped, DateTime.now()));
-    } catch (_) {
-      _serviceWarnings.add('作业已保存在本机，小组件更新失败，请稍后刷新');
+    if (_manageBackgroundSchedule) {
+      try {
+        await widgetSnapshotService
+            .saveAssignments(display.forWidget(scoped, DateTime.now()));
+      } catch (_) {
+        _serviceWarnings.add('作业已保存在本机，小组件更新失败，请稍后刷新');
+      }
     }
+  }
+
+  Future<void> _markReminderMutationPending() async {
+    final accountHash = _accountHash;
+    if (!_nativeReminderAvailable || !_authenticated || accountHash == null) {
+      return;
+    }
+    await backgroundReminderGateway.markPendingUpdate(
+      accountHash: accountHash,
+      sessionEpoch: _nativeSessionEpoch,
+    );
+  }
+
+  Future<void> _applyNativeReminderPlan({
+    required bool completeSync,
+    required bool detectNewAssignments,
+    required bool syncCompleted,
+    String? failure,
+    DateTime? completedAt,
+  }) async {
+    final accountHash = _accountHash;
+    if (!_authenticated || accountHash == null) return;
+    final sessionEpoch = _nativeSessionEpoch;
+    final state = await backgroundReminderGateway.loadPlanState(
+      accountHash: accountHash,
+      sessionEpoch: sessionEpoch,
+    );
+    final now = completedAt ?? DateTime.now();
+    final plan = AssignmentReminderPlanner.planAfterSync(
+      accountHash: accountHash,
+      sessionEpoch: sessionEpoch,
+      assignments: [..._assignments, ..._hiddenAssignments],
+      hiddenAssignmentIds: _hiddenAssignments.map((item) => item.id).toSet(),
+      unfollowedCourseKeys: _unfollowed,
+      knownAssignmentIds: state.knownAssignmentIds,
+      sentNewAssignmentIds: state.sentNewAssignmentIds,
+      baselineCompleted: state.baselineCompleted,
+      completeSync: completeSync,
+      detectNewAssignments: detectNewAssignments,
+      newAssignmentReminderEnabled:
+          _backgroundCheckSettings.newAssignmentReminderEnabled,
+      reminderOffsetsMinutes: _reminderOffsetsMinutes,
+      now: now,
+    );
+    final result = await backgroundReminderGateway.applyPlan(
+      accountHash: accountHash,
+      sessionEpoch: sessionEpoch,
+      plan: plan,
+      completedAt: now,
+      failure: failure,
+      syncCompleted: syncCompleted,
+      expectedMutationVersion: state.mutationVersion,
+    );
+    _backgroundWarning = result.warning;
+    if (result.warning != null) {
+      _serviceWarnings.add(result.warning!);
+    }
+    await _reconcileBackgroundControls(now: now);
   }
 
   bool _needsProfileRecovery = false;
 
-  Future<void> _syncAssignmentsBody() async {
+  Future<void> _syncAssignmentsBody(BackgroundSyncTrigger trigger) async {
     final generation = _generation;
-    final attempted = _autoSyncRunning && _lastSyncAttemptAt != null
+    final startedAt = _autoSyncRunning && _lastSyncAttemptAt != null
         ? _lastSyncAttemptAt!
         : DateTime.now();
+    final automatic = trigger != BackgroundSyncTrigger.manual;
+    if (automatic && !DaytimeCheckPolicy.isInWindow(startedAt)) {
+      await _reconcileBackgroundControls(now: startedAt);
+      return;
+    }
+    if (automatic && (_serverBackoffUntil?.isAfter(startedAt) ?? false)) {
+      await _reconcileBackgroundControls(now: startedAt);
+      return;
+    }
+    final attempted = startedAt;
     _lastSyncAttemptAt = attempted;
     syncReport = SyncReport(
         phase: SyncPhase.running,
@@ -1066,6 +1490,9 @@ class AssignmentStore extends ChangeNotifier {
         .map((a) => a.id)
         .toSet();
     List<Assignment> incoming;
+    final stopCheck =
+        automatic ? () => !DaytimeCheckPolicy.isInWindow(DateTime.now()) : null;
+    chaoxingClient.shouldStop = stopCheck;
     try {
       incoming = await chaoxingClient.fetchAssignments();
     } on ChaoxingAuthenticationException {
@@ -1073,6 +1500,7 @@ class AssignmentStore extends ChangeNotifier {
       await _refreshChaoxingSession();
       incoming = await chaoxingClient.fetchAssignments();
     } finally {
+      chaoxingClient.shouldStop = null;
       if (generation == _generation &&
           !_disposed &&
           chaoxingClient.hasCourseResponse) {
@@ -1099,7 +1527,17 @@ class AssignmentStore extends ChangeNotifier {
     }
     if (generation != _generation || _disposed) return;
     final before = [..._assignments, ..._hiddenAssignments];
-    await repository.mergeAndSave(incoming, completeSync: warning == null);
+    await _markReminderMutationPending();
+    await repository.mergeAndSave(
+      incoming,
+      completeSync: warning == null,
+      canCommit: _nativeReminderAvailable
+          ? () => backgroundReminderGateway.isSessionCurrent(
+                _accountHash!,
+                _nativeSessionEpoch,
+              )
+          : null,
+    );
     if (generation != _generation || _disposed) return;
     final dataSuccessAt = DateTime.now();
     final dataMirrorSaved = await _writePreferenceAndVerify(
@@ -1121,6 +1559,7 @@ class AssignmentStore extends ChangeNotifier {
         succeededCourses: chaoxingClient.succeededCourses,
         failedCourses: chaoxingClient.failedCourses,
         issues: reportIssues);
+    await _updateServerBackoff(reportIssues);
     final timestampWarning =
         timestampMirrorFailed ? '作业数据已保存，但同步时间记录未能完整保存；请重新同步核对' : null;
     _error = [warning, timestampWarning]
@@ -1151,7 +1590,13 @@ class AssignmentStore extends ChangeNotifier {
       _error = '作业数据已保存，但同步结果记录未能保存；请重新同步核对';
     }
     try {
-      await _reloadJournal();
+      await _reloadJournal(
+        completeSync: warning == null,
+        detectNewAssignments: true,
+        syncCompleted: true,
+        syncFailure: warning,
+        completedAt: dataSuccessAt,
+      );
       if (generation != _generation || _disposed) return;
       await _recordChanges(before, incoming, completeSync: warning == null);
       _error ??= warning;
@@ -1213,36 +1658,112 @@ class AssignmentStore extends ChangeNotifier {
     }
   }
 
-  Future<int> _loadAutoSyncIntervalMinutes() async {
-    final prefs = await SharedPreferences.getInstance();
-    return normalizeAutoSyncIntervalMinutes(
-      prefs.getInt(_autoSyncIntervalKey) ?? defaultAutoSyncIntervalMinutes,
-    );
-  }
-
-  void _restartAutoSyncTimer() {
-    _autoSyncTimer?.cancel();
-    _autoSyncTimer = null;
-    if (!_authenticated || _autoSyncIntervalMinutes <= 0) {
-      return;
-    }
-    _autoSyncTimer = Timer.periodic(
-      Duration(minutes: _autoSyncIntervalMinutes),
-      (_) => unawaited(runDueAutoSync()),
-    );
-  }
-
   static int normalizeAutoSyncIntervalMinutes(int minutes) {
     if (minutes <= 0) {
       return 0;
     }
-    if (minutes < 1) {
-      return 1;
+    return DaytimeCheckPolicy.normalizeIntervalMinutes(minutes);
+  }
+
+  DateTime? get _latestAttemptAt {
+    final attempt = _lastSyncAttemptAt;
+    final success = _lastSyncAt;
+    if (attempt == null) return success;
+    if (success == null || attempt.isAfter(success)) return attempt;
+    return success;
+  }
+
+  DateTime? _nextBackgroundTarget(DateTime now) {
+    if (!_backgroundCheckSettings.enabled) return null;
+    var target = DaytimeCheckPolicy.nextTarget(
+      localNow: now,
+      lastAttemptAt: _latestAttemptAt,
+      intervalMinutes: _backgroundCheckSettings.intervalMinutes,
+    );
+    final backoff = _serverBackoffUntil;
+    if (backoff != null && backoff.isAfter(target)) {
+      target = backoff;
     }
-    if (minutes > 1440) {
-      return 1440;
+    return target;
+  }
+
+  Future<void> _reconcileBackgroundControls({DateTime? now}) async {
+    if (!_nativeReminderAvailable) return;
+    final current = now ?? DateTime.now();
+    try {
+      final accountHash = _accountHash;
+      if (_authenticated && accountHash != null) {
+        await backgroundReminderGateway.updateSettings(
+          accountHash,
+          _nativeSessionEpoch,
+          _backgroundCheckSettings,
+          showDetails: notificationService.showDetails,
+        );
+      }
+      if (_manageBackgroundSchedule) {
+        await backgroundReminderGateway.reconcileDaytimeSchedule(
+          targetAt: _authenticated ? _nextBackgroundTarget(current) : null,
+          enabled: _authenticated && _backgroundCheckSettings.enabled,
+          intervalMinutes: _backgroundCheckSettings.intervalMinutes,
+        );
+      }
+      if (accountHash != null) {
+        final health = await backgroundReminderGateway.inspectHealth(
+          accountHash: accountHash,
+          sessionEpoch: _nativeSessionEpoch,
+        );
+        _backgroundWarning = health.lastFailure;
+      }
+    } catch (error) {
+      _backgroundWarning =
+          error.toString().replaceFirst('PlatformException', '后台提醒');
     }
-    return minutes;
+  }
+
+  Future<void> _updateServerBackoff(Iterable<SyncIssue> issues) async {
+    final seconds = issues
+        .map((issue) => issue.retryAfterSeconds ?? 0)
+        .where((value) => value > 0)
+        .fold<int>(0, max);
+    final prefs = await SharedPreferences.getInstance();
+    if (seconds == 0) {
+      if (syncReport.phase == SyncPhase.success) {
+        _serverBackoffUntil = null;
+        await prefs.remove(_serverBackoffKey);
+      }
+      return;
+    }
+    final until = DateTime.now().add(Duration(seconds: seconds));
+    _serverBackoffUntil = until;
+    await prefs.setString(
+      _serverBackoffKey,
+      until.toUtc().toIso8601String(),
+    );
+  }
+
+  Future<void> _recordBackgroundAttempt({
+    required DateTime attemptedAt,
+    required bool dataSucceeded,
+    required bool fullSucceeded,
+    required String? failure,
+  }) async {
+    final accountHash = _accountHash;
+    if (!_nativeReminderAvailable || !_authenticated || accountHash == null) {
+      return;
+    }
+    try {
+      await backgroundReminderGateway.recordAttempt(
+        accountHash: accountHash,
+        sessionEpoch: _nativeSessionEpoch,
+        attemptedAt: attemptedAt,
+        dataSucceeded: dataSucceeded,
+        fullSucceeded: fullSucceeded,
+        failure: failure,
+      );
+      await _reconcileBackgroundControls(now: attemptedAt);
+    } catch (error) {
+      _backgroundWarning = error.toString();
+    }
   }
 
   Future<void>? _operations;
@@ -1279,6 +1800,17 @@ class AssignmentStore extends ChangeNotifier {
                                 : SyncIssueKind.network,
                             _error!)
                   ]);
+        await _updateServerBackoff(syncReport.issues);
+        await _recordBackgroundAttempt(
+          attemptedAt: syncReport.attemptedAt ?? DateTime.now(),
+          dataSucceeded: syncReport.lastDataSuccessAt?.isAfter(
+                syncReport.attemptedAt ??
+                    DateTime.fromMillisecondsSinceEpoch(0),
+              ) ??
+              false,
+          fullSucceeded: false,
+          failure: _error,
+        );
         try {
           await _persistSyncReport();
         } catch (_) {
@@ -1303,7 +1835,13 @@ class AssignmentStore extends ChangeNotifier {
     _privacyCleanupPending = true;
     try {
       await _persistPrivacyCleanupPending(true);
-      await notificationService.cancelPrivateSchedules();
+      if (_manageBackgroundSchedule) {
+        await notificationService.cancelPrivateSchedules();
+      }
+      if (_nativeReminderAvailable && _accountHash != null) {
+        await backgroundReminderGateway
+            .cancelAssignmentDeliveryKeepEvents(_accountHash!);
+      }
       await _persistPrivacyCleanupPending(false);
       _privacyCleanupPending = false;
     } catch (error) {
@@ -1384,7 +1922,6 @@ class AssignmentStore extends ChangeNotifier {
 
   @override
   void dispose() {
-    _autoSyncTimer?.cancel();
     _disposed = true;
     _generation++;
     super.dispose();

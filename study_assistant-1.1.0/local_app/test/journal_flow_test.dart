@@ -91,17 +91,12 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(row);
     await t.pumpAndSettle();
-    final interval = find.byKey(const ValueKey('auto-sync-option-60'));
-    await t.scrollUntilVisible(interval, 150,
-        scrollable: find.byType(Scrollable).first);
-    await t.tap(interval);
-    await t.pumpAndSettle();
-    expect(store.autoSyncIntervalMinutes, 60);
+    expect(find.text('调整后台检查与提醒'), findsOneWidget);
+    expect(find.byKey(const ValueKey('auto-sync-option-60')), findsNothing);
     await t.tap(find.byTooltip('返回我的'));
     await t.pumpAndSettle();
     expect(find.byType(ProfileScreen), findsOneWidget);
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getInt('auto_sync_interval_minutes'), 60);
+    expect(store.backgroundCheckIntervalMinutes, 240);
     expect(await store.reminderRuleStore.loadOffsetsMinutes(), contains(10));
     await t.ensureVisible(find.widgetWithText(ListTile, '提醒设置'));
     await t.pumpAndSettle();

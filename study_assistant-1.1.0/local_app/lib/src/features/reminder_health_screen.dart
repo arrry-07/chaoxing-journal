@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/assignment_store.dart';
+import '../services/background_reminder_gateway.dart';
 import '../services/daily_summary.dart';
 import '../services/permission_settings_service.dart';
 
@@ -13,6 +14,7 @@ class ReminderHealthScreen extends StatefulWidget {
 class _HealthState extends State<ReminderHealthScreen>
     with WidgetsBindingObserver {
   ReminderHealth? health;
+  BackgroundReminderHealth? backgroundHealth;
   bool busy = false;
   String? message;
   late final int epoch;
@@ -40,14 +42,17 @@ class _HealthState extends State<ReminderHealthScreen>
     setState(() => busy = true);
     ReminderHealth? value;
     var failed = false;
+    BackgroundReminderHealth? nativeValue;
     try {
       value = await widget.store.notificationService.inspectHealth();
+      nativeValue = await widget.store.inspectBackgroundReminderHealth();
     } catch (_) {
       failed = true;
     }
     if (!mounted) return;
     setState(() {
       if (value != null) health = value;
+      backgroundHealth = nativeValue;
       busy = false;
       if (failed) message = '提醒状态读取失败，请稍后重试';
     });
@@ -98,6 +103,13 @@ class _HealthState extends State<ReminderHealthScreen>
                       .openNotificationSettings()),
               ListTile(
                   contentPadding: EdgeInsets.zero,
+                  title: const Text('作业变化通知渠道'),
+                  subtitle:
+                      Text(channelState(health?.assignmentUpdatesChannel)),
+                  onTap: () => const PermissionSettingsService()
+                      .openNotificationSettings()),
+              ListTile(
+                  contentPadding: EdgeInsets.zero,
                   title: const Text('截止提醒通知渠道'),
                   subtitle: Text(channelState(health?.assignmentChannel)),
                   onTap: () => const PermissionSettingsService()
@@ -129,12 +141,43 @@ class _HealthState extends State<ReminderHealthScreen>
                       .openExactAlarmSettings()),
               ListTile(
                   contentPadding: EdgeInsets.zero,
+                  title: const Text('学习通通知使用权'),
+                  subtitle: Text(
+                    backgroundHealth?.notificationListenerEnabled == true
+                        ? backgroundHealth?.notificationListenerGranted == true
+                            ? '应用开关已开启，系统已授权'
+                            : '应用开关已开启，但系统尚未授权'
+                        : '应用中默认关闭',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => const PermissionSettingsService()
+                      .openNotificationListenerSettings()),
+              ListTile(
+                  contentPadding: EdgeInsets.zero,
                   title: const Text('后台与省电设置'),
                   subtitle: const Text('此项需在系统中自行核对，应用无法保证长期后台运行'),
                   onTap: () =>
                       const PermissionSettingsService().openBatterySettings()),
               Text(
-                  '已安排截止提醒：${health?.pending ?? '未知'} 条\n已安排摘要：${health?.summaryPending ?? '未知'} 条\n已安排个人提醒：${health?.manualPending ?? '未知'} 条\n最近完整同步：${widget.store.lastSyncAt?.toLocal().toString().substring(0, 16) ?? '尚无完整同步'}'),
+                  '原生作业截止事件：${backgroundHealth?.pendingDeadlineCount ?? health?.pending ?? '未知'} 条\n'
+                  '待处理新增作业事件：${backgroundHealth?.pendingNewCount ?? '未知'} 条\n'
+                  '已安排摘要：${health?.summaryPending ?? '未知'} 条\n'
+                  '已安排个人提醒：${health?.manualPending ?? '未知'} 条\n'
+                  '新增提醒基线：${backgroundHealth == null ? '当前平台不适用' : backgroundHealth!.baselineCompleted ? '已建立' : '待首次完整同步'}\n'
+                  '下次后台检查：${backgroundHealth?.nextCheckAt == null ? widget.store.nextBackgroundCheckAt?.toLocal().toString().substring(0, 16) ?? '未安排' : backgroundHealth!.nextCheckAt!.toLocal().toString().substring(0, 16)}\n'
+                  '最近完整同步：${widget.store.lastSyncAt?.toLocal().toString().substring(0, 16) ?? '尚无完整同步'}'),
+              if (backgroundHealth?.migrationPending == true)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text(
+                    '提醒迁移或快照恢复尚未完成，系统已暂停不确定的作业自动投递。',
+                  ),
+                ),
+              if (backgroundHealth?.lastFailure != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text('最近后台失败：${backgroundHealth!.lastFailure}'),
+                ),
               const SizedBox(height: 12),
               Wrap(spacing: 12, children: [
                 OutlinedButton(

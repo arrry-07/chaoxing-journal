@@ -139,7 +139,7 @@ void main() {
     expect(restored.records.single.requirementsText, isEmpty);
     expect(restored.courses.single.name, '合成课程');
     expect(restored.unfollowed, {'synthetic-course:class'});
-    expect(restored.autoSyncIntervalMinutes, 15);
+    expect(restored.autoSyncIntervalMinutes, 240);
 
     await expectLater(
       service.decrypt(envelope, 'wrong-password'),

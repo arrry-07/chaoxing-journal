@@ -156,29 +156,18 @@ void main() {
     expect(find.text('提醒时间已保存，作业通知已更新'), findsOneWidget);
   });
 
-  testWidgets('auto sync exposes exactly one selected option in a radio group',
+  testWidgets('sync page has one background-check entry and no legacy controls',
       (t) async {
+    SharedPreferences.setMockInitialValues({});
     final s = _store();
     addTearDown(s.dispose);
     await s.restoreSession();
-    final semantics = t.ensureSemantics();
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: SyncStatusScreen(store: s))));
-    final off = find.byKey(const ValueKey('auto-sync-option-off'));
-    final fifteen = find.byKey(const ValueKey('auto-sync-option-15'));
-    expect(t.getSemantics(off).flagsCollection.isSelected, ui.Tristate.isTrue);
-    expect(t.getSemantics(fifteen).flagsCollection.isSelected,
-        ui.Tristate.isFalse);
-    expect(t.getSemantics(fifteen).flagsCollection.isInMutuallyExclusiveGroup,
-        isTrue);
-    await t.tap(fifteen);
-    await t.pumpAndSettle();
-    expect(
-        t.getSemantics(fifteen).flagsCollection.isSelected, ui.Tristate.isTrue);
-    expect(t.getSemantics(off).flagsCollection.isSelected, ui.Tristate.isFalse);
-    expect(s.autoSyncIntervalMinutes, 15);
-    await s.saveAutoSyncIntervalMinutes(0);
-    semantics.dispose();
+    expect(find.byKey(const ValueKey('auto-sync-option-off')), findsNothing);
+    expect(find.byKey(const ValueKey('auto-sync-option-15')), findsNothing);
+    expect(find.text('调整后台检查与提醒'), findsOneWidget);
+    expect(s.autoSyncIntervalMinutes, 240);
   });
 
   testWidgets('remediated screens stay usable at narrow width and large text',
@@ -256,8 +245,7 @@ void main() {
       await t.pumpAndSettle();
       await capture('reminders');
       await mount(Scaffold(body: SyncStatusScreen(store: s)));
-      await t.scrollUntilVisible(
-          find.byKey(const ValueKey('auto-sync-option-off')), 250,
+      await t.scrollUntilVisible(find.text('白天后台检查'), 250,
           scrollable: find.byType(Scrollable).first);
       await t.pumpAndSettle();
       await capture('sync');

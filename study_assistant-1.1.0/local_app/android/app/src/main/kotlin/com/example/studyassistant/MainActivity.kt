@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
 import java.io.File
 import io.flutter.embedding.engine.FlutterEngine
@@ -30,6 +31,7 @@ class MainActivity : FlutterActivity() {
     }
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        BackgroundReminderBridge.attach(flutterEngine, this)
         personalFileBridge = PersonalFileBridge(this,
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/personal_files"))
         backupBridge = BackupBridge(this,
@@ -81,12 +83,20 @@ class MainActivity : FlutterActivity() {
                 result.success(Build.VERSION.SDK_INT)
                 return@setMethodCallHandler
             }
+            if (call.method == "isNotificationListenerEnabled") {
+                result.success(
+                    NotificationManagerCompat.getEnabledListenerPackages(this)
+                        .contains(packageName)
+                )
+                return@setMethodCallHandler
+            }
             val opened = when (call.method) {
                 "openNotificationSettings" -> openNotificationSettings()
                 "openExactAlarmSettings" -> openExactAlarmSettings()
                 "openLockScreenNotificationSettings" -> openLockScreenNotificationSettings()
                 "openBatterySettings" -> openBatterySettings()
                 "openAppSettings" -> openAppSettings()
+                "openNotificationListenerSettings" -> openNotificationListenerSettings()
                 else -> {
                     result.notImplemented()
                     return@setMethodCallHandler
@@ -139,6 +149,10 @@ class MainActivity : FlutterActivity() {
     private fun openBatterySettings(): Boolean {
         return openIntent(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) ||
             openAppSettings()
+    }
+
+    private fun openNotificationListenerSettings(): Boolean {
+        return openIntent(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
     }
 
     private fun openAppSettings(): Boolean {

@@ -28,6 +28,7 @@ class LocalNotificationService {
   String? lastWarning;
   bool showDetails = false;
   static const assignmentChannel = 'assignment_deadlines';
+  static const assignmentUpdatesChannel = 'assignment_updates';
   static const summaryChannel = 'daily_summary';
   static const manualChannel = 'personal_schedule';
   static const _permissionsChannel =
@@ -38,6 +39,12 @@ class LocalNotificationService {
       '作业截止提醒',
       description: '学习通作业截止前提醒',
       importance: Importance.high,
+    ),
+    AndroidNotificationChannel(
+      assignmentUpdatesChannel,
+      '作业变化提醒',
+      description: '学习通正式作业新增提醒',
+      importance: Importance.defaultImportance,
     ),
     AndroidNotificationChannel(
       summaryChannel,
@@ -171,6 +178,69 @@ class LocalNotificationService {
     });
   }
 
+  /// Removes only the legacy plugin-delivered assignment alarms. Personal
+  /// reminders and the daily summary retain their existing transaction logs.
+  Future<void> removeLegacyAssignmentSchedules() async {
+    await _ensurePluginInitialized();
+    await _runScheduleMutation(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final ids = <int>{};
+      try {
+        final pending = await _plugin.pendingNotificationRequests();
+        ids.addAll(pending
+            .where((item) => item.payload?.startsWith('a:') == true)
+            .map((item) => item.id));
+      } catch (error) {
+        throw StateError('旧作业提醒待发列表无法读取：$error');
+      }
+      try {
+        final active = await _plugin.getActiveNotifications();
+        ids.addAll(active
+            .where((item) =>
+                item.id != null &&
+                (item.payload?.startsWith('a:') == true ||
+                    item.channelId == assignmentChannel))
+            .map((item) => item.id!));
+      } catch (_) {
+        // Pending alarms are still removable. Delivered notifications may be
+        // unavailable on older plugin/API combinations.
+      }
+
+      for (final category in const ['assignments']) {
+        try {
+          ids.addAll(_readActiveIds(prefs, category));
+        } catch (_) {
+          // OS payload/channel ownership above is sufficient to avoid touching
+          // another category when this manifest is damaged.
+        }
+        try {
+          final journal = _readJournal(prefs, category);
+          if (journal != null) {
+            ids.addAll(journal['oldIds'] as List<int>);
+            ids.addAll(journal['newIds'] as List<int>);
+          }
+        } catch (_) {
+          // Keep the damaged journal visible; do not guess notification owner.
+        }
+      }
+
+      final failures = await _cancelIds(ids);
+      if (failures.isNotEmpty) {
+        throw StateError('旧作业提醒未能完整清理：${failures.join('; ')}');
+      }
+      try {
+        await _writeActiveIds(prefs, 'assignments', const []);
+      } catch (_) {
+        // The prior ID set is safe to retain; all known IDs were cancelled.
+      }
+      try {
+        await _removeJournal(prefs, 'assignments');
+      } catch (_) {
+        // Recovery will see only cancelled IDs and cannot duplicate delivery.
+      }
+    });
+  }
+
   NotificationPayloadHandler? _onPayload;
   String? _pendingPayload;
   Future<void> rescheduleManual(List<ManualEntry> entries) async {
@@ -272,8 +342,9 @@ class LocalNotificationService {
         notifications: allowed,
         exact: exact,
         assignmentChannel: channels.$1,
-        summaryChannel: channels.$2,
-        manualChannel: channels.$3,
+        assignmentUpdatesChannel: channels.$2,
+        summaryChannel: channels.$3,
+        manualChannel: channels.$4,
         pending: pending,
         summaryPending: summary,
         manualPending: manual,
@@ -306,6 +377,14 @@ class LocalNotificationService {
           return false;
         }
       });
+
+  Future<bool> requestNotificationsPermission() async {
+    await _ensurePluginInitialized();
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) return true;
+    return await android.requestNotificationsPermission() ?? false;
+  }
 
   Future<void> rescheduleSummary(List<Assignment> assignments,
       PersonalWorkspace personal, DateTime? lastSync) async {
@@ -1117,8 +1196,12 @@ class LocalNotificationService {
     // recovery, where category ownership must remain fail-closed.
     return item.tag == null &&
         (_isPrivatePayload(item.payload) ||
-            const {assignmentChannel, summaryChannel, manualChannel}
-                .contains(item.channelId));
+            const {
+              assignmentChannel,
+              assignmentUpdatesChannel,
+              summaryChannel,
+              manualChannel
+            }.contains(item.channelId));
   }
 
   static String? _scheduleCategoryForPayload(String? payload) {
@@ -1131,6 +1214,7 @@ class LocalNotificationService {
   static String? _scheduleCategoryForChannel(String? channel) =>
       switch (channel) {
         assignmentChannel => 'assignments',
+        assignmentUpdatesChannel => 'assignments',
         manualChannel => 'manual',
         summaryChannel => 'summary',
         _ => null,
@@ -1154,30 +1238,37 @@ class LocalNotificationService {
     await android.createNotificationChannel(channel);
   }
 
-  Future<(ReminderChannelHealth, ReminderChannelHealth, ReminderChannelHealth)>
-      _inspectChannelHealth() async {
+  Future<
+      (
+        ReminderChannelHealth,
+        ReminderChannelHealth,
+        ReminderChannelHealth,
+        ReminderChannelHealth
+      )> _inspectChannelHealth() async {
     const unsupported =
         ReminderChannelHealth(ReminderChannelStatus.unsupported);
     const failed = ReminderChannelHealth(ReminderChannelStatus.queryFailed);
     if (defaultTargetPlatform != TargetPlatform.android) {
-      return (unsupported, unsupported, unsupported);
+      return (unsupported, unsupported, unsupported, unsupported);
     }
 
     final int? sdkInt;
     try {
       sdkInt = await _permissionsChannel.invokeMethod<int>('getAndroidSdkInt');
     } catch (_) {
-      return (failed, failed, failed);
+      return (failed, failed, failed, failed);
     }
-    if (sdkInt == null) return (failed, failed, failed);
-    if (sdkInt < 26) return (unsupported, unsupported, unsupported);
+    if (sdkInt == null) return (failed, failed, failed, failed);
+    if (sdkInt < 26) {
+      return (unsupported, unsupported, unsupported, unsupported);
+    }
 
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
-    if (android == null) return (failed, failed, failed);
+    if (android == null) return (failed, failed, failed, failed);
     try {
       final channels = await android.getNotificationChannels();
-      if (channels == null) return (failed, failed, failed);
+      if (channels == null) return (failed, failed, failed, failed);
       ReminderChannelHealth status(String id) {
         final channel = channels.where((item) => item.id == id).firstOrNull;
         if (channel == null) {
@@ -1193,11 +1284,12 @@ class LocalNotificationService {
 
       return (
         status(assignmentChannel),
+        status(assignmentUpdatesChannel),
         status(summaryChannel),
         status(manualChannel),
       );
     } catch (_) {
-      return (failed, failed, failed);
+      return (failed, failed, failed, failed);
     }
   }
 

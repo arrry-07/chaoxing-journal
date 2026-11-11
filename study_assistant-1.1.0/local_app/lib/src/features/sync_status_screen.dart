@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/sync_report.dart';
 import 'package:go_router/go_router.dart';
-import '../app/journal.dart';
 import 'package:intl/intl.dart';
+import '../app/journal.dart';
 
 import '../services/assignment_store.dart';
 
@@ -16,25 +16,7 @@ class SyncStatusScreen extends StatefulWidget {
 }
 
 class _SyncStatusScreenState extends State<SyncStatusScreen> {
-  final _customSyncController = TextEditingController();
-  final _customSyncFocus = FocusNode();
-
   AssignmentStore get store => widget.store;
-
-  @override
-  void initState() {
-    super.initState();
-    _customSyncController.text = store.autoSyncIntervalMinutes == 0
-        ? ''
-        : store.autoSyncIntervalMinutes.toString();
-  }
-
-  @override
-  void dispose() {
-    _customSyncController.dispose();
-    _customSyncFocus.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -44,10 +26,6 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         final lastSyncAt = store.lastSyncAt;
         final stale = lastSyncAt == null ||
             DateTime.now().difference(lastSyncAt).inHours >= 24;
-        final selectedInterval =
-            _isPresetInterval(store.autoSyncIntervalMinutes)
-                ? store.autoSyncIntervalMinutes
-                : -1;
         return Scaffold(
             appBar: AppBar(
                 leading: IconButton(
@@ -116,13 +94,13 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                         Row(
                           children: [
                             Icon(
-                              Icons.update,
+                              Icons.nightlight_round,
                               color: Theme.of(context).colorScheme.primary,
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                '自动同步',
+                                '白天后台检查',
                                 style: Theme.of(context)
                                     .textTheme
                                     .titleMedium
@@ -133,81 +111,25 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'App 运行或重新打开时会按间隔同步作业和截止时间，提醒会跟着新截止时间更新。',
+                          store.backgroundCheckEnabled
+                              ? '已开启，每 ${store.backgroundCheckIntervalMinutes ~/ 60} 小时在 08:00—次日 00:00 内检查。实际执行由系统调度，不承诺整点。'
+                              : '已关闭；手动刷新、通知监听（如开启）和已有缓存截止提醒不受影响。',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          '同步间隔设置过短会增加耗电量和网络请求次数，建议不要低于 15 分钟。',
-                          style:
-                              Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _SyncIntervalOption(
-                              key: const ValueKey('auto-sync-option-15'),
-                              label: '15 分钟',
-                              selected: selectedInterval == 15,
-                              enabled: !store.isLoading,
-                              onTap: () => _selectPresetInterval(15),
-                            ),
-                            _SyncIntervalOption(
-                              key: const ValueKey('auto-sync-option-30'),
-                              label: '30 分钟',
-                              selected: selectedInterval == 30,
-                              enabled: !store.isLoading,
-                              onTap: () => _selectPresetInterval(30),
-                            ),
-                            _SyncIntervalOption(
-                              key: const ValueKey('auto-sync-option-60'),
-                              label: '1 小时',
-                              selected: selectedInterval == 60,
-                              enabled: !store.isLoading,
-                              onTap: () => _selectPresetInterval(60),
-                            ),
-                            _SyncIntervalOption(
-                              key: const ValueKey('auto-sync-option-custom'),
-                              label: '自定义',
-                              selected: selectedInterval == -1,
-                              enabled: !store.isLoading,
-                              onTap: () => _customSyncFocus.requestFocus(),
-                            ),
-                            _SyncIntervalOption(
-                              key: const ValueKey('auto-sync-option-off'),
-                              label: '关闭',
-                              selected: selectedInterval == 0,
-                              enabled: !store.isLoading,
-                              onTap: () => _selectPresetInterval(0),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _customSyncController,
-                                focusNode: _customSyncFocus,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  hintText: '自定义分钟数',
-                                  prefixIcon: Icon(Icons.timer_outlined),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            FilledButton(
-                              onPressed: store.isLoading
-                                  ? null
-                                  : _saveCustomSyncInterval,
-                              child: const Text('保存'),
-                            ),
-                          ],
+                        if (store.nextBackgroundCheckAt != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            '下次目标：${DateFormat('M月d日 HH:mm').format(store.nextBackgroundCheckAt!)}',
+                          ),
+                        ],
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton.icon(
+                            onPressed: () => context.push('/reminders'),
+                            icon: const Icon(Icons.tune),
+                            label: const Text('调整后台检查与提醒'),
+                          ),
                         ),
                       ],
                     ),
@@ -273,130 +195,9 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
     );
   }
 
-  Future<void> _saveCustomSyncInterval() async {
-    final value = int.tryParse(_customSyncController.text.trim());
-    if (value == null || value <= 0) {
-      _showMessage('请输入大于 0 的分钟数');
-      return;
-    }
-    final normalized = AssignmentStore.normalizeAutoSyncIntervalMinutes(value);
-    final saved = await store.saveAutoSyncIntervalMinutes(normalized);
-    if (!mounted) {
-      return;
-    }
-    if (!saved) {
-      _showMessage(store.operationError ?? '自动同步设置未能保存，请重试');
-      return;
-    }
-    _customSyncController.text = normalized.toString();
-    _showMessage('自动同步时间已保存');
-  }
-
-  Future<void> _selectPresetInterval(int minutes) async {
-    if (store.isLoading) {
-      return;
-    }
-    final saved = await store.saveAutoSyncIntervalMinutes(minutes);
-    if (!mounted) {
-      return;
-    }
-    if (!saved) {
-      _showMessage(store.operationError ?? '自动同步设置未能保存，请重试');
-      return;
-    }
-    _customSyncController.text = minutes == 0 ? '' : minutes.toString();
-  }
-
   void _showMessage(String message) {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  bool _isPresetInterval(int minutes) {
-    return minutes == 0 || minutes == 15 || minutes == 30 || minutes == 60;
-  }
-}
-
-class _SyncIntervalOption extends StatelessWidget {
-  const _SyncIntervalOption({
-    super.key,
-    required this.label,
-    required this.selected,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final foreground =
-        selected ? colorScheme.onPrimaryContainer : colorScheme.onSurface;
-    return Semantics(
-      label: label,
-      selected: selected,
-      inMutuallyExclusiveGroup: true,
-      enabled: enabled,
-      button: true,
-      onTap: enabled ? onTap : null,
-      excludeSemantics: true,
-      child: SizedBox(
-        width: 140,
-        child: Material(
-          color: selected
-              ? colorScheme.primaryContainer
-              : colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(
-              color: selected ? colorScheme.primary : Journal.rule,
-            ),
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: enabled ? onTap : null,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 150),
-                    child: selected
-                        ? Icon(
-                            Icons.check,
-                            key: const ValueKey('selected'),
-                            size: 18,
-                            color: foreground,
-                          )
-                        : const SizedBox(
-                            key: ValueKey('unselected'),
-                            width: 18,
-                            height: 18,
-                          ),
-                  ),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      label,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: foreground,
-                            fontWeight:
-                                selected ? FontWeight.w700 : FontWeight.w600,
-                          ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
