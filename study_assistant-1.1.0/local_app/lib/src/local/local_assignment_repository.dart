@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:crypto/crypto.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,8 +11,22 @@ import '../models/personal_workspace.dart';
 import '../models/study_notebook.dart';
 import '../models/home_filters.dart';
 import '../services/reminder_rule_store.dart';
+import '../services/background_reminder_gateway.dart';
+import '../services/background_check_settings.dart';
 
 class LocalAssignmentRepository {
+  LocalAssignmentRepository({
+    BackgroundReminderGateway backgroundReminderGateway =
+        const BackgroundReminderGateway(),
+    String? writeLeaseOwner,
+  })  : _backgroundReminderGateway = backgroundReminderGateway,
+        _writeOwner = writeLeaseOwner ??
+            'repository-${DateTime.now().microsecondsSinceEpoch}-'
+                '${Random().nextInt(1 << 31)}';
+
+  final BackgroundReminderGateway _backgroundReminderGateway;
+  final String _writeOwner;
+  bool crossEngineLockEnabled = false;
   static const _key = 'chaoxing_journal_v2';
   static const _personalKey = 'personal_workspace_v1';
   static const _notebookKey = 'notebook_v1';
@@ -35,6 +50,13 @@ class LocalAssignmentRepository {
     'course_refs',
     'unfollowed_courses',
     'reminder_offsets_minutes',
+    'auto_sync_interval_minutes',
+    'background_check_enabled_v1',
+    'background_check_interval_minutes_v1',
+    'notification_listener_enabled_v1',
+    'new_assignment_reminder_enabled_v1',
+    'background_check_legacy_migration_v1',
+    'background_server_backoff_until_v1',
     'sync_attempt_at',
     'sync_data_at',
     'sync_report_v1',
@@ -184,6 +206,8 @@ class LocalAssignmentRepository {
           throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
         }
         final state = await _read();
+        final backgroundSettings =
+            await const BackgroundCheckSettingsStore().loadAndMigrate();
         final snapshot = BackupSnapshot.create(
             owner: _owner(account),
             createdAt: DateTime.now(),
@@ -193,8 +217,9 @@ class LocalAssignmentRepository {
             unfollowed:
                 (prefs.getStringList('unfollowed_courses') ?? []).toSet(),
             reminderOffsets: await ReminderRuleStore().loadOffsetsMinutes(),
-            autoSyncIntervalMinutes:
-                prefs.getInt('auto_sync_interval_minutes') ?? 30,
+            autoSyncIntervalMinutes: backgroundSettings.enabled
+                ? backgroundSettings.intervalMinutes
+                : 0,
             notebook: await _readProtected(
               prefs,
               _notebookKey,
@@ -380,6 +405,10 @@ class LocalAssignmentRepository {
         await _require(prefs.setString(key, value));
       } else if (value is List) {
         await _require(prefs.setStringList(key, value.cast<String>()));
+      } else if (value is int) {
+        await _require(prefs.setInt(key, value));
+      } else if (value is bool) {
+        await _require(prefs.setBool(key, value));
       } else {
         throw StateError('账号本机记录格式无法识别');
       }
@@ -463,7 +492,21 @@ class LocalAssignmentRepository {
   Future<void> _tail = Future.value();
 
   Future<T> _serialized<T>(Future<T> Function() action) {
-    final result = _tail.then((_) => action());
+    final result = _tail.then((_) async {
+      if (!crossEngineLockEnabled) return action();
+      final acquired =
+          await _backgroundReminderGateway.acquireWriteLease(_writeOwner);
+      if (!acquired) {
+        throw StateError('本机数据正在被另一后台任务更新，请稍后重试');
+      }
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.reload();
+        return await action();
+      } finally {
+        await _backgroundReminderGateway.releaseWriteLease(_writeOwner);
+      }
+    });
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return result;
   }
@@ -478,8 +521,11 @@ class LocalAssignmentRepository {
       _serialized(() async => (await _read()).lastSync);
 
   Future<List<Assignment>> mergeAndSave(List<Assignment> incoming,
-          {bool completeSync = true}) =>
+          {bool completeSync = true, Future<bool> Function()? canCommit}) =>
       _serialized(() async {
+        if (canCommit != null && !await canCommit()) {
+          throw StateError('账号会话已变化，旧同步结果已拒绝提交');
+        }
         final state = await _read();
         state.merge(incoming);
         if (completeSync) state.lastSync = DateTime.now();

@@ -10,6 +10,7 @@ import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
+import 'package:study_assistant_mobile/src/services/permission_settings_service.dart';
 import 'package:study_assistant_mobile/src/services/reminder_rule_store.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -41,6 +42,74 @@ void main() {
     expect(find.text('锁屏提醒'), findsOneWidget);
     expect(find.text('后台与自启动'), findsOneWidget);
     expect(find.text('保存后会重新安排所有未完成作业的本地通知，自定义提醒支持精确到分钟'), findsOneWidget);
+  });
+
+  testWidgets('refreshes listener permission when the page opens',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            permissionSettingsService:
+                const _GrantedPermissionSettingsService(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('已授权'), findsNWidgets(2));
+  });
+
+  testWidgets('background checks expose only 2, 4 and 6 hour choices',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 60,
+    });
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(assignmentStore: store),
+        ),
+      ),
+    );
+
+    expect(store.backgroundCheckIntervalMinutes, 240);
+    expect(
+        find.byKey(const ValueKey('background-check-switch')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('background-interval-120')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('background-interval-240')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('background-interval-360')), findsOneWidget);
+    expect(find.byKey(const ValueKey('notification-listener-switch')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('new-assignment-switch')), findsOneWidget);
+
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('background-interval-120')));
+    await tester.tap(find.byKey(const ValueKey('background-interval-120')));
+    await tester.pumpAndSettle();
+    expect(store.backgroundCheckIntervalMinutes, 120);
   });
 
   testWidgets('adds and removes a custom reminder time', (tester) async {
@@ -566,6 +635,13 @@ class _MemorySessionStore extends SecureSessionStore {
 
   @override
   Future<String?> readChaoxingAvatarUrl() async => null;
+}
+
+class _GrantedPermissionSettingsService extends PermissionSettingsService {
+  const _GrantedPermissionSettingsService();
+
+  @override
+  Future<bool> isNotificationListenerEnabled() async => true;
 }
 
 class _NoopWidgetSnapshotService extends WidgetSnapshotService {

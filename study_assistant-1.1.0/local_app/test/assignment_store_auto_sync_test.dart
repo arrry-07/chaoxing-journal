@@ -57,14 +57,14 @@ void main() {
         chaoxingClient: client);
     addTearDown(store.dispose);
     await store.restoreSession();
-    final now = DateTime.now();
+    final now = DateTime(2026, 11, 11, 10);
     await store.runDueAutoSync(now: now);
     expect(store.lastSyncAt, isNull);
     expect(client.calls, 1);
     expect(await store.runDueAutoSync(now: now.add(const Duration(minutes: 1))),
         isFalse);
     expect(client.calls, 1);
-    await store.runDueAutoSync(now: now.add(const Duration(minutes: 31)));
+    await store.runDueAutoSync(now: now.add(const Duration(minutes: 241)));
     expect(client.calls, 2);
   });
   test(
@@ -96,9 +96,10 @@ void main() {
       expect(notificationService.lastAssignments.single.deadlineAt,
           initialDeadline);
 
-      await store.saveAutoSyncIntervalMinutes(15);
+      await store.saveBackgroundCheckIntervalMinutes(360);
+      final lastSync = store.lastSyncAt!;
       final ran = await store.runDueAutoSync(
-        now: store.lastSyncAt!.add(const Duration(minutes: 16)),
+        now: DateTime(lastSync.year, lastSync.month, lastSync.day + 1, 10),
       );
 
       expect(ran, isTrue);
@@ -110,7 +111,7 @@ void main() {
     },
   );
 
-  test('custom auto sync interval is saved and used by due checks', () async {
+  test('2/4/6 hour interval is saved and used by due checks', () async {
     SharedPreferences.setMockInitialValues({});
     final client = _QueuedChaoxingClient([
       [_assignment(deadlineAt: DateTime(2026, 5, 7, 8))],
@@ -129,19 +130,14 @@ void main() {
     await store.restoreSession();
     await store.syncAssignments();
 
-    await store.saveAutoSyncIntervalMinutes(7);
+    await store.saveBackgroundCheckIntervalMinutes(120);
 
-    expect(store.autoSyncIntervalMinutes, 7);
+    expect(store.autoSyncIntervalMinutes, 120);
+    final lastSync = store.lastSyncAt!;
+    final daytimeNow =
+        DateTime(lastSync.year, lastSync.month, lastSync.day + 1, 10);
     expect(
-      await store.runDueAutoSync(
-        now: store.lastSyncAt!.add(const Duration(minutes: 6)),
-      ),
-      isFalse,
-    );
-    expect(
-      await store.runDueAutoSync(
-        now: store.lastSyncAt!.add(const Duration(minutes: 7)),
-      ),
+      await store.runDueAutoSync(now: daytimeNow),
       isTrue,
     );
 
@@ -153,7 +149,7 @@ void main() {
     addTearDown(restored.dispose);
     await restored.restoreSession();
 
-    expect(restored.autoSyncIntervalMinutes, 7);
+    expect(restored.autoSyncIntervalMinutes, 120);
   });
 
   test('failed reminder write keeps old offsets and schedules unchanged',
@@ -183,7 +179,7 @@ void main() {
     expect(prefs.getStringList('reminder_offsets_minutes'), ['1440']);
   });
 
-  test('failed auto sync write keeps old interval in memory and on disk',
+  test('failed background interval write keeps old value in memory and on disk',
       () async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 30});
     final store = AssignmentStore(
@@ -194,15 +190,16 @@ void main() {
     addTearDown(store.dispose);
     await store.restoreSession();
     final prefs = await SharedPreferences.getInstance();
-    _installFailingStore(prefs, {'flutter.auto_sync_interval_minutes'});
+    _installFailingStore(
+        prefs, {'flutter.background_check_interval_minutes_v1'});
     await prefs.reload();
 
-    await store.saveAutoSyncIntervalMinutes(7);
+    await store.saveBackgroundCheckIntervalMinutes(120);
 
-    expect(store.autoSyncIntervalMinutes, 30);
-    expect(store.error, contains('自动同步设置未能保存'));
+    expect(store.autoSyncIntervalMinutes, 240);
+    expect(store.error, contains('后台检查设置未能保存'));
     await prefs.reload();
-    expect(prefs.getInt('auto_sync_interval_minutes'), 30);
+    expect(prefs.getInt('background_check_interval_minutes_v1'), 240);
   });
 
   test(

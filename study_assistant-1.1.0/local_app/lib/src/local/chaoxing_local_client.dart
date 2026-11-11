@@ -63,6 +63,7 @@ class ChaoxingLocalClient {
 
   final Dio _dio;
   final Future<void> Function(Duration) _wait;
+  CancelToken? _activeRequestToken;
   static Future<void> _defaultWait(Duration delay) =>
       Future<void>.delayed(delay);
 
@@ -71,6 +72,18 @@ class ChaoxingLocalClient {
   final _consecutiveTransientFailures = <String, int>{};
   int _syncRetryCount = 0;
   int? _fullSyncElapsedMs;
+  bool Function()? shouldStop;
+
+  void cancelActiveRequests() {
+    _activeRequestToken?.cancel('主动停止后台学习通请求');
+    _activeRequestToken = null;
+    _sessionGeneration++;
+  }
+
+  CancelToken _startRequestToken() {
+    _activeRequestToken?.cancel('开始新的学习通请求');
+    return _activeRequestToken = CancelToken();
+  }
 
   Map<String, ({int count, int elapsedMs, int httpFailures})>
       get requestTimings => Map.unmodifiable({
@@ -302,6 +315,7 @@ class ChaoxingLocalClient {
     required String password,
   }) async {
     clearSession();
+    final cancelToken = _startRequestToken();
     final generation = _sessionGeneration;
     if (account.trim().isEmpty || password.isEmpty) {
       return const ChaoxingLoginResult(success: false, message: '请输入账号和密码');
@@ -315,6 +329,7 @@ class ChaoxingLocalClient {
         'loginType': '1',
         'roleSelect': 'true',
       }),
+      cancelToken: cancelToken,
     );
     if (generation != _sessionGeneration) {
       return const ChaoxingLoginResult(success: false, message: '会话已切换，请重试');
@@ -360,6 +375,7 @@ class ChaoxingLocalClient {
   /// supplies its current cpi/signatures without reading every homework list.
   Future<List<Assignment>> fetchAssignmentsForCourse(
       {required String courseId, required String clazzId}) async {
+    _startRequestToken();
     final generation = _sessionGeneration;
     final syncWatch = Stopwatch()..start();
     _resetSyncTracking(clearRequestStats: false);
@@ -403,6 +419,7 @@ class ChaoxingLocalClient {
   }
 
   Future<List<Assignment>> fetchAssignments() async {
+    _startRequestToken();
     final generation = _sessionGeneration;
     final syncWatch = Stopwatch()..start();
     _resetSyncTracking(clearRequestStats: true);
@@ -449,6 +466,17 @@ class ChaoxingLocalClient {
       final assignments = <Assignment>[];
       var recognized = courses.isEmpty;
       for (final course in courses) {
+        if (shouldStop?.call() == true) {
+          failedCourses += courses.length - succeededCourses;
+          const issue = SyncIssue(
+            SyncIssueKind.partial,
+            '检查窗口已结束，已停止后续课程请求',
+            stage: 'workList',
+          );
+          issues.add(issue);
+          lastSyncWarning = '白天检查窗口已结束，已保存已取得的作业数据';
+          break;
+        }
         List<Assignment>? work;
         final watch = Stopwatch()..start();
         SyncIssue? failure;
@@ -1017,8 +1045,19 @@ class ChaoxingLocalClient {
             validateStatus: (status) => status != null,
             headers: _headers(parsedUri, headers),
           ),
+          cancelToken: _activeRequestToken,
         );
       } on DioException catch (error) {
+        if (CancelToken.isCancel(error)) {
+          if (generation != _sessionGeneration) return null;
+          throw const SyncReadException(
+            SyncIssue(
+              SyncIssueKind.network,
+              '后台作业检查已取消',
+              stage: 'request',
+            ),
+          );
+        }
         transportError = error;
       }
       final httpElapsedMs = watch.elapsedMilliseconds;
@@ -1573,6 +1612,7 @@ class ChaoxingLocalClient {
           headers: _headers(Uri.parse(normalized),
               {'Accept': 'image/avif,image/webp,image/apng,image/*,*/*'}),
         ),
+        cancelToken: _activeRequestToken,
       );
       final location = response.headers.value('location');
       return _normalizeUrl(location) ?? normalized;

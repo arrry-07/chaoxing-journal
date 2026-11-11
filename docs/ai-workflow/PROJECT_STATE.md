@@ -60,3 +60,15 @@
 新对话接手提示：
 
 > 请先读取实际仓库的 AGENTS.md 和 docs/ai-workflow/PROJECT_STATE.md，核对当前分支、HEAD、未提交修改与暂存区，再按我本轮给出的目标继续。仅按需读取相关计划和验收记录，保留已有修改；不要把历史报告当作当前已验证结果，也不要仅因接手就提交、发布或扩大任务范围。
+
+## 2026-11-11 1.6.72 验收现场
+
+- 当前分支：`codex/v1.6.72-release`；基线 HEAD：`6161c65`；工作区仍有本任务未提交修改，暂存区为空。
+- 最终候选版本：`1.6.72+54`；Release APK SHA-256：`ED7A2B970B00FFDC9A037E7C68B0CDA82A4073ED4CC720CDBC009FF5F847785F`。
+- 全量 Flutter 测试：`667 passed / 0 failed`（启用 `RUN_STORAGE_BENCHMARK=true`）；`flutter analyze`、格式、版本元数据、Kotlin JVM、API 35 instrumented tests、`lintDebug`、APK ABI/签名/ZIP/对齐检查通过。
+- 主 MuMu `学习通`：最终候选覆盖安装，登录态保留；真实账号无界面 Worker 曾返回 `SUCCESS`；时区切换与恢复后调度记录保持可用。
+- 物理 HUAWEI `CDY-AN00` / API 29 / ARM64：最终候选覆盖安装；用户开启厂商自启动/关联启动/后台活动后，未启动 Activity 的整机重启恢复了 8 条 Job/Work 相关记录和 56 条 Alarm 记录；Doze 进入/退出保持调度；强制停止后重开恢复 54 条 Alarm。
+- 物理真机 `connectedDebugAndroidTest` 曾卸载/重装应用，`firstInstallTime` 发生变化；之后 UI 仍观察到登录态，本轮没有重新输入账号密码，数据连续性不能作为完整保留证据。
+- 真实官方学习通通知尚未自然到达。用户已明确接受该缺项，不计入本轮完成条件；当前账号为学生，不能发布测试作业，已停止主动等待和轮询，不能用合成通知替代。
+- 已补充完成：通知权限/通道故障、监听撤销/恢复、测试通知热点击与冷启动、普通进程回收、横幅/声音投递管线、锁屏隐私、物理真机时间/时区和 TalkBack 服务绑定与关键页面语义。
+- 尚未执行：commit、push、PR、最终 main CI、Tag、Release、APK 上传和公开发布。任何后续接手必须先核对最新源码和设备状态，不得把候选证据直接当成发布通过。

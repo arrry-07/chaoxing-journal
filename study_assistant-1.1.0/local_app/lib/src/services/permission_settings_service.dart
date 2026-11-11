@@ -16,6 +16,19 @@ class PermissionSettingsService {
 
   Future<bool> openAppSettings() => _open('openAppSettings');
 
+  Future<bool> openNotificationListenerSettings() =>
+      _open('openNotificationListenerSettings');
+
+  Future<bool> isNotificationListenerEnabled() async {
+    try {
+      return await _channel
+              .invokeMethod<bool>('isNotificationListenerEnabled') ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> _open(String method) async {
     try {
       return await _channel.invokeMethod<bool>(method) ?? false;

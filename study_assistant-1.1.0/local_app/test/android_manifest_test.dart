@@ -56,6 +56,37 @@ void main() {
     expect(mainActivity, contains('openBatterySettings'));
     expect(mainActivity, contains('getAndroidSdkInt'));
     expect(mainActivity, contains('Build.VERSION.SDK_INT'));
+    expect(mainActivity, contains('isNotificationListenerEnabled'));
+    expect(mainActivity, contains('openNotificationListenerSettings'));
+  });
+
+  test('Android manifest wires native background and listener components', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+
+    expect(manifest, contains('AssignmentDeadlineReceiver'));
+    expect(manifest, contains('NewAssignmentWindowReceiver'));
+    expect(manifest, contains('ReminderClickReceiver'));
+    expect(manifest, contains('ReminderClickActivity'));
+    expect(manifest, contains('ReminderSystemReceiver'));
+    expect(manifest, contains('flutter_deeplinking_enabled'));
+    expect(manifest, contains('ChaoxingNotificationListener'));
+    expect(
+      manifest,
+      contains('android.permission.BIND_NOTIFICATION_LISTENER_SERVICE'),
+    );
+    expect(manifest,
+        contains('android.service.notification.NotificationListenerService'));
+    expect(manifest, contains('android.intent.action.TIMEZONE_CHANGED'));
+    final reminderSystemReceiver = RegExp(
+      r'<receiver\s+android:name="\.ReminderSystemReceiver"[\s\S]*?</receiver>',
+    ).firstMatch(manifest)?.group(0);
+    expect(reminderSystemReceiver, isNotNull);
+    expect(
+      reminderSystemReceiver,
+      contains('android.intent.action.USER_UNLOCKED'),
+    );
   });
 
   test('Android host can open downloaded apk updates', () {

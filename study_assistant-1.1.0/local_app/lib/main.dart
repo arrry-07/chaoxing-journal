@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'src/services/app_update_controller.dart';
 import 'src/features/assignment_changes_screen.dart';
 import 'src/features/backup_screen.dart';
@@ -28,6 +30,7 @@ import 'src/features/stats_screen.dart';
 import 'src/features/sync_status_screen.dart';
 import 'src/features/widgets/update_dialog.dart';
 import 'src/services/assignment_store.dart';
+import 'src/services/background_reminder_gateway.dart';
 import 'src/services/local_notification_service.dart';
 import 'src/services/reminder_rule_store.dart';
 import 'src/services/secure_session_store.dart';
@@ -57,6 +60,7 @@ Future<void> main() async {
     notificationService: notificationService,
     widgetSnapshotService: widgetSnapshotService,
     reminderRuleStore: reminderRuleStore,
+    nativeReminderDeliveryEnabled: true,
   );
 
   await notificationService.initializeSafely();
@@ -66,6 +70,86 @@ Future<void> main() async {
     assignmentStore: assignmentStore,
     notificationService: notificationService,
   ));
+}
+
+@pragma('vm:entry-point')
+Future<void> backgroundMain() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  const channel = MethodChannel('study_assistant/background_worker');
+  AssignmentStore? activeStore;
+  var cancelled = false;
+
+  Future<void> run(Map<Object?, Object?> arguments) async {
+    await initializeDateFormatting('zh_CN');
+    final notificationService = LocalNotificationService();
+    final store = AssignmentStore(
+      sessionStore: SecureSessionStore(),
+      notificationService: notificationService,
+      widgetSnapshotService: WidgetSnapshotService(),
+      reminderRuleStore: ReminderRuleStore(),
+      manageBackgroundSchedule: false,
+      nativeLeaseOwner: arguments['leaseOwner'] as String?,
+      nativeReminderDeliveryEnabled: true,
+    );
+    activeStore = store;
+    try {
+      await store.restoreSession();
+      if (cancelled) return;
+      final expectedAccount = arguments['accountHash'] as String?;
+      if (expectedAccount != null && expectedAccount != store.accountHash) {
+        await channel.invokeMethod<void>('finished', {
+          'success': false,
+          'skipped': true,
+          'nextTargetAt': null,
+          'message': '后台任务所属账号已变化，已拒绝旧账号结果',
+        });
+        return;
+      }
+      final reason = arguments['reason'] as String?;
+      final trigger = switch (reason) {
+        'daytime' => BackgroundSyncTrigger.daytime,
+        'notification_signal' => BackgroundSyncTrigger.notificationSignal,
+        _ => BackgroundSyncTrigger.daytime,
+      };
+      final result = await store.runBackgroundAutomaticCheck(trigger);
+      if (cancelled) return;
+      await channel.invokeMethod<void>('finished', {
+        'success': result.success,
+        'skipped': result.skipped,
+        'nextTargetAt': result.nextTargetAt?.millisecondsSinceEpoch,
+        'message': result.message,
+      });
+    } catch (error) {
+      if (!cancelled) {
+        await channel.invokeMethod<void>('finished', {
+          'success': false,
+          'skipped': false,
+          'nextTargetAt': null,
+          'message': error.toString(),
+        });
+      }
+    } finally {
+      activeStore = null;
+      store.dispose();
+    }
+  }
+
+  channel.setMethodCallHandler((call) async {
+    switch (call.method) {
+      case 'run':
+        final arguments =
+            (call.arguments as Map<Object?, Object?>?) ?? const {};
+        unawaited(run(arguments));
+        return null;
+      case 'cancel':
+        cancelled = true;
+        activeStore?.chaoxingClient.cancelActiveRequests();
+        return null;
+      default:
+        throw MissingPluginException('未知后台任务 ${call.method}');
+    }
+  });
+  await channel.invokeMethod<void>('ready');
 }
 
 class StudyAssistantApp extends StatefulWidget {
