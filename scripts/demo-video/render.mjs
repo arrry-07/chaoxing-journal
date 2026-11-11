@@ -43,4 +43,3 @@ for(let i=0;i<scenes.length;i++){
 fs.writeFileSync(path.join(edit,'concat.txt'),scenes.map((_,i)=>"file 'part-"+String(i).padStart(2,'0')+".mp4'").join('\n'));
 run(['-f','concat','-safe','0','-i','concat.txt','-c','copy','-movflags','+faststart',path.join(dir,'学习通课业手记-项目演示-1080p.mp4')]);
 fs.writeFileSync(path.join(dir,'字幕.srt'),srt.join('\n'));fs.writeFileSync(path.join(dir,'edit-decision-list.json'),JSON.stringify(scenes,null,2));
-
