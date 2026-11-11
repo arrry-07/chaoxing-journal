@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载1.6.71静默补丁](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.6.71)** · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.6.71](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.6.71/chaoxing-journal-1.6.71.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.6.71) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
@@ -32,11 +32,18 @@
 
 ## 下载安装
 
-本次版本为 **1.6.71（53）静默补丁**，公开状态及下载以 [Releases](https://github.com/arrry-07/chaoxing-journal/releases) 为准；自动更新通道latest保留 **1.6.7（52）**。首次安装此补丁请网页下载；新版手动检查可发现后续非latest补丁。发布策略见[更新渠道指南](docs/guides/更新渠道与国内分发.md)，支持Android8.0+、ARM64/x86_64。
+**首次安装或手动升级均下载 1.6.71；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. 从 [1.6.71发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.6.71) 下载 `chaoxing-journal-1.6.71.apk` 和 `SHA256SUMS.txt`。此补丁不设latest，旧版首次需网页下载安装。
-2. 核对文件的 SHA-256，然后按 Android 提示安装。具体校验命令见[安装指南](docs/guides/安装与使用.md#下载安装)。
+1. [下载 chaoxing-journal-1.6.71.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.6.71/chaoxing-journal-1.6.71.apk)。发布说明及校验文件见 [1.6.71 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.6.71)。
+2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
+
+<details>
+<summary>已经安装：为什么应用没有提示 1.6.71？</summary>
+
+1.6.71 是静默补丁，不主动弹出更新提示。GitHub 的 latest 自动提示通道保留 1.6.7；旧版 1.6.7 的自动和手动检查均无法发现此补丁，请使用上面的网页链接下载并覆盖安装。1.6.71 客户端的手动检查可发现后续非 latest 补丁。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
+
+</details>
 
 体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.6.3 继续沿用既有体验身份，只通过 GitHub Release 更新。
 
@@ -45,7 +52,7 @@
 - 登录与同步直接连接学习通，账号凭据保存在本机安全存储；课程作业记录保存在本机偏好文件。头像、GitHub 链接与已配置的更新检查也可能联网，详见[隐私与安全](docs/guides/隐私与安全.md)。
 - 读取失败不代表没有作业，“提交未知”不代表未交或过期。重要截止和提交结果请核对学习通原页面。
 - 自动同步依赖应用进程与恢复运行时的检查，不能保证被系统关闭后仍持续联网。通知还受权限、省电和厂商后台限制影响。
-- “我的 → 检查更新”直接读取本仓库最新正式 Release，支持应用内下载与后台收起；安装前校验 SHA-256、包名、签名和版本，再由 Android 确认安装。首次安装请从 Releases 下载；旧版未接通的更新入口不会因仓库公开而自动修复。
+- “我的 → 检查更新”按更新渠道规则读取本仓库正式 Release（手动检查可发现静默补丁），支持应用内下载与后台收起；安装前校验 SHA-256、包名、签名和版本，再由 Android 确认安装。首次安装请从 Releases 下载；旧版未接通的更新入口不会因仓库公开而自动修复。
 - Android 是当前交付目标；仓库保留 iOS 工程，但尚未完成 iOS 构建验收。
 
 ## 本地开发
