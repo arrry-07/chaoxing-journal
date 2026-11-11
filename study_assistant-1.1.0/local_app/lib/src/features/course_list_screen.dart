@@ -39,6 +39,7 @@ class CourseListScreen extends StatelessWidget {
               ),
             for (final c in store.courses)
               SwitchListTile(
+                  secondary: const Icon(Icons.menu_book_outlined),
                   title: Text(c.name),
                   subtitle: Text('班级 ${c.clazzId}'),
                   value: store.follows(c.key),

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/assignment.dart';
+import '../models/assignment_sync_progress.dart';
 import '../models/sync_report.dart';
 import 'chaoxing_api_parser.dart';
 import 'chaoxing_assignment_parser.dart';
@@ -73,6 +74,7 @@ class ChaoxingLocalClient {
   int _syncRetryCount = 0;
   int? _fullSyncElapsedMs;
   bool Function()? shouldStop;
+  void Function(AssignmentSyncProgress)? onProgress;
 
   void cancelActiveRequests() {
     _activeRequestToken?.cancel('主动停止后台学习通请求');
@@ -423,6 +425,9 @@ class ChaoxingLocalClient {
     final generation = _sessionGeneration;
     final syncWatch = Stopwatch()..start();
     _resetSyncTracking(clearRequestStats: true);
+    final progress =
+        onProgress == null ? null : _SyncProgressTracker(onProgress!);
+    progress?.setStage(AssignmentSyncStage.courses);
     lastSyncWarning = null;
     _deadlineReadsBlockedBy = null;
     issues = [];
@@ -458,6 +463,7 @@ class ChaoxingLocalClient {
       }
       final problems = <String>{};
       hasCourseResponse = true;
+      progress?.setStage(AssignmentSyncStage.workLists);
       if (raw.length != courses.length) {
         failedCourses = raw.length - courses.length;
         issues.add(const SyncIssue(SyncIssueKind.schemaChanged, '部分课程结构无法识别'));
@@ -481,7 +487,8 @@ class ChaoxingLocalClient {
         final watch = Stopwatch()..start();
         SyncIssue? failure;
         try {
-          work = await _fetchCourseWork(course, generation: generation);
+          work = await _fetchCourseWork(course,
+              generation: generation, progress: progress);
           if (generation != _sessionGeneration) return const [];
         } on ChaoxingAuthenticationException {
           rethrow;
@@ -554,7 +561,7 @@ class ChaoxingLocalClient {
   }
 
   Future<List<Assignment>?> _fetchCourseWork(ChaoxingCourseRef course,
-      {required int generation}) async {
+      {required int generation, _SyncProgressTracker? progress}) async {
     final courseUri =
         Uri.https('mooc1.chaoxing.com', '/visit/stucoursemiddle', {
       'courseid': course.courseId,
@@ -565,7 +572,8 @@ class ChaoxingLocalClient {
     });
     _courseVerificationProbe = courseUri;
     if (_v3FormalApiConfirmed) {
-      return _fetchV3FormalHomework(course, generation: generation);
+      return _fetchV3FormalHomework(course,
+          generation: generation, progress: progress);
     }
     final middle = await _courseGet(courseUri, generation: generation);
     if (generation != _sessionGeneration) return null;
@@ -592,7 +600,8 @@ class ChaoxingLocalClient {
     if ((workEnc == null || workEnc.isEmpty) &&
         navigationUri == null &&
         html.contains('/mooc2-ans-vue/')) {
-      final work = await _fetchV3FormalHomework(course, generation: generation);
+      final work = await _fetchV3FormalHomework(course,
+          generation: generation, progress: progress);
       if (generation != _sessionGeneration) return null;
       _v3FormalApiConfirmed = true;
       return work;
@@ -628,35 +637,46 @@ class ChaoxingLocalClient {
       _noteParseFailure('作业列表');
       return null;
     }
-    return _hydrateWorkDeadlines(parsed, generation: generation);
+    progress?.addRows(parsed);
+    return _hydrateWorkDeadlines(parsed,
+        generation: generation, progress: progress);
   }
 
   Future<List<Assignment>> _hydrateWorkDeadlines(List<Assignment> rows,
       {required int generation,
+      _SyncProgressTracker? progress,
       Map<String, DateTime> starts = const {}}) async {
     final result = <Assignment>[];
+    progress?.beginDetails(rows);
     for (final item in rows) {
       if (item.isCompleted) {
         final prior = previousAssignments[item.id];
-        result.add(item.copyWith(
+        final completed = item.copyWith(
             deadlineAt: item.deadlineAt ?? prior?.deadlineAt,
             deadlineTrusted:
                 item.deadlineAt != null || prior?.deadlineTrusted == true,
-            deadlineRawText: prior?.deadlineRawText));
+            deadlineRawText: prior?.deadlineRawText);
+        result.add(completed);
+        progress?.replace(completed);
         continue;
       }
       if (item.deadlineTrusted && item.deadlineAt != null) {
         result.add(item);
+        progress?.replace(item);
         continue;
       }
       DeadlineEvidence evidence = const DeadlineEvidence();
       SyncIssue? failure;
       if (_deadlineReadsBlockedBy == null) {
+        progress?.attempt(item.id);
         final watch = Stopwatch()..start();
         try {
           final response = await _courseGet(Uri.parse(item.submitUrl!),
               generation: generation);
-          if (generation != _sessionGeneration) return const [];
+          if (generation != _sessionGeneration) {
+            progress?.clearPending();
+            return const [];
+          }
           final detail = _measureParse('作业详情', () {
             final body = response?.data?.toString() ?? '';
             if (body.contains('没有此页面访问权限')) {
@@ -714,14 +734,16 @@ class ChaoxingLocalClient {
         }
       }
       if (failure != null) issues.add(failure);
-      result.add(item.copyWith(
+      final resolved = item.copyWith(
           deadlineAt: evidence.deadlineAt,
           clearDeadlineAt: evidence.noLimit,
           deadlineTrusted: evidence.deadlineAt != null || evidence.noLimit,
           deadlineReadFailed: evidence.deadlineAt == null && !evidence.noLimit,
           deadlineRawText: evidence.missingYear
               ? '${evidence.rawText}（年份待确认）'
-              : evidence.rawText));
+              : evidence.rawText);
+      result.add(resolved);
+      progress?.resolve(item.id, resolved);
     }
     return result;
   }
@@ -833,7 +855,7 @@ class ChaoxingLocalClient {
 
   // fanyav3 fetches homework separately from its exam and activity APIs.
   Future<List<Assignment>> _fetchV3FormalHomework(ChaoxingCourseRef course,
-      {required int generation}) async {
+      {required int generation, _SyncProgressTracker? progress}) async {
     final result = <Assignment>[];
     final starts = <String, DateTime>{};
     final seen = <String>{};
@@ -948,8 +970,9 @@ class ChaoxingLocalClient {
         return (rowCount: rows.length, total: total);
       });
       if (result.length == pageResult.total) {
+        progress?.addRows(result);
         return _hydrateWorkDeadlines(result,
-            generation: generation, starts: starts);
+            generation: generation, starts: starts, progress: progress);
       }
       if (pageResult.rowCount == 0) {
         _noteParseFailure('作业列表');
@@ -1670,6 +1693,81 @@ class ChaoxingLocalClient {
         .replaceAll('&gt;', '>')
         .replaceAll('&quot;', '"')
         .replaceAll('&#39;', "'");
+  }
+}
+
+class _SyncProgressTracker {
+  _SyncProgressTracker(this.onProgress);
+
+  final void Function(AssignmentSyncProgress) onProgress;
+  final Map<String, Assignment> assignments = {};
+  final Set<String> pendingDetailIds = {};
+  AssignmentSyncStage stage = AssignmentSyncStage.courses;
+  int resolvedCount = 0;
+  int attemptedCount = 0;
+
+  void setStage(AssignmentSyncStage value) {
+    stage = value;
+    _emit();
+  }
+
+  void addRows(List<Assignment> rows) {
+    for (final assignment in rows) {
+      assignments[assignment.id] = assignment;
+    }
+    stage = AssignmentSyncStage.workLists;
+    _emit();
+  }
+
+  void beginDetails(List<Assignment> rows) {
+    pendingDetailIds
+      ..clear()
+      ..addAll(rows
+          .where((item) =>
+              !item.isCompleted &&
+              !(item.deadlineTrusted && item.deadlineAt != null))
+          .map((item) => item.id));
+    stage = AssignmentSyncStage.details;
+    _emit();
+  }
+
+  void attempt(String id) {
+    pendingDetailIds.add(id);
+    attemptedCount++;
+    _emit();
+  }
+
+  void replace(Assignment assignment) {
+    assignments[assignment.id] = assignment;
+    _emit();
+  }
+
+  void resolve(String id, Assignment assignment) {
+    assignments[id] = assignment;
+    pendingDetailIds.remove(id);
+    resolvedCount++;
+    _emit();
+  }
+
+  void clearPending() {
+    if (pendingDetailIds.isEmpty) return;
+    pendingDetailIds.clear();
+    _emit();
+  }
+
+  void _emit() {
+    final ordered = assignments.values.toList()
+      ..sort((a, b) {
+        final ids = a.id.compareTo(b.id);
+        return ids;
+      });
+    onProgress(AssignmentSyncProgress(
+      stage: stage,
+      assignments: ordered,
+      pendingDetailIds: pendingDetailIds,
+      resolvedCount: resolvedCount,
+      attemptedCount: attemptedCount,
+    ));
   }
 }
 

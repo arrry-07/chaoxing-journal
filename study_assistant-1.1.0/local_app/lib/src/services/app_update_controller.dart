@@ -133,7 +133,7 @@ class AppUpdateController extends ChangeNotifier {
     }
     if (_disposed || busy || downloadedPath != null) return;
     phase = UpdatePhase.checking;
-    message = '正在检查 GitHub 最新版本…';
+    message = '正在检查最新版本…';
     result = null;
     _cancel = CancelToken();
     _emit();

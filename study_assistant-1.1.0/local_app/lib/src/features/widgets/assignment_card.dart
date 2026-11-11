@@ -15,13 +15,17 @@ class AssignmentCard extends StatelessWidget {
       this.opening = false,
       this.compact = false,
       this.countdown = false,
-      this.showFullDeadline = true});
+      this.showFullDeadline = true,
+      this.deadlinePending = false,
+      this.previewOnly = false,
+      this.previewSaving = false});
   final Assignment assignment;
   final DateTime now;
   final VoidCallback onTap;
   final VoidCallback? onOpenAssignment;
   final bool opening;
   final bool showFullDeadline;
+  final bool deadlinePending, previewOnly, previewSaving;
   final bool compact, countdown;
   @override
   Widget build(BuildContext context) {
@@ -42,17 +46,21 @@ class AssignmentCard extends StatelessWidget {
             ? '今天截止'
             : null;
     final state = a.statusLabel;
-    final deadline = a.deadlineReadFailed
-        ? d == null
-            ? a.deadlineLabel
-            : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))} · ${a.deadlineLabel}'
-        : !a.deadlineTrusted
-            ? '截止待确认'
-            : d == null
-                ? '未设置截止时间'
-                : countdown
-                    ? DisplayPreferences.remaining(d, now)
-                    : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}';
+    final deadline = deadlinePending
+        ? '正在确认截止时间'
+        : a.deadlineReadFailed
+            ? d == null
+                ? a.deadlineLabel
+                : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))} · ${a.deadlineLabel}'
+            : !a.deadlineTrusted
+                ? a.deadlineRawText?.endsWith('（年份待确认）') == true
+                    ? a.deadlineLabel
+                    : '待确认'
+                : d == null
+                    ? '无期限'
+                    : countdown
+                        ? DisplayPreferences.remaining(d, now)
+                        : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}';
     final color = urgent != null ? Journal.berry : Journal.ink;
     final hasTime = d != null && a.deadlineTrusted && !a.deadlineReadFailed;
     final clock =
@@ -71,6 +79,14 @@ class AssignmentCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(state, style: Journal.metadata.copyWith(color: Journal.ink)),
+        if (previewOnly)
+          Text(
+            previewSaving ? '正在保存到本机' : '待保存预览',
+            style: Journal.metadata.copyWith(
+              color: Journal.sage,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         if (urgent != null)
           Text(urgent,
               style: Journal.metadata
@@ -79,19 +95,20 @@ class AssignmentCard extends StatelessWidget {
           Text(deadline, style: Journal.metadata),
       ],
     );
+    final onCardTap = previewOnly ? null : onTap;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Semantics(
-          button: true,
-          onTap: onTap,
+          button: onCardTap != null,
+          onTap: onCardTap,
           label:
-              '${a.title}，${a.courseName}，$state，${urgent == null ? '' : '$urgent，'}$deadline',
+              '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}$deadline',
           excludeSemantics: true,
           child: SizedBox(
               width: double.infinity,
               child: Material(
                   type: MaterialType.transparency,
                   child: InkWell(
-                      onTap: onTap,
+                      onTap: onCardTap,
                       borderRadius: BorderRadius.circular(12),
                       child: Padding(
                           padding: EdgeInsets.only(
@@ -107,7 +124,19 @@ class AssignmentCard extends StatelessWidget {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(clock, style: Journal.time),
+                                    if (deadlinePending)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4),
+                                        child: SizedBox.square(
+                                          dimension: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            semanticsLabel: '正在确认截止时间',
+                                          ),
+                                        ),
+                                      )
+                                    else
+                                      Text(clock, style: Journal.time),
                                   ],
                                 ),
                               ),
@@ -139,16 +168,20 @@ class AssignmentCard extends StatelessWidget {
               Padding(
                 padding: EdgeInsets.only(left: largeText ? railWidth + 12 : 0),
                 child: ExcludeSemantics(
-                    child: InkWell(onTap: onTap, child: metadata)),
+                    child: InkWell(onTap: onCardTap, child: metadata)),
               ),
               TextButton.icon(
-                onPressed: opening ? null : onOpenAssignment,
+                onPressed: previewOnly || opening ? null : onOpenAssignment,
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   minimumSize: const Size(48, 48),
                 ),
                 icon: const Icon(Icons.launch, size: 18),
-                label: Text(opening ? '正在打开…' : '去学习通完成'),
+                label: Text(previewOnly
+                    ? '保存后可打开'
+                    : opening
+                        ? '正在打开…'
+                        : '去学习通完成'),
               ),
             ],
           ),

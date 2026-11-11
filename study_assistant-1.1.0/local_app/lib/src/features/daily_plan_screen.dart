@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import '../app/journal.dart';
 import '../models/assignment.dart';
 import '../models/personal_workspace.dart';
 import '../services/assignment_store.dart';
@@ -177,8 +178,7 @@ class _DailyPlanState extends State<DailyPlanScreen> {
                   style: Theme.of(context).textTheme.titleMedium),
               const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Text(
-                      '完成勾选只记录你的计划进度，不表示学习通作业已提交。未完成的计划会保留在原日期，不会自动转成逾期作业。')),
+                  child: Text('计划完成不代表学习通已提交。未完成的计划会保留在原日期，不会自动移动。')),
               if (plans.isEmpty)
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 20),
@@ -229,10 +229,9 @@ class _DailyPlanState extends State<DailyPlanScreen> {
                 ]),
               if (message != null)
                 Semantics(liveRegion: true, child: Text(message!)),
-              OutlinedButton.icon(
-                  onPressed: busy ? null : openPlanner,
-                  icon: const Icon(Icons.auto_awesome_outlined),
-                  label: const Text('智能规划建议')),
+              _PlannerEntry(
+                onPressed: busy ? null : openPlanner,
+              ),
               const SizedBox(height: 8),
               FilledButton.icon(
                   onPressed: busy ? null : add,
@@ -240,6 +239,79 @@ class _DailyPlanState extends State<DailyPlanScreen> {
                   label: const Text('添加作业到计划')),
             ]));
       });
+}
+
+class _PlannerEntry extends StatelessWidget {
+  const _PlannerEntry({required this.onPressed});
+
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        alignment: Alignment.centerLeft,
+        foregroundColor: Journal.ink,
+        disabledForegroundColor: Journal.muted,
+        padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+        side: const BorderSide(color: Journal.rule),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+      onPressed: onPressed,
+      child: Row(
+        children: [
+          const Icon(Icons.edit_calendar_outlined),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('安排学习时间', style: Journal.entryTitle),
+                SizedBox(height: 3),
+                Text('选作业、填预计耗时，根据可用时间生成安排。'),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Icon(Icons.chevron_right),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlannerSectionHeader extends StatelessWidget {
+  const _PlannerSectionHeader({
+    required this.icon,
+    required this.title,
+  });
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Semantics(
+        header: true,
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: Journal.ink),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                title,
+                style: Journal.section.copyWith(fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _PlannerSheet extends StatefulWidget {
@@ -294,7 +366,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
     }
     final budget = int.tryParse(budgetController.text.trim());
     if (budget == null || budget < 1 || budget > 1440) {
-      setState(() => error = '请输入1至1440分钟的总预算');
+      setState(() => error = '当天可用时间应为1至1440分钟');
       return;
     }
     final minutes = <String, int>{};
@@ -344,13 +416,13 @@ class _PlannerSheetState extends State<_PlannerSheet> {
     final currentPreview = preview;
     if (currentPreview == null || accepted.isEmpty || saving) return;
     if (widget.store.account != openingAccount) {
-      setState(() => error = '账号已变化，请重新生成规划预览');
+      setState(() => error = '账号已变化，请重新生成安排');
       return;
     }
     try {
       currentPreview.ensureCurrentEpoch(widget.store.accountEpoch);
     } on StateError {
-      setState(() => error = '账号已变化，请重新生成规划预览');
+      setState(() => error = '账号已变化，请重新生成安排');
       return;
     }
     final assignments = {
@@ -377,7 +449,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
       );
       if (refreshed.suggested.length != chosen.length) {
         stale = true;
-        throw StateError('作业或同日计划已变化，请重新生成规划预览');
+        throw StateError('作业或当天计划已变化，请重新生成安排');
       }
     }
 
@@ -389,7 +461,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
           current.title != item.assignment.title ||
           current.courseName != item.assignment.courseName ||
           current.deadlineAt != item.assignment.deadlineAt) {
-        setState(() => error = '作业信息已变化，请重新生成规划预览');
+        setState(() => error = '作业信息已变化，请重新生成安排');
         return;
       }
     }
@@ -399,7 +471,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
       setState(() => error = value.message.toString());
       return;
     } on ArgumentError {
-      setState(() => error = '规划条件已变化，请重新生成规划预览');
+      setState(() => error = '安排条件已变化，请重新生成安排');
       return;
     }
     setState(() => saving = true);
@@ -422,8 +494,8 @@ class _PlannerSheetState extends State<_PlannerSheet> {
       if (!mounted) return;
       final feedback = widget.store.saveFeedback(
         ok,
-        successMessage: '规划建议已保存到个人计划',
-        failureMessage: stale ? '作业或同日计划已变化，请重新生成规划预览' : '规划建议保存失败，请检查账号后重试',
+        successMessage: '已加入当天计划',
+        failureMessage: stale ? '作业或当天计划已变化，请重新生成安排' : '加入当天计划失败，请检查账号后重试',
       );
       if (ok) {
         Navigator.pop(context, feedback);
@@ -437,7 +509,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
       if (mounted) {
         setState(() {
           saving = false;
-          error = '规划建议保存失败，请检查账号后重试';
+          error = '加入当天计划失败，请检查账号后重试';
         });
       }
     }
@@ -448,16 +520,20 @@ class _PlannerSheetState extends State<_PlannerSheet> {
     final currentPreview = preview;
     final needsPreview =
         currentPreview == null || currentPreview.suggested.isEmpty;
+    final selectedAssignments = [
+      for (final assignment in candidates)
+        if (selected.contains(assignment.id)) assignment,
+    ];
     final guidance = error ??
         (currentPreview == null
-            ? '勾选作业并填写预计分钟，再生成预览；确认建议后才会保存。'
+            ? '选择作业并填写可用时间与预计耗时，然后生成安排。'
             : currentPreview.suggested.isEmpty
                 ? currentPreview.manual.isNotEmpty
-                    ? '暂不能保存：${currentPreview.manual.map((item) => _planningReason(item.reason)).toSet().join('；')}。请调整后重新生成。'
-                    : '没有可新增的建议，请检查作业是否已在当日计划中，或调整选择后重新生成。'
+                    ? '暂不能加入当天计划：${currentPreview.manual.map((item) => _planningReason(item.reason)).toSet().join('；')}。请调整条件后重新生成安排。'
+                    : '没有可加入的作业，请检查作业是否已在当天计划中，或调整条件后重新生成安排。'
                 : accepted.isEmpty
-                    ? '请至少勾选一项“自动纳入”的建议后保存。'
-                    : '已选 ${accepted.length} 项建议，确认后保存到个人计划。');
+                    ? '请至少选择一项建议，再加入当天计划。'
+                    : '已选择 ${accepted.length} 项建议，确认后加入当天计划。');
     return AnimatedPadding(
       duration: const Duration(milliseconds: 150),
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -473,14 +549,17 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('规则规划预览'),
+                        Text(
+                          '安排学习时间',
+                          style: Journal.section,
+                        ),
                         SizedBox(height: 4),
-                        Text('建议只用于安排个人计划，不表示学习通已提交，也不会猜测未填写的耗时。'),
+                        Text('选作业、填预计耗时，根据可用时间生成安排。'),
                       ],
                     ),
                   ),
                   IconButton(
-                    tooltip: '关闭规划预览',
+                    tooltip: '关闭安排学习时间',
                     onPressed: saving ? null : () => Navigator.pop(context),
                     icon: const Icon(Icons.close),
                   ),
@@ -490,43 +569,93 @@ class _PlannerSheetState extends State<_PlannerSheet> {
             const Divider(height: 1),
             Expanded(
               child: ListView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 children: [
-                  Text('目标日期：${widget.day}'),
-                  const SizedBox(height: 10),
+                  const _PlannerSectionHeader(
+                    icon: Icons.checklist_rtl,
+                    title: '选择作业',
+                  ),
+                  Text(
+                    '目标日期：${widget.day}',
+                    style: Journal.metadata,
+                  ),
+                  const SizedBox(height: 8),
+                  for (final assignment in candidates) _candidate(assignment),
+                  if (candidates.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text('当前没有可选择的作业，请先同步。'),
+                    ),
+                  const Divider(height: 32),
+                  const _PlannerSectionHeader(
+                    icon: Icons.schedule_outlined,
+                    title: '填写可用时间与耗时',
+                  ),
                   TextField(
                     key: const ValueKey('planning-budget'),
                     controller: budgetController,
                     keyboardType: TextInputType.number,
                     onChanged: (_) => invalidatePreview(),
                     decoration: const InputDecoration(
-                      labelText: '当日总预算（分钟）',
-                      helperText: '已有同日未完成计划会先占用预算',
+                      labelText: '当天可用时间（分钟）',
+                      helperText: '当天已有未完成计划会先占用可用时间',
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  Text('选择要参与规划的作业',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  for (final assignment in candidates) _candidate(assignment),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
+                  const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ExcludeSemantics(
+                        child: Icon(Icons.lightbulb_outline, size: 20),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '示例：今天有 60 分钟，两份作业预计各 30 分钟，可生成安排后再确认。',
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  if (selectedAssignments.isEmpty)
+                    const Text('勾选作业后可填写预计耗时。')
+                  else
+                    for (final assignment in selectedAssignments)
+                      _estimateField(assignment),
+                  const Divider(height: 32),
+                  const _PlannerSectionHeader(
+                    icon: Icons.event_note_outlined,
+                    title: '查看安排',
+                  ),
                   OutlinedButton.icon(
                     key: const ValueKey('planning-generate'),
                     onPressed: selected.isEmpty || saving ? null : generate,
                     icon: const Icon(Icons.auto_awesome_outlined),
-                    label: const Text('生成预览'),
+                    label: Text(currentPreview == null ? '生成安排' : '重新生成安排'),
                   ),
                   if (currentPreview != null) ...[
-                    const SizedBox(height: 20),
-                    const Divider(),
+                    const SizedBox(height: 16),
+                    Text(
+                      '当天可用时间 ${currentPreview.budgetMinutes} 分钟',
+                      style: Journal.time,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '已有未完成计划占用 ${currentPreview.existingMinutes} 分钟',
+                      style: Journal.metadata,
+                    ),
+                    const SizedBox(height: 4),
                     Text(
                       currentPreview.remainingMinutes == null
-                          ? '已有计划耗时未确认，剩余预算暂不能确定'
-                          : '规划后预计剩余 ${currentPreview.remainingMinutes} 分钟',
+                          ? '已有计划耗时未确认，剩余可用时间暂不能确定'
+                          : '预计剩余 ${currentPreview.remainingMinutes} 分钟',
+                      style: Journal.entryTitle,
                     ),
                     if (currentPreview.suggested.isNotEmpty) ...[
                       const SizedBox(height: 16),
-                      Text('自动纳入',
-                          style: Theme.of(context).textTheme.titleMedium),
+                      Text('自动纳入', style: Journal.entryTitle),
                       for (final item in currentPreview.suggested)
                         CheckboxListTile(
                           key: ValueKey(
@@ -549,8 +678,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                     ],
                     if (currentPreview.manual.isNotEmpty) ...[
                       const SizedBox(height: 16),
-                      Text('需要人工处理',
-                          style: Theme.of(context).textTheme.titleMedium),
+                      Text('需要人工处理', style: Journal.entryTitle),
                       for (final item in currentPreview.manual)
                         ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -576,14 +704,14 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Semantics(
                       liveRegion: true,
-                      child: Text(guidance,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                  color: error == null
-                                      ? null
-                                      : Theme.of(context).colorScheme.error))),
+                      child: Text(
+                        guidance,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: error == null
+                                ? null
+                                : Theme.of(context).colorScheme.error),
+                      )),
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
@@ -603,13 +731,15 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                           : Icon(needsPreview
                               ? Icons.auto_awesome_outlined
                               : Icons.playlist_add_check),
-                      label: Text(saving
-                          ? '正在保存…'
-                          : needsPreview
-                              ? currentPreview == null
-                                  ? '生成规划预览'
-                                  : '重新生成规划预览'
-                              : '保存所选建议'),
+                      label: Text(
+                        saving
+                            ? '正在加入…'
+                            : needsPreview
+                                ? currentPreview == null
+                                    ? '生成安排'
+                                    : '重新生成安排'
+                                : '加入当天计划',
+                      ),
                     ),
                   )
                 ]),
@@ -652,22 +782,33 @@ class _PlannerSheetState extends State<_PlannerSheet> {
           subtitle: Text(
               '${assignment.courseName} · ${assignment.statusLabel} · $deadlineText'),
         ),
-        if (chosen)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: TextField(
-              key: ValueKey('planning-estimate-${assignment.id}'),
-              controller: estimates[assignment.id],
-              enabled: !saving,
-              keyboardType: TextInputType.number,
-              onChanged: (_) => invalidatePreview(),
-              decoration: const InputDecoration(
-                labelText: '预计分钟',
-                helperText: '未填写时只列为需人工处理，不按0分钟安排',
-              ),
+      ],
+    );
+  }
+
+  Widget _estimateField(Assignment assignment) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(assignment.title, style: Journal.entryTitle),
+          const SizedBox(height: 2),
+          Text(assignment.courseName, style: Journal.metadata),
+          const SizedBox(height: 8),
+          TextField(
+            key: ValueKey('planning-estimate-${assignment.id}'),
+            controller: estimates[assignment.id],
+            enabled: !saving,
+            keyboardType: TextInputType.number,
+            onChanged: (_) => invalidatePreview(),
+            decoration: const InputDecoration(
+              labelText: '预计耗时（分钟）',
+              helperText: '未填写时列为人工处理，不会按 0 分钟安排',
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -680,7 +821,7 @@ String _planningReason(PlanningReason reason) => switch (reason) {
       PlanningReason.overdue => '已经超过截止时间',
       PlanningReason.deadlineBeforeTarget => '截止时间早于目标日期',
       PlanningReason.missingEstimate => '需要填写预计耗时',
-      PlanningReason.insufficientBudget => '预计耗时超过剩余预算',
+      PlanningReason.insufficientBudget => '预计耗时超过当天剩余可用时间',
       PlanningReason.existingBudgetUnknown => '已有计划耗时未确认',
-      PlanningReason.existingBudgetExceeded => '已有计划已超过总预算',
+      PlanningReason.existingBudgetExceeded => '已有计划已超过当天可用时间',
     };

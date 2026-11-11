@@ -21,6 +21,7 @@ class AppUpdateInfo {
     this.versionCode,
     this.sha256Hash,
     this.applicationId,
+    this.backupApkUrls = const [],
   });
 
   final int? versionCode;
@@ -31,6 +32,15 @@ class AppUpdateInfo {
   final String apkDownloadUrl;
   final String releaseNotes;
   final int? apkSize;
+  final List<String> backupApkUrls;
+
+  List<String> get downloadUrls {
+    final seen = <String>{};
+    return [
+      apkDownloadUrl,
+      ...backupApkUrls,
+    ].where(seen.add).toList(growable: false);
+  }
 }
 
 class AppUpdateService {
@@ -40,7 +50,12 @@ class AppUpdateService {
       this.parallelDownloads = false,
       this.totalDownloadTimeout = const Duration(minutes: 5),
       this.staleDownloadAge = const Duration(hours: 24),
-      this.manifestUrl = const String.fromEnvironment('UPDATE_MANIFEST_URL')})
+      this.now = DateTime.now,
+      this.manifestUrl = const String.fromEnvironment('UPDATE_MANIFEST_URL'),
+      this.stableManifestUrl =
+          const String.fromEnvironment('UPDATE_STABLE_MANIFEST_URL'),
+      this.manualManifestUrl =
+          const String.fromEnvironment('UPDATE_MANUAL_MANIFEST_URL')})
       : _dio = dio ??
             Dio(
               BaseOptions(
@@ -59,29 +74,88 @@ class AppUpdateService {
   static const repo = 'chaoxing-journal';
   static const repositoryUrl = 'https://github.com/$owner/$repo';
   static const releasesUrl = '$repositoryUrl/releases';
+  static const applicationId = 'com.example.studyassistant.journal';
+  static final _releaseVersionPattern = RegExp(r'^\d+\.\d+\.\d+$');
 
   final Dio _dio;
   final int maxDownloadBytes;
   bool parallelDownloads;
   final Duration totalDownloadTimeout;
   final Duration staleDownloadAge;
+  final DateTime Function() now;
   final String manifestUrl;
+  final String stableManifestUrl;
+  final String manualManifestUrl;
   static const _downloadDirectoryPrefix = '.apk-download-';
   static const _downloadOwnerFile = 'owner.marker';
   static const _downloadOwnerValue = 'chaoxing-journal-apk-download-v1';
+  static const _maxManifestBytes = 64 * 1024;
   static final Set<String> _activeDownloadDirectories = {};
 
   Future<UpdateCheckResult> checkConfigured(
-      {required int currentVersionCode, CancelToken? cancelToken}) async {
-    await cleanupStaleDownloads();
-    if (manifestUrl.isEmpty) {
-      return checkForManualUpdate(
+          {required int currentVersionCode, CancelToken? cancelToken}) =>
+      checkForManualUpdate(
           currentVersionName: AppVersion.name,
           currentVersionCode: currentVersionCode,
           cancelToken: cancelToken);
+
+  Future<UpdateCheckResult> checkForManualUpdate({
+    required String currentVersionName,
+    required int currentVersionCode,
+    CancelToken? cancelToken,
+  }) async {
+    await cleanupStaleDownloads();
+    final url = manualManifestUrl.isNotEmpty ? manualManifestUrl : manifestUrl;
+    if (url.isNotEmpty) {
+      return _checkManifest(
+        manifestUrl: url,
+        currentVersionName: currentVersionName,
+        currentVersionCode: currentVersionCode,
+        startupOnly: false,
+        cancelToken: cancelToken,
+      );
     }
-    final uri = Uri.tryParse(manifestUrl);
-    if (uri == null || uri.scheme != 'https') {
+    return _checkGitHub(
+        currentVersionName: currentVersionName,
+        currentVersionCode: currentVersionCode,
+        cancelToken: cancelToken,
+        listReleases: true);
+  }
+
+  /// Startup follows only the explicitly promoted iteration release.
+  Future<UpdateCheckResult> checkForStartup(
+      {required int currentVersionCode, CancelToken? cancelToken}) async {
+    await cleanupStaleDownloads();
+    final url = stableManifestUrl.isNotEmpty ? stableManifestUrl : manifestUrl;
+    final checked = url.isNotEmpty
+        ? await _checkManifest(
+            manifestUrl: url,
+            currentVersionName: AppVersion.name,
+            currentVersionCode: currentVersionCode,
+            startupOnly: true,
+            cancelToken: cancelToken,
+          )
+        : await _checkGitHub(
+            currentVersionName: AppVersion.name,
+            currentVersionCode: currentVersionCode,
+            cancelToken: cancelToken,
+          );
+    final candidate = checked.update;
+    if (candidate != null &&
+        !isNewIteration(candidate.versionName, AppVersion.name)) {
+      return const UpdateCheckResult(UpdateCheckStatus.upToDate);
+    }
+    return checked;
+  }
+
+  Future<UpdateCheckResult> _checkManifest({
+    required String manifestUrl,
+    required String currentVersionName,
+    required int currentVersionCode,
+    required bool startupOnly,
+    CancelToken? cancelToken,
+  }) async {
+    if (!_isSecureUrl(manifestUrl)) {
       return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
     }
     try {
@@ -90,7 +164,14 @@ class AppUpdateService {
       final r = await _dio.get<dynamic>(
         manifestUrl,
         cancelToken: cancelToken,
-        options: Options(responseType: ResponseType.plain),
+        options: Options(
+          responseType: ResponseType.stream,
+          followRedirects: false,
+          headers: const {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
+        ),
       );
       if (r.statusCode == 401 || r.statusCode == 403) {
         return const UpdateCheckResult(UpdateCheckStatus.authRequired);
@@ -98,7 +179,8 @@ class AppUpdateService {
       if (r.statusCode != 200) {
         return const UpdateCheckResult(UpdateCheckStatus.networkError);
       }
-      final j = _asMap(r.data);
+      final manifestText = await _readManifestText(r.data, cancelToken);
+      final j = manifestText == null ? null : _asMap(manifestText);
       if (j == null) {
         return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
       }
@@ -106,20 +188,39 @@ class AppUpdateService {
           name = j['versionName'],
           url = j['apkUrl'],
           hash = j['sha256'],
-          app = j['applicationId'];
+          app = j['applicationId'],
+          size = j['size'];
+      final backupUrls = _parseBackupApkUrls(j, primaryUrl: url);
       if (code is! int ||
           code <= 0 ||
+          code > 0x7fffffff ||
           name is! String ||
-          name.isEmpty ||
+          !_releaseVersionPattern.hasMatch(name) ||
           url is! String ||
-          Uri.tryParse(url)?.scheme != 'https' ||
+          !_isSecureUrl(url) ||
           hash is! String ||
           !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(hash) ||
           app is! String ||
-          app.isEmpty) {
+          app != applicationId ||
+          size is! int ||
+          size <= 0 ||
+          size > maxDownloadBytes ||
+          backupUrls == null) {
         return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
       }
       if (code <= currentVersionCode) {
+        return const UpdateCheckResult(UpdateCheckStatus.upToDate);
+      }
+      final normalizedCurrent = normalizeVersionName(currentVersionName);
+      if (!_releaseVersionPattern.hasMatch(normalizedCurrent)) {
+        return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
+      }
+      final sameDisplayVersion = name == normalizedCurrent;
+      if (!sameDisplayVersion &&
+          !isRemoteVersionNewer(name, normalizedCurrent)) {
+        return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
+      }
+      if (startupOnly && !isNewIteration(name, normalizedCurrent)) {
         return const UpdateCheckResult(UpdateCheckStatus.upToDate);
       }
       return UpdateCheckResult(UpdateCheckStatus.available,
@@ -131,8 +232,9 @@ class AppUpdateService {
               releaseUrl: releasesUrl,
               apkName: 'journal-$code.apk',
               apkDownloadUrl: url,
+              backupApkUrls: backupUrls,
               releaseNotes: j['notes']?.toString() ?? '',
-              apkSize: _asInt(j['size'])));
+              apkSize: size));
     } on DioException catch (e) {
       return UpdateCheckResult(CancelToken.isCancel(e)
           ? UpdateCheckStatus.cancelled
@@ -140,31 +242,6 @@ class AppUpdateService {
     } catch (_) {
       return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
     }
-  }
-
-  Future<UpdateCheckResult> checkForManualUpdate({
-    required String currentVersionName,
-    required int currentVersionCode,
-    CancelToken? cancelToken,
-  }) =>
-      _checkGitHub(
-          currentVersionName: currentVersionName,
-          currentVersionCode: currentVersionCode,
-          cancelToken: cancelToken,
-          listReleases: true);
-
-  /// Startup follows only the explicitly promoted iteration release.
-  Future<UpdateCheckResult> checkForStartup(
-      {required int currentVersionCode, CancelToken? cancelToken}) async {
-    if (manifestUrl.isNotEmpty) {
-      return checkConfigured(
-          currentVersionCode: currentVersionCode, cancelToken: cancelToken);
-    }
-    await cleanupStaleDownloads();
-    return _checkGitHub(
-        currentVersionName: AppVersion.name,
-        currentVersionCode: currentVersionCode,
-        cancelToken: cancelToken);
   }
 
   static bool isNewIteration(String remote, String current) {
@@ -339,6 +416,61 @@ class AppUpdateService {
     CancelToken? cancelToken,
     void Function(int receivedBytes, int totalBytes)? onProgress,
   }) async {
+    final sources = update.downloadUrls;
+    final budget = Stopwatch()..start();
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    for (var index = 0; index < sources.length; index++) {
+      if (cancelToken?.isCancelled == true) {
+        Error.throwWithStackTrace(
+            cancelToken!.cancelError!, StackTrace.current);
+      }
+      final remaining = totalDownloadTimeout - budget.elapsed;
+      if (remaining <= Duration.zero) {
+        if (lastError != null && lastStackTrace != null) {
+          Error.throwWithStackTrace(lastError, lastStackTrace);
+        }
+        throw DioException.connectionTimeout(
+          timeout: totalDownloadTimeout,
+          requestOptions: RequestOptions(path: sources[index]),
+        );
+      }
+      try {
+        return await _downloadApkFromUrl(
+          update,
+          downloadUrl: sources[index],
+          transferTimeout: remaining,
+          targetDirectory: targetDirectory,
+          cancelToken: cancelToken,
+          onProgress: onProgress,
+        );
+      } catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
+        final canUseBackup = index + 1 < sources.length &&
+            cancelToken?.isCancelled != true &&
+            _isTransientNetworkFailure(error);
+        if (!canUseBackup) {
+          Error.throwWithStackTrace(error, stackTrace);
+        }
+        // A backup starts from a fresh temporary directory. Never append bytes
+        // from two sources; the complete result is checked against this
+        // manifest's single size/hash before publication.
+        onProgress?.call(0, update.apkSize ?? -1);
+      }
+    }
+    Error.throwWithStackTrace(
+        lastError ?? StateError('没有可用的安装包下载源'), lastStackTrace!);
+  }
+
+  Future<File> _downloadApkFromUrl(
+    AppUpdateInfo update, {
+    required String downloadUrl,
+    required Duration transferTimeout,
+    String? targetDirectory,
+    CancelToken? cancelToken,
+    void Function(int receivedBytes, int totalBytes)? onProgress,
+  }) async {
     final baseDirectory = targetDirectory == null
         ? Directory(
             '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}updates',
@@ -362,7 +494,7 @@ class AppUpdateService {
     cancelToken?.whenCancel.then((error) {
       if (active) transfer.cancel(error.message);
     });
-    final deadline = Timer(totalDownloadTimeout, () {
+    final deadline = Timer(transferTimeout, () {
       transfer.cancel('下载总时限已到，请重试');
     });
     Future<T> guarded<T>(Future<T> work) => Future.any([
@@ -396,13 +528,13 @@ class AppUpdateService {
       if (parallel) {
         response = await ParallelApkTransfer.download(
             dio: _dio,
-            url: update.apkDownloadUrl,
+            url: downloadUrl,
             size: declared,
             destination: partial,
             working: working,
             token: transfer,
             validateFullResponse: (response) =>
-                _fullResponseSize(response, declared),
+                _fullResponseSize(response, declared, downloadUrl),
             onProgress: onProgress);
       }
       var received = 0;
@@ -411,12 +543,12 @@ class AppUpdateService {
         final fullResponse = response ??
             await guarded<Response<ResponseBody>>(
                 ApkDownloadTransport(_dio).open(
-              update.apkDownloadUrl,
+              downloadUrl,
               token: transfer,
               validateHeaders: (response) =>
-                  _fullResponseSize(response, declared),
+                  _fullResponseSize(response, declared, downloadUrl),
             ));
-        expectedSize = _fullResponseSize(fullResponse, declared);
+        expectedSize = _fullResponseSize(fullResponse, declared, downloadUrl);
         responseStream = fullResponse.data!.stream;
         chunks = StreamIterator<List<int>>(responseStream);
         output = await partial.open(mode: FileMode.write);
@@ -496,9 +628,13 @@ class AppUpdateService {
     return file;
   }
 
-  int? _fullResponseSize(Response<ResponseBody> response, int? declared) {
+  int? _fullResponseSize(
+      Response<ResponseBody> response, int? declared, String expectedUrl) {
     if (response.statusCode != 200 || response.data == null) {
       throw StateError('下载 APK 失败');
+    }
+    if (!_redirectChainIsSecure(response, expectedUrl)) {
+      throw StateError('安装包下载重定向不安全');
     }
     final header = response.headers.value('content-length');
     final size = header == null ? null : int.tryParse(header);
@@ -520,7 +656,7 @@ class AppUpdateService {
             )
           : Directory(targetDirectory);
       if (!await baseDirectory.exists()) return;
-      final cutoff = DateTime.now().subtract(staleDownloadAge);
+      final cutoff = now().subtract(staleDownloadAge);
       await for (final entry in baseDirectory.list(followLinks: false)) {
         if (entry is! Directory ||
             !entry.path
@@ -610,6 +746,105 @@ class AppUpdateService {
         .where((part) => part.isNotEmpty)
         .map((part) => int.tryParse(part) ?? 0)
         .toList(growable: false);
+  }
+
+  bool _isSecureUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    return uri != null &&
+        uri.scheme == 'https' &&
+        uri.host.isNotEmpty &&
+        uri.userInfo.isEmpty;
+  }
+
+  bool _redirectChainIsSecure(Response<dynamic> response, String expectedUrl) {
+    var current = Uri.tryParse(expectedUrl);
+    if (current == null || !_isSafeDownloadUrl(current)) return false;
+    for (final redirect in response.redirects) {
+      final next = redirect.location.hasScheme
+          ? redirect.location
+          : current!.resolveUri(redirect.location);
+      if (!_isSafeDownloadUrl(next)) return false;
+      current = next;
+    }
+    return current != null && _isSafeDownloadUrl(current);
+  }
+
+  bool _isSafeDownloadUrl(Uri uri) {
+    if (_isSecureUrl(uri.toString())) return true;
+    return uri.scheme == 'http' &&
+        uri.userInfo.isEmpty &&
+        const {'127.0.0.1', 'localhost', '::1'}.contains(uri.host);
+  }
+
+  Future<String?> _readManifestText(
+    dynamic data,
+    CancelToken? cancelToken,
+  ) async {
+    if (data is Map || data is List) {
+      return jsonEncode(data);
+    }
+    if (data is String) {
+      final bytes = utf8.encode(data);
+      if (bytes.length > _maxManifestBytes) return null;
+      return utf8.decode(bytes).replaceFirst('\uFEFF', '').trim();
+    }
+    if (data is! ResponseBody) return null;
+    final chunks = StreamIterator<List<int>>(data.stream);
+    final bytes = BytesBuilder(copy: false);
+    try {
+      while (await chunks.moveNext()) {
+        if (cancelToken?.isCancelled == true) {
+          throw cancelToken!.cancelError!;
+        }
+        bytes.add(chunks.current);
+        if (bytes.length > _maxManifestBytes) {
+          await chunks.cancel();
+          return null;
+        }
+      }
+    } finally {
+      await chunks.cancel();
+    }
+    return utf8.decode(bytes.takeBytes()).replaceFirst('\uFEFF', '').trim();
+  }
+
+  List<String>? _parseBackupApkUrls(
+    Map<String, dynamic> json, {
+    required dynamic primaryUrl,
+  }) {
+    final rawSingle = json['backupApkUrl'];
+    final rawList = json['backupApkUrls'];
+    if (rawSingle == null && rawList == null) return const [];
+    final values = <dynamic>[];
+    if (rawSingle != null) values.add(rawSingle);
+    if (rawList != null) {
+      if (rawList is! List) return null;
+      values.addAll(rawList);
+    }
+    if (values.length > 4) return null;
+    final result = <String>[];
+    for (final value in values) {
+      if (value is! String || !_isSecureUrl(value)) return null;
+      if (value == primaryUrl || result.contains(value)) continue;
+      result.add(value);
+    }
+    return List<String>.unmodifiable(result);
+  }
+
+  bool _isTransientNetworkFailure(Object error) {
+    if (error is! DioException) return false;
+    return switch (error.type) {
+      DioExceptionType.connectionError ||
+      DioExceptionType.connectionTimeout ||
+      DioExceptionType.receiveTimeout ||
+      DioExceptionType.sendTimeout ||
+      DioExceptionType.unknown ||
+      DioExceptionType.cancel =>
+        true,
+      DioExceptionType.badResponse => error.response?.statusCode != null &&
+          error.response!.statusCode! >= 500,
+      _ => false,
+    };
   }
 
   Map<String, dynamic>? _asMap(dynamic value) {

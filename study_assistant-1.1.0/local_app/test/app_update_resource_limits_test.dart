@@ -202,7 +202,8 @@ void main() {
       () async {
     final service = AppUpdateService(
       dio: Dio(),
-      staleDownloadAge: const Duration(seconds: 1),
+      staleDownloadAge: Duration.zero,
+      now: () => DateTime.now().add(const Duration(days: 1)),
     );
     final stale = await Directory('${dir.path}/.apk-download-stale').create();
     await File('${stale.path}/download.part').writeAsBytes([1, 2]);
@@ -213,19 +214,24 @@ void main() {
     final unrelated =
         await Directory('${dir.path}/.apk-download-user-folder').create();
     await File('${unrelated.path}/notes.txt').writeAsString('keep');
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
-    final fresh = await Directory('${dir.path}/.apk-download-fresh').create();
-    await File('${fresh.path}/download.part').writeAsBytes([5]);
-    await File('${fresh.path}/owner.marker')
-        .writeAsString('chaoxing-journal-apk-download-v1');
-
     await service.cleanupStaleDownloads(targetDirectory: dir.path);
 
     expect(await stale.exists(), isFalse);
     expect(await legacy.exists(), isFalse);
-    expect(await fresh.exists(), isTrue);
     expect(await unrelated.exists(), isTrue);
     expect(await File('${unrelated.path}/notes.txt').readAsString(), 'keep');
+
+    final fresh = await Directory('${dir.path}/.apk-download-fresh').create();
+    await File('${fresh.path}/download.part').writeAsBytes([5]);
+    await File('${fresh.path}/owner.marker')
+        .writeAsString('chaoxing-journal-apk-download-v1');
+    final recentService = AppUpdateService(
+      dio: Dio(),
+      staleDownloadAge: const Duration(hours: 1),
+      now: () => DateTime.fromMillisecondsSinceEpoch(0),
+    );
+    await recentService.cleanupStaleDownloads(targetDirectory: dir.path);
+    expect(await fresh.exists(), isTrue);
   });
 
   test('cleanup never removes another active download directory', () async {

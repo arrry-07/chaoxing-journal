@@ -39,9 +39,158 @@ void main() {
     expect(find.text('提醒权限'), findsOneWidget);
     expect(find.text('通知权限'), findsOneWidget);
     expect(find.text('精确闹钟'), findsOneWidget);
-    expect(find.text('锁屏提醒'), findsOneWidget);
-    expect(find.text('后台与自启动'), findsOneWidget);
+    expect(find.text('截止提醒通知渠道'), findsOneWidget);
+    expect(find.text('电池优化'), findsOneWidget);
     expect(find.text('保存后会重新安排所有未完成作业的本地通知，自定义提醒支持精确到分钟'), findsOneWidget);
+  });
+
+  testWidgets('missing setting activity explains where to search manually',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final service = _ScriptedPermissionSettingsService(
+      exactAlarmResult: SettingsOpenResult.unavailable,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            permissionSettingsService: service,
+          ),
+        ),
+      ),
+    );
+
+    final tile = find.widgetWithText(ListTile, '精确闹钟').first;
+    await tester.ensureVisible(tile);
+    await tester.pumpAndSettle();
+    await tester.tap(tile);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(service.exactAlarmChecks, 1);
+    expect(
+      find.textContaining('手机系统设置中搜索“学习通课业手记”'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('学习通作业提醒'), findsNothing);
+  });
+
+  testWidgets('missing notification channel explains the list fallback',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final service = _ScriptedPermissionSettingsService(
+      channelResult: SettingsOpenResult.listFallback,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            permissionSettingsService: service,
+          ),
+        ),
+      ),
+    );
+
+    final tile = find.widgetWithText(ListTile, '截止提醒通知渠道').first;
+    await tester.ensureVisible(tile);
+    await tester.pumpAndSettle();
+    await tester.tap(tile);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(service.channelId, 'assignment_deadlines');
+    expect(
+      find.textContaining('已打开相关系统设置列表'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('battery fallback explains that app details were opened',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final service = _ScriptedPermissionSettingsService(
+      batteryResult: SettingsOpenResult.appDetailsFallback,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            permissionSettingsService: service,
+          ),
+        ),
+      ),
+    );
+
+    final tile = find.widgetWithText(ListTile, '电池优化').first;
+    await tester.ensureVisible(tile);
+    await tester.pumpAndSettle();
+    await tester.tap(tile);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      find.textContaining('已打开“学习通课业手记”的应用详情'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('resuming refreshes notification listener state', (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final service = _ScriptedPermissionSettingsService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            permissionSettingsService: service,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(service.listenerChecks, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump();
+
+    expect(service.listenerChecks, 2);
   });
 
   testWidgets('refreshes listener permission when the page opens',
@@ -642,6 +791,44 @@ class _GrantedPermissionSettingsService extends PermissionSettingsService {
 
   @override
   Future<bool> isNotificationListenerEnabled() async => true;
+}
+
+class _ScriptedPermissionSettingsService extends PermissionSettingsService {
+  _ScriptedPermissionSettingsService({
+    this.exactAlarmResult = SettingsOpenResult.direct,
+    this.channelResult = SettingsOpenResult.direct,
+    this.batteryResult = SettingsOpenResult.direct,
+  });
+
+  final SettingsOpenResult exactAlarmResult;
+  final SettingsOpenResult channelResult;
+  final SettingsOpenResult batteryResult;
+  int listenerChecks = 0;
+  int exactAlarmChecks = 0;
+  String? channelId;
+
+  @override
+  Future<bool> isNotificationListenerEnabled() async {
+    listenerChecks++;
+    return false;
+  }
+
+  @override
+  Future<SettingsOpenResult> openExactAlarmSettingsResult() async {
+    exactAlarmChecks++;
+    return exactAlarmResult;
+  }
+
+  @override
+  Future<SettingsOpenResult> openNotificationChannelSettingsResult(
+    String channelId,
+  ) async {
+    this.channelId = channelId;
+    return channelResult;
+  }
+
+  @override
+  Future<SettingsOpenResult> openBatterySettingsResult() async => batteryResult;
 }
 
 class _NoopWidgetSnapshotService extends WidgetSnapshotService {

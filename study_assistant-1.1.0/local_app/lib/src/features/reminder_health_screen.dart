@@ -5,8 +5,13 @@ import '../services/daily_summary.dart';
 import '../services/permission_settings_service.dart';
 
 class ReminderHealthScreen extends StatefulWidget {
-  const ReminderHealthScreen({super.key, required this.store});
+  const ReminderHealthScreen({
+    super.key,
+    required this.store,
+    this.permissionSettingsService = const PermissionSettingsService(),
+  });
   final AssignmentStore store;
+  final PermissionSettingsService permissionSettingsService;
   @override
   State<ReminderHealthScreen> createState() => _HealthState();
 }
@@ -99,33 +104,44 @@ class _HealthState extends State<ReminderHealthScreen>
                   title: const Text('系统通知权限'),
                   subtitle: Text(state(health?.notifications)),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () => const PermissionSettingsService()
-                      .openNotificationSettings()),
+                  onTap: () => _openPermissionSettings(
+                        widget.permissionSettingsService
+                            .openNotificationSettingsResult,
+                        destination: '通知设置',
+                      )),
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('作业变化通知渠道'),
                   subtitle:
                       Text(channelState(health?.assignmentUpdatesChannel)),
-                  onTap: () => const PermissionSettingsService()
-                      .openNotificationSettings()),
+                  onTap: () => _openNotificationChannel(
+                        'assignment_updates',
+                        '作业变化通知渠道',
+                      )),
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('截止提醒通知渠道'),
                   subtitle: Text(channelState(health?.assignmentChannel)),
-                  onTap: () => const PermissionSettingsService()
-                      .openNotificationSettings()),
+                  onTap: () => _openNotificationChannel(
+                        'assignment_deadlines',
+                        '截止提醒通知渠道',
+                      )),
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('每日摘要通知渠道'),
                   subtitle: Text(channelState(health?.summaryChannel)),
-                  onTap: () => const PermissionSettingsService()
-                      .openNotificationSettings()),
+                  onTap: () => _openNotificationChannel(
+                        'daily_summary',
+                        '每日摘要通知渠道',
+                      )),
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('个人日程通知渠道'),
                   subtitle: Text(channelState(health?.manualChannel)),
-                  onTap: () => const PermissionSettingsService()
-                      .openNotificationSettings()),
+                  onTap: () => _openNotificationChannel(
+                        'personal_schedule',
+                        '个人日程通知渠道',
+                      )),
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('提醒批次恢复状态'),
@@ -137,8 +153,11 @@ class _HealthState extends State<ReminderHealthScreen>
                   title: const Text('精确提醒权限'),
                   subtitle: Text(state(health?.exact)),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () => const PermissionSettingsService()
-                      .openExactAlarmSettings()),
+                  onTap: () => _openPermissionSettings(
+                        widget.permissionSettingsService
+                            .openExactAlarmSettingsResult,
+                        destination: '精确闹钟设置',
+                      )),
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('学习通通知使用权'),
@@ -150,14 +169,22 @@ class _HealthState extends State<ReminderHealthScreen>
                         : '应用中默认关闭',
                   ),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () => const PermissionSettingsService()
-                      .openNotificationListenerSettings()),
+                  onTap: () => _openPermissionSettings(
+                        widget.permissionSettingsService
+                            .openNotificationListenerSettingsResult,
+                        destination: '通知使用权设置',
+                      )),
               ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('后台与省电设置'),
-                  subtitle: const Text('此项需在系统中自行核对，应用无法保证长期后台运行'),
-                  onTap: () =>
-                      const PermissionSettingsService().openBatterySettings()),
+                  title: const Text('电池优化'),
+                  subtitle: const Text(
+                    '打开系统优化列表，请找到“学习通课业手记”自行核对；应用无法保证长期后台运行',
+                  ),
+                  onTap: () => _openPermissionSettings(
+                        widget.permissionSettingsService
+                            .openBatterySettingsResult,
+                        destination: '电池优化设置',
+                      )),
               Text(
                   '原生作业截止事件：${backgroundHealth?.pendingDeadlineCount ?? health?.pending ?? '未知'} 条\n'
                   '待处理新增作业事件：${backgroundHealth?.pendingNewCount ?? '未知'} 条\n'
@@ -260,4 +287,32 @@ class _HealthState extends State<ReminderHealthScreen>
                     child: Semantics(liveRegion: true, child: Text(message!))),
             ]));
       });
+
+  Future<void> _openNotificationChannel(
+    String channelId,
+    String destination,
+  ) =>
+      _openPermissionSettings(
+        () => widget.permissionSettingsService
+            .openNotificationChannelSettingsResult(channelId),
+        destination: destination,
+      );
+
+  Future<void> _openPermissionSettings(
+    Future<SettingsOpenResult> Function() openSettings, {
+    required String destination,
+  }) async {
+    final result = await openSettings();
+    if (!mounted || result == SettingsOpenResult.direct) return;
+    final text = switch (result) {
+      SettingsOpenResult.direct => '',
+      SettingsOpenResult.listFallback =>
+        '未能直达$destination，已打开相关系统设置列表；请查找“学习通课业手记”',
+      SettingsOpenResult.appDetailsFallback =>
+        '未能直达$destination，已打开“学习通课业手记”的应用详情',
+      SettingsOpenResult.unavailable =>
+        '无法打开$destination，请手动在手机系统设置中搜索“学习通课业手记”',
+    };
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
 }

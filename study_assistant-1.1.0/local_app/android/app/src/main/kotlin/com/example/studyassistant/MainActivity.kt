@@ -1,5 +1,6 @@
 package com.example.studyassistant
 
+import android.app.NotificationManager
 import android.content.pm.PackageManager
 import java.util.zip.ZipFile
 import android.content.Intent
@@ -15,6 +16,13 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private enum class SettingsOpenOutcome(val wireValue: String) {
+        DIRECT("direct"),
+        LIST_FALLBACK("listFallback"),
+        APP_DETAILS_FALLBACK("appDetailsFallback"),
+        UNAVAILABLE("unavailable"),
+    }
+
     private var backupBridge: BackupBridge? = null
     private var personalFileBridge: PersonalFileBridge? = null
     private var verificationBrowser: VerificationBrowser? = null
@@ -90,19 +98,33 @@ class MainActivity : FlutterActivity() {
                 )
                 return@setMethodCallHandler
             }
-            val opened = when (call.method) {
-                "openNotificationSettings" -> openNotificationSettings()
-                "openExactAlarmSettings" -> openExactAlarmSettings()
-                "openLockScreenNotificationSettings" -> openLockScreenNotificationSettings()
-                "openBatterySettings" -> openBatterySettings()
-                "openAppSettings" -> openAppSettings()
-                "openNotificationListenerSettings" -> openNotificationListenerSettings()
+            val outcome = when (call.method) {
+                "openNotificationSettings",
+                "openNotificationSettingsResult" -> openNotificationSettings()
+                "openExactAlarmSettings",
+                "openExactAlarmSettingsResult" -> openExactAlarmSettings()
+                "openLockScreenNotificationSettings",
+                "openLockScreenNotificationSettingsResult" ->
+                    openNotificationChannelSettings(ASSIGNMENT_DEADLINE_CHANNEL_ID)
+                "openNotificationChannelSettingsResult" ->
+                    openNotificationChannelSettings(call.argument<String>("channelId"))
+                "openBatterySettings",
+                "openBatterySettingsResult" -> openBatterySettings()
+                "openAppSettings",
+                "openAppSettingsResult" -> openAppSettings()
+                "openNotificationListenerSettings",
+                "openNotificationListenerSettingsResult" ->
+                    openNotificationListenerSettings()
                 else -> {
                     result.notImplemented()
                     return@setMethodCallHandler
                 }
             }
-            result.success(opened)
+            result.success(
+                if (call.method.endsWith("Result")) outcome.wireValue
+                else (outcome == SettingsOpenOutcome.DIRECT ||
+                    outcome == SettingsOpenOutcome.LIST_FALLBACK)
+            )
         }
     }
 
@@ -112,54 +134,110 @@ class MainActivity : FlutterActivity() {
         personalFileBridge?.onActivityResult(requestCode, resultCode, data)
     }
 
-    private fun openNotificationSettings(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            openIntent(
-                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-            )
-        } else {
-            openAppSettings()
+    private fun openNotificationSettings(): SettingsOpenOutcome {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            openAppNotificationSettings()
+        ) {
+            return SettingsOpenOutcome.DIRECT
         }
+        return openAppDetailsFallback()
     }
 
-    private fun openExactAlarmSettings(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    private fun openExactAlarmSettings(): SettingsOpenOutcome {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             openIntent(
                 Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
                     .setData(Uri.parse("package:$packageName"))
             )
-        } else {
-            openAppSettings()
+        ) {
+            return SettingsOpenOutcome.DIRECT
         }
+        return openAppDetailsFallback()
     }
 
-    private fun openLockScreenNotificationSettings(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            openIntent(
+    private fun openNotificationChannelSettings(
+        channelId: String?,
+    ): SettingsOpenOutcome {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !channelId.isNullOrBlank()
+        ) {
+            val hasChannel = runCatching {
+                getSystemService(NotificationManager::class.java)
+                    .getNotificationChannel(channelId) != null
+            }.getOrDefault(false)
+            if (hasChannel && openIntent(
                 Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                     .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                    .putExtra(Settings.EXTRA_CHANNEL_ID, "assignment_deadlines")
-            ) || openNotificationSettings()
+                    .putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+            )) {
+                return SettingsOpenOutcome.DIRECT
+            }
+            if (openAppNotificationSettings()) {
+                return SettingsOpenOutcome.LIST_FALLBACK
+            }
+        }
+        return openAppDetailsFallback()
+    }
+
+    private fun openBatterySettings(): SettingsOpenOutcome {
+        // The official direct-exemption use cases are not established for this
+        // reminder app, so keep the system optimization list and no manifest
+        // permission for ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS.
+        if (openIntent(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))) {
+            return SettingsOpenOutcome.DIRECT
+        }
+        return openAppDetailsFallback()
+    }
+
+    private fun openNotificationListenerSettings(): SettingsOpenOutcome {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            openIntent(
+                Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                    .putExtra(
+                        Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                        ComponentName(
+                            this,
+                            ChaoxingNotificationListener::class.java
+                        ).flattenToString()
+                    )
+            )
+        ) {
+            return SettingsOpenOutcome.DIRECT
+        }
+        if (openIntent(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))) {
+            return SettingsOpenOutcome.LIST_FALLBACK
+        }
+        return openAppDetailsFallback()
+    }
+
+    private fun openAppSettings(): SettingsOpenOutcome {
+        return if (openAppDetailsSettings()) {
+            SettingsOpenOutcome.DIRECT
         } else {
-            openNotificationSettings()
+            SettingsOpenOutcome.UNAVAILABLE
         }
     }
 
-    private fun openBatterySettings(): Boolean {
-        return openIntent(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) ||
-            openAppSettings()
+    private fun openAppNotificationSettings(): Boolean {
+        return openIntent(
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        )
     }
 
-    private fun openNotificationListenerSettings(): Boolean {
-        return openIntent(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-    }
-
-    private fun openAppSettings(): Boolean {
+    private fun openAppDetailsSettings(): Boolean {
         return openIntent(
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                 .setData(Uri.parse("package:$packageName"))
         )
+    }
+
+    private fun openAppDetailsFallback(): SettingsOpenOutcome {
+        return if (openAppDetailsSettings()) {
+            SettingsOpenOutcome.APP_DETAILS_FALLBACK
+        } else {
+            SettingsOpenOutcome.UNAVAILABLE
+        }
     }
 
     private fun openExternalUrl(url: String?): Boolean {
@@ -275,5 +353,9 @@ class MainActivity : FlutterActivity() {
         return runCatching {
             startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }.isSuccess
+    }
+
+    private companion object {
+        const val ASSIGNMENT_DEADLINE_CHANNEL_ID = "assignment_deadlines"
     }
 }
