@@ -552,6 +552,11 @@ class ReminderDatabase private constructor(context: Context) :
         writableDatabase.update(
             "events",
             ContentValues().apply {
+                // A restored or renamed assignment keeps its stable event id,
+                // so the display text must follow the latest snapshot instead
+                // of the row that was created before it was hidden/renamed.
+                put("course_name", event.courseName)
+                put("title", event.title)
                 put("session_epoch", sessionEpoch)
                 put("notify_at", event.notifyAt)
                 put("deadline_at", event.deadlineAt)
@@ -562,6 +567,31 @@ class ReminderDatabase private constructor(context: Context) :
             "event_id = ?",
             arrayOf(event.eventId),
         )
+    }
+
+    /**
+     * Notification ids owned by the native reminder database, across accounts.
+     * Legacy plugin notifications can share the same numeric id range, so an id
+     * alone is never ownership evidence; this set only protects rows the native
+     * publisher may still be showing.
+     */
+    @Synchronized
+    fun notificationIds(): Set<Int> {
+        readableDatabase.query(
+            "events",
+            arrayOf("notification_id"),
+            null,
+            null,
+            null,
+            null,
+            null,
+        ).use { cursor ->
+            val ids = mutableSetOf<Int>()
+            while (cursor.moveToNext()) {
+                if (!cursor.isNull(0)) ids.add(cursor.getInt(0))
+            }
+            return ids
+        }
     }
 
     @Synchronized

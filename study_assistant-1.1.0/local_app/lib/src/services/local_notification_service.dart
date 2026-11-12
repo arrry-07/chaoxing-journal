@@ -33,6 +33,8 @@ class LocalNotificationService {
   static const manualChannel = 'personal_schedule';
   static const _permissionsChannel =
       MethodChannel('study_assistant/permissions');
+  static const _legacyMigrationChannel =
+      MethodChannel('study_assistant/legacy_assignment_migration');
   static const _androidChannels = <AndroidNotificationChannel>[
     AndroidNotificationChannel(
       assignmentChannel,
@@ -180,67 +182,74 @@ class LocalNotificationService {
 
   /// Removes only the legacy plugin-delivered assignment alarms. Personal
   /// reminders and the daily summary retain their existing transaction logs.
+  ///
+  /// Delivered legacy notifications do not appear in the plugin's pending list
+  /// and Android plugin v18 does not return their payload. Ownership is proven
+  /// on the native side from the plugin's own click operation and schedule
+  /// cache; native notifications that share an id are preserved. This returns
+  /// only after that native cleanup (including its cache durability barrier)
+  /// completed, so the caller may record a one-time migration marker.
   Future<void> removeLegacyAssignmentSchedules() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
     await _ensurePluginInitialized();
     await _runScheduleMutation(() async {
       final prefs = await SharedPreferences.getInstance();
-      final ids = <int>{};
+      final owned = <int>{};
+      final pending = await _plugin.pendingNotificationRequests();
+      for (final item in pending) {
+        if (item.payload?.startsWith('a:') == true) owned.add(item.id);
+      }
+      final active = await _plugin.getActiveNotifications();
+      for (final item in active) {
+        if (item.id != null && item.payload?.startsWith('a:') == true) {
+          owned.add(item.id!);
+        }
+      }
       try {
-        final pending = await _plugin.pendingNotificationRequests();
-        ids.addAll(pending
-            .where((item) => item.payload?.startsWith('a:') == true)
-            .map((item) => item.id));
+        owned.addAll(_readActiveIds(prefs, 'assignments'));
       } catch (error) {
-        throw StateError('旧作业提醒待发列表无法读取：$error');
+        throw StateError('旧作业提醒清单损坏，未执行迁移：$error');
       }
       try {
-        final active = await _plugin.getActiveNotifications();
-        // Native deadline notifications use the same channel as the legacy
-        // plugin schedules and are untagged/unpayloaded. The channel alone is
-        // therefore not proof of plugin ownership; only cancel active entries
-        // that still carry the legacy `a:` payload. Native entries are handled
-        // by the privacy/logout cleanup paths, which deliberately target them.
-        ids.addAll(active
-            .where((item) =>
-                item.id != null && item.payload?.startsWith('a:') == true)
-            .map((item) => item.id!));
-      } catch (_) {
-        // Pending alarms are still removable. Delivered notifications may be
-        // unavailable on older plugin/API combinations.
+        final journal = _readJournal(prefs, 'assignments');
+        if (journal != null) {
+          owned.addAll(journal['oldIds'] as List<int>);
+          owned.addAll(journal['newIds'] as List<int>);
+        }
+      } catch (error) {
+        throw StateError('旧作业提醒事务记录损坏，未执行迁移：$error');
       }
 
-      for (final category in const ['assignments']) {
-        try {
-          ids.addAll(_readActiveIds(prefs, category));
-        } catch (_) {
-          // OS payload/channel ownership above is sufficient to avoid touching
-          // another category when this manifest is damaged.
-        }
-        try {
-          final journal = _readJournal(prefs, category);
-          if (journal != null) {
-            ids.addAll(journal['oldIds'] as List<int>);
-            ids.addAll(journal['newIds'] as List<int>);
-          }
-        } catch (_) {
-          // Keep the damaged journal visible; do not guess notification owner.
-        }
+      final Map<Object?, Object?>? result;
+      try {
+        result =
+            await _legacyMigrationChannel.invokeMethod<Map<Object?, Object?>>(
+          'retireLegacyAssignments',
+          {
+            'ownedIds': owned.toList()..sort(),
+            'excludeIds': [DailySummary.baseId + 8],
+          },
+        );
+      } catch (error) {
+        throw StateError('旧作业提醒迁移失败：$error');
+      }
+      if (result == null) {
+        throw StateError('旧作业提醒迁移原生通道未返回结果');
+      }
+      if (result['completed'] != true) {
+        final unknown = result['preservedUnknownIds'];
+        final warning = result['warning'];
+        throw StateError(
+          '旧作业提醒迁移未完成'
+          '${unknown is List && unknown.isNotEmpty ? '；保留未知归属：${unknown.join(', ')}' : ''}'
+          '${warning == null ? '' : '；$warning'}',
+        );
       }
 
-      final failures = await _cancelIds(ids);
-      if (failures.isNotEmpty) {
-        throw StateError('旧作业提醒未能完整清理：${failures.join('; ')}');
-      }
-      try {
-        await _writeActiveIds(prefs, 'assignments', const []);
-      } catch (_) {
-        // The prior ID set is safe to retain; all known IDs were cancelled.
-      }
-      try {
-        await _removeJournal(prefs, 'assignments');
-      } catch (_) {
-        // Recovery will see only cancelled IDs and cannot duplicate delivery.
-      }
+      // Native proof and its durability barrier succeeded; only now retire the
+      // local manifests so a failed migration remains retryable.
+      await _writeActiveIds(prefs, 'assignments', const []);
+      await _removeJournal(prefs, 'assignments');
     });
   }
 

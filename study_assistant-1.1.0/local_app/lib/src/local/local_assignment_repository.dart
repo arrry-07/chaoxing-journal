@@ -499,12 +499,33 @@ class LocalAssignmentRepository {
       if (!acquired) {
         throw StateError('本机数据正在被另一后台任务更新，请稍后重试');
       }
+      Object? primaryError;
+      StackTrace? primaryStack;
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.reload();
         return await action();
+      } catch (error, stack) {
+        primaryError = error;
+        primaryStack = stack;
+        rethrow;
       } finally {
-        await _backgroundReminderGateway.releaseWriteLease(_writeOwner);
+        try {
+          await _backgroundReminderGateway.releaseWriteLease(_writeOwner);
+        } catch (releaseError, releaseStack) {
+          // Never let a release failure hide the real persistence error; when
+          // the action succeeded, the unconfirmed release is the only failure.
+          if (primaryError == null) {
+            Error.throwWithStackTrace(
+              StateError('本机数据已写入，但写租约释放未确认：$releaseError'),
+              releaseStack,
+            );
+          }
+          Error.throwWithStackTrace(
+            StateError('$primaryError；写租约释放未确认：$releaseError'),
+            primaryStack!,
+          );
+        }
       }
     });
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});

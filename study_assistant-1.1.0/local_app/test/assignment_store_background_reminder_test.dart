@@ -71,6 +71,175 @@ void main() {
     expect(gateway.plans.last.newEvents, isEmpty);
   });
 
+  for (final fullSuccess in [true, false]) {
+    test(
+        fullSuccess
+            ? 'waitedSuccessReleasesSyncLease'
+            : 'waitedFailureReleasesSyncLease', () async {
+      SharedPreferences.setMockInitialValues({});
+      final gateway = _FakeGateway()..waitedResult = fullSuccess;
+      final client = _ClientQueue([<Assignment>[]]);
+      final store = _store(gateway: gateway, client: client);
+      addTearDown(store.dispose);
+      await store.restoreSession();
+      await store.syncAssignments();
+      expect(client.calls, 0);
+      expect(gateway.syncReleases, gateway.syncAcquisitions);
+      expect(gateway.syncReleases, hasLength(1));
+      await store.syncAssignments();
+      expect(gateway.syncReleases, hasLength(2));
+    });
+  }
+
+  test('reloadFailureStillReleasesLease', () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway()..waitedResult = true;
+    final repository = _FailingReloadRepository(gateway);
+    final store = _store(
+        gateway: gateway, client: _ClientQueue([[]]), repository: repository);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    repository.failReload = true;
+    await store.syncAssignments();
+    expect(store.error, contains('synthetic reload failure'));
+    expect(gateway.syncReleases, gateway.syncAcquisitions);
+  });
+
+  test('unacquiredSyncLeaseIsNotReleased', () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway()..syncAcquired = false;
+    final store = _store(gateway: gateway, client: _ClientQueue([[]]));
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.syncAssignments();
+    expect(gateway.syncReleases, isEmpty);
+  });
+
+  test('nativeSettingsFailureDoesNotReportAppliedOrApplyPlan', () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway();
+    final store = _store(gateway: gateway, client: _ClientQueue([[]]));
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    gateway.plans.clear();
+    gateway.failSettings = true;
+    expect(await store.saveBackgroundCheckEnabled(false), isFalse);
+    expect(store.error, contains('已保存'));
+    await store.saveReminderRule([60]);
+    expect(gateway.plans, isEmpty);
+    expect(store.backgroundWarning, contains('未确认'));
+    gateway.failSettings = false;
+    await store.refreshAssignments();
+    expect(gateway.plans, isNotEmpty);
+  });
+
+  test('daytimeScheduleFailureIsVisible', () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway();
+    final store = _store(gateway: gateway, client: _ClientQueue([[]]));
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    gateway.failDaytime = true;
+    expect(await store.saveBackgroundCheckEnabled(false), isFalse);
+    expect(store.backgroundWarning, contains('未确认'));
+  });
+
+  test('nativePrivacyFailureKeepsCleanupPending', () async {
+    SharedPreferences.setMockInitialValues({'notification_details_v1': true});
+    final gateway = _FakeGateway();
+    final store = _store(gateway: gateway, client: _ClientQueue([[]]));
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    gateway.failPrivacy = true;
+    await store.saveNotificationDetails(false);
+    final prefs = await SharedPreferences.getInstance();
+    expect(store.notificationPrivacyPending, isTrue);
+    expect(prefs.getBool('notification_privacy_cleanup_pending_v1'), isTrue);
+    expect(store.notificationDetails, isTrue);
+    gateway.failPrivacy = false;
+    await store.saveNotificationDetails(false);
+    expect(store.notificationPrivacyPending, isFalse);
+  });
+
+  test('logoutRetriesNativeCleanupAfterIdentityRemoved', () async {
+    SharedPreferences.setMockInitialValues({'notification_details_v1': true});
+    final session = _MemorySessionStore();
+    final gateway = _FakeGateway();
+    final store =
+        _store(gateway: gateway, client: _ClientQueue([[]]), session: session);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final oldHash = store.accountHash;
+    gateway.failClear = true;
+    await store.logout();
+    expect(store.isAuthenticated, isFalse);
+    expect(session.account, isNull);
+    expect(store.notificationPrivacyPending, isTrue);
+    expect(store.error, contains('账号已退出'));
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getStringList('native_account_cleanup_pending_v1'),
+        contains(oldHash));
+    gateway.failClear = false;
+    final restarted =
+        _store(gateway: gateway, client: _ClientQueue([[]]), session: session);
+    addTearDown(restarted.dispose);
+    await restarted.restoreSession();
+    expect(gateway.clearedAccounts, contains(oldHash));
+    expect(prefs.getStringList('native_account_cleanup_pending_v1'), isNull);
+  });
+
+  test('nativeSwitchFailureNeverCommitsNewIdentity', () async {
+    SharedPreferences.setMockInitialValues({'notification_details_v1': true});
+    final gateway = _FakeGateway();
+    final session = _MemorySessionStore();
+    final client = _LoginClient();
+    final store = _store(gateway: gateway, client: client, session: session);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final epochBeforeFailedSwitch = store.nativeSessionEpoch;
+    gateway.failSwitch = true;
+    await store.loginChaoxing(
+        account: 'new-student', password: 'dummy', agreementAccepted: true);
+    expect(store.account, isNot('new-student'));
+    expect(session.account, isNot('new-student'));
+    expect(client.clearCalls, greaterThan(0));
+    expect(store.nativeSessionEpoch, epochBeforeFailedSwitch,
+        reason: 'failed switch cannot claim old native session restored');
+    expect(store.error, contains('synthetic switch failure'));
+  });
+
+  test('legacyV1MarkerDoesNotSkipV2Cleanup', () async {
+    SharedPreferences.setMockInitialValues(
+        {'legacy_assignment_schedule_cleanup_v1': true});
+    final notifications = _NoopNotificationService();
+    final store = _store(
+        gateway: _FakeGateway(),
+        client: _ClientQueue([[]]),
+        notifications: notifications);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final prefs = await SharedPreferences.getInstance();
+    expect(notifications.legacyCleanupCalls, 1);
+    expect(prefs.getBool('legacy_assignment_schedule_cleanup_v2'), isTrue);
+  });
+
+  test('failedLegacyMigrationKeepsV2PendingAndRetries', () async {
+    SharedPreferences.setMockInitialValues(
+        {'legacy_assignment_schedule_cleanup_v1': true});
+    final notifications = _NoopNotificationService()..failLegacyCleanup = true;
+    final store = _store(
+        gateway: _FakeGateway(),
+        client: _ClientQueue([[]]),
+        notifications: notifications);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('legacy_assignment_schedule_cleanup_v2'), isNot(true));
+    notifications.failLegacyCleanup = false;
+    await store.refreshAssignments();
+    expect(prefs.getBool('legacy_assignment_schedule_cleanup_v2'), isTrue);
+  });
+
   test('legacy assignment cleanup runs once per install', () async {
     SharedPreferences.setMockInitialValues({});
     final gateway = _FakeGateway();
@@ -85,7 +254,7 @@ void main() {
     addTearDown(store.dispose);
     await store.restoreSession();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('legacy_assignment_schedule_cleanup_v1');
+    await prefs.remove('legacy_assignment_schedule_cleanup_v2');
     notifications.legacyCleanupCalls = 0;
 
     await store.saveReminderRule([60]);
@@ -99,16 +268,19 @@ AssignmentStore _store({
   required _FakeGateway gateway,
   required ChaoxingLocalClient client,
   LocalNotificationService? notifications,
+  LocalAssignmentRepository? repository,
+  SecureSessionStore? session,
 }) =>
     AssignmentStore(
-      sessionStore: _MemorySessionStore(),
+      sessionStore: session ?? _MemorySessionStore(),
       notificationService: notifications ?? _NoopNotificationService(),
       widgetSnapshotService: _NoopWidgetSnapshotService(),
       chaoxingClient: client,
       backgroundReminderGateway: gateway,
-      repository: LocalAssignmentRepository(
-        backgroundReminderGateway: gateway,
-      ),
+      repository: repository ??
+          LocalAssignmentRepository(
+            backgroundReminderGateway: gateway,
+          ),
       nativeReminderDeliveryEnabled: true,
     );
 
@@ -145,8 +317,10 @@ class _ClientQueue extends ChaoxingLocalClient {
 }
 
 class _MemorySessionStore extends SecureSessionStore {
+  String? account = 'student';
+
   @override
-  Future<String?> readChaoxingAccount() async => 'student';
+  Future<String?> readChaoxingAccount() async => account;
 
   @override
   Future<String?> readChaoxingPassword() async => null;
@@ -156,10 +330,59 @@ class _MemorySessionStore extends SecureSessionStore {
 
   @override
   Future<String?> readChaoxingAvatarUrl() async => null;
+
+  @override
+  Future<void> saveChaoxingAccount({
+    required String account,
+    required String password,
+    String? displayName,
+    String? avatarUrl,
+  }) async {
+    this.account = account;
+  }
+
+  @override
+  Future<void> clear() async {
+    account = null;
+  }
+}
+
+class _LoginClient extends ChaoxingLocalClient {
+  int clearCalls = 0;
+
+  @override
+  bool get needsSessionInitialization => false;
+
+  @override
+  Future<ChaoxingLoginResult> login({
+    required String account,
+    required String password,
+  }) async =>
+      const ChaoxingLoginResult(success: true, displayName: '合成账号');
+
+  @override
+  void clearSession() {
+    clearCalls++;
+    super.clearSession();
+  }
+}
+
+class _FailingReloadRepository extends LocalAssignmentRepository {
+  _FailingReloadRepository(_FakeGateway gateway)
+      : super(backgroundReminderGateway: gateway);
+
+  bool failReload = false;
+
+  @override
+  Future<List<Assignment>> loadJournal() async {
+    if (failReload) throw StateError('synthetic reload failure');
+    return super.loadJournal();
+  }
 }
 
 class _NoopNotificationService extends LocalNotificationService {
   int legacyCleanupCalls = 0;
+  bool failLegacyCleanup = false;
 
   @override
   Future<void> cancelPrivateSchedules() async {}
@@ -167,6 +390,9 @@ class _NoopNotificationService extends LocalNotificationService {
   @override
   Future<void> removeLegacyAssignmentSchedules() async {
     legacyCleanupCalls++;
+    if (failLegacyCleanup) {
+      throw StateError('synthetic legacy migration failure');
+    }
   }
 
   @override
@@ -195,12 +421,22 @@ class _FakeGateway extends BackgroundReminderGateway {
   _FakeGateway() : super();
 
   final plans = <AssignmentReminderPlan>[];
+  final syncAcquisitions = <String>[];
+  final syncReleases = <String>[];
+  final clearedAccounts = <String>[];
   bool baseline = false;
   int mutationVersion = 0;
   Set<String> known = {};
   Set<String> sentNew = {};
   DateTime? lastAttempt;
   DateTime? lastFull;
+  bool? waitedResult;
+  bool syncAcquired = true;
+  bool failSettings = false;
+  bool failDaytime = false;
+  bool failPrivacy = false;
+  bool failClear = false;
+  bool failSwitch = false;
 
   @override
   Future<bool> isAvailable() async => true;
@@ -212,8 +448,10 @@ class _FakeGateway extends BackgroundReminderGateway {
   Future<int> switchAccount({
     required String? previousAccountHash,
     required String accountHash,
-  }) async =>
-      2;
+  }) async {
+    if (failSwitch) throw StateError('synthetic switch failure');
+    return 2;
+  }
 
   @override
   Future<void> updateSettings(
@@ -222,6 +460,7 @@ class _FakeGateway extends BackgroundReminderGateway {
     BackgroundCheckSettings settings, {
     required bool showDetails,
   }) async {
+    if (failSettings) throw StateError('synthetic settings failure');
     mutationVersion++;
   }
 
@@ -230,26 +469,42 @@ class _FakeGateway extends BackgroundReminderGateway {
     required DateTime? targetAt,
     required bool enabled,
     required int intervalMinutes,
-  }) async {}
+  }) async {
+    if (failDaytime) throw StateError('synthetic daytime failure');
+  }
 
   @override
   Future<SyncLeaseResult> acquireSyncLease({
     required String accountHash,
     required String requestId,
     required DateTime requestedAt,
-  }) async =>
-      const SyncLeaseResult(
-        acquired: true,
-        waited: false,
+  }) async {
+    syncAcquisitions.add(requestId);
+    if (!syncAcquired) {
+      return const SyncLeaseResult(
+        acquired: false,
+        waited: true,
         lastAttemptAt: null,
         lastFullSuccessAt: null,
       );
+    }
+    final waited = waitedResult;
+    final timestamp = requestedAt.add(const Duration(milliseconds: 1));
+    return SyncLeaseResult(
+      acquired: true,
+      waited: waited != null,
+      lastAttemptAt: waited == null ? null : timestamp,
+      lastFullSuccessAt: waited == true ? timestamp : null,
+    );
+  }
 
   @override
   Future<void> releaseSyncLease({
     required String accountHash,
     required String requestId,
-  }) async {}
+  }) async {
+    syncReleases.add(requestId);
+  }
 
   @override
   Future<bool> acquireWriteLease(String owner) async => true;
@@ -267,6 +522,18 @@ class _FakeGateway extends BackgroundReminderGateway {
     required int sessionEpoch,
   }) async {
     mutationVersion++;
+  }
+
+  @override
+  Future<int> clearActiveAccount(String accountHash) async {
+    if (failClear) throw StateError('synthetic clear failure');
+    clearedAccounts.add(accountHash);
+    return 3;
+  }
+
+  @override
+  Future<void> cancelAssignmentDeliveryKeepEvents(String accountHash) async {
+    if (failPrivacy) throw StateError('synthetic privacy failure');
   }
 
   @override

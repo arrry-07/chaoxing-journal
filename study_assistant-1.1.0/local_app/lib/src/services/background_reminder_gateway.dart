@@ -110,35 +110,52 @@ class BackgroundReminderGateway {
   const BackgroundReminderGateway({
     MethodChannel channel =
         const MethodChannel('study_assistant/background_reminders'),
+    this.operationTimeout = const Duration(seconds: 10),
+    this.syncLeaseTimeout = const Duration(seconds: 130),
+    this.writeLeaseTimeout = const Duration(seconds: 65),
   }) : _channel = channel;
 
   final MethodChannel _channel;
+  final Duration operationTimeout;
+  final Duration syncLeaseTimeout;
+  final Duration writeLeaseTimeout;
+
+  // Keep the const gateway usable in default arguments. Only acknowledged write
+  // grants are retained, and failed releases stay here so they can be retried.
+  static final _writeRequests = Expando<Map<String, List<String>>>();
+  static int _requestSequence = 0;
+  Map<String, List<String>> get _confirmedWrites =>
+      _writeRequests[this] ??= <String, List<String>>{};
 
   Future<bool> isAvailable() async =>
       await _invokeTimed<bool>('ping', null, const Duration(seconds: 2)) ??
       false;
 
-  Future<int> ensureActiveAccount(String accountHash) async =>
-      await _invoke<int>('ensureActiveAccount', {'accountHash': accountHash}) ??
-      0;
+  Future<int> ensureActiveAccount(String accountHash) =>
+      _epoch('ensureActiveAccount', {'accountHash': accountHash});
 
   Future<int> switchAccount({
     required String? previousAccountHash,
     required String accountHash,
-  }) async =>
-      await _invoke<int>('switchAccount', {
+  }) =>
+      _epoch('switchAccount', {
         'previousAccountHash': previousAccountHash,
         'accountHash': accountHash,
-      }) ??
-      0;
+      });
 
-  Future<int> rotateSessionEpoch(String accountHash) async =>
-      await _invoke<int>('rotateSessionEpoch', {'accountHash': accountHash}) ??
-      0;
+  Future<int> rotateSessionEpoch(String accountHash) =>
+      _epoch('rotateSessionEpoch', {'accountHash': accountHash});
 
-  Future<int> clearActiveAccount(String accountHash) async =>
-      await _invoke<int>('clearActiveAccount', {'accountHash': accountHash}) ??
-      0;
+  Future<int> clearActiveAccount(String accountHash) =>
+      _epoch('clearActiveAccount', {'accountHash': accountHash});
+
+  Future<int> _epoch(String method, Map<String, Object?> arguments) async {
+    final epoch = await _invokeStrict<Object>(method, arguments);
+    if (epoch is! int || epoch <= 0) {
+      throw BackgroundReminderGatewayException(method, '原生会话代次无效');
+    }
+    return epoch;
+  }
 
   Future<bool> isSessionCurrent(
     String accountHash,
@@ -156,7 +173,7 @@ class BackgroundReminderGateway {
     BackgroundCheckSettings settings, {
     required bool showDetails,
   }) async {
-    await _invoke<void>('updateSettings', {
+    await _invokeStrictVoid('updateSettings', {
       'accountHash': accountHash,
       'sessionEpoch': sessionEpoch,
       ...settings.toJson(),
@@ -169,7 +186,7 @@ class BackgroundReminderGateway {
     required bool enabled,
     required int intervalMinutes,
   }) async {
-    await _invoke<void>('reconcileDaytimeSchedule', {
+    await _invokeStrictVoid('reconcileDaytimeSchedule', {
       'targetAt': targetAt?.toUtc().toIso8601String(),
       'enabled': enabled,
       'intervalMinutes': intervalMinutes,
@@ -181,44 +198,99 @@ class BackgroundReminderGateway {
     required String requestId,
     required DateTime requestedAt,
   }) async {
-    final value = await _invokeTimed<Map<Object?, Object?>>(
-      'acquireSyncLease',
-      {
-        'accountHash': accountHash,
-        'requestId': requestId,
-        'requestedAt': requestedAt.toUtc().toIso8601String(),
-      },
-      const Duration(seconds: 130),
-    );
-    return SyncLeaseResult(
-      acquired: value?['acquired'] == true,
-      waited: value?['waited'] == true,
-      lastAttemptAt: _date(value?['lastAttemptAt']),
-      lastFullSuccessAt: _date(value?['lastFullSuccessAt']),
-    );
+    final arguments = <String, Object?>{
+      'accountHash': accountHash,
+      'requestId': requestId,
+      'requestedAt': requestedAt.toUtc().toIso8601String(),
+    };
+    try {
+      final value = await _invokeStrict<Map<Object?, Object?>>(
+        'acquireSyncLease',
+        arguments,
+        timeout: syncLeaseTimeout,
+      );
+      if (value['acquired'] is! bool || value['waited'] is! bool) {
+        throw const BackgroundReminderGatewayException(
+            'acquireSyncLease', '原生租约结果无效');
+      }
+      if (value['acquired'] == true &&
+          !await _invokeStrict<bool>('confirmSyncLease', arguments)) {
+        throw const BackgroundReminderGatewayException(
+            'confirmSyncLease', '原生租约未确认');
+      }
+      return SyncLeaseResult(
+        acquired: value['acquired'] == true,
+        waited: value['waited'] == true,
+        lastAttemptAt: _date(value['lastAttemptAt']),
+        lastFullSuccessAt: _date(value['lastFullSuccessAt']),
+      );
+    } catch (error, stack) {
+      await _cancelUncertainAcquisition(
+          'cancelSyncLeaseAcquisition', arguments, error);
+      Error.throwWithStackTrace(error, stack);
+    }
   }
 
   Future<void> releaseSyncLease({
     required String accountHash,
     required String requestId,
   }) async {
-    await _invoke<void>('releaseSyncLease', {
+    await _invokeStrictVoid('releaseSyncLease', {
       'accountHash': accountHash,
       'requestId': requestId,
     });
   }
 
   Future<bool> acquireWriteLease(String owner) async {
-    return await _invokeTimed<bool>(
-          'acquireWriteLease',
-          {'owner': owner},
-          const Duration(seconds: 65),
-        ) ??
-        false;
+    final requestId = 'dart-${DateTime.now().microsecondsSinceEpoch}-'
+        '${_requestSequence++}';
+    final arguments = <String, Object?>{'owner': owner, 'requestId': requestId};
+    try {
+      final acquired = await _invokeStrict<bool>(
+        'acquireWriteLease',
+        arguments,
+        timeout: writeLeaseTimeout,
+      );
+      if (!acquired) return false;
+      if (!await _invokeStrict<bool>('confirmWriteLease', arguments)) {
+        throw const BackgroundReminderGatewayException(
+            'confirmWriteLease', '原生租约未确认');
+      }
+      (_confirmedWrites[owner] ??= []).add(requestId);
+      return true;
+    } catch (error, stack) {
+      await _cancelUncertainAcquisition(
+          'cancelWriteLeaseAcquisition', arguments, error);
+      Error.throwWithStackTrace(error, stack);
+    }
   }
 
   Future<void> releaseWriteLease(String owner) async {
-    await _invoke<void>('releaseWriteLease', {'owner': owner});
+    final requests = _confirmedWrites[owner];
+    if (requests == null || requests.isEmpty) {
+      throw const BackgroundReminderGatewayException(
+          'releaseWriteLease', '没有可释放的已确认写租约');
+    }
+    final requestId = requests.last;
+    await _invokeStrictVoid('releaseWriteLease', {
+      'owner': owner,
+      'requestId': requestId,
+    });
+    requests.removeLast();
+    if (requests.isEmpty) _confirmedWrites.remove(owner);
+  }
+
+  Future<void> _cancelUncertainAcquisition(
+    String method,
+    Map<String, Object?> arguments,
+    Object primaryError,
+  ) async {
+    try {
+      await _invokeStrictVoid(method, arguments);
+    } catch (cleanupError) {
+      throw BackgroundReminderGatewayException(
+          method, '租约状态未确认；取得失败：$primaryError；取消失败：$cleanupError');
+    }
   }
 
   Future<ReminderPlanState> loadPlanState({
@@ -246,7 +318,7 @@ class BackgroundReminderGateway {
     required String accountHash,
     required int sessionEpoch,
   }) async {
-    await _invoke<void>('markPendingUpdate', {
+    await _invokeStrictVoid('markPendingUpdate', {
       'accountHash': accountHash,
       'sessionEpoch': sessionEpoch,
     });
@@ -288,7 +360,7 @@ class BackgroundReminderGateway {
     required bool fullSucceeded,
     required String? failure,
   }) async {
-    await _invoke<void>('recordAttempt', {
+    await _invokeStrictVoid('recordAttempt', {
       'accountHash': accountHash,
       'sessionEpoch': sessionEpoch,
       'attemptedAt': attemptedAt.toUtc().toIso8601String(),
@@ -302,36 +374,58 @@ class BackgroundReminderGateway {
     required String accountHash,
     required int sessionEpoch,
   }) async {
-    final value = await _invoke<Map<Object?, Object?>>('inspectHealth', {
+    final value = await _invokeStrict<Map<Object?, Object?>>('inspectHealth', {
       'accountHash': accountHash,
       'sessionEpoch': sessionEpoch,
     });
+    for (final key in [
+      'backgroundEnabled',
+      'newAssignmentReminderEnabled',
+      'notificationListenerEnabled',
+      'notificationListenerGranted',
+      'baselineCompleted',
+      'migrationPending',
+    ]) {
+      if (value[key] is! bool) {
+        throw const BackgroundReminderGatewayException(
+            'inspectHealth', '原生体检结果不完整');
+      }
+    }
+    for (final key in [
+      'intervalMinutes',
+      'pendingNewCount',
+      'pendingDeadlineCount',
+      'pendingSignalCount'
+    ]) {
+      if (value[key] is! int || (value[key] as int) < 0) {
+        throw const BackgroundReminderGatewayException(
+            'inspectHealth', '原生体检计数无效');
+      }
+    }
     return BackgroundReminderHealth(
-      backgroundEnabled: value?['backgroundEnabled'] == true,
-      intervalMinutes: value?['intervalMinutes'] as int? ?? 240,
+      backgroundEnabled: value['backgroundEnabled'] as bool,
+      intervalMinutes: value['intervalMinutes'] as int,
       newAssignmentReminderEnabled:
-          value?['newAssignmentReminderEnabled'] == true,
-      notificationListenerEnabled:
-          value?['notificationListenerEnabled'] == true,
-      notificationListenerGranted:
-          value?['notificationListenerGranted'] == true,
-      nextCheckAt: _date(value?['nextCheckAt']),
-      pendingNewCount: value?['pendingNewCount'] as int? ?? 0,
-      pendingDeadlineCount: value?['pendingDeadlineCount'] as int? ?? 0,
-      baselineCompleted: value?['baselineCompleted'] == true,
-      pendingSignalCount: value?['pendingSignalCount'] as int? ?? 0,
-      migrationPending: value?['migrationPending'] == true,
-      lastFailure: value?['lastFailure'] as String?,
+          value['newAssignmentReminderEnabled'] as bool,
+      notificationListenerEnabled: value['notificationListenerEnabled'] as bool,
+      notificationListenerGranted: value['notificationListenerGranted'] as bool,
+      nextCheckAt: _date(value['nextCheckAt']),
+      pendingNewCount: value['pendingNewCount'] as int,
+      pendingDeadlineCount: value['pendingDeadlineCount'] as int,
+      baselineCompleted: value['baselineCompleted'] as bool,
+      pendingSignalCount: value['pendingSignalCount'] as int,
+      migrationPending: value['migrationPending'] as bool,
+      lastFailure: value['lastFailure'] as String?,
     );
   }
 
   Future<void> cancelAssignmentReminders(String accountHash) async {
-    await _invoke<void>(
+    await _invokeStrictVoid(
         'cancelAssignmentReminders', {'accountHash': accountHash});
   }
 
   Future<void> cancelAssignmentDeliveryKeepEvents(String accountHash) async {
-    await _invoke<void>(
+    await _invokeStrictVoid(
       'cancelAssignmentDeliveryKeepEvents',
       {'accountHash': accountHash},
     );
@@ -341,7 +435,7 @@ class BackgroundReminderGateway {
     required String accountHash,
     required int version,
   }) async {
-    await _invoke<void>('consumeNotificationSignal', {
+    await _invokeStrictVoid('consumeNotificationSignal', {
       'accountHash': accountHash,
       'version': version,
     });
@@ -356,12 +450,13 @@ class BackgroundReminderGateway {
   /// missing plugin) is surfaced as [BackgroundReminderGatewayException].
   Future<T> _invokeStrict<T>(
     String method,
-    Map<String, Object?>? arguments,
-  ) async {
+    Map<String, Object?>? arguments, {
+    Duration? timeout,
+  }) async {
     try {
       final value = await _channel
           .invokeMethod<T>(method, arguments)
-          .timeout(const Duration(seconds: 10));
+          .timeout(timeout ?? operationTimeout);
       if (value == null) {
         throw BackgroundReminderGatewayException(method, '原生通道未返回结果');
       }
@@ -375,6 +470,21 @@ class BackgroundReminderGateway {
           method, error.message ?? error.code);
     } on TimeoutException catch (error) {
       throw BackgroundReminderGatewayException(method, error);
+    } catch (error) {
+      throw BackgroundReminderGatewayException(method, error);
+    }
+  }
+
+  // A void MethodChannel operation normally succeeds with a null reply. Only
+  // transport completion is evidence here; data operations use _invokeStrict.
+  Future<void> _invokeStrictVoid(
+    String method,
+    Map<String, Object?>? arguments,
+  ) async {
+    try {
+      await _channel
+          .invokeMethod<void>(method, arguments)
+          .timeout(operationTimeout);
     } catch (error) {
       throw BackgroundReminderGatewayException(method, error);
     }

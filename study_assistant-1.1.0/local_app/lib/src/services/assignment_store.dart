@@ -51,8 +51,9 @@ class AssignmentStore extends ChangeNotifier {
   static const _notificationClickMissingKey = 'notification_click_missing_v1';
   static const _privacyCleanupPendingKey =
       'notification_privacy_cleanup_pending_v1';
+  static const _nativeCleanupAccountsKey = 'native_account_cleanup_pending_v1';
   static const _legacyScheduleCleanupKey =
-      'legacy_assignment_schedule_cleanup_v1';
+      'legacy_assignment_schedule_cleanup_v2';
 
   AssignmentStore({
     required this.sessionStore,
@@ -373,14 +374,12 @@ class AssignmentStore extends ChangeNotifier {
     if (!_nativeReminderAvailable || !_authenticated || accountHash == null) {
       return null;
     }
-    try {
-      return await backgroundReminderGateway.inspectHealth(
-        accountHash: accountHash,
-        sessionEpoch: _nativeSessionEpoch,
-      );
-    } catch (_) {
-      return null;
-    }
+    // Once the bridge is expected, a failed read is not "zero reminders"; let
+    // the caller surface the failure instead of fabricating a healthy state.
+    return backgroundReminderGateway.inspectHealth(
+      accountHash: accountHash,
+      sessionEpoch: _nativeSessionEpoch,
+    );
   }
 
   List<int> get reminderOffsetsMinutes =>
@@ -395,6 +394,7 @@ class AssignmentStore extends ChangeNotifier {
           .where((a) => follows(a.courseKey!))
           .toList();
   bool _privacyCleanupPending = false;
+  final Set<String> _pendingNativeCleanupAccounts = <String>{};
   bool get notificationPrivacyPending => _privacyCleanupPending;
   bool get notificationDetails => notificationService.showDetails;
   Future<void> saveNotificationDetails(bool value) => _run(() async {
@@ -600,6 +600,7 @@ class AssignmentStore extends ChangeNotifier {
       _recoveryWarnings.add('个人资料暂时无法恢复，不影响重新登录和读取作业');
     }
     await _reconcileBackgroundControls();
+    await _maybeMigrateLegacyAssignmentSchedules();
     notifyListeners();
   }
 
@@ -630,8 +631,13 @@ class AssignmentStore extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final details = prefs.getBool('notification_details_v1') ?? false;
       final cleanupPending = prefs.getBool(_privacyCleanupPendingKey) ?? false;
+      _pendingNativeCleanupAccounts
+        ..clear()
+        ..addAll(prefs.getStringList(_nativeCleanupAccountsKey) ?? const []);
       notificationService.showDetails = details;
-      _privacyCleanupPending = !details || cleanupPending;
+      _privacyCleanupPending = !details ||
+          cleanupPending ||
+          _pendingNativeCleanupAccounts.isNotEmpty;
       if (_privacyCleanupPending) {
         try {
           await _cancelPrivateNotifications();
@@ -834,13 +840,24 @@ class AssignmentStore extends ChangeNotifier {
       final newAccountHash = AccountIdentity.hash(normalizedAccount);
       var nativeSwitched = false;
       if (_nativeReminderAvailable) {
-        _nativeSessionEpoch = await backgroundReminderGateway.switchAccount(
-          previousAccountHash: oldAccountHash ??
-              (oldAccount == null ? null : AccountIdentity.hash(oldAccount)),
-          accountHash: newAccountHash,
-        );
-        _accountHash = newAccountHash;
-        nativeSwitched = true;
+        try {
+          final nativeEpoch = await backgroundReminderGateway.switchAccount(
+            previousAccountHash: oldAccountHash ??
+                (oldAccount == null ? null : AccountIdentity.hash(oldAccount)),
+            accountHash: newAccountHash,
+          );
+          if (nativeEpoch <= 0) {
+            throw StateError('原生会话代次无效');
+          }
+          _nativeSessionEpoch = nativeEpoch;
+          _accountHash = newAccountHash;
+          nativeSwitched = true;
+        } catch (error) {
+          // The server accepted the login, but native reminder state did not
+          // follow. Do not commit the new local identity with split ownership.
+          chaoxingClient.clearSession();
+          throw StateError('原生提醒账号切换失败，登录未完成：$error');
+        }
       }
       String? oldPassword;
       if (oldAccount != null) {
@@ -981,24 +998,30 @@ class AssignmentStore extends ChangeNotifier {
     final accountHash = _accountHash;
     final sessionEpoch = _nativeSessionEpoch;
     String? leaseRequest;
+    DateTime? leaseRequestedAt;
+    SyncLeaseResult? lease;
     if (_nativeReminderAvailable && accountHash != null) {
-      final requestedAt = DateTime.now();
+      leaseRequestedAt = DateTime.now();
       leaseRequest = nativeLeaseOwner ??
           '${accountHash.substring(0, min(8, accountHash.length))}-'
-              '${requestedAt.microsecondsSinceEpoch}-${Random().nextInt(1 << 31)}';
-      final lease = await backgroundReminderGateway.acquireSyncLease(
+              '${leaseRequestedAt.microsecondsSinceEpoch}-${Random().nextInt(1 << 31)}';
+      lease = await backgroundReminderGateway.acquireSyncLease(
         accountHash: accountHash,
         requestId: leaseRequest,
-        requestedAt: requestedAt,
+        requestedAt: leaseRequestedAt,
       );
       if (!lease.acquired) {
         _backgroundWarning = '另一轮作业检查仍在进行，本次已合并等待';
         notifyListeners();
         return;
       }
-      if (lease.waited &&
-          (lease.lastAttemptAt?.isAfter(requestedAt) ?? false)) {
-        if (lease.lastFullSuccessAt?.isAfter(requestedAt) ?? false) {
+    }
+    try {
+      if (lease != null &&
+          lease.waited &&
+          leaseRequestedAt != null &&
+          (lease.lastAttemptAt?.isAfter(leaseRequestedAt) ?? false)) {
+        if (lease.lastFullSuccessAt?.isAfter(leaseRequestedAt) ?? false) {
           await _run(_reloadJournal);
           return;
         }
@@ -1006,8 +1029,6 @@ class AssignmentStore extends ChangeNotifier {
         notifyListeners();
         return;
       }
-    }
-    try {
       await _run(() async {
         if (!_authenticated) return;
         if (_nativeReminderAvailable &&
@@ -1023,11 +1044,20 @@ class AssignmentStore extends ChangeNotifier {
     } finally {
       if (_nativeReminderAvailable &&
           accountHash != null &&
-          leaseRequest != null) {
-        await backgroundReminderGateway.releaseSyncLease(
-          accountHash: accountHash,
-          requestId: leaseRequest,
-        );
+          leaseRequest != null &&
+          lease != null &&
+          lease.acquired) {
+        try {
+          await backgroundReminderGateway.releaseSyncLease(
+            accountHash: accountHash,
+            requestId: leaseRequest,
+          );
+        } catch (error) {
+          // Keep the sync result intact; an unconfirmed release is visible and
+          // the native engine-destroy path remains the safety net.
+          _backgroundWarning = '同步租约释放未确认：$error';
+          _serviceWarnings.add(_backgroundWarning!);
+        }
       }
     }
   }
@@ -1196,7 +1226,9 @@ class AssignmentStore extends ChangeNotifier {
       final next = _backgroundCheckSettings.copyWith(enabled: enabled);
       await backgroundCheckSettingsStore.save(next);
       _backgroundCheckSettings = next;
-      await _reconcileBackgroundControls();
+      if (!await _reconcileBackgroundControls()) {
+        throw StateError('设置已保存，但后台提醒设置未确认，请重试');
+      }
       saved = true;
     });
     return saved;
@@ -1212,7 +1244,9 @@ class AssignmentStore extends ChangeNotifier {
       );
       await backgroundCheckSettingsStore.save(next);
       _backgroundCheckSettings = next;
-      await _reconcileBackgroundControls();
+      if (!await _reconcileBackgroundControls()) {
+        throw StateError('设置已保存，但后台提醒设置未确认，请重试');
+      }
       saved = true;
     });
     return saved;
@@ -1226,7 +1260,9 @@ class AssignmentStore extends ChangeNotifier {
       );
       await backgroundCheckSettingsStore.save(next);
       _backgroundCheckSettings = next;
-      await _reconcileBackgroundControls();
+      if (!await _reconcileBackgroundControls()) {
+        throw StateError('设置已保存，但后台提醒设置未确认，请重试');
+      }
       saved = true;
     });
     return saved;
@@ -1240,7 +1276,9 @@ class AssignmentStore extends ChangeNotifier {
       );
       await backgroundCheckSettingsStore.save(next);
       _backgroundCheckSettings = next;
-      await _reconcileBackgroundControls();
+      if (!await _reconcileBackgroundControls()) {
+        throw StateError('设置已保存，但后台提醒设置未确认，请重试');
+      }
       saved = true;
     });
     return saved;
@@ -1345,7 +1383,19 @@ class AssignmentStore extends ChangeNotifier {
     changes = [];
     final accountHash = _accountHash;
     if (_nativeReminderAvailable && accountHash != null) {
-      await backgroundReminderGateway.clearActiveAccount(accountHash);
+      try {
+        await backgroundReminderGateway.clearActiveAccount(accountHash);
+      } catch (error) {
+        // Local identity removal must still complete. Keep the old account
+        // hash so the native cleanup can be retried without account identity.
+        _pendingNativeCleanupAccounts.add(accountHash);
+        try {
+          await _persistNativeCleanupAccounts();
+        } catch (persistError) {
+          _error = '退出后原生提醒清理未确认，且清理目标未能保存：$persistError';
+        }
+        _privacyCleanupPending = true;
+      }
     }
     _accountHash = null;
     _nativeSessionEpoch = 0;
@@ -1393,6 +1443,10 @@ class AssignmentStore extends ChangeNotifier {
         _error = '账号已退出，但部分提醒或桌面内容可能仍保留。请在系统中清除本应用通知并移除小组件。';
       }
     });
+    if (_pendingNativeCleanupAccounts.isNotEmpty) {
+      _error ??= '账号已退出，但旧账号的原生提醒清理尚未确认；应用会在下次启动或刷新时重试。';
+      notifyListeners();
+    }
   }
 
   @visibleForTesting
@@ -1422,26 +1476,24 @@ class AssignmentStore extends ChangeNotifier {
     }
     if (!_privacyCleanupPending) {
       if (_nativeReminderAvailable && _authenticated) {
-        try {
-          if (_manageBackgroundSchedule) {
-            // Legacy plugin assignment alarms are migrated once per app
-            // install. Running this on every sync would cancel the native
-            // deadline notifications that share the same Android channel.
-            final prefs = await SharedPreferences.getInstance();
-            if (prefs.getBool(_legacyScheduleCleanupKey) != true) {
-              await notificationService.removeLegacyAssignmentSchedules();
-              await prefs.setBool(_legacyScheduleCleanupKey, true);
-            }
+        final controlsApplied = await _reconcileBackgroundControls();
+        if (!controlsApplied) {
+          // Fail closed: publishing a plan while showDetails/schedule settings
+          // were not applied would activate the previous native settings.
+          _serviceWarnings.add(_backgroundWarning ?? '后台提醒设置未能应用，本次未更新提醒计划');
+        } else {
+          try {
+            await _maybeMigrateLegacyAssignmentSchedules();
+            await _applyNativeReminderPlan(
+              completeSync: completeSync,
+              detectNewAssignments: detectNewAssignments,
+              syncCompleted: syncCompleted,
+              failure: syncFailure,
+              completedAt: completedAt,
+            );
+          } catch (error) {
+            _serviceWarnings.add('后台作业提醒状态未能更新：$error');
           }
-          await _applyNativeReminderPlan(
-            completeSync: completeSync,
-            detectNewAssignments: detectNewAssignments,
-            syncCompleted: syncCompleted,
-            failure: syncFailure,
-            completedAt: completedAt,
-          );
-        } catch (error) {
-          _serviceWarnings.add('后台作业提醒状态未能更新：$error');
         }
       } else {
         try {
@@ -1501,6 +1553,25 @@ class AssignmentStore extends ChangeNotifier {
     );
   }
 
+  Future<void> _maybeMigrateLegacyAssignmentSchedules() async {
+    if (!_manageBackgroundSchedule ||
+        !_nativeReminderAvailable ||
+        !_authenticated) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_legacyScheduleCleanupKey) == true) return;
+    try {
+      await notificationService.removeLegacyAssignmentSchedules();
+      if (!await _writeBoolPreferenceAndVerify(
+          prefs, _legacyScheduleCleanupKey, true)) {
+        _serviceWarnings.add('旧作业提醒已清理，但完成标记未能保存，将在下次继续核对');
+      }
+    } catch (error) {
+      _serviceWarnings.add('旧作业提醒迁移尚未完成：$error');
+    }
+  }
+
   Future<void> _applyNativeReminderPlan({
     required bool completeSync,
     required bool detectNewAssignments,
@@ -1545,7 +1616,6 @@ class AssignmentStore extends ChangeNotifier {
     if (result.warning != null) {
       _serviceWarnings.add(result.warning!);
     }
-    await _reconcileBackgroundControls(now: now);
   }
 
   bool _needsProfileRecovery = false;
@@ -1799,11 +1869,14 @@ class AssignmentStore extends ChangeNotifier {
     return target;
   }
 
-  Future<void> _reconcileBackgroundControls({DateTime? now}) async {
-    if (!_nativeReminderAvailable) return;
+  /// Applies settings/schedule to the native side. Returns false only when a
+  /// control write was not confirmed, so callers can refuse to activate a plan
+  /// under stale settings. Health is diagnostic and never blocks that result.
+  Future<bool> _reconcileBackgroundControls({DateTime? now}) async {
+    if (!_nativeReminderAvailable) return true;
     final current = now ?? DateTime.now();
+    final accountHash = _accountHash;
     try {
-      final accountHash = _accountHash;
       if (_authenticated && accountHash != null) {
         await backgroundReminderGateway.updateSettings(
           accountHash,
@@ -1819,6 +1892,12 @@ class AssignmentStore extends ChangeNotifier {
           intervalMinutes: _backgroundCheckSettings.intervalMinutes,
         );
       }
+    } catch (error) {
+      _backgroundWarning =
+          '后台提醒设置未确认：${error.toString().replaceFirst('PlatformException', '后台提醒')}';
+      return false;
+    }
+    try {
       if (accountHash != null) {
         final health = await backgroundReminderGateway.inspectHealth(
           accountHash: accountHash,
@@ -1827,9 +1906,9 @@ class AssignmentStore extends ChangeNotifier {
         _backgroundWarning = health.lastFailure;
       }
     } catch (error) {
-      _backgroundWarning =
-          error.toString().replaceFirst('PlatformException', '后台提醒');
+      _backgroundWarning = '后台提醒体检读取失败：$error';
     }
+    return true;
   }
 
   Future<void> _updateServerBackoff(Iterable<SyncIssue> issues) async {
@@ -1951,12 +2030,40 @@ class AssignmentStore extends ChangeNotifier {
       if (_manageBackgroundSchedule) {
         await notificationService.cancelPrivateSchedules();
       }
-      if (_nativeReminderAvailable && _accountHash != null) {
-        await backgroundReminderGateway
-            .cancelAssignmentDeliveryKeepEvents(_accountHash!);
+      final nativeTargets = <String>{
+        ..._pendingNativeCleanupAccounts,
+        if (_nativeReminderAvailable && _accountHash != null) _accountHash!,
+      };
+      var pendingChanged = false;
+      for (final target in nativeTargets) {
+        final pendingAccount = _pendingNativeCleanupAccounts.contains(target);
+        if (_nativeReminderAvailable) {
+          if (pendingAccount) {
+            // Account-level cleanup also cancels background work and alarms;
+            // delivery cleanup alone is not enough to retry a failed logout.
+            await backgroundReminderGateway.clearActiveAccount(target);
+          }
+          await backgroundReminderGateway
+              .cancelAssignmentDeliveryKeepEvents(target);
+        }
+        if (pendingAccount && _pendingNativeCleanupAccounts.remove(target)) {
+          pendingChanged = true;
+        }
       }
-      await _persistPrivacyCleanupPending(false);
-      _privacyCleanupPending = false;
+      if (pendingChanged) {
+        // Retry evidence is only cleared after the native side confirmed the
+        // delivery cleanup for that old identity.
+        await _persistNativeCleanupAccounts();
+      }
+      if (_pendingNativeCleanupAccounts.isEmpty) {
+        await _persistPrivacyCleanupPending(false);
+        _privacyCleanupPending = false;
+      } else {
+        // A failed account-level cleanup is still pending even when delivery
+        // cancellation succeeded. Keep the durable marker for the next retry.
+        await _persistPrivacyCleanupPending(true);
+        _privacyCleanupPending = true;
+      }
     } catch (error) {
       _privacyCleanupPending = true;
       try {
@@ -1991,6 +2098,27 @@ class AssignmentStore extends ChangeNotifier {
     }
   }
 
+  Future<void> _persistNativeCleanupAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_pendingNativeCleanupAccounts.isEmpty) {
+      final removed = await prefs.remove(_nativeCleanupAccountsKey);
+      if (!removed) {
+        await prefs.reload();
+        if (prefs.getStringList(_nativeCleanupAccountsKey) != null) {
+          throw StateError('旧账号原生提醒清理目标未能清除');
+        }
+      }
+      return;
+    }
+    final values = _pendingNativeCleanupAccounts.toList()..sort();
+    if (!await prefs.setStringList(_nativeCleanupAccountsKey, values)) {
+      await prefs.reload();
+      if (!listEquals(prefs.getStringList(_nativeCleanupAccountsKey), values)) {
+        throw StateError('旧账号原生提醒清理目标未能保存');
+      }
+    }
+  }
+
   String _privacyCleanupMessage(Object error) =>
       notificationService.lastWarning ??
       error
@@ -2008,6 +2136,21 @@ class AssignmentStore extends ChangeNotifier {
     try {
       await prefs.reload();
       return prefs.getString(key) == value;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _writeBoolPreferenceAndVerify(
+      SharedPreferences prefs, String key, bool value) async {
+    try {
+      if (await prefs.setBool(key, value)) return true;
+    } catch (_) {
+      // Verify the durable value; the plugin can fail after updating memory.
+    }
+    try {
+      await prefs.reload();
+      return prefs.getBool(key) == value;
     } catch (_) {
       return false;
     }

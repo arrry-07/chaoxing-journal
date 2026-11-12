@@ -201,14 +201,16 @@ object AssignmentNotificationPublisher {
     }
 
     fun cancelForAccount(context: Context, database: ReminderDatabase, accountHash: String) {
-        AssignmentAlarmScheduler.cancelNewAssignmentWindow(context, accountHash)
-        val manager = NotificationManagerCompat.from(context)
-        val events = database.cancelAssignmentReminders(accountHash)
-        events.forEach {
-            if (it.type == ReminderDatabase.EVENT_DEADLINE) {
-                AssignmentAlarmScheduler.cancelDeadline(context, it)
+        synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
+            AssignmentAlarmScheduler.cancelNewAssignmentWindow(context, accountHash)
+            val manager = NotificationManagerCompat.from(context)
+            val events = database.cancelAssignmentReminders(accountHash)
+            events.forEach {
+                if (it.type == ReminderDatabase.EVENT_DEADLINE) {
+                    AssignmentAlarmScheduler.cancelDeadline(context, it)
+                }
+                manager.cancel(it.notificationId)
             }
-            manager.cancel(it.notificationId)
         }
     }
 
@@ -217,19 +219,21 @@ object AssignmentNotificationPublisher {
         database: ReminderDatabase,
         accountHash: String,
     ) {
-        AssignmentAlarmScheduler.cancelNewAssignmentWindow(context, accountHash)
-        val manager = NotificationManagerCompat.from(context)
-        database.eventsForAccount(accountHash)
-            .filter {
-                it.status == ReminderDatabase.STATUS_PENDING ||
-                    it.status == ReminderDatabase.STATUS_SUBMITTED
-            }
-            .forEach {
-                if (it.type == ReminderDatabase.EVENT_DEADLINE) {
-                    AssignmentAlarmScheduler.cancelDeadline(context, it)
+        synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
+            AssignmentAlarmScheduler.cancelNewAssignmentWindow(context, accountHash)
+            val manager = NotificationManagerCompat.from(context)
+            database.eventsForAccount(accountHash)
+                .filter {
+                    it.status == ReminderDatabase.STATUS_PENDING ||
+                        it.status == ReminderDatabase.STATUS_SUBMITTED
                 }
-                manager.cancel(it.notificationId)
-            }
+                .forEach {
+                    if (it.type == ReminderDatabase.EVENT_DEADLINE) {
+                        AssignmentAlarmScheduler.cancelDeadline(context, it)
+                    }
+                    manager.cancel(it.notificationId)
+                }
+        }
     }
 
     private fun submit(
@@ -241,29 +245,33 @@ object AssignmentNotificationPublisher {
         showDetails: Boolean,
         channelId: String,
     ): PublishResult {
-        return try {
-            if (!showDetails) {
-                notification.visibility = Notification.VISIBILITY_PRIVATE
+        return synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
+            try {
+                if (!showDetails) {
+                    notification.visibility = Notification.VISIBILITY_PRIVATE
+                }
+                val manager = NotificationManagerCompat.from(context)
+                manager.notify(notificationId, notification)
+                if (!isActive(manager, notificationId)) {
+                    return@synchronized PublishResult(
+                        false, null, "系统未接受通知，请检查通知通道设置",
+                    )
+                }
+                events.forEach {
+                    database.markEventSubmitted(
+                        it.eventId,
+                        notificationId,
+                        it.accountHash,
+                        it.assignmentId,
+                        it.type,
+                    )
+                }
+                PublishResult(true, notificationId, null)
+            } catch (error: SecurityException) {
+                PublishResult(false, null, "系统通知权限未开启：${error.message.orEmpty()}")
+            } catch (error: Exception) {
+                PublishResult(false, null, "通知提交失败：${error.message.orEmpty()}")
             }
-            val manager = NotificationManagerCompat.from(context)
-            manager.notify(notificationId, notification)
-            if (!isActive(manager, notificationId)) {
-                return PublishResult(false, null, "系统未接受通知，请检查通知通道设置")
-            }
-            events.forEach {
-                database.markEventSubmitted(
-                    it.eventId,
-                    notificationId,
-                    it.accountHash,
-                    it.assignmentId,
-                    it.type,
-                )
-            }
-            PublishResult(true, notificationId, null)
-        } catch (error: SecurityException) {
-            PublishResult(false, null, "系统通知权限未开启：${error.message.orEmpty()}")
-        } catch (error: Exception) {
-            PublishResult(false, null, "通知提交失败：${error.message.orEmpty()}")
         }
     }
 

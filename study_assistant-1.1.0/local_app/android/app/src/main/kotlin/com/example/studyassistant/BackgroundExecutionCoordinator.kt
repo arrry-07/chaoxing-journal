@@ -28,23 +28,27 @@ object BackgroundExecutionCoordinator {
         accountHash: String,
         requestId: String,
         timeoutMs: Long,
+        isCancelled: () -> Boolean = { false },
     ): SyncLeaseAcquisition {
         val gate = syncGates.getOrPut(accountHash) { LeaseGate() }
         synchronized(gate.monitor) {
+            if (isCancelled()) return SyncLeaseAcquisition(acquired = false, waited = false)
             if (gate.owner == requestId) {
                 gate.depth++
                 return SyncLeaseAcquisition(acquired = true, waited = false)
             }
             var waited = false
-            val deadline = System.currentTimeMillis() + timeoutMs
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs)
             while (gate.owner != null) {
-                val remaining = deadline - System.currentTimeMillis()
+                if (isCancelled()) return SyncLeaseAcquisition(acquired = false, waited = waited)
+                val remaining = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
                 if (remaining <= 0) {
                     return SyncLeaseAcquisition(acquired = false, waited = true)
                 }
                 waited = true
                 gate.monitor.wait(remaining.coerceAtMost(1_000L))
             }
+            if (isCancelled()) return SyncLeaseAcquisition(acquired = false, waited = waited)
             gate.owner = requestId
             gate.depth = 1
             gate.acquisitionCounter++
@@ -68,26 +72,31 @@ object BackgroundExecutionCoordinator {
     fun lastSyncCompletion(accountHash: String): Long? =
         syncCompletions[accountHash]
 
-    @Synchronized
-    fun acquireWrite(owner: String, timeoutMs: Long = 60_000L): Boolean {
+    fun acquireWrite(
+        owner: String,
+        timeoutMs: Long = 60_000L,
+        isCancelled: () -> Boolean = { false },
+    ): Boolean {
         synchronized(writeGate.monitor) {
+            if (isCancelled()) return false
             if (writeGate.owner == owner) {
                 writeGate.depth++
                 return true
             }
-            val deadline = System.currentTimeMillis() + timeoutMs
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs)
             while (writeGate.owner != null) {
-                val remaining = deadline - System.currentTimeMillis()
+                if (isCancelled()) return false
+                val remaining = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
                 if (remaining <= 0) return false
                 writeGate.monitor.wait(remaining.coerceAtMost(1_000L))
             }
+            if (isCancelled()) return false
             writeGate.owner = owner
             writeGate.depth = 1
             return true
         }
     }
 
-    @Synchronized
     fun releaseWrite(owner: String) {
         synchronized(writeGate.monitor) {
             if (writeGate.owner != owner) return
@@ -97,6 +106,14 @@ object BackgroundExecutionCoordinator {
             writeGate.depth = 0
             writeGate.monitor.notifyAll()
         }
+    }
+
+    /** Cancellation predicates are checked under the same gate monitor as grants. */
+    fun wakeWaiters() {
+        syncGates.values.forEach { gate ->
+            synchronized(gate.monitor) { gate.monitor.notifyAll() }
+        }
+        synchronized(writeGate.monitor) { writeGate.monitor.notifyAll() }
     }
 
     fun releaseAllForOwner(owner: String) {
