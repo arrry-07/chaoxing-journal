@@ -136,3 +136,12 @@
 - 新增／扩展回归：`v3_pagination_preview_test.dart`、`calendar_scope_test.dart`、`unsaved_edit_guard_test.dart`、`reminder_settings_screen_test.dart`、`reliability_recovery_test.dart`、`reminder_health_test.dart`、`daily_plan_planner_test.dart`、`chaoxing_local_client_test.dart` 与 `assignment_query_test.dart`。
 - 验证：`dart analyze` 无问题；`dart format` 177 文件 0 改动；全量 Flutter 测试 `799 passed / 1 skipped / 0 failed`；上海／洛杉矶时区各 `35 passed`。未运行原生 instrumented 测试、未连接真机、未构建 Release 或发布 APK。
 - 未验证：键盘／TalkBack 实机体感、真实账号首次同步分页耗时、系统通知投递、Store 销毁取消的设备级行为；B7 的退避取消与跨会话迟到结果仅覆盖客户端取消路径，完整的设备级取消矩阵仍待后续。国内源、图标与实机验收保持未完成。
+
+## 2026-11-12 C 批次：1.7.5 候选与原生 CI 门禁
+
+- 候选提交 `21d6104`：版本提升为 `1.7.5+57`，同步 `AppVersion`、CHANGELOG、README 和安装指南；CI 新增 `:app:testDebugUnitTest`、`:app:compileDebugAndroidTestKotlin`、`:app:lintDebug`。npm/依赖未变，`pubspec.lock` 未改。
+- 版本核对：核对时无 `v1.7.5` Tag；GitHub latest 仍为 `v1.7.4`。1.7.5 按小补丁处理，不设 latest、不触发启动提示。
+- 验证：`tool/check_release_metadata.py` 通过（1.7.5+57）；`dart analyze` 无问题；格式 177 文件 0 改动；全量 Flutter 测试 `799 passed / 1 skipped`；上海／洛杉矶时区各 `35 passed`。
+- ASCII 副本使用 `ANDROID_HOME=D:/campus-tools/android` 构建：Debug 与 Release 均成功；`:app:testDebugUnitTest`、`:app:compileDebugAndroidTestKotlin`、`:app:lintDebug` 通过。
+- 候选 APK：`app-release.apk`，57,851,367 字节，SHA-256 `79c40fe20b8903bfa91cec036a3c98b71b00804e8d80c41edab49c8cf0c839fc`；`aapt` 为 `com.example.studyassistant.journal` / versionCode 57 / versionName 1.7.5 / minSdk 26 / targetSdk 36；ABI 仅 `arm64-v8a`、`x86_64`；APK Signature Scheme v2 有效，证书 SHA-256 `d36a571510e046dd196d7384f849f82b4fcff05ce3affb334765d5c752265d8a`；`zipalign -c 4`、ZIP CRC 通过；未声明 debuggable。
+- 未验证：候选未安装到模拟器或实体手机，未运行 instrumented 测试；真实账号同步与通知投递未复验。候选尚未合并、打 Tag 或发布；国内源与图标仍未完成。
