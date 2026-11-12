@@ -549,7 +549,12 @@ void main() {
 
     final watch = Stopwatch()..start();
     client.cancelActiveRequests();
-    await fetch.timeout(const Duration(seconds: 2));
+    await expectLater(
+      fetch.timeout(const Duration(seconds: 2)),
+      throwsA(predicate((Object error) =>
+          error is SyncReadException &&
+          error.issue.kind == SyncIssueKind.cancelled)),
+    );
 
     expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
     expect(client.hasCourseResponse, isFalse);

@@ -152,6 +152,7 @@ class ManualEntryEditor extends StatefulWidget {
 class _EditorState extends State<ManualEntryEditor> {
   final form = GlobalKey<FormState>();
   late final int epoch;
+  late final String? _accountHashAtStart;
 
   late final title = TextEditingController(text: widget.entry?.title);
   late final course = TextEditingController(text: widget.entry?.course);
@@ -172,6 +173,7 @@ class _EditorState extends State<ManualEntryEditor> {
   void initState() {
     super.initState();
     epoch = widget.store.accountEpoch;
+    _accountHashAtStart = widget.store.accountHash;
     for (final c in [title, course, location, note, minutes]) {
       c.addListener(_markDirty);
     }
@@ -187,9 +189,15 @@ class _EditorState extends State<ManualEntryEditor> {
     _leaveGuard?.register(
       this,
       hasUnsavedChanges: () => _dirty || _saving,
+      draftRevision: () =>
+          '${title.text}|${course.text}|${location.text}|${note.text}|'
+          '${minutes.text}|$kind|$remind|$at',
+      blocksNavigation: () => _saving,
       confirmDiscard: _confirmDiscard,
       isStale: () =>
-          !widget.store.isAuthenticated || widget.store.accountEpoch != epoch,
+          !widget.store.isAuthenticated ||
+          widget.store.accountEpoch != epoch ||
+          widget.store.accountHash != _accountHashAtStart,
     );
   }
 
@@ -208,8 +216,9 @@ class _EditorState extends State<ManualEntryEditor> {
       setState(() => error = '个人安排正在保存，请稍候再离开');
       return false;
     }
-    final result = await showDialog<bool>(
+    final result = await showUnsavedEditDialog(
       context: context,
+      guard: _leaveGuard,
       builder: (c) => AlertDialog(
         title: const Text('放弃未保存的修改？'),
         content: const Text('这项个人安排的修改尚未保存。'),

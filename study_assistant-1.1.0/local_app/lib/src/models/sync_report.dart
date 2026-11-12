@@ -1,4 +1,4 @@
-enum SyncPhase { idle, running, success, partial, failed }
+enum SyncPhase { idle, running, success, partial, failed, cancelled }
 
 enum SyncIssueKind {
   network,
@@ -12,7 +12,8 @@ enum SyncIssueKind {
   partial,
   storage,
   notification,
-  widget
+  widget,
+  cancelled
 }
 
 class SyncIssue {
@@ -129,6 +130,7 @@ class SyncReport {
             ? '作业数据已保存，但同步状态记录需要处理'
             : '已更新 $succeededCourses 门课程，$failedCourses 门待重试',
         SyncPhase.failed => '本次未能读取作业',
+        SyncPhase.cancelled => '本次同步已取消',
         SyncPhase.success => '作业记录已更新',
         SyncPhase.idle => '尚未获取作业',
       };
@@ -145,6 +147,15 @@ class SyncReadException implements Exception {
 
   @override
   String toString() => issue.message;
+}
+
+/// A synchronization was explicitly stopped (logout, Worker cancellation or
+/// Store disposal). This is never a legitimate empty result and must not
+/// advance the full-success time or be retried as a network failure.
+class SyncCancelledException implements Exception {
+  const SyncCancelledException();
+  @override
+  String toString() => '本次同步已取消';
 }
 
 /// Memory-only timings for one fixed request category. No URL, query, cookie,

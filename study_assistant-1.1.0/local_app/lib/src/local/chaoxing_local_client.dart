@@ -65,6 +65,7 @@ class ChaoxingLocalClient {
   final Dio _dio;
   final Future<void> Function(Duration) _wait;
   CancelToken? _activeRequestToken;
+  bool _stopRequested = false;
   static Future<void> _defaultWait(Duration delay) =>
       Future<void>.delayed(delay);
 
@@ -76,7 +77,8 @@ class ChaoxingLocalClient {
   bool Function()? shouldStop;
   void Function(AssignmentSyncProgress)? onProgress;
 
-  void cancelActiveRequests() {
+  void cancelActiveRequests({bool reportCancelled = true}) {
+    _stopRequested = reportCancelled;
     _activeRequestToken?.cancel('主动停止后台学习通请求');
     _activeRequestToken = null;
     _sessionGeneration++;
@@ -84,7 +86,28 @@ class ChaoxingLocalClient {
 
   CancelToken _startRequestToken() {
     _activeRequestToken?.cancel('开始新的学习通请求');
+    _stopRequested = false;
     return _activeRequestToken = CancelToken();
+  }
+
+  /// Backoff must not delay an explicit stop for the full retry delay.
+  Future<void> _waitOrCancel(Duration delay) async {
+    final token = _activeRequestToken;
+    if (token == null) {
+      await _wait(delay);
+    } else {
+      await Future.any<Object?>([
+        _wait(delay),
+        token.whenCancel,
+      ]);
+    }
+    if (_stopRequested) {
+      throw const SyncReadException(SyncIssue(
+        SyncIssueKind.cancelled,
+        '本次同步已取消',
+        stage: 'request',
+      ));
+    }
   }
 
   Map<String, ({int count, int elapsedMs, int httpFailures})>
@@ -297,9 +320,10 @@ class ChaoxingLocalClient {
   Map<String, Assignment> previousAssignments = {};
   void clearSession() {
     // Stop any transport that still belongs to the previous identity before
-    // clearing cookies and generation. Otherwise a late response could keep
-    // running after logout even though its result is discarded.
-    cancelActiveRequests();
+    // clearing cookies and generation. A session replacement is a stale-result
+    // case, not an explicit user/Worker cancellation, so old callers keep the
+    // existing empty-result contract; Store cancellation uses the default.
+    cancelActiveRequests(reportCancelled: false);
     _resetSyncTracking(clearRequestStats: true);
     _sessionGeneration++;
     _cookies.clear();
@@ -1097,6 +1121,13 @@ class ChaoxingLocalClient {
         );
       } on DioException catch (error) {
         if (CancelToken.isCancel(error)) {
+          if (_stopRequested) {
+            throw const SyncReadException(SyncIssue(
+              SyncIssueKind.cancelled,
+              '本次同步已取消',
+              stage: 'request',
+            ));
+          }
           if (generation != _sessionGeneration) return null;
           throw const SyncReadException(
             SyncIssue(
@@ -1118,7 +1149,7 @@ class ChaoxingLocalClient {
             _retryDelay(kind, attempt, failure, circuitOpened: opened);
         if (delay != null) {
           _syncRetryCount++;
-          await _wait(delay);
+          await _waitOrCancel(delay);
           continue;
         }
         throw SyncReadException(failure.issue);
@@ -1161,7 +1192,7 @@ class ChaoxingLocalClient {
             _retryDelay(kind, attempt, failure, circuitOpened: opened);
         if (delay != null) {
           _syncRetryCount++;
-          await _wait(delay);
+          await _waitOrCancel(delay);
           continue;
         }
         throw SyncReadException(issue);

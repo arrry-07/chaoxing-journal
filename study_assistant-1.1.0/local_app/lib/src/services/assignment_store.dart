@@ -497,7 +497,10 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   void _markHomePreviewSaving() {
-    final progress = _homeSyncProgress;
+    // A retraction may still be waiting in the 100ms merge queue. Saving must
+    // publish the newest snapshot, otherwise the failed course's temporary
+    // rows reappear until the whole sync clears the preview.
+    final progress = _queuedHomeProgress ?? _homeSyncProgress;
     if (progress == null) return;
     _publishHomeProgress(AssignmentSyncProgress(
       stage: AssignmentSyncStage.saving,
@@ -983,6 +986,24 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void>? _syncInFlight;
+  int _syncOperation = 0;
+  bool _syncCancelled = false;
+
+  /// Stopping is explicit: it invalidates the current operation and cancels
+  /// transport before the serial cleanup queue, so a cancelled fetch can never
+  /// be committed as a successful empty sync.
+  void cancelSynchronization() {
+    _syncCancelled = true;
+    _syncOperation++;
+    chaoxingClient.cancelActiveRequests();
+    _clearHomePreview(notify: true);
+  }
+
+  void _ensureSyncActive(int operation) {
+    if (_disposed || _syncCancelled || operation != _syncOperation) {
+      throw const SyncCancelledException();
+    }
+  }
 
   Future<void> syncAssignments() =>
       syncAssignmentsForTrigger(BackgroundSyncTrigger.manual);
@@ -995,6 +1016,8 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _performCoordinatedSync(BackgroundSyncTrigger trigger) async {
+    final operation = ++_syncOperation;
+    _syncCancelled = false;
     final accountHash = _accountHash;
     final sessionEpoch = _nativeSessionEpoch;
     String? leaseRequest;
@@ -1002,9 +1025,13 @@ class AssignmentStore extends ChangeNotifier {
     SyncLeaseResult? lease;
     if (_nativeReminderAvailable && accountHash != null) {
       leaseRequestedAt = DateTime.now();
-      leaseRequest = nativeLeaseOwner ??
-          '${accountHash.substring(0, min(8, accountHash.length))}-'
-              '${leaseRequestedAt.microsecondsSinceEpoch}-${Random().nextInt(1 << 31)}';
+      // The Worker's owner is stable for write leases and engine cleanup, but
+      // every sync acquisition needs its own request id: native terminal ids
+      // are tombstones and must never be reused by a later acquisition.
+      final prefix = nativeLeaseOwner ??
+          accountHash.substring(0, min(8, accountHash.length));
+      leaseRequest = '$prefix-${leaseRequestedAt.microsecondsSinceEpoch}-'
+          '${Random().nextInt(1 << 31)}';
       lease = await backgroundReminderGateway.acquireSyncLease(
         accountHash: accountHash,
         requestId: leaseRequest,
@@ -1039,7 +1066,7 @@ class AssignmentStore extends ChangeNotifier {
             )) {
           return;
         }
-        await _syncAssignmentsBody(trigger);
+        await _syncAssignmentsBody(trigger, operation: operation);
       });
     } finally {
       if (_nativeReminderAvailable &&
@@ -1377,6 +1404,8 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> logout() async {
     _generation++;
+    cancelSynchronization();
+    chaoxingClient.clearSession();
     _clearHomePreview(notify: true);
     _visitedAssignment = null;
     returnCheckMessage = null;
@@ -1483,14 +1512,15 @@ class AssignmentStore extends ChangeNotifier {
           _serviceWarnings.add(_backgroundWarning ?? '后台提醒设置未能应用，本次未更新提醒计划');
         } else {
           try {
-            await _maybeMigrateLegacyAssignmentSchedules();
-            await _applyNativeReminderPlan(
-              completeSync: completeSync,
-              detectNewAssignments: detectNewAssignments,
-              syncCompleted: syncCompleted,
-              failure: syncFailure,
-              completedAt: completedAt,
-            );
+            if (await _ensureLegacyAssignmentVerified()) {
+              await _applyNativeReminderPlan(
+                completeSync: completeSync,
+                detectNewAssignments: detectNewAssignments,
+                syncCompleted: syncCompleted,
+                failure: syncFailure,
+                completedAt: completedAt,
+              );
+            }
           } catch (error) {
             _serviceWarnings.add('后台作业提醒状态未能更新：$error');
           }
@@ -1554,21 +1584,37 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _maybeMigrateLegacyAssignmentSchedules() async {
-    if (!_manageBackgroundSchedule ||
-        !_nativeReminderAvailable ||
-        !_authenticated) {
-      return;
-    }
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_legacyScheduleCleanupKey) == true) return;
+    await _ensureLegacyAssignmentVerified();
+  }
+
+  /// The native migration revision is the only activation fact. The Flutter
+  /// boolean is mirrored for diagnostics/tests but never authorizes delivery.
+  Future<bool> _ensureLegacyAssignmentVerified() async {
+    if (!_nativeReminderAvailable) return true;
     try {
-      await notificationService.removeLegacyAssignmentSchedules();
-      if (!await _writeBoolPreferenceAndVerify(
-          prefs, _legacyScheduleCleanupKey, true)) {
-        _serviceWarnings.add('旧作业提醒已清理，但完成标记未能保存，将在下次继续核对');
+      if (await notificationService.isLegacyAssignmentMigrationComplete()) {
+        await _mirrorLegacyCleanupMarker();
+        return true;
       }
+      await notificationService.removeLegacyAssignmentSchedules();
+      if (!await notificationService.isLegacyAssignmentMigrationComplete()) {
+        _serviceWarnings.add('旧作业提醒迁移未完成，已暂缓原生提醒计划');
+        return false;
+      }
+      await _mirrorLegacyCleanupMarker();
+      return true;
     } catch (error) {
       _serviceWarnings.add('旧作业提醒迁移尚未完成：$error');
+      return false;
+    }
+  }
+
+  Future<void> _mirrorLegacyCleanupMarker() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_legacyScheduleCleanupKey) == true) return;
+    if (!await _writeBoolPreferenceAndVerify(
+        prefs, _legacyScheduleCleanupKey, true)) {
+      _serviceWarnings.add('旧作业提醒已清理，但本机完成标记未能保存；不影响原生迁移状态');
     }
   }
 
@@ -1620,7 +1666,8 @@ class AssignmentStore extends ChangeNotifier {
 
   bool _needsProfileRecovery = false;
 
-  Future<void> _syncAssignmentsBody(BackgroundSyncTrigger trigger) async {
+  Future<void> _syncAssignmentsBody(BackgroundSyncTrigger trigger,
+      {required int operation}) async {
     final generation = _generation;
     final startedAt = _autoSyncRunning && _lastSyncAttemptAt != null
         ? _lastSyncAttemptAt!
@@ -1687,11 +1734,18 @@ class AssignmentStore extends ChangeNotifier {
       await _refreshChaoxingSession();
       attachProgress();
       incoming = await chaoxingClient.fetchAssignments();
+    } on SyncReadException catch (error) {
+      if (error.issue.kind == SyncIssueKind.cancelled) {
+        throw const SyncCancelledException();
+      }
+      rethrow;
     } finally {
       chaoxingClient.onProgress = null;
       chaoxingClient.shouldStop = null;
       if (generation == _generation &&
           !_disposed &&
+          !_syncCancelled &&
+          operation == _syncOperation &&
           chaoxingClient.hasCourseResponse) {
         final nextCourses = chaoxingClient.courses
             .map((c) => CourseRef(
@@ -1707,6 +1761,7 @@ class AssignmentStore extends ChangeNotifier {
       }
     }
     if (generation != _generation || _disposed) return;
+    _ensureSyncActive(operation);
     final warning = chaoxingClient.lastSyncWarning;
     if (_needsProfileRecovery && !chaoxingClient.deferProfile) {
       _needsProfileRecovery = false;
@@ -1717,6 +1772,7 @@ class AssignmentStore extends ChangeNotifier {
       }
     }
     if (generation != _generation || _disposed) return;
+    _ensureSyncActive(operation);
     final before = [..._assignments, ..._hiddenAssignments];
     await _markReminderMutationPending();
     markSavingStage();
@@ -1984,6 +2040,28 @@ class AssignmentStore extends ChangeNotifier {
     try {
       await action();
     } catch (error) {
+      if (error is SyncCancelledException) {
+        // A stopped operation never advances full-success time and is not
+        // merged as an empty snapshot. Already committed data stays committed.
+        _error = '本次同步已取消';
+        syncReport = SyncReport(
+          phase: SyncPhase.cancelled,
+          attemptedAt: syncReport.attemptedAt,
+          lastDataSuccessAt: syncReport.lastDataSuccessAt,
+          lastFullSuccessAt: _lastSyncAt,
+          succeededCourses: chaoxingClient.succeededCourses,
+          failedCourses: chaoxingClient.failedCourses,
+          issues: const [
+            SyncIssue(SyncIssueKind.cancelled, '本次同步已取消', stage: 'request')
+          ],
+        );
+        try {
+          await _persistSyncReport();
+        } catch (_) {
+          // The in-memory cancelled phase still prevents a success claim.
+        }
+        return;
+      }
       _error = _friendlyError(error);
       if (syncReport.phase == SyncPhase.running) {
         final storageFailure = error is LocalStorageWriteException;
@@ -2051,15 +2129,18 @@ class AssignmentStore extends ChangeNotifier {
       var pendingChanged = false;
       for (final target in nativeTargets) {
         final pendingAccount = _pendingNativeCleanupAccounts.contains(target);
-        if (_nativeReminderAvailable) {
-          if (pendingAccount) {
-            // Account-level cleanup also cancels background work and alarms;
-            // delivery cleanup alone is not enough to retry a failed logout.
-            await backgroundReminderGateway.clearActiveAccount(target);
-          }
-          await backgroundReminderGateway
-              .cancelAssignmentDeliveryKeepEvents(target);
+        if (!_nativeReminderAvailable) {
+          // No bridge means no proof the old account was cleaned. Keep the
+          // durable target; deleting it here would silently lose retry state.
+          continue;
         }
+        if (pendingAccount) {
+          // Account-level cleanup also cancels background work and alarms;
+          // delivery cleanup alone is not enough to retry a failed logout.
+          await backgroundReminderGateway.clearActiveAccount(target);
+        }
+        await backgroundReminderGateway
+            .cancelAssignmentDeliveryKeepEvents(target);
         if (pendingAccount && _pendingNativeCleanupAccounts.remove(target)) {
           pendingChanged = true;
         }
@@ -2077,6 +2158,7 @@ class AssignmentStore extends ChangeNotifier {
         // cancellation succeeded. Keep the durable marker for the next retry.
         await _persistPrivacyCleanupPending(true);
         _privacyCleanupPending = true;
+        throw StateError('原生提醒通道不可用，旧账号清理状态未确认');
       }
     } catch (error) {
       _privacyCleanupPending = true;
@@ -2198,6 +2280,8 @@ class AssignmentStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _syncCancelled = true;
+    _syncOperation++;
     chaoxingClient.cancelActiveRequests();
     _clearHomePreview();
     _generation++;

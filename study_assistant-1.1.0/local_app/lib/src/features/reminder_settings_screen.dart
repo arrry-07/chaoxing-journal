@@ -38,6 +38,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   final Set<int> _offsets = {};
   late final Set<int> _savedOffsets;
   late final int epoch;
+  late final String? _accountHashAtStart;
   bool _saving = false;
   bool _savingRules = false;
   UnsavedEditGuard? _leaveGuard;
@@ -52,6 +53,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     epoch = widget.assignmentStore.accountEpoch;
+    _accountHashAtStart = widget.assignmentStore.accountHash;
     _offsets.addAll(widget.assignmentStore.reminderOffsetsMinutes);
     _savedOffsets = Set<int>.of(widget.assignmentStore.reminderOffsetsMinutes);
     unawaited(_refreshListenerGranted());
@@ -67,10 +69,13 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     _leaveGuard?.register(
       this,
       hasUnsavedChanges: () => _ruleDirty || _savingRules,
+      draftRevision: () => (_offsets.toList()..sort()).join(','),
+      blocksNavigation: () => _savingRules,
       confirmDiscard: _confirmLeaveDraft,
       isStale: () =>
           !widget.assignmentStore.isAuthenticated ||
-          widget.assignmentStore.accountEpoch != epoch,
+          widget.assignmentStore.accountEpoch != epoch ||
+          widget.assignmentStore.accountHash != _accountHashAtStart,
     );
   }
 
@@ -94,8 +99,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       _showMessage('提醒规则正在保存，请稍候');
       return false;
     }
-    final result = await showDialog<bool>(
+    final result = await showUnsavedEditDialog(
       context: context,
+      guard: _leaveGuard,
       builder: (c) => AlertDialog(
         title: const Text('放弃未保存的提醒规则？'),
         content: const Text('当前勾选和自定义提醒尚未保存，已保存的规则集仍会保留。'),

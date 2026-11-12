@@ -16,6 +16,10 @@ object BackgroundReminderBridge {
     const val CHANNEL = "study_assistant/background_reminders"
     private const val CONFIRMATION_TIMEOUT_SECONDS = 10L
     private val leaseExecutor = Executors.newCachedThreadPool()
+    // Database, alarm and notification publishing run here, never on the
+    // platform main thread. Lease waits stay on their own executor so a busy
+    // plan cannot block confirmation/release callbacks.
+    private val reminderExecutor = Executors.newSingleThreadExecutor()
     private val confirmationExecutor =
         Executors.newSingleThreadScheduledExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -49,6 +53,9 @@ object BackgroundReminderBridge {
             },
         )
         LegacyAssignmentNotificationMigrator.attach(engine, appContext)
+        val tasks = NativeReminderTasks(reminderExecutor) { action ->
+            mainHandler.post(action)
+        }
         MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
@@ -262,7 +269,7 @@ object BackgroundReminderBridge {
                             ),
                         )
                     }
-                    "applyPlan" -> {
+                    "applyPlan" -> tasks.execute(result) { reply ->
                         val accountHash = call.requiredString("accountHash")
                         val sessionEpoch = call.requiredLong("sessionEpoch")
                         val snapshots = jsonObjectList(call.argument("snapshots"))
@@ -319,7 +326,7 @@ object BackgroundReminderBridge {
                                 accountHash,
                             )
                         }
-                        result.success(
+                        reply.success(
                             mapOf(
                                 "scheduledDeadlineCount" to
                                     application.desiredDeadlineEvents.size,

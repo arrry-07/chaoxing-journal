@@ -18,6 +18,7 @@ class PersonalWorkScreen extends StatefulWidget {
 
 class _PersonalWorkState extends State<PersonalWorkScreen> {
   late final int epoch;
+  late final String? _accountHashAtStart;
   late final TextEditingController note;
   late List<PersonalStep> steps;
   late List<PersonalLink> links, files;
@@ -30,6 +31,7 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
   void initState() {
     super.initState();
     epoch = widget.store.accountEpoch;
+    _accountHashAtStart = widget.store.accountHash;
     final data =
         widget.store.personal.work[widget.assignmentId] ?? const PersonalWork();
     note = TextEditingController(text: data.note);
@@ -49,9 +51,15 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
     _leaveGuard?.register(
       this,
       hasUnsavedChanges: () => _dirty || _saving,
+      draftRevision: () =>
+          '$_dirty|${note.text}|${steps.length}|${links.length}|${files.length}|'
+          '${steps.fold<int>(0, (value, step) => value ^ step.text.hashCode ^ (step.done ? 1 : 0))}',
+      blocksNavigation: () => _saving,
       confirmDiscard: _confirmDiscard,
       isStale: () =>
-          !widget.store.isAuthenticated || widget.store.accountEpoch != epoch,
+          !widget.store.isAuthenticated ||
+          widget.store.accountEpoch != epoch ||
+          widget.store.accountHash != _accountHashAtStart,
     );
   }
 
@@ -70,8 +78,9 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
       setState(() => message = '个人记录正在保存，请稍候再离开');
       return false;
     }
-    final result = await showDialog<bool>(
+    final result = await showUnsavedEditDialog(
       context: context,
+      guard: _leaveGuard,
       builder: (c) => AlertDialog(
         title: const Text('放弃未保存的修改？'),
         content: const Text('备注、清单、链接或文件关联的修改尚未保存。'),

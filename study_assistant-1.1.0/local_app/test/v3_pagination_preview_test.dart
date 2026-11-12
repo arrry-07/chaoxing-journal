@@ -7,6 +7,7 @@ import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
@@ -263,6 +264,72 @@ void main() {
         ['cx:work:1:2:99']);
     expect(notifications.scheduledIds, isNot(contains('cx:work:1:2:1')));
   });
+  test('saving preview uses the retracted snapshot', () async {
+    SharedPreferences.setMockInitialValues({});
+    final secondPageStarted = Completer<void>();
+    final secondPageGate = Completer<void>();
+    final dio = _v3Dio([_course('1'), _course('2')], (request, handler) async {
+      final courseId = request.uri.queryParameters['courseId']!;
+      final page = request.uri.queryParameters['pageNum'];
+      if (courseId == '2' && page == '2') {
+        if (!secondPageStarted.isCompleted) secondPageStarted.complete();
+        await secondPageGate.future;
+        handler.reject(DioException(
+            requestOptions: request, type: DioExceptionType.connectionTimeout));
+        return;
+      }
+      final total = courseId == '2' ? 2 : 1;
+      handler.resolve(_ok(request, {
+        'status': true,
+        'total': total,
+        'data': [_row(int.parse(courseId), courseId: courseId)],
+      }));
+    });
+    final repository = _BlockingCourseRepository();
+    await repository.mergeAndSave([_oldWork(99, courseId: '2')]);
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(account: 'student'),
+      notificationService: _RecordingNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      repository: repository,
+      chaoxingClient: ChaoxingLocalClient(dio: dio, wait: (_) async {}),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final syncing = store.syncAssignments();
+    await secondPageStarted.future;
+    secondPageGate.complete();
+    await repository.courseSaveStarted.future;
+    await pumpEventQueue();
+
+    expect(store.homeSyncProgress?.stage, AssignmentSyncStage.saving);
+    expect(store.homeDisplayAssignments.map((item) => item.id),
+        contains('cx:work:1:2:1'));
+    expect(store.homeDisplayAssignments.map((item) => item.id),
+        isNot(contains('cx:work:2:2:2')),
+        reason: 'saving 阶段不能把已撤回的课程行重新发布');
+
+    repository.releaseCourses.complete();
+    await syncing;
+
+    expect(store.homeDisplayAssignments.map((item) => item.id),
+        isNot(contains('cx:work:2:2:2')));
+    expect((await repository.loadJournal()).map((item) => item.id),
+        contains('cx:work:2:2:99'));
+  });
+}
+
+class _BlockingCourseRepository extends LocalAssignmentRepository {
+  final courseSaveStarted = Completer<void>();
+  final releaseCourses = Completer<void>();
+
+  @override
+  Future<void> saveCourses(List<CourseRef> courses, {String? account}) async {
+    if (!courseSaveStarted.isCompleted) courseSaveStarted.complete();
+    await releaseCourses.future;
+    return super.saveCourses(courses, account: account);
+  }
 }
 
 class _MemorySessionStore extends SecureSessionStore {

@@ -1,14 +1,17 @@
 package com.example.studyassistant
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,6 +39,11 @@ class LegacyAssignmentNotificationMigratorTest {
         manager = context.getSystemService(NotificationManager::class.java)
         database = ReminderDatabase.get(context)
         accountHash = "instrumentation-migration-${System.nanoTime()}"
+        if (Build.VERSION.SDK_INT >= 33) {
+            InstrumentationRegistry.getInstrumentation().uiAutomation
+                .grantRuntimePermission(context.packageName, Manifest.permission.POST_NOTIFICATIONS)
+        }
+        NotificationManagerCompat.from(context).cancelAll()
         manager.createNotificationChannel(
             NotificationChannel(
                 AssignmentNotificationPublisher.CHANNEL_DEADLINES,
@@ -54,8 +62,8 @@ class LegacyAssignmentNotificationMigratorTest {
     @Test
     fun retiresPluginDeliveredNotificationAndPreservesNativeCollision() {
         val nativeId = ReminderDatabase.stableNotificationId("native:$accountHash")
-        seedNativeEvent(nativeId)
-        postNative(nativeId)
+        val nativeEventId = seedNativeEvent(nativeId)
+        postNative(nativeId, nativeEventId)
 
         val legacyId = ReminderDatabase.stableNotificationId("legacy:$accountHash")
         postPlugin(legacyId)
@@ -77,7 +85,7 @@ class LegacyAssignmentNotificationMigratorTest {
     @Test
     fun unknownOwnershipIsPreservedAndReported() {
         val unknownId = ReminderDatabase.stableNotificationId("unknown:$accountHash")
-        postNative(unknownId)
+        postNative(unknownId, "unknown-event-$unknownId")
 
         val outcome = LegacyAssignmentNotificationMigrator.retireNow(
             context,
@@ -104,13 +112,17 @@ class LegacyAssignmentNotificationMigratorTest {
         post(id, click)
     }
 
-    private fun postNative(id: Int) {
+    private fun postNative(id: Int, eventId: String) {
         val click = PendingIntent.getActivity(
             context,
-            id,
+            ReminderDatabase.stableNotificationId("click:$eventId"),
             Intent(context, ReminderClickActivity::class.java)
                 .setAction(ReminderClickReceiver.ACTION_CLICK)
-                .setData(android.net.Uri.parse("studyassistant://notification-click/native-$id")),
+                .setData(
+                    android.net.Uri.parse(
+                        "studyassistant://notification-click/${android.net.Uri.encode(eventId)}",
+                    ),
+                ),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         post(id, click)
@@ -130,7 +142,7 @@ class LegacyAssignmentNotificationMigratorTest {
         postedIds.add(id)
     }
 
-    private fun seedNativeEvent(notificationId: Int) {
+    private fun seedNativeEvent(notificationId: Int): String {
         val state = database.ensureActiveAccount(accountHash)
         val assignmentId = "cx:work:instrumentation:class:migration"
         val deadlineAt = System.currentTimeMillis() + 3_600_000L
@@ -179,5 +191,6 @@ class LegacyAssignmentNotificationMigratorTest {
             syncCompleted = false,
             expectedMutationVersion = state.mutationVersion,
         )
+        return eventId
     }
 }

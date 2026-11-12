@@ -221,7 +221,7 @@ class BackgroundLeaseRequestsTest {
     }
 
     @Test
-    fun releasedRequestIdCanBeReusedForTheNextSyncInTheSameEngine() {
+    fun releasedRequestIdCannotBeReusedAndLateControlsCannotReleaseNextLayer() {
         val registry = registry()
         val owner = owner()
         val request = owner()
@@ -231,12 +231,44 @@ class BackgroundLeaseRequestsTest {
         assertTrue(registry.confirmWrite(owner, request))
         registry.releaseWrite(owner, request)
 
+        val secondRequest = owner()
         val second = Reply()
-        registry.acquireWrite(owner, request, second)
+        registry.acquireWrite(owner, secondRequest, second)
         second.await()
         assertEquals(true, second.value.get())
-        assertTrue(registry.confirmWrite(owner, request))
+        assertTrue(registry.confirmWrite(owner, secondRequest))
+        assertFalse(registry.confirmWrite(owner, request))
+        registry.cancelWrite(owner, request)
         registry.releaseWrite(owner, request)
+        try {
+            registry.acquireWrite(owner, request, Reply())
+            throw AssertionError("终态 requestId 不得重新授予")
+        } catch (_: IllegalStateException) {
+            // Delayed acquire and old controls must not touch the new layer.
+        }
+        assertFalse(BackgroundExecutionCoordinator.acquireWrite(owner(), 0))
+        registry.releaseWrite(owner, secondRequest)
+        assertTrue(BackgroundExecutionCoordinator.acquireWrite(owner(), 0))
+    }
+
+    @Test
+    fun cancelBeforeAcquireCreatesPermanentSyncAndWriteTombstones() {
+        val registry = registry()
+        val account = owner()
+        val request = owner()
+        registry.cancelSync(account, request)
+        registry.cancelWrite(account, request)
+        for (sync in listOf(true, false)) {
+            try {
+                if (sync) registry.acquireSync(account, request, { emptyMap() }, Reply())
+                else registry.acquireWrite(account, request, Reply())
+                throw AssertionError("取消先到时不得复活")
+            } catch (_: IllegalStateException) {
+                // The request key remains terminal until engine destruction.
+            }
+        }
+        assertFalse(registry.confirmSync(account, request))
+        assertFalse(registry.confirmWrite(account, request))
     }
 
     private fun registry(

@@ -22,7 +22,10 @@ import 'package:study_assistant_mobile/src/services/background_reminder_gateway.
 import 'package:study_assistant_mobile/src/services/background_check_settings.dart';
 import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.dart';
 
-class InspectableNotifications extends f.Notifications {}
+class InspectableNotifications extends f.Notifications {
+  @override
+  Future<bool> isLegacyAssignmentMigrationComplete() async => true;
+}
 
 class ThrowingHealthNotifications extends f.Notifications {
   @override

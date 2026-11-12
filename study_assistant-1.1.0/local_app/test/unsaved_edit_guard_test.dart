@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/main.dart';
@@ -32,9 +35,10 @@ Future<AssignmentStore> _launchApp(
   WidgetTester tester,
   String location, {
   f.Notifications? notifications,
+  _LaunchStore? suppliedStore,
 }) async {
   SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
-  final store = _LaunchStore(notifications: notifications);
+  final store = suppliedStore ?? _LaunchStore(notifications: notifications);
   addTearDown(store.dispose);
   await store.restoreSession();
   await store.repository.mergeAndSave([f.sample('shared')]);
@@ -50,9 +54,9 @@ Future<AssignmentStore> _launchApp(
 }
 
 class _LaunchStore extends AssignmentStore {
-  _LaunchStore({f.Notifications? notifications})
+  _LaunchStore({f.Notifications? notifications, f.Session? session})
       : super(
-          sessionStore: f.Session(),
+          sessionStore: session ?? f.Session(),
           notificationService: notifications ?? f.Notifications(),
           widgetSnapshotService: f.WidgetService(),
           chaoxingClient: f.Client(),
@@ -60,6 +64,28 @@ class _LaunchStore extends AssignmentStore {
 
   @override
   Future<bool> runDueAutoSync({DateTime? now}) async => false;
+}
+
+class _GatedEditorStore extends _LaunchStore {
+  Completer<bool>? saveGate;
+  int saves = 0;
+
+  @override
+  Future<bool> savePersonal(
+      PersonalWorkspace Function(PersonalWorkspace) update,
+      int expectedEpoch) async {
+    saves++;
+    if (saveGate != null && !await saveGate!.future) return false;
+    return super.savePersonal(update, expectedEpoch);
+  }
+
+  @override
+  Future<bool> saveNotebook(
+      StudyNotebook Function(StudyNotebook) update, int expectedEpoch) async {
+    saves++;
+    if (saveGate != null && !await saveGate!.future) return false;
+    return super.saveNotebook(update, expectedEpoch);
+  }
 }
 
 Future<void> _push(
@@ -120,9 +146,111 @@ void main() {
     gate.complete(true);
     expect(await first, isTrue);
     expect(await second, isTrue);
-    // The approved entry no longer blocks the following route exit.
+    // A confirmation without a navigation must not approve a future exit.
     expect(await guard.confirmLeave(), isTrue);
-    expect(confirmations, 1);
+    expect(confirmations, 2);
+  });
+
+  testWidgets('approval belongs to one navigation and draft revision',
+      (tester) async {
+    final guard = UnsavedEditGuard();
+    var revision = 0;
+    var prompts = 0;
+    var saving = false;
+    guard.register(
+      Object(),
+      hasUnsavedChanges: () => true,
+      draftRevision: () => revision,
+      blocksNavigation: () => saving,
+      confirmDiscard: () async {
+        prompts++;
+        return true;
+      },
+    );
+    final answers = <bool>[];
+    final navigation = guard.navigate(
+      isCurrent: () => true,
+      action: () async {
+        answers.add(await guard.confirmLeave());
+        revision++;
+        answers.add(await guard.confirmLeave());
+        saving = true;
+        answers.add(await guard.confirmLeave());
+      },
+    );
+    await tester.pumpAndSettle();
+    await navigation;
+    expect(answers, [true, true, false]);
+    saving = false;
+    expect(await guard.confirmLeave(), isTrue);
+    // One prompt for the initial navigation, one after the revision changed,
+    // one for the save-in-progress block, and one for the later fresh exit.
+    expect(prompts, 4);
+  });
+
+  testWidgets('last valid navigation wins a shared confirmation',
+      (tester) async {
+    final guard = UnsavedEditGuard();
+    final answer = Completer<bool>();
+    var prompts = 0;
+    final targets = <String>[];
+    guard.register(Object(),
+        hasUnsavedChanges: () => true,
+        confirmDiscard: () {
+          prompts++;
+          return answer.future;
+        });
+    final requests = [
+      for (final target in ['notification-one', 'notification-two', 'tab'])
+        guard.navigate(
+            isCurrent: () => true, action: () => targets.add(target)),
+    ];
+    expect(prompts, 1);
+    answer.complete(true);
+    await tester.pumpAndSettle();
+    await Future.wait(requests);
+    expect(targets, ['tab']);
+  });
+
+  test('registration replacement and invalidation reject old confirmations',
+      () async {
+    final guard = UnsavedEditGuard();
+    final owner = Object();
+    final old = Completer<bool>();
+    guard.register(owner,
+        hasUnsavedChanges: () => true, confirmDiscard: () => old.future);
+    final pending = guard.confirmLeave();
+    guard.invalidate();
+    guard.register(owner,
+        hasUnsavedChanges: () => true, confirmDiscard: () async => false);
+    expect(await guard.confirmLeave(), isFalse);
+    old.complete(true);
+    expect(await pending, isFalse);
+    expect(await guard.confirmLeave(), isFalse);
+  });
+
+  testWidgets('cancelled or failed navigation cannot retain approval',
+      (tester) async {
+    final guard = UnsavedEditGuard();
+    var prompts = 0;
+    guard.register(Object(),
+        hasUnsavedChanges: () => true,
+        confirmDiscard: () async {
+          prompts++;
+          return true;
+        });
+    final noNavigation = guard.navigate(isCurrent: () => true, action: () {});
+    await tester.pumpAndSettle();
+    await noNavigation;
+    expect(await guard.confirmLeave(), isTrue);
+    final failure = guard.navigate(
+        isCurrent: () => true,
+        action: () => throw StateError('navigation rejected'));
+    final expectation = expectLater(failure, throwsStateError);
+    await tester.pumpAndSettle();
+    await expectation;
+    expect(await guard.confirmLeave(), isTrue);
+    expect(prompts, 4);
   });
 
   test('cancelling keeps the draft and allows a later prompt', () async {
@@ -349,6 +477,174 @@ void main() {
     expect(find.byType(AssignmentDetailScreen), findsOneWidget);
     expect(store.personal.work['cx:work:1:2:shared']?.note, '保存后离开');
   });
+
+  testWidgets('two notifications and a tab commit only the latest target',
+      (tester) async {
+    final notifications = _CapturingNotifications();
+    await _launchApp(tester, _personalLocation, notifications: notifications);
+    await tester.enterText(find.byType(TextField).first, '竞争中的草稿');
+    final router = GoRouter.of(tester.element(find.byType(PersonalWorkScreen)));
+    final destinations = <String>[];
+    void record() =>
+        destinations.add(router.routeInformationProvider.value.uri.path);
+    router.routeInformationProvider.addListener(record);
+    addTearDown(() => router.routeInformationProvider.removeListener(record));
+    notifications.handler!('p:first');
+    notifications.handler!('d:summary');
+    tester
+        .widget<NavigationBar>(find.byType(NavigationBar))
+        .onDestinationSelected!(1);
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    await tester.tap(find.text('放弃修改'));
+    await tester.pumpAndSettle();
+    expect(destinations, ['/calendar']);
+    expect(find.byType(CalendarScreen), findsOneWidget);
+  });
+
+  for (final switchAccount in [false, true]) {
+    testWidgets(
+        'pending dialog invalidated by ${switchAccount ? 'account switch' : 'logout'}',
+        (tester) async {
+      final session = f.Session();
+      final notifications = _CapturingNotifications();
+      final store =
+          _LaunchStore(session: session, notifications: notifications);
+      await _launchApp(tester, _personalLocation,
+          notifications: notifications, suppliedStore: store);
+      await tester.enterText(find.byType(TextField).first, '旧账号草稿');
+      notifications.handler!('p:old');
+      await tester.pumpAndSettle();
+      expect(find.text('放弃未保存的修改？'), findsOneWidget);
+      if (switchAccount) {
+        session.account = 'B';
+        await store.restoreSession();
+      } else {
+        await store.logout();
+      }
+      await tester.pumpAndSettle();
+      expect(find.text('放弃未保存的修改？'), findsNothing);
+      expect(find.byType(ManualAgendaScreen), findsNothing);
+      if (!switchAccount) expect(find.byType(LoginScreen), findsOneWidget);
+      // Neither a late completion nor old approval may steer the new session.
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.byType(ManualAgendaScreen), findsNothing);
+      if (switchAccount) {
+        final context = tester.element(find.byType(NavigationBar));
+        GoRouter.of(context).go(_personalLocation);
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField).first, '新账号草稿');
+        notifications.handler!('d:summary');
+        await tester.pumpAndSettle();
+        expect(find.text('放弃未保存的修改？'), findsOneWidget);
+        await tester.tap(find.text('继续编辑'));
+        await tester.pumpAndSettle();
+        expect(find.byType(PersonalWorkScreen), findsOneWidget);
+      }
+    });
+  }
+
+  testWidgets('same-location notification does not approve a pageless editor',
+      (tester) async {
+    final notifications = _CapturingNotifications();
+    await _launchApp(tester, '/agenda', notifications: notifications);
+    await tester.tap(find.text('添加个人安排'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '同址草稿');
+    notifications.handler!('p:same');
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsNothing);
+    expect(find.byType(ManualEntryEditor), findsOneWidget);
+    await tester.enterText(find.byType(TextFormField).first, '同址后再次编辑');
+    notifications.handler!('d:summary');
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<TextFormField>(find.byType(TextFormField).first)
+            .controller!
+            .text,
+        '同址后再次编辑');
+  });
+
+  for (final manual in [false, true]) {
+    testWidgets(
+        '${manual ? 'manual' : 'personal'} delayed failed save retains draft and retries once',
+        (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final notifications = _CapturingNotifications();
+      final store = _GatedEditorStore();
+      await _launchApp(tester, manual ? '/agenda' : '/assignments',
+          notifications: notifications, suppliedStore: store);
+      if (manual) {
+        await tester.tap(find.text('添加个人安排'));
+      } else {
+        final router =
+            GoRouter.of(tester.element(find.byType(AssignmentListScreen)));
+        unawaited(router.push<void>(_personalLocation));
+      }
+      await tester.pumpAndSettle();
+      final editor = manual
+          ? find.byType(ManualEntryEditor)
+          : find.byType(PersonalWorkScreen);
+      final field = find
+          .descendant(
+              of: editor,
+              matching:
+                  manual ? find.byType(TextFormField) : find.byType(TextField))
+          .first;
+      await tester.enterText(field, '延迟保存且失败后重试');
+      final save = find.descendant(
+          of: editor,
+          matching:
+              find.widgetWithText(FilledButton, manual ? '保存个人安排' : '保存个人记录'));
+      await tester.ensureVisible(save);
+      await tester.pumpAndSettle();
+      store.saveGate = Completer<bool>();
+      await tester.tap(save);
+      await tester.pump();
+      notifications.handler!('d:summary');
+      await tester.pump();
+      expect(find.text('放弃未保存的修改？'), findsNothing);
+      expect(store.saves, 1);
+      store.saveGate!.complete(false);
+      await tester.pumpAndSettle();
+      expect(
+          manual
+              ? find.byType(ManualEntryEditor)
+              : find.byType(PersonalWorkScreen),
+          findsOneWidget);
+      expect(
+          manual
+              ? tester.widget<TextFormField>(field).controller!.text
+              : tester.widget<TextField>(field).controller!.text,
+          '延迟保存且失败后重试');
+      store.saveGate = Completer<bool>();
+      await tester.ensureVisible(save);
+      await tester.pumpAndSettle();
+      await tester.tap(save);
+      await tester.pump();
+      store.saveGate!.complete(true);
+      await tester.pumpAndSettle();
+      expect(store.saves, 2);
+      expect(
+          manual
+              ? find.byType(ManualEntryEditor)
+              : find.byType(PersonalWorkScreen),
+          findsNothing);
+      expect(
+          manual
+              ? find.byType(ManualAgendaScreen)
+              : find.byType(AssignmentListScreen),
+          findsOneWidget);
+      expect(find.text('放弃未保存的修改？'), findsNothing);
+    });
+  }
 
   testWidgets('accountChangeBypassesOldDraftPrompt', (tester) async {
     final store = await _launchApp(tester, _personalLocation);

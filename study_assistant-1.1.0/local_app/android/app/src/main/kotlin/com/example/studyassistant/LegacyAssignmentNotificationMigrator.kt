@@ -1,43 +1,31 @@
 package com.example.studyassistant
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import org.json.JSONArray
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
-/**
- * One-time retirement of assignment notifications scheduled by the legacy
- * `flutter_local_notifications` path. Native deadline notifications share the
- * same channels and can collide with legacy ids, so ownership is proven from
- * the delivered notification itself rather than from an id range or channel.
- *
- * Only notifications whose click operation was created by the plugin
- * (`MainActivity` launch intent + `notificationId` extra) or ids that are backed
- * by the plugin's own schedule cache are touched. Anything else is preserved
- * and reported, and the caller must not record the migration as complete.
- */
+/** Retire only proven plugin assignment operations. IDs and DB rows are hints,
+ * never ownership. Cache RMW follows the plugin's main-thread boundary; disk
+ * barriers and notification scans run off main without holding deliveryLock. */
 object LegacyAssignmentNotificationMigrator {
     const val CHANNEL = "study_assistant/legacy_assignment_migration"
-
-    /** Serializes notification posting/cancelling with legacy retirement. */
     val deliveryLock = Any()
-
     private const val PLUGIN_PREFS = "scheduled_notifications"
     private const val PLUGIN_CACHE_KEY = "scheduled_notifications"
-    private const val PLUGIN_NOTIFICATION_ID_EXTRA = "notificationId"
-    private const val CHANNEL_DEADLINES = "assignment_deadlines"
-    private const val CHANNEL_UPDATES = "assignment_updates"
-
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val barrierExecutor = Executors.newSingleThreadExecutor()
+    private val worker = Executors.newSingleThreadExecutor()
 
     data class Outcome(
         val completed: Boolean,
@@ -47,178 +35,151 @@ object LegacyAssignmentNotificationMigrator {
         val warning: String?,
     )
 
+    fun isMigrationComplete(context: Context): Boolean =
+        LegacyAssignmentMigrationState.isComplete(context)
+
     fun attach(engine: FlutterEngine, context: Context) {
         val appContext = context.applicationContext
         val database = ReminderDatabase.get(appContext)
-        val channel = MethodChannel(
-            engine.dartExecutor.binaryMessenger,
-            CHANNEL,
-        )
-        channel.setMethodCallHandler { call, result ->
-            if (call.method != "retireLegacyAssignments") {
-                result.notImplemented()
-                return@setMethodCallHandler
-            }
-            val ownedIds = (call.argument<List<*>>("ownedIds") ?: emptyList<Any>())
-                .mapNotNull { (it as? Number)?.toInt() }
-                .toSet()
-            val excludeIds = (call.argument<List<*>>("excludeIds") ?: emptyList<Any>())
-                .mapNotNull { (it as? Number)?.toInt() }
-                .toSet()
-            mainHandler.post {
-                val outcome = try {
-                    synchronized(deliveryLock) {
-                        retireNow(appContext, database, ownedIds, excludeIds)
-                    }
-                } catch (error: Exception) {
-                    result.error(
-                        "legacy_migration_error",
-                        error.message ?: error.javaClass.simpleName,
-                        null,
-                    )
-                    return@post
+        val tasks = NativeReminderTasks(worker) { action -> mainHandler.post(action) }
+        MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isMigrationComplete" -> tasks.execute(result) {
+                    it.success(isMigrationComplete(appContext))
                 }
-                // apply() is asynchronous. commit() on the same SharedPreferences
-                // instance writes the current map (including this retirement) and
-                // reports whether the whole map reached disk.
-                val cachePrefs = appContext.getSharedPreferences(
-                    PLUGIN_PREFS,
-                    Context.MODE_PRIVATE,
-                )
-                if (!outcome.cacheChanged) {
-                    result.success(outcome.toMap())
-                    return@post
-                }
-                barrierExecutor.execute {
-                    val committed = try {
-                        cachePrefs.edit().commit()
-                    } catch (_: Exception) {
-                        false
-                    }
-                    mainHandler.post {
-                        if (!committed) {
-                            result.success(
-                                outcome.copy(
-                                    completed = false,
-                                    warning = "旧提醒调度缓存未能写入磁盘",
-                                ).toMap(),
-                            )
-                        } else {
-                            result.success(outcome.toMap())
-                        }
+                "retireLegacyAssignments" -> {
+                    val owned = (call.argument<List<*>>("ownedIds") ?: emptyList<Any>())
+                        .mapNotNull { (it as? Number)?.toInt() }.toSet()
+                    val excluded = (call.argument<List<*>>("excludeIds") ?: emptyList<Any>())
+                        .mapNotNull { (it as? Number)?.toInt() }.toSet()
+                    tasks.execute(result) {
+                        it.success(retireAndConfirm(appContext, database, owned, excluded).toMap())
                     }
                 }
+                else -> result.notImplemented()
             }
         }
     }
 
-    /** Runs on the main thread; callers hold [deliveryLock]. */
+    /** Public protocol's durable outcome, also exercised by instrumented tests. */
+    internal fun retireAndConfirm(
+        context: Context,
+        database: ReminderDatabase,
+        ownedIds: Set<Int>,
+        excludeIds: Set<Int> = emptySet(),
+        commitCache: () -> Boolean = {
+            context.getSharedPreferences(PLUGIN_PREFS, Context.MODE_PRIVATE).edit().commit()
+        },
+    ): Outcome {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "迁移磁盘屏障不能在主线程运行" }
+        if (!LegacyAssignmentMigrationState.begin(context)) {
+            return Outcome(false, emptyList(), emptyList(), false, "迁移待处理状态未能写入磁盘")
+        }
+        val outcome = retireNow(context, database, ownedIds, excludeIds)
+        // Always execute the barrier, including retries after a previous failed
+        // commit whose removal is already visible in SharedPreferences memory.
+        val committed = runCatching(commitCache).getOrDefault(false)
+        if (!committed) return outcome.copy(completed = false, warning = "旧提醒调度缓存未能写入磁盘")
+        if (!outcome.completed) return outcome
+        if (!LegacyAssignmentMigrationState.confirm(context)) {
+            return outcome.copy(completed = false, warning = "迁移完成状态未能写入磁盘")
+        }
+        return outcome
+    }
+
     internal fun retireNow(
         context: Context,
         database: ReminderDatabase,
         ownedIds: Set<Int>,
         excludeIds: Set<Int> = emptySet(),
     ): Outcome {
+        val prefs = context.getSharedPreferences(PLUGIN_PREFS, Context.MODE_PRIVATE)
+        fun readCache() = LegacyAssignmentCache.parse(prefs.getString(PLUGIN_CACHE_KEY, null))
+        val initial = try {
+            onMain { readCache() }
+        } catch (_: Exception) {
+            return Outcome(false, emptyList(), emptyList(), false, "旧提醒调度缓存无法解析")
+        }
         val manager = NotificationManagerCompat.from(context)
-        val active = manager.activeNotifications
-        val nativeIds = database.notificationIds()
-        val pluginPrefs = context.getSharedPreferences(PLUGIN_PREFS, Context.MODE_PRIVATE)
-        val cacheRawPresent = pluginPrefs.contains(PLUGIN_CACHE_KEY)
-        val cacheIds = readPluginCacheIds(pluginPrefs)
-        val retire = linkedSetOf<Int>()
-        val retireCacheOnly = linkedSetOf<Int>()
+        val active = manager.activeNotifications.toList()
         val unknown = linkedSetOf<Int>()
         val failures = mutableListOf<String>()
-        val cache = readPluginCache(pluginPrefs)
-
+        if (initial.hasUnknown) failures.add("旧提醒调度缓存含未知记录，已原样保留")
+        val foreignActive = active.filter {
+            it.tag != null || it.notification.channelId !in assignmentChannels
+        }.map { it.id }.toSet()
+        val blocked = excludeIds + initial.foreignIds + foreignActive
+        val candidates = initial.assignmentIds.toMutableSet()
         for (entry in active) {
-            val id = entry.id
-            val notification = entry.notification
-            if (id in excludeIds || entry.tag != null) continue
-            if (notification.channelId != CHANNEL_DEADLINES &&
-                notification.channelId != CHANNEL_UPDATES
-            ) {
-                continue
-            }
-            val nativeOwned = id in nativeIds
-            val pluginOwned = isPluginOwned(context, notification, id)
+            if (entry.tag != null || entry.notification.channelId !in assignmentChannels) continue
+            if (entry.id in excludeIds) continue
             when {
-                nativeOwned -> {
-                    // The visible notification belongs to the native publisher.
-                    // A colliding legacy schedule must still be retired so it
-                    // cannot repost over the native notification later.
-                    if (id in cacheIds || id in ownedIds) retireCacheOnly.add(id)
+                entry.id in blocked -> unknown.add(entry.id)
+                isPluginOwned(context, entry.notification, entry.id) -> candidates.add(entry.id)
+                isNativeOwned(context, database, entry.notification, entry.id) -> Unit
+                else -> unknown.add(entry.id)
+            }
+        }
+        unknown.addAll(initial.assignmentIds.intersect(initial.foreignIds + foreignActive) - excludeIds)
+        val retired = linkedSetOf<Int>()
+        for (id in candidates - blocked) {
+            try {
+                // One short main operation at a time. Re-read the CURRENT cache
+                // before cancellation, so a concurrent personal reschedule is not
+                // overwritten/cancelled from our stale initial snapshot.
+                val cancelled = onMain {
+                    val current = readCache()
+                    if (id in current.foreignIds || id in excludeIds) return@onMain false
+                    synchronized(deliveryLock) {
+                        val visible = manager.activeNotifications.filter { it.id == id }
+                        if (visible.any { it.tag != null || it.notification.channelId !in assignmentChannels }) {
+                            return@synchronized false
+                        }
+                        for (entry in visible) {
+                            if (isPluginOwned(context, entry.notification, id)) manager.cancel(id)
+                            else if (!isNativeOwned(context, database, entry.notification, id)) {
+                                return@synchronized false
+                            }
+                        }
+                        cancelPluginAlarm(context, id)
+                        true
+                    }
                 }
-                pluginOwned -> retire.add(id)
-                id in ownedIds -> unknown.add(id)
-                else -> unknown.add(id)
-            }
-        }
-        for (id in ownedIds) {
-            if (id in retire || id in retireCacheOnly || id in unknown) continue
-            if (id in nativeIds) {
-                if (id in cacheIds) retireCacheOnly.add(id)
-            } else if (id in cacheIds) {
-                // Pending plugin alarms from the legacy schedule cache.
-                retireCacheOnly.add(id)
-            }
-            // Ids that are neither visible nor cached already delivered their
-            // notification and the user dismissed it: nothing left to retire.
-        }
-
-        for (id in retire) {
-            try {
-                manager.cancel(id)
+                if (cancelled) retired.add(id) else unknown.add(id)
             } catch (error: Exception) {
-                failures.add("取消通知 $id 失败：${error.message ?: error.javaClass.simpleName}")
+                failures.add("取消旧提醒失败：${error.javaClass.simpleName}")
+                unknown.add(id)
             }
         }
-        for (id in retire + retireCacheOnly) {
-            try {
-                cancelPluginAlarm(context, id)
-            } catch (error: Exception) {
-                failures.add("取消旧闹钟 $id 失败：${error.message ?: error.javaClass.simpleName}")
-            }
-        }
-
-        val removed = retire + retireCacheOnly
         var cacheChanged = false
-        if (cacheRawPresent && cache == null) {
-            failures.add("旧提醒调度缓存无法解析")
-        }
-        if (cache != null && removed.isNotEmpty()) {
-            val kept = JSONArray()
-            var dropped = false
-            for (index in 0 until cache.length()) {
-                val item = cache.optJSONObject(index) ?: continue
-                val id = item.optInt(PLUGIN_NOTIFICATION_ID_EXTRA, Int.MIN_VALUE)
-                if (id in removed) {
-                    dropped = true
-                } else {
-                    kept.put(item)
-                }
-            }
-            if (dropped) {
-                try {
-                    // apply() updates the in-memory map; the channel handler
-                    // confirms durability with commit() on a worker thread.
-                    pluginPrefs.edit().putString(PLUGIN_CACHE_KEY, kept.toString()).apply()
+        try {
+            onMain {
+                val raw = prefs.getString(PLUGIN_CACHE_KEY, null)
+                val current = LegacyAssignmentCache.parse(raw)
+                if (current.hasUnknown && !initial.hasUnknown) failures.add("旧提醒调度缓存含未知记录")
+                unknown.addAll(retired.intersect(current.foreignIds))
+                val kept = current.without(retired - unknown, excludeIds)
+                if (raw != null && kept != raw) {
+                    prefs.edit().putString(PLUGIN_CACHE_KEY, kept).apply()
                     cacheChanged = true
-                } catch (error: Exception) {
-                    failures.add("旧提醒调度缓存写入失败：${error.message ?: error.javaClass.simpleName}")
                 }
             }
+        } catch (_: Exception) {
+            failures.add("旧提醒调度缓存写入失败")
         }
-
-        val warning = failures.takeIf { it.isNotEmpty() }?.joinToString("；")
+        // Manifest-only ids carry no proof. Absence of an operation is harmless;
+        // presence of an unknown token was reported above, never cancelled.
+        @Suppress("UNUSED_VARIABLE") val manifestHints = ownedIds
         return Outcome(
             completed = unknown.isEmpty() && failures.isEmpty(),
-            retiredIds = removed.sorted(),
+            retiredIds = (retired - unknown).sorted(),
             preservedUnknownIds = unknown.sorted(),
             cacheChanged = cacheChanged,
-            warning = warning,
+            warning = failures.takeIf { it.isNotEmpty() }?.joinToString("；"),
         )
     }
+
+    private val assignmentChannels = setOf("assignment_deadlines", "assignment_updates")
 
     private fun Outcome.toMap(): Map<String, Any?> = mapOf(
         "completed" to completed,
@@ -227,66 +188,52 @@ object LegacyAssignmentNotificationMigrator {
         "warning" to warning,
     )
 
-    /**
-     * The plugin builds the click operation from the app's launcher intent with
-     * requestCode = notification id. Native reminders use ReminderClickActivity
-     * and a different action/data, so a matching component plus the plugin's
-     * id extra proves plugin ownership without triggering the PendingIntent.
-     */
-    @Suppress("DEPRECATION")
-    private fun isPluginOwned(
-        context: Context,
-        notification: Notification,
-        id: Int,
-    ): Boolean {
+    private fun isPluginOwned(context: Context, notification: Notification, id: Int): Boolean {
         val content = notification.contentIntent ?: return false
         if (content.creatorPackage != context.packageName) return false
-        val launcher = context.packageManager
-            .getLaunchIntentForPackage(context.packageName) ?: return false
+        val launcher = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return false
         launcher.action = "SELECT_NOTIFICATION"
-        var flags = PendingIntent.FLAG_NO_CREATE
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            flags = flags or PendingIntent.FLAG_IMMUTABLE
-        }
-        // Same operation identity (launcher component, SELECT_NOTIFICATION
-        // action, requestCode = id) as FlutterLocalNotificationsPlugin creates.
-        val candidate = PendingIntent.getActivity(context, id, launcher, flags)
-            ?: return false
+        val candidate = PendingIntent.getActivity(
+            context, id, launcher, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+        ) ?: return false
         return candidate == content
     }
 
+    private fun isNativeOwned(
+        context: Context,
+        database: ReminderDatabase,
+        notification: Notification,
+        id: Int,
+    ): Boolean = database.eventsForNotification(id).any { event ->
+        AssignmentNotificationPublisher.matchesClickIntent(context, notification.contentIntent, event)
+    }
+
     private fun cancelPluginAlarm(context: Context, id: Int) {
-        val intent = Intent(
-            context,
-            com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver::class.java,
-        )
-        var flags = PendingIntent.FLAG_NO_CREATE
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            flags = flags or PendingIntent.FLAG_IMMUTABLE
-        }
-        PendingIntent.getBroadcast(context, id, intent, flags)?.cancel()
+        val intent = Intent(context, com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver::class.java)
+        val operation = PendingIntent.getBroadcast(
+            context, id, intent, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+        ) ?: return
+        context.getSystemService(AlarmManager::class.java).cancel(operation)
+        operation.cancel()
     }
 
-    private fun readPluginCacheIds(
-        prefs: android.content.SharedPreferences,
-    ): Set<Int> {
-        val cache = readPluginCache(prefs) ?: return emptySet()
-        val ids = mutableSetOf<Int>()
-        for (index in 0 until cache.length()) {
-            val item = cache.optJSONObject(index) ?: continue
-            ids.add(item.optInt(PLUGIN_NOTIFICATION_ID_EXTRA, Int.MIN_VALUE))
+    /** Never invoke while holding deliveryLock; plugin RMW stays on main. */
+    private fun <T> onMain(action: () -> T): T {
+        if (Looper.myLooper() == Looper.getMainLooper()) return action()
+        val done = CountDownLatch(1)
+        val expired = AtomicBoolean(false)
+        val value = AtomicReference<T>()
+        val error = AtomicReference<Throwable>()
+        mainHandler.post {
+            if (expired.get()) { done.countDown(); return@post }
+            try { value.set(action()) } catch (failure: Throwable) { error.set(failure) }
+            finally { done.countDown() }
         }
-        return ids
-    }
-
-    private fun readPluginCache(
-        prefs: android.content.SharedPreferences,
-    ): JSONArray? {
-        val raw = prefs.getString(PLUGIN_CACHE_KEY, null) ?: return null
-        return try {
-            JSONArray(raw)
-        } catch (_: Exception) {
-            null
+        if (!done.await(5, TimeUnit.SECONDS)) {
+            expired.set(true)
+            throw IllegalStateException("旧提醒迁移等待主线程超时")
         }
+        error.get()?.let { throw IllegalStateException("旧提醒迁移失败", it) }
+        return value.get()
     }
 }

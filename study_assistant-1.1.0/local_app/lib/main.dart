@@ -144,7 +144,7 @@ Future<void> backgroundMain() async {
         return null;
       case 'cancel':
         cancelled = true;
-        activeStore?.chaoxingClient.cancelActiveRequests();
+        activeStore?.cancelSynchronization();
         return null;
       default:
         throw MissingPluginException('未知后台任务 ${call.method}');
@@ -185,8 +185,44 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     _updates = widget.updateController ?? AppUpdateController();
     _router = _buildRouter();
     widget.notificationService.setPayloadHandler(_handleNotificationPayload);
+    _lastAuthenticated = assignmentStore.isAuthenticated;
+    _lastAccountEpoch = assignmentStore.accountEpoch;
+    _lastAccountHash = assignmentStore.accountHash;
+    assignmentStore.addListener(_handleStoreIdentityChanged);
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _checkUpdateOnStartup());
+  }
+
+  bool _lastAuthenticated = false;
+  int _lastAccountEpoch = 0;
+  String? _lastAccountHash;
+
+  /// Account replacement must invalidate the old dialog/approval before a new
+  /// page can inherit it. Other store notifications leave the guard alone.
+  void _handleStoreIdentityChanged() {
+    final authenticated = assignmentStore.isAuthenticated;
+    final epoch = assignmentStore.accountEpoch;
+    final accountHash = assignmentStore.accountHash;
+    if (authenticated == _lastAuthenticated &&
+        epoch == _lastAccountEpoch &&
+        accountHash == _lastAccountHash) {
+      return;
+    }
+    _lastAuthenticated = authenticated;
+    _lastAccountEpoch = epoch;
+    _lastAccountHash = accountHash;
+    _leaveGuard.invalidate();
+    // A private editor belongs to the old identity. Leaving it mounted after
+    // an in-place account restore would let edits appear to belong to the new
+    // account even though the page is stale.
+    if (authenticated) {
+      final location = _router.routeInformationProvider.value.uri.path;
+      if (location.startsWith('/personal/') ||
+          location == '/agenda' ||
+          location == '/reminders') {
+        _router.go('/assignments');
+      }
+    }
   }
 
   Future<void> _checkUpdateOnStartup() async {
@@ -217,6 +253,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    assignmentStore.removeListener(_handleStoreIdentityChanged);
     if (widget.updateController == null) _updates.dispose();
     _router.dispose();
     widget.notificationService.setPayloadHandler(null);
@@ -374,10 +411,16 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
           uri == null ? null : AppDeepLinks.normalizeIncomingLocation(uri);
     }
     if (location == null) return;
+    final target = location;
+    // A notification for the current route must not ask to discard a draft or
+    // approve a future exit; a later different destination asks normally.
+    if (_router.routeInformationProvider.value.uri.path == target) return;
     // A dirty editor must not be replaced by a notification deep link without
-    // the same confirmation used for back navigation.
-    if (!await _leaveGuard.confirmLeave()) return;
-    if (!mounted) return;
-    _router.go(location);
+    // the same confirmation used for back navigation. `navigate` also makes
+    // concurrent notifications/tabs resolve to one winning destination.
+    await _leaveGuard.navigate(
+      isCurrent: () => mounted,
+      action: () => _router.go(target),
+    );
   }
 }

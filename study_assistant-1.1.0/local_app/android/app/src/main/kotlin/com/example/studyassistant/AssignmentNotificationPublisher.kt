@@ -52,6 +52,9 @@ object AssignmentNotificationPublisher {
         now: Instant = Instant.now(),
     ): PublishResult {
         ensureChannels(context)
+        if (!LegacyAssignmentMigrationState.isComplete(context)) {
+            return PublishResult(false, null, "旧提醒迁移尚未完成，已暂缓自动投递")
+        }
         val account = database.readAccount(event.accountHash)
             ?: return PublishResult(false, null, "账号提醒状态不存在")
         if (account.pendingUpdate) {
@@ -120,6 +123,9 @@ object AssignmentNotificationPublisher {
         now: Instant = Instant.now(),
     ): PublishResult {
         ensureChannels(context)
+        if (!LegacyAssignmentMigrationState.isComplete(context)) {
+            return PublishResult(false, null, "旧提醒迁移尚未完成，已暂缓自动投递")
+        }
         val account = database.readAccount(accountHash)
             ?: return PublishResult(false, null, "账号提醒状态不存在")
         if (!account.active || !account.newAssignmentEnabled) {
@@ -334,7 +340,38 @@ object AssignmentNotificationPublisher {
         accountHash: String,
         assignmentId: String?,
         eventId: String?,
-    ): PendingIntent {
+    ): PendingIntent = clickOperation(
+        context,
+        accountHash,
+        assignmentId,
+        eventId,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    ) ?: error("notification click operation unavailable")
+
+    /** Compares the stored event's own click operation without creating it. */
+    internal fun matchesClickIntent(
+        context: Context,
+        contentIntent: PendingIntent?,
+        event: StoredReminderEvent,
+    ): Boolean {
+        if (contentIntent == null) return false
+        val expected = clickOperation(
+            context,
+            event.accountHash,
+            event.assignmentId,
+            event.eventId,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+        ) ?: return false
+        return expected == contentIntent
+    }
+
+    private fun clickOperation(
+        context: Context,
+        accountHash: String,
+        assignmentId: String?,
+        eventId: String?,
+        flags: Int,
+    ): PendingIntent? {
         val intent = Intent(context, ReminderClickActivity::class.java)
             .setAction(ReminderClickReceiver.ACTION_CLICK)
             .setData(
@@ -348,12 +385,7 @@ object AssignmentNotificationPublisher {
         val requestCode = ReminderDatabase.stableNotificationId(
             "click:${eventId ?: accountHash}",
         )
-        return PendingIntent.getActivity(
-            context,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        return PendingIntent.getActivity(context, requestCode, intent, flags)
     }
 
     private fun formatRemaining(minutes: Long): String {

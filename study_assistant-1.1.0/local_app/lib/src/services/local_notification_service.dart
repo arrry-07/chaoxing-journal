@@ -180,6 +180,20 @@ class LocalNotificationService {
     });
   }
 
+  /// Native-only migration fact. A missing/failed bridge is not evidence of a
+  /// completed migration, so callers must keep native reminder activation
+  /// paused until this returns true.
+  Future<bool> isLegacyAssignmentMigrationComplete() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return true;
+    try {
+      return await _legacyMigrationChannel
+              .invokeMethod<bool>('isMigrationComplete') ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Removes only the legacy plugin-delivered assignment alarms. Personal
   /// reminders and the daily summary retain their existing transaction logs.
   ///

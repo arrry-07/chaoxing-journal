@@ -612,8 +612,24 @@ class ReminderDatabase private constructor(context: Context) :
     }
 
     @Synchronized
-    fun event(eventId: String): StoredReminderEvent? {
+    fun eventsForNotification(notificationId: Int): List<StoredReminderEvent> {
         readableDatabase.query(
+            "events",
+            null,
+            "notification_id = ?",
+            arrayOf(notificationId.toString()),
+            null,
+            null,
+            "notify_at ASC",
+        ).use { cursor ->
+            val rows = mutableListOf<StoredReminderEvent>()
+            while (cursor.moveToNext()) rows.add(cursor.toEvent())
+            return rows
+        }
+    }
+
+    @Synchronized
+    fun event(eventId: String): StoredReminderEvent? {        readableDatabase.query(
             "events",
             null,
             "event_id = ?",

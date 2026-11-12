@@ -69,9 +69,10 @@ internal class BackgroundLeaseRequests(
         val request = synchronized(monitor) {
             check(!destroyed) { "提醒引擎已销毁" }
             val existing = requests[key]
-            // A Worker reuses its lease owner for several syncs in one engine;
-            // allow the id again only after the previous request terminated.
-            check(existing == null || existing.finished) { "租约 requestId 已使用" }
+            // Owner can reenter with a fresh request, but a terminal request
+            // is a permanent tombstone. Replacing it would make delayed controls
+            // release/confirm a different acquisition (ABA).
+            check(existing == null) { "租约 requestId 已使用" }
             Request(key).also { requests[key] = it }
         }
         val replied = AtomicBoolean(false)

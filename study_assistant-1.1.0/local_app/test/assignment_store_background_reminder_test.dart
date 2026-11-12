@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.dart';
@@ -88,6 +91,9 @@ void main() {
       expect(gateway.syncReleases, hasLength(1));
       await store.syncAssignments();
       expect(gateway.syncReleases, hasLength(2));
+      expect(gateway.syncAcquisitions, hasLength(2));
+      expect(gateway.syncAcquisitions.toSet(), hasLength(2),
+          reason: '每次同步必须使用唯一的原生 requestId');
     });
   }
 
@@ -240,6 +246,45 @@ void main() {
     expect(prefs.getBool('legacy_assignment_schedule_cleanup_v2'), isTrue);
   });
 
+  test('cancelled sync never advances full success', () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway();
+    final client = _BlockingClient();
+    final store = _store(gateway: gateway, client: client);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final plansBefore = gateway.plans.length;
+
+    final sync = store.syncAssignments();
+    await client.started.future;
+    store.cancelSynchronization();
+    await sync;
+
+    expect(store.syncReport.phase, SyncPhase.cancelled);
+    expect(store.syncReport.lastFullSuccessAt, isNull);
+    expect(store.error, contains('取消'));
+    expect(gateway.plans.length, plansBefore);
+  });
+
+  test('failed legacy migration blocks native plan until retry', () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway();
+    final notifications = _NoopNotificationService()..failLegacyCleanup = true;
+    final store = _store(
+      gateway: gateway,
+      client: _ClientQueue([<Assignment>[]]),
+      notifications: notifications,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    expect(gateway.plans, isEmpty);
+    expect(store.error, contains('迁移'));
+
+    notifications.failLegacyCleanup = false;
+    await store.refreshAssignments();
+    expect(gateway.plans, isNotEmpty);
+  });
+
   test('legacy assignment cleanup runs once per install', () async {
     SharedPreferences.setMockInitialValues({});
     final gateway = _FakeGateway();
@@ -260,7 +305,10 @@ void main() {
     await store.saveReminderRule([60]);
     await store.saveReminderRule([120]);
 
-    expect(notifications.legacyCleanupCalls, 1);
+    // The native revision is authoritative: removing only the Flutter mirror
+    // must not run the one-time migration again.
+    expect(notifications.legacyCleanupCalls, 0);
+    expect(notifications.legacyMigrationComplete, isTrue);
   });
 }
 
@@ -313,6 +361,31 @@ class _ClientQueue extends ChaoxingLocalClient {
     issues = [];
     lastSyncWarning = null;
     return result;
+  }
+}
+
+class _BlockingClient extends ChaoxingLocalClient {
+  final started = Completer<void>();
+  final result = Completer<List<Assignment>>();
+
+  @override
+  bool get needsSessionInitialization => false;
+
+  @override
+  Future<List<Assignment>> fetchAssignments() {
+    if (!started.isCompleted) started.complete();
+    return result.future;
+  }
+
+  @override
+  void cancelActiveRequests({bool reportCancelled = true}) {
+    if (!result.isCompleted) {
+      result.completeError(const SyncReadException(SyncIssue(
+        SyncIssueKind.cancelled,
+        '本次同步已取消',
+        stage: 'request',
+      )));
+    }
   }
 }
 
@@ -383,6 +456,11 @@ class _FailingReloadRepository extends LocalAssignmentRepository {
 class _NoopNotificationService extends LocalNotificationService {
   int legacyCleanupCalls = 0;
   bool failLegacyCleanup = false;
+  bool legacyMigrationComplete = false;
+
+  @override
+  Future<bool> isLegacyAssignmentMigrationComplete() async =>
+      legacyMigrationComplete;
 
   @override
   Future<void> cancelPrivateSchedules() async {}
@@ -393,6 +471,7 @@ class _NoopNotificationService extends LocalNotificationService {
     if (failLegacyCleanup) {
       throw StateError('synthetic legacy migration failure');
     }
+    legacyMigrationComplete = true;
   }
 
   @override

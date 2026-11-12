@@ -85,6 +85,9 @@ class Client extends ChaoxingLocalClient {
 
 class Notifications extends LocalNotificationService {
   @override
+  Future<bool> isLegacyAssignmentMigrationComplete() async => true;
+
+  @override
   Future<void> cancelPrivateSchedules() async {}
   @override
   Future<void> rescheduleManual(List<ManualEntry> items) async {}

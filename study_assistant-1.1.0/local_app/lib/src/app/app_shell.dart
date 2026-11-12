@@ -125,23 +125,29 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _selectDestination(int index) async {
-    final guard = _leaveGuard;
-    if (guard != null && !await guard.confirmLeave()) return;
-    if (!mounted) return;
-    switch (index) {
-      case 0:
-        context.go('/assignments');
-        break;
-      case 1:
-        context.go('/calendar');
-        break;
-      case 2:
-        context.go('/stats');
-        break;
-      case 3:
-        context.go('/profile');
-        break;
+    Future<void> go() async {
+      switch (index) {
+        case 0:
+          context.go('/assignments');
+          break;
+        case 1:
+          context.go('/calendar');
+          break;
+        case 2:
+          context.go('/stats');
+          break;
+        case 3:
+          context.go('/profile');
+          break;
+      }
     }
+
+    final guard = _leaveGuard;
+    if (guard == null) {
+      await go();
+      return;
+    }
+    await guard.navigate(isCurrent: () => mounted, action: go);
   }
 
   int _indexFor(String location) {
