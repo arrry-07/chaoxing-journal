@@ -89,3 +89,13 @@
 - S9280 API35 模拟器同签名覆盖成功并保留原有数据；V2284A API35 首次安装和登录页启动成功，新图标在 Launcher 刷新后正确显示。最终物理设备安装因原 HUAWEI 设备离线未复验。
 - 公开 Release 草稿和公开后均完整下载 APK；GitHub digest、下载哈希、ZIP CRC 和两个模拟器安装后的 base.apk 哈希均为上述 SHA-256。GitHub latest API 已返回 `v1.7.3`。
 - 仍有限制：学习通同账号原生/网页布局对照、API26/31 最终设置页逐项点击、最终包 TalkBack/实体 ARM64 未复验；国内生产托管仍无项目 Gitee 仓库、域名或凭据，1.7.3 默认继续使用 GitHub。详见 `docs/reviews/2026-11-12-1.7.3体验改进与发布记录.md`。
+
+## 2026-11-12 1.7.4 原图标恢复与重发
+
+- 按维护者要求撤回 1.7.3 自定义桌面图标，恢复 1.6.72 及以前的猫头像；10 个普通/圆形 PNG 的 Git blob 与 `v1.6.72` 完全一致。删除 1.7.3 新增的自适应、单色、候选 SVG 和生成脚本，业务代码与国内更新配置未改。
+- 业务提交 `e71cc0bca071082fe8a6bd96741113cc8a9d3c7e` 经 PR #14 合并；最终 main 与 Tag 提交为 `0769ccf4a07181d66ca3d607e1bc474c4cb2e10a`。PR push/PR、main、Tag 三组 CI 均成功。
+- Tag `v1.7.4` 已公开并设为 GitHub latest。正式 APK 57,785,643 字节，SHA-256 `3994e1e413010ccffa08a79fedbecb7af8dee8d375289225d019b47842374f54`；`SHA256SUMS.txt` SHA-256 `f2e5fc697d7868ee620ec9a15ad9d9eec921e11460923c590ce3445a5184370c`。
+- `v1.7.3` Tag、APK 与校验文件保持不变，Release 改为预发布并注明由 1.7.4 取代。已安装 1.7.3 的用户需手动检查或网页覆盖安装；旧 1.6.7 仍可从 latest 发现 1.7.4。
+- Flutter 全量测试 `729 passed / 0 failed`；上海/洛杉矶时区各 35 项通过；ASCII 干净导出 analyze、原生 JVM、`:app:testDebugUnitTest`、`:app:lintDebug`、双 ABI Debug/Release、签名/ZIP/对齐检查通过。聚合 Gradle 测试中的第三方 shared_preferences DataStore 12 项失败未计为通过，详见 1.7.4 发布记录。
+- S9280 API35 同签名覆盖后 `firstInstallTime` 保持并进入原有首页；V2284A API35 首次测试安装进入登录页；两台桌面均显示猫头像，安装后 `base.apk` 哈希与公开 APK 一致。
+- 草稿与公开 Release 均完整匿名回下载，大小、哈希、GitHub digest 与 ZIP CRC 一致。最终图标仍待维护者后续自行选型，国内生产托管未配置。详见 `docs/reviews/2026-11-12-1.7.4原图标恢复与重发记录.md`。
