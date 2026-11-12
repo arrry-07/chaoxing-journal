@@ -129,3 +129,10 @@
 - 回归：`background_reminder_gateway_test.dart`、`assignment_store_background_reminder_test.dart`、`notification_ordering_test.dart` 新增租约确认、取消竞态、迁移保留、失败重试与退出重试用例；`BackgroundLeaseRequestsTest`、`BackgroundExecutionCoordinatorTest`、`LegacyAssignmentNotificationMigratorTest` 与扩展的 `ReminderDatabaseAccountTest` 覆盖原生侧。
 - 验证：`dart analyze` 无问题；`dart format` 174 文件 0 改动；全量 Flutter 测试 `766 passed / 1 skipped / 0 failed`；上海／洛杉矶时区各 `35 passed`；ASCII 副本 `:app:testDebugUnitTest` 与 `:app:compileDebugAndroidTestKotlin` 通过（NDK 28.2，未在设备运行 instrumented 测试）。
 - 未验证：设备上的真实 PendingIntent 身份匹配、通知投递／保留、旧账号原生清理重试、主线程耗时与冷启动；未修改版本号、未构建 Release、未发布 APK。B 批次及国内源、图标、实机验收保持未完成。
+
+## 2026-11-12 B 批次：同步预览、保存恢复与日常交互
+
+- 业务提交 `ce206c1`：V3 多页作业每页校验后发布内存预览，后页失败只撤回该课程并保留旧正式记录；journal／课程写入在 false／异常后 reload 核验真实持久值，首次持久化前标记保存阶段，本机写失败归为 storage；个人备注、手动日程与提醒规则共用离开守卫，覆盖底部页签、通知深链和路由替换，规则保存中锁定草稿控件；日历新增“无截止／截止待确认”临时范围，不覆盖已保存筛选；提醒体检区分读取失败、不支持和真实零值；会话清理／销毁取消在途请求，规划弹层在大字＋键盘下改为紧凑滚动。
+- 新增／扩展回归：`v3_pagination_preview_test.dart`、`calendar_scope_test.dart`、`unsaved_edit_guard_test.dart`、`reminder_settings_screen_test.dart`、`reliability_recovery_test.dart`、`reminder_health_test.dart`、`daily_plan_planner_test.dart`、`chaoxing_local_client_test.dart` 与 `assignment_query_test.dart`。
+- 验证：`dart analyze` 无问题；`dart format` 177 文件 0 改动；全量 Flutter 测试 `799 passed / 1 skipped / 0 failed`；上海／洛杉矶时区各 `35 passed`。未运行原生 instrumented 测试、未连接真机、未构建 Release 或发布 APK。
+- 未验证：键盘／TalkBack 实机体感、真实账号首次同步分页耗时、系统通知投递、Store 销毁取消的设备级行为；B7 的退避取消与跨会话迟到结果仅覆盖客户端取消路径，完整的设备级取消矩阵仍待后续。国内源、图标与实机验收保持未完成。
