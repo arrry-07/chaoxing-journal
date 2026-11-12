@@ -307,4 +307,19 @@ void main() {
     expect(pending, isEmpty);
     expect(service.lastWarning, isNull);
   });
+  test('legacy assignment cleanup keeps untagged native deadline notifications',
+      () async {
+    final service = _Notifications();
+    pending.add({
+      'id': 730123,
+      'title': 'legacy',
+      'body': '',
+      'payload': 'a:synthetic'
+    });
+    active.add(
+        {'id': 1100000123, 'channelId': 'assignment_deadlines', 'tag': null});
+    await service.removeLegacyAssignmentSchedules();
+    expect(pending.any((n) => n['id'] == 730123), isFalse);
+    expect(active.map((n) => n['id']), [1100000123]);
+  });
 }

@@ -21,6 +21,7 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
   late List<PersonalStep> steps;
   late List<PersonalLink> links, files;
   bool busy = false;
+  bool _dirty = false;
   String? message;
   @override
   void initState() {
@@ -29,13 +30,38 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
     final data =
         widget.store.personal.work[widget.assignmentId] ?? const PersonalWork();
     note = TextEditingController(text: data.note);
+    note.addListener(_markDirty);
     steps = [...data.steps];
     links = [...data.links];
     files = [...data.files];
   }
 
+  void _markDirty() {
+    if (!_dirty && mounted) setState(() => _dirty = true);
+  }
+
+  Future<bool> _confirmDiscard() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('放弃未保存的修改？'),
+        content: const Text('备注、清单、链接或文件关联的修改尚未保存。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('继续编辑')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('放弃修改')),
+        ],
+      ),
+    );
+    return result == true;
+  }
+
   @override
   void dispose() {
+    note.removeListener(_markDirty);
     note.dispose();
     super.dispose();
   }
@@ -128,6 +154,7 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
     if (saved) await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     if (saved) {
+      _dirty = false;
       if (editorRoute?.isCurrent == false) {
         setState(() {
           busy = false;
@@ -156,139 +183,179 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-      appBar: AppBar(title: const Text('个人清单与备注')),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        Text(
-            widget.store.findAssignment(widget.assignmentId)?.title ?? '本机个人记录',
-            style: Theme.of(context).textTheme.titleLarge),
-        const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text('这里的勾选只表示个人进度，不代表学习通已提交。更改后请保存。')),
-        TextField(
-            controller: note,
-            maxLength: 10000,
-            minLines: 3,
-            maxLines: 8,
-            enabled: !busy,
-            decoration: const InputDecoration(labelText: '我的备注')),
-        Text('个人清单 · ${steps.where((s) => s.done).length}/${steps.length}',
-            style: Theme.of(context).textTheme.titleMedium),
-        for (var i = 0; i < steps.length; i++)
-          Row(children: [
-            // An interactive secondary inside CheckboxListTile is merged into
-            // its toggle semantics. Keep removal independently accessible.
-            IconButton(
-                tooltip: '移除清单项：${steps[i].text}',
-                onPressed:
-                    busy ? null : () => setState(() => steps.removeAt(i)),
-                icon: const Icon(Icons.close)),
-            Expanded(
-                child: CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: steps[i].done,
-                    onChanged: busy
+  Widget build(BuildContext context) => PopScope(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop || !_dirty) return;
+        final leave = await _confirmDiscard();
+        if (!leave || !context.mounted) return;
+        final router = GoRouter.maybeOf(context);
+        if (router != null && router.canPop()) {
+          router.pop();
+        } else {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+          appBar: AppBar(title: const Text('个人清单与备注')),
+          body: ListView(padding: const EdgeInsets.all(16), children: [
+            Text(
+                widget.store.findAssignment(widget.assignmentId)?.title ??
+                    '本机个人记录',
+                style: Theme.of(context).textTheme.titleLarge),
+            const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('这里的勾选只表示个人进度，不代表学习通已提交。更改后请保存。')),
+            TextField(
+                controller: note,
+                maxLength: 10000,
+                minLines: 3,
+                maxLines: 8,
+                enabled: !busy,
+                decoration: const InputDecoration(labelText: '我的备注')),
+            Text('个人清单 · ${steps.where((s) => s.done).length}/${steps.length}',
+                style: Theme.of(context).textTheme.titleMedium),
+            for (var i = 0; i < steps.length; i++)
+              Row(children: [
+                // An interactive secondary inside CheckboxListTile is merged into
+                // its toggle semantics. Keep removal independently accessible.
+                IconButton(
+                    tooltip: '移除清单项：${steps[i].text}',
+                    onPressed: busy
                         ? null
-                        : (v) => setState(() => steps[i] =
-                            PersonalStep(steps[i].text, done: v ?? false)),
-                    title: Text(steps[i].text))),
-          ]),
-        TextButton.icon(
-            onPressed: busy || steps.length >= 50
-                ? null
-                : () async {
-                    final v = await input('添加清单项', ['要做的事']);
-                    if (mounted && v != null) {
-                      setState(() => steps.add(PersonalStep(v[0])));
-                    }
-                  },
-            icon: const Icon(Icons.add),
-            label: const Text('添加清单项')),
-        const Divider(height: 24),
-        Text('资料链接', style: Theme.of(context).textTheme.titleMedium),
-        for (var i = 0; i < links.length; i++)
-          ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(links[i].label),
-              subtitle: Text(links[i].url,
-                  maxLines: 2, overflow: TextOverflow.ellipsis),
-              onTap: busy
-                  ? null
-                  : () async {
-                      final ok =
-                          await ExternalLinkService().openBrowser(links[i].url);
-                      if (mounted && !ok) {
-                        setState(() => message = '未能打开浏览器，请重试');
-                      }
-                    },
-              trailing: IconButton(
-                  tooltip: '移除链接',
-                  onPressed:
-                      busy ? null : () => setState(() => links.removeAt(i)),
-                  icon: const Icon(Icons.close))),
-        TextButton.icon(
-            onPressed: busy || links.length >= 20
-                ? null
-                : () async {
-                    final v = await input('添加资料链接', ['名称', 'HTTPS 地址']);
-                    if (mounted && v != null) {
-                      setState(() => links.add(PersonalLink(v[0], v[1])));
-                    }
-                  },
-            icon: const Icon(Icons.link),
-            label: const Text('添加资料链接')),
-        const Divider(height: 24),
-        Text('本地文件', style: Theme.of(context).textTheme.titleMedium),
-        const Text('只关联本设备的文件授权，不复制或上传；加密备份不包含文件及其关联。文件移走或授权失效时请重新选择。'),
-        for (var i = 0; i < files.length; i++)
-          ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(files[i].label),
-              leading: const Icon(Icons.attach_file),
-              onTap: busy
-                  ? null
-                  : () async {
-                      final ok = await PersonalFileService().open(files[i].url);
-                      if (mounted && !ok) {
-                        setState(() => message = '文件已失效或没有可用的打开应用，请重新关联。');
-                      }
-                    },
-              trailing: IconButton(
-                  tooltip: '移除文件关联',
-                  onPressed:
-                      busy ? null : () => setState(() => files.removeAt(i)),
-                  icon: const Icon(Icons.close))),
-        TextButton.icon(
-            onPressed: busy || files.length >= 10
-                ? null
-                : () async {
-                    setState(() => busy = true);
-                    try {
-                      final file = await PersonalFileService().pick();
-                      if (mounted &&
-                          file != null &&
-                          !files.any((f) => f.url == file.url)) {
-                        setState(() => files.add(file));
-                      }
-                    } catch (error) {
-                      if (mounted) {
-                        setState(() => message = error is PlatformException &&
-                                error.code == 'file_access'
-                            ? '系统未授予持久读取权限，请在文件选择器的“内部存储”中重选本机文件。'
-                            : '文件未能关联，请重试');
-                      }
-                    } finally {
-                      if (mounted) setState(() => busy = false);
-                    }
-                  },
-            icon: const Icon(Icons.folder_open),
-            label: const Text('关联本地文件')),
-        if (message != null)
-          Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(message!)),
-        FilledButton(
-            onPressed: busy ? null : save,
-            child: Text(busy ? '正在处理…' : '保存个人记录')),
-      ]));
+                        : () => setState(() {
+                              steps.removeAt(i);
+                              _dirty = true;
+                            }),
+                    icon: const Icon(Icons.close)),
+                Expanded(
+                    child: CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: steps[i].done,
+                        onChanged: busy
+                            ? null
+                            : (v) => setState(() {
+                                  steps[i] = PersonalStep(steps[i].text,
+                                      done: v ?? false);
+                                  _dirty = true;
+                                }),
+                        title: Text(steps[i].text))),
+              ]),
+            TextButton.icon(
+                onPressed: busy || steps.length >= 50
+                    ? null
+                    : () async {
+                        final v = await input('添加清单项', ['要做的事']);
+                        if (mounted && v != null) {
+                          setState(() {
+                            steps.add(PersonalStep(v[0]));
+                            _dirty = true;
+                          });
+                        }
+                      },
+                icon: const Icon(Icons.add),
+                label: const Text('添加清单项')),
+            const Divider(height: 24),
+            Text('资料链接', style: Theme.of(context).textTheme.titleMedium),
+            for (var i = 0; i < links.length; i++)
+              ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(links[i].label),
+                  subtitle: Text(links[i].url,
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
+                  onTap: busy
+                      ? null
+                      : () async {
+                          final ok = await ExternalLinkService()
+                              .openBrowser(links[i].url);
+                          if (mounted && !ok) {
+                            setState(() => message = '未能打开浏览器，请重试');
+                          }
+                        },
+                  trailing: IconButton(
+                      tooltip: '移除链接',
+                      onPressed: busy
+                          ? null
+                          : () => setState(() {
+                                links.removeAt(i);
+                                _dirty = true;
+                              }),
+                      icon: const Icon(Icons.close))),
+            TextButton.icon(
+                onPressed: busy || links.length >= 20
+                    ? null
+                    : () async {
+                        final v = await input('添加资料链接', ['名称', 'HTTPS 地址']);
+                        if (mounted && v != null) {
+                          setState(() {
+                            links.add(PersonalLink(v[0], v[1]));
+                            _dirty = true;
+                          });
+                        }
+                      },
+                icon: const Icon(Icons.link),
+                label: const Text('添加资料链接')),
+            const Divider(height: 24),
+            Text('本地文件', style: Theme.of(context).textTheme.titleMedium),
+            const Text('只关联本设备的文件授权，不复制或上传；加密备份不包含文件及其关联。文件移走或授权失效时请重新选择。'),
+            for (var i = 0; i < files.length; i++)
+              ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(files[i].label),
+                  leading: const Icon(Icons.attach_file),
+                  onTap: busy
+                      ? null
+                      : () async {
+                          final ok =
+                              await PersonalFileService().open(files[i].url);
+                          if (mounted && !ok) {
+                            setState(() => message = '文件已失效或没有可用的打开应用，请重新关联。');
+                          }
+                        },
+                  trailing: IconButton(
+                      tooltip: '移除文件关联',
+                      onPressed: busy
+                          ? null
+                          : () => setState(() {
+                                files.removeAt(i);
+                                _dirty = true;
+                              }),
+                      icon: const Icon(Icons.close))),
+            TextButton.icon(
+                onPressed: busy || files.length >= 10
+                    ? null
+                    : () async {
+                        setState(() => busy = true);
+                        try {
+                          final file = await PersonalFileService().pick();
+                          if (mounted &&
+                              file != null &&
+                              !files.any((f) => f.url == file.url)) {
+                            setState(() {
+                              files.add(file);
+                              _dirty = true;
+                            });
+                          }
+                        } catch (error) {
+                          if (mounted) {
+                            setState(() => message =
+                                error is PlatformException &&
+                                        error.code == 'file_access'
+                                    ? '系统未授予持久读取权限，请在文件选择器的“内部存储”中重选本机文件。'
+                                    : '文件未能关联，请重试');
+                          }
+                        } finally {
+                          if (mounted) setState(() => busy = false);
+                        }
+                      },
+                icon: const Icon(Icons.folder_open),
+                label: const Text('关联本地文件')),
+            if (message != null)
+              Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(message!)),
+            FilledButton(
+                onPressed: busy ? null : save,
+                child: Text(busy ? '正在处理…' : '保存个人记录')),
+          ])));
 }

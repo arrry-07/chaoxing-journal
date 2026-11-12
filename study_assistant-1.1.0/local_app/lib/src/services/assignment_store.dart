@@ -51,6 +51,8 @@ class AssignmentStore extends ChangeNotifier {
   static const _notificationClickMissingKey = 'notification_click_missing_v1';
   static const _privacyCleanupPendingKey =
       'notification_privacy_cleanup_pending_v1';
+  static const _legacyScheduleCleanupKey =
+      'legacy_assignment_schedule_cleanup_v1';
 
   AssignmentStore({
     required this.sessionStore,
@@ -1422,7 +1424,14 @@ class AssignmentStore extends ChangeNotifier {
       if (_nativeReminderAvailable && _authenticated) {
         try {
           if (_manageBackgroundSchedule) {
-            await notificationService.removeLegacyAssignmentSchedules();
+            // Legacy plugin assignment alarms are migrated once per app
+            // install. Running this on every sync would cancel the native
+            // deadline notifications that share the same Android channel.
+            final prefs = await SharedPreferences.getInstance();
+            if (prefs.getBool(_legacyScheduleCleanupKey) != true) {
+              await notificationService.removeLegacyAssignmentSchedules();
+              await prefs.setBool(_legacyScheduleCleanupKey, true);
+            }
           }
           await _applyNativeReminderPlan(
             completeSync: completeSync,

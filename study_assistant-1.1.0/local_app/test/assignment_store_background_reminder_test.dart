@@ -70,15 +70,39 @@ void main() {
     expect(gateway.plans.last.deadlineEvents, isEmpty);
     expect(gateway.plans.last.newEvents, isEmpty);
   });
+
+  test('legacy assignment cleanup runs once per install', () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway();
+    final notifications = _NoopNotificationService();
+    final store = _store(
+      gateway: gateway,
+      client: _ClientQueue([
+        [_assignment('legacy', DateTime.now().add(const Duration(days: 2)))],
+      ]),
+      notifications: notifications,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('legacy_assignment_schedule_cleanup_v1');
+    notifications.legacyCleanupCalls = 0;
+
+    await store.saveReminderRule([60]);
+    await store.saveReminderRule([120]);
+
+    expect(notifications.legacyCleanupCalls, 1);
+  });
 }
 
 AssignmentStore _store({
   required _FakeGateway gateway,
   required ChaoxingLocalClient client,
+  LocalNotificationService? notifications,
 }) =>
     AssignmentStore(
       sessionStore: _MemorySessionStore(),
-      notificationService: _NoopNotificationService(),
+      notificationService: notifications ?? _NoopNotificationService(),
       widgetSnapshotService: _NoopWidgetSnapshotService(),
       chaoxingClient: client,
       backgroundReminderGateway: gateway,
@@ -135,11 +159,15 @@ class _MemorySessionStore extends SecureSessionStore {
 }
 
 class _NoopNotificationService extends LocalNotificationService {
+  int legacyCleanupCalls = 0;
+
   @override
   Future<void> cancelPrivateSchedules() async {}
 
   @override
-  Future<void> removeLegacyAssignmentSchedules() async {}
+  Future<void> removeLegacyAssignmentSchedules() async {
+    legacyCleanupCalls++;
+  }
 
   @override
   Future<void> rescheduleManual(List<ManualEntry> entries) async {}

@@ -492,21 +492,16 @@ class ReminderDatabase private constructor(context: Context) :
 
         desiredDeadline.forEach { event ->
             val current = existing.firstOrNull { it.eventId == event.eventId }
-            if (current == null) {
-                insertEvent(event, now)
-            } else if (current.status == STATUS_PENDING) {
-                writableDatabase.update(
-                    "events",
-                    ContentValues().apply {
-                        put("session_epoch", sessionEpoch)
-                        put("notify_at", event.notifyAt)
-                        put("deadline_at", event.deadlineAt)
-                        put("offsets", JSONArray(event.offsets).toString())
-                        put("updated_at", now)
-                    },
-                    "event_id = ?",
-                    arrayOf(event.eventId),
-                )
+            when {
+                current == null -> insertEvent(event, now)
+                current.status == STATUS_PENDING ->
+                    updateEvent(event, sessionEpoch, now)
+                current.status == STATUS_CANCELLED ->
+                    // Hiding an assignment cancels its deadline events. When it
+                    // becomes eligible again the planner emits the same stable
+                    // event id; reactivate it instead of silently dropping the
+                    // reminder forever.
+                    updateEvent(event, sessionEpoch, now, status = STATUS_PENDING)
             }
         }
 
@@ -545,6 +540,27 @@ class ReminderDatabase private constructor(context: Context) :
                 .count { it.type == EVENT_NEW && it.status == STATUS_PENDING },
             pendingDeadlineCount = eventsForAccount(accountHash)
                 .count { it.type == EVENT_DEADLINE && it.status == STATUS_PENDING },
+        )
+    }
+
+    private fun updateEvent(
+        event: StoredReminderEvent,
+        sessionEpoch: Long,
+        now: Long,
+        status: String = STATUS_PENDING,
+    ) {
+        writableDatabase.update(
+            "events",
+            ContentValues().apply {
+                put("session_epoch", sessionEpoch)
+                put("notify_at", event.notifyAt)
+                put("deadline_at", event.deadlineAt)
+                put("offsets", JSONArray(event.offsets).toString())
+                put("status", status)
+                put("updated_at", now)
+            },
+            "event_id = ?",
+            arrayOf(event.eventId),
         )
     }
 

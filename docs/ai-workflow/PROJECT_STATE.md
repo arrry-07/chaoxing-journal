@@ -106,3 +106,10 @@
 - 本轮GitHub资产查询确认1.7.4为57,785,643字节、digest与发布记录相同；Gitee官方单附件100M/总1G限制已复核。生产匿名直链、清单地址和大陆网络仍待验证，不能只凭包小宣称已配置。
 - 用户将自行注册并登录Gitee。实机许可已给出：其他问题收尾后由用户连接并确认具体手机；不重复申请许可，未确认目标前不操作设备。付费托管/域名仍需报价确认。
 - 用户图标偏好已变为接近旧头像的可爱风，可偏二次元，不要求体现软件用途。本轮已生成A软萌猫头像、B慵懒猫团子、C猫耳动漫角色、D奶油小狐狸四张预览；未选定前保留1.7.4原图标，不发布候选。
+
+## 2026-11-12 P1 修复（提醒链路/原生桥/编辑页）
+
+- 按用户“先修 P1”要求处理审查发现：`ReminderDatabase.applyPlan` 允许仍有效的 CANCELLED 截止事件重新激活（隐藏后恢复不再永久丢提醒）；`BackgroundReminderGateway` 的 `isSessionCurrent` 改为 fail-closed，`loadPlanState`/`applyPlan` 改为严格通道调用并抛出 `BackgroundReminderGatewayException`；旧插件提醒清理只按 `a:` payload/清单 ID 取消，不再按 `assignment_deadlines` channel 误删原生已投递通知，并增加一次性迁移标记；个人清单/备注与手动日程编辑页增加未保存修改的 `PopScope` 确认。
+- 新增回归：`test/background_reminder_gateway_test.dart`、`test/unsaved_edit_guard_test.dart`、`test/notification_ordering_test.dart` 的原生通知保留用例、`assignment_store_background_reminder_test.dart` 的一次性清理标记用例，以及 `ReminderDatabaseAccountTest` 的 CANCELLED→PENDING instrumented 用例。
+- 验证：`dart analyze` 无问题；`dart format` 174 文件 0 改动；全量 Flutter 测试 `736 passed / 1 skipped / 0 failed`；上海/洛杉矶时区各 35 项通过；ASCII 副本 `:app:compileDebugAndroidTestKotlin` 通过（NDK 28.2，未在设备运行 instrumented 测试）。
+- 未验证：instrumented 用例需设备运行；F1 修复未在真机通知栏复核；主线程/冷启动/取消语义等 P2 未在本轮处理。工作区未提交，保留 `scripts/demo-video/` 未跟踪。

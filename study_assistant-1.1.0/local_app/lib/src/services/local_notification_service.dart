@@ -195,11 +195,14 @@ class LocalNotificationService {
       }
       try {
         final active = await _plugin.getActiveNotifications();
+        // Native deadline notifications use the same channel as the legacy
+        // plugin schedules and are untagged/unpayloaded. The channel alone is
+        // therefore not proof of plugin ownership; only cancel active entries
+        // that still carry the legacy `a:` payload. Native entries are handled
+        // by the privacy/logout cleanup paths, which deliberately target them.
         ids.addAll(active
             .where((item) =>
-                item.id != null &&
-                (item.payload?.startsWith('a:') == true ||
-                    item.channelId == assignmentChannel))
+                item.id != null && item.payload?.startsWith('a:') == true)
             .map((item) => item.id!));
       } catch (_) {
         // Pending alarms are still removable. Delivered notifications may be

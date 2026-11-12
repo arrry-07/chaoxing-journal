@@ -5,6 +5,20 @@ import 'package:flutter/services.dart';
 import 'assignment_reminder_planner.dart';
 import 'background_check_settings.dart';
 
+/// A native reminder operation failed after the bridge was reported available.
+/// Critical callers must surface this instead of treating a missing result as
+/// success (notably [BackgroundReminderGateway.isSessionCurrent] and
+/// [BackgroundReminderGateway.applyPlan]).
+class BackgroundReminderGatewayException implements Exception {
+  const BackgroundReminderGatewayException(this.method, this.cause);
+
+  final String method;
+  final Object cause;
+
+  @override
+  String toString() => '后台提醒操作失败（$method）：$cause';
+}
+
 enum BackgroundSyncTrigger {
   manual,
   daytime,
@@ -134,7 +148,7 @@ class BackgroundReminderGateway {
         'accountHash': accountHash,
         'sessionEpoch': sessionEpoch,
       }) ??
-      true;
+      false;
 
   Future<void> updateSettings(
     String accountHash,
@@ -211,20 +225,20 @@ class BackgroundReminderGateway {
     required String accountHash,
     required int sessionEpoch,
   }) async {
-    final value = await _invoke<Map<Object?, Object?>>('loadPlanState', {
+    final value = await _invokeStrict<Map<Object?, Object?>>('loadPlanState', {
       'accountHash': accountHash,
       'sessionEpoch': sessionEpoch,
     });
     return ReminderPlanState(
       accountHash: accountHash,
       sessionEpoch: sessionEpoch,
-      baselineCompleted: value?['baselineCompleted'] == true,
-      knownAssignmentIds: _strings(value?['knownAssignmentIds']),
-      sentNewAssignmentIds: _strings(value?['sentNewAssignmentIds']),
-      lastAttemptAt: _date(value?['lastAttemptAt']),
-      lastFullSuccessAt: _date(value?['lastFullSuccessAt']),
-      pendingUpdate: value?['pendingUpdate'] == true,
-      mutationVersion: value?['mutationVersion'] as int? ?? 0,
+      baselineCompleted: value['baselineCompleted'] == true,
+      knownAssignmentIds: _strings(value['knownAssignmentIds']),
+      sentNewAssignmentIds: _strings(value['sentNewAssignmentIds']),
+      lastAttemptAt: _date(value['lastAttemptAt']),
+      lastFullSuccessAt: _date(value['lastFullSuccessAt']),
+      pendingUpdate: value['pendingUpdate'] == true,
+      mutationVersion: value['mutationVersion'] as int? ?? 0,
     );
   }
 
@@ -247,7 +261,7 @@ class BackgroundReminderGateway {
     required bool syncCompleted,
     required int expectedMutationVersion,
   }) async {
-    final value = await _invoke<Map<Object?, Object?>>('applyPlan', {
+    final value = await _invokeStrict<Map<Object?, Object?>>('applyPlan', {
       'accountHash': accountHash,
       'sessionEpoch': sessionEpoch,
       'completedAt': completedAt.toUtc().toIso8601String(),
@@ -260,9 +274,9 @@ class BackgroundReminderGateway {
       'events': plan.eventJson,
     });
     return ReminderPlanApplyResult(
-      scheduledDeadlineCount: value?['scheduledDeadlineCount'] as int? ?? 0,
-      pendingNewCount: value?['pendingNewCount'] as int? ?? 0,
-      warning: value?['warning'] as String?,
+      scheduledDeadlineCount: value['scheduledDeadlineCount'] as int? ?? 0,
+      pendingNewCount: value['pendingNewCount'] as int? ?? 0,
+      warning: value['warning'] as String?,
     );
   }
 
@@ -335,6 +349,36 @@ class BackgroundReminderGateway {
 
   Future<T?> _invoke<T>(String method, [Map<String, Object?>? arguments]) =>
       _invokeTimed<T>(method, arguments, const Duration(seconds: 10));
+
+  /// Critical reminder operations must not degrade a failed platform call into
+  /// a successful-looking empty result. Callers gate this method behind
+  /// [isAvailable]; once the bridge is expected, any failure (including a
+  /// missing plugin) is surfaced as [BackgroundReminderGatewayException].
+  Future<T> _invokeStrict<T>(
+    String method,
+    Map<String, Object?>? arguments,
+  ) async {
+    try {
+      final value = await _channel
+          .invokeMethod<T>(method, arguments)
+          .timeout(const Duration(seconds: 10));
+      if (value == null) {
+        throw BackgroundReminderGatewayException(method, '原生通道未返回结果');
+      }
+      return value;
+    } on BackgroundReminderGatewayException {
+      rethrow;
+    } on MissingPluginException catch (error) {
+      throw BackgroundReminderGatewayException(method, error);
+    } on PlatformException catch (error) {
+      throw BackgroundReminderGatewayException(
+          method, error.message ?? error.code);
+    } on TimeoutException catch (error) {
+      throw BackgroundReminderGatewayException(method, error);
+    } catch (error) {
+      throw BackgroundReminderGatewayException(method, error);
+    }
+  }
 
   Future<T?> _invokeTimed<T>(
     String method,
