@@ -112,4 +112,20 @@
 - 按用户“先修 P1”要求处理审查发现：`ReminderDatabase.applyPlan` 允许仍有效的 CANCELLED 截止事件重新激活（隐藏后恢复不再永久丢提醒）；`BackgroundReminderGateway` 的 `isSessionCurrent` 改为 fail-closed，`loadPlanState`/`applyPlan` 改为严格通道调用并抛出 `BackgroundReminderGatewayException`；旧插件提醒清理只按 `a:` payload/清单 ID 取消，不再按 `assignment_deadlines` channel 误删原生已投递通知，并增加一次性迁移标记；个人清单/备注与手动日程编辑页增加未保存修改的 `PopScope` 确认。
 - 新增回归：`test/background_reminder_gateway_test.dart`、`test/unsaved_edit_guard_test.dart`、`test/notification_ordering_test.dart` 的原生通知保留用例、`assignment_store_background_reminder_test.dart` 的一次性清理标记用例，以及 `ReminderDatabaseAccountTest` 的 CANCELLED→PENDING instrumented 用例。
 - 验证：`dart analyze` 无问题；`dart format` 174 文件 0 改动；全量 Flutter 测试 `736 passed / 1 skipped / 0 failed`；上海/洛杉矶时区各 35 项通过；ASCII 副本 `:app:compileDebugAndroidTestKotlin` 通过（NDK 28.2，未在设备运行 instrumented 测试）。
-- 未验证：instrumented 用例需设备运行；F1 修复未在真机通知栏复核；主线程/冷启动/取消语义等 P2 未在本轮处理。工作区未提交，保留 `scripts/demo-video/` 未跟踪。
+- 未验证：instrumented 用例需设备运行；F1 修复未在真机通知栏复核；主线程/冷启动/取消语义等 P2 未在本轮处理。此处为当轮提交前记录；后续已提交／推送，当前状态见下一节。保留 `scripts/demo-video/` 未跟踪。
+
+## 2026-11-12 当前小版本重核与完整执行方案
+
+- 现场核对：`codex/p1-reminder-fixes` 本地／远端均为 `4a367991f2e35153bb13adf017c76baa57a588fe`，远端 main 为 `144874a`；[当前 PR](https://github.com/arrry-07/chaoxing-journal/pull/16) 未合并、非 draft、两项检查成功，Auto-fix 开启、auto-merge 关闭。正式版仍是 `1.7.4+56`／latest `v1.7.4`；核对时无 `v1.7.5*` 标签，`1.7.5+57` 仅为下一补丁建议，发布前须再查占用。
+- 已读取[当前提交的 CI 原始日志](https://github.com/arrry-07/chaoxing-journal/actions/runs/43185486702)：UTC 全量 `736 passed / 1 skipped`、上海／洛杉矶各 `35 passed`、分析与 Debug/ABI 检查成功。这不是本轮复跑；未来修复不能继承。现有 Java 合成检查和 Debug 构建未执行 Kotlin 应用单测／数据库设备测试，方案补上对应门禁。
+- 已将原[下一阶段方案](../plans/2026-11-12-下一阶段-国内更新与体验收尾执行方案.md)原位扩展为“当前小版本：可靠性修复、体验收尾与国内分发完整执行方案”。优先补现有 PR 与租约／原生失败语义，再做分页预览、持久化失败恢复、编辑路由保护、规则保存、日历待确认入口、体检错误反馈、取消及有界性能／键盘验证；每项含文件、最小步骤、新增测试、验收和停止条件。不再把 Gitee、未选图标和实机等待绑定为所有修复的前置。
+- 源码复核确认：写租约双重同步会阻住释放者；同步合并成功／失败提前返回漏释放租约；部分关键原生写操作仍吞错；legacy 已投递迁移漏清且新旧 ID 区间重叠；恢复事件未刷新课程／标题。两个 PR 审查线程本轮尚未修复、回复或 resolve。其他体验发现区分源码缺口与需组件／设备复现，不宣称实机卡顿或丢稿已验证。
+- 国内源仍无本项目生产 URL／匿名完整下载证据；Gitee 官方 100M／1G 规则已复核，不代表匿名下载保证。原猫头像继续保留；仓库内图标证据是 1.7.3 旧 A/B，不能当四个可爱风新候选或已选稿；旧候选 README 已加撤回／失效命令警告。物理手机未确认，不连接或操作设备；真实官方通知的接受缺项保持不变。
+- 本轮只修改执行方案、文档索引、该状态与旧图标说明，没有业务改动、版本变更、提交／推送、新 APK 或发布。原有 `scripts/demo-video/demo_main.dart` 未跟踪文件保留。下一步从方案 A0/A1/A2/A3 的失败测试和最小修复开始，依赖共享接口由主代理统一集成。
+
+## 2026-11-12 A 批次：租约、迁移与控制失败语义
+
+- 业务提交 `590752a`（`codex/p1-reminder-fixes`）：移除写租约多余对象锁并加入取消检查；新增按请求的租约确认／取消／引擎销毁生命周期，迟到取得不再泄漏；旧插件已投递提醒改由原生按插件点击操作与调度缓存证明归属，保留同 ID 原生通知并处理插件缓存并发；恢复／更新截止事件时同步课程与标题；关键原生控制、登录切换、隐私清理、退出与提醒体检不再把失败伪装成成功，退出失败保留旧账号哈希待重试。
+- 回归：`background_reminder_gateway_test.dart`、`assignment_store_background_reminder_test.dart`、`notification_ordering_test.dart` 新增租约确认、取消竞态、迁移保留、失败重试与退出重试用例；`BackgroundLeaseRequestsTest`、`BackgroundExecutionCoordinatorTest`、`LegacyAssignmentNotificationMigratorTest` 与扩展的 `ReminderDatabaseAccountTest` 覆盖原生侧。
+- 验证：`dart analyze` 无问题；`dart format` 174 文件 0 改动；全量 Flutter 测试 `766 passed / 1 skipped / 0 failed`；上海／洛杉矶时区各 `35 passed`；ASCII 副本 `:app:testDebugUnitTest` 与 `:app:compileDebugAndroidTestKotlin` 通过（NDK 28.2，未在设备运行 instrumented 测试）。
+- 未验证：设备上的真实 PendingIntent 身份匹配、通知投递／保留、旧账号原生清理重试、主线程耗时与冷启动；未修改版本号、未构建 Release、未发布 APK。B 批次及国内源、图标、实机验收保持未完成。
