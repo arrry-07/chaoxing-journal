@@ -145,3 +145,12 @@
 - ASCII 副本使用 `ANDROID_HOME=D:/campus-tools/android` 构建：Debug 与 Release 均成功；`:app:testDebugUnitTest`、`:app:compileDebugAndroidTestKotlin`、`:app:lintDebug` 通过。
 - 候选 APK：`app-release.apk`，57,851,367 字节，SHA-256 `79c40fe20b8903bfa91cec036a3c98b71b00804e8d80c41edab49c8cf0c839fc`；`aapt` 为 `com.example.studyassistant.journal` / versionCode 57 / versionName 1.7.5 / minSdk 26 / targetSdk 36；ABI 仅 `arm64-v8a`、`x86_64`；APK Signature Scheme v2 有效，证书 SHA-256 `d36a571510e046dd196d7384f849f82b4fcff05ce3affb334765d5c752265d8a`；`zipalign -c 4`、ZIP CRC 通过；未声明 debuggable。
 - 未验证：候选未安装到模拟器或实体手机，未运行 instrumented 测试；真实账号同步与通知投递未复验。候选尚未合并、打 Tag 或发布；国内源与图标仍未完成。
+
+## 2026-11-12 暂停现场：1.7.5 发布门禁修复（未完成，已存 stash）
+
+- 原因：执行方案 P1/P2 的 R1–R6 修复进行到一半，用户需关机暂停。进行中的 18 个文件已存入本地 Git stash：`stash@{0}` / `wip: 1.7.5 release gates R1-R6 partial (2026-11-12 pause)`；工作区只保留已完成的下载入口修正和本状态。未合并、未打 Tag、未发布 1.7.5。
+- 已完成并验证（stash 内容）：原生迁移拆分 `LegacyAssignmentCache`（读取 v18 Gson 的 `id`、保留非目标/未知记录）、`LegacyAssignmentMigrationState`（原生 v3 事实）、`NativeReminderTasks`、迁移/租约终态修改；`AssignmentNotificationPublisher` 增加真实点击 token 比较与迁移门禁；`ReminderDatabase.eventsForNotification`；Store 的迁移闸门、隐私待清理保护、唯一 sync requestId、保存阶段取最新快照；点击型取消结果与退避取消；`unsaved_edit_guard` 新核心；`update-manifest.ps1` 显式 ApkUrl/初始化模式与脚本测试。
+- 验证现场：Dart `analyze` 无问题；ASCII 副本原生 `:app:testDebugUnitTest` 与 `:app:compileDebugAndroidTestKotlin` 通过（约 40 个原生单测）。Dart 定向运行仍有 13 个失败，主要是 `chaoxing_local_client_test` 的取消/会话旧断言，以及 `unsaved_edit_guard_test` 因新守卫尚未接入页面调用方；不能把这些失败当作已修复。
+- 尚未完成：R4 页面/Shell/通知调用方接入新守卫（`navigate`/`showUnsavedEditDialog`/`invalidate`）；R6 区分“显式取消”与 `clearSession` 旧 stale 语义并更新测试；R2 登录/Worker/隐私端到端回归；R3 原生迟到控制测试收口；R5 Store 撤回窗口测试；PowerShell 脚本真实执行；全量 Flutter、双时区、构建、隔离模拟器与实际设备验收；最终合并、Tag、Release 与匿名回下载。图标/国内源仍保持未完成。
+- 恢复步骤：现场核对 `git status` 与 `git stash list`；执行 `git stash pop stash@{0}`（不要 drop），再 `dart analyze`，先修复 guard 调用方与取消测试，再跑定向/全量；stash 不含 `scripts/demo-video/`，该未跟踪目录保持原样。
+- 当前远端/本地已提交 HEAD 仍为 `39ebf88`（1.7.5+57 候选、PR16 两项 CI 已通过），README/安装指南已恢复 1.7.4 有效下载入口并标注 1.7.5 未发布。下一轮不要从“旧候选已构建”直接发布。
