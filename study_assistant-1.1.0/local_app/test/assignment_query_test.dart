@@ -208,6 +208,68 @@ void main() {
     expect(AssignmentQuery.home([failedRead], now, {}).near, isEmpty);
   });
 
+  test('queryClassificationDistinguishesNoDeadlineFromRetainedUntrustedDates',
+      () {
+    final now = DateTime.utc(2026, 11, 4, 2);
+    final retained = _sortRecord(
+      'retained',
+      courseName: '课程',
+      title: '保留但不可信',
+      deadlineAt: now.add(const Duration(days: 1)),
+      trusted: false,
+    );
+    final readFailed = _sortRecord(
+      'read-failed',
+      courseName: '课程',
+      title: '读取失败保留日期',
+      deadlineAt: now.add(const Duration(days: 1)),
+      failed: true,
+    );
+    final trusted = _sortRecord(
+      'trusted',
+      courseName: '课程',
+      title: '可信日期',
+      deadlineAt: now.add(const Duration(days: 1)),
+    );
+    final clear = _sortRecord(
+      'clear',
+      courseName: '课程',
+      title: '明确无截止',
+    );
+    final failedWithoutDate = _sortRecord(
+      'failed-no-date',
+      courseName: '课程',
+      title: '读取失败且无日期',
+      failed: true,
+    );
+    final rows = [retained, readFailed, trusted, clear, failedWithoutDate];
+
+    List<String> titles(AssignmentDeadlineFilter filter) =>
+        AssignmentQuery.filterHome(rows, deadline: filter, now: now)
+            .map((assignment) => assignment.title)
+            .toList();
+
+    expect(titles(AssignmentDeadlineFilter.noDeadline), ['明确无截止']);
+    expect(titles(AssignmentDeadlineFilter.uncertain), [
+      '保留但不可信',
+      '读取失败保留日期',
+      '读取失败且无日期',
+    ]);
+    expect(
+        AssignmentQuery.forDay(rows, DateTime(2026, 11, 5), {})
+            .map((assignment) => assignment.title),
+        ['可信日期']);
+
+    final groups = AssignmentQuery.home(rows, now, {});
+    expect(groups.uncertain.map((assignment) => assignment.title), [
+      '保留但不可信',
+      '读取失败且无日期',
+      '读取失败保留日期',
+    ]);
+    expect(groups.noDeadline.map((assignment) => assignment.title), ['明确无截止']);
+    expect(groups.near.map((assignment) => assignment.title), ['可信日期']);
+  });
+
   test('search matches title and course without changing source scope', () {
     final now = DateTime.utc(2026, 11, 4, 2);
     Assignment work(String id,

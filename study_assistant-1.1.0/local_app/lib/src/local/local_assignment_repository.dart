@@ -14,6 +14,20 @@ import '../services/reminder_rule_store.dart';
 import '../services/background_reminder_gateway.dart';
 import '../services/background_check_settings.dart';
 
+/// A journal or course write could not be confirmed against durable storage.
+///
+/// The preference plugin updates its in-process cache before the platform
+/// write completes, so a failed write must be verified with
+/// [SharedPreferences.reload] before callers decide that nothing was stored.
+class LocalStorageWriteException implements Exception {
+  const LocalStorageWriteException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class LocalAssignmentRepository {
   LocalAssignmentRepository({
     BackgroundReminderGateway backgroundReminderGateway =
@@ -394,6 +408,45 @@ class LocalAssignmentRepository {
     if (!await write) throw StateError('未能保存账号本机记录，原记录已保留');
   }
 
+  /// Writes [value] and confirms the durable value after a false return or an
+  /// exception. A failure may still have reached the platform, so treating the
+  /// first error as "nothing was written" would either lose a durable value or
+  /// leave the in-process cache showing data that will vanish on restart.
+  static Future<void> _writeVerified(
+    SharedPreferences prefs,
+    String key,
+    String value,
+    String failureMessage,
+  ) async {
+    Object? writeError;
+    try {
+      if (await prefs.setString(key, value)) return;
+      writeError = '原生写入未确认';
+    } catch (error) {
+      writeError = error;
+    }
+    try {
+      await prefs.reload();
+    } catch (reloadError) {
+      throw LocalStorageWriteException(
+          '$failureMessage，写入结果未确认；重新读取也失败：$reloadError');
+    }
+    String? durable;
+    try {
+      durable = prefs.getString(key);
+    } catch (_) {
+      // A different stored type cannot match a string write; treat it as not
+      // written instead of leaking a cast error from the verification step.
+      durable = null;
+    }
+    if (durable == value) {
+      // The platform reported an error, but the value is durable. Reporting a
+      // rollback here would contradict the data the next read will return.
+      return;
+    }
+    throw LocalStorageWriteException('$failureMessage，原记录已保留：$writeError');
+  }
+
   static Future<void> _restoreScope(
       SharedPreferences prefs, Map<String, dynamic> snapshot) async {
     final values = snapshot['values'] as Map<String, dynamic>;
@@ -475,10 +528,12 @@ class LocalAssignmentRepository {
         } else if (p.containsKey(_switchKey)) {
           throw StateError('账号本机记录切换未完成，请重新登录后恢复');
         }
-        if (!await p.setString('course_refs',
-            jsonEncode(courses.map((c) => c.toJson()).toList()))) {
-          throw StateError('课程保存失败');
-        }
+        await _writeVerified(
+          p,
+          'course_refs',
+          jsonEncode(courses.map((c) => c.toJson()).toList()),
+          '课程保存失败',
+        );
       });
 
   Future<List<Assignment>> loadHiddenAssignments() => _serialized(() async {
@@ -731,9 +786,12 @@ class LocalAssignmentRepository {
 
   Future<void> _save(_Journal state) async {
     final prefs = await SharedPreferences.getInstance();
-    if (!await prefs.setString(_key, jsonEncode(state.toJson()))) {
-      throw StateError('未能保存本机作业记录');
-    }
+    await _writeVerified(
+      prefs,
+      _key,
+      jsonEncode(state.toJson()),
+      '未能保存本机作业记录',
+    );
   }
 }
 

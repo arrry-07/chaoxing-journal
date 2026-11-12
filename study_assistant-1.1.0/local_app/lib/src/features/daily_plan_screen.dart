@@ -534,219 +534,224 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                 : accepted.isEmpty
                     ? '请至少选择一项建议，再加入当天计划。'
                     : '已选择 ${accepted.length} 项建议，确认后加入当天计划。');
-    return AnimatedPadding(
-      duration: const Duration(milliseconds: 150),
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.9,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
-              child: Row(
-                children: [
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '安排学习时间',
-                          style: Journal.section,
-                        ),
-                        SizedBox(height: 4),
-                        Text('选作业、填预计耗时，根据可用时间生成安排。'),
-                      ],
+    final media = MediaQuery.of(context);
+    // The modal sheet is already constrained above the keyboard; adding the
+    // same inset again here would double-count it and overflow the sheet.
+    final availableHeight = (media.size.height - media.viewInsets.bottom) * 0.9;
+    final compact = media.viewInsets.bottom > 0;
+    Widget header() => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '安排学习时间',
+                      style: Journal.section,
                     ),
-                  ),
-                  IconButton(
-                    tooltip: '关闭安排学习时间',
-                    onPressed: saving ? null : () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
+                    SizedBox(height: 4),
+                    Text('选作业、填预计耗时，根据可用时间生成安排。'),
+                  ],
+                ),
               ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: ListView(
-                keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                children: [
-                  const _PlannerSectionHeader(
-                    icon: Icons.checklist_rtl,
-                    title: '选择作业',
+              IconButton(
+                tooltip: '关闭安排学习时间',
+                onPressed: saving ? null : () => Navigator.pop(context),
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+        );
+    Widget footer() => SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    guidance,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: error == null
+                            ? null
+                            : Theme.of(context).colorScheme.error),
+                  )),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  key: const ValueKey('planning-save'),
+                  onPressed: saving
+                      ? null
+                      : needsPreview
+                          ? generate
+                          : accepted.isEmpty
+                              ? null
+                              : save,
+                  icon: saving
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : Icon(needsPreview
+                          ? Icons.auto_awesome_outlined
+                          : Icons.playlist_add_check),
+                  label: Text(
+                    saving
+                        ? '正在加入…'
+                        : needsPreview
+                            ? currentPreview == null
+                                ? '生成安排'
+                                : '重新生成安排'
+                            : '加入当天计划',
                   ),
+                ),
+              )
+            ]),
+          ),
+        );
+    return SizedBox(
+      height: availableHeight,
+      child: Column(
+        children: [
+          if (!compact) header(),
+          if (!compact) const Divider(height: 1),
+          Expanded(
+            child: ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              children: [
+                if (compact) header(),
+                if (compact) const Divider(height: 1),
+                const _PlannerSectionHeader(
+                  icon: Icons.checklist_rtl,
+                  title: '选择作业',
+                ),
+                Text(
+                  '目标日期：${widget.day}',
+                  style: Journal.metadata,
+                ),
+                const SizedBox(height: 8),
+                for (final assignment in candidates) _candidate(assignment),
+                if (candidates.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text('当前没有可选择的作业，请先同步。'),
+                  ),
+                const Divider(height: 32),
+                const _PlannerSectionHeader(
+                  icon: Icons.schedule_outlined,
+                  title: '填写可用时间与耗时',
+                ),
+                TextField(
+                  key: const ValueKey('planning-budget'),
+                  controller: budgetController,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => invalidatePreview(),
+                  decoration: const InputDecoration(
+                    labelText: '当天可用时间（分钟）',
+                    helperText: '当天已有未完成计划会先占用可用时间',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ExcludeSemantics(
+                      child: Icon(Icons.lightbulb_outline, size: 20),
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '示例：今天有 60 分钟，两份作业预计各 30 分钟，可生成安排后再确认。',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                if (selectedAssignments.isEmpty)
+                  const Text('勾选作业后可填写预计耗时。')
+                else
+                  for (final assignment in selectedAssignments)
+                    _estimateField(assignment),
+                const Divider(height: 32),
+                const _PlannerSectionHeader(
+                  icon: Icons.event_note_outlined,
+                  title: '查看安排',
+                ),
+                OutlinedButton.icon(
+                  key: const ValueKey('planning-generate'),
+                  onPressed: selected.isEmpty || saving ? null : generate,
+                  icon: const Icon(Icons.auto_awesome_outlined),
+                  label: Text(currentPreview == null ? '生成安排' : '重新生成安排'),
+                ),
+                if (currentPreview != null) ...[
+                  const SizedBox(height: 16),
                   Text(
-                    '目标日期：${widget.day}',
+                    '当天可用时间 ${currentPreview.budgetMinutes} 分钟',
+                    style: Journal.time,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '已有未完成计划占用 ${currentPreview.existingMinutes} 分钟',
                     style: Journal.metadata,
                   ),
-                  const SizedBox(height: 8),
-                  for (final assignment in candidates) _candidate(assignment),
-                  if (candidates.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('当前没有可选择的作业，请先同步。'),
-                    ),
-                  const Divider(height: 32),
-                  const _PlannerSectionHeader(
-                    icon: Icons.schedule_outlined,
-                    title: '填写可用时间与耗时',
+                  const SizedBox(height: 4),
+                  Text(
+                    currentPreview.remainingMinutes == null
+                        ? '已有计划耗时未确认，剩余可用时间暂不能确定'
+                        : '预计剩余 ${currentPreview.remainingMinutes} 分钟',
+                    style: Journal.entryTitle,
                   ),
-                  TextField(
-                    key: const ValueKey('planning-budget'),
-                    controller: budgetController,
-                    keyboardType: TextInputType.number,
-                    onChanged: (_) => invalidatePreview(),
-                    decoration: const InputDecoration(
-                      labelText: '当天可用时间（分钟）',
-                      helperText: '当天已有未完成计划会先占用可用时间',
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ExcludeSemantics(
-                        child: Icon(Icons.lightbulb_outline, size: 20),
-                      ),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '示例：今天有 60 分钟，两份作业预计各 30 分钟，可生成安排后再确认。',
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  if (selectedAssignments.isEmpty)
-                    const Text('勾选作业后可填写预计耗时。')
-                  else
-                    for (final assignment in selectedAssignments)
-                      _estimateField(assignment),
-                  const Divider(height: 32),
-                  const _PlannerSectionHeader(
-                    icon: Icons.event_note_outlined,
-                    title: '查看安排',
-                  ),
-                  OutlinedButton.icon(
-                    key: const ValueKey('planning-generate'),
-                    onPressed: selected.isEmpty || saving ? null : generate,
-                    icon: const Icon(Icons.auto_awesome_outlined),
-                    label: Text(currentPreview == null ? '生成安排' : '重新生成安排'),
-                  ),
-                  if (currentPreview != null) ...[
+                  if (currentPreview.suggested.isNotEmpty) ...[
                     const SizedBox(height: 16),
-                    Text(
-                      '当天可用时间 ${currentPreview.budgetMinutes} 分钟',
-                      style: Journal.time,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '已有未完成计划占用 ${currentPreview.existingMinutes} 分钟',
-                      style: Journal.metadata,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      currentPreview.remainingMinutes == null
-                          ? '已有计划耗时未确认，剩余可用时间暂不能确定'
-                          : '预计剩余 ${currentPreview.remainingMinutes} 分钟',
-                      style: Journal.entryTitle,
-                    ),
-                    if (currentPreview.suggested.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text('自动纳入', style: Journal.entryTitle),
-                      for (final item in currentPreview.suggested)
-                        CheckboxListTile(
-                          key: ValueKey(
-                              'planning-suggested-${item.assignment.id}'),
-                          contentPadding: EdgeInsets.zero,
-                          value: accepted.contains(item.assignment.id),
-                          onChanged: saving
-                              ? null
-                              : (value) => setState(() {
-                                    if (value ?? false) {
-                                      accepted.add(item.assignment.id);
-                                    } else {
-                                      accepted.remove(item.assignment.id);
-                                    }
-                                  }),
-                          title: Text(item.assignment.title),
-                          subtitle: Text(
-                              '${item.assignment.courseName} · ${item.minutes} 分钟'),
-                        ),
-                    ],
-                    if (currentPreview.manual.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text('需要人工处理', style: Journal.entryTitle),
-                      for (final item in currentPreview.manual)
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(item.assignment.title),
-                          subtitle: Text(
-                              '${item.assignment.courseName} · ${_planningReason(item.reason)}'),
-                        ),
-                    ],
-                    if (currentPreview.unavailableIds.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 10),
-                        child: Text(
-                            '${currentPreview.unavailableIds.length} 项选择已在本机记录中失效，请重新选择。'),
+                    Text('自动纳入', style: Journal.entryTitle),
+                    for (final item in currentPreview.suggested)
+                      CheckboxListTile(
+                        key: ValueKey(
+                            'planning-suggested-${item.assignment.id}'),
+                        contentPadding: EdgeInsets.zero,
+                        value: accepted.contains(item.assignment.id),
+                        onChanged: saving
+                            ? null
+                            : (value) => setState(() {
+                                  if (value ?? false) {
+                                    accepted.add(item.assignment.id);
+                                  } else {
+                                    accepted.remove(item.assignment.id);
+                                  }
+                                }),
+                        title: Text(item.assignment.title),
+                        subtitle: Text(
+                            '${item.assignment.courseName} · ${item.minutes} 分钟'),
                       ),
                   ],
-                ],
-              ),
-            ),
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Semantics(
-                      liveRegion: true,
-                      child: Text(
-                        guidance,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: error == null
-                                ? null
-                                : Theme.of(context).colorScheme.error),
-                      )),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      key: const ValueKey('planning-save'),
-                      onPressed: saving
-                          ? null
-                          : needsPreview
-                              ? generate
-                              : accepted.isEmpty
-                                  ? null
-                                  : save,
-                      icon: saving
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2))
-                          : Icon(needsPreview
-                              ? Icons.auto_awesome_outlined
-                              : Icons.playlist_add_check),
-                      label: Text(
-                        saving
-                            ? '正在加入…'
-                            : needsPreview
-                                ? currentPreview == null
-                                    ? '生成安排'
-                                    : '重新生成安排'
-                                : '加入当天计划',
+                  if (currentPreview.manual.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Text('需要人工处理', style: Journal.entryTitle),
+                    for (final item in currentPreview.manual)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(item.assignment.title),
+                        subtitle: Text(
+                            '${item.assignment.courseName} · ${_planningReason(item.reason)}'),
                       ),
+                  ],
+                  if (currentPreview.unavailableIds.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Text(
+                          '${currentPreview.unavailableIds.length} 项选择已在本机记录中失效，请重新选择。'),
                     ),
-                  )
-                ]),
-              ),
+                ],
+                if (compact) footer(),
+              ],
             ),
-          ],
-        ),
+          ),
+          if (!compact) footer(),
+        ],
       ),
     );
   }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,11 +6,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 // Failure injection into the persistence boundary used by SharedPreferences.
 // ignore: depend_on_referenced_packages
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -416,6 +421,128 @@ void main() {
     expect(store.isAuthenticated, isFalse);
     expect(store.error, contains('本机数据恢复未完成'));
   });
+  // This simulates the fallback path with no native cross-engine reload. It
+  // proves what the Dart layer must do; it does not claim every Android sync
+  // loses data when the native engine later reloads SharedPreferences.
+  test('failedJournalWriteCannotReappearFromCache', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    await repo.mergeAndSave([journalItem('durable')]);
+    final durableSyncAt = await repo.lastSyncAt();
+    expect(durableSyncAt, isNotNull);
+    final store = AssignmentStore(
+      sessionStore: _SignedInSession(),
+      repository: repo,
+      notificationService: _QuietNotifications(),
+      widgetSnapshotService: _QuietWidget(),
+      chaoxingClient: _ProgressClient(),
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    expect(store.assignments.map((a) => a.id), ['cx:work:1:2:durable']);
+
+    final prefs = await SharedPreferences.getInstance();
+    _installFailingStore(prefs, {'flutter.chaoxing_journal_v2'});
+
+    await store.syncAssignments();
+
+    expect(store.assignments.map((a) => a.id), ['cx:work:1:2:durable'],
+        reason: '失败后必须保留旧可见作业');
+    expect(store.homeSyncProgress, isNull, reason: '失败后必须清理同步预览');
+    expect(store.lastSyncAt, durableSyncAt, reason: '失败的写入不能推进完整同步时间');
+    expect(store.error, contains('未能保存本机作业记录'));
+    expect(
+        store.syncReport.issues
+            .any((issue) => issue.kind == SyncIssueKind.storage),
+        isTrue,
+        reason: '本机写入失败必须归类为存储问题，而不是网络问题');
+    expect((await repo.loadJournal()).map((a) => a.id), ['cx:work:1:2:durable'],
+        reason: '同进程读取不能再看到未落盘的缓存值');
+    await prefs.reload();
+    expect((await LocalAssignmentRepository().loadJournal()).map((a) => a.id),
+        ['cx:work:1:2:durable'],
+        reason: '重新打开仓库后仍应与真实持久值一致');
+  });
+  test('falseWriteWithDurableValueIsVerified', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    await repo.mergeAndSave([journalItem('durable')]);
+    final prefs = await SharedPreferences.getInstance();
+    _installWriteThenRejectStore(prefs, {'flutter.chaoxing_journal_v2'});
+
+    await repo.mergeAndSave([journalItem('durable'), journalItem('written')]);
+
+    expect((await repo.loadJournal()).map((a) => a.id),
+        unorderedEquals(['cx:work:1:2:durable', 'cx:work:1:2:written']),
+        reason: '平台返回 false 但值已经落盘时，不应回滚或报失败');
+    await prefs.reload();
+    expect((await LocalAssignmentRepository().loadJournal()).map((a) => a.id),
+        unorderedEquals(['cx:work:1:2:durable', 'cx:work:1:2:written']));
+
+    await repo.activateAccount('student');
+    await repo.saveCourses([course('old')], account: 'student');
+    _installWriteThenRejectStore(prefs, const {},
+        throwKeys: {'flutter.course_refs'});
+    await repo.saveCourses([course('thrown')], account: 'student');
+    expect((await repo.loadCourses(account: 'student')).map((c) => c.name),
+        ['thrown'],
+        reason: '平台抛错但值已落盘时同样应按真实持久值处理');
+
+    _installWriteThenRejectStore(prefs, {'flutter.course_refs'});
+    await repo.saveCourses([course('old'), course('new')], account: 'student');
+    expect((await repo.loadCourses(account: 'student')).map((c) => c.name),
+        ['old', 'new'],
+        reason: '课程写入同样必须以真实持久值为准');
+  });
+  test('failedCourseWriteKeepsDurableCourses', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('student');
+    await repo.saveCourses([course('old')], account: 'student');
+    final prefs = await SharedPreferences.getInstance();
+    _installFailingStore(prefs, {'flutter.course_refs'});
+
+    await expectLater(
+        repo.saveCourses([course('old'), course('new')], account: 'student'),
+        throwsA(isA<LocalStorageWriteException>()));
+
+    expect((await repo.loadCourses(account: 'student')).map((c) => c.name),
+        ['old'],
+        reason: '未落盘的新课程不能从缓存回读');
+    await prefs.reload();
+    expect(
+        (await LocalAssignmentRepository().loadCourses(account: 'student'))
+            .map((c) => c.name),
+        ['old']);
+  });
+  test('savingStagePrecedesCoursePersistence', () async {
+    SharedPreferences.setMockInitialValues({});
+    final store = AssignmentStore(
+      sessionStore: _SignedInSession(),
+      notificationService: _QuietNotifications(),
+      widgetSnapshotService: _QuietWidget(),
+      chaoxingClient: _ProgressClient(),
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final prefs = await SharedPreferences.getInstance();
+    final blocking = _BlockCourseWrites(_prefsSnapshot(prefs));
+    SharedPreferencesStorePlatform.instance = blocking;
+
+    final sync = store.syncAssignments();
+    await blocking.started.future;
+    expect(blocking.blockedKey, 'flutter.course_refs');
+    expect(store.homeSyncProgress?.stage, AssignmentSyncStage.saving,
+        reason: '首次持久化等待期间必须已经标记保存阶段');
+
+    blocking.release.complete();
+    await sync;
+    expect(store.homeSyncProgress, isNull);
+    expect(store.courses.single.name, '数学');
+    expect(prefs.getString('course_refs'), contains('数学'));
+  });
 }
 
 class _Session extends SecureSessionStore {
@@ -449,13 +576,22 @@ class _BrokenWidget extends WidgetSnapshotService {
 
 _FailSelectedWrites _installFailingStore(
     SharedPreferences prefs, Set<String> failingKeys) {
-  final values = {
-    for (final key in prefs.getKeys()) 'flutter.$key': prefs.get(key)!
-  };
-  final store = _FailSelectedWrites(values, failingKeys);
+  final store = _FailSelectedWrites(_prefsSnapshot(prefs), failingKeys);
   SharedPreferencesStorePlatform.instance = store;
   return store;
 }
+
+_WriteThenRejectStore _installWriteThenRejectStore(
+    SharedPreferences prefs, Set<String> rejectKeys,
+    {Set<String> throwKeys = const {}}) {
+  final store =
+      _WriteThenRejectStore(_prefsSnapshot(prefs), rejectKeys, throwKeys);
+  SharedPreferencesStorePlatform.instance = store;
+  return store;
+}
+
+Map<String, Object> _prefsSnapshot(SharedPreferences prefs) =>
+    {for (final key in prefs.getKeys()) 'flutter.$key': prefs.get(key)!};
 
 class _FailSelectedWrites extends InMemorySharedPreferencesStore {
   _FailSelectedWrites(super.data, this.failingKeys) : super.withData();
@@ -469,3 +605,106 @@ class _FailSelectedWrites extends InMemorySharedPreferencesStore {
     return super.setValue(valueType, key, value);
   }
 }
+
+/// Mirrors a platform that stores the value but still reports a failed write.
+class _WriteThenRejectStore extends InMemorySharedPreferencesStore {
+  _WriteThenRejectStore(super.data, this.rejectKeys, this.throwKeys)
+      : super.withData();
+
+  final Set<String> rejectKeys;
+  final Set<String> throwKeys;
+
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) async {
+    final stored = await super.setValue(valueType, key, value);
+    if (throwKeys.contains(key)) {
+      throw PlatformException(code: 'synthetic-write-failure');
+    }
+    if (rejectKeys.contains(key)) return false;
+    return stored;
+  }
+}
+
+class _SignedInSession extends SecureSessionStore {
+  @override
+  Future<String?> readChaoxingAccount() async => 'student';
+  @override
+  Future<String?> readChaoxingPassword() async => 'dummy';
+  @override
+  Future<String?> readChaoxingDisplayName() async => 'Tester';
+  @override
+  Future<String?> readChaoxingAvatarUrl() async =>
+      'https://example.invalid/avatar.png';
+}
+
+class _ProgressClient extends ChaoxingLocalClient {
+  @override
+  bool get needsSessionInitialization => false;
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    hasCourseResponse = true;
+    courses = [
+      const ChaoxingCourseRef(courseId: '1', clazzId: '2', courseName: '数学')
+    ];
+    onProgress?.call(AssignmentSyncProgress(
+      stage: AssignmentSyncStage.details,
+      assignments: [journalItem('preview')],
+      pendingDetailIds: const {},
+      resolvedCount: 1,
+      attemptedCount: 1,
+    ));
+    return [journalItem('preview')];
+  }
+}
+
+class _QuietNotifications extends LocalNotificationService {
+  @override
+  Future<void> cancelPrivateSchedules() async {}
+  @override
+  Future<void> rescheduleAssignments(List<Assignment> assignments,
+      {List<int>? offsetsMinutes}) async {}
+  @override
+  Future<void> rescheduleSummary(List<Assignment> assignments,
+      PersonalWorkspace personal, DateTime? lastSync) async {}
+  @override
+  Future<void> rescheduleManual(List<ManualEntry> entries) async {}
+  @override
+  Future<void> removeLegacyAssignmentSchedules() async {}
+}
+
+class _QuietWidget extends WidgetSnapshotService {
+  @override
+  Future<void> saveAssignments(List<Assignment> assignments) async {}
+}
+
+class _BlockCourseWrites extends InMemorySharedPreferencesStore {
+  _BlockCourseWrites(super.data) : super.withData();
+
+  final Completer<void> started = Completer<void>();
+  final Completer<void> release = Completer<void>();
+  String? blockedKey;
+  bool _blocked = false;
+
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) async {
+    if (!_blocked && key == 'flutter.course_refs') {
+      _blocked = true;
+      blockedKey = key;
+      started.complete();
+      await release.future;
+    }
+    return super.setValue(valueType, key, value);
+  }
+}
+
+Assignment journalItem(String id) => Assignment(
+    id: 'cx:work:1:2:$id',
+    courseName: '数学',
+    title: id,
+    deadlineAt: DateTime(2030, 11, 6, 23, 59),
+    requirementsText: '',
+    status: 'pending',
+    lastSyncedAt: DateTime(2030, 11, 1));
+
+CourseRef course(String name) =>
+    CourseRef(courseId: name, clazzId: '1', name: name);

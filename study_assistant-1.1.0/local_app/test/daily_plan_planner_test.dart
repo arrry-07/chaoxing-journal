@@ -227,6 +227,60 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('plannerOperableAt320x640WithKeyboardAndDoubleText',
+      (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(
+          textScaler: const TextScaler.linear(2),
+          viewInsets: const EdgeInsets.only(bottom: 300),
+        ),
+        child: child!,
+      ),
+      home: DailyPlanScreen(store: store),
+    ));
+    await tester.scrollUntilVisible(
+      find.text('安排学习时间'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('安排学习时间'));
+    await tester.pumpAndSettle();
+
+    await _scrollPlannerTo(
+      tester,
+      find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')),
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')),
+    );
+    await tester.pumpAndSettle();
+    await _scrollPlannerTo(
+      tester,
+      find.byKey(const ValueKey('planning-budget')),
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('planning-budget')),
+      '60',
+    );
+    await _scrollPlannerTo(
+      tester,
+      find.byKey(const ValueKey('planning-generate')),
+    );
+    await tester.tap(find.byKey(const ValueKey('planning-generate')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('查看安排'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('planner validates available time and estimated duration',
       (tester) async {
     final store = await _setup(f.Session());

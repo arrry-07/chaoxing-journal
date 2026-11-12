@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import '../app/unsaved_edit_guard.dart';
 import '../models/personal_workspace.dart';
 import '../services/assignment_store.dart';
 import '../services/external_link_service.dart';
@@ -22,6 +23,8 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
   late List<PersonalLink> links, files;
   bool busy = false;
   bool _dirty = false;
+  bool _saving = false;
+  UnsavedEditGuard? _leaveGuard;
   String? message;
   @override
   void initState() {
@@ -36,11 +39,37 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
     files = [...data.files];
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final guard = UnsavedEditGuardScope.maybeOf(context);
+    if (identical(guard, _leaveGuard)) return;
+    _leaveGuard?.unregister(this);
+    _leaveGuard = guard;
+    _leaveGuard?.register(
+      this,
+      hasUnsavedChanges: () => _dirty || _saving,
+      confirmDiscard: _confirmDiscard,
+      isStale: () =>
+          !widget.store.isAuthenticated || widget.store.accountEpoch != epoch,
+    );
+  }
+
+  Future<bool> _requestLeave() async {
+    final guard = _leaveGuard;
+    if (guard != null) return guard.confirmLeave();
+    return _confirmDiscard();
+  }
+
   void _markDirty() {
     if (!_dirty && mounted) setState(() => _dirty = true);
   }
 
   Future<bool> _confirmDiscard() async {
+    if (_saving) {
+      setState(() => message = '个人记录正在保存，请稍候再离开');
+      return false;
+    }
     final result = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -61,6 +90,7 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
 
   @override
   void dispose() {
+    _leaveGuard?.unregister(this);
     note.removeListener(_markDirty);
     note.dispose();
     super.dispose();
@@ -140,6 +170,7 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
     final editorRoute = ModalRoute.of(context);
     setState(() {
       busy = true;
+      _saving = true;
       message = null;
     });
     final value = PersonalWork(
@@ -154,6 +185,7 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
     if (saved) await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     if (saved) {
+      _saving = false;
       _dirty = false;
       if (editorRoute?.isCurrent == false) {
         setState(() {
@@ -178,16 +210,17 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
     }
     setState(() {
       busy = false;
+      _saving = false;
       message = '未能保存，输入仍保留。账号变化时请返回后重新编辑。';
     });
   }
 
   @override
   Widget build(BuildContext context) => PopScope(
-      canPop: !_dirty,
+      canPop: !_dirty && !_saving,
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop || !_dirty) return;
-        final leave = await _confirmDiscard();
+        if (didPop || (!_dirty && !_saving)) return;
+        final leave = await _requestLeave();
         if (!leave || !context.mounted) return;
         final router = GoRouter.maybeOf(context);
         if (router != null && router.canPop()) {

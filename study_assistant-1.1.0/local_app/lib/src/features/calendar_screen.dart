@@ -5,6 +5,7 @@ import '../app/journal.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
+import 'assignment_list_screen.dart';
 import 'widgets/assignment_card.dart';
 import 'manual_agenda_screen.dart';
 
@@ -44,6 +45,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 a.deadlineTrusted &&
                 !a.deadlineReadFailed)
             .toList();
+        final noDeadlineCount = all
+            .where((a) => AssignmentRecoveryScope.noDeadline.matches(a))
+            .length;
+        final pendingDeadlineCount = all
+            .where((a) => AssignmentRecoveryScope.deadlinePending.matches(a))
+            .length;
         final agenda = selected == null
             ? dated.where((a) {
                 final d = AssignmentQuery.dayKey(a.deadlineAt!);
@@ -217,10 +224,29 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         '${e.kind == 'exam' ? '手动考试' : '个人待办'} · ${e.title}'),
                     subtitle: Text(manualTime(e.at)),
                     onTap: () => context.push('/agenda')),
-              if (all.any((a) => a.deadlineAt == null))
-                TextButton(
-                    onPressed: () => context.go('/assignments'),
-                    child: const Text('查看无截止 / 待确认作业')),
+              if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
+                const Divider(height: 24),
+                const Text('待核对作业', style: Journal.section),
+                if (noDeadlineCount > 0)
+                  TextButton.icon(
+                      key: const ValueKey('calendar-no-deadline-scope'),
+                      onPressed: () => context.go(_recoveryLocation(
+                          AssignmentRecoveryScope.noDeadline)),
+                      icon: const Icon(Icons.event_busy_outlined),
+                      label: Text('无截止（$noDeadlineCount）')),
+                if (pendingDeadlineCount > 0)
+                  TextButton.icon(
+                      key: const ValueKey('calendar-deadline-pending-scope'),
+                      onPressed: () => context.go(_recoveryLocation(
+                          AssignmentRecoveryScope.deadlinePending)),
+                      icon: const Icon(Icons.help_outline),
+                      label: Text('截止待确认（$pendingDeadlineCount）')),
+              ],
             ]);
       });
+
+  String _recoveryLocation(AssignmentRecoveryScope scope) =>
+      Uri(path: '/assignments', queryParameters: {
+        AssignmentRecoveryScope.queryParameter: scope.queryValue,
+      }).toString();
 }

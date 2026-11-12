@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../app/unsaved_edit_guard.dart';
 import '../models/study_notebook.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
@@ -163,6 +164,8 @@ class _EditorState extends State<ManualEntryEditor> {
   late DateTime? at = widget.entry?.at;
   bool busy = false;
   bool _dirty = false;
+  bool _saving = false;
+  UnsavedEditGuard? _leaveGuard;
   String? error;
 
   @override
@@ -174,11 +177,37 @@ class _EditorState extends State<ManualEntryEditor> {
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final guard = UnsavedEditGuardScope.maybeOf(context);
+    if (identical(guard, _leaveGuard)) return;
+    _leaveGuard?.unregister(this);
+    _leaveGuard = guard;
+    _leaveGuard?.register(
+      this,
+      hasUnsavedChanges: () => _dirty || _saving,
+      confirmDiscard: _confirmDiscard,
+      isStale: () =>
+          !widget.store.isAuthenticated || widget.store.accountEpoch != epoch,
+    );
+  }
+
+  Future<bool> _requestLeave() async {
+    final guard = _leaveGuard;
+    if (guard != null) return guard.confirmLeave();
+    return _confirmDiscard();
+  }
+
   void _markDirty() {
     if (!_dirty && mounted) setState(() => _dirty = true);
   }
 
   Future<bool> _confirmDiscard() async {
+    if (_saving) {
+      setState(() => error = '个人安排正在保存，请稍候再离开');
+      return false;
+    }
     final result = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -199,6 +228,7 @@ class _EditorState extends State<ManualEntryEditor> {
 
   @override
   void dispose() {
+    _leaveGuard?.unregister(this);
     for (final c in [title, course, location, note, minutes]) {
       c.removeListener(_markDirty);
       c.dispose();
@@ -235,6 +265,7 @@ class _EditorState extends State<ManualEntryEditor> {
     final editorRoute = ModalRoute.of(context);
     setState(() {
       busy = true;
+      _saving = true;
       error = null;
     });
     final e = ManualEntry(
@@ -252,6 +283,7 @@ class _EditorState extends State<ManualEntryEditor> {
         (n) => n.withEntries([...n.entries.where((v) => v.id != e.id), e]),
         epoch);
     if (ok) {
+      _saving = false;
       _dirty = false;
       await WidgetsBinding.instance.endOfFrame;
     }
@@ -271,16 +303,17 @@ class _EditorState extends State<ManualEntryEditor> {
     }
     setState(() {
       busy = false;
+      _saving = false;
       error = feedback;
     });
   }
 
   @override
   Widget build(BuildContext context) => PopScope(
-      canPop: !_dirty,
+      canPop: !_dirty && !_saving,
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop || !_dirty) return;
-        final leave = await _confirmDiscard();
+        if (didPop || (!_dirty && !_saving)) return;
+        final leave = await _requestLeave();
         if (leave && context.mounted) Navigator.of(context).pop();
       },
       child: Scaffold(

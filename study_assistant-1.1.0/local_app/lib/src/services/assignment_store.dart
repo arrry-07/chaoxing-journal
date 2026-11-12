@@ -1669,6 +1669,15 @@ class AssignmentStore extends ChangeNotifier {
     }
 
     attachProgress();
+    var savingStageMarked = false;
+    // Persistence begins with the course cache; mark that stage before the
+    // first write can suspend, not only before the journal merge.
+    void markSavingStage() {
+      if (savingStageMarked) return;
+      savingStageMarked = true;
+      _markHomePreviewSaving();
+    }
+
     try {
       incoming = await chaoxingClient.fetchAssignments();
     } on ChaoxingAuthenticationException {
@@ -1684,7 +1693,7 @@ class AssignmentStore extends ChangeNotifier {
       if (generation == _generation &&
           !_disposed &&
           chaoxingClient.hasCourseResponse) {
-        _courses = chaoxingClient.courses
+        final nextCourses = chaoxingClient.courses
             .map((c) => CourseRef(
                 courseId: c.courseId, clazzId: c.clazzId, name: c.courseName))
             .toList();
@@ -1692,7 +1701,9 @@ class AssignmentStore extends ChangeNotifier {
         if (account == null) {
           throw StateError('当前学习通账号已变化，课程资料未保存');
         }
-        await repository.saveCourses(_courses, account: account);
+        markSavingStage();
+        await repository.saveCourses(nextCourses, account: account);
+        if (generation == _generation && !_disposed) _courses = nextCourses;
       }
     }
     if (generation != _generation || _disposed) return;
@@ -1708,7 +1719,7 @@ class AssignmentStore extends ChangeNotifier {
     if (generation != _generation || _disposed) return;
     final before = [..._assignments, ..._hiddenAssignments];
     await _markReminderMutationPending();
-    _markHomePreviewSaving();
+    markSavingStage();
     await repository.mergeAndSave(
       incoming,
       completeSync: warning == null,
@@ -1975,22 +1986,25 @@ class AssignmentStore extends ChangeNotifier {
     } catch (error) {
       _error = _friendlyError(error);
       if (syncReport.phase == SyncPhase.running) {
+        final storageFailure = error is LocalStorageWriteException;
         syncReport = SyncReport(
             phase: SyncPhase.failed,
             attemptedAt: syncReport.attemptedAt ?? _lastSyncAttemptAt,
             lastDataSuccessAt: syncReport.lastDataSuccessAt,
             lastFullSuccessAt: _lastSyncAt,
-            issues: chaoxingClient.issues.isNotEmpty
-                ? List.of(chaoxingClient.issues)
-                : [
-                    error is SyncReadException
-                        ? error.issue
-                        : SyncIssue(
-                            error is ChaoxingAuthenticationException
-                                ? SyncIssueKind.authExpired
-                                : SyncIssueKind.network,
-                            _error!)
-                  ]);
+            issues: [
+              ...chaoxingClient.issues,
+              if (storageFailure)
+                SyncIssue(SyncIssueKind.storage, _error!, stage: 'persistence')
+              else if (chaoxingClient.issues.isEmpty)
+                error is SyncReadException
+                    ? error.issue
+                    : SyncIssue(
+                        error is ChaoxingAuthenticationException
+                            ? SyncIssueKind.authExpired
+                            : SyncIssueKind.network,
+                        _error!)
+            ]);
         await _updateServerBackoff(syncReport.issues);
         await _recordBackgroundAttempt(
           attemptedAt: syncReport.attemptedAt ?? DateTime.now(),
@@ -2157,6 +2171,11 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   String _friendlyError(Object error) {
+    if (error is LocalStorageWriteException) {
+      // Never reclassify a local write failure as a network problem just
+      // because the platform error mentions a timeout or connection.
+      return error.message;
+    }
     final raw = error.toString().replaceFirst('Bad state: ', '');
     if (raw.contains('SocketException') ||
         raw.contains('Failed host lookup') ||
@@ -2179,6 +2198,7 @@ class AssignmentStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    chaoxingClient.cancelActiveRequests();
     _clearHomePreview();
     _generation++;
     super.dispose();

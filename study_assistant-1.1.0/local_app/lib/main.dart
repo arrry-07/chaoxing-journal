@@ -20,6 +20,7 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'src/app/app_deep_links.dart';
 import 'src/app/app_shell.dart';
+import 'src/app/unsaved_edit_guard.dart';
 import 'src/features/assignment_detail_screen.dart';
 import 'src/features/assignment_list_screen.dart';
 import 'src/features/calendar_screen.dart';
@@ -172,6 +173,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     with WidgetsBindingObserver {
   AssignmentStore get assignmentStore => widget.assignmentStore;
   final _navigatorKey = GlobalKey<NavigatorState>();
+  final _leaveGuard = UnsavedEditGuard();
   late final GoRouter _router;
   late final AppUpdateController _updates;
   bool _pendingUpdatePrompt = false;
@@ -223,14 +225,17 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
 
   @override
   Widget build(BuildContext context) {
-    return AppUpdateScope(
-        controller: _updates,
-        child: MaterialApp.router(
-          title: '学习通课业手记',
-          debugShowCheckedModeBanner: false,
-          theme: StudyAssistantTheme.light,
-          routerConfig: _router,
-        ));
+    return UnsavedEditGuardScope(
+      guard: _leaveGuard,
+      child: AppUpdateScope(
+          controller: _updates,
+          child: MaterialApp.router(
+            title: '学习通课业手记',
+            debugShowCheckedModeBanner: false,
+            theme: StudyAssistantTheme.light,
+            routerConfig: _router,
+          )),
+    );
   }
 
   GoRouter _buildRouter() {
@@ -250,11 +255,13 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
         ShellRoute(
           builder: (_, __, child) => AppShell(
             assignmentStore: assignmentStore,
+            leaveGuard: _leaveGuard,
             child: child,
           ),
           routes: [
             GoRoute(
                 path: '/agenda',
+                onExit: (_, __) => _leaveGuard.confirmLeave(),
                 builder: (_, __) => ManualAgendaScreen(store: assignmentStore)),
             GoRoute(
                 path: '/terms',
@@ -264,6 +271,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                 builder: (_, __) => DailyPlanScreen(store: assignmentStore)),
             GoRoute(
                 path: '/personal/:id',
+                onExit: (_, __) => _leaveGuard.confirmLeave(),
                 builder: (_, s) => PersonalWorkScreen(
                     store: assignmentStore,
                     assignmentId: s.pathParameters['id']!)),
@@ -303,6 +311,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             ),
             GoRoute(
               path: '/reminders',
+              onExit: (_, __) => _leaveGuard.confirmLeave(),
               builder: (_, __) => ReminderSettingsScreen(
                 assignmentStore: assignmentStore,
               ),
@@ -350,21 +359,25 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   }
 
   void _handleNotificationPayload(String payload) {
+    unawaited(_navigateForNotification(payload));
+  }
+
+  Future<void> _navigateForNotification(String payload) async {
+    final String? location;
     if (payload.startsWith('p:')) {
-      _router.go('/agenda');
-      return;
+      location = '/agenda';
+    } else if (payload == 'd:summary') {
+      location = '/assignments';
+    } else {
+      final uri = Uri.tryParse(payload);
+      location =
+          uri == null ? null : AppDeepLinks.normalizeIncomingLocation(uri);
     }
-    if (payload == 'd:summary') {
-      _router.go('/assignments');
-      return;
-    }
-    final uri = Uri.tryParse(payload);
-    if (uri == null) return;
-    final location = AppDeepLinks.normalizeIncomingLocation(
-      uri,
-    );
-    if (location != null) {
-      _router.go(location);
-    }
+    if (location == null) return;
+    // A dirty editor must not be replaced by a notification deep link without
+    // the same confirmation used for back navigation.
+    if (!await _leaveGuard.confirmLeave()) return;
+    if (!mounted) return;
+    _router.go(location);
   }
 }
