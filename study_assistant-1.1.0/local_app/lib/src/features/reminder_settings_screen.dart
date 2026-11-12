@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
+import '../app/unsaved_edit_guard.dart';
 import '../models/reminder_rule_limits.dart';
 
 import '../services/assignment_store.dart';
@@ -35,23 +36,86 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   final _customHoursController = TextEditingController();
   final _customMinutesController = TextEditingController();
   final Set<int> _offsets = {};
+  late final Set<int> _savedOffsets;
+  late final int epoch;
+  late final String? _accountHashAtStart;
   bool _saving = false;
+  bool _savingRules = false;
+  UnsavedEditGuard? _leaveGuard;
   bool? _listenerGranted;
+
+  bool get _ruleDirty =>
+      _offsets.length != _savedOffsets.length ||
+      !_offsets.every(_savedOffsets.contains);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    epoch = widget.assignmentStore.accountEpoch;
+    _accountHashAtStart = widget.assignmentStore.accountHash;
     _offsets.addAll(widget.assignmentStore.reminderOffsetsMinutes);
+    _savedOffsets = Set<int>.of(widget.assignmentStore.reminderOffsetsMinutes);
     unawaited(_refreshListenerGranted());
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final guard = UnsavedEditGuardScope.maybeOf(context);
+    if (identical(guard, _leaveGuard)) return;
+    _leaveGuard?.unregister(this);
+    _leaveGuard = guard;
+    _leaveGuard?.register(
+      this,
+      hasUnsavedChanges: () => _ruleDirty || _savingRules,
+      draftRevision: () => (_offsets.toList()..sort()).join(','),
+      blocksNavigation: () => _savingRules,
+      confirmDiscard: _confirmLeaveDraft,
+      isStale: () =>
+          !widget.assignmentStore.isAuthenticated ||
+          widget.assignmentStore.accountEpoch != epoch ||
+          widget.assignmentStore.accountHash != _accountHashAtStart,
+    );
+  }
+
+  @override
   void dispose() {
+    _leaveGuard?.unregister(this);
     WidgetsBinding.instance.removeObserver(this);
     _customHoursController.dispose();
     _customMinutesController.dispose();
     super.dispose();
+  }
+
+  Future<bool> _requestLeave() async {
+    final guard = _leaveGuard;
+    if (guard != null) return guard.confirmLeave();
+    return _confirmLeaveDraft();
+  }
+
+  Future<bool> _confirmLeaveDraft() async {
+    if (_savingRules) {
+      _showMessage('提醒规则正在保存，请稍候');
+      return false;
+    }
+    final result = await showUnsavedEditDialog(
+      context: context,
+      guard: _leaveGuard,
+      builder: (c) => AlertDialog(
+        title: const Text('放弃未保存的提醒规则？'),
+        content: const Text('当前勾选和自定义提醒尚未保存，已保存的规则集仍会保留。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('继续编辑')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('放弃修改')),
+        ],
+      ),
+    );
+    return result == true;
   }
 
   @override
@@ -72,308 +136,347 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
         .toList()
       ..sort((a, b) => b.compareTo(a));
 
-    return Scaffold(
-        appBar: AppBar(
-            leading: IconButton(
-                tooltip: '返回我的',
-                icon: const Icon(Icons.arrow_back),
-                onPressed: () =>
-                    context.canPop() ? context.pop() : context.go('/profile'))),
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const JournalHeading('提醒设置',
-                  eyebrow: 'CAMPUS JOURNAL   /   MEMO'),
-              const SizedBox(height: 6),
-              Text(
-                '保存后会重新安排所有未完成作业的本地通知，自定义提醒支持精确到分钟',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              if (ReminderRuleStore.requiresReview(_offsets.toList())) ...[
-                const SizedBox(height: 12),
-                Card(
-                  color: Theme.of(context).colorScheme.secondaryContainer,
-                  child: const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Text(
-                      '旧版提醒规则已保留，但超过365天的规则目前不会参与提醒调度。请调整到365天以内后再使用。\n'
-                      '当前版本每份作业最多使用32条、最长365天；保存前请移除超出范围的规则。',
+    return PopScope(
+        canPop: !_ruleDirty && !_savingRules,
+        onPopInvokedWithResult: (didPop, result) async {
+          if (didPop) return;
+          if (_savingRules) {
+            _showMessage('提醒规则正在保存，请稍候');
+            return;
+          }
+          if (!_ruleDirty) return;
+          final leave = await _requestLeave();
+          if (!leave || !context.mounted) return;
+          final router = GoRouter.maybeOf(context);
+          if (router != null && router.canPop()) {
+            router.pop();
+          } else if (router != null) {
+            router.go('/profile');
+          } else if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+        },
+        child: Scaffold(
+            appBar: AppBar(
+                leading: IconButton(
+                    tooltip: '返回我的',
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () => context.canPop()
+                        ? context.pop()
+                        : context.go('/profile'))),
+            body: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const JournalHeading('提醒设置',
+                      eyebrow: 'CAMPUS JOURNAL   /   MEMO'),
+                  const SizedBox(height: 6),
+                  Text(
+                    '保存后会重新安排所有未完成作业的本地通知，自定义提醒支持精确到分钟',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  if (ReminderRuleStore.requiresReview(_offsets.toList())) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      color: Theme.of(context).colorScheme.secondaryContainer,
+                      child: const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text(
+                          '旧版提醒规则已保留，但超过365天的规则目前不会参与提醒调度。请调整到365天以内后再使用。\n'
+                          '当前版本每份作业最多使用32条、最长365天；保存前请移除超出范围的规则。',
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  if (widget.assignmentStore.notificationPrivacyPending) ...[
+                    const Text('旧详细提醒尚未清理，隐私设置未完全生效。'),
+                    TextButton(
+                        onPressed: _saving ? null : () => _savePrivacy(false),
+                        child: const Text('重试清理旧提醒')),
+                  ],
+                  SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('通知显示详细内容'),
+                      subtitle:
+                          const Text('默认隐藏课程、作业与个人事项详情；开启后可能在锁屏显示。系统设置仍会影响显示。'),
+                      value: widget.assignmentStore.notificationDetails,
+                      onChanged: _saving ? null : _savePrivacy),
+                  OutlinedButton.icon(
+                      onPressed: () => context.push('/reminder-health'),
+                      icon: const Icon(Icons.health_and_safety_outlined),
+                      label: const Text('提醒体检与每日摘要')),
+                  const SizedBox(height: 16),
+                  Text(
+                    '作业后台检查',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Card(
+                    child: Column(
+                      children: [
+                        SwitchListTile(
+                          key: const ValueKey('background-check-switch'),
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 12),
+                          title: const Text('白天后台检查'),
+                          subtitle: const Text(
+                            '08:00 至次日 00:00 低频检查；默认每 4 小时，不承诺整点执行',
+                          ),
+                          value: widget.assignmentStore.backgroundCheckEnabled,
+                          onChanged:
+                              _saving ? null : _saveBackgroundCheckEnabled,
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final option in const {
+                                120: '2 小时',
+                                240: '4 小时',
+                                360: '6 小时',
+                              }.entries)
+                                ChoiceChip(
+                                  key: ValueKey(
+                                      'background-interval-${option.key}'),
+                                  label: Text(option.value),
+                                  selected: widget.assignmentStore
+                                          .backgroundCheckIntervalMinutes ==
+                                      option.key,
+                                  onSelected: _saving ||
+                                          !widget.assignmentStore
+                                              .backgroundCheckEnabled
+                                      ? null
+                                      : (_) =>
+                                          _saveBackgroundInterval(option.key),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        SwitchListTile(
+                          key: const ValueKey('notification-listener-switch'),
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 12),
+                          title: const Text('学习通通知触发核对'),
+                          subtitle: Text(
+                            _listenerGranted == true
+                                ? '已授权；只处理学习通通知信号，正文不落盘'
+                                : '需单独授予系统通知使用权；默认关闭',
+                          ),
+                          value: widget
+                              .assignmentStore.notificationListenerEnabled,
+                          onChanged: _saving ? null : _saveNotificationListener,
+                        ),
+                        const Divider(height: 1),
+                        SwitchListTile(
+                          key: const ValueKey('new-assignment-switch'),
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 12),
+                          title: const Text('新增正式作业提醒'),
+                          subtitle: const Text(
+                            '首次完整同步只建立基线；之后同一次检查发现多条时合并提醒',
+                          ),
+                          value: widget
+                              .assignmentStore.newAssignmentReminderEnabled,
+                          onChanged:
+                              _saving ? null : _saveNewAssignmentReminder,
+                        ),
+                      ],
                     ),
                   ),
-                ),
-              ],
-              const SizedBox(height: 16),
-              if (widget.assignmentStore.notificationPrivacyPending) ...[
-                const Text('旧详细提醒尚未清理，隐私设置未完全生效。'),
-                TextButton(
-                    onPressed: _saving ? null : () => _savePrivacy(false),
-                    child: const Text('重试清理旧提醒')),
-              ],
-              SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('通知显示详细内容'),
-                  subtitle:
-                      const Text('默认隐藏课程、作业与个人事项详情；开启后可能在锁屏显示。系统设置仍会影响显示。'),
-                  value: widget.assignmentStore.notificationDetails,
-                  onChanged: _saving ? null : _savePrivacy),
-              OutlinedButton.icon(
-                  onPressed: () => context.push('/reminder-health'),
-                  icon: const Icon(Icons.health_and_safety_outlined),
-                  label: const Text('提醒体检与每日摘要')),
-              const SizedBox(height: 16),
-              Text(
-                '作业后台检查',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Card(
-                child: Column(
-                  children: [
-                    SwitchListTile(
-                      key: const ValueKey('background-check-switch'),
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 12),
-                      title: const Text('白天后台检查'),
-                      subtitle: const Text(
-                        '08:00 至次日 00:00 低频检查；默认每 4 小时，不承诺整点执行',
-                      ),
-                      value: widget.assignmentStore.backgroundCheckEnabled,
-                      onChanged: _saving ? null : _saveBackgroundCheckEnabled,
+                  Text(
+                    '提醒权限',
+                    style: Theme.of(
+                      context,
+                    )
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 10),
+                  Card(
+                    child: Column(
+                      children: [
+                        ListTile(
+                          leading:
+                              const Icon(Icons.notifications_active_outlined),
+                          title: const Text('通知权限'),
+                          subtitle: const Text('允许系统通知，关闭后不会弹出提醒'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: _requestNotificationPermission,
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading:
+                              const Icon(Icons.notifications_paused_outlined),
+                          title: const Text('通知使用权'),
+                          subtitle: Text(
+                            _listenerGranted == true
+                                ? '系统已授权学习通通知信号核对'
+                                : '未授权；不影响白天定时检查',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () async {
+                            await _openPermissionSettings(
+                                widget.permissionSettingsService
+                                    .openNotificationListenerSettingsResult,
+                                destination: '通知使用权设置');
+                            await _refreshListenerGranted();
+                          },
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: const Icon(Icons.alarm_on_outlined),
+                          title: const Text('精确闹钟'),
+                          subtitle: const Text('用于按分钟准时提醒，关闭后系统可能延迟通知'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _openPermissionSettings(
+                            widget.permissionSettingsService
+                                .openExactAlarmSettingsResult,
+                            destination: '精确闹钟设置',
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: const Icon(Icons.lock_clock_outlined),
+                          title: const Text('截止提醒通知渠道'),
+                          subtitle: const Text(
+                            '控制截止提醒的锁屏、横幅和声音；不提供独立锁屏设置页',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _openPermissionSettings(
+                            widget.permissionSettingsService
+                                .openLockScreenNotificationSettingsResult,
+                            destination: '截止提醒通知渠道',
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: const Icon(Icons.battery_saver_outlined),
+                          title: const Text('电池优化'),
+                          subtitle: const Text(
+                            '打开系统电池优化列表；请找到“学习通课业手记”并自行核对',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _openPermissionSettings(
+                            widget.permissionSettingsService
+                                .openBatterySettingsResult,
+                            destination: '电池优化设置',
+                          ),
+                        ),
+                      ],
                     ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
+                  ),
+                  const SizedBox(height: 16),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Column(
                         children: [
-                          for (final option in const {
-                            120: '2 小时',
-                            240: '4 小时',
-                            360: '6 小时',
-                          }.entries)
-                            ChoiceChip(
-                              key:
-                                  ValueKey('background-interval-${option.key}'),
-                              label: Text(option.value),
-                              selected: widget.assignmentStore
-                                      .backgroundCheckIntervalMinutes ==
-                                  option.key,
-                              onSelected: _saving ||
-                                      !widget.assignmentStore
-                                          .backgroundCheckEnabled
+                          for (final item in _presetOffsets.entries)
+                            CheckboxListTile(
+                              value: _offsets.contains(item.key),
+                              onChanged: _saving
                                   ? null
-                                  : (_) => _saveBackgroundInterval(option.key),
+                                  : (checked) =>
+                                      _toggleOffset(item.key, checked),
+                              title: Text(item.value),
                             ),
                         ],
                       ),
                     ),
-                    const Divider(height: 1),
-                    SwitchListTile(
-                      key: const ValueKey('notification-listener-switch'),
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 12),
-                      title: const Text('学习通通知触发核对'),
-                      subtitle: Text(
-                        _listenerGranted == true
-                            ? '已授权；只处理学习通通知信号，正文不落盘'
-                            : '需单独授予系统通知使用权；默认关闭',
-                      ),
-                      value: widget.assignmentStore.notificationListenerEnabled,
-                      onChanged: _saving ? null : _saveNotificationListener,
-                    ),
-                    const Divider(height: 1),
-                    SwitchListTile(
-                      key: const ValueKey('new-assignment-switch'),
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 12),
-                      title: const Text('新增正式作业提醒'),
-                      subtitle: const Text(
-                        '首次完整同步只建立基线；之后同一次检查发现多条时合并提醒',
-                      ),
-                      value:
-                          widget.assignmentStore.newAssignmentReminderEnabled,
-                      onChanged: _saving ? null : _saveNewAssignmentReminder,
-                    ),
-                  ],
-                ),
-              ),
-              Text(
-                '提醒权限',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 10),
-              Card(
-                child: Column(
-                  children: [
-                    ListTile(
-                      leading: const Icon(Icons.notifications_active_outlined),
-                      title: const Text('通知权限'),
-                      subtitle: const Text('允许系统通知，关闭后不会弹出提醒'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: _requestNotificationPermission,
-                    ),
-                    const Divider(height: 1),
-                    ListTile(
-                      leading: const Icon(Icons.notifications_paused_outlined),
-                      title: const Text('通知使用权'),
-                      subtitle: Text(
-                        _listenerGranted == true
-                            ? '系统已授权学习通通知信号核对'
-                            : '未授权；不影响白天定时检查',
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () async {
-                        await _openPermissionSettings(
-                            widget.permissionSettingsService
-                                .openNotificationListenerSettingsResult,
-                            destination: '通知使用权设置');
-                        await _refreshListenerGranted();
-                      },
-                    ),
-                    const Divider(height: 1),
-                    ListTile(
-                      leading: const Icon(Icons.alarm_on_outlined),
-                      title: const Text('精确闹钟'),
-                      subtitle: const Text('用于按分钟准时提醒，关闭后系统可能延迟通知'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => _openPermissionSettings(
-                        widget.permissionSettingsService
-                            .openExactAlarmSettingsResult,
-                        destination: '精确闹钟设置',
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    ListTile(
-                      leading: const Icon(Icons.lock_clock_outlined),
-                      title: const Text('截止提醒通知渠道'),
-                      subtitle: const Text(
-                        '控制截止提醒的锁屏、横幅和声音；不提供独立锁屏设置页',
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => _openPermissionSettings(
-                        widget.permissionSettingsService
-                            .openLockScreenNotificationSettingsResult,
-                        destination: '截止提醒通知渠道',
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    ListTile(
-                      leading: const Icon(Icons.battery_saver_outlined),
-                      title: const Text('电池优化'),
-                      subtitle: const Text(
-                        '打开系统电池优化列表；请找到“学习通课业手记”并自行核对',
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => _openPermissionSettings(
-                        widget.permissionSettingsService
-                            .openBatterySettingsResult,
-                        destination: '电池优化设置',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Column(
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '自定义提醒',
+                    style: Theme.of(
+                      context,
+                    )
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
                     children: [
-                      for (final item in _presetOffsets.entries)
-                        CheckboxListTile(
-                          value: _offsets.contains(item.key),
-                          onChanged: (checked) =>
-                              _toggleOffset(item.key, checked),
-                          title: Text(item.value),
+                      Expanded(
+                        child: TextField(
+                          controller: _customHoursController,
+                          enabled: !_saving,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            hintText: '小时',
+                            prefixIcon: Icon(Icons.schedule),
+                          ),
                         ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _customMinutesController,
+                          enabled: !_saving,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            hintText: '分钟',
+                            prefixIcon: Icon(Icons.timer_outlined),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: _saving ? null : _addCustomOffset,
+                        child: const Text('添加'),
+                      ),
                     ],
                   ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                '自定义提醒',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _customHoursController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        hintText: '小时',
-                        prefixIcon: Icon(Icons.schedule),
+                  if (customOffsets.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      child: Column(
+                        children: [
+                          for (final offset in customOffsets)
+                            ListTile(
+                              leading: const Icon(
+                                  Icons.notifications_active_outlined),
+                              title: Text(_labelFor(offset)),
+                              trailing: IconButton(
+                                onPressed: _saving
+                                    ? null
+                                    : () => _removeOffset(offset),
+                                icon: const Icon(Icons.delete_outline),
+                                tooltip: '删除',
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: _customMinutesController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        hintText: '分钟',
-                        prefixIcon: Icon(Icons.timer_outlined),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: _addCustomOffset,
-                    child: const Text('添加'),
+                  ],
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    onPressed: _offsets.isEmpty || _saving ? null : _save,
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save),
+                    label: Text(_saving ? '保存中' : '保存提醒规则'),
                   ),
                 ],
               ),
-              if (customOffsets.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Card(
-                  child: Column(
-                    children: [
-                      for (final offset in customOffsets)
-                        ListTile(
-                          leading:
-                              const Icon(Icons.notifications_active_outlined),
-                          title: Text(_labelFor(offset)),
-                          trailing: IconButton(
-                            onPressed: () =>
-                                setState(() => _offsets.remove(offset)),
-                            icon: const Icon(Icons.delete_outline),
-                            tooltip: '删除',
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-              const SizedBox(height: 20),
-              FilledButton.icon(
-                onPressed: _offsets.isEmpty || _saving ? null : _save,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.save),
-                label: Text(_saving ? '保存中' : '保存提醒规则'),
-              ),
-            ],
-          ),
-        ));
+            )));
   }
 
   void _toggleOffset(int offset, bool? checked) {
+    if (_saving) return;
     if ((checked ?? false) &&
         !_offsets.contains(offset) &&
         _offsets.length >= ReminderRuleLimits.maxRuleCount) {
@@ -389,7 +492,13 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     });
   }
 
+  void _removeOffset(int offset) {
+    if (_saving) return;
+    setState(() => _offsets.remove(offset));
+  }
+
   void _addCustomOffset() {
+    if (_saving) return;
     final hours = int.tryParse(_customHoursController.text.trim()) ?? 0;
     final minutes = int.tryParse(_customMinutesController.text.trim()) ?? 0;
     if (hours < 0 || minutes < 0) {
@@ -533,15 +642,27 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (ReminderRuleStore.requiresReview(_offsets.toList())) {
       _showMessage('旧版提醒规则已保留，请先移除超出 32 条或 365 天的规则再保存');
       return;
     }
-    setState(() => _saving = true);
+    final snapshot = List<int>.of(_offsets);
+    setState(() {
+      _saving = true;
+      _savingRules = true;
+    });
     try {
-      final saved =
-          await widget.assignmentStore.saveReminderRule(_offsets.toList());
+      final saved = await widget.assignmentStore.saveReminderRule(snapshot);
       if (!mounted) return;
+      if (saved) {
+        // What was saved is the new clean baseline. Rule controls stay locked
+        // while the write is pending, so the success feedback describes this
+        // exact snapshot.
+        _savedOffsets
+          ..clear()
+          ..addAll(snapshot);
+      }
       final operationError = widget.assignmentStore.operationError;
       final hasWarnings = widget.assignmentStore.serviceWarnings.isNotEmpty ||
           widget.assignmentStore.recoveryWarning != null;
@@ -555,7 +676,12 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     } catch (_) {
       if (mounted) _showMessage('保存失败，请稍后重试；当前选择已保留');
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _savingRules = false;
+        });
+      }
     }
   }
 

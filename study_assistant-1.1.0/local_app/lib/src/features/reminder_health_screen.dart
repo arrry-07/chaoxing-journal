@@ -22,6 +22,11 @@ class _HealthState extends State<ReminderHealthScreen>
   BackgroundReminderHealth? backgroundHealth;
   bool busy = false;
   String? message;
+  String? healthError;
+  String? backgroundError;
+  DateTime? healthCheckedAt;
+  DateTime? backgroundCheckedAt;
+  bool backgroundUnsupported = false;
   late final int epoch;
   @override
   void initState() {
@@ -46,29 +51,120 @@ class _HealthState extends State<ReminderHealthScreen>
     if (!mounted || busy) return;
     setState(() => busy = true);
     ReminderHealth? value;
-    var failed = false;
+    String? healthFailure;
     BackgroundReminderHealth? nativeValue;
+    String? nativeFailure;
     try {
       value = await widget.store.notificationService.inspectHealth();
+    } catch (_) {
+      healthFailure = '系统通知与排期体检暂时无法读取，可重试';
+    }
+    try {
       nativeValue = await widget.store.inspectBackgroundReminderHealth();
     } catch (_) {
-      failed = true;
+      nativeFailure = '原生后台提醒状态暂时无法读取，可重试';
     }
     if (!mounted) return;
+    final now = DateTime.now();
     setState(() {
-      if (value != null) health = value;
-      backgroundHealth = nativeValue;
       busy = false;
-      if (failed) message = '提醒状态读取失败，请稍后重试';
+      healthError = healthFailure;
+      if (healthFailure == null && value != null) {
+        health = value;
+        healthCheckedAt = now;
+      }
+      backgroundError = nativeFailure;
+      if (nativeFailure == null) {
+        // A null result means the bridge is not available on this platform;
+        // it is not an inspection failure and must not keep stale native
+        // counts as if they were current.
+        backgroundHealth = nativeValue;
+        backgroundUnsupported = nativeValue == null;
+        backgroundCheckedAt = nativeValue == null ? null : now;
+      }
     });
   }
 
+  String get inspectionError => [
+        if (healthError != null) healthError!,
+        if (backgroundError != null) backgroundError!,
+      ].join('；');
+
+  bool get hasStaleResult =>
+      (healthError != null && health != null) ||
+      (backgroundError != null && backgroundHealth != null);
+
+  static String _clock(DateTime value) =>
+      '${value.hour.toString().padLeft(2, '0')}:'
+      '${value.minute.toString().padLeft(2, '0')}';
+
+  String get lastResultLabel {
+    final times = [
+      if (healthError != null && health != null) healthCheckedAt,
+      if (backgroundError != null && backgroundHealth != null)
+        backgroundCheckedAt,
+    ].whereType<DateTime>().toList()
+      ..sort();
+    final latest = times.isEmpty ? null : times.last;
+    return latest == null
+        ? '以下标注“上次结果”的数据来自上次成功读取，本次未更新。'
+        : '以下标注“上次结果”的数据来自上次成功读取（${_clock(latest)}），本次未更新。';
+  }
+
   String state(bool? v) => v == null
-      ? '暂时无法读取'
+      ? (healthError != null ? '暂时无法读取，可重试' : '暂时无法读取')
       : v
-          ? '已开启'
-          : '未开启';
-  String channelState(ReminderChannelHealth? value) => value?.label ?? '状态未知';
+          ? healthError != null
+              ? '已开启（上次结果）'
+              : '已开启'
+          : healthError != null
+              ? '未开启（上次结果）'
+              : '未开启';
+  String channelState(ReminderChannelHealth? value) {
+    if (value == null) {
+      return healthError != null ? '暂时无法读取，可重试' : '状态未知';
+    }
+    return healthError != null ? '${value.label}（上次结果）' : value.label;
+  }
+
+  String _nativeText(String Function(BackgroundReminderHealth) read) {
+    final value = backgroundHealth;
+    if (value == null) {
+      if (backgroundUnsupported) return '当前平台不适用';
+      return backgroundError != null ? '暂时无法读取，可重试' : '暂时无法读取';
+    }
+    final text = read(value);
+    return backgroundError != null ? '$text（上次结果）' : text;
+  }
+
+  String get notificationListenerText =>
+      _nativeText((value) => value.notificationListenerEnabled
+          ? value.notificationListenerGranted
+              ? '应用开关已开启，系统已授权'
+              : '应用开关已开启，但系统尚未授权'
+          : '应用中默认关闭');
+
+  String get baselineText =>
+      _nativeText((value) => value.baselineCompleted ? '已建立' : '待首次完整同步');
+
+  String _localCount(int? value) {
+    if (value == null) {
+      return healthError != null ? '暂时无法读取，可重试' : '未知';
+    }
+    return healthError != null ? '$value 条（上次结果）' : '$value 条';
+  }
+
+  String get recoveryText {
+    final value = health;
+    if (value == null) {
+      return healthError != null ? '暂时无法读取，可重试' : '状态未知';
+    }
+    final text = value.scheduleRecoveryPending
+        ? '有未完成的调度事务，旧提醒已保留或正在清理；请重试恢复'
+        : '没有待恢复的调度事务';
+    return healthError != null ? '$text（上次结果）' : text;
+  }
+
   Future<void> summary(bool enabled, int hour, int minute) async {
     if (busy) return;
     setState(() => busy = true);
@@ -99,6 +195,18 @@ class _HealthState extends State<ReminderHealthScreen>
               const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Text('权限开启和已安排不等于一定送达。厂商省电、锁屏设置与应用被强制停止都可能影响提醒。')),
+              if (inspectionError.isNotEmpty)
+                Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Semantics(
+                        liveRegion: true,
+                        child: Text(inspectionError,
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.error)))),
+              if (hasStaleResult)
+                Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(lastResultLabel)),
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('系统通知权限'),
@@ -145,9 +253,7 @@ class _HealthState extends State<ReminderHealthScreen>
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('提醒批次恢复状态'),
-                  subtitle: Text(health?.scheduleRecoveryPending == true
-                      ? '有未完成的调度事务，旧提醒已保留或正在清理；请重试恢复'
-                      : '没有待恢复的调度事务')),
+                  subtitle: Text(recoveryText)),
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('精确提醒权限'),
@@ -161,13 +267,7 @@ class _HealthState extends State<ReminderHealthScreen>
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('学习通通知使用权'),
-                  subtitle: Text(
-                    backgroundHealth?.notificationListenerEnabled == true
-                        ? backgroundHealth?.notificationListenerGranted == true
-                            ? '应用开关已开启，系统已授权'
-                            : '应用开关已开启，但系统尚未授权'
-                        : '应用中默认关闭',
-                  ),
+                  subtitle: Text(notificationListenerText),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _openPermissionSettings(
                         widget.permissionSettingsService
@@ -186,12 +286,12 @@ class _HealthState extends State<ReminderHealthScreen>
                         destination: '电池优化设置',
                       )),
               Text(
-                  '原生作业截止事件：${backgroundHealth?.pendingDeadlineCount ?? health?.pending ?? '未知'} 条\n'
-                  '待处理新增作业事件：${backgroundHealth?.pendingNewCount ?? '未知'} 条\n'
-                  '已安排摘要：${health?.summaryPending ?? '未知'} 条\n'
-                  '已安排个人提醒：${health?.manualPending ?? '未知'} 条\n'
-                  '新增提醒基线：${backgroundHealth == null ? '当前平台不适用' : backgroundHealth!.baselineCompleted ? '已建立' : '待首次完整同步'}\n'
-                  '下次后台检查：${backgroundHealth?.nextCheckAt == null ? widget.store.nextBackgroundCheckAt?.toLocal().toString().substring(0, 16) ?? '未安排' : backgroundHealth!.nextCheckAt!.toLocal().toString().substring(0, 16)}\n'
+                  '原生作业截止事件：${_nativeText((value) => '${value.pendingDeadlineCount} 条')}\n'
+                  '待处理新增作业事件：${_nativeText((value) => '${value.pendingNewCount} 条')}\n'
+                  '已安排摘要：${_localCount(health?.summaryPending)}\n'
+                  '已安排个人提醒：${_localCount(health?.manualPending)}\n'
+                  '新增提醒基线：$baselineText\n'
+                  '下次后台检查：${backgroundHealth?.nextCheckAt == null ? widget.store.nextBackgroundCheckAt?.toLocal().toString().substring(0, 16) ?? '未安排' : backgroundHealth!.nextCheckAt!.toLocal().toString().substring(0, 16)}${backgroundError != null && backgroundHealth?.nextCheckAt != null ? '（上次结果）' : ''}\n'
                   '最近完整同步：${widget.store.lastSyncAt?.toLocal().toString().substring(0, 16) ?? '尚无完整同步'}'),
               if (backgroundHealth?.migrationPending == true)
                 const Padding(

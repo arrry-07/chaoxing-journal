@@ -14,7 +14,12 @@ param(
   [Parameter(Mandatory = $true)][string]$VersionName,
   [Parameter(Mandatory = $true)][int]$VersionCode,
   [Parameter(Mandatory = $true)][ValidateSet('stable', 'manual')][string]$Channel,
-  [Parameter(Mandatory = $true)][string]$BaseUrl,
+  [string]$BaseUrl = '',
+  [string]$ApkUrl = '',
+  # Offline candidate only: never writes the stable entry or proves remote absence.
+  [switch]$InitializeStableBaselinePreflight,
+  [string]$VerifiedLatestEvidencePath = '',
+  [string]$StableEntryPath = '',
   [string]$OutPath = '',
   [string]$ApplicationId = 'com.example.studyassistant.journal',
   [string]$Notes = '',
@@ -26,6 +31,12 @@ param(
   [string]$ExpectedSignerSha256 = 'd36a571510e046dd196d7384f849f82b4fcff05ce3affb334765d5c752265d8a'
 )
 
+$ErrorActionPreference = 'Stop'
+$registeredSigner = 'd36a571510e046dd196d7384f849f82b4fcff05ce3affb334765d5c752265d8a'
+if ($ExpectedSignerSha256.Replace(':', '').ToLowerInvariant() -cne $registeredSigner) {
+  throw 'ExpectedSignerSha256 must remain the registered release certificate.'
+}
+
 if ($VersionName -notmatch '^\d+\.\d+\.\d+$') {
   throw 'VersionName must contain exactly three numeric parts, for example 1.7.3.'
 }
@@ -36,25 +47,46 @@ if ($ApplicationId -ne 'com.example.studyassistant.journal') {
   throw 'ApplicationId must exactly match com.example.studyassistant.journal.'
 }
 
-$baseUri = [System.Uri]$null
-if (-not [System.Uri]::TryCreate($BaseUrl, [System.UriKind]::Absolute, [ref]$baseUri) -or
-    $baseUri.Scheme -ne 'https' -or
-    [string]::IsNullOrWhiteSpace($baseUri.Host) -or
-    -not [string]::IsNullOrWhiteSpace($baseUri.UserInfo) -or
-    -not [string]::IsNullOrWhiteSpace($baseUri.Query) -or
-    -not [string]::IsNullOrWhiteSpace($baseUri.Fragment)) {
-  throw 'BaseUrl must be an HTTPS URL without embedded credentials.'
-}
-if (-not [string]::IsNullOrWhiteSpace($BackupApkUrl)) {
-  $backupUri = [System.Uri]$null
-  if (-not [System.Uri]::TryCreate($BackupApkUrl, [System.UriKind]::Absolute, [ref]$backupUri) -or
-      $backupUri.Scheme -ne 'https' -or
-      [string]::IsNullOrWhiteSpace($backupUri.Host) -or
-      -not [string]::IsNullOrWhiteSpace($backupUri.UserInfo)) {
-    throw 'BackupApkUrl must be an HTTPS URL without embedded credentials.'
+function Assert-HttpsUrl([string]$Value, [string]$Name, [switch]$Base) {
+  $uri = [System.Uri]$null
+  if ($Value -cne $Value.Trim() -or $Value -match '[\x00-\x20\\]' -or
+      -not [System.Uri]::TryCreate($Value, [System.UriKind]::Absolute, [ref]$uri) -or
+      $uri.Scheme -ne 'https' -or [string]::IsNullOrWhiteSpace($uri.Host) -or
+      -not [string]::IsNullOrEmpty($uri.UserInfo) -or
+      -not [string]::IsNullOrEmpty($uri.Fragment) -or
+      ($Base -and -not [string]::IsNullOrEmpty($uri.Query))) {
+    # Do not echo a rejected URL: it might contain a credential.
+    throw "$Name must be an HTTPS URL without embedded credentials or fragments."
   }
 }
+$hasBase = -not [string]::IsNullOrWhiteSpace($BaseUrl)
+$hasApk = -not [string]::IsNullOrWhiteSpace($ApkUrl)
+if ($hasBase -eq $hasApk) {
+  throw 'Provide exactly one of ApkUrl or BaseUrl.'
+}
+if ($hasBase) { Assert-HttpsUrl $BaseUrl 'BaseUrl' -Base }
+if ($hasApk) { Assert-HttpsUrl $ApkUrl 'ApkUrl' }
+if (-not [string]::IsNullOrWhiteSpace($BackupApkUrl)) {
+  Assert-HttpsUrl $BackupApkUrl 'BackupApkUrl'
+}
 
+if ($InitializeStableBaselinePreflight) {
+  if ($Channel -ne 'stable' -or $PSBoundParameters.ContainsKey('PreviousVersionName') -or
+      $PSBoundParameters.ContainsKey('PreviousVersionCode')) {
+    throw 'Baseline preflight requires stable and forbids PreviousVersion inputs.'
+  }
+  if ([string]::IsNullOrWhiteSpace($VerifiedLatestEvidencePath) -or
+      [string]::IsNullOrWhiteSpace($StableEntryPath)) {
+    throw 'Baseline preflight requires VerifiedLatestEvidencePath and StableEntryPath.'
+  }
+  if (Test-Path -LiteralPath $StableEntryPath) {
+    throw 'Stable entry already exists; baseline preflight cannot overwrite it.'
+  }
+} else {
+  if ($PSBoundParameters.ContainsKey('VerifiedLatestEvidencePath') -or
+      $PSBoundParameters.ContainsKey('StableEntryPath')) {
+    throw 'Baseline evidence inputs require InitializeStableBaselinePreflight.'
+  }
 if (-not [string]::IsNullOrWhiteSpace($PreviousVersionName)) {
   if ($PreviousVersionName -notmatch '^\d+\.\d+\.\d+$') {
     throw 'PreviousVersionName must contain exactly three numeric parts.'
@@ -82,7 +114,11 @@ if (-not $newIteration -and
       $current[2] -lt $previous[2]))) {
   throw 'VersionName must not move backwards from PreviousVersionName.'
 }
+}
 
+if (-not (Test-Path -LiteralPath $ApkPath)) {
+  throw "ApkPath does not exist: $ApkPath"
+}
 $apk = Get-Item -LiteralPath $ApkPath
 if ($apk.PSIsContainer -or $apk.Extension -ne '.apk') {
   throw 'ApkPath must point to a file with the .apk extension.'
@@ -100,6 +136,9 @@ if ($read -ne 2 -or $signature[0] -ne 0x50 -or $signature[1] -ne 0x4b) {
 
 function Resolve-AndroidTool([string]$ExplicitPath, [string]$Name) {
   if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
+    if (-not (Test-Path -LiteralPath $ExplicitPath -PathType Leaf)) {
+      throw "$Name path does not exist: $ExplicitPath"
+    }
     $item = Get-Item -LiteralPath $ExplicitPath -ErrorAction Stop
     if ($item.PSIsContainer) {
       throw "$Name path must point to an executable file."
@@ -173,7 +212,43 @@ if (-not $signer.Success -or
 $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $apk.FullName).Hash.ToLowerInvariant()
 $versionKey = "$VersionName-$VersionCode"
 $apkFileName = "chaoxing-journal-$versionKey.apk"
-$apkUrl = "$($BaseUrl.TrimEnd('/'))/$versionKey/$apkFileName"
+if ($hasBase) {
+  $ApkUrl = "$($BaseUrl.TrimEnd('/'))/$versionKey/$apkFileName"
+}
+if ($InitializeStableBaselinePreflight) {
+  # Evidence is a maintainer-verified offline snapshot, NOT remote authentication.
+  # JSON: { verified: true, verifiedAtUtc: ISO8601, sourceUrl: the official
+  # /releases/latest API URL, versionCode: integer, release: raw API response }.
+  # release.assets must include the official APK with size and sha256 digest.
+  $evidence = Get-Content -Raw -LiteralPath $VerifiedLatestEvidencePath | ConvertFrom-Json
+  $official = 'https://api.github.com/repos/arrry-07/chaoxing-journal/releases/latest'
+  $verifiedAt = [DateTimeOffset]::MinValue
+  if ($evidence.verified -isnot [bool] -or $evidence.verified -ne $true -or
+      $evidence.sourceUrl -cne $official -or
+      -not [DateTimeOffset]::TryParse([string]$evidence.verifiedAtUtc, [ref]$verifiedAt) -or
+      $verifiedAt -gt [DateTimeOffset]::UtcNow -or
+      $verifiedAt -lt [DateTimeOffset]::UtcNow.AddHours(-24) -or
+      $evidence.versionCode -ne $VersionCode) {
+    throw 'Baseline requires a maintainer-verified official latest snapshot from the last 24 hours.'
+  }
+  $release = $evidence.release
+  $releaseUrl = "https://github.com/arrry-07/chaoxing-journal/releases/tag/v$VersionName"
+  if ($null -eq $release -or $release.tag_name -cne "v$VersionName" -or
+      $release.html_url -cne $releaseUrl -or
+      $release.draft -isnot [bool] -or $release.draft -ne $false -or
+      $release.prerelease -isnot [bool] -or $release.prerelease -ne $false -or
+      [string]::IsNullOrWhiteSpace([string]$release.published_at)) {
+    throw 'Baseline evidence must identify a published, non-draft, non-prerelease official latest release.'
+  }
+  $officialName = "chaoxing-journal-$VersionName.apk"
+  $assets = @($release.assets | Where-Object { $_.name -ceq $officialName })
+  if ($assets.Count -ne 1 -or
+      $assets[0].browser_download_url -cne "https://github.com/arrry-07/chaoxing-journal/releases/download/v$VersionName/$officialName" -or
+      $assets[0].size -ne $apk.Length -or
+      $assets[0].digest -cne "sha256:$sha") {
+    throw 'Baseline APK bytes must match the official latest asset size and SHA-256 digest.'
+  }
+}
 $manifest = [ordered]@{
   versionCode   = $VersionCode
   versionName   = $VersionName
@@ -188,11 +263,21 @@ if (-not [string]::IsNullOrWhiteSpace($BackupApkUrl)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($OutPath)) {
-  $OutPath = Join-Path (Split-Path -Parent $apk.FullName) "update-$Channel.json"
+  $fileName = if ($InitializeStableBaselinePreflight) { 'update-stable.preflight.json' } else { "update-$Channel.json" }
+  $OutPath = Join-Path (Split-Path -Parent $apk.FullName) $fileName
 }
 $outFullPath = [System.IO.Path]::GetFullPath($OutPath)
 if ($outFullPath -eq $apk.FullName) {
   throw 'OutPath must not overwrite the APK.'
+}
+if ($InitializeStableBaselinePreflight) {
+  if ($outFullPath -eq [System.IO.Path]::GetFullPath($StableEntryPath) -or
+      $outFullPath -eq (Get-Item -LiteralPath $VerifiedLatestEvidencePath).FullName) {
+    throw 'Preflight output must not overwrite the stable entry or evidence.'
+  }
+  if ((Test-Path -LiteralPath $StableEntryPath) -or (Test-Path -LiteralPath $outFullPath)) {
+    throw 'Stable entry or preflight output already exists; refusing overwrite.'
+  }
 }
 $outDirectory = [System.IO.Path]::GetDirectoryName($outFullPath)
 if (-not [System.IO.Directory]::Exists($outDirectory)) {
@@ -200,7 +285,16 @@ if (-not [System.IO.Directory]::Exists($outDirectory)) {
 }
 $json = $manifest | ConvertTo-Json -Compress
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-[System.IO.File]::WriteAllText($outFullPath, $json, $utf8NoBom)
+if ($InitializeStableBaselinePreflight) {
+  $output = [System.IO.File]::Open($outFullPath, [System.IO.FileMode]::CreateNew)
+  try {
+    $bytes = $utf8NoBom.GetBytes($json)
+    $output.Write($bytes, 0, $bytes.Length)
+  } finally { $output.Dispose() }
+  Write-Output 'OFFLINE PREFLIGHT ONLY: remote stable absence is unverified; initialization is NOT complete.'
+} else {
+  [System.IO.File]::WriteAllText($outFullPath, $json, $utf8NoBom)
+}
 Write-Output ("manifest written: " + $outFullPath)
 Write-Output ("channel         : " + $Channel)
 Write-Output ("unique apk path : " + $apkUrl)

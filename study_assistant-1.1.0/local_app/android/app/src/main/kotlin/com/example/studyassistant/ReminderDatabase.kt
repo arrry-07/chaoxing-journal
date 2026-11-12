@@ -492,21 +492,16 @@ class ReminderDatabase private constructor(context: Context) :
 
         desiredDeadline.forEach { event ->
             val current = existing.firstOrNull { it.eventId == event.eventId }
-            if (current == null) {
-                insertEvent(event, now)
-            } else if (current.status == STATUS_PENDING) {
-                writableDatabase.update(
-                    "events",
-                    ContentValues().apply {
-                        put("session_epoch", sessionEpoch)
-                        put("notify_at", event.notifyAt)
-                        put("deadline_at", event.deadlineAt)
-                        put("offsets", JSONArray(event.offsets).toString())
-                        put("updated_at", now)
-                    },
-                    "event_id = ?",
-                    arrayOf(event.eventId),
-                )
+            when {
+                current == null -> insertEvent(event, now)
+                current.status == STATUS_PENDING ->
+                    updateEvent(event, sessionEpoch, now)
+                current.status == STATUS_CANCELLED ->
+                    // Hiding an assignment cancels its deadline events. When it
+                    // becomes eligible again the planner emits the same stable
+                    // event id; reactivate it instead of silently dropping the
+                    // reminder forever.
+                    updateEvent(event, sessionEpoch, now, status = STATUS_PENDING)
             }
         }
 
@@ -548,6 +543,57 @@ class ReminderDatabase private constructor(context: Context) :
         )
     }
 
+    private fun updateEvent(
+        event: StoredReminderEvent,
+        sessionEpoch: Long,
+        now: Long,
+        status: String = STATUS_PENDING,
+    ) {
+        writableDatabase.update(
+            "events",
+            ContentValues().apply {
+                // A restored or renamed assignment keeps its stable event id,
+                // so the display text must follow the latest snapshot instead
+                // of the row that was created before it was hidden/renamed.
+                put("course_name", event.courseName)
+                put("title", event.title)
+                put("session_epoch", sessionEpoch)
+                put("notify_at", event.notifyAt)
+                put("deadline_at", event.deadlineAt)
+                put("offsets", JSONArray(event.offsets).toString())
+                put("status", status)
+                put("updated_at", now)
+            },
+            "event_id = ?",
+            arrayOf(event.eventId),
+        )
+    }
+
+    /**
+     * Notification ids owned by the native reminder database, across accounts.
+     * Legacy plugin notifications can share the same numeric id range, so an id
+     * alone is never ownership evidence; this set only protects rows the native
+     * publisher may still be showing.
+     */
+    @Synchronized
+    fun notificationIds(): Set<Int> {
+        readableDatabase.query(
+            "events",
+            arrayOf("notification_id"),
+            null,
+            null,
+            null,
+            null,
+            null,
+        ).use { cursor ->
+            val ids = mutableSetOf<Int>()
+            while (cursor.moveToNext()) {
+                if (!cursor.isNull(0)) ids.add(cursor.getInt(0))
+            }
+            return ids
+        }
+    }
+
     @Synchronized
     fun eventsForAccount(accountHash: String): List<StoredReminderEvent> {
         readableDatabase.query(
@@ -566,8 +612,24 @@ class ReminderDatabase private constructor(context: Context) :
     }
 
     @Synchronized
-    fun event(eventId: String): StoredReminderEvent? {
+    fun eventsForNotification(notificationId: Int): List<StoredReminderEvent> {
         readableDatabase.query(
+            "events",
+            null,
+            "notification_id = ?",
+            arrayOf(notificationId.toString()),
+            null,
+            null,
+            "notify_at ASC",
+        ).use { cursor ->
+            val rows = mutableListOf<StoredReminderEvent>()
+            while (cursor.moveToNext()) rows.add(cursor.toEvent())
+            return rows
+        }
+    }
+
+    @Synchronized
+    fun event(eventId: String): StoredReminderEvent? {        readableDatabase.query(
             "events",
             null,
             "event_id = ?",

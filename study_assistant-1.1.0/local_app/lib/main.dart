@@ -20,6 +20,7 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'src/app/app_deep_links.dart';
 import 'src/app/app_shell.dart';
+import 'src/app/unsaved_edit_guard.dart';
 import 'src/features/assignment_detail_screen.dart';
 import 'src/features/assignment_list_screen.dart';
 import 'src/features/calendar_screen.dart';
@@ -143,7 +144,7 @@ Future<void> backgroundMain() async {
         return null;
       case 'cancel':
         cancelled = true;
-        activeStore?.chaoxingClient.cancelActiveRequests();
+        activeStore?.cancelSynchronization();
         return null;
       default:
         throw MissingPluginException('未知后台任务 ${call.method}');
@@ -172,6 +173,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     with WidgetsBindingObserver {
   AssignmentStore get assignmentStore => widget.assignmentStore;
   final _navigatorKey = GlobalKey<NavigatorState>();
+  final _leaveGuard = UnsavedEditGuard();
   late final GoRouter _router;
   late final AppUpdateController _updates;
   bool _pendingUpdatePrompt = false;
@@ -183,8 +185,44 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     _updates = widget.updateController ?? AppUpdateController();
     _router = _buildRouter();
     widget.notificationService.setPayloadHandler(_handleNotificationPayload);
+    _lastAuthenticated = assignmentStore.isAuthenticated;
+    _lastAccountEpoch = assignmentStore.accountEpoch;
+    _lastAccountHash = assignmentStore.accountHash;
+    assignmentStore.addListener(_handleStoreIdentityChanged);
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _checkUpdateOnStartup());
+  }
+
+  bool _lastAuthenticated = false;
+  int _lastAccountEpoch = 0;
+  String? _lastAccountHash;
+
+  /// Account replacement must invalidate the old dialog/approval before a new
+  /// page can inherit it. Other store notifications leave the guard alone.
+  void _handleStoreIdentityChanged() {
+    final authenticated = assignmentStore.isAuthenticated;
+    final epoch = assignmentStore.accountEpoch;
+    final accountHash = assignmentStore.accountHash;
+    if (authenticated == _lastAuthenticated &&
+        epoch == _lastAccountEpoch &&
+        accountHash == _lastAccountHash) {
+      return;
+    }
+    _lastAuthenticated = authenticated;
+    _lastAccountEpoch = epoch;
+    _lastAccountHash = accountHash;
+    _leaveGuard.invalidate();
+    // A private editor belongs to the old identity. Leaving it mounted after
+    // an in-place account restore would let edits appear to belong to the new
+    // account even though the page is stale.
+    if (authenticated) {
+      final location = _router.routeInformationProvider.value.uri.path;
+      if (location.startsWith('/personal/') ||
+          location == '/agenda' ||
+          location == '/reminders') {
+        _router.go('/assignments');
+      }
+    }
   }
 
   Future<void> _checkUpdateOnStartup() async {
@@ -215,6 +253,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    assignmentStore.removeListener(_handleStoreIdentityChanged);
     if (widget.updateController == null) _updates.dispose();
     _router.dispose();
     widget.notificationService.setPayloadHandler(null);
@@ -223,14 +262,17 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
 
   @override
   Widget build(BuildContext context) {
-    return AppUpdateScope(
-        controller: _updates,
-        child: MaterialApp.router(
-          title: '学习通课业手记',
-          debugShowCheckedModeBanner: false,
-          theme: StudyAssistantTheme.light,
-          routerConfig: _router,
-        ));
+    return UnsavedEditGuardScope(
+      guard: _leaveGuard,
+      child: AppUpdateScope(
+          controller: _updates,
+          child: MaterialApp.router(
+            title: '学习通课业手记',
+            debugShowCheckedModeBanner: false,
+            theme: StudyAssistantTheme.light,
+            routerConfig: _router,
+          )),
+    );
   }
 
   GoRouter _buildRouter() {
@@ -250,11 +292,13 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
         ShellRoute(
           builder: (_, __, child) => AppShell(
             assignmentStore: assignmentStore,
+            leaveGuard: _leaveGuard,
             child: child,
           ),
           routes: [
             GoRoute(
                 path: '/agenda',
+                onExit: (_, __) => _leaveGuard.confirmLeave(),
                 builder: (_, __) => ManualAgendaScreen(store: assignmentStore)),
             GoRoute(
                 path: '/terms',
@@ -264,6 +308,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                 builder: (_, __) => DailyPlanScreen(store: assignmentStore)),
             GoRoute(
                 path: '/personal/:id',
+                onExit: (_, __) => _leaveGuard.confirmLeave(),
                 builder: (_, s) => PersonalWorkScreen(
                     store: assignmentStore,
                     assignmentId: s.pathParameters['id']!)),
@@ -303,6 +348,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             ),
             GoRoute(
               path: '/reminders',
+              onExit: (_, __) => _leaveGuard.confirmLeave(),
               builder: (_, __) => ReminderSettingsScreen(
                 assignmentStore: assignmentStore,
               ),
@@ -350,21 +396,31 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   }
 
   void _handleNotificationPayload(String payload) {
+    unawaited(_navigateForNotification(payload));
+  }
+
+  Future<void> _navigateForNotification(String payload) async {
+    final String? location;
     if (payload.startsWith('p:')) {
-      _router.go('/agenda');
-      return;
+      location = '/agenda';
+    } else if (payload == 'd:summary') {
+      location = '/assignments';
+    } else {
+      final uri = Uri.tryParse(payload);
+      location =
+          uri == null ? null : AppDeepLinks.normalizeIncomingLocation(uri);
     }
-    if (payload == 'd:summary') {
-      _router.go('/assignments');
-      return;
-    }
-    final uri = Uri.tryParse(payload);
-    if (uri == null) return;
-    final location = AppDeepLinks.normalizeIncomingLocation(
-      uri,
+    if (location == null) return;
+    final target = location;
+    // A notification for the current route must not ask to discard a draft or
+    // approve a future exit; a later different destination asks normally.
+    if (_router.routeInformationProvider.value.uri.path == target) return;
+    // A dirty editor must not be replaced by a notification deep link without
+    // the same confirmation used for back navigation. `navigate` also makes
+    // concurrent notifications/tabs resolve to one winning destination.
+    await _leaveGuard.navigate(
+      isCurrent: () => mounted,
+      action: () => _router.go(target),
     );
-    if (location != null) {
-      _router.go(location);
-    }
   }
 }

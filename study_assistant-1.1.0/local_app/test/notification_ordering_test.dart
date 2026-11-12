@@ -30,8 +30,13 @@ class _Notifications extends LocalNotificationService {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('dexterous.com/flutter/local_notifications');
+  const migrationChannel =
+      MethodChannel('study_assistant/legacy_assignment_migration');
   late List<Map<String, Object?>> active, pending;
   late List<String> events;
+  late Set<int> nativeActiveIds, deliveredLegacyIds;
+  late bool migrationCompleted;
+  late List<Map<Object?, Object?>> migrationCalls;
   Completer<void>? showing, release;
   late bool failShow, failCancel;
   setUp(() {
@@ -42,8 +47,40 @@ void main() {
     active = [];
     pending = [];
     events = [];
+    nativeActiveIds = {};
+    deliveredLegacyIds = {};
+    migrationCompleted = true;
+    migrationCalls = [];
     showing = release = null;
     failShow = failCancel = false;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(migrationChannel, (call) async {
+      if (call.method != 'retireLegacyAssignments') return null;
+      final arguments = Map<Object?, Object?>.from(call.arguments as Map);
+      migrationCalls.add(arguments);
+      final owned = (arguments['ownedIds'] as List).cast<int>().toSet();
+      final exclude = (arguments['excludeIds'] as List).cast<int>().toSet();
+      final retire = <int>{
+        ...owned.where((id) => !nativeActiveIds.contains(id)),
+        ...deliveredLegacyIds,
+      }..removeAll(exclude);
+      final preserved = <int>[];
+      for (final id in active.map((item) => item['id'] as int).toList()) {
+        if (retire.contains(id) && !nativeActiveIds.contains(id)) {
+          active.removeWhere((item) => item['id'] == id);
+        } else if (!exclude.contains(id)) {
+          preserved.add(id);
+        }
+      }
+      pending.removeWhere((item) => retire.contains(item['id'] as int));
+      return {
+        'completed': migrationCompleted,
+        'retiredIds': retire.toList(),
+        'preservedUnknownIds':
+            migrationCompleted ? <int>[] : preserved.take(1).toList(),
+        'warning': migrationCompleted ? null : 'synthetic migration pending',
+      };
+    });
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
             const MethodChannel('study_assistant/permissions'),
@@ -116,6 +153,8 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(migrationChannel, null);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
             const MethodChannel('study_assistant/permissions'), null);
@@ -306,5 +345,50 @@ void main() {
     expect(active, isEmpty);
     expect(pending, isEmpty);
     expect(service.lastWarning, isNull);
+  });
+  test('legacy assignment cleanup keeps untagged native deadline notifications',
+      () async {
+    final service = _Notifications();
+    pending.add({
+      'id': 730123,
+      'title': 'legacy',
+      'body': '',
+      'payload': 'a:synthetic'
+    });
+    active.add(
+        {'id': 1100000123, 'channelId': 'assignment_deadlines', 'tag': null});
+    nativeActiveIds.add(1100000123);
+    await service.removeLegacyAssignmentSchedules();
+    expect(pending.any((n) => n['id'] == 730123), isFalse);
+    expect(active.map((n) => n['id']), [1100000123]);
+    expect((migrationCalls.single['ownedIds'] as List), contains(730123));
+  });
+  test('delivered legacy notification without pending or manifest is retired',
+      () async {
+    final service = _Notifications();
+    active.addAll([
+      {'id': 730500, 'channelId': 'assignment_deadlines', 'tag': null},
+      {'id': 1100000125, 'channelId': 'assignment_deadlines', 'tag': null},
+    ]);
+    nativeActiveIds.add(1100000125);
+    deliveredLegacyIds.add(730500);
+    await service.removeLegacyAssignmentSchedules();
+    expect(active.map((n) => n['id']), [1100000125]);
+    expect(
+        (migrationCalls.single['ownedIds'] as List), isNot(contains(730500)));
+  });
+  test('incomplete native migration is reported and keeps manifests', () async {
+    final service = _Notifications();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+        'notification_schedule_v2_active_assignments', ['730501']);
+    active
+        .add({'id': 730501, 'channelId': 'assignment_deadlines', 'tag': null});
+    deliveredLegacyIds.add(730501);
+    migrationCompleted = false;
+    await expectLater(
+        service.removeLegacyAssignmentSchedules(), throwsStateError);
+    expect(prefs.getStringList('notification_schedule_v2_active_assignments'),
+        ['730501']);
   });
 }

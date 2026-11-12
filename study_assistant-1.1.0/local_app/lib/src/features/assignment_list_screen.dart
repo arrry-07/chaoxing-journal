@@ -14,6 +14,37 @@ import '../services/assignment_web_link.dart';
 import '../services/external_link_service.dart';
 import 'widgets/assignment_card.dart';
 
+/// A calendar recovery view. It is carried in the route query, never in
+/// [HomeFilters], so opening or leaving it cannot rewrite saved preferences.
+enum AssignmentRecoveryScope {
+  noDeadline('noDeadline', '无截止'),
+  deadlinePending('deadlinePending', '截止待确认');
+
+  const AssignmentRecoveryScope(this.queryValue, this.label);
+
+  static const queryParameter = 'scope';
+
+  final String queryValue;
+  final String label;
+
+  static AssignmentRecoveryScope? fromQueryValue(String? value) {
+    for (final scope in values) {
+      if (scope.queryValue == value) return scope;
+    }
+    return null;
+  }
+
+  /// Retained historical dates remain visible here even though the trusted
+  /// calendar grid excludes them.
+  bool matches(Assignment assignment) => switch (this) {
+        noDeadline => assignment.deadlineAt == null &&
+            assignment.deadlineTrusted &&
+            !assignment.deadlineReadFailed,
+        deadlinePending =>
+          !assignment.deadlineTrusted || assignment.deadlineReadFailed,
+      };
+}
+
 class AssignmentListScreen extends StatefulWidget {
   const AssignmentListScreen({super.key, required this.store});
   final AssignmentStore store;
@@ -159,6 +190,27 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
     }
   }
 
+  AssignmentRecoveryScope? _recoveryScope(BuildContext context) {
+    if (GoRouter.maybeOf(context) == null) return null;
+    try {
+      final value = GoRouterState.of(context)
+          .uri
+          .queryParameters[AssignmentRecoveryScope.queryParameter];
+      return AssignmentRecoveryScope.fromQueryValue(value);
+    } on GoError {
+      // The screen is also embedded in plain test hosts without a page state.
+      return null;
+    }
+  }
+
+  void _exitRecoveryScope(BuildContext context) {
+    if (GoRouter.maybeOf(context) != null) {
+      context.go('/assignments');
+    } else if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: store,
@@ -166,6 +218,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         final busy = _refreshing ||
             store.isLoading ||
             store.syncReport.phase == SyncPhase.running;
+        final recoveryScope = _recoveryScope(context);
         final displayAssignments = store.homeDisplayAssignments;
         final options = <String, String>{
           for (final a in displayAssignments)
@@ -174,14 +227,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         if (_courseKey != null && !options.containsKey(_courseKey)) {
           options[_courseKey!] = '已选课程（当前无可显示作业）';
         }
-        final now = DateTime.now(),
-            items = AssignmentQuery.filterHome(
-              displayAssignments,
-              query: _query,
-              courseKey: _courseKey,
-              deadline: _deadlineFilter,
-              now: now,
-            );
+        final now = DateTime.now();
+        // Recovery views are route-scoped. They deliberately bypass the saved
+        // query/course/deadline filters without ever writing them back.
+        final items = recoveryScope == null
+            ? AssignmentQuery.filterHome(
+                displayAssignments,
+                query: _query,
+                courseKey: _courseKey,
+                deadline: _deadlineFilter,
+                now: now,
+              )
+            : displayAssignments.where(recoveryScope.matches).toList();
         final sortOrder = _sortOrder;
         final sortedItems = AssignmentQuery.sortHome(items, sortOrder);
         final groups = sortOrder == HomeSortOrder.grouped
@@ -218,6 +275,19 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             opening: _openingAssignments.contains(a.id),
             onTap: () =>
                 context.push('/assignments/${Uri.encodeComponent(a.id)}'));
+        Widget filterAction() => compactFilterAction
+            ? IconButton(
+                tooltip: filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选',
+                onPressed: () => _openFilters(options),
+                icon: Badge(
+                    isLabelVisible: filtersActive,
+                    child: const Icon(Icons.filter_list)),
+              )
+            : TextButton.icon(
+                onPressed: () => _openFilters(options),
+                icon: const Icon(Icons.filter_list, size: 18),
+                label: Text(filtersActive ? '已筛选' : '搜索与筛选'),
+              );
         List<Widget> timeline(List<Assignment> list) {
           DateTime? previous;
           return [
@@ -237,7 +307,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             padding: const EdgeInsets.only(top: 20, bottom: 8),
             child: Text(label, style: Journal.metadata));
         return ListView(
-            key: const PageStorageKey('home-list'),
+            key: PageStorageKey(recoveryScope == null
+                ? 'home-list'
+                : 'home-recovery-${recoveryScope.queryValue}'),
             padding: const EdgeInsets.fromLTRB(20, 22, 20, 32),
             children: [
               JournalHeading('课业手记',
@@ -266,6 +338,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                         icon: const Icon(Icons.more_horiz_rounded)),
                   ])),
               const SizedBox(height: 20),
+              if (recoveryScope != null) ...[
+                _recoveryHeader(context, recoveryScope, items.length),
+                const SizedBox(height: 12),
+              ],
               Builder(builder: (context) {
                 final today = PersonalWorkspace.dayKey(now);
                 final plans =
@@ -301,22 +377,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                     ],
                   ]),
                 )),
-                if (compactFilterAction)
-                  IconButton(
-                    tooltip: filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选',
-                    onPressed: () => _openFilters(options),
-                    icon: Badge(
-                        isLabelVisible: filtersActive,
-                        child: const Icon(Icons.filter_list)),
-                  )
-                else
-                  TextButton.icon(
-                    onPressed: () => _openFilters(options),
-                    icon: const Icon(Icons.filter_list, size: 18),
-                    label: Text(filtersActive ? '已筛选' : '搜索与筛选'),
-                  ),
+                if (recoveryScope == null) filterAction(),
               ]),
-              if (sortOrder != HomeSortOrder.grouped)
+              if (recoveryScope == null && sortOrder != HomeSortOrder.grouped)
                 Align(
                   alignment: Alignment.centerRight,
                   child: Padding(
@@ -342,7 +405,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                         liveRegion: true,
                         child: Text(_syncProgressLabel(store),
                             style: Journal.metadata))),
-              if (_courseKey != null &&
+              if (recoveryScope == null &&
+                  _courseKey != null &&
                   !displayAssignments.any((a) => a.courseKey == _courseKey))
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 12),
@@ -362,6 +426,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   ...timeline(groups.overdue),
                 ] else
                   ...sortedItems.map(card),
+              ] else if (recoveryScope != null) ...[
+                const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Text('这个临时范围当前没有作业，可能已随同步更新。',
+                        style: Journal.metadata)),
               ] else if (filtersActive &&
                   (displayAssignments.isNotEmpty ||
                       store.assignments.isNotEmpty)) ...[
@@ -410,6 +479,41 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         const SizedBox(height: 8),
         const Divider(height: 1),
       ]));
+
+  Widget _recoveryHeader(
+          BuildContext context, AssignmentRecoveryScope scope, int count) =>
+      Card(
+        key: const ValueKey('assignment-recovery-scope'),
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(children: [
+                const Icon(Icons.filter_alt_outlined,
+                    size: 18, color: Journal.muted),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text('临时范围 · ${scope.label}',
+                        style: Journal.entryTitle)),
+              ]),
+              const SizedBox(height: 4),
+              Text(
+                '共 $count 项。不受已保存的搜索、课程和期限筛选影响，返回后原偏好保留。',
+                style: Journal.metadata,
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => _exitRecoveryScope(context),
+                  child: const Text('退出临时范围'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
 
   String _deadlineLabel(AssignmentDeadlineFilter filter) => switch (filter) {
         AssignmentDeadlineFilter.all => '全部',

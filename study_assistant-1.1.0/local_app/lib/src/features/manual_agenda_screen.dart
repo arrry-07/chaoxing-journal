@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../app/unsaved_edit_guard.dart';
 import '../models/study_notebook.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
@@ -151,11 +152,7 @@ class ManualEntryEditor extends StatefulWidget {
 class _EditorState extends State<ManualEntryEditor> {
   final form = GlobalKey<FormState>();
   late final int epoch;
-  @override
-  void initState() {
-    super.initState();
-    epoch = widget.store.accountEpoch;
-  }
+  late final String? _accountHashAtStart;
 
   late final title = TextEditingController(text: widget.entry?.title);
   late final course = TextEditingController(text: widget.entry?.course);
@@ -167,10 +164,82 @@ class _EditorState extends State<ManualEntryEditor> {
   late bool remind = widget.entry?.remind ?? false;
   late DateTime? at = widget.entry?.at;
   bool busy = false;
+  bool _dirty = false;
+  bool _saving = false;
+  UnsavedEditGuard? _leaveGuard;
   String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    epoch = widget.store.accountEpoch;
+    _accountHashAtStart = widget.store.accountHash;
+    for (final c in [title, course, location, note, minutes]) {
+      c.addListener(_markDirty);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final guard = UnsavedEditGuardScope.maybeOf(context);
+    if (identical(guard, _leaveGuard)) return;
+    _leaveGuard?.unregister(this);
+    _leaveGuard = guard;
+    _leaveGuard?.register(
+      this,
+      hasUnsavedChanges: () => _dirty || _saving,
+      draftRevision: () =>
+          '${title.text}|${course.text}|${location.text}|${note.text}|'
+          '${minutes.text}|$kind|$remind|$at',
+      blocksNavigation: () => _saving,
+      confirmDiscard: _confirmDiscard,
+      isStale: () =>
+          !widget.store.isAuthenticated ||
+          widget.store.accountEpoch != epoch ||
+          widget.store.accountHash != _accountHashAtStart,
+    );
+  }
+
+  Future<bool> _requestLeave() async {
+    final guard = _leaveGuard;
+    if (guard != null) return guard.confirmLeave();
+    return _confirmDiscard();
+  }
+
+  void _markDirty() {
+    if (!_dirty && mounted) setState(() => _dirty = true);
+  }
+
+  Future<bool> _confirmDiscard() async {
+    if (_saving) {
+      setState(() => error = '个人安排正在保存，请稍候再离开');
+      return false;
+    }
+    final result = await showUnsavedEditDialog(
+      context: context,
+      guard: _leaveGuard,
+      builder: (c) => AlertDialog(
+        title: const Text('放弃未保存的修改？'),
+        content: const Text('这项个人安排的修改尚未保存。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('继续编辑')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('放弃修改')),
+        ],
+      ),
+    );
+    return result == true;
+  }
+
   @override
   void dispose() {
+    _leaveGuard?.unregister(this);
     for (final c in [title, course, location, note, minutes]) {
+      c.removeListener(_markDirty);
       c.dispose();
     }
     super.dispose();
@@ -188,8 +257,11 @@ class _EditorState extends State<ManualEntryEditor> {
         context: context,
         initialTime: TimeOfDay(hour: start.hour, minute: start.minute));
     if (mounted && t != null) {
-      setState(() => at = DateTime.utc(d.year, d.month, d.day, t.hour, t.minute)
-          .subtract(const Duration(hours: 8)));
+      setState(() {
+        at = DateTime.utc(d.year, d.month, d.day, t.hour, t.minute)
+            .subtract(const Duration(hours: 8));
+        _dirty = true;
+      });
     }
   }
 
@@ -202,6 +274,7 @@ class _EditorState extends State<ManualEntryEditor> {
     final editorRoute = ModalRoute.of(context);
     setState(() {
       busy = true;
+      _saving = true;
       error = null;
     });
     final e = ManualEntry(
@@ -218,7 +291,11 @@ class _EditorState extends State<ManualEntryEditor> {
     final ok = await widget.store.saveNotebook(
         (n) => n.withEntries([...n.entries.where((v) => v.id != e.id), e]),
         epoch);
-    if (ok) await WidgetsBinding.instance.endOfFrame;
+    if (ok) {
+      _saving = false;
+      _dirty = false;
+      await WidgetsBinding.instance.endOfFrame;
+    }
     if (!mounted) return;
     final feedback = widget.store.saveFeedback(
       ok,
@@ -235,92 +312,113 @@ class _EditorState extends State<ManualEntryEditor> {
     }
     setState(() {
       busy = false;
+      _saving = false;
       error = feedback;
     });
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-      appBar: AppBar(title: Text(widget.entry == null ? '添加个人安排' : '编辑个人安排')),
-      body: Form(
-          key: form,
-          child: ListView(padding: const EdgeInsets.all(16), children: [
-            const Text('仅记录个人安排，不会创建或提交学习通作业。所有时间使用北京时间。'),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-                initialValue: kind,
-                decoration: const InputDecoration(labelText: '类型'),
-                items: const [
-                  DropdownMenuItem(value: 'todo', child: Text('个人待办')),
-                  DropdownMenuItem(value: 'exam', child: Text('手动考试'))
-                ],
-                onChanged: busy ? null : (v) => setState(() => kind = v!)),
-            const SizedBox(height: 12),
-            TextFormField(
-                controller: title,
-                enabled: !busy,
-                maxLength: 200,
-                decoration: const InputDecoration(labelText: '标题'),
-                validator: (s) =>
-                    s == null || s.trim().isEmpty ? '请填写标题' : null),
-            TextFormField(
-                controller: course,
-                enabled: !busy,
-                maxLength: 200,
-                decoration: const InputDecoration(labelText: '课程（可选）')),
-            TextFormField(
-                controller: location,
-                enabled: !busy,
-                maxLength: 200,
-                decoration: const InputDecoration(labelText: '地点（可选）')),
-            ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(manualTime(at)),
-                subtitle: Text(kind == 'exam' ? '考试必须填写时间' : '待办可以暂不安排时间'),
-                trailing: const Icon(Icons.calendar_today),
-                onTap: busy ? null : chooseDate),
-            if (at != null && kind == 'todo')
-              TextButton(
-                  onPressed: busy
-                      ? null
-                      : () => setState(() {
-                            at = null;
-                            remind = false;
-                          }),
-                  child: const Text('清除时间')),
-            SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('提前30分钟提醒'),
-                subtitle: const Text('受通知权限和系统调度限制'),
-                value: remind,
-                onChanged: busy || at == null
-                    ? null
-                    : (v) => setState(() => remind = v)),
-            TextFormField(
-                controller: minutes,
-                enabled: !busy,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: '预计分钟（0表示未填写）'),
-                validator: (s) {
-                  final v = int.tryParse(s?.trim() ?? '');
-                  return v == null || v < 0 || v > 1440 ? '请输入0–1440的整数' : null;
-                }),
-            const SizedBox(height: 12),
-            TextFormField(
-                controller: note,
-                enabled: !busy,
-                maxLength: 10000,
-                minLines: 3,
-                maxLines: 8,
-                decoration: const InputDecoration(labelText: '备注')),
-            if (error != null)
-              Semantics(
-                key: const ValueKey('manual-editor-feedback'),
-                liveRegion: true,
-                child: Text(error!),
-              ),
-            FilledButton(
-                onPressed: busy ? null : save,
-                child: Text(busy ? '正在保存…' : '保存个人安排'))
-          ])));
+  Widget build(BuildContext context) => PopScope(
+      canPop: !_dirty && !_saving,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop || (!_dirty && !_saving)) return;
+        final leave = await _requestLeave();
+        if (leave && context.mounted) Navigator.of(context).pop();
+      },
+      child: Scaffold(
+          appBar:
+              AppBar(title: Text(widget.entry == null ? '添加个人安排' : '编辑个人安排')),
+          body: Form(
+              key: form,
+              child: ListView(padding: const EdgeInsets.all(16), children: [
+                const Text('仅记录个人安排，不会创建或提交学习通作业。所有时间使用北京时间。'),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                    initialValue: kind,
+                    decoration: const InputDecoration(labelText: '类型'),
+                    items: const [
+                      DropdownMenuItem(value: 'todo', child: Text('个人待办')),
+                      DropdownMenuItem(value: 'exam', child: Text('手动考试'))
+                    ],
+                    onChanged: busy
+                        ? null
+                        : (v) => setState(() {
+                              kind = v!;
+                              _dirty = true;
+                            })),
+                const SizedBox(height: 12),
+                TextFormField(
+                    controller: title,
+                    enabled: !busy,
+                    maxLength: 200,
+                    decoration: const InputDecoration(labelText: '标题'),
+                    validator: (s) =>
+                        s == null || s.trim().isEmpty ? '请填写标题' : null),
+                TextFormField(
+                    controller: course,
+                    enabled: !busy,
+                    maxLength: 200,
+                    decoration: const InputDecoration(labelText: '课程（可选）')),
+                TextFormField(
+                    controller: location,
+                    enabled: !busy,
+                    maxLength: 200,
+                    decoration: const InputDecoration(labelText: '地点（可选）')),
+                ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(manualTime(at)),
+                    subtitle: Text(kind == 'exam' ? '考试必须填写时间' : '待办可以暂不安排时间'),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: busy ? null : chooseDate),
+                if (at != null && kind == 'todo')
+                  TextButton(
+                      onPressed: busy
+                          ? null
+                          : () => setState(() {
+                                at = null;
+                                remind = false;
+                                _dirty = true;
+                              }),
+                      child: const Text('清除时间')),
+                SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('提前30分钟提醒'),
+                    subtitle: const Text('受通知权限和系统调度限制'),
+                    value: remind,
+                    onChanged: busy || at == null
+                        ? null
+                        : (v) => setState(() {
+                              remind = v;
+                              _dirty = true;
+                            })),
+                TextFormField(
+                    controller: minutes,
+                    enabled: !busy,
+                    keyboardType: TextInputType.number,
+                    decoration:
+                        const InputDecoration(labelText: '预计分钟（0表示未填写）'),
+                    validator: (s) {
+                      final v = int.tryParse(s?.trim() ?? '');
+                      return v == null || v < 0 || v > 1440
+                          ? '请输入0–1440的整数'
+                          : null;
+                    }),
+                const SizedBox(height: 12),
+                TextFormField(
+                    controller: note,
+                    enabled: !busy,
+                    maxLength: 10000,
+                    minLines: 3,
+                    maxLines: 8,
+                    decoration: const InputDecoration(labelText: '备注')),
+                if (error != null)
+                  Semantics(
+                    key: const ValueKey('manual-editor-feedback'),
+                    liveRegion: true,
+                    child: Text(error!),
+                  ),
+                FilledButton(
+                    onPressed: busy ? null : save,
+                    child: Text(busy ? '正在保存…' : '保存个人安排'))
+              ]))));
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -537,6 +538,57 @@ void main() {
       'https://p.cldisk.com/star3/160_160c/sample-avatar.png',
     );
   });
+
+  test('cancelActiveRequests aborts an in-flight request without a response',
+      () async {
+    final started = Completer<void>();
+    final dio = Dio()..httpClientAdapter = _BlockingAdapter(started);
+    final client = ChaoxingLocalClient(dio: dio);
+    final fetch = client.fetchAssignments();
+    await started.future.timeout(const Duration(seconds: 2));
+
+    final watch = Stopwatch()..start();
+    client.cancelActiveRequests();
+    await expectLater(
+      fetch.timeout(const Duration(seconds: 2)),
+      throwsA(predicate((Object error) =>
+          error is SyncReadException &&
+          error.issue.kind == SyncIssueKind.cancelled)),
+    );
+
+    expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+    expect(client.hasCourseResponse, isFalse);
+    expect(client.issues, isEmpty);
+  });
+}
+
+class _BlockingAdapter implements HttpClientAdapter {
+  _BlockingAdapter(this.started);
+
+  final Completer<void> started;
+  final Completer<ResponseBody> response = Completer<ResponseBody>();
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) {
+    if (!started.isCompleted) started.complete();
+    cancelFuture?.whenComplete(() {
+      if (!response.isCompleted) {
+        response.completeError(DioException(
+          requestOptions: options,
+          type: DioExceptionType.cancel,
+          error: 'synthetic cancellation',
+        ));
+      }
+    });
+    return response.future;
+  }
+
+  @override
+  void close({bool force = false}) {}
 }
 
 class _RecordedRequest {

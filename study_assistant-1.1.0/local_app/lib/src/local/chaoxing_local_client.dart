@@ -65,6 +65,7 @@ class ChaoxingLocalClient {
   final Dio _dio;
   final Future<void> Function(Duration) _wait;
   CancelToken? _activeRequestToken;
+  bool _stopRequested = false;
   static Future<void> _defaultWait(Duration delay) =>
       Future<void>.delayed(delay);
 
@@ -76,7 +77,8 @@ class ChaoxingLocalClient {
   bool Function()? shouldStop;
   void Function(AssignmentSyncProgress)? onProgress;
 
-  void cancelActiveRequests() {
+  void cancelActiveRequests({bool reportCancelled = true}) {
+    _stopRequested = reportCancelled;
     _activeRequestToken?.cancel('主动停止后台学习通请求');
     _activeRequestToken = null;
     _sessionGeneration++;
@@ -84,7 +86,28 @@ class ChaoxingLocalClient {
 
   CancelToken _startRequestToken() {
     _activeRequestToken?.cancel('开始新的学习通请求');
+    _stopRequested = false;
     return _activeRequestToken = CancelToken();
+  }
+
+  /// Backoff must not delay an explicit stop for the full retry delay.
+  Future<void> _waitOrCancel(Duration delay) async {
+    final token = _activeRequestToken;
+    if (token == null) {
+      await _wait(delay);
+    } else {
+      await Future.any<Object?>([
+        _wait(delay),
+        token.whenCancel,
+      ]);
+    }
+    if (_stopRequested) {
+      throw const SyncReadException(SyncIssue(
+        SyncIssueKind.cancelled,
+        '本次同步已取消',
+        stage: 'request',
+      ));
+    }
   }
 
   Map<String, ({int count, int elapsedMs, int httpFailures})>
@@ -296,6 +319,11 @@ class ChaoxingLocalClient {
   Set<String> trackedActivityIds = {};
   Map<String, Assignment> previousAssignments = {};
   void clearSession() {
+    // Stop any transport that still belongs to the previous identity before
+    // clearing cookies and generation. A session replacement is a stale-result
+    // case, not an explicit user/Worker cancellation, so old callers keep the
+    // existing empty-result contract; Store cancellation uses the default.
+    cancelActiveRequests(reportCancelled: false);
     _resetSyncTracking(clearRequestStats: true);
     _sessionGeneration++;
     _cookies.clear();
@@ -859,132 +887,153 @@ class ChaoxingLocalClient {
     final result = <Assignment>[];
     final starts = <String, DateTime>{};
     final seen = <String>{};
-    for (var page = 1; page <= 100; page++) {
-      final response = await _safeGet<dynamic>(
-          'https://mooc1.chaoxing.com/mooc-ans/work/api/task',
-          queryParameters: {
-            'courseId': course.courseId,
-            'classId': course.clazzId,
-            'pageNum': page,
-            'pageSize': 100
-          },
-          headers: {
-            'User-Agent': courseUserAgent
-          });
-      if (generation != _sessionGeneration) return const [];
-      final pageResult = _measureParse('作业列表', () {
-        final payload = _decodeJsonPayload(response?.data);
-        if (payload is! Map ||
-            payload['status'] != true ||
-            payload['data'] is! List) {
-          throw SyncReadException(SyncIssue(
-              SyncIssueKind.schemaChanged, '正式作业接口响应无法识别',
-              stage: 'workList', httpStatus: response?.statusCode));
+    final courseKey = '${course.courseId}:${course.clazzId}';
+    try {
+      for (var page = 1; page <= 100; page++) {
+        final response = await _safeGet<dynamic>(
+            'https://mooc1.chaoxing.com/mooc-ans/work/api/task',
+            queryParameters: {
+              'courseId': course.courseId,
+              'classId': course.clazzId,
+              'pageNum': page,
+              'pageSize': 100
+            },
+            headers: {
+              'User-Agent': courseUserAgent
+            });
+        if (generation != _sessionGeneration) {
+          progress?.retractCourse(courseKey);
+          return const [];
         }
-        final rows = payload['data'] as List;
-        final total = int.tryParse('${payload['total']}');
-        if (total == null || total < 0 || result.length + rows.length > total) {
+        final pageRows = <Assignment>[];
+        final pageResult = _measureParse('作业列表', () {
+          final payload = _decodeJsonPayload(response?.data);
+          if (payload is! Map ||
+              payload['status'] != true ||
+              payload['data'] is! List) {
+            throw SyncReadException(SyncIssue(
+                SyncIssueKind.schemaChanged, '正式作业接口响应无法识别',
+                stage: 'workList', httpStatus: response?.statusCode));
+          }
+          final rows = payload['data'] as List;
+          final total = int.tryParse('${payload['total']}');
+          if (total == null ||
+              total < 0 ||
+              result.length + rows.length > total) {
+            throw const SyncReadException(SyncIssue(
+                SyncIssueKind.schemaChanged, '正式作业总数与分页不匹配',
+                stage: 'workList'));
+          }
+          if (kDebugMode) {
+            debugPrint(
+                '[SyncFormal] status=${response?.statusCode} page=$page rows=${rows.length} total=$total');
+          }
+          for (final row in rows) {
+            if (row is! Map ||
+                row['title'] is! String ||
+                (row['title'] as String).trim().isEmpty) {
+              throw const SyncReadException(SyncIssue(
+                  SyncIssueKind.schemaChanged, '正式作业条目不完整',
+                  stage: 'workList'));
+            }
+            var url = Uri.tryParse(
+                '${row['taskUrl'] ?? ''}'.replaceAll('&amp;', '&'));
+            if (url != null &&
+                url.scheme == 'http' &&
+                url.host.endsWith('.chaoxing.com')) {
+              url = url.replace(scheme: 'https', port: 443);
+            }
+            final id = url?.queryParameters['workId'] ??
+                url?.queryParameters['taskrefId'];
+            final linkedCourse = url?.queryParameters['courseId'] ??
+                url?.queryParameters['courseid'];
+            final linkedClass = url?.queryParameters['classId'] ??
+                url?.queryParameters['clazzId'] ??
+                url?.queryParameters['clazzid'];
+            if (url == null ||
+                url.scheme != 'https' ||
+                !url.host.endsWith('.chaoxing.com') ||
+                id == null ||
+                id.isEmpty ||
+                !url.path.contains('/work/') ||
+                (linkedCourse != null && linkedCourse != course.courseId) ||
+                (linkedClass != null && linkedClass != course.clazzId)) {
+              throw const SyncReadException(SyncIssue(
+                  SyncIssueKind.schemaChanged, '正式作业详情身份无法确认',
+                  stage: 'workList'));
+            }
+            if (!seen.add(id)) {
+              throw const SyncReadException(SyncIssue(
+                  SyncIssueKind.schemaChanged, '正式作业分页重复，请稍后重试',
+                  stage: 'workList'));
+            }
+            final status = int.tryParse('${row['stuStatus']}');
+            final evaluation = int.tryParse('${row['evaluation'] ?? 0}') ?? 0;
+            final state = evaluation != 0
+                ? (status == 4 ? 'completed' : 'unknown')
+                : switch (status) {
+                    0 || 1 || 2 => 'pending',
+                    3 => 'reviewing',
+                    4 => 'completed',
+                    5 => 'returned',
+                    _ => 'unknown'
+                  };
+            final end = int.tryParse('${row['endTime']}');
+            final start = int.tryParse('${row['startTime']}');
+            if (start != null &&
+                start >= 946684800000 &&
+                start <= 4102444800000) {
+              starts['cx:work:${course.courseId}:${course.clazzId}:$id'] =
+                  DateTime.fromMillisecondsSinceEpoch(start, isUtc: true);
+            }
+            final trusted =
+                end != null && (end >= 946684800000 && end <= 4102444800000);
+            pageRows.add(Assignment(
+                id: 'cx:work:${course.courseId}:${course.clazzId}:$id',
+                courseName: course.courseName,
+                title: (row['title'] as String).trim(),
+                deadlineAt: trusted && end > 0
+                    ? DateTime.fromMillisecondsSinceEpoch(end)
+                    : null,
+                deadlineTrusted: trusted,
+                deadlineRawText: trusted ? end.toString() : null,
+                deadlineReadFailed: false,
+                requirementsText: '',
+                status: state,
+                submitUrl: url.toString(),
+                lastSyncedAt: DateTime.now()));
+          }
+          return (rowCount: rows.length, total: total);
+        });
+        result.addAll(pageRows);
+        // Identity, shape, duplicate, and cumulative total checks for this
+        // page have passed. Publish only after them so a later failed page can
+        // retract this course's rows without touching other courses or the
+        // formal repository.
+        if (pageRows.isNotEmpty) {
+          progress?.addRows(pageRows, courseKey: courseKey);
+        }
+        if (result.length == pageResult.total) {
+          return _hydrateWorkDeadlines(result,
+              generation: generation, starts: starts, progress: progress);
+        }
+        if (pageResult.rowCount == 0) {
+          _noteParseFailure('作业列表');
           throw const SyncReadException(SyncIssue(
               SyncIssueKind.schemaChanged, '正式作业总数与分页不匹配',
               stage: 'workList'));
         }
-        if (kDebugMode) {
-          debugPrint(
-              '[SyncFormal] status=${response?.statusCode} page=$page rows=${rows.length} total=$total');
-        }
-        for (final row in rows) {
-          if (row is! Map ||
-              row['title'] is! String ||
-              (row['title'] as String).trim().isEmpty) {
-            throw const SyncReadException(SyncIssue(
-                SyncIssueKind.schemaChanged, '正式作业条目不完整',
-                stage: 'workList'));
-          }
-          var url =
-              Uri.tryParse('${row['taskUrl'] ?? ''}'.replaceAll('&amp;', '&'));
-          if (url != null &&
-              url.scheme == 'http' &&
-              url.host.endsWith('.chaoxing.com')) {
-            url = url.replace(scheme: 'https', port: 443);
-          }
-          final id = url?.queryParameters['workId'] ??
-              url?.queryParameters['taskrefId'];
-          final linkedCourse = url?.queryParameters['courseId'] ??
-              url?.queryParameters['courseid'];
-          final linkedClass = url?.queryParameters['classId'] ??
-              url?.queryParameters['clazzId'] ??
-              url?.queryParameters['clazzid'];
-          if (url == null ||
-              url.scheme != 'https' ||
-              !url.host.endsWith('.chaoxing.com') ||
-              id == null ||
-              id.isEmpty ||
-              !url.path.contains('/work/') ||
-              (linkedCourse != null && linkedCourse != course.courseId) ||
-              (linkedClass != null && linkedClass != course.clazzId)) {
-            throw const SyncReadException(SyncIssue(
-                SyncIssueKind.schemaChanged, '正式作业详情身份无法确认',
-                stage: 'workList'));
-          }
-          if (!seen.add(id)) {
-            throw const SyncReadException(SyncIssue(
-                SyncIssueKind.schemaChanged, '正式作业分页重复，请稍后重试',
-                stage: 'workList'));
-          }
-          final status = int.tryParse('${row['stuStatus']}');
-          final evaluation = int.tryParse('${row['evaluation'] ?? 0}') ?? 0;
-          final state = evaluation != 0
-              ? (status == 4 ? 'completed' : 'unknown')
-              : switch (status) {
-                  0 || 1 || 2 => 'pending',
-                  3 => 'reviewing',
-                  4 => 'completed',
-                  5 => 'returned',
-                  _ => 'unknown'
-                };
-          final end = int.tryParse('${row['endTime']}');
-          final start = int.tryParse('${row['startTime']}');
-          if (start != null &&
-              start >= 946684800000 &&
-              start <= 4102444800000) {
-            starts['cx:work:${course.courseId}:${course.clazzId}:$id'] =
-                DateTime.fromMillisecondsSinceEpoch(start, isUtc: true);
-          }
-          final trusted =
-              end != null && (end >= 946684800000 && end <= 4102444800000);
-          result.add(Assignment(
-              id: 'cx:work:${course.courseId}:${course.clazzId}:$id',
-              courseName: course.courseName,
-              title: (row['title'] as String).trim(),
-              deadlineAt: trusted && end > 0
-                  ? DateTime.fromMillisecondsSinceEpoch(end)
-                  : null,
-              deadlineTrusted: trusted,
-              deadlineRawText: trusted ? end.toString() : null,
-              deadlineReadFailed: false,
-              requirementsText: '',
-              status: state,
-              submitUrl: url.toString(),
-              lastSyncedAt: DateTime.now()));
-        }
-        return (rowCount: rows.length, total: total);
-      });
-      if (result.length == pageResult.total) {
-        progress?.addRows(result);
-        return _hydrateWorkDeadlines(result,
-            generation: generation, starts: starts, progress: progress);
       }
-      if (pageResult.rowCount == 0) {
-        _noteParseFailure('作业列表');
-        throw const SyncReadException(SyncIssue(
-            SyncIssueKind.schemaChanged, '正式作业总数与分页不匹配',
-            stage: 'workList'));
-      }
+      _noteParseFailure('作业列表');
+      throw const SyncReadException(SyncIssue(
+          SyncIssueKind.schemaChanged, '正式作业分页超出读取范围',
+          stage: 'workList'));
+    } catch (_) {
+      // The course is still reported as partially failed by the caller, but
+      // its unverified preview must not linger over the old formal cache.
+      progress?.retractCourse(courseKey);
+      rethrow;
     }
-    _noteParseFailure('作业列表');
-    throw const SyncReadException(SyncIssue(
-        SyncIssueKind.schemaChanged, '正式作业分页超出读取范围',
-        stage: 'workList'));
   }
 
   // Only forward the authenticated session within Chaoxing when the course
@@ -1072,6 +1121,13 @@ class ChaoxingLocalClient {
         );
       } on DioException catch (error) {
         if (CancelToken.isCancel(error)) {
+          if (_stopRequested) {
+            throw const SyncReadException(SyncIssue(
+              SyncIssueKind.cancelled,
+              '本次同步已取消',
+              stage: 'request',
+            ));
+          }
           if (generation != _sessionGeneration) return null;
           throw const SyncReadException(
             SyncIssue(
@@ -1093,7 +1149,7 @@ class ChaoxingLocalClient {
             _retryDelay(kind, attempt, failure, circuitOpened: opened);
         if (delay != null) {
           _syncRetryCount++;
-          await _wait(delay);
+          await _waitOrCancel(delay);
           continue;
         }
         throw SyncReadException(failure.issue);
@@ -1136,7 +1192,7 @@ class ChaoxingLocalClient {
             _retryDelay(kind, attempt, failure, circuitOpened: opened);
         if (delay != null) {
           _syncRetryCount++;
-          await _wait(delay);
+          await _waitOrCancel(delay);
           continue;
         }
         throw SyncReadException(issue);
@@ -1702,6 +1758,7 @@ class _SyncProgressTracker {
   final void Function(AssignmentSyncProgress) onProgress;
   final Map<String, Assignment> assignments = {};
   final Set<String> pendingDetailIds = {};
+  final Map<String, Set<String>> _courseRowIds = {};
   AssignmentSyncStage stage = AssignmentSyncStage.courses;
   int resolvedCount = 0;
   int attemptedCount = 0;
@@ -1711,11 +1768,29 @@ class _SyncProgressTracker {
     _emit();
   }
 
-  void addRows(List<Assignment> rows) {
+  void addRows(List<Assignment> rows, {String? courseKey}) {
     for (final assignment in rows) {
       assignments[assignment.id] = assignment;
+      if (courseKey != null) {
+        (_courseRowIds[courseKey] ??= <String>{}).add(assignment.id);
+      }
     }
     stage = AssignmentSyncStage.workLists;
+    _emit();
+  }
+
+  /// Withdraws this round's preview rows and pending details for one course.
+  ///
+  /// Used when a later V3 page fails validation after earlier pages were
+  /// already published. Other courses' preview rows and the formal repository
+  /// are untouched; the retraction is emitted as one consistent snapshot.
+  void retractCourse(String courseKey) {
+    final ids = _courseRowIds.remove(courseKey);
+    if (ids == null || ids.isEmpty) return;
+    for (final id in ids) {
+      assignments.remove(id);
+      pendingDetailIds.remove(id);
+    }
     _emit();
   }
 

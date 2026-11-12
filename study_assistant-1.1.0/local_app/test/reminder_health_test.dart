@@ -17,8 +17,15 @@ import 'package:study_assistant_mobile/src/services/daily_summary.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/features/reminder_health_screen.dart';
 import 'package:study_assistant_mobile/src/services/permission_settings_service.dart';
+import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
+import 'package:study_assistant_mobile/src/services/background_check_settings.dart';
+import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.dart';
 
-class InspectableNotifications extends f.Notifications {}
+class InspectableNotifications extends f.Notifications {
+  @override
+  Future<bool> isLegacyAssignmentMigrationComplete() async => true;
+}
 
 class ThrowingHealthNotifications extends f.Notifications {
   @override
@@ -70,6 +77,142 @@ class _HealthPermissionSettingsService extends PermissionSettingsService {
   ) async {
     requestedChannelId = channelId;
     return channelResult;
+  }
+}
+
+class _HealthGateway extends BackgroundReminderGateway {
+  _HealthGateway({this.available = true});
+
+  bool available;
+  bool failInspections = false;
+  Object failure = TimeoutException('synthetic native health timeout');
+  BackgroundReminderHealth nextHealth = nativeHealth();
+  int inspections = 0;
+
+  @override
+  Future<bool> isAvailable() async => available;
+
+  @override
+  Future<int> ensureActiveAccount(String accountHash) async => 1;
+
+  @override
+  Future<int> clearActiveAccount(String accountHash) async => 1;
+
+  @override
+  Future<void> updateSettings(
+    String accountHash,
+    int sessionEpoch,
+    BackgroundCheckSettings settings, {
+    required bool showDetails,
+  }) async {}
+
+  @override
+  Future<void> reconcileDaytimeSchedule({
+    required DateTime? targetAt,
+    required bool enabled,
+    required int intervalMinutes,
+  }) async {}
+
+  @override
+  Future<void> cancelAssignmentDeliveryKeepEvents(String accountHash) async {}
+
+  @override
+  Future<ReminderPlanState> loadPlanState({
+    required String accountHash,
+    required int sessionEpoch,
+  }) async =>
+      ReminderPlanState(
+        accountHash: accountHash,
+        sessionEpoch: sessionEpoch,
+        baselineCompleted: true,
+        knownAssignmentIds: const {},
+        sentNewAssignmentIds: const {},
+        lastAttemptAt: null,
+        lastFullSuccessAt: null,
+        pendingUpdate: false,
+        mutationVersion: 0,
+      );
+
+  @override
+  Future<ReminderPlanApplyResult> applyPlan({
+    required String accountHash,
+    required int sessionEpoch,
+    required AssignmentReminderPlan plan,
+    required DateTime completedAt,
+    required String? failure,
+    required bool syncCompleted,
+    required int expectedMutationVersion,
+  }) async =>
+      const ReminderPlanApplyResult(
+        scheduledDeadlineCount: 0,
+        pendingNewCount: 0,
+        warning: null,
+      );
+
+  @override
+  Future<bool> acquireWriteLease(String owner) async => true;
+
+  @override
+  Future<void> releaseWriteLease(String owner) async {}
+
+  @override
+  Future<BackgroundReminderHealth> inspectHealth({
+    required String accountHash,
+    required int sessionEpoch,
+  }) async {
+    inspections++;
+    if (failInspections) throw failure;
+    return nextHealth;
+  }
+}
+
+BackgroundReminderHealth nativeHealth({
+  bool notificationListenerEnabled = true,
+  bool notificationListenerGranted = true,
+  int pendingDeadlineCount = 0,
+  int pendingNewCount = 0,
+  bool baselineCompleted = true,
+}) =>
+    BackgroundReminderHealth(
+      backgroundEnabled: true,
+      intervalMinutes: 60,
+      newAssignmentReminderEnabled: true,
+      notificationListenerEnabled: notificationListenerEnabled,
+      notificationListenerGranted: notificationListenerGranted,
+      nextCheckAt: null,
+      pendingNewCount: pendingNewCount,
+      pendingDeadlineCount: pendingDeadlineCount,
+      baselineCompleted: baselineCompleted,
+      pendingSignalCount: 0,
+      migrationPending: false,
+      lastFailure: null,
+    );
+
+AssignmentStore _nativeHealthStore(LocalNotificationService notifications,
+        BackgroundReminderGateway gateway) =>
+    AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: notifications,
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+    );
+
+class _FlakyHealthNotifications extends f.Notifications {
+  bool fail = true;
+
+  @override
+  Future<ReminderHealth> inspectHealth() async {
+    if (fail) throw TimeoutException('synthetic notification health timeout');
+    return const ReminderHealth(
+      notifications: true,
+      exact: true,
+      pending: 0,
+      summaryPending: 0,
+      manualPending: 0,
+    );
   }
 }
 
@@ -1048,6 +1191,155 @@ void main() {
         .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '重新体检'));
     expect(refresh.onPressed, isNotNull,
         reason: 'inspection failure must not leave the page busy');
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
+  });
+  testWidgets('nativeHealthFailureNeverFabricatesZeroCounts', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'legacy_assignment_schedule_cleanup_v2': true,
+    });
+    final gateway = _HealthGateway()..failInspections = true;
+    final store = _nativeHealthStore(InspectableNotifications(), gateway);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await tester
+        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.textContaining('原生后台提醒状态暂时无法读取，可重试'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('学习通通知使用权'), 200);
+    final listener =
+        tester.widget<ListTile>(find.widgetWithText(ListTile, '学习通通知使用权'));
+    expect((listener.subtitle as Text).data, '暂时无法读取，可重试',
+        reason: '读取失败不能被显示成“默认关闭”');
+    await tester.scrollUntilVisible(find.textContaining('原生作业截止事件'), 200);
+    expect(find.textContaining('原生作业截止事件：暂时无法读取，可重试'), findsOneWidget);
+    expect(find.textContaining('待处理新增作业事件：暂时无法读取，可重试'), findsOneWidget);
+    expect(find.textContaining('原生作业截止事件：0 条'), findsNothing);
+    expect(find.textContaining('待处理新增作业事件：0 条'), findsNothing);
+    expect(find.textContaining('当前平台不适用'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
+  });
+  testWidgets('healthInspectionTimeoutKeepsLastResultAndIsRetryable',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'legacy_assignment_schedule_cleanup_v2': true,
+    });
+    final gateway = _HealthGateway()
+      ..nextHealth = nativeHealth(pendingDeadlineCount: 3, pendingNewCount: 1);
+    final store = _nativeHealthStore(InspectableNotifications(), gateway);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await tester
+        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.scrollUntilVisible(find.textContaining('原生作业截止事件'), 200);
+    expect(find.textContaining('原生作业截止事件：3 条'), findsOneWidget);
+
+    gateway.failInspections = true;
+    await tester.scrollUntilVisible(find.text('重新体检'), 200);
+    await tester.tap(find.text('重新体检'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.scrollUntilVisible(
+        find.textContaining('原生作业截止事件：3 条（上次结果）'), -200);
+    expect(find.textContaining('原生作业截止事件：3 条（上次结果）'), findsOneWidget);
+    await tester.scrollUntilVisible(find.textContaining('以下标注“上次结果”'), -200);
+    expect(find.textContaining('原生后台提醒状态暂时无法读取，可重试'), findsOneWidget);
+
+    gateway.failInspections = false;
+    gateway.nextHealth = nativeHealth(pendingDeadlineCount: 2);
+    await tester.scrollUntilVisible(find.text('重新体检'), 200);
+    await tester.tap(find.text('重新体检'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.scrollUntilVisible(find.textContaining('原生作业截止事件'), -200);
+    expect(find.textContaining('原生作业截止事件：2 条'), findsOneWidget);
+    expect(find.textContaining('原生作业截止事件：2 条（上次结果）'), findsNothing);
+    expect(find.textContaining('上次结果'), findsNothing);
+    await tester.scrollUntilVisible(find.text('先确认提醒能到达'), -200);
+    expect(find.textContaining('暂时无法读取，可重试'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
+  });
+  testWidgets('unsupportedPlatformDiffersFromInspectionFailure',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'legacy_assignment_schedule_cleanup_v2': true,
+    });
+    final unsupportedGateway = _HealthGateway(available: false);
+    final unsupported =
+        _nativeHealthStore(InspectableNotifications(), unsupportedGateway);
+    addTearDown(unsupported.dispose);
+    await unsupported.restoreSession();
+    await tester.pumpWidget(
+        MaterialApp(home: ReminderHealthScreen(store: unsupported)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.textContaining('暂时无法读取，可重试'), findsNothing);
+    expect(unsupportedGateway.inspections, 0);
+    await tester.scrollUntilVisible(find.text('学习通通知使用权'), 200);
+    final listener =
+        tester.widget<ListTile>(find.widgetWithText(ListTile, '学习通通知使用权'));
+    expect((listener.subtitle as Text).data, '当前平台不适用');
+    await tester.scrollUntilVisible(find.textContaining('原生作业截止事件'), 200);
+    expect(find.textContaining('原生作业截止事件：当前平台不适用'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+
+    final failingGateway = _HealthGateway()..failInspections = true;
+    final failing =
+        _nativeHealthStore(InspectableNotifications(), failingGateway);
+    addTearDown(failing.dispose);
+    await failing.restoreSession();
+    await tester
+        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: failing)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.textContaining('原生后台提醒状态暂时无法读取，可重试'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('学习通通知使用权'), 200);
+    final failingListener =
+        tester.widget<ListTile>(find.widgetWithText(ListTile, '学习通通知使用权'));
+    expect((failingListener.subtitle as Text).data, '暂时无法读取，可重试');
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
+  });
+  testWidgets('successfulRetryClearsStaleError', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'legacy_assignment_schedule_cleanup_v2': true,
+    });
+    final notifications = _FlakyHealthNotifications();
+    final store = _nativeHealthStore(notifications, _HealthGateway());
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await tester
+        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.textContaining('系统通知与排期体检暂时无法读取，可重试'), findsOneWidget);
+
+    notifications.fail = false;
+    await tester.scrollUntilVisible(find.text('重新体检'), 200);
+    await tester.tap(find.text('重新体检'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.scrollUntilVisible(find.textContaining('已安排摘要'), 200);
+    expect(find.textContaining('已安排摘要：0 条'), findsOneWidget);
+    expect(find.textContaining('原生作业截止事件：0 条'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('先确认提醒能到达'), -200);
+    expect(find.textContaining('暂时无法读取，可重试'), findsNothing);
+    expect(find.textContaining('上次结果'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     debugDefaultTargetPlatformOverride = null;
   });

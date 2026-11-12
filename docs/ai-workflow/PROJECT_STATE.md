@@ -106,3 +106,58 @@
 - 本轮GitHub资产查询确认1.7.4为57,785,643字节、digest与发布记录相同；Gitee官方单附件100M/总1G限制已复核。生产匿名直链、清单地址和大陆网络仍待验证，不能只凭包小宣称已配置。
 - 用户将自行注册并登录Gitee。实机许可已给出：其他问题收尾后由用户连接并确认具体手机；不重复申请许可，未确认目标前不操作设备。付费托管/域名仍需报价确认。
 - 用户图标偏好已变为接近旧头像的可爱风，可偏二次元，不要求体现软件用途。本轮已生成A软萌猫头像、B慵懒猫团子、C猫耳动漫角色、D奶油小狐狸四张预览；未选定前保留1.7.4原图标，不发布候选。
+
+## 2026-11-12 P1 修复（提醒链路/原生桥/编辑页）
+
+- 按用户“先修 P1”要求处理审查发现：`ReminderDatabase.applyPlan` 允许仍有效的 CANCELLED 截止事件重新激活（隐藏后恢复不再永久丢提醒）；`BackgroundReminderGateway` 的 `isSessionCurrent` 改为 fail-closed，`loadPlanState`/`applyPlan` 改为严格通道调用并抛出 `BackgroundReminderGatewayException`；旧插件提醒清理只按 `a:` payload/清单 ID 取消，不再按 `assignment_deadlines` channel 误删原生已投递通知，并增加一次性迁移标记；个人清单/备注与手动日程编辑页增加未保存修改的 `PopScope` 确认。
+- 新增回归：`test/background_reminder_gateway_test.dart`、`test/unsaved_edit_guard_test.dart`、`test/notification_ordering_test.dart` 的原生通知保留用例、`assignment_store_background_reminder_test.dart` 的一次性清理标记用例，以及 `ReminderDatabaseAccountTest` 的 CANCELLED→PENDING instrumented 用例。
+- 验证：`dart analyze` 无问题；`dart format` 174 文件 0 改动；全量 Flutter 测试 `736 passed / 1 skipped / 0 failed`；上海/洛杉矶时区各 35 项通过；ASCII 副本 `:app:compileDebugAndroidTestKotlin` 通过（NDK 28.2，未在设备运行 instrumented 测试）。
+- 未验证：instrumented 用例需设备运行；F1 修复未在真机通知栏复核；主线程/冷启动/取消语义等 P2 未在本轮处理。此处为当轮提交前记录；后续已提交／推送，当前状态见下一节。保留 `scripts/demo-video/` 未跟踪。
+
+## 2026-11-12 当前小版本重核与完整执行方案
+
+- 现场核对：`codex/p1-reminder-fixes` 本地／远端均为 `4a367991f2e35153bb13adf017c76baa57a588fe`，远端 main 为 `144874a`；[当前 PR](https://github.com/arrry-07/chaoxing-journal/pull/16) 未合并、非 draft、两项检查成功，Auto-fix 开启、auto-merge 关闭。正式版仍是 `1.7.4+56`／latest `v1.7.4`；核对时无 `v1.7.5*` 标签，`1.7.5+57` 仅为下一补丁建议，发布前须再查占用。
+- 已读取[当前提交的 CI 原始日志](https://github.com/arrry-07/chaoxing-journal/actions/runs/43185486702)：UTC 全量 `736 passed / 1 skipped`、上海／洛杉矶各 `35 passed`、分析与 Debug/ABI 检查成功。这不是本轮复跑；未来修复不能继承。现有 Java 合成检查和 Debug 构建未执行 Kotlin 应用单测／数据库设备测试，方案补上对应门禁。
+- 已将原[下一阶段方案](../plans/2026-11-12-下一阶段-国内更新与体验收尾执行方案.md)原位扩展为“当前小版本：可靠性修复、体验收尾与国内分发完整执行方案”。优先补现有 PR 与租约／原生失败语义，再做分页预览、持久化失败恢复、编辑路由保护、规则保存、日历待确认入口、体检错误反馈、取消及有界性能／键盘验证；每项含文件、最小步骤、新增测试、验收和停止条件。不再把 Gitee、未选图标和实机等待绑定为所有修复的前置。
+- 源码复核确认：写租约双重同步会阻住释放者；同步合并成功／失败提前返回漏释放租约；部分关键原生写操作仍吞错；legacy 已投递迁移漏清且新旧 ID 区间重叠；恢复事件未刷新课程／标题。两个 PR 审查线程本轮尚未修复、回复或 resolve。其他体验发现区分源码缺口与需组件／设备复现，不宣称实机卡顿或丢稿已验证。
+- 国内源仍无本项目生产 URL／匿名完整下载证据；Gitee 官方 100M／1G 规则已复核，不代表匿名下载保证。原猫头像继续保留；仓库内图标证据是 1.7.3 旧 A/B，不能当四个可爱风新候选或已选稿；旧候选 README 已加撤回／失效命令警告。物理手机未确认，不连接或操作设备；真实官方通知的接受缺项保持不变。
+- 本轮只修改执行方案、文档索引、该状态与旧图标说明，没有业务改动、版本变更、提交／推送、新 APK 或发布。原有 `scripts/demo-video/demo_main.dart` 未跟踪文件保留。下一步从方案 A0/A1/A2/A3 的失败测试和最小修复开始，依赖共享接口由主代理统一集成。
+
+## 2026-11-12 A 批次：租约、迁移与控制失败语义
+
+- 业务提交 `590752a`（`codex/p1-reminder-fixes`）：移除写租约多余对象锁并加入取消检查；新增按请求的租约确认／取消／引擎销毁生命周期，迟到取得不再泄漏；旧插件已投递提醒改由原生按插件点击操作与调度缓存证明归属，保留同 ID 原生通知并处理插件缓存并发；恢复／更新截止事件时同步课程与标题；关键原生控制、登录切换、隐私清理、退出与提醒体检不再把失败伪装成成功，退出失败保留旧账号哈希待重试。
+- 回归：`background_reminder_gateway_test.dart`、`assignment_store_background_reminder_test.dart`、`notification_ordering_test.dart` 新增租约确认、取消竞态、迁移保留、失败重试与退出重试用例；`BackgroundLeaseRequestsTest`、`BackgroundExecutionCoordinatorTest`、`LegacyAssignmentNotificationMigratorTest` 与扩展的 `ReminderDatabaseAccountTest` 覆盖原生侧。
+- 验证：`dart analyze` 无问题；`dart format` 174 文件 0 改动；全量 Flutter 测试 `766 passed / 1 skipped / 0 failed`；上海／洛杉矶时区各 `35 passed`；ASCII 副本 `:app:testDebugUnitTest` 与 `:app:compileDebugAndroidTestKotlin` 通过（NDK 28.2，未在设备运行 instrumented 测试）。
+- 未验证：设备上的真实 PendingIntent 身份匹配、通知投递／保留、旧账号原生清理重试、主线程耗时与冷启动；未修改版本号、未构建 Release、未发布 APK。B 批次及国内源、图标、实机验收保持未完成。
+
+## 2026-11-12 B 批次：同步预览、保存恢复与日常交互
+
+- 业务提交 `ce206c1`：V3 多页作业每页校验后发布内存预览，后页失败只撤回该课程并保留旧正式记录；journal／课程写入在 false／异常后 reload 核验真实持久值，首次持久化前标记保存阶段，本机写失败归为 storage；个人备注、手动日程与提醒规则共用离开守卫，覆盖底部页签、通知深链和路由替换，规则保存中锁定草稿控件；日历新增“无截止／截止待确认”临时范围，不覆盖已保存筛选；提醒体检区分读取失败、不支持和真实零值；会话清理／销毁取消在途请求，规划弹层在大字＋键盘下改为紧凑滚动。
+- 新增／扩展回归：`v3_pagination_preview_test.dart`、`calendar_scope_test.dart`、`unsaved_edit_guard_test.dart`、`reminder_settings_screen_test.dart`、`reliability_recovery_test.dart`、`reminder_health_test.dart`、`daily_plan_planner_test.dart`、`chaoxing_local_client_test.dart` 与 `assignment_query_test.dart`。
+- 验证：`dart analyze` 无问题；`dart format` 177 文件 0 改动；全量 Flutter 测试 `799 passed / 1 skipped / 0 failed`；上海／洛杉矶时区各 `35 passed`。未运行原生 instrumented 测试、未连接真机、未构建 Release 或发布 APK。
+- 未验证：键盘／TalkBack 实机体感、真实账号首次同步分页耗时、系统通知投递、Store 销毁取消的设备级行为；B7 的退避取消与跨会话迟到结果仅覆盖客户端取消路径，完整的设备级取消矩阵仍待后续。国内源、图标与实机验收保持未完成。
+
+## 2026-11-12 C 批次：1.7.5 候选与原生 CI 门禁
+
+- 候选提交 `21d6104`：版本提升为 `1.7.5+57`，同步 `AppVersion`、CHANGELOG、README 和安装指南；CI 新增 `:app:testDebugUnitTest`、`:app:compileDebugAndroidTestKotlin`、`:app:lintDebug`。npm/依赖未变，`pubspec.lock` 未改。
+- 版本核对：核对时无 `v1.7.5` Tag；GitHub latest 仍为 `v1.7.4`。1.7.5 按小补丁处理，不设 latest、不触发启动提示。
+- 验证：`tool/check_release_metadata.py` 通过（1.7.5+57）；`dart analyze` 无问题；格式 177 文件 0 改动；全量 Flutter 测试 `799 passed / 1 skipped`；上海／洛杉矶时区各 `35 passed`。
+- ASCII 副本使用 `ANDROID_HOME=D:/campus-tools/android` 构建：Debug 与 Release 均成功；`:app:testDebugUnitTest`、`:app:compileDebugAndroidTestKotlin`、`:app:lintDebug` 通过。
+- 候选 APK：`app-release.apk`，57,851,367 字节，SHA-256 `79c40fe20b8903bfa91cec036a3c98b71b00804e8d80c41edab49c8cf0c839fc`；`aapt` 为 `com.example.studyassistant.journal` / versionCode 57 / versionName 1.7.5 / minSdk 26 / targetSdk 36；ABI 仅 `arm64-v8a`、`x86_64`；APK Signature Scheme v2 有效，证书 SHA-256 `d36a571510e046dd196d7384f849f82b4fcff05ce3affb334765d5c752265d8a`；`zipalign -c 4`、ZIP CRC 通过；未声明 debuggable。
+- 未验证：候选未安装到模拟器或实体手机，未运行 instrumented 测试；真实账号同步与通知投递未复验。候选尚未合并、打 Tag 或发布；国内源与图标仍未完成。
+
+## 2026-11-12 暂停现场：1.7.5 发布门禁修复（未完成，已存 stash）
+
+- 原因：执行方案 P1/P2 的 R1–R6 修复进行到一半，用户需关机暂停。进行中的 18 个文件已存入本地 Git stash：`stash@{0}` / `wip: 1.7.5 release gates R1-R6 partial (2026-11-12 pause)`；工作区只保留已完成的下载入口修正和本状态。未合并、未打 Tag、未发布 1.7.5。
+- 已完成并验证（stash 内容）：原生迁移拆分 `LegacyAssignmentCache`（读取 v18 Gson 的 `id`、保留非目标/未知记录）、`LegacyAssignmentMigrationState`（原生 v3 事实）、`NativeReminderTasks`、迁移/租约终态修改；`AssignmentNotificationPublisher` 增加真实点击 token 比较与迁移门禁；`ReminderDatabase.eventsForNotification`；Store 的迁移闸门、隐私待清理保护、唯一 sync requestId、保存阶段取最新快照；点击型取消结果与退避取消；`unsaved_edit_guard` 新核心；`update-manifest.ps1` 显式 ApkUrl/初始化模式与脚本测试。
+- 验证现场：Dart `analyze` 无问题；ASCII 副本原生 `:app:testDebugUnitTest` 与 `:app:compileDebugAndroidTestKotlin` 通过（约 40 个原生单测）。Dart 定向运行仍有 13 个失败，主要是 `chaoxing_local_client_test` 的取消/会话旧断言，以及 `unsaved_edit_guard_test` 因新守卫尚未接入页面调用方；不能把这些失败当作已修复。
+- 尚未完成：R4 页面/Shell/通知调用方接入新守卫（`navigate`/`showUnsavedEditDialog`/`invalidate`）；R6 区分“显式取消”与 `clearSession` 旧 stale 语义并更新测试；R2 登录/Worker/隐私端到端回归；R3 原生迟到控制测试收口；R5 Store 撤回窗口测试；PowerShell 脚本真实执行；全量 Flutter、双时区、构建、隔离模拟器与实际设备验收；最终合并、Tag、Release 与匿名回下载。图标/国内源仍保持未完成。
+- 恢复步骤：现场核对 `git status` 与 `git stash list`；执行 `git stash pop stash@{0}`（不要 drop），再 `dart analyze`，先修复 guard 调用方与取消测试，再跑定向/全量；stash 不含 `scripts/demo-video/`，该未跟踪目录保持原样。
+- 当前远端/本地已提交 HEAD 仍为 `39ebf88`（1.7.5+57 候选、PR16 两项 CI 已通过），README/安装指南已恢复 1.7.4 有效下载入口并标注 1.7.5 未发布。下一轮不要从“旧候选已构建”直接发布。
+
+## 2026-11-13 恢复执行：1.7.5 发布门禁修复闭环
+
+- 已恢复并删除暂停 stash；业务提交 `ad6d395` 完成 R1–R6：插件 v18 缓存 `id`/点击 token 归属、未知记录保留、AlarmManager 取消、原生 v3 迁移事实与投递门禁；租约终态不可复活且每次同步唯一 requestId；plan 数据库/闹钟/通知发布移出主线程；草稿批准限定一次导航/一个 revision，账号替换失效旧弹窗并退出私有编辑页；保存阶段取最新撤回快照；显式取消不再变成成功空同步；清单脚本补显式 APK URL/基线初始化并修缺失路径错误。
+- 验证：`dart analyze` 无问题；格式 177 文件 0 改动；全量 Flutter `812 passed / 1 skipped`；上海/洛杉矶各 `35 passed`；原生单元测试 40 项通过；隔离 API35 x86_64 模拟器实际运行 instrumented 16 项（15 通过，真实账号 1 跳过）；PowerShell 清单脚本 `66 passed / 0 failed`。
+- 最终候选（本轮源码重建）：`chaoxing-journal-1.7.5.apk` 57,867,751 字节，SHA-256 `0732c5b99cf7dc2a956a9f95d5a6844b8cd20c0cd187c44a5bffbdb394df0bdf`；包名 `com.example.studyassistant.journal`、code 57、name 1.7.5、min26/target36、ABI arm64-v8a/x86_64、v2 证书 `d36a571510e046dd196d7384f849f82b4fcff05ce3affb334765d5c752265d8a`、`zipalign -c -P 16 4` 通过。隔离模拟器先装公开 1.7.4（SHA `3994e1e…`）再同签名覆盖候选，`firstInstallTime` 保持 `2026-11-13 02:43:02`，版本 1.7.5 且 MainActivity 正常前台。
+- 未完成：PR 尚未合并、Tag/Release 未创建；README/安装指南仍指向 1.7.4，CHANGELOG 仍标候选；最终 main 构建/公开回下载/旧客户端手动更新验证待执行。国内源生产部署和新图标仍未具备外部条件。

@@ -1,9 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 // Failure injection into the persistence boundary used by SharedPreferences.
 // ignore: depend_on_referenced_packages
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
+import 'package:study_assistant_mobile/main.dart';
+import 'package:study_assistant_mobile/src/app/unsaved_edit_guard.dart';
+import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/reminder_settings_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
@@ -16,6 +22,11 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    await initializeDateFormatting('zh_CN');
+  });
+
   testWidgets('shows permission controls needed for reminders', (tester) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     final notifService = _NoopNotificationService();
@@ -749,6 +760,284 @@ void main() {
     );
     expect(find.textContaining('保存失败'), findsNothing);
   });
+
+  testWidgets('reminderRuleDraftAsksBeforeLeaving', (tester) async {
+    final store = await _launchApp(tester, '/reminders');
+    final preset = find.widgetWithText(CheckboxListTile, '提前 1 天');
+    await tester.ensureVisible(preset);
+    await tester.pumpAndSettle();
+    await tester.tap(preset);
+    await tester.pump();
+    expect(tester.widget<CheckboxListTile>(preset).value, isTrue);
+    expect(store.reminderOffsetsMinutes, [30]);
+
+    final calendarTab = find.descendant(
+        of: find.byType(NavigationBar), matching: find.text('日历'));
+    await tester.tap(calendarTab);
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的提醒规则？'), findsOneWidget);
+    expect(find.byType(ReminderSettingsScreen), findsOneWidget);
+
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ReminderSettingsScreen), findsOneWidget);
+    expect(tester.widget<CheckboxListTile>(preset).value, isTrue);
+    expect(store.reminderOffsetsMinutes, [30]);
+
+    await tester.tap(calendarTab);
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的提醒规则？'), findsOneWidget);
+    await tester.tap(find.text('放弃修改'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.byType(ReminderSettingsScreen), findsNothing);
+  });
+
+  testWidgets('clean reminder rules leave without a prompt', (tester) async {
+    await _launchApp(tester, '/reminders');
+    final calendarTab = find.descendant(
+        of: find.byType(NavigationBar), matching: find.text('日历'));
+    await tester.tap(calendarTab);
+    await tester.pumpAndSettle();
+
+    expect(find.text('放弃未保存的提醒规则？'), findsNothing);
+    expect(find.byType(CalendarScreen), findsOneWidget);
+  });
+
+  testWidgets('ruleControlsLockedWhileSavePending', (tester) async {
+    final store = await _gatedStore();
+    addTearDown(store.dispose);
+    final guard = UnsavedEditGuard();
+    await tester.pumpWidget(UnsavedEditGuardScope(
+      guard: guard,
+      child: MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(assignmentStore: store),
+        ),
+      ),
+    ));
+    await tester.ensureVisible(find.text('添加'));
+    await tester.enterText(find.byType(TextField).at(1), '45');
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+    expect(find.text('提前 45 分钟'), findsOneWidget);
+    expect(guard.hasUnsavedChanges, isTrue);
+
+    final saveButton = find.widgetWithText(FilledButton, '保存提醒规则');
+    await tester.ensureVisible(saveButton);
+    await tester.tap(saveButton);
+    await tester.pump();
+    expect(store.calls, hasLength(1));
+    expect(find.text('保存中'), findsOneWidget);
+
+    final preset = find.widgetWithText(CheckboxListTile, '提前 1 天');
+    expect(tester.widget<CheckboxListTile>(preset).onChanged, isNull);
+    for (final field in tester.widgetList<TextField>(find.byType(TextField))) {
+      expect(field.enabled, isFalse);
+    }
+    expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, '添加'))
+            .onPressed,
+        isNull);
+    final deleteButton = find.ancestor(
+        of: find.byIcon(Icons.delete_outline),
+        matching: find.byType(IconButton));
+    expect(tester.widget<IconButton>(deleteButton).onPressed, isNull);
+    expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, '保存中'))
+            .onPressed,
+        isNull);
+
+    // A second tap cannot start another save while the first is pending.
+    await tester.tap(find.widgetWithText(FilledButton, '保存中'));
+    await tester.pump();
+    expect(store.calls, hasLength(1));
+
+    store.gate.complete(true);
+    await tester.pumpAndSettle();
+    expect(store.calls.single.toSet(), {30, 45});
+    expect(find.textContaining('提醒时间已保存'), findsOneWidget);
+    expect(guard.hasUnsavedChanges, isFalse);
+    expect(await guard.confirmLeave(), isTrue);
+    expect(find.text('放弃未保存的提醒规则？'), findsNothing);
+  });
+
+  testWidgets('failedSaveKeepsDraftDirty', (tester) async {
+    final store = await _gatedStore();
+    addTearDown(store.dispose);
+    final guard = UnsavedEditGuard();
+    await tester.pumpWidget(UnsavedEditGuardScope(
+      guard: guard,
+      child: MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(assignmentStore: store),
+        ),
+      ),
+    ));
+    final preset = find.widgetWithText(CheckboxListTile, '提前 1 天');
+    await tester.ensureVisible(preset);
+    await tester.tap(preset);
+    await tester.pump();
+    await tester.ensureVisible(find.text('添加'));
+    await tester.enterText(find.byType(TextField).at(1), '45');
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+    final expected = {30, 45, 1440};
+
+    final saveButton = find.widgetWithText(FilledButton, '保存提醒规则');
+    await tester.ensureVisible(saveButton);
+    await tester.tap(saveButton);
+    await tester.pump();
+    expect(store.calls, hasLength(1));
+    store.gate.complete(false);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('当前选择已保留'), findsOneWidget);
+    expect(find.text('提前 45 分钟'), findsOneWidget);
+    expect(tester.widget<CheckboxListTile>(preset).value, isTrue);
+    expect(guard.hasUnsavedChanges, isTrue);
+
+    // Let the failure banner dismiss before retrying from the same controls.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    store.gate = Completer<bool>();
+    await tester.ensureVisible(saveButton);
+    await tester.tap(saveButton);
+    await tester.pump();
+    expect(store.calls, hasLength(2));
+    store.gate.complete(true);
+    await tester.pumpAndSettle();
+
+    expect(store.calls.last.toSet(), expected);
+    expect(find.textContaining('提醒时间已保存'), findsOneWidget);
+    expect(guard.hasUnsavedChanges, isFalse);
+  });
+
+  testWidgets('reminderRuleLeavingBlockedWhileSavePending', (tester) async {
+    final store = await _gatedStore();
+    addTearDown(store.dispose);
+    final guard = UnsavedEditGuard();
+    await tester.pumpWidget(UnsavedEditGuardScope(
+      guard: guard,
+      child: MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(assignmentStore: store),
+        ),
+      ),
+    ));
+    final preset = find.widgetWithText(CheckboxListTile, '提前 1 天');
+    await tester.ensureVisible(preset);
+    await tester.tap(preset);
+    await tester.pump();
+
+    final saveButton = find.widgetWithText(FilledButton, '保存提醒规则');
+    await tester.ensureVisible(saveButton);
+    await tester.tap(saveButton);
+    await tester.pump();
+    expect(store.calls, hasLength(1));
+
+    // A discard dialog must not offer to leave while the write is running.
+    expect(await guard.confirmLeave(), isFalse);
+    await tester.pump();
+    expect(find.text('放弃未保存的提醒规则？'), findsNothing);
+    expect(find.textContaining('正在保存'), findsOneWidget);
+    expect(find.byType(ReminderSettingsScreen), findsOneWidget);
+
+    store.gate.complete(true);
+    await tester.pumpAndSettle();
+    expect(guard.hasUnsavedChanges, isFalse);
+  });
+
+  testWidgets('immediate settings do not dirty the reminder rule draft',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'reminder_offsets_minutes': ['30'],
+    });
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final guard = UnsavedEditGuard();
+    await tester.pumpWidget(UnsavedEditGuardScope(
+      guard: guard,
+      child: MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(assignmentStore: store),
+        ),
+      ),
+    ));
+
+    final detailsTile = find.widgetWithText(SwitchListTile, '通知显示详细内容');
+    await tester.ensureVisible(detailsTile);
+    await tester.tap(detailsTile);
+    await tester.pumpAndSettle();
+
+    expect(guard.hasUnsavedChanges, isFalse);
+  });
+}
+
+Future<AssignmentStore> _launchApp(WidgetTester tester, String location) async {
+  SharedPreferences.setMockInitialValues({
+    'auto_sync_interval_minutes': 0,
+    'reminder_offsets_minutes': ['30'],
+  });
+  final store = _LaunchStore();
+  addTearDown(store.dispose);
+  await store.restoreSession();
+  tester.binding.platformDispatcher.defaultRouteNameTestValue = location;
+  addTearDown(tester.binding.platformDispatcher.clearDefaultRouteNameTestValue);
+  await tester.pumpWidget(StudyAssistantApp(
+    assignmentStore: store,
+    notificationService: _NoopNotificationService(),
+  ));
+  await tester.pumpAndSettle();
+  return store;
+}
+
+Future<_GatedRuleStore> _gatedStore() async {
+  SharedPreferences.setMockInitialValues({
+    'auto_sync_interval_minutes': 0,
+    'reminder_offsets_minutes': ['30'],
+  });
+  final store = _GatedRuleStore();
+  await store.restoreSession();
+  return store;
+}
+
+class _LaunchStore extends AssignmentStore {
+  _LaunchStore()
+      : super(
+          sessionStore: _MemorySessionStore(),
+          notificationService: _NoopNotificationService(),
+          widgetSnapshotService: _NoopWidgetSnapshotService(),
+        );
+
+  @override
+  Future<bool> runDueAutoSync({DateTime? now}) async => false;
+}
+
+class _GatedRuleStore extends AssignmentStore {
+  _GatedRuleStore()
+      : super(
+          sessionStore: _MemorySessionStore(),
+          notificationService: _NoopNotificationService(),
+          widgetSnapshotService: _NoopWidgetSnapshotService(),
+        );
+
+  final calls = <List<int>>[];
+  Completer<bool> gate = Completer<bool>();
+
+  @override
+  Future<bool> saveReminderRule(List<int> offsetsMinutes) {
+    calls.add(List<int>.of(offsetsMinutes));
+    return gate.future;
+  }
 }
 
 class _NoopNotificationService extends LocalNotificationService {

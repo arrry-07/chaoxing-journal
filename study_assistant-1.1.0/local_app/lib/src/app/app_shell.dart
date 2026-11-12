@@ -5,16 +5,19 @@ import 'package:go_router/go_router.dart';
 
 import '../services/assignment_store.dart';
 import 'journal.dart';
+import 'unsaved_edit_guard.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
     required this.assignmentStore,
     required this.child,
+    this.leaveGuard,
   });
 
   final AssignmentStore assignmentStore;
   final Widget child;
+  final UnsavedEditGuard? leaveGuard;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -22,6 +25,8 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Timer? _returnTimer;
+  UnsavedEditGuard? _leaveGuard;
+
   @override
   void initState() {
     super.initState();
@@ -29,6 +34,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.assignmentStore.runDueAutoSync();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _leaveGuard = widget.leaveGuard ?? UnsavedEditGuardScope.maybeOf(context);
   }
 
   @override
@@ -84,20 +95,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           height: 76,
           selectedIndex: _indexFor(location),
           onDestinationSelected: (index) {
-            switch (index) {
-              case 0:
-                context.go('/assignments');
-                break;
-              case 1:
-                context.go('/calendar');
-                break;
-              case 2:
-                context.go('/stats');
-                break;
-              case 3:
-                context.go('/profile');
-                break;
-            }
+            unawaited(_selectDestination(index));
           },
           destinations: const [
             NavigationDestination(
@@ -124,6 +122,32 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ),
       ]),
     );
+  }
+
+  Future<void> _selectDestination(int index) async {
+    Future<void> go() async {
+      switch (index) {
+        case 0:
+          context.go('/assignments');
+          break;
+        case 1:
+          context.go('/calendar');
+          break;
+        case 2:
+          context.go('/stats');
+          break;
+        case 3:
+          context.go('/profile');
+          break;
+      }
+    }
+
+    final guard = _leaveGuard;
+    if (guard == null) {
+      await go();
+      return;
+    }
+    await guard.navigate(isCurrent: () => mounted, action: go);
   }
 
   int _indexFor(String location) {

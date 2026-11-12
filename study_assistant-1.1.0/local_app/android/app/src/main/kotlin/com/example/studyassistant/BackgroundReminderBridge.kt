@@ -14,12 +14,48 @@ import java.util.concurrent.Executors
 
 object BackgroundReminderBridge {
     const val CHANNEL = "study_assistant/background_reminders"
+    private const val CONFIRMATION_TIMEOUT_SECONDS = 10L
     private val leaseExecutor = Executors.newCachedThreadPool()
+    // Database, alarm and notification publishing run here, never on the
+    // platform main thread. Lease waits stay on their own executor so a busy
+    // plan cannot block confirmation/release callbacks.
+    private val reminderExecutor = Executors.newSingleThreadExecutor()
+    private val confirmationExecutor =
+        Executors.newSingleThreadScheduledExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun attach(engine: FlutterEngine, context: Context) {
         val appContext = context.applicationContext
         val database = ReminderDatabase.get(appContext)
+        val leaseRequests = BackgroundLeaseRequests(
+            waitExecutor = leaseExecutor,
+            dispatch = { action -> mainHandler.post(action) },
+            scheduleConfirmationTimeout = { action ->
+                val future = confirmationExecutor.schedule(
+                    action,
+                    CONFIRMATION_TIMEOUT_SECONDS,
+                    java.util.concurrent.TimeUnit.SECONDS,
+                )
+                val cancel: () -> Unit = { future.cancel(false) }
+                cancel
+            },
+            onCleanupFailure = { /* best effort; the lease is still released */ },
+        )
+        engine.addEngineLifecycleListener(
+            object : FlutterEngine.EngineLifecycleListener {
+                override fun onPreEngineRestart() {
+                    leaseRequests.destroy()
+                }
+
+                override fun onEngineWillDestroy() {
+                    leaseRequests.destroy()
+                }
+            },
+        )
+        LegacyAssignmentNotificationMigrator.attach(engine, appContext)
+        val tasks = NativeReminderTasks(reminderExecutor) { action ->
+            mainHandler.post(action)
+        }
         MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
@@ -148,45 +184,65 @@ object BackgroundReminderBridge {
                     }
                     "acquireSyncLease" -> {
                         val accountHash = call.requiredString("accountHash")
-                        val requestId = call.requiredString("requestId")
-                        leaseExecutor.execute {
-                            val acquisition = BackgroundExecutionCoordinator.acquireSync(
-                                accountHash,
-                                requestId,
-                                120_000L,
-                            )
-                            val state = database.readAccount(accountHash)
-                            mainHandler.post {
-                                result.success(
-                                    mapOf(
-                                        "acquired" to acquisition.acquired,
-                                        "waited" to acquisition.waited,
-                                        "lastAttemptAt" to
-                                            state?.lastAttemptAt?.toIsoUtc(),
-                                        "lastFullSuccessAt" to
-                                            state?.lastFullSuccessAt?.toIsoUtc(),
-                                    ),
+                        leaseRequests.acquireSync(
+                            accountHash,
+                            call.requiredString("requestId"),
+                            {
+                                val state = database.readAccount(accountHash)
+                                mapOf(
+                                    "lastAttemptAt" to state?.lastAttemptAt?.toIsoUtc(),
+                                    "lastFullSuccessAt" to
+                                        state?.lastFullSuccessAt?.toIsoUtc(),
                                 )
-                            }
-                        }
+                            },
+                            result.toLeaseReply(),
+                        )
+                    }
+                    "confirmSyncLease" -> result.success(
+                        leaseRequests.confirmSync(
+                            call.requiredString("accountHash"),
+                            call.requiredString("requestId"),
+                        ),
+                    )
+                    "cancelSyncLeaseAcquisition" -> {
+                        leaseRequests.cancelSync(
+                            call.requiredString("accountHash"),
+                            call.requiredString("requestId"),
+                        )
+                        result.success(null)
                     }
                     "releaseSyncLease" -> {
-                        BackgroundExecutionCoordinator.releaseSync(
+                        leaseRequests.releaseSync(
                             call.requiredString("accountHash"),
                             call.requiredString("requestId"),
                         )
                         result.success(null)
                     }
                     "acquireWriteLease" -> {
-                        val owner = call.requiredString("owner")
-                        leaseExecutor.execute {
-                            val acquired =
-                                BackgroundExecutionCoordinator.acquireWrite(owner)
-                            mainHandler.post { result.success(acquired) }
-                        }
+                        leaseRequests.acquireWrite(
+                            call.requiredString("owner"),
+                            call.requiredString("requestId"),
+                            result.toLeaseReply(),
+                        )
+                    }
+                    "confirmWriteLease" -> result.success(
+                        leaseRequests.confirmWrite(
+                            call.requiredString("owner"),
+                            call.requiredString("requestId"),
+                        ),
+                    )
+                    "cancelWriteLeaseAcquisition" -> {
+                        leaseRequests.cancelWrite(
+                            call.requiredString("owner"),
+                            call.requiredString("requestId"),
+                        )
+                        result.success(null)
                     }
                     "releaseWriteLease" -> {
-                        BackgroundExecutionCoordinator.releaseWrite(call.requiredString("owner"))
+                        leaseRequests.releaseWrite(
+                            call.requiredString("owner"),
+                            call.requiredString("requestId"),
+                        )
                         result.success(null)
                     }
                     "markPendingUpdate" -> {
@@ -213,7 +269,7 @@ object BackgroundReminderBridge {
                             ),
                         )
                     }
-                    "applyPlan" -> {
+                    "applyPlan" -> tasks.execute(result) { reply ->
                         val accountHash = call.requiredString("accountHash")
                         val sessionEpoch = call.requiredLong("sessionEpoch")
                         val snapshots = jsonObjectList(call.argument("snapshots"))
@@ -270,7 +326,7 @@ object BackgroundReminderBridge {
                                 accountHash,
                             )
                         }
-                        result.success(
+                        reply.success(
                             mapOf(
                                 "scheduledDeadlineCount" to
                                     application.desiredDeadlineEvents.size,
@@ -353,6 +409,21 @@ object BackgroundReminderBridge {
     private fun io.flutter.plugin.common.MethodCall.requiredString(key: String): String =
         argument<String>(key)?.takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException("缺少参数 $key")
+
+    private fun MethodChannel.Result.toLeaseReply(): BackgroundLeaseRequests.Reply =
+        object : BackgroundLeaseRequests.Reply {
+            override fun success(value: Any?) {
+                this@toLeaseReply.success(value)
+            }
+
+            override fun error(error: Exception) {
+                this@toLeaseReply.error(
+                    "background_reminder_error",
+                    error.message ?: error.javaClass.simpleName,
+                    null,
+                )
+            }
+        }
 
     private fun io.flutter.plugin.common.MethodCall.requiredLong(key: String): Long =
         (argument<Number>(key) ?: throw IllegalArgumentException("缺少参数 $key")).toLong()
