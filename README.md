@@ -6,9 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载当前正式版：1.7.4](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.4/chaoxing-journal-1.7.4.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.4) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
-
-> 开发中的 **1.7.5（57）候选**尚未发布；以下下载入口在候选验收与公开回下载完成前继续提供 1.7.4。
+**[下载 Android 安装包：1.7.5](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.5/chaoxing-journal-1.7.5.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.5) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
@@ -34,16 +32,16 @@
 
 ## 下载安装
 
-**当前正式下载为 1.7.4（56）；1.7.5（57）仍在候选验收。已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**首次安装或手动升级均下载 1.7.5（57）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.7.4.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.4/chaoxing-journal-1.7.4.apk)。发布说明及校验文件见 [1.7.4 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.4)。
+1. [下载 chaoxing-journal-1.7.5.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.5/chaoxing-journal-1.7.5.apk)。发布说明及校验文件见 [1.7.5 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.5)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
 <summary>已经安装：如何升级到 1.7.5？</summary>
 
-1.7.5 尚未公开，当前不能通过应用内检查或网页下载。候选通过验收并正式公开后，将按手动补丁提供，不触发启动更新提示；1.7.4 用户届时手动检查或从正式发布页覆盖安装。旧 1.6.7 客户端仍只读取 latest（1.7.4），不会自动发现该补丁。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
+1.7.5 是手动补丁，不会触发启动更新提示。已安装 1.7.4 的用户请在“我的 → 检查更新”手动检查，或用上面的网页链接覆盖安装；旧 1.6.7 客户端仍只读取 latest（1.7.4），不会自动发现 1.7.5。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 

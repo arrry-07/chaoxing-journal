@@ -161,3 +161,11 @@
 - 验证：`dart analyze` 无问题；格式 177 文件 0 改动；全量 Flutter `812 passed / 1 skipped`；上海/洛杉矶各 `35 passed`；原生单元测试 40 项通过；隔离 API35 x86_64 模拟器实际运行 instrumented 16 项（15 通过，真实账号 1 跳过）；PowerShell 清单脚本 `66 passed / 0 failed`。
 - 最终候选（本轮源码重建）：`chaoxing-journal-1.7.5.apk` 57,867,751 字节，SHA-256 `0732c5b99cf7dc2a956a9f95d5a6844b8cd20c0cd187c44a5bffbdb394df0bdf`；包名 `com.example.studyassistant.journal`、code 57、name 1.7.5、min26/target36、ABI arm64-v8a/x86_64、v2 证书 `d36a571510e046dd196d7384f849f82b4fcff05ce3affb334765d5c752265d8a`、`zipalign -c -P 16 4` 通过。隔离模拟器先装公开 1.7.4（SHA `3994e1e…`）再同签名覆盖候选，`firstInstallTime` 保持 `2026-11-13 02:43:02`，版本 1.7.5 且 MainActivity 正常前台。
 - 未完成：PR 尚未合并、Tag/Release 未创建；README/安装指南仍指向 1.7.4，CHANGELOG 仍标候选；最终 main 构建/公开回下载/旧客户端手动更新验证待执行。国内源生产部署和新图标仍未具备外部条件。
+
+## 2026-11-13 1.7.5 正式发布
+
+- PR `#16` 正常合并，main 提交 `0127aa371805b65acbb6211562e501df0ad7c80d`；annotated Tag `v1.7.5` 指向同一提交。main CI `43284580711` 与 Tag CI `43284985962` 均成功；PR push/PR checks 成功。
+- 正式 APK：`chaoxing-journal-1.7.5.apk`，57,867,751 字节，SHA-256 `104f902b1cbc564b098afc1ac9849b2ad62521fc827d2a9499b40845c7c7ed47`；`SHA256SUMS.txt` 93 字节；同签名证书 `d36a5715…265d8a`；ABI arm64-v8a/x86_64；v2 签名、ZIP CRC、16KiB 对齐通过。
+- Release：<https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.5>，已公开、非预发布、显式 `latest=false`；GitHub latest 仍为 `v1.7.4`。公开 URL 未登录完整下载 APK 与校验文件，`sha256sum -c`、ZIP 和证书核对通过。
+- 设备：专用 API35 x86_64 模拟器从公开 1.7.4 同签名覆盖到最终 1.7.5，`firstInstallTime` 保持，MainActivity 前台；未操作物理手机。实体手机真实账号/后台/Doze/TalkBack、真实官方学习通通知（既有接受缺项）仍未验证；国内生产源与新图标未交付。
+- 文档已切到 1.7.5 下载/安装/版本记录，新增 1.7.5 完整验收记录并更新索引/路线图/验收基线。后续文档提交不移动 Tag；应用源码以 `0127aa3` 为准。
