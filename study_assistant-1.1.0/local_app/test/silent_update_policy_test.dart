@@ -23,6 +23,11 @@ Map<String, dynamic> release(String name,
       ],
     };
 
+String nextPatchVersion() {
+  final parts = AppVersion.name.split('.').map(int.parse).toList();
+  return '${parts[0]}.${parts[1]}.${parts[2] + 1}';
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -53,6 +58,8 @@ void main() {
   test('manual click during startup waits then checks the patch list',
       () async {
     final gate = Completer<void>();
+    final current = AppVersion.name;
+    final nextPatch = nextPatchVersion();
     final paths = <String>[];
     final dio = Dio()
       ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) async {
@@ -62,7 +69,7 @@ void main() {
         h.resolve(Response(
             requestOptions: o,
             statusCode: 200,
-            data: startup ? release('1.7.3') : [release('1.7.4')]));
+            data: startup ? release(current) : [release(nextPatch)]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
@@ -72,7 +79,7 @@ void main() {
     gate.complete();
     expect(await startup, false);
     await manual;
-    expect(task.update?.versionName, '1.7.4');
+    expect(task.update?.versionName, nextPatch);
     expect(paths, [
       '/repos/arrry-07/chaoxing-journal/releases/latest',
       '/repos/arrry-07/chaoxing-journal/releases'
@@ -81,23 +88,26 @@ void main() {
 
   test('late startup check never replaces a manual candidate', () async {
     var calls = 0;
+    final nextPatch = nextPatchVersion();
     final dio = Dio()
       ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
         calls++;
         expect(o.uri.path.endsWith('/latest'), false);
         h.resolve(Response(
-            requestOptions: o, statusCode: 200, data: [release('1.7.4')]));
+            requestOptions: o, statusCode: 200, data: [release(nextPatch)]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
     await task.check();
     expect(await task.checkOnStartup(), false);
-    expect(task.update!.versionName, '1.7.4');
+    expect(task.update!.versionName, nextPatch);
     expect(calls, 1);
   });
 
   test('startup reads only latest; manual discovers a non-latest patch',
       () async {
+    final current = AppVersion.name;
+    final nextPatch = nextPatchVersion();
     final paths = <String>[];
     final dio = Dio()
       ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
@@ -106,8 +116,8 @@ void main() {
             requestOptions: o,
             statusCode: 200,
             data: o.uri.path.endsWith('/latest')
-                ? release('1.7.3')
-                : [release('1.7.4'), release('1.7.3')]));
+                ? release(current)
+                : [release(nextPatch), release(current)]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
@@ -115,7 +125,7 @@ void main() {
     expect(task.showBanner, false);
     expect(task.update, isNull);
     await task.check();
-    expect(task.update!.versionName, '1.7.4');
+    expect(task.update!.versionName, nextPatch);
     expect(paths, [
       '/repos/arrry-07/chaoxing-journal/releases/latest',
       '/repos/arrry-07/chaoxing-journal/releases'

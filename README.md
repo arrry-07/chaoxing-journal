@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.7.3](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.3/chaoxing-journal-1.7.3.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.3) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.7.4](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.4/chaoxing-journal-1.7.4.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.4) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
@@ -32,20 +32,20 @@
 
 ## 下载安装
 
-**首次安装或手动升级均下载 1.7.3（55）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**首次安装或手动升级均下载 1.7.4（56）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.7.3.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.3/chaoxing-journal-1.7.3.apk)。发布说明及校验文件见 [1.7.3 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.3)。
+1. [下载 chaoxing-journal-1.7.4.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.4/chaoxing-journal-1.7.4.apk)。发布说明及校验文件见 [1.7.4 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.4)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到 1.7.3？</summary>
+<summary>已经安装：如何升级到 1.7.4？</summary>
 
-1.7.3 提高了主/次版本并设置 latest，支持新版更新规则的客户端可在启动时提示，也可从“我的 → 检查更新”手动检查。旧 1.6.7 客户端只读取 latest，本次也会看到 1.7.3；若应用内下载受网络影响，可使用上面的网页链接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
+1.7.4 恢复 1.6.72 及以前使用的原应用图标。1.7.3 已从 latest 撤下并标记为预发布；已安装 1.7.3 的用户请从“我的 → 检查更新”手动检查，或使用上面的网页链接覆盖安装。旧 1.6.7 客户端仍读取 latest，可发现 1.7.4。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
-体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.7.3 继续沿用既有体验身份。
+体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.7.4 继续沿用既有体验身份。
 
 ## 使用边界
 
