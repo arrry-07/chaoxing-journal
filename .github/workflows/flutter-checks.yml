@@ -40,6 +40,9 @@ jobs:
         run: |
           python3 tool/check_release_metadata.py
           python3 tool/check_changed_format.py
+          python3 -m py_compile scripts/gitee_release_sync.py
+          python3 scripts/test_gitee_release_sync.py
+          python3 scripts/test_gitee_workflow.py
       - name: Run synthetic JVM checks
         run: |
           curl --fail --location --retry 2 https://repo.maven.apache.org/maven2/org/json/json/20180813/json-20180813.jar -o "$RUNNER_TEMP/json.jar"

@@ -1,0 +1,82 @@
+name: Gitee release sync
+
+on:
+  schedule:
+    # 19:17 UTC is 03:17 on the following day in Asia/Shanghai.
+    - cron: "17 19 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Sync the current GitHub latest or seed explicit historical tags
+        required: true
+        type: choice
+        default: daily
+        options:
+          - daily
+          - seed
+      tags:
+        description: Comma-separated seed tags, for example v1.7.4,v1.7.5,v1.7.52
+        required: false
+        type: string
+        default: ""
+      retention:
+        description: Maximum APK releases retained on Gitee
+        required: true
+        type: choice
+        default: "3"
+        options:
+          - "3"
+          - "4"
+          - "5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitee-release-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Verify and publish to Gitee
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install APK verification tools
+        run: sdkmanager "build-tools;36.0.0"
+
+      - name: Run offline synchronizer tests
+        run: |
+          python3 -m py_compile scripts/gitee_release_sync.py
+          python3 scripts/test_gitee_release_sync.py
+          python3 scripts/test_gitee_workflow.py
+
+      - name: Synchronize Gitee distribution
+        shell: bash
+        run: |
+          args=(
+            --mode "${{ inputs.mode || 'daily' }}"
+            --retention "${{ inputs.retention || '3' }}"
+          )
+          if [[ -n "${{ inputs.tags }}" ]]; then
+            args+=(--tags "${{ inputs.tags }}")
+          fi
+          python3 scripts/gitee_release_sync.py "${args[@]}"
