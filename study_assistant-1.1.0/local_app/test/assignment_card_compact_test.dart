@@ -59,8 +59,8 @@ void main() {
         )));
         await t.pumpAndSettle();
         expect(t.takeException(), isNull, reason: '$width/$scale');
-        final action = find.text('去学习通完成');
-        expect(t.getSize(find.widgetWithText(TextButton, '去学习通完成')).height,
+        final action = find.text('在学习通内打开作业');
+        expect(t.getSize(find.widgetWithText(TextButton, '在学习通内打开作业')).height,
             greaterThanOrEqualTo(48));
         await t.tap(action);
         expect(opens, 1);

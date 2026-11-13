@@ -150,7 +150,7 @@ void main() {
         scrollable: find.byType(Scrollable).first);
 
     expect(find.text('待核对作业'), findsOneWidget);
-    expect(find.text('无截止（1）'), findsOneWidget);
+    expect(find.text('无截止日期（1）'), findsOneWidget);
     expect(find.text('截止待确认（3）'), findsOneWidget);
     expect(find.text('保留但不可信的日期'), findsNothing);
     expect(find.text('读取失败后保留的日期'), findsNothing);

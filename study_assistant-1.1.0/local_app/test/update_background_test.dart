@@ -136,6 +136,21 @@ void main() {
     expect(installer.launches, 0);
   });
 
+  testWidgets('signature rejection is identified as verification failure',
+      (t) async {
+    await task.check();
+    installer.compatible = false;
+    await t.runAsync(() async {
+      final download = task.download();
+      service.pending!.complete(service.file);
+      await download;
+    });
+    await t.pumpWidget(MaterialApp(home: UpdateDialog(controller: task)));
+    await t.pump();
+    expect(find.text('安装包校验失败'), findsOneWidget);
+    expect(find.textContaining('签名不一致'), findsOneWidget);
+  });
+
   test('permission retry reuses the verified download', () async {
     await task.check();
     final downloading = task.download();

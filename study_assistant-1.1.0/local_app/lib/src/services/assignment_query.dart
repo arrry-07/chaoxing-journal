@@ -135,6 +135,8 @@ class AssignmentQuery {
           trusted && due != null && due.isBefore(now),
         AssignmentDeadlineFilter.uncertain => uncertain,
         AssignmentDeadlineFilter.noDeadline => trusted && due == null,
+        AssignmentDeadlineFilter.notExpired =>
+          trusted && due != null && due.isAfter(now),
       };
     }).toList();
   }

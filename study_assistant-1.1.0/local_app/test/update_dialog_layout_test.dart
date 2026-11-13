@@ -129,6 +129,33 @@ void main() {
     }
   });
 
+  testWidgets('unknown package size and progress remain clear', (t) async {
+    final task = AppUpdateController()
+      ..phase = UpdatePhase.downloading
+      ..result = const UpdateCheckResult(UpdateCheckStatus.available,
+          update: AppUpdateInfo(
+              versionName: '1.7.52',
+              releaseUrl: '',
+              apkName: 'x.apk',
+              apkDownloadUrl: 'https://example.org/x.apk',
+              releaseNotes: ''))
+      ..totalBytes = -1;
+    addTearDown(task.dispose);
+    await t.pumpWidget(
+        MaterialApp(home: Scaffold(body: UpdateDialog(controller: task))));
+    await t.pump();
+    expect(find.textContaining('安装包大小'), findsNothing);
+    expect(
+        t
+            .widget<LinearProgressIndicator>(
+                find.byType(LinearProgressIndicator))
+            .value,
+        isNull);
+    expect(find.text('后台下载'), findsOneWidget);
+    expect(t.takeException(), isNull);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('short landscape with long content keeps actions accessible',
       (t) async {
     t.view.devicePixelRatio = 1;

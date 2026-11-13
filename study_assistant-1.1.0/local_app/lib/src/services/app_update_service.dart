@@ -122,30 +122,26 @@ class AppUpdateService {
         listReleases: true);
   }
 
-  /// Startup follows only the explicitly promoted iteration release.
+  /// Discover every newer public release on cold start, including patches.
+  /// The controller still honours ignored versions and never auto-downloads.
   Future<UpdateCheckResult> checkForStartup(
       {required int currentVersionCode, CancelToken? cancelToken}) async {
-    await cleanupStaleDownloads();
-    final url = stableManifestUrl.isNotEmpty ? stableManifestUrl : manifestUrl;
-    final checked = url.isNotEmpty
-        ? await _checkManifest(
-            manifestUrl: url,
-            currentVersionName: AppVersion.name,
-            currentVersionCode: currentVersionCode,
-            startupOnly: true,
-            cancelToken: cancelToken,
-          )
-        : await _checkGitHub(
-            currentVersionName: AppVersion.name,
-            currentVersionCode: currentVersionCode,
-            cancelToken: cancelToken,
-          );
-    final candidate = checked.update;
-    if (candidate != null &&
-        !isNewIteration(candidate.versionName, AppVersion.name)) {
-      return const UpdateCheckResult(UpdateCheckStatus.upToDate);
+    if (manualManifestUrl.isEmpty &&
+        manifestUrl.isEmpty &&
+        stableManifestUrl.isNotEmpty) {
+      await cleanupStaleDownloads();
+      return _checkManifest(
+          manifestUrl: stableManifestUrl,
+          currentVersionName: AppVersion.name,
+          currentVersionCode: currentVersionCode,
+          startupOnly: false,
+          cancelToken: cancelToken);
     }
-    return checked;
+    return checkForManualUpdate(
+      currentVersionName: AppVersion.name,
+      currentVersionCode: currentVersionCode,
+      cancelToken: cancelToken,
+    );
   }
 
   Future<UpdateCheckResult> _checkManifest({
@@ -588,12 +584,12 @@ class AppUpdateService {
           await handle.close();
         }
         if (bytes.length < 4 || bytes[0] != 0x50 || bytes[1] != 0x4b) {
-          throw StateError('响应不是APK文件');
+          throw ApkVerificationException('响应不是APK文件');
         }
         final digest = await sha256.bind(partial.openRead()).first;
         checkCancelled();
         if (digest.toString() != update.sha256Hash) {
-          throw StateError('安装包校验失败，请重新下载');
+          throw ApkVerificationException('安装包校验失败，请重新下载');
         }
       }
       checkCancelled();
@@ -889,6 +885,10 @@ class AppUpdateService {
     // identity/signature. Equal digests represent the same file content.
     return '$stem-${digest.toLowerCase()}.apk';
   }
+}
+
+class ApkVerificationException extends StateError {
+  ApkVerificationException(super.message);
 }
 
 enum UpdateCheckStatus {

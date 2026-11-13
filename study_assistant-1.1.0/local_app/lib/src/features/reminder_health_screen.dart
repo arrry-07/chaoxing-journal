@@ -276,14 +276,15 @@ class _HealthState extends State<ReminderHealthScreen>
                       )),
               ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('电池优化'),
+                  title: const Text('本应用电池与后台设置'),
                   subtitle: const Text(
-                    '打开系统优化列表，请找到“学习通课业手记”自行核对；应用无法保证长期后台运行',
+                    '打开应用详情后，请进入电池或后台运行设置自行核对；应用无法保证长期后台运行',
                   ),
                   onTap: () => _openPermissionSettings(
                         widget.permissionSettingsService
                             .openBatterySettingsResult,
-                        destination: '电池优化设置',
+                        destination: '本应用电池与后台设置',
+                        batterySettings: true,
                       )),
               Text(
                   '原生作业截止事件：${_nativeText((value) => '${value.pendingDeadlineCount} 条')}\n'
@@ -401,6 +402,7 @@ class _HealthState extends State<ReminderHealthScreen>
   Future<void> _openPermissionSettings(
     Future<SettingsOpenResult> Function() openSettings, {
     required String destination,
+    bool batterySettings = false,
   }) async {
     final result = await openSettings();
     if (!mounted || result == SettingsOpenResult.direct) return;
@@ -408,8 +410,9 @@ class _HealthState extends State<ReminderHealthScreen>
       SettingsOpenResult.direct => '',
       SettingsOpenResult.listFallback =>
         '未能直达$destination，已打开相关系统设置列表；请查找“学习通课业手记”',
-      SettingsOpenResult.appDetailsFallback =>
-        '未能直达$destination，已打开“学习通课业手记”的应用详情',
+      SettingsOpenResult.appDetailsFallback => batterySettings
+          ? '已打开“学习通课业手记”的应用详情，请进入电池或后台运行设置自行核对'
+          : '未能直达$destination，已打开“学习通课业手记”的应用详情',
       SettingsOpenResult.unavailable =>
         '无法打开$destination，请手动在手机系统设置中搜索“学习通课业手记”',
     };

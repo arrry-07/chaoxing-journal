@@ -37,12 +37,10 @@ void main() {
     final gate = Completer<void>();
     final dio = Dio()
       ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) async {
-        final startup = o.uri.path.endsWith('/latest');
+        final startup = !gate.isCompleted;
         if (startup) await gate.future;
         h.resolve(Response(
-            requestOptions: o,
-            statusCode: 200,
-            data: startup ? release('1.8.0') : [release('1.8.0')]));
+            requestOptions: o, statusCode: 200, data: [release('1.8.0')]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
@@ -64,12 +62,12 @@ void main() {
     final dio = Dio()
       ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) async {
         paths.add(o.uri.path);
-        final startup = o.uri.path.endsWith('/latest');
+        final startup = !gate.isCompleted;
         if (startup) await gate.future;
         h.resolve(Response(
             requestOptions: o,
             statusCode: 200,
-            data: startup ? release(current) : [release(nextPatch)]));
+            data: [startup ? release(current) : release(nextPatch)]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
@@ -81,7 +79,7 @@ void main() {
     await manual;
     expect(task.update?.versionName, nextPatch);
     expect(paths, [
-      '/repos/arrry-07/chaoxing-journal/releases/latest',
+      '/repos/arrry-07/chaoxing-journal/releases',
       '/repos/arrry-07/chaoxing-journal/releases'
     ]);
   });
@@ -104,7 +102,7 @@ void main() {
     expect(calls, 1);
   });
 
-  test('startup reads only latest; manual discovers a non-latest patch',
+  test('startup automatically offers a non-latest patch without downloading',
       () async {
     final current = AppVersion.name;
     final nextPatch = nextPatchVersion();
@@ -121,24 +119,24 @@ void main() {
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
-    expect(await task.checkOnStartup(), false);
+    expect(await task.checkOnStartup(), true);
     expect(task.showBanner, false);
-    expect(task.update, isNull);
+    expect(task.update!.versionName, nextPatch);
     await task.check();
     expect(task.update!.versionName, nextPatch);
     expect(paths, [
-      '/repos/arrry-07/chaoxing-journal/releases/latest',
+      '/repos/arrry-07/chaoxing-journal/releases',
       '/repos/arrry-07/chaoxing-journal/releases'
     ]);
   });
 
-  for (final row in [('1.7.999', false), ('1.8.0', true), ('2.0.0', true)]) {
+  for (final row in [('1.7.999', true), ('1.8.0', true), ('2.0.0', true)]) {
     test('startup iteration gate for ${row.$1}', () async {
       final dio = Dio()
         ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
-          expect(o.uri.path.endsWith('/latest'), true);
+          expect(o.uri.path.endsWith('/releases'), true);
           h.resolve(Response(
-              requestOptions: o, statusCode: 200, data: release(row.$1)));
+              requestOptions: o, statusCode: 200, data: [release(row.$1)]));
         }));
       final task = AppUpdateController(service: AppUpdateService(dio: dio));
       addTearDown(task.dispose);

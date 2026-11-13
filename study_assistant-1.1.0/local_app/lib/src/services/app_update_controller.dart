@@ -30,6 +30,7 @@ class AppUpdateController extends ChangeNotifier {
   final AppUpdateService service;
   final ExternalLinkService links;
   UpdatePhase phase = UpdatePhase.idle;
+  bool verificationFailed = false;
   UpdateCheckResult? result;
   String message = '正在检查更新…';
   String? downloadedPath;
@@ -143,12 +144,6 @@ class AppUpdateController extends ChangeNotifier {
               currentVersionCode: AppVersion.code, cancelToken: _cancel)
           : service.checkConfigured(
               currentVersionCode: AppVersion.code, cancelToken: _cancel));
-      if (startup &&
-          checked.update != null &&
-          !AppUpdateService.isNewIteration(
-              checked.update!.versionName, AppVersion.name)) {
-        checked = const UpdateCheckResult(UpdateCheckStatus.upToDate);
-      }
       if (_disposed) return;
       result = checked;
       phase = checked.status == UpdateCheckStatus.available
@@ -169,6 +164,7 @@ class AppUpdateController extends ChangeNotifier {
     if (_disposed || busy || candidate == null || downloadedPath != null) {
       return;
     }
+    verificationFailed = false;
     phase = UpdatePhase.downloading;
     receivedBytes = 0;
     bytesPerSecond = 0;
@@ -219,6 +215,8 @@ class AppUpdateController extends ChangeNotifier {
       if (file != null && await file.exists()) await file.delete();
       if (_disposed) return;
       final cancelled = _cancel?.isCancelled == true;
+      verificationFailed = !cancelled &&
+          (phase == UpdatePhase.verifying || e is ApkVerificationException);
       phase = cancelled ? UpdatePhase.cancelled : UpdatePhase.failed;
       message = cancelled ? '已取消下载，可重新开始' : _error(e, '下载失败，请重试');
     }
@@ -251,6 +249,7 @@ class AppUpdateController extends ChangeNotifier {
     } catch (e) {
       if (_disposed) return;
       downloadedPath = null;
+      verificationFailed = true;
       phase = UpdatePhase.failed;
       message = '${_error(e, '安装包已失效')}，请重新下载';
       try {

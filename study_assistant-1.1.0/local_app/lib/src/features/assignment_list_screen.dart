@@ -17,7 +17,7 @@ import 'widgets/assignment_card.dart';
 /// A calendar recovery view. It is carried in the route query, never in
 /// [HomeFilters], so opening or leaving it cannot rewrite saved preferences.
 enum AssignmentRecoveryScope {
-  noDeadline('noDeadline', '无截止'),
+  noDeadline('noDeadline', '无截止日期'),
   deadlinePending('deadlinePending', '截止待确认');
 
   const AssignmentRecoveryScope(this.queryValue, this.label);
@@ -521,7 +521,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         AssignmentDeadlineFilter.next30Days => '30天内',
         AssignmentDeadlineFilter.overdue => '已逾期',
         AssignmentDeadlineFilter.uncertain => '期限待确认',
-        AssignmentDeadlineFilter.noDeadline => '无截止',
+        AssignmentDeadlineFilter.noDeadline => '无截止日期',
+        AssignmentDeadlineFilter.notExpired => '未截止',
       };
 
   String _sortLabel(HomeSortOrder order) => switch (order) {

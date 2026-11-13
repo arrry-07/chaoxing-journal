@@ -8,12 +8,18 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.FixMethodOrder
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.runners.MethodSorters
 import java.time.Instant
 
 @RunWith(AndroidJUnit4::class)
+// Android preserves a deleted channel's settings when it is recreated. On a
+// fresh test install, create the disabled channel before tests that create it.
+@FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class AssignmentNotificationPublisherTest {
     private lateinit var context: Context
     private lateinit var notificationManager: NotificationManager
@@ -30,7 +36,6 @@ class AssignmentNotificationPublisherTest {
         notificationManager.deleteNotificationChannel(
             AssignmentNotificationPublisher.CHANNEL_UPDATES,
         )
-        AssignmentNotificationPublisher.ensureChannels(context)
         notificationId = seedPendingNewAssignment()
     }
 
@@ -51,13 +56,21 @@ class AssignmentNotificationPublisherTest {
     }
 
     @Test
-    fun disabledChannelKeepsNewAssignmentPending() {
+    fun aDisabledChannelKeepsNewAssignmentPending() {
+        assertTrue(LegacyAssignmentMigrationState.confirm(context))
         notificationManager.createNotificationChannel(
             NotificationChannel(
                 AssignmentNotificationPublisher.CHANNEL_UPDATES,
                 "测试关闭通道",
                 NotificationManager.IMPORTANCE_NONE,
             ),
+        )
+        assertEquals(
+            "测试前置条件：系统渠道必须处于关闭状态",
+            NotificationManager.IMPORTANCE_NONE,
+            notificationManager.getNotificationChannel(
+                AssignmentNotificationPublisher.CHANNEL_UPDATES,
+            ).importance,
         )
         val result = AssignmentNotificationPublisher.publishPendingNewAssignments(
             context,
@@ -67,6 +80,7 @@ class AssignmentNotificationPublisherTest {
         )
 
         assertFalse(result.submitted)
+        assertEquals("对应通知通道已关闭，请在系统通知设置中重新开启", result.warning)
         assertEquals(
             ReminderDatabase.STATUS_PENDING,
             database.eventsForAccount(accountHash).single().status,

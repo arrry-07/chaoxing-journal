@@ -181,7 +181,7 @@ class AssignmentCard extends StatelessWidget {
                     ? '保存后可打开'
                     : opening
                         ? '正在打开…'
-                        : '去学习通完成'),
+                        : '在学习通内打开作业'),
               ),
             ],
           ),

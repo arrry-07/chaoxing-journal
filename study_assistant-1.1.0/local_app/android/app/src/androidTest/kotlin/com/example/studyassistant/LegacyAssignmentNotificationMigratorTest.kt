@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.test.core.app.ApplicationProvider
@@ -140,6 +141,11 @@ class LegacyAssignmentNotificationMigratorTest {
             .build()
         NotificationManagerCompat.from(context).notify(id, notification)
         postedIds.add(id)
+        val deadline = SystemClock.elapsedRealtime() + 3_000
+        while (id !in activeIds() && SystemClock.elapsedRealtime() < deadline) {
+            SystemClock.sleep(50)
+        }
+        assertTrue("测试通知未出现在系统通知列表中", id in activeIds())
     }
 
     private fun seedNativeEvent(notificationId: Int): String {

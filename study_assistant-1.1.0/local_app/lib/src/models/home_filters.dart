@@ -7,6 +7,7 @@ enum AssignmentDeadlineFilter {
   overdue,
   uncertain,
   noDeadline,
+  notExpired,
 }
 
 enum HomeSortOrder {

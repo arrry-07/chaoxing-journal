@@ -194,7 +194,7 @@ void main() {
     expect(result.update!.versionCode, AppVersion.code + 1);
   });
 
-  test('stable startup ignores a patch while manual checks the patch manifest',
+  test('startup and manual both discover a patch from the manual manifest',
       () async {
     final paths = <String>[];
     final dio = manifestDio(
@@ -209,15 +209,15 @@ void main() {
 
     final startup =
         await service.checkForStartup(currentVersionCode: AppVersion.code);
-    expect(startup.status, UpdateCheckStatus.upToDate);
-    expect(startup.update, isNull);
+    expect(startup.status, UpdateCheckStatus.available);
+    expect(startup.update!.versionName, patchVersion());
 
     final manual =
         await service.checkConfigured(currentVersionCode: AppVersion.code);
     expect(manual.status, UpdateCheckStatus.available);
     expect(manual.update!.versionName, patchVersion());
     expect(paths, [
-      'https://updates.example.org/stable.json',
+      'https://updates.example.org/manual.json',
       'https://updates.example.org/manual.json',
     ]);
   });
@@ -236,7 +236,7 @@ void main() {
     expect(result.update!.versionName, iterationVersion());
   });
 
-  test('legacy single manifest keeps startup gating and manual patches',
+  test('legacy single manifest offers patches on startup and manual checks',
       () async {
     final paths = <String>[];
     final service = AppUpdateService(
@@ -246,7 +246,7 @@ void main() {
     expect(
         (await service.checkForStartup(currentVersionCode: AppVersion.code))
             .status,
-        UpdateCheckStatus.upToDate);
+        UpdateCheckStatus.available);
     expect(
         (await service.checkConfigured(currentVersionCode: AppVersion.code))
             .status,

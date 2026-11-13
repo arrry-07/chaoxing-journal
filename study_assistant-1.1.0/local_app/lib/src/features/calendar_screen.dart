@@ -233,7 +233,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       onPressed: () => context.go(_recoveryLocation(
                           AssignmentRecoveryScope.noDeadline)),
                       icon: const Icon(Icons.event_busy_outlined),
-                      label: Text('无截止（$noDeadlineCount）')),
+                      label: Text('无截止日期（$noDeadlineCount）')),
                 if (pendingDeadlineCount > 0)
                   TextButton.icon(
                       key: const ValueKey('calendar-deadline-pending-scope'),

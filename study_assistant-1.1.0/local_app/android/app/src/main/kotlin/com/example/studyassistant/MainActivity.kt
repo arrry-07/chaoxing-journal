@@ -180,13 +180,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun openBatterySettings(): SettingsOpenOutcome {
-        // The official direct-exemption use cases are not established for this
-        // reminder app, so keep the system optimization list and no manifest
-        // permission for ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS.
-        if (openIntent(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))) {
-            return SettingsOpenOutcome.DIRECT
+        if (openAppDetailsSettings()) {
+            return SettingsOpenOutcome.APP_DETAILS_FALLBACK
         }
-        return openAppDetailsFallback()
+        if (openIntent(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))) {
+            return SettingsOpenOutcome.LIST_FALLBACK
+        }
+        return SettingsOpenOutcome.UNAVAILABLE
     }
 
     private fun openNotificationListenerSettings(): SettingsOpenOutcome {

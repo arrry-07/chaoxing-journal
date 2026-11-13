@@ -20,6 +20,16 @@ class _ResultService extends AppUpdateService {
 }
 
 void main() {
+  testWidgets('cancelled check is not reported as failure', (t) async {
+    await t.pumpWidget(MaterialApp(
+        home: UpdateDialog(
+            service: _ResultService(
+                const UpdateCheckResult(UpdateCheckStatus.cancelled)))));
+    await t.pumpAndSettle();
+    expect(find.text('检查已取消'), findsOneWidget);
+    expect(find.text('检查更新失败'), findsNothing);
+    expect(find.text('重新检查'), findsOneWidget);
+  });
   testWidgets(
       'update dialog handles narrow screens, large text and long release notes',
       (t) async {
@@ -77,6 +87,19 @@ void main() {
           await t.pumpAndSettle();
           await t.pump();
           expect(t.takeException(), isNull, reason: '$width/$scale/$status');
+          if (status == UpdateCheckStatus.networkError) {
+            expect(find.text('检查更新失败'), findsOneWidget);
+            expect(find.text('重新检查'), findsOneWidget);
+            expect(find.text('已是最新版本'), findsNothing);
+          }
+          if (status == UpdateCheckStatus.upToDate) {
+            expect(find.text('已是最新版本'), findsOneWidget);
+            expect(find.text('重新检查'), findsOneWidget);
+          }
+          if (status == UpdateCheckStatus.available) {
+            expect(find.text('下载选项'), findsOneWidget);
+            expect(find.text('尝试多连接加速'), findsNothing);
+          }
           final dismiss = status == UpdateCheckStatus.available ? '稍后更新' : '关闭';
           expect(find.text(dismiss), findsOneWidget);
           if (const bool.fromEnvironment('CAPTURE_UI')) {

@@ -19,6 +19,21 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
+  test('battery settings report each actual destination', () async {
+    var response = 'appDetailsFallback';
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async => response);
+    const service = PermissionSettingsService();
+    for (final entry in {
+      'appDetailsFallback': SettingsOpenResult.appDetailsFallback,
+      'listFallback': SettingsOpenResult.listFallback,
+      'unavailable': SettingsOpenResult.unavailable,
+    }.entries) {
+      response = entry.key;
+      expect(await service.openBatterySettingsResult(), entry.value);
+    }
+  });
+
   test('structured settings calls map fixed native strings explicitly',
       () async {
     final responses = {
@@ -180,7 +195,7 @@ void main() {
     );
   });
 
-  test('battery optimization keeps the list flow without direct exemption', () {
+  test('battery settings prefer app details and retain list fallback', () {
     final mainActivity = File(
       'android/app/src/main/kotlin/com/example/studyassistant/MainActivity.kt',
     ).readAsStringSync();
@@ -192,6 +207,18 @@ void main() {
       mainActivity,
       contains('Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS'),
     );
+    final batteryMethod = mainActivity.substring(
+      mainActivity.indexOf('private fun openBatterySettings()'),
+      mainActivity.indexOf('private fun openNotificationListenerSettings()'),
+    );
+    expect(
+        batteryMethod.indexOf('openAppDetailsSettings()'),
+        lessThan(batteryMethod
+            .indexOf('ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS')));
+    expect(batteryMethod, contains('SettingsOpenOutcome.APP_DETAILS_FALLBACK'));
+    expect(batteryMethod, contains('SettingsOpenOutcome.LIST_FALLBACK'));
+    expect(batteryMethod, contains('SettingsOpenOutcome.UNAVAILABLE'));
+    expect(batteryMethod, isNot(contains('SettingsOpenOutcome.DIRECT')));
     expect(
       mainActivity,
       isNot(contains('Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS')),
