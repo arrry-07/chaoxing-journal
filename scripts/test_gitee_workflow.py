@@ -53,6 +53,9 @@ class GiteeWorkflowTests(unittest.TestCase):
         self.assertIn("permissions:\n  contents: read", self.text)
         self.assertNotIn("contents: write", self.text)
 
+    def test_workflow_allows_seed_uploads_to_finish(self) -> None:
+        self.assertIn("timeout-minutes: 60", self.text)
+
     def test_workflow_uses_preinstalled_android_sdk(self) -> None:
         self.assertNotIn("android-actions/setup-android", self.text)
         self.assertIn(

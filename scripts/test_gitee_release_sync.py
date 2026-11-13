@@ -267,7 +267,7 @@ class SafetyTests(unittest.TestCase):
         self.assertNotIn(token, redacted)
         self.assertIn("[REDACTED]", redacted)
 
-    def test_gitee_upload_allows_slow_cross_border_transfers(self) -> None:
+    def test_gitee_upload_streams_file_with_extended_timeout(self) -> None:
         client = sync.HttpClient(github_token="", gitee_token="token")
         with tempfile.TemporaryDirectory() as directory:
             apk = Path(directory) / "test.apk"
@@ -276,15 +276,34 @@ class SafetyTests(unittest.TestCase):
                 client,
                 "_request",
                 return_value=(201, b"{}", "application/json"),
-            ) as request:
-                client.gitee_upload(
+            ) as request, mock.patch.object(
+                sync.shutil,
+                "which",
+                return_value="/usr/bin/curl",
+            ), mock.patch.object(
+                sync.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    [],
+                    0,
+                    '{"id": 1}\n201',
+                    "",
+                ),
+            ) as run:
+                result = client.gitee_upload(
                     "/repos/owner/repo/releases/1/attach_files",
                     file_path=apk,
                 )
 
-        self.assertEqual(request.call_args.kwargs["timeout"], 300)
+        command = run.call_args.args[0]
+        self.assertEqual(result, {"id": 1})
+        self.assertIn("--max-time", command)
+        self.assertEqual(command[command.index("--max-time") + 1], "600")
+        file_form = next(item for item in command if item.startswith("file=@"))
+        self.assertIn(str(apk), file_form)
+        request.assert_not_called()
 
-    def test_gitee_upload_sends_access_token_as_multipart_field(self) -> None:
+    def test_gitee_upload_keeps_token_out_of_command_arguments(self) -> None:
         client = sync.HttpClient(github_token="", gitee_token="secret-token")
         with tempfile.TemporaryDirectory() as directory:
             apk = Path(directory) / "test.apk"
@@ -293,15 +312,29 @@ class SafetyTests(unittest.TestCase):
                 client,
                 "_request",
                 return_value=(201, b"{}", "application/json"),
-            ) as request:
+            ), mock.patch.object(
+                sync.shutil,
+                "which",
+                return_value="/usr/bin/curl",
+            ), mock.patch.object(
+                sync.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    [],
+                    0,
+                    '{"id": 1}\n201',
+                    "",
+                ),
+            ) as run:
                 client.gitee_upload(
                     "/repos/owner/repo/releases/1/attach_files",
                     file_path=apk,
                 )
 
-        body = request.call_args.kwargs["data"]
-        self.assertIn(b'name="access_token"', body)
-        self.assertIn(b"\r\n\r\nsecret-token\r\n", body)
+        command = run.call_args.args[0]
+        config = run.call_args.kwargs["input"]
+        self.assertNotIn("secret-token", " ".join(command))
+        self.assertIn("access_token=secret-token", config)
 
     def test_android_tool_output_is_decoded_as_utf8_on_windows(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

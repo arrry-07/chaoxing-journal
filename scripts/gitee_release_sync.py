@@ -46,7 +46,7 @@ SIGNER_SHA256 = (
 )
 MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024
-GITEE_UPLOAD_TIMEOUT_SECONDS = 300
+GITEE_UPLOAD_TIMEOUT_SECONDS = 600
 USER_AGENT = "chaoxing-journal-gitee-sync/1.0"
 TAG_PATTERN = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 RAW_VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
@@ -238,6 +238,16 @@ def redact_secret(value: str, secret: str) -> str:
     return value.replace(secret, "[REDACTED]")
 
 
+def curl_config_quote(value: str) -> str:
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+    )
+    return f'"{escaped}"'
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -375,31 +385,59 @@ class HttpClient:
         *,
         file_path: Path,
     ) -> Any:
-        boundary = f"----journal-{secrets.token_hex(16)}"
-        filename = file_path.name
-        content_type = "application/vnd.android.package-archive"
-        token_part = (
-            f"--{boundary}\r\n"
-            'Content-Disposition: form-data; name="access_token"\r\n\r\n'
-            f"{self._gitee_token}\r\n"
-        ).encode("utf-8")
-        prefix = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-            f"Content-Type: {content_type}\r\n\r\n"
-        ).encode("utf-8")
-        suffix = f"\r\n--{boundary}--\r\n".encode("ascii")
-        body = token_part + prefix + file_path.read_bytes() + suffix
-        _, response, _ = self._request(
-            "POST",
-            f"{GITEE_API}{path}",
-            token="",
-            data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-            },
-            timeout=GITEE_UPLOAD_TIMEOUT_SECONDS,
+        curl = shutil.which("curl")
+        if curl is None:
+            raise SyncError("curl is required for Gitee APK uploads.")
+        url = f"{GITEE_API}{path}"
+        token_config = curl_config_quote(
+            f"access_token={self._gitee_token}"
         )
+        command = [
+            curl,
+            "-q",
+            "--silent",
+            "--show-error",
+            "--fail-with-body",
+            "--connect-timeout",
+            "30",
+            "--max-time",
+            str(GITEE_UPLOAD_TIMEOUT_SECONDS),
+            "--config",
+            "-",
+            "--form",
+            f"file=@{file_path};type=application/vnd.android.package-archive",
+            "--write-out",
+            "\n%{http_code}",
+            url,
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                input=f"form-string = {token_config}\n",
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=GITEE_UPLOAD_TIMEOUT_SECONDS + 30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise safe_io_error(url) from None
+        response_text, separator, status_text = result.stdout.rstrip().rpartition(
+            "\n"
+        )
+        if not separator:
+            response_text = ""
+            status_text = result.stdout.strip()
+        try:
+            status = int(status_text)
+        except ValueError:
+            status = None
+        if result.returncode != 0 or status not in (200, 201):
+            raise safe_io_error(url, status)
+        response = response_text.encode("utf-8")
+        if len(response) > MAX_JSON_BYTES:
+            raise SyncError("Gitee upload response exceeded the size limit.")
         try:
             return json.loads(response.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
