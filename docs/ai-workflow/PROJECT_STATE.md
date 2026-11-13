@@ -202,3 +202,15 @@
 - 最终 APK 已在 MuMu Android 15 覆盖：`firstInstallTime` 保持 `2026-11-04 19:05:10`，登录态、课程数据与首页正常；设备拉回 `base.apk` 与本地正式 APK 哈希一致。API31、锁屏、TalkBack、实体手机后台/Doze 和真实作业原生直达仍未验证，按用户约定不阻塞发布。
 - Release <https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.51> 已公开、非预发布并设为 latest；`releases/latest` API 返回 `v1.7.51`。`SHA256SUMS.txt` 94 字节、SHA-256 `c09e2d51bc85fcab4c7046bca3eb16e9f0ca8e70d153d8f96c969557d702a806`。
 - 草稿和公开后均完整下载 APK 与校验文件，大小、哈希、ZIP、v2 签名和证书一致。README、安装指南、CHANGELOG、路线图、文档索引、验收基线与本状态已切到正式 1.7.51；后续纯文档提交不移动 Tag，应用源码以 `7bfd035` 为准。
+
+## 2026-11-14 1.7.53 作业数据体验与设置收口正式发布
+
+- 现场从 `7b6ab7a` / `1.7.52+59` 起步，保留既有 `pubspec.lock` 意向与未跟踪 `scripts/demo-video/`；因 Gitee/GitHub `v1.7.52` 已正式发布，冻结前改用未占用的 `1.7.53+60`。
+- 功能提交 `5860944` 经 PR #19 合并到 main `0705a9e34b7cab3fc66c8da6506240e221cba303`；annotated Tag `v1.7.53`（object `404320130d6d41b2744f4f1510143d7730a0893f`）指向同一提交。PR CI `43468063352`、main CI `43470960963`、Tag CI `43474590304` 均成功。
+- 实现统一 `deadlineBucketAt(now)`、三期限筛选与旧偏好迁移、`lpinyin 2.0.3` 拼音/英文/数字自然排序、四设置入口、登录/卡片排版、邮件草稿桥。独立代码审查发现的日历/提醒冲突、默认排序额外计算和卡片无日期文案问题已修复并补回归。
+- 验证：Flutter 全量 `854 passed / 1 skipped`；上海/洛杉矶各 `35 passed`；`dart analyze` 无问题；格式 184 文件 0 改动；原生 JVM 39 项、instrumented 编译、lint 通过；API35 仪器套件 15 passed/1 skipped，另邮件实际启动 1 passed；PowerShell 69、Python Gitee 25、工作流 8 项通过。
+- 正式 APK：`chaoxing-journal-1.7.53.apk`，58,852,146 字节，SHA-256 `b3d1f25f9ab636e4f3b00a3f9e7cd68c2b5ac7a999b2769b0e25dd5b58fcc9b8`；`SHA256SUMS.txt` 94 字节；包名、60/1.7.53、min26/target36、双 ABI、v2 原证书、ZIP CRC 和 16 KiB 对齐通过。
+- Release <https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.53> 已公开、非预发布并设为 latest；公开匿名完整回下载得到的 APK/校验文件大小、哈希、ZIP、签名和对齐一致。
+- MuMu Android 15 从 `1.7.52+59` 同签名覆盖到正式包，`firstInstallTime` 保持 `2026-11-04 19:05:10`，登录态、7 门课程与作业保留；实际核对三筛选、五排序、四入口/二级页、Gmail 成功启动与无客户端回退，设备 `base.apk` 哈希与正式 APK 一致。
+- 文档已切到 1.7.53，新增执行方案、完整验收记录和截图证据；后续文档提交不移动 Tag，应用源码以 `0705a9e` 为准。
+- 未完成：Gitee `v1.7.53` APK 尚未由维护者本机上传，Gitee manual 仍为 `1.7.52+59`，必须在新 APK 匿名回下载校验后通过现有 workflow 更新；群聊漏拉、年份/状态补全、音效、完整反馈服务、API31、锁屏、TalkBack 与实体手机后台/Doze 仍未验证。
