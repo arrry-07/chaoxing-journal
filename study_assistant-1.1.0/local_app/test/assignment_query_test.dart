@@ -305,6 +305,51 @@ void main() {
         ['cx:work:1:2:a']);
   });
 
+  test('not expired requires a confirmed pending future deadline', () {
+    final now = DateTime.utc(2026, 11, 1, 9);
+    Assignment row(String id,
+            {DateTime? due,
+            String status = 'pending',
+            bool trusted = true,
+            bool failed = false,
+            String courseId = '1'}) =>
+        _sortRecord(id,
+            courseName: '课程',
+            title: id,
+            deadlineAt: due,
+            status: status,
+            trusted: trusted,
+            failed: failed,
+            courseId: courseId);
+    final future = now.add(const Duration(microseconds: 1));
+    final rows = [
+      row('future', due: future),
+      row('other', due: future, courseId: '2'),
+      row('past', due: now.subtract(const Duration(microseconds: 1))),
+      row('exact', due: now),
+      row('none'),
+      row('failed', due: future, failed: true),
+      row('untrusted', due: future, trusted: false),
+      row('unknown', due: future, status: 'unknown'),
+      row('done', due: future, status: 'submitted'),
+    ];
+    List<String> ids(AssignmentDeadlineFilter filter) =>
+        AssignmentQuery.filterHome(rows, deadline: filter, now: now.toLocal())
+            .map((a) => a.title)
+            .toList();
+    expect(ids(AssignmentDeadlineFilter.notExpired), ['future', 'other']);
+    expect(ids(AssignmentDeadlineFilter.noDeadline), ['none']);
+    expect(ids(AssignmentDeadlineFilter.uncertain),
+        ['failed', 'untrusted', 'unknown']);
+    expect(
+        AssignmentQuery.filterHome(rows,
+                deadline: AssignmentDeadlineFilter.notExpired,
+                query: 'future',
+                courseKey: '1:2',
+                now: now)
+            .map((a) => a.title),
+        ['future']);
+  });
   test('deadline filters distinguish horizons overdue unknown and undated', () {
     final now = DateTime.utc(2026, 11, 4, 2);
     Assignment work(String id,

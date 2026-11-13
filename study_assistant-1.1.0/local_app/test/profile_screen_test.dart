@@ -195,7 +195,7 @@ void main() {
     await tester.tap(find.text('检查更新'));
     await tester.pumpAndSettle();
 
-    expect(find.text('1.0.7'), findsOneWidget);
+    expect(find.textContaining('→ 1.0.7'), findsOneWidget);
     expect(find.text('下载并安装'), findsOneWidget);
 
     await tester.tap(find.text('下载并安装'));

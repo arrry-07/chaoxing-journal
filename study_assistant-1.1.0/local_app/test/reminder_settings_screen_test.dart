@@ -51,7 +51,7 @@ void main() {
     expect(find.text('通知权限'), findsOneWidget);
     expect(find.text('精确闹钟'), findsOneWidget);
     expect(find.text('截止提醒通知渠道'), findsOneWidget);
-    expect(find.text('电池优化'), findsOneWidget);
+    expect(find.text('本应用电池与后台设置'), findsOneWidget);
     expect(find.text('保存后会重新安排所有未完成作业的本地通知，自定义提醒支持精确到分钟'), findsOneWidget);
   });
 
@@ -156,7 +156,7 @@ void main() {
       ),
     );
 
-    final tile = find.widgetWithText(ListTile, '电池优化').first;
+    final tile = find.widgetWithText(ListTile, '本应用电池与后台设置').first;
     await tester.ensureVisible(tile);
     await tester.pumpAndSettle();
     await tester.tap(tile);
@@ -167,6 +167,7 @@ void main() {
       find.textContaining('已打开“学习通课业手记”的应用详情'),
       findsOneWidget,
     );
+    expect(find.textContaining('请进入电池或后台运行设置自行核对'), findsWidgets);
   });
 
   testWidgets('resuming refreshes notification listener state', (tester) async {

@@ -584,12 +584,12 @@ class AppUpdateService {
           await handle.close();
         }
         if (bytes.length < 4 || bytes[0] != 0x50 || bytes[1] != 0x4b) {
-          throw StateError('响应不是APK文件');
+          throw ApkVerificationException('响应不是APK文件');
         }
         final digest = await sha256.bind(partial.openRead()).first;
         checkCancelled();
         if (digest.toString() != update.sha256Hash) {
-          throw StateError('安装包校验失败，请重新下载');
+          throw ApkVerificationException('安装包校验失败，请重新下载');
         }
       }
       checkCancelled();
@@ -885,6 +885,10 @@ class AppUpdateService {
     // identity/signature. Equal digests represent the same file content.
     return '$stem-${digest.toLowerCase()}.apk';
   }
+}
+
+class ApkVerificationException extends StateError {
+  ApkVerificationException(super.message);
 }
 
 enum UpdateCheckStatus {

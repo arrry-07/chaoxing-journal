@@ -124,7 +124,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
             child: Text(_savingIgnore ? '正在保存…' : '忽略此版本')));
       }
     } else {
-      if (phase == UpdatePhase.failed) {
+      if (phase == UpdatePhase.failed || phase == UpdatePhase.checked) {
         primary = '重新检查';
         action = task.check;
       }
@@ -168,12 +168,27 @@ class _UpdateDialogState extends State<UpdateDialog> {
       builder: (context, _) {
         final update = task.update;
         final phase = task.phase;
+        final checkCancelled =
+            task.result?.status == UpdateCheckStatus.cancelled;
+        final checkFailed = phase == UpdatePhase.checked &&
+            task.result?.status != UpdateCheckStatus.upToDate &&
+            !checkCancelled;
         final title = switch (phase) {
+          UpdatePhase.idle || UpdatePhase.checking => '正在检查更新',
+          UpdatePhase.checked => checkCancelled
+              ? '检查已取消'
+              : checkFailed
+                  ? '检查更新失败'
+                  : '已是最新版本',
           UpdatePhase.downloading => '正在下载更新',
           UpdatePhase.verifying => '正在校验更新',
           UpdatePhase.ready => '更新已就绪',
           UpdatePhase.installing => '准备安装更新',
-          UpdatePhase.failed => update == null ? '检查更新失败' : '更新未完成',
+          UpdatePhase.failed => update == null
+              ? '检查更新失败'
+              : task.verificationFailed
+                  ? '安装包校验失败'
+                  : '下载失败',
           UpdatePhase.cancelled => '下载已取消',
           _ => update == null ? '应用更新' : '发现新版本',
         };
@@ -196,13 +211,15 @@ class _UpdateDialogState extends State<UpdateDialog> {
                             style: Journal.section.copyWith(fontSize: 23)),
                         const SizedBox(height: 16),
                         if (update != null) ...[
-                          Text(update.versionName,
-                              style: Journal.display.copyWith(fontSize: 30)),
-                          const SizedBox(height: 4),
                           Text(
-                              '当前版本 ${AppVersion.display}'
-                              '${update.apkSize == null ? '' : ' · ${(update.apkSize! / 1048576).toStringAsFixed(1)} MB'}',
-                              style: Journal.metadata),
+                              '当前版本 ${AppVersion.display} → ${update.versionName}',
+                              style: Journal.entryTitle),
+                          if (update.apkSize != null) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                                '安装包大小 ${(update.apkSize! / 1048576).toStringAsFixed(1)} MB',
+                                style: Journal.metadata),
+                          ],
                           const SizedBox(height: 16),
                         ] else ...[
                           Text('当前版本 ${AppVersion.display}',
@@ -214,7 +231,8 @@ class _UpdateDialogState extends State<UpdateDialog> {
                               liveRegion: !task.downloading,
                               child: Text(task.message,
                                   style: Journal.metadata.copyWith(
-                                      color: phase == UpdatePhase.failed
+                                      color: phase == UpdatePhase.failed ||
+                                              checkFailed
                                           ? Journal.berry
                                           : Journal.muted))),
                         if (task.busy) ...[
@@ -258,16 +276,22 @@ class _UpdateDialogState extends State<UpdateDialog> {
                             !task.busy &&
                             task.downloadedPath == null) ...[
                           const SizedBox(height: 16),
-                          SwitchListTile.adaptive(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text('尝试多连接加速',
-                                  style: Journal.metadata),
-                              subtitle: Text('下载较慢时可尝试，速度取决于网络。',
-                                  style:
-                                      Journal.metadata.copyWith(fontSize: 12)),
-                              value: task.service.parallelDownloads,
-                              onChanged: (v) => setState(
-                                  () => task.service.parallelDownloads = v)),
+                          ExpansionTile(
+                              tilePadding: EdgeInsets.zero,
+                              title:
+                                  const Text('下载选项', style: Journal.metadata),
+                              children: [
+                                SwitchListTile.adaptive(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: const Text('尝试多连接加速',
+                                        style: Journal.metadata),
+                                    subtitle: Text('下载较慢时可尝试，速度取决于网络。',
+                                        style: Journal.metadata
+                                            .copyWith(fontSize: 12)),
+                                    value: task.service.parallelDownloads,
+                                    onChanged: (v) => setState(() =>
+                                        task.service.parallelDownloads = v)),
+                              ]),
                         ],
                         if (!task.busy)
                           TextButton(

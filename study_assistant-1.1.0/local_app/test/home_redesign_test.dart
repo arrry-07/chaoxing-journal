@@ -67,6 +67,10 @@ Assignment work(int i,
 
 Future<void> tapSheetOption(WidgetTester tester, String label) async {
   final target = find.text(label);
+  if (label == '应用') {
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+  }
   await tester.ensureVisible(target);
   await tester.pumpAndSettle();
   await tester.tap(target);

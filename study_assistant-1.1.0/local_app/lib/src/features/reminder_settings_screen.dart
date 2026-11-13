@@ -360,15 +360,16 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                         const Divider(height: 1),
                         ListTile(
                           leading: const Icon(Icons.battery_saver_outlined),
-                          title: const Text('电池优化'),
+                          title: const Text('本应用电池与后台设置'),
                           subtitle: const Text(
-                            '打开系统电池优化列表；请找到“学习通课业手记”并自行核对',
+                            '打开应用详情后，请进入电池或后台运行设置自行核对',
                           ),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () => _openPermissionSettings(
                             widget.permissionSettingsService
                                 .openBatterySettingsResult,
-                            destination: '电池优化设置',
+                            destination: '本应用电池与后台设置',
+                            batterySettings: true,
                           ),
                         ),
                       ],
@@ -688,6 +689,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   Future<void> _openPermissionSettings(
     Future<SettingsOpenResult> Function() openSettings, {
     required String destination,
+    bool batterySettings = false,
   }) async {
     final result = await openSettings();
     if (!mounted) return;
@@ -696,8 +698,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       SettingsOpenResult.direct => '',
       SettingsOpenResult.listFallback =>
         '未能直达$destination，已打开相关系统设置列表；请查找“学习通课业手记”',
-      SettingsOpenResult.appDetailsFallback =>
-        '未能直达$destination，已打开“学习通课业手记”的应用详情',
+      SettingsOpenResult.appDetailsFallback => batterySettings
+          ? '已打开“学习通课业手记”的应用详情，请进入电池或后台运行设置自行核对'
+          : '未能直达$destination，已打开“学习通课业手记”的应用详情',
       SettingsOpenResult.unavailable =>
         '无法打开$destination，请手动在手机系统设置中搜索“学习通课业手记”',
     });

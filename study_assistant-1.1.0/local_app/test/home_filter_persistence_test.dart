@@ -86,7 +86,7 @@ void main() {
             const HomeFilters(
                 query: '数学',
                 courseKey: 'c:k',
-                deadline: AssignmentDeadlineFilter.next7Days,
+                deadline: AssignmentDeadlineFilter.notExpired,
                 sortOrder: HomeSortOrder.deadlineDesc),
             a.accountEpoch),
         true);
@@ -94,7 +94,7 @@ void main() {
     addTearDown(restored.dispose);
     await restored.restoreSession();
     expect(restored.homeFilters.query, '数学');
-    expect(restored.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(restored.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
     expect(restored.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     final repo = LocalAssignmentRepository();
     expect(
@@ -113,6 +113,7 @@ void main() {
     session.account = 'A';
     await restored.restoreSession();
     expect(restored.homeFilters.query, '数学');
+    expect(restored.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
     expect(restored.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     await restored.logout();
     expect(restored.homeFilters.query, '');
@@ -122,6 +123,14 @@ void main() {
     expect((await repo.loadHomeFilters()).sortOrder, HomeSortOrder.grouped);
   });
 
+  test('legacy noDeadline and new notExpired retain distinct names', () {
+    final legacy = HomeFilters.decode('{"query":"","deadline":"noDeadline"}');
+    final newer = HomeFilters.decode(
+        const HomeFilters(deadline: AssignmentDeadlineFilter.notExpired)
+            .encode());
+    expect(legacy.deadline, AssignmentDeadlineFilter.noDeadline);
+    expect(newer.deadline, AssignmentDeadlineFilter.notExpired);
+  });
   test('malformed preferences safely use defaults', () async {
     for (final raw in [
       null,
@@ -234,6 +243,8 @@ void main() {
     expect(find.text('已选课程（当前无可显示作业）'), findsOneWidget);
     expect(find.text('private:class'), findsNothing);
     await t.enterText(find.byType(TextField), '新条件');
+    await t.testTextInput.receiveAction(TextInputAction.done);
+    await t.pumpAndSettle();
     await tapSheetOption(t, '应用');
     expect(find.text('搜索、筛选与排序未能保存，请重试；原偏好已保留'), findsOneWidget);
     expect(s.homeFilters.query, '原条件');

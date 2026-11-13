@@ -265,7 +265,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
                   ? null
                   : _openAssignment,
               icon: const Icon(Icons.launch),
-              label: Text(_opening ? '正在打开…' : '去学习通完成'),
+              label: Text(_opening ? '正在打开…' : '在学习通内打开作业'),
             ),
             const SizedBox(height: 8),
             FilledButton.icon(
@@ -275,7 +275,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
               label: Text(_opening ? '正在请求浏览器…' : '打开作业网页'),
             ),
             const SizedBox(height: 8),
-            const Text('通过学习通打开作业网页；可能需要另行登录。返回后可刷新核对提交状态。'),
+            const Text('将在学习通内打开作业网页；也可主动选择浏览器打开，可能需要另行登录。返回后可刷新核对提交状态。'),
             if (_currentUrl == null) ...[
               const SizedBox(height: 8),
               const Text('作业链接暂不可用，请刷新作业信息；尚未开放的作业请稍后重试。'),
