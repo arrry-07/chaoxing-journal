@@ -336,6 +336,35 @@ class SafetyTests(unittest.TestCase):
         self.assertNotIn("secret-token", " ".join(command))
         self.assertIn("access_token=secret-token", config)
 
+    def test_gitee_upload_uses_compatible_http_transport(self) -> None:
+        client = sync.HttpClient(github_token="", gitee_token="token")
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "test.apk"
+            apk.write_bytes(b"apk")
+            with mock.patch.object(
+                sync.shutil,
+                "which",
+                return_value="/usr/bin/curl",
+            ), mock.patch.object(
+                sync.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    [],
+                    0,
+                    '{"id": 1}\n201',
+                    "",
+                ),
+            ) as run:
+                client.gitee_upload(
+                    "/repos/owner/repo/releases/1/attach_files",
+                    file_path=apk,
+                )
+
+        command = run.call_args.args[0]
+        self.assertIn("--ipv4", command)
+        self.assertIn("--http1.1", command)
+        self.assertIn("Expect:", command)
+
     def test_android_tool_output_is_decoded_as_utf8_on_windows(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             apk = Path(directory) / "test.apk"

@@ -398,6 +398,10 @@ class HttpClient:
             "--silent",
             "--show-error",
             "--fail-with-body",
+            "--ipv4",
+            "--http1.1",
+            "--header",
+            "Expect:",
             "--connect-timeout",
             "30",
             "--max-time",
@@ -407,7 +411,7 @@ class HttpClient:
             "--form",
             f"file=@{file_path};type=application/vnd.android.package-archive",
             "--write-out",
-            "\n%{http_code}",
+            "\n%{http_code} %{size_upload} %{speed_upload}",
             url,
         ]
         try:
@@ -423,18 +427,42 @@ class HttpClient:
             )
         except subprocess.TimeoutExpired:
             raise safe_io_error(url) from None
-        response_text, separator, status_text = result.stdout.rstrip().rpartition(
+        response_text, separator, metrics_text = result.stdout.rstrip().rpartition(
             "\n"
         )
         if not separator:
             response_text = ""
-            status_text = result.stdout.strip()
-        try:
-            status = int(status_text)
-        except ValueError:
-            status = None
+            metrics_text = result.stdout.strip()
+        metrics = metrics_text.split()
+        status = None
+        uploaded = None
+        speed = None
+        if metrics:
+            try:
+                status = int(metrics[0])
+            except ValueError:
+                pass
+        if len(metrics) > 1:
+            try:
+                uploaded = int(float(metrics[1]))
+            except ValueError:
+                pass
+        if len(metrics) > 2:
+            try:
+                speed = float(metrics[2])
+            except ValueError:
+                pass
         if result.returncode != 0 or status not in (200, 201):
-            raise safe_io_error(url, status)
+            parsed = urllib.parse.urlsplit(url)
+            safe_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+            detail = f"HTTP {status}" if status is not None else "no HTTP status"
+            if uploaded is not None:
+                detail += (
+                    f", uploaded {uploaded}/{file_path.stat().st_size} bytes"
+                )
+            if speed is not None:
+                detail += f" at {speed:.0f} B/s"
+            raise SyncError(f"Gitee upload failed for {safe_url} ({detail}).")
         response = response_text.encode("utf-8")
         if len(response) > MAX_JSON_BYTES:
             raise SyncError("Gitee upload response exceeded the size limit.")
