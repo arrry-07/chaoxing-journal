@@ -8,7 +8,7 @@ is downloaded anonymously and verified before manifests are published.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -73,6 +73,7 @@ class GiteeRelease:
     release_id: int
     tag: str
     assets: tuple[dict[str, Any], ...]
+    body: str = ""
 
 
 def version_tuple(value: str) -> tuple[int, int, int]:
@@ -692,6 +693,7 @@ class GiteeReleaseClient:
                         assets=tuple(
                             asset for asset in assets if isinstance(asset, dict)
                         ),
+                    body=str(item.get("body") or ""),
                     )
                 )
             if len(response) < 100:
@@ -1128,6 +1130,16 @@ def verify_gitee_release(
     return release
 
 
+def with_gitee_release_notes(
+    artifact: ReleaseArtifact,
+    release: GiteeRelease,
+) -> ReleaseArtifact:
+    notes = release.body.strip()
+    if not notes:
+        return artifact
+    return replace(artifact, notes=notes)
+
+
 def verify_gitee_artifacts(
     gitee: GiteeReleaseClient,
     client: HttpClient,
@@ -1135,18 +1147,20 @@ def verify_gitee_artifacts(
     *,
     latest_tag: str,
     work_dir: Path,
-) -> None:
+) -> dict[str, GiteeRelease]:
     unique = {artifact.tag: artifact for artifact in artifacts}
     if latest_tag not in unique:
         raise SyncError("Latest release was missing from Gitee verification.")
+    verified: dict[str, GiteeRelease] = {}
     for artifact in unique.values():
-        verify_gitee_release(
+        verified[artifact.tag] = verify_gitee_release(
             gitee,
             client,
             artifact,
             full_download=artifact.tag == latest_tag,
             work_dir=work_dir,
         )
+    return verified
 
 
 def verify_published_manifests(
@@ -1309,12 +1323,16 @@ def synchronize(args: argparse.Namespace) -> int:
     }
     verification_artifacts[target_stable.tag] = target_stable
     verification_artifacts[target_manual.tag] = target_manual
-    verify_gitee_artifacts(
+    verified_releases = verify_gitee_artifacts(
         gitee,
         client,
         verification_artifacts.values(),
         latest_tag=target_manual.tag,
         work_dir=work_dir,
+    )
+    target_manual = with_gitee_release_notes(
+        target_manual,
+        verified_releases[target_manual.tag],
     )
 
     generated_dir = work_dir / "manifests"
