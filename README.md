@@ -32,6 +32,8 @@
 
 ## 下载安装
 
+源码候选版本为 1.7.51（58），尚待发布验收；以下下载地址仍指向已公开版本。
+
 **首次安装或手动升级均下载 1.7.5（57）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
 1. [下载 chaoxing-journal-1.7.5.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.5/chaoxing-journal-1.7.5.apk)。发布说明及校验文件见 [1.7.5 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.5)。
