@@ -84,7 +84,8 @@ Write-Output $signerOutput
         if ($caught) { throw $caught }
         $actualOut = if ($p.OutPath) { $p.OutPath } else { Join-Path $root 'update-stable.preflight.json' }
         $m = Get-Content -Raw -LiteralPath $actualOut | ConvertFrom-Json
-        Assert ($m.versionCode -eq 57 -and $m.versionName -eq '1.7.5') 'Wrong version.'
+        Assert ($m.versionCode -eq $p.VersionCode -and
+            $m.versionName -ceq $p.VersionName) 'Wrong version.'
         Assert ($m.applicationId -ceq 'com.example.studyassistant.journal') 'Wrong package.'
         Assert ($m.size -eq 6) 'Wrong size.'
         Assert ($m.sha256 -ceq (Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()) 'Wrong hash.'
@@ -147,6 +148,37 @@ Write-Output $signerOutput
   Case 'directory is not APK' @{ ApkPath = $root } @() 'extension'
   Case 'missing aapt executable' @{ AaptPath = (Join-Path $root 'missing.exe') } @() 'does not exist|Cannot find'
   Case 'output cannot overwrite APK' @{ OutPath = $apk } @() 'overwrite the APK'
+  $actualStable = Join-Path $root 'actual-update-stable.json'
+  $actualInit = @{
+    InitializeStableBaseline = $true
+    VerifiedReleaseEvidencePath = $evidencePath
+    StableEntryPath = $actualStable; OutPath = $actualStable
+  }
+  $actualBaseline = @{
+    VersionName = '1.7.4'; VersionCode = 56; Channel = 'stable'
+  }
+  $actualNoPrevious = @('PreviousVersionName', 'PreviousVersionCode')
+  Case 'actual stable baseline writes one stable entry' ($actualInit + $actualBaseline) $actualNoPrevious '' {
+    $badging = "package: name='com.example.studyassistant.journal' versionCode='56' versionName='1.7.4'"
+    $evidence.versionCode = 56
+    $evidence.sourceUrl = 'https://api.github.com/repos/arrry-07/chaoxing-journal/releases/tags/v1.7.4'
+    $evidence.release.tag_name = 'v1.7.4'
+    $evidence.release.html_url = 'https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.4'
+    $evidence.release.assets[0].name = 'chaoxing-journal-1.7.4.apk'
+    $evidence.release.assets[0].browser_download_url = 'https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.4/chaoxing-journal-1.7.4.apk'
+  } {
+    Assert (Test-Path -LiteralPath $actualStable) 'Stable entry was not written.'
+    Assert (-not (($messages -join "`n") -match 'OFFLINE PREFLIGHT')) 'Actual baseline emitted preflight warning.'
+  }
+  [IO.File]::WriteAllText($actualStable, 'existing stable', $utf8)
+  Case 'actual stable baseline refuses existing stable' ($actualInit + $actualBaseline) $actualNoPrevious 'already exists'
+  Assert ((Get-Content -Raw -LiteralPath $actualStable) -ceq 'existing stable') 'Existing stable entry changed.'
+  Remove-Item -LiteralPath $actualStable -Force
+  $manualActual = $actualInit.Clone()
+  $manualActual.Channel = 'manual'
+  $manualActual.VersionName = '1.7.4'
+  $manualActual.VersionCode = 56
+  Case 'actual baseline cannot be manual' $manualActual $actualNoPrevious 'requires stable'
   $init = @{ InitializeStableBaselinePreflight = $true; Channel = 'stable'; VerifiedLatestEvidencePath = $evidencePath; StableEntryPath = $stable }
   $noPrevious = @('PreviousVersionName', 'PreviousVersionCode')
   Case 'baseline local preflight only' $init $noPrevious '' {} {

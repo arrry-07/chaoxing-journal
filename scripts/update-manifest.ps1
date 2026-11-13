@@ -18,7 +18,11 @@ param(
   [string]$ApkUrl = '',
   # Offline candidate only: never writes the stable entry or proves remote absence.
   [switch]$InitializeStableBaselinePreflight,
+  # One-time real stable initialization after the calling workflow has proved
+  # the remote stable entry is absent. Requires exact GitHub Release evidence.
+  [switch]$InitializeStableBaseline,
   [string]$VerifiedLatestEvidencePath = '',
+  [string]$VerifiedReleaseEvidencePath = '',
   [string]$StableEntryPath = '',
   [string]$OutPath = '',
   [string]$ApplicationId = 'com.example.studyassistant.journal',
@@ -70,10 +74,39 @@ if (-not [string]::IsNullOrWhiteSpace($BackupApkUrl)) {
   Assert-HttpsUrl $BackupApkUrl 'BackupApkUrl'
 }
 
-if ($InitializeStableBaselinePreflight) {
+if ($InitializeStableBaseline -and $InitializeStableBaselinePreflight) {
+  throw 'Use only one stable baseline mode.'
+}
+if ($InitializeStableBaseline) {
+  if ($Channel -ne 'stable' -or
+      $PSBoundParameters.ContainsKey('PreviousVersionName') -or
+      $PSBoundParameters.ContainsKey('PreviousVersionCode')) {
+    throw 'Actual stable baseline requires stable and forbids PreviousVersion inputs.'
+  }
+  if ($PSBoundParameters.ContainsKey('VerifiedLatestEvidencePath')) {
+    throw 'Actual stable baseline requires VerifiedReleaseEvidencePath.'
+  }
+  if ([string]::IsNullOrWhiteSpace($VerifiedReleaseEvidencePath) -or
+      [string]::IsNullOrWhiteSpace($StableEntryPath)) {
+    throw 'Actual stable baseline requires VerifiedReleaseEvidencePath and StableEntryPath.'
+  }
+  if ([string]::IsNullOrWhiteSpace($OutPath)) {
+    $OutPath = $StableEntryPath
+  }
+  if ([System.IO.Path]::GetFullPath($OutPath) -ne
+      [System.IO.Path]::GetFullPath($StableEntryPath)) {
+    throw 'Actual stable baseline OutPath must equal StableEntryPath.'
+  }
+  if (Test-Path -LiteralPath $StableEntryPath) {
+    throw 'Stable entry already exists; actual baseline cannot overwrite it.'
+  }
+} elseif ($InitializeStableBaselinePreflight) {
   if ($Channel -ne 'stable' -or $PSBoundParameters.ContainsKey('PreviousVersionName') -or
       $PSBoundParameters.ContainsKey('PreviousVersionCode')) {
     throw 'Baseline preflight requires stable and forbids PreviousVersion inputs.'
+  }
+  if ($PSBoundParameters.ContainsKey('VerifiedReleaseEvidencePath')) {
+    throw 'Baseline preflight requires VerifiedLatestEvidencePath.'
   }
   if ([string]::IsNullOrWhiteSpace($VerifiedLatestEvidencePath) -or
       [string]::IsNullOrWhiteSpace($StableEntryPath)) {
@@ -84,36 +117,37 @@ if ($InitializeStableBaselinePreflight) {
   }
 } else {
   if ($PSBoundParameters.ContainsKey('VerifiedLatestEvidencePath') -or
+      $PSBoundParameters.ContainsKey('VerifiedReleaseEvidencePath') -or
       $PSBoundParameters.ContainsKey('StableEntryPath')) {
-    throw 'Baseline evidence inputs require InitializeStableBaselinePreflight.'
+    throw 'Baseline evidence inputs require InitializeStableBaseline or InitializeStableBaselinePreflight.'
   }
-if (-not [string]::IsNullOrWhiteSpace($PreviousVersionName)) {
-  if ($PreviousVersionName -notmatch '^\d+\.\d+\.\d+$') {
-    throw 'PreviousVersionName must contain exactly three numeric parts.'
+  if (-not [string]::IsNullOrWhiteSpace($PreviousVersionName)) {
+    if ($PreviousVersionName -notmatch '^\d+\.\d+\.\d+$') {
+      throw 'PreviousVersionName must contain exactly three numeric parts.'
+    }
   }
-}
-if ([string]::IsNullOrWhiteSpace($PreviousVersionName) -or
-    $PreviousVersionCode -le 0) {
-  throw 'PreviousVersionName and PreviousVersionCode are required to prevent stale manifests.'
-}
-$current = $VersionName.Split('.') | ForEach-Object { [int]$_ }
-$previous = $PreviousVersionName.Split('.') | ForEach-Object { [int]$_ }
-$newIteration = $current[0] -gt $previous[0] -or
-    ($current[0] -eq $previous[0] -and $current[1] -gt $previous[1])
-if ($Channel -eq 'stable' -and -not $newIteration) {
-  throw 'Stable manifests may only advance the major or minor version.'
-}
-if ($VersionCode -le $PreviousVersionCode) {
-  throw 'VersionCode must be greater than PreviousVersionCode.'
-}
-if (-not $newIteration -and
-    ($current[0] -lt $previous[0] -or
-     ($current[0] -eq $previous[0] -and $current[1] -lt $previous[1]) -or
-     ($current[0] -eq $previous[0] -and
-      $current[1] -eq $previous[1] -and
-      $current[2] -lt $previous[2]))) {
-  throw 'VersionName must not move backwards from PreviousVersionName.'
-}
+  if ([string]::IsNullOrWhiteSpace($PreviousVersionName) -or
+      $PreviousVersionCode -le 0) {
+    throw 'PreviousVersionName and PreviousVersionCode are required to prevent stale manifests.'
+  }
+  $current = $VersionName.Split('.') | ForEach-Object { [int]$_ }
+  $previous = $PreviousVersionName.Split('.') | ForEach-Object { [int]$_ }
+  $newIteration = $current[0] -gt $previous[0] -or
+      ($current[0] -eq $previous[0] -and $current[1] -gt $previous[1])
+  if ($Channel -eq 'stable' -and -not $newIteration) {
+    throw 'Stable manifests may only advance the major or minor version.'
+  }
+  if ($VersionCode -le $PreviousVersionCode) {
+    throw 'VersionCode must be greater than PreviousVersionCode.'
+  }
+  if (-not $newIteration -and
+      ($current[0] -lt $previous[0] -or
+       ($current[0] -eq $previous[0] -and $current[1] -lt $previous[1]) -or
+       ($current[0] -eq $previous[0] -and
+        $current[1] -eq $previous[1] -and
+        $current[2] -lt $previous[2]))) {
+    throw 'VersionName must not move backwards from PreviousVersionName.'
+  }
 }
 
 if (-not (Test-Path -LiteralPath $ApkPath)) {
@@ -215,13 +249,22 @@ $apkFileName = "chaoxing-journal-$versionKey.apk"
 if ($hasBase) {
   $ApkUrl = "$($BaseUrl.TrimEnd('/'))/$versionKey/$apkFileName"
 }
-if ($InitializeStableBaselinePreflight) {
+if ($InitializeStableBaselinePreflight -or $InitializeStableBaseline) {
   # Evidence is a maintainer-verified offline snapshot, NOT remote authentication.
   # JSON: { verified: true, verifiedAtUtc: ISO8601, sourceUrl: the official
-  # /releases/latest API URL, versionCode: integer, release: raw API response }.
+  # latest or exact tag API URL, versionCode: integer, release: raw API response }.
   # release.assets must include the official APK with size and sha256 digest.
-  $evidence = Get-Content -Raw -LiteralPath $VerifiedLatestEvidencePath | ConvertFrom-Json
-  $official = 'https://api.github.com/repos/arrry-07/chaoxing-journal/releases/latest'
+  $evidencePath = if ($InitializeStableBaseline) {
+    $VerifiedReleaseEvidencePath
+  } else {
+    $VerifiedLatestEvidencePath
+  }
+  $evidence = Get-Content -Raw -LiteralPath $evidencePath | ConvertFrom-Json
+  $official = if ($InitializeStableBaseline) {
+    "https://api.github.com/repos/arrry-07/chaoxing-journal/releases/tags/v$VersionName"
+  } else {
+    'https://api.github.com/repos/arrry-07/chaoxing-journal/releases/latest'
+  }
   $verifiedAt = [DateTimeOffset]::MinValue
   if ($evidence.verified -isnot [bool] -or $evidence.verified -ne $true -or
       $evidence.sourceUrl -cne $official -or
@@ -229,7 +272,7 @@ if ($InitializeStableBaselinePreflight) {
       $verifiedAt -gt [DateTimeOffset]::UtcNow -or
       $verifiedAt -lt [DateTimeOffset]::UtcNow.AddHours(-24) -or
       $evidence.versionCode -ne $VersionCode) {
-    throw 'Baseline requires a maintainer-verified official latest snapshot from the last 24 hours.'
+    throw 'Baseline requires a maintainer-verified official release snapshot from the last 24 hours.'
   }
   $release = $evidence.release
   $releaseUrl = "https://github.com/arrry-07/chaoxing-journal/releases/tag/v$VersionName"
@@ -238,7 +281,7 @@ if ($InitializeStableBaselinePreflight) {
       $release.draft -isnot [bool] -or $release.draft -ne $false -or
       $release.prerelease -isnot [bool] -or $release.prerelease -ne $false -or
       [string]::IsNullOrWhiteSpace([string]$release.published_at)) {
-    throw 'Baseline evidence must identify a published, non-draft, non-prerelease official latest release.'
+    throw 'Baseline evidence must identify a published, non-draft, non-prerelease official release.'
   }
   $officialName = "chaoxing-journal-$VersionName.apk"
   $assets = @($release.assets | Where-Object { $_.name -ceq $officialName })
@@ -246,7 +289,7 @@ if ($InitializeStableBaselinePreflight) {
       $assets[0].browser_download_url -cne "https://github.com/arrry-07/chaoxing-journal/releases/download/v$VersionName/$officialName" -or
       $assets[0].size -ne $apk.Length -or
       $assets[0].digest -cne "sha256:$sha") {
-    throw 'Baseline APK bytes must match the official latest asset size and SHA-256 digest.'
+    throw 'Baseline APK bytes must match the official release asset size and SHA-256 digest.'
   }
 }
 $manifest = [ordered]@{
@@ -270,7 +313,14 @@ $outFullPath = [System.IO.Path]::GetFullPath($OutPath)
 if ($outFullPath -eq $apk.FullName) {
   throw 'OutPath must not overwrite the APK.'
 }
-if ($InitializeStableBaselinePreflight) {
+if ($InitializeStableBaseline) {
+  if ($outFullPath -eq (Get-Item -LiteralPath $VerifiedReleaseEvidencePath).FullName) {
+    throw 'Stable entry must not overwrite the evidence.'
+  }
+  if ((Test-Path -LiteralPath $StableEntryPath) -or (Test-Path -LiteralPath $outFullPath)) {
+    throw 'Stable entry already exists; actual baseline cannot overwrite it.'
+  }
+} elseif ($InitializeStableBaselinePreflight) {
   if ($outFullPath -eq [System.IO.Path]::GetFullPath($StableEntryPath) -or
       $outFullPath -eq (Get-Item -LiteralPath $VerifiedLatestEvidencePath).FullName) {
     throw 'Preflight output must not overwrite the stable entry or evidence.'
@@ -285,13 +335,15 @@ if (-not [System.IO.Directory]::Exists($outDirectory)) {
 }
 $json = $manifest | ConvertTo-Json -Compress
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-if ($InitializeStableBaselinePreflight) {
+if ($InitializeStableBaselinePreflight -or $InitializeStableBaseline) {
   $output = [System.IO.File]::Open($outFullPath, [System.IO.FileMode]::CreateNew)
   try {
     $bytes = $utf8NoBom.GetBytes($json)
     $output.Write($bytes, 0, $bytes.Length)
   } finally { $output.Dispose() }
-  Write-Output 'OFFLINE PREFLIGHT ONLY: remote stable absence is unverified; initialization is NOT complete.'
+  if ($InitializeStableBaselinePreflight) {
+    Write-Output 'OFFLINE PREFLIGHT ONLY: remote stable absence is unverified; initialization is NOT complete.'
+  }
 } else {
   [System.IO.File]::WriteAllText($outFullPath, $json, $utf8NoBom)
 }

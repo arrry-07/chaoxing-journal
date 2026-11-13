@@ -24,7 +24,7 @@ enum UpdatePhase {
 /// The application owns this task; a dialog only observes it.
 class AppUpdateController extends ChangeNotifier {
   AppUpdateController({AppUpdateService? service, ExternalLinkService? links})
-      : service = service ?? AppUpdateService(),
+      : service = service ?? AppUpdateService.withGiteeDefaults(),
         links = links ?? ExternalLinkService();
 
   final AppUpdateService service;
