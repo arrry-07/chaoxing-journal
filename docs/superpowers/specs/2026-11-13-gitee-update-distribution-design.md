@@ -71,6 +71,8 @@ GitHub Actions 工作流只提供：
 
 不再监听每个 `release.published` 事件。若当天 latest 已同步，任务做幂等 no-op。一次性 seed 可显式上传 `v1.7.4`、`v1.7.5` 和迁移版本，完成首轮国内源初始化。
 
+2026-11-13 维护者进一步收紧传输量：历史 `v1.7.4`、`v1.7.5` 只在 Gitee 网页后台上传一次，Actions 只检查 Release/附件存在，不做 Gitee 回头完整下载；最新 manual APK 由维护者本机上传一次，Actions 只对最新版做匿名完整下载和 SHA-256 校验后更新清单。云端工作流不再上传任何 APK。
+
 ## 初始部署
 
 迁移版本发布后执行一次 seed：

@@ -23,6 +23,7 @@
 - Reserved package typo `com.example.studystassistant.journal` is forbidden; exact package is `com.example.studyassistant.journal`.
 - Signing certificate SHA-256: `d36a571510e046dd196d7384f849f82b4fcff05ce3affb334765d5c752265d8a`.
 - Failed or unverified manifests must not be published.
+- 2026-11-13 revision: historical APKs are uploaded through the Gitee web backend once and are not downloaded back; only the latest manual APK receives the full Gitee anonymous download/hash check. GitHub Actions does not upload APKs.
 
 ## Review Focus
 

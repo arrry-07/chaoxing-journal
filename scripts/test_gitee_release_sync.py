@@ -204,48 +204,127 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual(gitee.deleted, [2])
         self.assertEqual(deleted, ["v1.7.5"])
 
-    def test_upload_waits_for_eventual_gitee_asset_visibility(self) -> None:
+    def test_historical_gitee_asset_check_skips_full_download(self) -> None:
         release = artifact("1.7.52", 59)
 
         class FakeGitee:
-            def __init__(self) -> None:
-                self.calls = 0
-                self.uploads = 0
-
             def find_release(self, tag: str) -> sync.GiteeRelease:
-                self.calls += 1
-                assets = ()
-                if self.calls >= 3:
-                    assets = ({"name": release.apk_name},)
                 return sync.GiteeRelease(
                     release_id=7,
                     tag=tag,
-                    assets=assets,
+                    assets=({"name": release.apk_name},),
                 )
 
-            def upload_apk(
-                self,
-                _release: sync.GiteeRelease,
-                _apk_path: Path,
-            ) -> None:
-                self.uploads += 1
-
-        gitee = FakeGitee()
         with tempfile.TemporaryDirectory() as directory:
-            with mock.patch.object(sync, "_download_public_apk"), mock.patch.object(
-                sync.time, "sleep"
-            ) as sleep:
-                ensured = sync.ensure_gitee_release(
-                    gitee,  # type: ignore[arg-type]
+            with mock.patch.object(sync, "_download_public_apk") as download:
+                checked = sync.verify_gitee_release(
+                    FakeGitee(),  # type: ignore[arg-type]
                     mock.sentinel.client,  # type: ignore[arg-type]
                     release,
-                    apk_path=Path(directory) / release.apk_name,
+                    full_download=False,
                     work_dir=Path(directory),
                 )
 
-        self.assertEqual(ensured.tag, "v1.7.52")
-        self.assertEqual(gitee.uploads, 1)
-        sleep.assert_called()
+        self.assertEqual(checked.tag, "v1.7.52")
+        download.assert_not_called()
+
+    def test_latest_gitee_asset_check_downloads_full_apk(self) -> None:
+        release = artifact("1.7.52", 59)
+
+        class FakeGitee:
+            def find_release(self, tag: str) -> sync.GiteeRelease:
+                return sync.GiteeRelease(
+                    release_id=7,
+                    tag=tag,
+                    assets=({"name": release.apk_name},),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(sync, "_download_public_apk") as download:
+                sync.verify_gitee_release(
+                    FakeGitee(),  # type: ignore[arg-type]
+                    mock.sentinel.client,  # type: ignore[arg-type]
+                    release,
+                    full_download=True,
+                    work_dir=Path(directory),
+                )
+
+        download.assert_called_once()
+
+    def test_seed_verification_fully_downloads_only_latest(self) -> None:
+        releases = [
+            artifact("1.7.4", 56),
+            artifact("1.7.5", 57),
+            artifact("1.7.52", 59),
+        ]
+
+        class FakeGitee:
+            def find_release(self, tag: str) -> sync.GiteeRelease:
+                release = next(item for item in releases if item.tag == tag)
+                return sync.GiteeRelease(
+                    release_id=7,
+                    tag=tag,
+                    assets=({"name": release.apk_name},),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(sync, "_download_public_apk") as download:
+                sync.verify_gitee_artifacts(
+                    FakeGitee(),  # type: ignore[arg-type]
+                    mock.sentinel.client,  # type: ignore[arg-type]
+                    releases,
+                    latest_tag="v1.7.52",
+                    work_dir=Path(directory),
+                )
+
+        downloaded = [
+            call.args[1].tag for call in download.call_args_list
+        ]
+        self.assertEqual(downloaded, ["v1.7.52"])
+
+    def test_missing_gitee_release_requires_web_upload(self) -> None:
+        release = artifact("1.7.52", 59)
+
+        class FakeGitee:
+            def find_release(self, _tag: str) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                sync.SyncError,
+                "must be created and uploaded in the Gitee web backend",
+            ):
+                sync.verify_gitee_release(
+                    FakeGitee(),  # type: ignore[arg-type]
+                    mock.sentinel.client,  # type: ignore[arg-type]
+                    release,
+                    full_download=False,
+                    work_dir=Path(directory),
+                )
+
+    def test_gitee_attachment_name_must_match(self) -> None:
+        release = artifact("1.7.52", 59)
+
+        class FakeGitee:
+            def find_release(self, tag: str) -> sync.GiteeRelease:
+                return sync.GiteeRelease(
+                    release_id=7,
+                    tag=tag,
+                    assets=({"name": "wrong.apk"},),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                sync.SyncError,
+                "Gitee release APK identity did not match",
+            ):
+                sync.verify_gitee_release(
+                    FakeGitee(),  # type: ignore[arg-type]
+                    mock.sentinel.client,  # type: ignore[arg-type]
+                    release,
+                    full_download=False,
+                    work_dir=Path(directory),
+                )
 
 
 class SafetyTests(unittest.TestCase):

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Synchronize verified GitHub releases to the public Gitee update mirror.
+"""Verify mirrored Gitee releases and publish the public update manifests.
 
-The script intentionally uses only the Python standard library. It never writes
-the Gitee token to a file, URL, command line, or log.
+Historical APKs are checked without a Gitee redownload. The latest manual APK
+is downloaded anonymously and verified before manifests are published.
 """
 
 from __future__ import annotations
@@ -1099,45 +1099,54 @@ def _download_public_apk(
     )
 
 
-def ensure_gitee_release(
+def verify_gitee_release(
     gitee: GiteeReleaseClient,
     client: HttpClient,
     artifact: ReleaseArtifact,
     *,
-    apk_path: Path,
+    full_download: bool,
     work_dir: Path,
 ) -> GiteeRelease:
     release = gitee.find_release(artifact.tag)
     if release is None:
-        release = gitee.create_release(artifact)
-    uploaded = False
-    apk_assets: list[dict[str, Any]] = []
-    for attempt in range(31):
-        apk_assets = [
-            asset
-            for asset in release.assets
-            if isinstance(asset.get("name"), str)
-            and str(asset["name"]).endswith(".apk")
-        ]
-        if len(apk_assets) > 1:
-            raise SyncError("Gitee release contained multiple APK assets.")
-        if apk_assets:
-            break
-        if not uploaded:
-            gitee.upload_apk(release, apk_path)
-            uploaded = True
-        if attempt < 30:
-            time.sleep(2)
-        refreshed = gitee.find_release(artifact.tag)
-        if refreshed is None:
-            raise SyncError("Gitee release disappeared after upload.")
-        release = refreshed
-    if not apk_assets:
-        raise SyncError("Gitee APK attachment did not become visible.")
+        raise SyncError(
+            f"Gitee release {artifact.tag} must be created and uploaded "
+            "in the Gitee web backend before synchronization."
+        )
+    apk_assets = [
+        asset
+        for asset in release.assets
+        if isinstance(asset.get("name"), str)
+        and str(asset["name"]).endswith(".apk")
+    ]
+    if len(apk_assets) > 1:
+        raise SyncError("Gitee release contained multiple APK assets.")
     if len(apk_assets) != 1 or apk_assets[0].get("name") != artifact.apk_name:
         raise SyncError("Gitee release APK identity did not match.")
-    _download_public_apk(client, artifact, work_dir=work_dir)
+    if full_download:
+        _download_public_apk(client, artifact, work_dir=work_dir)
     return release
+
+
+def verify_gitee_artifacts(
+    gitee: GiteeReleaseClient,
+    client: HttpClient,
+    artifacts: Iterable[ReleaseArtifact],
+    *,
+    latest_tag: str,
+    work_dir: Path,
+) -> None:
+    unique = {artifact.tag: artifact for artifact in artifacts}
+    if latest_tag not in unique:
+        raise SyncError("Latest release was missing from Gitee verification.")
+    for artifact in unique.values():
+        verify_gitee_release(
+            gitee,
+            client,
+            artifact,
+            full_download=artifact.tag == latest_tag,
+            work_dir=work_dir,
+        )
 
 
 def verify_published_manifests(
@@ -1262,16 +1271,6 @@ def synchronize(args: argparse.Namespace) -> int:
         )
         artifacts.append(artifact)
         raw_releases[artifact.tag] = raw_release
-        if args.dry_run:
-            continue
-        apk_path = work_dir / artifact.tag / artifact.apk_name
-        ensure_gitee_release(
-            gitee,
-            client,
-            artifact,
-            apk_path=apk_path,
-            work_dir=work_dir,
-        )
     current_stable = (
         manifest_artifact(current_stable_json)
         if current_stable_json is not None
@@ -1304,6 +1303,19 @@ def synchronize(args: argparse.Namespace) -> int:
             )
         )
         return 0
+
+    verification_artifacts = {
+        artifact.tag: artifact for artifact in artifacts
+    }
+    verification_artifacts[target_stable.tag] = target_stable
+    verification_artifacts[target_manual.tag] = target_manual
+    verify_gitee_artifacts(
+        gitee,
+        client,
+        verification_artifacts.values(),
+        latest_tag=target_manual.tag,
+        work_dir=work_dir,
+    )
 
     generated_dir = work_dir / "manifests"
     generated_dir.mkdir(parents=True, exist_ok=True)
