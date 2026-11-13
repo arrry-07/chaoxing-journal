@@ -717,7 +717,7 @@ class GiteeReleaseClient:
                         assets=tuple(
                             asset for asset in assets if isinstance(asset, dict)
                         ),
-                    body=str(item.get("body") or ""),
+                        body=str(item.get("body") or ""),
                     )
                 )
             if len(response) < 100:
