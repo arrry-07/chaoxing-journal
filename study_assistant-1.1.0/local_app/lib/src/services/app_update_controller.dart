@@ -143,12 +143,6 @@ class AppUpdateController extends ChangeNotifier {
               currentVersionCode: AppVersion.code, cancelToken: _cancel)
           : service.checkConfigured(
               currentVersionCode: AppVersion.code, cancelToken: _cancel));
-      if (startup &&
-          checked.update != null &&
-          !AppUpdateService.isNewIteration(
-              checked.update!.versionName, AppVersion.name)) {
-        checked = const UpdateCheckResult(UpdateCheckStatus.upToDate);
-      }
       if (_disposed) return;
       result = checked;
       phase = checked.status == UpdateCheckStatus.available
