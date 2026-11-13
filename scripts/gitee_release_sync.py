@@ -46,6 +46,7 @@ SIGNER_SHA256 = (
 )
 MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024
+GITEE_UPLOAD_TIMEOUT_SECONDS = 300
 USER_AGENT = "chaoxing-journal-gitee-sync/1.0"
 TAG_PATTERN = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 RAW_VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
@@ -282,6 +283,7 @@ class HttpClient:
         headers: dict[str, str] | None = None,
         max_bytes: int = MAX_JSON_BYTES,
         allow_not_found: bool = False,
+        timeout: int = 60,
     ) -> tuple[int, bytes, str]:
         request = urllib.request.Request(
             url,
@@ -290,7 +292,7 @@ class HttpClient:
             headers=self._headers(token, headers),
         )
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 status = response.status
                 final_url = response.geturl()
                 if urllib.parse.urlsplit(final_url).scheme != "https":
@@ -391,6 +393,7 @@ class HttpClient:
             headers={
                 "Content-Type": f"multipart/form-data; boundary={boundary}",
             },
+            timeout=GITEE_UPLOAD_TIMEOUT_SECONDS,
         )
         try:
             return json.loads(response.decode("utf-8"))

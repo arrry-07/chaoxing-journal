@@ -267,6 +267,23 @@ class SafetyTests(unittest.TestCase):
         self.assertNotIn(token, redacted)
         self.assertIn("[REDACTED]", redacted)
 
+    def test_gitee_upload_allows_slow_cross_border_transfers(self) -> None:
+        client = sync.HttpClient(github_token="", gitee_token="token")
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "test.apk"
+            apk.write_bytes(b"apk")
+            with mock.patch.object(
+                client,
+                "_request",
+                return_value=(201, b"{}", "application/json"),
+            ) as request:
+                client.gitee_upload(
+                    "/repos/owner/repo/releases/1/attach_files",
+                    file_path=apk,
+                )
+
+        self.assertEqual(request.call_args.kwargs["timeout"], 300)
+
     def test_android_tool_output_is_decoded_as_utf8_on_windows(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             apk = Path(directory) / "test.apk"
