@@ -61,6 +61,15 @@ class GiteeWorkflowTests(unittest.TestCase):
             self.text,
         )
         self.assertIn('"$SDKMANAGER" "build-tools;36.0.0"', self.text)
+        self.assertIn(
+            'APKSIGNER="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/'
+            'build-tools/36.0.0/apksigner"',
+            self.text,
+        )
+        self.assertIn(
+            'args+=(--aapt "$AAPT" --apksigner "$APKSIGNER")',
+            self.text,
+        )
 
 
 if __name__ == "__main__":

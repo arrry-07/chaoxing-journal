@@ -84,4 +84,9 @@ jobs:
           if [[ -n "$TAGS" ]]; then
             args+=(--tags "$TAGS")
           fi
+          AAPT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools/36.0.0/aapt"
+          APKSIGNER="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools/36.0.0/apksigner"
+          test -x "$AAPT"
+          test -x "$APKSIGNER"
+          args+=(--aapt "$AAPT" --apksigner "$APKSIGNER")
           python3 scripts/gitee_release_sync.py "${args[@]}"
