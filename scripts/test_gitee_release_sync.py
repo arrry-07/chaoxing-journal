@@ -284,6 +284,25 @@ class SafetyTests(unittest.TestCase):
 
         self.assertEqual(request.call_args.kwargs["timeout"], 300)
 
+    def test_gitee_upload_sends_access_token_as_multipart_field(self) -> None:
+        client = sync.HttpClient(github_token="", gitee_token="secret-token")
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "test.apk"
+            apk.write_bytes(b"apk")
+            with mock.patch.object(
+                client,
+                "_request",
+                return_value=(201, b"{}", "application/json"),
+            ) as request:
+                client.gitee_upload(
+                    "/repos/owner/repo/releases/1/attach_files",
+                    file_path=apk,
+                )
+
+        body = request.call_args.kwargs["data"]
+        self.assertIn(b'name="access_token"', body)
+        self.assertIn(b"\r\n\r\nsecret-token\r\n", body)
+
     def test_android_tool_output_is_decoded_as_utf8_on_windows(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             apk = Path(directory) / "test.apk"

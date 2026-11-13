@@ -378,17 +378,22 @@ class HttpClient:
         boundary = f"----journal-{secrets.token_hex(16)}"
         filename = file_path.name
         content_type = "application/vnd.android.package-archive"
+        token_part = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="access_token"\r\n\r\n'
+            f"{self._gitee_token}\r\n"
+        ).encode("utf-8")
         prefix = (
             f"--{boundary}\r\n"
             f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
             f"Content-Type: {content_type}\r\n\r\n"
         ).encode("utf-8")
         suffix = f"\r\n--{boundary}--\r\n".encode("ascii")
-        body = prefix + file_path.read_bytes() + suffix
+        body = token_part + prefix + file_path.read_bytes() + suffix
         _, response, _ = self._request(
             "POST",
             f"{GITEE_API}{path}",
-            token=self._gitee_token,
+            token="",
             data=body,
             headers={
                 "Content-Type": f"multipart/form-data; boundary={boundary}",
