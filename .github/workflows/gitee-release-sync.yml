@@ -63,8 +63,10 @@ jobs:
       - name: Install APK verification tools
         run: |
           # ubuntu-latest already provides the Android SDK and cmdline tools.
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "build-tools;36.0.0"
+          SDKMANAGER="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" "build-tools;36.0.0"
 
       - name: Run offline synchronizer tests
         run: |

@@ -55,7 +55,12 @@ class GiteeWorkflowTests(unittest.TestCase):
 
     def test_workflow_uses_preinstalled_android_sdk(self) -> None:
         self.assertNotIn("android-actions/setup-android", self.text)
-        self.assertIn('sdkmanager "build-tools;36.0.0"', self.text)
+        self.assertIn(
+            'SDKMANAGER="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/'
+            'cmdline-tools/latest/bin/sdkmanager"',
+            self.text,
+        )
+        self.assertIn('"$SDKMANAGER" "build-tools;36.0.0"', self.text)
 
 
 if __name__ == "__main__":
