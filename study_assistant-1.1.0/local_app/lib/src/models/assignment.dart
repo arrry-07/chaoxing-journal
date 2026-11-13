@@ -6,6 +6,14 @@ enum AssignmentSource {
   legacyUnknown
 }
 
+enum AssignmentDeadlineBucket {
+  notExpiredWithDeadline,
+  confirmedNoDeadline,
+  unconfirmed,
+  overdue,
+  completed,
+}
+
 class Assignment {
   Assignment({
     required this.id,
@@ -178,11 +186,28 @@ class Assignment {
       status == 'reviewing' ||
       status == 'graded';
 
-  bool get isOverdue =>
-      deadlineTrusted &&
-      isPendingConfirmed &&
-      !isCompleted &&
-      (deadlineAt?.isBefore(DateTime.now()) ?? false);
+  AssignmentDeadlineBucket deadlineBucketAt(DateTime now) {
+    if (isCompleted) return AssignmentDeadlineBucket.completed;
+    if (!isPendingConfirmed || !deadlineTrusted || deadlineReadFailed) {
+      return AssignmentDeadlineBucket.unconfirmed;
+    }
+
+    final deadline = deadlineAt;
+    if (status == 'overdue' && (deadline == null || deadline.isAfter(now))) {
+      return AssignmentDeadlineBucket.unconfirmed;
+    }
+    if (deadline == null) {
+      return AssignmentDeadlineBucket.confirmedNoDeadline;
+    }
+    return deadline.isAfter(now)
+        ? AssignmentDeadlineBucket.notExpiredWithDeadline
+        : AssignmentDeadlineBucket.overdue;
+  }
+
+  bool isOverdueAt(DateTime now) =>
+      deadlineBucketAt(now) == AssignmentDeadlineBucket.overdue;
+
+  bool get isOverdue => isOverdueAt(DateTime.now());
 
   String get deadlineLabel {
     if (deadlineAt == null && deadlineRawText == '尚未开放') {

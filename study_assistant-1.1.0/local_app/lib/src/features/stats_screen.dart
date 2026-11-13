@@ -1,19 +1,49 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../app/journal.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_statistics.dart';
 import 'widgets/completion_pie_chart.dart';
 
-class StatsScreen extends StatelessWidget {
-  const StatsScreen({super.key, required this.store});
+class StatsScreen extends StatefulWidget {
+  const StatsScreen({super.key, required this.store, this.clock});
   final AssignmentStore store;
+  final DateTime Function()? clock;
+
+  @override
+  State<StatsScreen> createState() => _StatsScreenState();
+}
+
+class _StatsScreenState extends State<StatsScreen> {
+  Timer? _clock;
+  late DateTime _now;
+
+  @override
+  void initState() {
+    super.initState();
+    _now = widget.clock?.call() ?? DateTime.now();
+    _clock = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) {
+        setState(() => _now = widget.clock?.call() ?? DateTime.now());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-      animation: store,
+      animation: widget.store,
       builder: (context, _) {
+        final store = widget.store;
+        final now = _now;
         // Use one instant for the overview and each course, including deadlines
         // that pass while the widget is building.
-        final now = DateTime.now();
         final records = store.formalAssignments;
         final stats = AssignmentStatistics(records, now: now);
         final keys = records.map((a) => a.courseKey!).toSet().toList()..sort();
@@ -153,7 +183,7 @@ class StatsScreen extends StatelessWidget {
                                 Wrap(spacing: 16, runSpacing: 4, children: [
                                   Text('待完成 ${own.pending} 份',
                                       style: Journal.metadata),
-                                  Text('已过期 ${own.expired} 份',
+                                  Text('已逾期 ${own.expired} 份',
                                       style: Journal.metadata.copyWith(
                                           color: own.expired > 0
                                               ? Journal.berry

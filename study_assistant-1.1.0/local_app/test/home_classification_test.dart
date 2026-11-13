@@ -34,9 +34,9 @@ void main() {
     final g = AssignmentQuery.home(records, now, {});
     expect(g.noDeadline.map((a) => a.workId), ['1']);
     expect(g.uncertain.length, 3);
-    expect(g.near.length, 2);
+    expect(g.near.length, 1);
     expect(g.far.length, 1);
-    expect(g.overdue.length, 1);
+    expect(g.overdue.length, 2);
     expect(
         [...g.near, ...g.far, ...g.overdue, ...g.uncertain, ...g.noDeadline]
             .map((a) => a.id)

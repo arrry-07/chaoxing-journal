@@ -4,18 +4,20 @@ class AssignmentStatistics {
   AssignmentStatistics(Iterable<Assignment> records, {DateTime? now}) {
     final referenceTime = now ?? DateTime.now();
     for (final a in records) {
-      if (a.isCompleted) {
-        completed++;
-      } else if (a.isPendingConfirmed) {
-        if (a.deadlineTrusted &&
-            !a.deadlineReadFailed &&
-            a.deadlineAt?.isBefore(referenceTime) == true) {
+      switch (a.deadlineBucketAt(referenceTime)) {
+        case AssignmentDeadlineBucket.completed:
+          completed++;
+        case AssignmentDeadlineBucket.overdue:
           expired++;
-        } else {
+        case AssignmentDeadlineBucket.notExpiredWithDeadline:
+        case AssignmentDeadlineBucket.confirmedNoDeadline:
           pending++;
-        }
-      } else {
-        unknown++;
+        case AssignmentDeadlineBucket.unconfirmed:
+          if (a.isPendingConfirmed) {
+            pending++;
+          } else {
+            unknown++;
+          }
       }
     }
   }

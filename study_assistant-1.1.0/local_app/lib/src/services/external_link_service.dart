@@ -23,6 +23,22 @@ class ExternalLinkService {
   /// information about page loading, authentication, or homework submission.
   Future<bool> openBrowser(String url) => _open('openBrowser', url);
 
+  /// A true result only means Android accepted the request to open a mail
+  /// draft. It does not mean the message was generated or sent.
+  Future<bool> composeFeedbackEmail(String subject, String body) async {
+    try {
+      return await _channel.invokeMethod<bool>(
+            'composeFeedbackEmail',
+            {'subject': subject, 'body': body},
+          ) ??
+          false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
   /// The native bridge wraps the original signed URL in Chaoxing's verified
   /// public share-back scheme. This action never silently opens a browser.
   Future<AssignmentLaunchTarget> openAssignment(String url) async {

@@ -1329,13 +1329,13 @@ class LocalNotificationService {
       final offsets = ReminderRuleStore.normalizeOffsets(offsetsMinutes);
       final schedules = <(Assignment, int)>[];
       final seen = <String>{};
+      final now = DateTime.now();
       for (final assignment in assignments.where((item) =>
-          !item.isCompleted &&
-          item.deadlineTrusted &&
-          !item.deadlineReadFailed)) {
+          item.deadlineBucketAt(now) ==
+          AssignmentDeadlineBucket.notExpiredWithDeadline)) {
         for (final offset in offsets) {
           final at = assignment.deadlineAt?.subtract(Duration(minutes: offset));
-          if (at == null || !at.isAfter(DateTime.now())) continue;
+          if (at == null || !at.isAfter(now)) continue;
           if (!seen.add('${assignment.id}:$offset')) {
             throw StateError('作业提醒存在重复标识，请重新同步后重试');
           }

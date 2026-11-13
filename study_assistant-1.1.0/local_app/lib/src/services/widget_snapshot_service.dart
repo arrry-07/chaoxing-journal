@@ -31,40 +31,42 @@ class WidgetSnapshotService {
     final groups = AssignmentQuery.home(assignments, now, {});
     final pending = [
       ...groups.near,
-      ...groups.uncertain,
-      ...groups.noDeadline,
       ...groups.far,
+      ...groups.noDeadline,
+      ...groups.uncertain,
       ...groups.overdue
     ];
-    final items = pending
-        .take(6)
-        .map(
-          (assignment) => WidgetSnapshotItem(
-            assignmentId: assignment.id,
-            title: assignment.title,
-            courseName: assignment.courseName,
-            deadlineAt:
-                assignment.deadlineTrusted && !assignment.deadlineReadFailed
-                    ? assignment.deadlineAt
-                    : null,
-            remainingText: assignment.deadlineReadFailed
-                ? assignment.deadlineLabel
-                : !assignment.deadlineTrusted
-                    ? assignment.deadlineAt == null
-                        ? assignment.deadlineLabel
-                        : '截止待确认'
-                    : assignment.deadlineAt == null
-                        ? assignment.deadlineLabel
-                        : _remainingText(assignment.deadlineAt!, now),
-            urgencyLevel: _urgencyLevel(
-                assignment.deadlineTrusted && !assignment.deadlineReadFailed
-                    ? assignment.deadlineAt
-                    : null,
-                now),
-            deepLinkUrl: AppDeepLinks.assignmentUri(assignment.id),
+    final items = pending.take(6).map(
+      (assignment) {
+        final bucket = assignment.deadlineBucketAt(now);
+        final hasTrustedTime =
+            bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
+                bucket == AssignmentDeadlineBucket.overdue;
+        return WidgetSnapshotItem(
+          assignmentId: assignment.id,
+          title: assignment.title,
+          courseName: assignment.courseName,
+          deadlineAt: hasTrustedTime ? assignment.deadlineAt : null,
+          remainingText: switch (bucket) {
+            AssignmentDeadlineBucket.overdue => '已逾期',
+            AssignmentDeadlineBucket.notExpiredWithDeadline =>
+              _remainingText(assignment.deadlineAt!, now),
+            AssignmentDeadlineBucket.confirmedNoDeadline =>
+              assignment.deadlineLabel,
+            AssignmentDeadlineBucket.unconfirmed =>
+              assignment.deadlineReadFailed || !assignment.deadlineTrusted
+                  ? assignment.deadlineLabel
+                  : '状态或截止待确认',
+            AssignmentDeadlineBucket.completed => '已完成',
+          },
+          urgencyLevel: _urgencyLevel(
+            hasTrustedTime ? assignment.deadlineAt : null,
+            now,
           ),
-        )
-        .toList();
+          deepLinkUrl: AppDeepLinks.assignmentUri(assignment.id),
+        );
+      },
+    ).toList();
     return saveSnapshot(items);
   }
 

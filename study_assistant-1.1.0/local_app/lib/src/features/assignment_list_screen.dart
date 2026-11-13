@@ -36,12 +36,11 @@ enum AssignmentRecoveryScope {
 
   /// Retained historical dates remain visible here even though the trusted
   /// calendar grid excludes them.
-  bool matches(Assignment assignment) => switch (this) {
-        noDeadline => assignment.deadlineAt == null &&
-            assignment.deadlineTrusted &&
-            !assignment.deadlineReadFailed,
-        deadlinePending =>
-          !assignment.deadlineTrusted || assignment.deadlineReadFailed,
+  bool matches(Assignment assignment, DateTime now) => switch (this) {
+        noDeadline => assignment.deadlineBucketAt(now) ==
+            AssignmentDeadlineBucket.confirmedNoDeadline,
+        deadlinePending => assignment.deadlineBucketAt(now) ==
+            AssignmentDeadlineBucket.unconfirmed,
       };
 }
 
@@ -238,9 +237,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                 deadline: _deadlineFilter,
                 now: now,
               )
-            : displayAssignments.where(recoveryScope.matches).toList();
+            : displayAssignments
+                .where((assignment) => recoveryScope.matches(assignment, now))
+                .toList();
         final sortOrder = _sortOrder;
-        final sortedItems = AssignmentQuery.sortHome(items, sortOrder);
+        final sortedItems = sortOrder == HomeSortOrder.grouped
+            ? items
+            : AssignmentQuery.sortHome(items, sortOrder, now: now);
         final groups = sortOrder == HomeSortOrder.grouped
             ? AssignmentQuery.home(items, now, {})
             : null;
@@ -420,7 +423,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                     ...timeline(groups.noDeadline),
                   ],
                   if (groups.uncertain.isNotEmpty) ...[
-                    note('需要确认'),
+                    note('状态或截止待确认'),
                     ...timeline(groups.uncertain),
                   ],
                   ...timeline(groups.overdue),
@@ -522,7 +525,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         AssignmentDeadlineFilter.overdue => '已逾期',
         AssignmentDeadlineFilter.uncertain => '期限待确认',
         AssignmentDeadlineFilter.noDeadline => '无截止日期',
-        AssignmentDeadlineFilter.notExpired => '未截止',
+        AssignmentDeadlineFilter.notExpired => '未逾期',
       };
 
   String _sortLabel(HomeSortOrder order) => switch (order) {
@@ -603,7 +606,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    for (final filter in AssignmentDeadlineFilter.values)
+                    for (final filter in homeDeadlineFilterChoices)
                       ChoiceChip(
                         key: ValueKey('deadline-${filter.name}'),
                         selected: deadline == filter,

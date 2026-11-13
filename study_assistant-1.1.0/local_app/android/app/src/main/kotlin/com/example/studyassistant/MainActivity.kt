@@ -78,6 +78,10 @@ class MainActivity : FlutterActivity() {
                 "openUrl" -> openExternalUrl(call.argument<String>("url"))
                 "openBrowser" -> openBrowser(call.argument<String>("url"))
                 "openChaoxingAssignment" -> openChaoxingAssignment(call.argument<String>("url"))
+                "composeFeedbackEmail" -> composeFeedbackEmail(
+                    call.argument<String>("subject"),
+                    call.argument<String>("body")
+                )
                 "installApk" -> installApk(call.argument<String>("filePath"))
                 else -> {
                     result.notImplemented()
@@ -245,6 +249,11 @@ class MainActivity : FlutterActivity() {
             return false
         }
         return openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+
+    private fun composeFeedbackEmail(subject: String?, body: String?): Boolean {
+        if (subject == null || body == null) return false
+        return openIntent(FeedbackEmailComposition.intent(subject, body))
     }
 
     @Suppress("DEPRECATION")

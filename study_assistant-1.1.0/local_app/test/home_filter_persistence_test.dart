@@ -123,12 +123,12 @@ void main() {
     expect((await repo.loadHomeFilters()).sortOrder, HomeSortOrder.grouped);
   });
 
-  test('legacy noDeadline and new notExpired retain distinct names', () {
+  test('legacy noDeadline preference migrates to notExpired', () {
     final legacy = HomeFilters.decode('{"query":"","deadline":"noDeadline"}');
     final newer = HomeFilters.decode(
         const HomeFilters(deadline: AssignmentDeadlineFilter.notExpired)
             .encode());
-    expect(legacy.deadline, AssignmentDeadlineFilter.noDeadline);
+    expect(legacy.deadline, AssignmentDeadlineFilter.notExpired);
     expect(newer.deadline, AssignmentDeadlineFilter.notExpired);
   });
   test('malformed preferences safely use defaults', () async {
@@ -148,20 +148,27 @@ void main() {
     expect((await LocalAssignmentRepository().loadHomeFilters()).query, '');
   });
 
-  test('legacy and unknown sort values only replace the sort field', () {
+  test('legacy deadline values migrate without discarding other fields', () {
     final legacy = HomeFilters.decode(
         '{"query":" 数学 ","courseKey":"c:k","deadline":"next7Days"}');
     expect(legacy.query, '数学');
     expect(legacy.courseKey, 'c:k');
-    expect(legacy.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(legacy.deadline, AssignmentDeadlineFilter.all);
     expect(legacy.sortOrder, HomeSortOrder.grouped);
 
     final unknown = HomeFilters.decode(
         '{"query":"英语","courseKey":"b:k","deadline":"next30Days","sortOrder":"removed"}');
     expect(unknown.query, '英语');
     expect(unknown.courseKey, 'b:k');
-    expect(unknown.deadline, AssignmentDeadlineFilter.next30Days);
+    expect(unknown.deadline, AssignmentDeadlineFilter.all);
     expect(unknown.sortOrder, HomeSortOrder.grouped);
+
+    final uncertain = HomeFilters.decode(
+        '{"query":"语文","courseKey":"a:k","deadline":"uncertain","sortOrder":"title"}');
+    expect(uncertain.query, '语文');
+    expect(uncertain.courseKey, 'a:k');
+    expect(uncertain.deadline, AssignmentDeadlineFilter.all);
+    expect(uncertain.sortOrder, HomeSortOrder.title);
 
     final encoded = const HomeFilters(
             query: '语文',
@@ -284,6 +291,29 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('home deadline picker shows only the three current choices',
+      (tester) async {
+    final store = makeStore(Session());
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: AssignmentListScreen(store: store))),
+    );
+    await tester.tap(find.text('搜索与筛选'));
+    await tester.pumpAndSettle();
+
+    final chips = tester
+        .widgetList<ChoiceChip>(find.byType(ChoiceChip))
+        .map((chip) => (chip.label as Text).data)
+        .toList();
+    expect(chips, ['未逾期', '全部', '已逾期']);
+    expect(find.text('7天内'), findsNothing);
+    expect(find.text('30天内'), findsNothing);
+    expect(find.text('期限待确认'), findsNothing);
+    expect(find.text('无截止日期'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
       'applied sort survives navigation refresh and account cache clearing',
       (t) async {
@@ -316,7 +346,7 @@ void main() {
     await t.tap(find.text('搜索与筛选'));
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), '数学');
-    await tapSheetOption(t, '7天内');
+    await tapSheetOption(t, '未逾期');
     await tapSheetOption(t, '作业名称');
     await tapSheetOption(t, '应用');
     expect(s.homeFilters.sortOrder, HomeSortOrder.title);
@@ -337,7 +367,7 @@ void main() {
     await t.pumpAndSettle();
     await s.refreshAssignments();
     await t.pumpAndSettle();
-    expect(s.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(s.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
     expect(s.homeFilters.sortOrder, HomeSortOrder.title);
     s.replaceAssignmentsForTest([]);
     await t.pump();
@@ -349,7 +379,7 @@ void main() {
     await tapSheetOption(t, '清空筛选');
     await tapSheetOption(t, '取消');
     expect(s.homeFilters.query, '数学');
-    expect(s.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(s.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
     expect(s.homeFilters.sortOrder, HomeSortOrder.title);
     await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();

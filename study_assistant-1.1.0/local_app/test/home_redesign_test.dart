@@ -156,7 +156,7 @@ void main() {
 
     await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
-    await tapSheetOption(t, '7天内');
+    await tapSheetOption(t, '已逾期');
     await tapSheetOption(t, '应用');
     expect(find.text('没有符合搜索或期限条件的作业'), findsOneWidget);
     expect(find.text('English Essay'), findsNothing);
@@ -165,23 +165,32 @@ void main() {
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), '');
     await tapSheetOption(t, '应用');
+    expect(find.text('高等数学练习'), findsNothing);
+    expect(find.text('逾期的实验报告'), findsOneWidget);
+    expect(find.text('待确认作业'), findsNothing);
+
+    await t.tap(find.text('已筛选'));
+    await t.pumpAndSettle();
+    await tapSheetOption(t, '未逾期');
+    await tapSheetOption(t, '应用');
     expect(find.text('高等数学练习'), findsOneWidget);
+    expect(find.text('English Essay'), findsOneWidget);
     expect(find.text('逾期的实验报告'), findsNothing);
     expect(find.text('待确认作业'), findsNothing);
 
     await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
-    await tapSheetOption(t, '已逾期');
+    await tapSheetOption(t, '全部');
     await tapSheetOption(t, '应用');
+    expect(find.text('高等数学练习'), findsOneWidget);
+    expect(find.text('English Essay'), findsOneWidget);
+    await t.scrollUntilVisible(find.text('逾期的实验报告'), 180);
     expect(find.text('逾期的实验报告'), findsOneWidget);
-    expect(find.text('高等数学练习'), findsNothing);
-
-    await t.tap(find.text('已筛选'));
-    await t.pumpAndSettle();
-    await tapSheetOption(t, '期限待确认');
-    await tapSheetOption(t, '应用');
+    await t.scrollUntilVisible(find.text('待确认作业'), 180);
     expect(find.text('待确认作业'), findsOneWidget);
-    expect(find.text('逾期的实验报告'), findsNothing);
+    expect(find.text('状态或截止待确认'), findsWidgets);
+    expect(find.text('需要确认'), findsNothing);
+    await t.scrollUntilVisible(find.text('今日计划'), -180);
 
     s.testEpoch++;
     s.homeFilters = const HomeFilters();

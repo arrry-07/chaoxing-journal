@@ -1,7 +1,7 @@
 name: study_assistant_mobile
 description: 学习通作业提醒本地版 App。
 publish_to: "none"
-version: 1.7.52+59
+version: 1.7.53+60
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -16,6 +16,7 @@ dependencies:
   go_router: ^14.6.2
   home_widget: ^0.7.0
   intl: ^0.20.1
+  lpinyin: 2.0.3
   path_provider: ^2.1.5
   shared_preferences: ^2.3.5
   timezone: ^0.10.1
@@ -35,5 +36,6 @@ flutter:
           weight: 400
   assets:
     - assets/licenses/HY.txt
+    - assets/licenses/lpinyin.txt
     - assets/licenses/xuexitong-cli.txt
     - assets/type/OFL-WenKai.txt

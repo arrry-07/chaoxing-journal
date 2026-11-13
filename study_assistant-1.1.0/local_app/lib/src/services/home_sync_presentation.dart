@@ -43,7 +43,7 @@ class HomeSyncPresentation {
                   ? '部分截止时间待确认'
                   : '部分课程未更新'
               : hasCache
-                  ? '更新失败，以下为上次记录'
+                  ? '更新失败'
                   : '暂时无法读取作业',
           action,
           showCached: hasCache && !detailOnly);

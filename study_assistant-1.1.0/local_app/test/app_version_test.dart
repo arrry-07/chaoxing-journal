@@ -4,9 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/app/app_version.dart';
 
 void main() {
-  test('Gitee migration release uses frozen version', () {
-    expect(AppVersion.name, '1.7.52');
-    expect(AppVersion.code, 59);
+  test('assignment data release uses frozen version', () {
+    expect(AppVersion.name, '1.7.53');
+    expect(AppVersion.code, 60);
   });
 
   test('AppVersion matches pubspec version', () {

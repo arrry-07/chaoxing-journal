@@ -15,7 +15,7 @@ class CompletionPieChart extends StatelessWidget {
     Journal.berry,
     Journal.muted
   ];
-  static const labels = ['已完成', '待完成', '已过期', '提交未知'];
+  static const labels = ['已完成', '待完成', '已逾期', '提交未知'];
 
   @override
   Widget build(BuildContext context) {

@@ -24,6 +24,8 @@ class OpenSourceScreen extends StatelessWidget {
             'assets/licenses/HY.txt'),
         _license(context, 'xuexitong-cli', '课程班级与正式作业查询参考 · MIT 许可证',
             'assets/licenses/xuexitong-cli.txt'),
+        _license(context, 'lpinyin', '中文课程与作业名称拼音排序 · BSD 2-Clause 许可证',
+            'assets/licenses/lpinyin.txt'),
         const SizedBox(height: 16),
         const Text('字体与基础组件', style: Journal.section),
         const ListTile(

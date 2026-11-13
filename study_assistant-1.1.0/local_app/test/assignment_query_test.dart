@@ -71,7 +71,7 @@ void main() {
     final originalOrder = records.toList();
 
     List<String> ids(HomeSortOrder order) =>
-        AssignmentQuery.sortHome(records, order)
+        AssignmentQuery.sortHome(records, order, now: now)
             .map((assignment) => assignment.title)
             .toList();
 
@@ -80,16 +80,17 @@ void main() {
     expect(records, originalOrder);
     expect(
         identical(
-            AssignmentQuery.sortHome(records, HomeSortOrder.grouped), records),
+            AssignmentQuery.sortHome(records, HomeSortOrder.grouped, now: now),
+            records),
         isFalse);
     expect(ids(HomeSortOrder.deadlineAsc),
-        ['Bravo', 'alpha', 'charlie', 'delta', 'echo']);
+        ['Bravo', 'alpha', 'echo', 'charlie', 'delta']);
     expect(ids(HomeSortOrder.deadlineDesc),
-        ['alpha', 'Bravo', 'charlie', 'delta', 'echo']);
+        ['alpha', 'Bravo', 'echo', 'charlie', 'delta']);
     expect(ids(HomeSortOrder.courseName),
-        ['Bravo', 'alpha', 'charlie', 'delta', 'echo']);
+        ['Bravo', 'alpha', 'echo', 'charlie', 'delta']);
     expect(ids(HomeSortOrder.title),
-        ['alpha', 'Bravo', 'charlie', 'delta', 'echo']);
+        ['alpha', 'Bravo', 'echo', 'charlie', 'delta']);
   });
 
   test('sort ties preserve same-title classes with deterministic identity', () {
@@ -137,7 +138,11 @@ void main() {
     );
     final records = [classNine, idZulu, earlierTitle, classThree, idAlpha];
 
-    final sorted = AssignmentQuery.sortHome(records, HomeSortOrder.deadlineAsc);
+    final sorted = AssignmentQuery.sortHome(
+      records,
+      HomeSortOrder.deadlineAsc,
+      now: now,
+    );
     expect(sorted.map((assignment) => assignment.courseKey),
         ['1:1', '1:2', '1:2', '1:3', '1:9']);
     expect(sorted[1].id, endsWith(':id-a'));
@@ -148,6 +153,189 @@ void main() {
         ['1:1', '1:2', '1:2', '1:3', '1:9']);
     expect(grouped[1].id, endsWith(':id-a'));
     expect(grouped[2].id, endsWith(':id-z'));
+  });
+
+  test('deadline order keeps bucket priority when direction changes', () {
+    final now = DateTime.utc(2026, 11, 12, 2);
+    final near = _sortRecord(
+      'near',
+      courseName: '课程',
+      title: '近期',
+      deadlineAt: now.add(const Duration(days: 1)),
+    );
+    final far = _sortRecord(
+      'far',
+      courseName: '课程',
+      title: '较远',
+      deadlineAt: now.add(const Duration(days: 20)),
+    );
+    final noDeadline = _sortRecord(
+      'none',
+      courseName: '课程',
+      title: '无截止',
+    );
+    final pending = _sortRecord(
+      'pending',
+      courseName: '课程',
+      title: '待确认',
+      deadlineAt: now.subtract(const Duration(days: 5)),
+      trusted: false,
+    );
+    final overdueOld = _sortRecord(
+      'overdue-old',
+      courseName: '课程',
+      title: '早逾期',
+      deadlineAt: now.subtract(const Duration(days: 4)),
+    );
+    final overdueNew = _sortRecord(
+      'overdue-new',
+      courseName: '课程',
+      title: '晚逾期',
+      deadlineAt: now.subtract(const Duration(days: 1)),
+    );
+    final records = [
+      overdueOld,
+      pending,
+      far,
+      noDeadline,
+      overdueNew,
+      near,
+    ];
+
+    List<String> titles(HomeSortOrder order) => AssignmentQuery.sortHome(
+          records,
+          order,
+          now: now,
+        ).map((assignment) => assignment.title).toList();
+
+    expect(
+      titles(HomeSortOrder.deadlineAsc),
+      ['近期', '较远', '无截止', '待确认', '早逾期', '晚逾期'],
+    );
+    expect(
+      titles(HomeSortOrder.deadlineDesc),
+      ['较远', '近期', '无截止', '待确认', '晚逾期', '早逾期'],
+    );
+  });
+
+  test('name order puts actionable work before pending and overdue buckets',
+      () {
+    final now = DateTime.utc(2026, 11, 12, 2);
+    final actionable = _sortRecord(
+      'actionable',
+      courseName: 'Zulu',
+      title: 'Zulu',
+      deadlineAt: now.add(const Duration(days: 1)),
+    );
+    final noDeadline = _sortRecord(
+      'none',
+      courseName: 'Albatross',
+      title: 'Albatross',
+    );
+    final pending = _sortRecord(
+      'pending',
+      courseName: 'Alpha',
+      title: 'Alpha',
+      trusted: false,
+    );
+    final overdue = _sortRecord(
+      'overdue',
+      courseName: 'Beta',
+      title: 'Beta',
+      deadlineAt: now.subtract(const Duration(days: 1)),
+    );
+    final records = [overdue, pending, actionable, noDeadline];
+
+    List<String> titles(HomeSortOrder order) => AssignmentQuery.sortHome(
+          records,
+          order,
+          now: now,
+        ).map((assignment) => assignment.title).toList();
+
+    expect(
+      titles(HomeSortOrder.courseName),
+      ['Albatross', 'Zulu', 'Alpha', 'Beta'],
+    );
+    expect(
+      titles(HomeSortOrder.title),
+      ['Albatross', 'Zulu', 'Alpha', 'Beta'],
+    );
+  });
+
+  test('name order uses pinyin, case-insensitive English and natural numbers',
+      () {
+    final now = DateTime.utc(2026, 11, 12, 2);
+    final due = now.add(const Duration(days: 1));
+    final courseRecords = [
+      _sortRecord('1', courseName: '数学', title: '一', deadlineAt: due),
+      _sortRecord('2', courseName: 'beta', title: '二', deadlineAt: due),
+      _sortRecord('3', courseName: '北京', title: '三', deadlineAt: due),
+      _sortRecord('4', courseName: '重庆', title: '四', deadlineAt: due),
+      _sortRecord('5', courseName: 'Alpha', title: '五', deadlineAt: due),
+    ];
+    final titleRecords = [
+      _sortRecord('6', courseName: '课程', title: '作业10', deadlineAt: due),
+      _sortRecord('7', courseName: '课程', title: '作业2', deadlineAt: due),
+      _sortRecord('8', courseName: '课程', title: '英语', deadlineAt: due),
+      _sortRecord('9', courseName: '课程', title: 'alpha', deadlineAt: due),
+    ];
+
+    expect(
+      AssignmentQuery.sortHome(
+        courseRecords,
+        HomeSortOrder.courseName,
+        now: now,
+      ).map((assignment) => assignment.courseName),
+      ['Alpha', '北京', 'beta', '重庆', '数学'],
+    );
+    expect(
+      AssignmentQuery.sortHome(
+        titleRecords,
+        HomeSortOrder.title,
+        now: now,
+      ).map((assignment) => assignment.title),
+      ['alpha', '英语', '作业2', '作业10'],
+    );
+  });
+
+  test('name ties use raw text, course identity and input order', () {
+    final now = DateTime.utc(2026, 11, 12, 2);
+    final due = now.add(const Duration(days: 1));
+    final li = _sortRecord(
+      'li',
+      courseName: '课程',
+      title: '李',
+      deadlineAt: due,
+    );
+    final liHomophone = _sortRecord(
+      'homophone',
+      courseName: '课程',
+      title: '里',
+      deadlineAt: due,
+    );
+    final duplicateA = _sortRecord(
+      'duplicate',
+      courseName: '课程',
+      title: '同名',
+      deadlineAt: due,
+    );
+    final duplicateB = duplicateA.copyWith(requirementsText: 'different');
+
+    expect(
+      AssignmentQuery.sortHome(
+        [liHomophone, duplicateB, li, duplicateA],
+        HomeSortOrder.title,
+        now: now,
+      ).map((assignment) => assignment.title),
+      ['李', '里', '同名', '同名'],
+    );
+    final stable = AssignmentQuery.sortHome(
+      [duplicateB, duplicateA],
+      HomeSortOrder.title,
+      now: now,
+    );
+    expect(stable[0].requirementsText, 'different');
+    expect(stable[1].requirementsText, '');
   });
 
   test('formal scope and horizon keep unknown discoverable and history folded',
@@ -185,9 +373,17 @@ void main() {
         title: '题',
         deadlineAt: DateTime.utc(2026, 11, 4, 17),
         requirementsText: '',
-        status: 'unknown',
+        status: 'pending',
         lastSyncedAt: DateTime.utc(2026));
-    expect(AssignmentQuery.forDay([a], DateTime(2026, 11, 5), {}).length, 1);
+    expect(
+      AssignmentQuery.forDay(
+        [a],
+        DateTime(2026, 11, 5),
+        {},
+        now: DateTime.utc(2026, 11, 4, 2),
+      ).length,
+      1,
+    );
   });
   test('calendar excludes retained historical deadline after read failure', () {
     final now = DateTime.utc(2026, 11, 4, 2);
@@ -202,8 +398,15 @@ void main() {
         deadlineReadFailed: true,
         lastSyncedAt: now);
 
-    expect(AssignmentQuery.forDay([failedRead], DateTime(2026, 11, 5), {}),
-        isEmpty);
+    expect(
+      AssignmentQuery.forDay(
+        [failedRead],
+        DateTime(2026, 11, 5),
+        {},
+        now: now,
+      ),
+      isEmpty,
+    );
     expect(AssignmentQuery.home([failedRead], now, {}).uncertain, [failedRead]);
     expect(AssignmentQuery.home([failedRead], now, {}).near, isEmpty);
   });
@@ -256,15 +459,19 @@ void main() {
       '读取失败且无日期',
     ]);
     expect(
-        AssignmentQuery.forDay(rows, DateTime(2026, 11, 5), {})
-            .map((assignment) => assignment.title),
+        AssignmentQuery.forDay(
+          rows,
+          DateTime(2026, 11, 5),
+          {},
+          now: now,
+        ).map((assignment) => assignment.title),
         ['可信日期']);
 
     final groups = AssignmentQuery.home(rows, now, {});
     expect(groups.uncertain.map((assignment) => assignment.title), [
       '保留但不可信',
-      '读取失败且无日期',
       '读取失败保留日期',
+      '读取失败且无日期',
     ]);
     expect(groups.noDeadline.map((assignment) => assignment.title), ['明确无截止']);
     expect(groups.near.map((assignment) => assignment.title), ['可信日期']);
@@ -305,7 +512,7 @@ void main() {
         ['cx:work:1:2:a']);
   });
 
-  test('not expired requires a confirmed pending future deadline', () {
+  test('not expired includes future deadlines and confirmed no deadline', () {
     final now = DateTime.utc(2026, 11, 1, 9);
     Assignment row(String id,
             {DateTime? due,
@@ -337,7 +544,11 @@ void main() {
         AssignmentQuery.filterHome(rows, deadline: filter, now: now.toLocal())
             .map((a) => a.title)
             .toList();
-    expect(ids(AssignmentDeadlineFilter.notExpired), ['future', 'other']);
+    expect(
+      ids(AssignmentDeadlineFilter.notExpired),
+      ['future', 'other', 'none'],
+    );
+    expect(ids(AssignmentDeadlineFilter.overdue), ['past', 'exact']);
     expect(ids(AssignmentDeadlineFilter.noDeadline), ['none']);
     expect(ids(AssignmentDeadlineFilter.uncertain),
         ['failed', 'untrusted', 'unknown']);

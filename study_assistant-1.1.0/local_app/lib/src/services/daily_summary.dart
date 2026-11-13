@@ -21,14 +21,11 @@ class DailySummary {
       final at = local.subtract(const Duration(hours: 8));
       if (!at.isAfter(now)) continue;
       final day = PersonalWorkspace.dayKey(at);
-      final due = rows
-          .where((a) =>
-              !a.isCompleted &&
-              a.deadlineTrusted &&
-              !a.deadlineReadFailed &&
-              a.deadlineAt != null &&
-              PersonalWorkspace.dayKey(a.deadlineAt!) == day)
-          .length;
+      final due = rows.where((a) {
+        final bucket = a.deadlineBucketAt(now);
+        return bucket == AssignmentDeadlineBucket.notExpiredWithDeadline &&
+            PersonalWorkspace.dayKey(a.deadlineAt!) == day;
+      }).length;
       final plans = personal.plans.where((p) => p.day == day && !p.done).length;
       final stamp = synced == null ? '尚未同步' : PersonalWorkspace.dayKey(synced);
       result.add(SummaryNotice(baseId + result.length, at,

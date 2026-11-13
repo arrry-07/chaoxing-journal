@@ -32,29 +32,47 @@ Assignment work(String id, DateTime? date, {String status = 'pending'}) =>
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  test('snapshot uses extended date and ranks undated work last', () async {
+  test('snapshot keeps near, far, undated, pending and overdue in order',
+      () async {
     final now = DateTime.now();
     final snapshot = _Snapshot();
     final extended =
         work('延期', now).copyWith(deadlineAt: now.add(const Duration(days: 3)));
     final undated = extended.copyWith(id: '无日期', clearDeadlineAt: true);
+    final pending = extended.copyWith(
+      id: '待确认',
+      deadlineAt: now.add(const Duration(days: 2)),
+      deadlineTrusted: false,
+    );
+    final far = extended.copyWith(
+      id: '较远',
+      deadlineAt: now.add(const Duration(days: 40)),
+    );
+    final overdue = extended.copyWith(
+      id: '逾期',
+      deadlineAt: now.subtract(const Duration(days: 1)),
+    );
     expect(Assignment.fromJson(undated.toJson()).deadlineAt, isNull);
     expect(undated.isOverdue, isFalse);
     final assignments = [
       undated,
       extended,
       work('明天', now.add(const Duration(days: 1))),
+      pending,
+      far,
+      overdue,
       work('已提交', now, status: 'submitted'),
       work('已批改', now, status: 'graded')
     ];
     await snapshot.saveAssignments(assignments);
-    expect(snapshot.items.map((i) => i.assignmentId), ['明天', '延期', '无日期']);
+    expect(snapshot.items.map((i) => i.assignmentId),
+        ['明天', '延期', '较远', '无日期', '待确认', '逾期']);
     expect(snapshot.items[1].deadlineAt, extended.deadlineAt);
     expect(snapshot.items[1].toJson()['deadlineText'], isNotEmpty);
-    final last = WidgetSnapshotItem.fromJson(snapshot.items.last.toJson());
-    expect(last.deadlineAt, isNull);
-    expect(last.remainingText, '未设置截止时间');
-    expect(last.urgencyLevel, 'unknown');
+    final noDeadline = WidgetSnapshotItem.fromJson(snapshot.items[3].toJson());
+    expect(noDeadline.deadlineAt, isNull);
+    expect(noDeadline.remainingText, '未设置截止时间');
+    expect(noDeadline.urgencyLevel, 'unknown');
   });
 
   test('widget does not show a failed deadline read as a current countdown',
@@ -66,6 +84,31 @@ void main() {
     expect(snapshot.items.single.deadlineAt, isNull);
     expect(snapshot.items.single.remainingText, contains('上次'));
     expect(snapshot.items.single.urgencyLevel, 'unknown');
+  });
+
+  test('widget treats conflicting status and overdue as non-countdown states',
+      () async {
+    final now = DateTime.now();
+    final snapshot = _Snapshot();
+    final unknown = work(
+      'unknown',
+      now.add(const Duration(days: 1)),
+      status: 'unknown',
+    );
+    final overdue = work(
+      'overdue',
+      now.subtract(const Duration(minutes: 1)),
+    );
+
+    await snapshot.saveAssignments([unknown, overdue]);
+
+    expect(snapshot.items.map((item) => item.assignmentId),
+        ['unknown', 'overdue']);
+    expect(snapshot.items.first.deadlineAt, isNull);
+    expect(snapshot.items.first.remainingText, contains('待确认'));
+    expect(snapshot.items.first.urgencyLevel, 'unknown');
+    expect(snapshot.items.last.deadlineAt, overdue.deadlineAt);
+    expect(snapshot.items.last.remainingText, '已逾期');
   });
 
   test('extension replaces same ID and removed deadline cancels reminder',

@@ -7,6 +7,8 @@ import 'src/features/daily_plan_screen.dart';
 import 'src/features/manual_agenda_screen.dart';
 import 'src/features/term_archives_screen.dart';
 import 'src/features/personal_work_screen.dart';
+import 'src/features/profile_arrangements_screen.dart';
+import 'src/features/profile_records_screen.dart';
 import 'src/features/reminder_health_screen.dart';
 import 'src/features/widgets/update_scope.dart';
 import 'package:flutter/foundation.dart';
@@ -42,6 +44,7 @@ Future<void> main() async {
   LicenseRegistry.addLicense(() async* {
     for (final entry in const {
       'HY': 'assets/licenses/HY.txt',
+      'lpinyin': 'assets/licenses/lpinyin.txt',
       'xuexitong-cli': 'assets/licenses/xuexitong-cli.txt',
       'LXGW WenKai Screen / 霞鹜文楷': 'assets/type/OFL-WenKai.txt',
     }.entries) {
@@ -364,6 +367,15 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             GoRoute(
               path: '/profile',
               builder: (_, __) => ProfileScreen(store: assignmentStore),
+            ),
+            GoRoute(
+              path: '/profile/arrangements',
+              builder: (_, __) =>
+                  ProfileArrangementsScreen(store: assignmentStore),
+            ),
+            GoRoute(
+              path: '/profile/records',
+              builder: (_, __) => ProfileRecordsScreen(store: assignmentStore),
             ),
           ],
         ),

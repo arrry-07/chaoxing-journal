@@ -340,7 +340,7 @@ Assignment _assignment(String suffix, DateTime? deadline) => Assignment(
       requirementsText: '',
       status: 'pending',
       lastSyncedAt: DateTime.now(),
-      deadlineTrusted: deadline != null,
+      deadlineTrusted: true,
     );
 
 class _ClientQueue extends ChaoxingLocalClient {

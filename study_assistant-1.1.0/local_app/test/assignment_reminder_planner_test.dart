@@ -194,6 +194,26 @@ void main() {
         isNot(second.deadlineEvents.single.eventId));
   });
 
+  test('conflicting overdue status never schedules a deadline reminder', () {
+    final plan = _plan(
+      now: now,
+      assignments: [
+        _assignment(
+          id: 'cx:work:1:2:conflict',
+          deadline: DateTime(2026, 11, 12, 9),
+          status: 'overdue',
+        ),
+      ],
+      known: const {},
+      baseline: true,
+      complete: true,
+      offsets: [30],
+    );
+
+    expect(plan.newEvents, isEmpty);
+    expect(plan.deadlineEvents, isEmpty);
+  });
+
   test('repeating an unchanged sync produces stable event identities', () {
     AssignmentReminderPlan run() => _plan(
           now: now,
@@ -256,7 +276,7 @@ Assignment _assignment({
     requirementsText: '',
     status: status,
     lastSyncedAt: DateTime(2026, 11, 11, 9),
-    deadlineTrusted: deadline != null,
+    deadlineTrusted: true,
     deadlineReadFailed: false,
     source: id.startsWith('cx:work:')
         ? AssignmentSource.courseWork
