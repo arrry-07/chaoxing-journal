@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import subprocess
 import tempfile
@@ -47,6 +48,17 @@ class VersionSelectionTests(unittest.TestCase):
 
         self.assertEqual(selected.version_name, "1.7.52")
         self.assertEqual(selected.version_code, 59)
+
+    def test_identical_manual_release_keeps_current_manifest_identity(self) -> None:
+        current = replace(artifact("1.7.52", 59), github_release_url="")
+        downloaded = artifact("1.7.52", 59)
+
+        selected = sync.choose_effective_manual_release(
+            current,
+            [downloaded],
+        )
+
+        self.assertIs(selected, current)
 
     def test_same_major_minor_patch_does_not_replace_stable(self) -> None:
         stable = artifact("1.7.4", 56)

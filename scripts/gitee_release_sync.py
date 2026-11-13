@@ -119,6 +119,27 @@ def choose_manual_release(releases: Iterable[ReleaseArtifact]) -> ReleaseArtifac
     return max(values, key=_release_key)
 
 
+def choose_effective_manual_release(
+    current: ReleaseArtifact | None,
+    releases: Iterable[ReleaseArtifact],
+) -> ReleaseArtifact:
+    candidate = choose_manual_release(releases)
+    if current is None:
+        return candidate
+    if (
+        candidate.tag == current.tag
+        and candidate.version_name == current.version_name
+        and candidate.version_code == current.version_code
+        and candidate.apk_name == current.apk_name
+        and candidate.size == current.size
+        and candidate.sha256 == current.sha256
+    ):
+        return current
+    if _release_key(current) > _release_key(candidate):
+        return current
+    return candidate
+
+
 def choose_stable_release(
     current: ReleaseArtifact,
     candidate: ReleaseArtifact,
@@ -1186,8 +1207,9 @@ def synchronize(args: argparse.Namespace) -> int:
         if current_manual_json is not None
         else None
     )
-    target_manual = choose_manual_release(
-        [*artifacts, *([current_manual] if current_manual is not None else [])]
+    target_manual = choose_effective_manual_release(
+        current_manual,
+        artifacts,
     )
     if current_stable is None and args.mode == "seed":
         current_stable = min(artifacts, key=_release_key)
