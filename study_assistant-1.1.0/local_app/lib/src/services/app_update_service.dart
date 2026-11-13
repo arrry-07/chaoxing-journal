@@ -10,6 +10,19 @@ import 'apk_download_transport.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 
+const _giteeStableManifestUrl =
+    'https://raw.giteeusercontent.com/arrry-07/chaoxing-journal-updates/raw/master/update-stable.json';
+const _giteeManualManifestUrl =
+    'https://raw.giteeusercontent.com/arrry-07/chaoxing-journal-updates/raw/master/update-manual.json';
+const _configuredLegacyManifestUrl =
+    String.fromEnvironment('UPDATE_MANIFEST_URL');
+const _configuredStableManifestUrl = String.fromEnvironment(
+  'UPDATE_STABLE_MANIFEST_URL',
+);
+const _configuredManualManifestUrl = String.fromEnvironment(
+  'UPDATE_MANUAL_MANIFEST_URL',
+);
+
 class AppUpdateInfo {
   const AppUpdateInfo({
     required this.versionName,
@@ -55,7 +68,8 @@ class AppUpdateService {
       this.stableManifestUrl =
           const String.fromEnvironment('UPDATE_STABLE_MANIFEST_URL'),
       this.manualManifestUrl =
-          const String.fromEnvironment('UPDATE_MANUAL_MANIFEST_URL')})
+          const String.fromEnvironment('UPDATE_MANUAL_MANIFEST_URL'),
+      this.githubFallbackEnabled = true})
       : _dio = dio ??
             Dio(
               BaseOptions(
@@ -70,11 +84,33 @@ class AppUpdateService {
               ),
             );
 
+  factory AppUpdateService.withGiteeDefaults({
+    Dio? dio,
+    String legacyManifestUrl = _configuredLegacyManifestUrl,
+    String stableManifestUrl = _configuredStableManifestUrl,
+    String manualManifestUrl = _configuredManualManifestUrl,
+  }) {
+    if (legacyManifestUrl.isNotEmpty) {
+      return AppUpdateService(dio: dio, manifestUrl: legacyManifestUrl);
+    }
+    final hasCustomManifest =
+        stableManifestUrl.isNotEmpty || manualManifestUrl.isNotEmpty;
+    return AppUpdateService(
+      dio: dio,
+      stableManifestUrl:
+          hasCustomManifest ? stableManifestUrl : _giteeStableManifestUrl,
+      manualManifestUrl:
+          hasCustomManifest ? manualManifestUrl : _giteeManualManifestUrl,
+    );
+  }
+
   static const owner = 'arrry-07';
   static const repo = 'chaoxing-journal';
   static const repositoryUrl = 'https://github.com/$owner/$repo';
   static const releasesUrl = '$repositoryUrl/releases';
   static const applicationId = 'com.example.studyassistant.journal';
+  static const giteeStableManifestUrl = _giteeStableManifestUrl;
+  static const giteeManualManifestUrl = _giteeManualManifestUrl;
   static final _releaseVersionPattern = RegExp(r'^\d+\.\d+\.\d+$');
 
   final Dio _dio;
@@ -86,6 +122,7 @@ class AppUpdateService {
   final String manifestUrl;
   final String stableManifestUrl;
   final String manualManifestUrl;
+  final bool githubFallbackEnabled;
   static const _downloadDirectoryPrefix = '.apk-download-';
   static const _downloadOwnerFile = 'owner.marker';
   static const _downloadOwnerValue = 'chaoxing-journal-apk-download-v1';
@@ -107,11 +144,12 @@ class AppUpdateService {
     await cleanupStaleDownloads();
     final url = manualManifestUrl.isNotEmpty ? manualManifestUrl : manifestUrl;
     if (url.isNotEmpty) {
-      return _checkManifest(
+      return _checkManifestWithFallback(
         manifestUrl: url,
         currentVersionName: currentVersionName,
         currentVersionCode: currentVersionCode,
         startupOnly: false,
+        githubListReleases: true,
         cancelToken: cancelToken,
       );
     }
@@ -130,11 +168,12 @@ class AppUpdateService {
         manifestUrl.isEmpty &&
         stableManifestUrl.isNotEmpty) {
       await cleanupStaleDownloads();
-      return _checkManifest(
+      return _checkManifestWithFallback(
           manifestUrl: stableManifestUrl,
           currentVersionName: AppVersion.name,
           currentVersionCode: currentVersionCode,
           startupOnly: false,
+          githubListReleases: false,
           cancelToken: cancelToken);
     }
     return checkForManualUpdate(
@@ -142,6 +181,51 @@ class AppUpdateService {
       currentVersionCode: currentVersionCode,
       cancelToken: cancelToken,
     );
+  }
+
+  Future<UpdateCheckResult> _checkManifestWithFallback({
+    required String manifestUrl,
+    required String currentVersionName,
+    required int currentVersionCode,
+    required bool startupOnly,
+    required bool githubListReleases,
+    CancelToken? cancelToken,
+  }) async {
+    final primary = await _checkManifest(
+      manifestUrl: manifestUrl,
+      currentVersionName: currentVersionName,
+      currentVersionCode: currentVersionCode,
+      startupOnly: startupOnly,
+      cancelToken: cancelToken,
+    );
+    if (!githubFallbackEnabled ||
+        cancelToken?.isCancelled == true ||
+        !_isOfficialGiteeManifest(manifestUrl) ||
+        primary.status == UpdateCheckStatus.available ||
+        primary.status == UpdateCheckStatus.upToDate ||
+        primary.status == UpdateCheckStatus.cancelled) {
+      return primary;
+    }
+    final fallback = await _checkGitHub(
+      currentVersionName: currentVersionName,
+      currentVersionCode: currentVersionCode,
+      cancelToken: cancelToken,
+      listReleases: githubListReleases,
+    );
+    if (fallback.status == UpdateCheckStatus.available ||
+        fallback.status == UpdateCheckStatus.upToDate) {
+      return fallback;
+    }
+    return primary;
+  }
+
+  bool _isOfficialGiteeManifest(String value) {
+    final uri = Uri.tryParse(value.trim());
+    return uri != null &&
+        uri.scheme == 'https' &&
+        uri.host == 'raw.giteeusercontent.com' &&
+        uri.userInfo.isEmpty &&
+        uri.path.startsWith('/arrry-07/chaoxing-journal-updates/raw/master/');
   }
 
   Future<UpdateCheckResult> _checkManifest({

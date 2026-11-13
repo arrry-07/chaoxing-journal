@@ -56,6 +56,34 @@ Dio manifestDio(
 }
 
 void main() {
+  test('client defaults to fixed Gitee stable and manual manifests', () {
+    final service = AppUpdateService.withGiteeDefaults();
+    expect(
+      service.stableManifestUrl,
+      'https://raw.giteeusercontent.com/arrry-07/chaoxing-journal-updates/raw/master/update-stable.json',
+    );
+    expect(
+      service.manualManifestUrl,
+      'https://raw.giteeusercontent.com/arrry-07/chaoxing-journal-updates/raw/master/update-manual.json',
+    );
+  });
+
+  test('explicit update manifest configuration overrides Gitee defaults', () {
+    final legacy = AppUpdateService.withGiteeDefaults(
+      legacyManifestUrl: 'https://updates.example.org/legacy.json',
+    );
+    expect(legacy.manifestUrl, 'https://updates.example.org/legacy.json');
+    expect(legacy.stableManifestUrl, isEmpty);
+    expect(legacy.manualManifestUrl, isEmpty);
+
+    final stableOnly = AppUpdateService.withGiteeDefaults(
+      stableManifestUrl: 'https://updates.example.org/stable.json',
+    );
+    expect(stableOnly.stableManifestUrl,
+        'https://updates.example.org/stable.json');
+    expect(stableOnly.manualManifestUrl, isEmpty);
+  });
+
   for (final pair in [
     (401, UpdateCheckStatus.authRequired),
     (403, UpdateCheckStatus.authRequired),
@@ -175,7 +203,8 @@ void main() {
                 {'tag_name': 'v1.0.0'}
               ]))));
     expect(
-        (await AppUpdateService(dio: dio)
+        (await AppUpdateService(
+                    dio: dio, stableManifestUrl: '', manualManifestUrl: '')
                 .checkConfigured(currentVersionCode: 31))
             .status,
         UpdateCheckStatus.upToDate);
@@ -257,7 +286,7 @@ void main() {
     ]);
   });
 
-  test('configured primary succeeds without contacting GitHub', () async {
+  test('valid Gitee manifest succeeds without contacting GitHub', () async {
     var calls = 0;
     final dio = Dio(BaseOptions(validateStatus: (_) => true))
       ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
@@ -277,7 +306,7 @@ void main() {
       }));
     final result = await AppUpdateService(
       dio: dio,
-      manualManifestUrl: 'https://updates.example.org/manual.json',
+      manualManifestUrl: AppUpdateService.giteeManualManifestUrl,
     ).checkConfigured(currentVersionCode: AppVersion.code);
     expect(result.status, UpdateCheckStatus.available);
     expect(calls, 1);
@@ -291,7 +320,7 @@ void main() {
     expect(result.status, UpdateCheckStatus.invalidManifest);
   });
 
-  test('invalid configured manifest does not fall back to GitHub', () async {
+  test('non-Gitee configured manifest does not fall back to GitHub', () async {
     final hosts = <String>[];
     final dio = Dio(BaseOptions(validateStatus: (_) => true))
       ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
@@ -317,6 +346,112 @@ void main() {
     ).checkConfigured(currentVersionCode: AppVersion.code);
     expect(result.status, UpdateCheckStatus.invalidManifest);
     expect(hosts, ['updates.example.org']);
+  });
+
+  test('Gitee manifest network failure falls back to GitHub release', () async {
+    final hosts = <String>[];
+    final dio = Dio(BaseOptions(validateStatus: (_) => true))
+      ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        hosts.add(options.uri.host);
+        if (options.uri.host == 'raw.giteeusercontent.com') {
+          handler.reject(DioException.connectionError(
+            requestOptions: options,
+            reason: 'Gitee unavailable',
+          ));
+          return;
+        }
+        handler.resolve(Response(
+          requestOptions: options,
+          statusCode: 200,
+          data: [
+            {
+              'tag_name': 'v9.0.0',
+              'draft': false,
+              'prerelease': false,
+              'body': 'GitHub fallback release',
+              'assets': [
+                {
+                  'name': 'chaoxing-journal-9.0.0.apk',
+                  'browser_download_url':
+                      'https://github.com/arrry-07/chaoxing-journal/releases/download/v9.0.0/chaoxing-journal-9.0.0.apk',
+                  'size': 1234,
+                  'digest': 'sha256:${'b' * 64}',
+                }
+              ],
+            }
+          ],
+        ));
+      }));
+
+    final result = await AppUpdateService(
+      dio: dio,
+      manualManifestUrl: AppUpdateService.giteeManualManifestUrl,
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+
+    expect(result.status, UpdateCheckStatus.available);
+    expect(result.update!.versionName, '9.0.0');
+    expect(result.update!.sha256Hash, 'b' * 64);
+    expect(result.update!.apkDownloadUrl, contains('github.com'));
+    expect(hosts, ['raw.giteeusercontent.com', 'api.github.com']);
+  });
+
+  test('invalid Gitee JSON falls back to GitHub release', () async {
+    final hosts = <String>[];
+    final dio = Dio(BaseOptions(validateStatus: (_) => true))
+      ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        hosts.add(options.uri.host);
+        handler.resolve(Response(
+          requestOptions: options,
+          statusCode: 200,
+          data: options.uri.host == 'raw.giteeusercontent.com'
+              ? '<!doctype html><html>blocked</html>'
+              : [
+                  {
+                    'tag_name': 'v9.0.0',
+                    'draft': false,
+                    'prerelease': false,
+                    'assets': [
+                      {
+                        'name': 'chaoxing-journal-9.0.0.apk',
+                        'browser_download_url':
+                            'https://github.com/arrry-07/chaoxing-journal/releases/download/v9.0.0/chaoxing-journal-9.0.0.apk',
+                        'size': 1234,
+                        'digest': 'sha256:${'b' * 64}',
+                      }
+                    ],
+                  }
+                ],
+        ));
+      }));
+
+    final result = await AppUpdateService(
+      dio: dio,
+      manualManifestUrl: AppUpdateService.giteeManualManifestUrl,
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+
+    expect(result.status, UpdateCheckStatus.available);
+    expect(hosts, ['raw.giteeusercontent.com', 'api.github.com']);
+  });
+
+  test('cancelled Gitee check does not fall back to GitHub', () async {
+    final hosts = <String>[];
+    final cancel = CancelToken()..cancel('cancelled');
+    final dio = Dio(BaseOptions(validateStatus: (_) => true))
+      ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        hosts.add(options.uri.host);
+        handler.reject(DioException.requestCancelled(
+          requestOptions: options,
+          reason: 'cancelled',
+        ));
+      }));
+
+    final result = await AppUpdateService(
+      dio: dio,
+      manualManifestUrl: AppUpdateService.giteeManualManifestUrl,
+    ).checkConfigured(currentVersionCode: AppVersion.code, cancelToken: cancel);
+
+    expect(result.status, UpdateCheckStatus.cancelled);
+    expect(hosts, isEmpty);
   });
 
   test('non-HTTPS manifest URL fails before making a request', () async {
