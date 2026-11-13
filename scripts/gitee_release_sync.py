@@ -153,6 +153,30 @@ def choose_stable_release(
     return current
 
 
+def choose_previous_manual(
+    target: ReleaseArtifact,
+    *,
+    current_manual: ReleaseArtifact | None,
+    artifacts: Iterable[ReleaseArtifact],
+    current_stable: ReleaseArtifact,
+) -> ReleaseArtifact:
+    if (
+        current_manual is not None
+        and _release_key(current_manual) < _release_key(target)
+    ):
+        return current_manual
+    prior = [
+        item
+        for item in artifacts
+        if _release_key(item) < _release_key(target)
+    ]
+    if not prior and _release_key(current_stable) < _release_key(target):
+        prior = [current_stable]
+    if not prior:
+        raise SyncError("No prior release was available for manual manifest.")
+    return max(prior, key=_release_key)
+
+
 def canonical_github_apk_url(
     repository: str,
     release: ReleaseArtifact,
@@ -1368,18 +1392,12 @@ def synchronize(args: argparse.Namespace) -> int:
     if current_manual_json is not None and target_manual == current_manual:
         manual_manifest = current_manual_json
     else:
-        previous = current_manual
-        if previous is None:
-            prior = [
-                item
-                for item in artifacts
-                if item.version_code < target_manual.version_code
-            ]
-            if not prior:
-                prior = [current_stable] if current_stable.version_code < target_manual.version_code else []
-            if not prior:
-                raise SyncError("No prior release was available for manual manifest.")
-            previous = max(prior, key=_release_key)
+        previous = choose_previous_manual(
+            target_manual,
+            current_manual=current_manual,
+            artifacts=artifacts,
+            current_stable=current_stable,
+        )
         manual_manifest = generate_manifest(
             target_manual,
             channel="manual",

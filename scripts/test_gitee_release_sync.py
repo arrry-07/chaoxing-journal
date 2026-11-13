@@ -340,6 +340,32 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual(updated.notes, "Gitee 验证式发布说明")
         self.assertEqual(updated.sha256, release.sha256)
 
+    def test_same_version_notes_refresh_uses_lower_previous(self) -> None:
+        current = artifact("1.7.52", 59)
+        target = sync.with_gitee_release_notes(
+            current,
+            sync.GiteeRelease(
+                release_id=7,
+                tag=current.tag,
+                assets=({"name": current.apk_name},),
+                body="更新后的 Gitee 说明",
+            ),
+        )
+        releases = [
+            artifact("1.7.4", 56),
+            artifact("1.7.5", 57),
+            current,
+        ]
+
+        previous = sync.choose_previous_manual(
+            target,
+            current_manual=current,
+            artifacts=releases,
+            current_stable=releases[0],
+        )
+
+        self.assertEqual(previous.tag, "v1.7.5")
+
 
 class SafetyTests(unittest.TestCase):
     def test_unknown_or_prerelease_versions_are_rejected(self) -> None:
