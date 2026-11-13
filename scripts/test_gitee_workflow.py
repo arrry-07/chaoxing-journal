@@ -28,6 +28,13 @@ class GiteeWorkflowTests(unittest.TestCase):
         self.assertIn("retention:", self.text)
         self.assertIn("default: \"3\"", self.text)
 
+    def test_dispatch_inputs_are_not_interpolated_into_shell_source(self) -> None:
+        self.assertNotIn('"${{ inputs.tags }}"', self.text)
+        self.assertNotIn('--mode "${{ inputs.mode', self.text)
+        self.assertIn('TAGS: ${{ inputs.tags }}', self.text)
+        self.assertIn("MODE: ${{ inputs.mode || 'daily' }}", self.text)
+        self.assertIn("RETENTION: ${{ inputs.retention || '3' }}", self.text)
+
     def test_token_is_read_only_from_secret_environment(self) -> None:
         self.assertIn("GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}", self.text)
         self.assertNotIn("--token", self.text)

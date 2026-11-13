@@ -44,6 +44,9 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
       GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      MODE: ${{ inputs.mode || 'daily' }}
+      TAGS: ${{ inputs.tags }}
+      RETENTION: ${{ inputs.retention || '3' }}
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
     steps:
@@ -73,10 +76,10 @@ jobs:
         shell: bash
         run: |
           args=(
-            --mode "${{ inputs.mode || 'daily' }}"
-            --retention "${{ inputs.retention || '3' }}"
+            --mode "$MODE"
+            --retention "$RETENTION"
           )
-          if [[ -n "${{ inputs.tags }}" ]]; then
-            args+=(--tags "${{ inputs.tags }}")
+          if [[ -n "$TAGS" ]]; then
+            args+=(--tags "$TAGS")
           fi
           python3 scripts/gitee_release_sync.py "${args[@]}"
