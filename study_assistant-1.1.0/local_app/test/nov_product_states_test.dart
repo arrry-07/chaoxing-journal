@@ -55,6 +55,7 @@ void main() {
     await t.pumpWidget(const MaterialApp(home: OpenSourceScreen()));
     expect(find.text('开源许可'), findsOneWidget);
     expect(find.textContaining('版权与许可声明'), findsOneWidget);
+    await t.scrollUntilVisible(find.text('完整依赖与原始许可'), 180);
     expect(find.text('完整依赖与原始许可'), findsOneWidget);
   });
   testWidgets('latest version has an explicit result and a release link',

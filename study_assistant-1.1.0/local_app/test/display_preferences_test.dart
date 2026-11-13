@@ -145,7 +145,8 @@ void main() {
       a('3', now.add(const Duration(hours: 1))),
       a('4', now.add(const Duration(days: 6))),
       a('5', now.add(const Duration(days: 7))),
-      a('6', null)
+      a('6', null),
+      a('exact', now),
     ];
     expect(
         const DisplayPreferences(widgetRange: WidgetRange.today)
@@ -157,7 +158,7 @@ void main() {
             .forWidget(items, now)
             .map((a) => a.title),
         ['2', '3', '4']);
-    expect(const DisplayPreferences().forWidget(items, now).length, 6);
+    expect(const DisplayPreferences().forWidget(items, now).length, 7);
   });
   test('countdown rounds up without early expiry', () {
     final now = DateTime.utc(2026);

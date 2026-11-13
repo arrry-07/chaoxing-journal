@@ -131,9 +131,124 @@ void main() {
     );
 
     await show(value: assignment);
-    expect(find.text('待确认'), findsOneWidget);
+    expect(find.text('截止时间待确认'), findsOneWidget);
 
     await show(value: assignment.copyWith(deadlineTrusted: true));
     expect(find.text('无期限'), findsOneWidget);
+  });
+
+  testWidgets('card omits the placeholder time rail without a trusted time',
+      (tester) async {
+    final assignment = Assignment(
+      id: 'cx:work:1:2:no-time',
+      courseName: '课程',
+      title: '无时间作业',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: DateTime.utc(2026, 11, 13),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentCard(
+          assignment: assignment,
+          now: DateTime.utc(2026, 11, 13, 4),
+          onTap: () {},
+          onOpenAssignment: () {},
+        ),
+      ),
+    ));
+
+    expect(find.text('—'), findsNothing);
+    expect(find.text('无期限'), findsOneWidget);
+    expect(
+      (tester.getTopLeft(find.text('无期限')).dx -
+              tester.getTopLeft(find.text('无时间作业')).dx)
+          .abs(),
+      lessThan(0.5),
+    );
+  });
+
+  testWidgets('card marks the exact deadline instant as overdue',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 13, 4);
+    final assignment = Assignment(
+      id: 'cx:work:1:2:exact',
+      courseName: '课程',
+      title: '恰好到期作业',
+      deadlineAt: now,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentCard(
+          assignment: assignment,
+          now: now,
+          onTap: () {},
+          onOpenAssignment: () {},
+        ),
+      ),
+    ));
+
+    expect(find.textContaining('已逾期'), findsOneWidget);
+  });
+
+  testWidgets('card does not present conflicting status as confirmed overdue',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 13, 4);
+    final assignment = Assignment(
+      id: 'cx:work:1:2:conflict',
+      courseName: '课程',
+      title: '状态冲突作业',
+      deadlineAt: now.add(const Duration(hours: 1)),
+      requirementsText: '',
+      status: 'overdue',
+      lastSyncedAt: now,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentCard(
+          assignment: assignment,
+          now: now,
+          onTap: () {},
+        ),
+      ),
+    ));
+
+    expect(find.text('状态或截止待确认'), findsOneWidget);
+    expect(find.text('已逾期'), findsNothing);
+    expect(find.text('今天截止'), findsNothing);
+  });
+
+  testWidgets('undated overdue status is pending instead of unlimited',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 13, 4);
+    final assignment = Assignment(
+      id: 'cx:work:1:2:overdue-undated',
+      courseName: '课程',
+      title: '无日期冲突作业',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'overdue',
+      lastSyncedAt: now,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentCard(
+          assignment: assignment,
+          now: now,
+          onTap: () {},
+        ),
+      ),
+    ));
+
+    expect(find.text('无期限'), findsNothing);
+    expect(find.text('截止信息待确认'), findsOneWidget);
   });
 }

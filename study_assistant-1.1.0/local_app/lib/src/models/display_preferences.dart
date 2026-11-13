@@ -33,10 +33,8 @@ class DisplayPreferences {
         today.add(Duration(days: widgetRange == WidgetRange.today ? 1 : 7));
     return items
         .where((a) =>
-            a.deadlineTrusted &&
-            !a.deadlineReadFailed &&
-            a.deadlineAt != null &&
-            !a.deadlineAt!.isBefore(now) &&
+            a.deadlineBucketAt(now) ==
+                AssignmentDeadlineBucket.notExpiredWithDeadline &&
             AssignmentQuery.dayKey(a.deadlineAt!).isBefore(end))
         .toList();
   }

@@ -36,7 +36,7 @@ void main() {
         MaterialApp(home: Scaffold(body: StatsScreen(store: store))));
     expect(find.text('已完成'), findsOneWidget);
     expect(find.text('待完成'), findsOneWidget);
-    expect(find.text('已过期'), findsOneWidget);
+    expect(find.text('已逾期'), findsOneWidget);
     expect(find.text('提交未知'), findsOneWidget);
     expect(
         find.descendant(
@@ -106,7 +106,7 @@ void main() {
         MaterialApp(home: Scaffold(body: StatsScreen(store: store))));
     expect(find.text('已完成'), findsOneWidget);
     expect(find.text('待完成'), findsOneWidget);
-    expect(find.text('已过期'), findsOneWidget);
+    expect(find.text('已逾期'), findsOneWidget);
     expect(find.text('提交未知'), findsNothing);
     expect(
         find.descendant(

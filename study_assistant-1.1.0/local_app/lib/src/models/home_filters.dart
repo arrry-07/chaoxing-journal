@@ -10,6 +10,12 @@ enum AssignmentDeadlineFilter {
   notExpired,
 }
 
+const homeDeadlineFilterChoices = [
+  AssignmentDeadlineFilter.notExpired,
+  AssignmentDeadlineFilter.all,
+  AssignmentDeadlineFilter.overdue,
+];
+
 enum HomeSortOrder {
   grouped,
   deadlineAsc,
@@ -48,10 +54,19 @@ class HomeFilters {
           (value['courseKey'] != null && value['courseKey'] is! String)) {
         return const HomeFilters();
       }
-      final deadline = AssignmentDeadlineFilter.values
+      final encodedDeadline = AssignmentDeadlineFilter.values
           .where((f) => f.name == value['deadline'])
           .firstOrNull;
-      if (deadline == null) return const HomeFilters();
+      if (encodedDeadline == null) return const HomeFilters();
+      final deadline = switch (encodedDeadline) {
+        AssignmentDeadlineFilter.noDeadline =>
+          AssignmentDeadlineFilter.notExpired,
+        AssignmentDeadlineFilter.next7Days ||
+        AssignmentDeadlineFilter.next30Days ||
+        AssignmentDeadlineFilter.uncertain =>
+          AssignmentDeadlineFilter.all,
+        _ => encodedDeadline,
+      };
       final sortOrder = HomeSortOrder.values
               .where((order) => order.name == value['sortOrder'])
               .firstOrNull ??

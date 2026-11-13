@@ -80,7 +80,7 @@ void main() {
     expect(stats.counts, [1, 3, 2, 1]);
     expect(stats.percentages.reduce((a, b) => a + b), 100);
   });
-  test('deadline equal to the shared reference instant stays pending', () {
+  test('deadline equal to the shared reference instant is expired', () {
     final now = DateTime.utc(2026, 11, 5, 12);
     final record = Assignment(
         id: 'cx:work:1:2:3',
@@ -90,12 +90,12 @@ void main() {
         requirementsText: '',
         status: 'pending',
         lastSyncedAt: now);
-    expect(AssignmentStatistics([record], now: now).counts, [0, 1, 0, 0]);
+    expect(AssignmentStatistics([record], now: now).counts, [0, 0, 1, 0]);
     expect(
         AssignmentStatistics([record],
-                now: now.add(const Duration(milliseconds: 1)))
+                now: now.subtract(const Duration(milliseconds: 1)))
             .counts,
-        [0, 0, 1, 0]);
+        [0, 1, 0, 0]);
   });
   test('sync actions match auth, verification, retry, and running cache states',
       () {
@@ -124,5 +124,21 @@ void main() {
       expect(p.action, HomeSyncAction.none);
       expect(p.summary, cache ? '正在更新…' : '正在读取作业…');
     }
+  });
+
+  test('failed sync with cache leaves one last-record badge', () {
+    final presentation = HomeSyncPresentation.from(
+      const SyncReport(
+        phase: SyncPhase.failed,
+        issues: [SyncIssue(SyncIssueKind.network, 'fixture')],
+      ),
+      loading: false,
+      hasCache: true,
+      now: DateTime.utc(2026, 11, 13),
+      successAt: DateTime.utc(2026, 11, 13).subtract(const Duration(hours: 1)),
+    );
+
+    expect(presentation.summary, '更新失败');
+    expect(presentation.showCached, isTrue);
   });
 }

@@ -14,12 +14,18 @@ class AssignmentReminderSnapshot {
   final bool hidden;
   final bool followed;
 
-  bool get eligible =>
-      assignment.isFormal &&
-      assignment.isPendingConfirmed &&
-      !assignment.isCompleted &&
-      !hidden &&
-      followed;
+  bool eligibleAt(DateTime now) {
+    if (!assignment.isFormal ||
+        !assignment.isPendingConfirmed ||
+        assignment.isCompleted ||
+        hidden ||
+        !followed) {
+      return false;
+    }
+    final bucket = assignment.deadlineBucketAt(now);
+    return bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
+        bucket == AssignmentDeadlineBucket.confirmedNoDeadline;
+  }
 
   Map<String, dynamic> toJson() => {
         'assignmentId': assignment.id,
@@ -141,7 +147,7 @@ class AssignmentReminderPlanner {
         final assignment = snapshot.assignment;
         if (previousKnown.contains(assignment.id) ||
             sentNewAssignmentIds.contains(assignment.id) ||
-            !snapshot.eligible ||
+            !snapshot.eligibleAt(now) ||
             _deadlinePassed(assignment, now)) {
           continue;
         }
@@ -161,7 +167,11 @@ class AssignmentReminderPlanner {
     final rawDeadlineEvents = <AssignmentReminderEvent>[];
     for (final snapshot in snapshots) {
       final assignment = snapshot.assignment;
-      if (!snapshot.eligible) continue;
+      if (!snapshot.eligibleAt(now) ||
+          assignment.deadlineBucketAt(now) !=
+              AssignmentDeadlineBucket.notExpiredWithDeadline) {
+        continue;
+      }
       final deadline = _trustedDeadline(assignment);
       if (deadline == null || !deadline.isAfter(now)) continue;
       final byTime = <DateTime, List<int>>{};

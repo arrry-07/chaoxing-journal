@@ -17,6 +17,42 @@ void main() {
     expect(
         await ExternalLinkService().openUrl('https://chaoxing.com/'), isFalse);
   });
+  test('feedback email uses the external-link bridge and returns launch status',
+      () async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return true;
+    });
+
+    final opened = await ExternalLinkService().composeFeedbackEmail(
+      '主题 & 版本',
+      '问题：中文换行\n特殊字符 &?%+#',
+    );
+
+    expect(opened, isTrue);
+    expect(calls.single.method, 'composeFeedbackEmail');
+    expect(calls.single.arguments, {
+      'subject': '主题 & 版本',
+      'body': '问题：中文换行\n特殊字符 &?%+#',
+    });
+  });
+  test('feedback email platform failures return false', () async {
+    for (final error in <Object>[
+      PlatformException(code: 'no_handler'),
+      MissingPluginException('missing'),
+    ]) {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async {
+        throw error;
+      });
+      expect(
+        await ExternalLinkService().composeFeedbackEmail('主题', '正文'),
+        isFalse,
+      );
+    }
+  });
   const homework =
       'https://mooc1.chaoxing.com/mooc-ans/mooc2/work/task?workId=3&enc=a%2Bb';
   for (final appSupported in [true, false]) {

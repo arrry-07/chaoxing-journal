@@ -11,6 +11,7 @@ import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/course_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/open_source_screen.dart';
+import 'package:study_assistant_mobile/src/features/profile_records_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
@@ -53,8 +54,21 @@ void main() {
           lastSyncedAt: DateTime.now())
     ]);
     await store.updateCompletion('cx:work:1:2:hidden-1', true);
-    await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: ProfileScreen(store: store))));
+    final router = GoRouter(initialLocation: '/profile', routes: [
+      GoRoute(
+        path: '/profile',
+        builder: (_, __) => Scaffold(body: ProfileScreen(store: store)),
+      ),
+      GoRoute(
+        path: '/profile/records',
+        builder: (_, __) => ProfileRecordsScreen(store: store),
+      ),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.scrollUntilVisible(find.text('学习记录'), 180);
+    await tester.tap(find.text('学习记录'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('已隐藏作业'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('已隐藏作业'));
@@ -314,10 +328,10 @@ void main() {
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('提醒设置'), findsOneWidget);
     expect(find.text('同步学习通'), findsOneWidget);
-    final storage =
-        tester.widget<ListTile>(find.widgetWithText(ListTile, '本地记录'));
-    expect(storage.onTap, isNotNull);
-    expect(storage.trailing, isNotNull);
+    for (final label in ['个人安排', '显示与小组件', '学习记录']) {
+      await tester.scrollUntilVisible(find.text(label), 180);
+      expect(find.text(label), findsOneWidget);
+    }
     expect(find.text('帮助与反馈'), findsOneWidget);
     expect(find.text('关于我们'), findsOneWidget);
   });

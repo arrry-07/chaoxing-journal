@@ -30,41 +30,46 @@ class AssignmentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final a = assignment, d = a.deadlineAt;
-    final overdue = a.isPendingConfirmed &&
-        a.deadlineTrusted &&
-        !a.deadlineReadFailed &&
-        d != null &&
-        d.isBefore(now);
-    final today =
-        d != null && AssignmentQuery.dayKey(d) == AssignmentQuery.dayKey(now);
+    final bucket = a.deadlineBucketAt(now);
+    final overdue = bucket == AssignmentDeadlineBucket.overdue;
+    final today = d != null &&
+        bucket != AssignmentDeadlineBucket.unconfirmed &&
+        AssignmentQuery.dayKey(d) == AssignmentQuery.dayKey(now);
     final urgent = overdue
-        ? '已逾期${now.difference(d).inDays > 0 ? '${now.difference(d).inDays}天' : ''}'
+        ? '已逾期${now.difference(d!).inDays > 0 ? '${now.difference(d).inDays}天' : ''}'
         : a.isPendingConfirmed &&
                 a.deadlineTrusted &&
                 !a.deadlineReadFailed &&
                 today
             ? '今天截止'
             : null;
-    final state = a.statusLabel;
+    final state =
+        a.status == 'overdue' && bucket == AssignmentDeadlineBucket.unconfirmed
+            ? '状态或截止待确认'
+            : a.statusLabel;
     final deadline = deadlinePending
         ? '正在确认截止时间'
         : a.deadlineReadFailed
             ? d == null
                 ? a.deadlineLabel
                 : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))} · ${a.deadlineLabel}'
-            : !a.deadlineTrusted
-                ? a.deadlineRawText?.endsWith('（年份待确认）') == true
+            : bucket == AssignmentDeadlineBucket.unconfirmed &&
+                    d == null &&
+                    a.deadlineTrusted &&
+                    !a.deadlineReadFailed
+                ? '截止信息待确认'
+                : !a.deadlineTrusted
                     ? a.deadlineLabel
-                    : '待确认'
-                : d == null
-                    ? '无期限'
-                    : countdown
-                        ? DisplayPreferences.remaining(d, now)
-                        : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}';
+                    : d == null
+                        ? '无期限'
+                        : countdown
+                            ? DisplayPreferences.remaining(d, now)
+                            : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}';
     final color = urgent != null ? Journal.berry : Journal.ink;
     final hasTime = d != null && a.deadlineTrusted && !a.deadlineReadFailed;
+    final showRail = deadlinePending || hasTime;
     final clock =
-        hasTime ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d)) : '—';
+        hasTime ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d)) : null;
     // Measure at the user's text scale: a fixed rail clips times at 2× size.
     final measure = TextPainter(
         text: const TextSpan(text: '00:00', style: Journal.time),
@@ -72,6 +77,7 @@ class AssignmentCard extends StatelessWidget {
         textScaler: MediaQuery.textScalerOf(context))
       ..layout();
     final railWidth = measure.width.ceilToDouble() + 4;
+    final metadataLeft = showRail ? railWidth + 12 : 0.0;
     final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
     measure.dispose();
     final metadata = Column(
@@ -119,28 +125,32 @@ class AssignmentCard extends StatelessWidget {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              SizedBox(
-                                width: railWidth,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (deadlinePending)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: SizedBox.square(
-                                          dimension: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            semanticsLabel: '正在确认截止时间',
+                              if (showRail) ...[
+                                SizedBox(
+                                  width: railWidth,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (deadlinePending)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 4),
+                                          child: SizedBox.square(
+                                            dimension: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              semanticsLabel: '正在确认截止时间',
+                                            ),
                                           ),
-                                        ),
-                                      )
-                                    else
-                                      Text(clock, style: Journal.time),
-                                  ],
+                                        )
+                                      else
+                                        Text(clock!, style: Journal.time),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
+                                const SizedBox(width: 12),
+                              ],
                               Expanded(
                                   child: Column(
                                       crossAxisAlignment:
@@ -159,14 +169,14 @@ class AssignmentCard extends StatelessWidget {
       if (onOpenAssignment != null)
         Padding(
           padding:
-              EdgeInsets.only(left: largeText ? 0 : railWidth + 12, bottom: 8),
+              EdgeInsets.only(left: largeText ? 0 : metadataLeft, bottom: 8),
           child: Wrap(
             alignment: WrapAlignment.spaceBetween,
             crossAxisAlignment: WrapCrossAlignment.center,
             spacing: 8,
             children: [
               Padding(
-                padding: EdgeInsets.only(left: largeText ? railWidth + 12 : 0),
+                padding: EdgeInsets.only(left: largeText ? metadataLeft : 0),
                 child: ExcludeSemantics(
                     child: InkWell(onTap: onCardTap, child: metadata)),
               ),

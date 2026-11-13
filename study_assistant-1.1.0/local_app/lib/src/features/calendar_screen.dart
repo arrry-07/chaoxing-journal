@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../app/journal.dart';
+import '../models/assignment.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
@@ -10,16 +13,42 @@ import 'widgets/assignment_card.dart';
 import 'manual_agenda_screen.dart';
 
 class CalendarScreen extends StatefulWidget {
-  const CalendarScreen({super.key, required this.store});
+  const CalendarScreen({super.key, required this.store, this.clock});
   final AssignmentStore store;
+  final DateTime Function()? clock;
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
 }
 
 class _CalendarScreenState extends State<CalendarScreen> {
-  DateTime get today => AssignmentQuery.dayKey(DateTime.now());
-  late DateTime month = DateTime(today.year, today.month);
-  late DateTime? selected = today;
+  Timer? _clock;
+  late DateTime _now;
+  late DateTime today;
+  late DateTime month;
+  DateTime? selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _now = widget.clock?.call() ?? DateTime.now();
+    today = AssignmentQuery.dayKey(_now);
+    month = DateTime(today.year, today.month);
+    selected = today;
+    _clock = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _now = widget.clock?.call() ?? DateTime.now();
+        today = AssignmentQuery.dayKey(_now);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _clock?.cancel();
+    super.dispose();
+  }
+
   void move(int delta) => setState(() {
         month = DateTime(month.year, month.month + delta);
         selected = DateTime(month.year, month.month);
@@ -28,6 +57,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
+        final now = _now;
         final all = widget.store.visibleAssignments;
         final manual = widget.store.notebook.entries
             .where((e) => !e.done && e.at != null)
@@ -39,24 +69,25 @@ class _CalendarScreenState extends State<CalendarScreen> {
               : d == selected;
         }).toList()
           ..sort((a, b) => a.at!.compareTo(b.at!));
-        final dated = all
-            .where((a) =>
-                a.deadlineAt != null &&
-                a.deadlineTrusted &&
-                !a.deadlineReadFailed)
-            .toList();
+        final dated = all.where((assignment) {
+          final bucket = assignment.deadlineBucketAt(now);
+          return (bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
+                  bucket == AssignmentDeadlineBucket.overdue) &&
+              assignment.deadlineAt != null;
+        }).toList();
         final noDeadlineCount = all
-            .where((a) => AssignmentRecoveryScope.noDeadline.matches(a))
+            .where((a) => AssignmentRecoveryScope.noDeadline.matches(a, now))
             .length;
         final pendingDeadlineCount = all
-            .where((a) => AssignmentRecoveryScope.deadlinePending.matches(a))
+            .where(
+                (a) => AssignmentRecoveryScope.deadlinePending.matches(a, now))
             .length;
         final agenda = selected == null
             ? dated.where((a) {
                 final d = AssignmentQuery.dayKey(a.deadlineAt!);
                 return d.year == month.year && d.month == month.month;
               }).toList()
-            : AssignmentQuery.forDay(all, selected!, {});
+            : AssignmentQuery.forDay(all, selected!, {}, now: now);
         agenda.sort((a, b) => a.deadlineAt!.compareTo(b.deadlineAt!));
         final days = DateTime(month.year, month.month + 1, 0).day,
             leading = month.weekday % 7;
@@ -138,7 +169,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                     items = AssignmentQuery.forDay(
                                         all,
                                         DateTime(month.year, month.month, day),
-                                        {});
+                                        {},
+                                        now: now);
                                 final unknown = items
                                     .where((a) => !a.isPendingConfirmed)
                                     .length;
@@ -210,7 +242,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
               for (final a in agenda)
                 AssignmentCard(
                     assignment: a,
-                    now: DateTime.now(),
+                    now: now,
                     showFullDeadline: false,
                     onTap: () => context
                         .push('/assignments/${Uri.encodeComponent(a.id)}')),

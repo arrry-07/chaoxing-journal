@@ -109,16 +109,21 @@ void main() {
         AssignmentRecoveryScope.deadlinePending);
     expect(AssignmentRecoveryScope.fromQueryValue('unknown'), isNull);
 
-    expect(AssignmentRecoveryScope.noDeadline.matches(clear), isTrue);
+    expect(AssignmentRecoveryScope.noDeadline.matches(clear, now), isTrue);
+    expect(AssignmentRecoveryScope.noDeadline.matches(failedWithoutDate, now),
+        isFalse);
+    expect(AssignmentRecoveryScope.noDeadline.matches(trusted, now), isFalse);
     expect(
-        AssignmentRecoveryScope.noDeadline.matches(failedWithoutDate), isFalse);
-    expect(AssignmentRecoveryScope.noDeadline.matches(trusted), isFalse);
-    expect(AssignmentRecoveryScope.deadlinePending.matches(failedWithoutDate),
+        AssignmentRecoveryScope.deadlinePending.matches(failedWithoutDate, now),
         isTrue);
-    expect(AssignmentRecoveryScope.deadlinePending.matches(untrusted), isTrue);
-    expect(AssignmentRecoveryScope.deadlinePending.matches(readFailed), isTrue);
-    expect(AssignmentRecoveryScope.deadlinePending.matches(trusted), isFalse);
-    expect(AssignmentRecoveryScope.deadlinePending.matches(clear), isFalse);
+    expect(AssignmentRecoveryScope.deadlinePending.matches(untrusted, now),
+        isTrue);
+    expect(AssignmentRecoveryScope.deadlinePending.matches(readFailed, now),
+        isTrue);
+    expect(
+        AssignmentRecoveryScope.deadlinePending.matches(trusted, now), isFalse);
+    expect(
+        AssignmentRecoveryScope.deadlinePending.matches(clear, now), isFalse);
   });
 
   testWidgets('calendarExposesRetainedUntrustedDeadlines', (tester) async {
@@ -141,19 +146,35 @@ void main() {
           failed: true),
       _assignment('undated', title: '明确无截止'),
       _assignment('failed-undated', title: '读取失败且无日期', failed: true),
+      _assignment('unknown-date',
+          title: '状态未知但有日期',
+          deadlineAt: now.add(const Duration(days: 4)),
+          status: 'unknown'),
+      _assignment('overdue-future',
+          title: '状态冲突的未来日期',
+          deadlineAt: now.add(const Duration(days: 5)),
+          status: 'overdue'),
+      _assignment(
+        'overdue-undated',
+        title: '已逾期状态但没有日期',
+        status: 'overdue',
+      ),
     ]);
 
     await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: CalendarScreen(store: store))));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('截止待确认（3）'), 200,
+    await tester.scrollUntilVisible(find.text('截止待确认（6）'), 200,
         scrollable: find.byType(Scrollable).first);
 
     expect(find.text('待核对作业'), findsOneWidget);
     expect(find.text('无截止日期（1）'), findsOneWidget);
-    expect(find.text('截止待确认（3）'), findsOneWidget);
+    expect(find.text('截止待确认（6）'), findsOneWidget);
     expect(find.text('保留但不可信的日期'), findsNothing);
     expect(find.text('读取失败后保留的日期'), findsNothing);
+    expect(find.text('状态未知但有日期'), findsNothing);
+    expect(find.text('状态冲突的未来日期'), findsNothing);
+    expect(find.text('已逾期状态但没有日期'), findsNothing);
   });
 
   testWidgets('calendarRecoveryEntryIgnoresConflictingHomeFilters',
@@ -177,7 +198,7 @@ void main() {
     store.homeFilters = const HomeFilters(
       query: '完全不匹配',
       courseKey: 'other:key',
-      deadline: AssignmentDeadlineFilter.next7Days,
+      deadline: AssignmentDeadlineFilter.notExpired,
       sortOrder: HomeSortOrder.title,
     );
 
@@ -200,7 +221,7 @@ void main() {
     expect(find.text('退出临时范围'), findsOneWidget);
     expect(store.homeFilters.query, '完全不匹配');
     expect(store.homeFilters.courseKey, 'other:key');
-    expect(store.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
     expect(store.homeFilters.sortOrder, HomeSortOrder.title);
 
     await tester.tap(find.text('退出临时范围'));
@@ -225,7 +246,7 @@ void main() {
     const saved = HomeFilters(
       query: '首页搜索',
       courseKey: 'c:k',
-      deadline: AssignmentDeadlineFilter.next7Days,
+      deadline: AssignmentDeadlineFilter.notExpired,
       sortOrder: HomeSortOrder.deadlineDesc,
     );
     expect(await store.saveHomeFilters(saved, store.accountEpoch), isTrue);
@@ -259,7 +280,7 @@ void main() {
     expect(find.text('已筛选'), findsNothing);
     expect(store.homeFilters.query, '首页搜索');
     expect(store.homeFilters.courseKey, 'c:k');
-    expect(store.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
     expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
 
     final repo = LocalAssignmentRepository();
@@ -267,7 +288,7 @@ void main() {
     final persisted = await repo.loadHomeFilters();
     expect(persisted.query, '首页搜索');
     expect(persisted.courseKey, 'c:k');
-    expect(persisted.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(persisted.deadline, AssignmentDeadlineFilter.notExpired);
     expect(persisted.sortOrder, HomeSortOrder.deadlineDesc);
 
     await tester.tap(find.text('退出临时范围'));

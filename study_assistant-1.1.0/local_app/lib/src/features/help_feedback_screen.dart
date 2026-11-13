@@ -73,13 +73,20 @@ class HelpFeedbackScreen extends StatelessWidget {
 }
 
 class FeedbackScreen extends StatefulWidget {
-  const FeedbackScreen({super.key});
+  const FeedbackScreen({super.key, this.links});
+
+  final ExternalLinkService? links;
+
   @override
   State<FeedbackScreen> createState() => _FeedbackScreenState();
 }
 
 class _FeedbackScreenState extends State<FeedbackScreen> {
+  static const _feedbackEmail = '397079535@qq.com';
+
   final problem = TextEditingController(), steps = TextEditingController();
+  ExternalLinkService get links => widget.links ?? ExternalLinkService();
+
   @override
   void dispose() {
     problem.dispose();
@@ -87,19 +94,83 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     super.dispose();
   }
 
+  String feedbackBody() => '学习通课业手记 ${AppVersion.display}\n'
+      '系统：${Platform.operatingSystem} ${Platform.operatingSystemVersion}\n'
+      '问题：${problem.text.trim()}\n'
+      '复现步骤：${steps.text.trim()}';
+
+  bool validateProblem() {
+    if (problem.text.trim().isNotEmpty) return true;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('请先描述遇到的问题')));
+    return false;
+  }
+
   Future<void> copy() async {
-    if (problem.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请先描述遇到的问题')));
-      return;
-    }
-    await Clipboard.setData(ClipboardData(
-        text:
-            '学习通课业手记 ${AppVersion.display}\n系统：${Platform.operatingSystem} ${Platform.operatingSystemVersion}\n问题：${problem.text.trim()}\n复现步骤：${steps.text.trim()}'));
+    if (!validateProblem()) return;
+    await Clipboard.setData(ClipboardData(text: feedbackBody()));
     if (mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('反馈内容已复制，尚未发送')));
     }
+  }
+
+  Future<void> composeEmail() async {
+    if (!validateProblem()) return;
+    final opened = await links.composeFeedbackEmail(
+      '学习通课业手记 ${AppVersion.display} 反馈',
+      feedbackBody(),
+    );
+    if (!mounted) return;
+    if (opened) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已打开邮件草稿，请在邮箱中确认发送')),
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('未能打开邮件草稿', style: Journal.section),
+            const SizedBox(height: 8),
+            const Text('没有可用的邮件客户端，或系统未接受打开请求。当前填写内容已保留。'),
+            const SizedBox(height: 12),
+            SelectableText(
+              _feedbackEmail,
+              style: Journal.metadata.copyWith(color: Journal.ink),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(sheetContext);
+                copy();
+              },
+              child: const Text('复制反馈内容'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(
+                  const ClipboardData(text: _feedbackEmail),
+                );
+                if (sheetContext.mounted) Navigator.pop(sheetContext);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('收件地址已复制')),
+                  );
+                }
+              },
+              child: const Text('复制收件地址'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -125,20 +196,21 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
             decoration: const InputDecoration(
                 labelText: '怎样出现的？（选填）', alignLabelWithHint: true)),
         const SizedBox(height: 16),
-        const Text('复制时会附带应用和系统版本。请勿填写登录信息或附上含个人信息的截图。',
+        const Text('复制或打开邮件时会附带应用和系统版本。请勿填写登录信息或附上含个人信息的截图。',
             style: TextStyle(color: Journal.muted)),
         const SizedBox(height: 20),
-        FilledButton(onPressed: copy, child: const Text('复制反馈内容')),
+        FilledButton(onPressed: composeEmail, child: const Text('通过邮件反馈')),
+        TextButton(onPressed: copy, child: const Text('复制反馈内容')),
         TextButton(
             onPressed: () async {
-              final ok = await ExternalLinkService()
+              final ok = await links
                   .openUrl('${AppUpdateService.repositoryUrl}/issues');
               if (!ok && context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('无法打开反馈页面，请先复制保存')));
               }
             },
-            child: const Text('打开反馈页面（需要仓库访问权限）')),
-        const Text('这里不会自动发送。你可以复制保存，或在有权限的反馈页面中粘贴提交。'),
+            child: const Text('打开 GitHub 反馈页面')),
+        const Text('邮件入口只会打开系统邮件草稿，不会自动发送；收到邮箱客户端返回结果不等于邮件已发送。'),
       ]));
 }

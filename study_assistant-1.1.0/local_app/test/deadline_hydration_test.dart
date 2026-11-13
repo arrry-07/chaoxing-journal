@@ -151,8 +151,23 @@ void main() {
     expect(work.single.deadlineAt!.toUtc(), DateTime.utc(2024, 11, 5, 15, 59));
     expect(c.issues, isEmpty);
     expect(
-        AssignmentQuery.forDay(work, DateTime(2024, 11, 5), {}), hasLength(1));
-    expect(AssignmentQuery.forDay(work, DateTime(2026, 11, 5), {}), isEmpty);
+      AssignmentQuery.forDay(
+        work,
+        DateTime(2024, 11, 5),
+        {},
+        now: DateTime.utc(2024, 11, 4),
+      ),
+      hasLength(1),
+    );
+    expect(
+      AssignmentQuery.forDay(
+        work,
+        DateTime(2026, 11, 5),
+        {},
+        now: DateTime.utc(2026, 11, 4),
+      ),
+      isEmpty,
+    );
   });
 
   for (final kind in [SyncIssueKind.network, SyncIssueKind.forbidden]) {
@@ -275,7 +290,15 @@ void main() {
     final work = await c.fetchAssignments();
     expect(work.single.deadlineLabel, '截止 11-05 23:59（年份待确认）');
     expect(work.single.deadlineTrusted, isFalse);
-    expect(AssignmentQuery.forDay(work, DateTime(2024, 11, 5), {}), isEmpty);
+    expect(
+      AssignmentQuery.forDay(
+        work,
+        DateTime(2024, 11, 5),
+        {},
+        now: DateTime.utc(2024, 11, 4),
+      ),
+      isEmpty,
+    );
     expect(
         AssignmentQuery.home(work, DateTime(2024), {}).uncertain, hasLength(1));
   });
