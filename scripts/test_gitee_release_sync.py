@@ -306,6 +306,42 @@ class SafetyTests(unittest.TestCase):
             self.assertEqual(call.kwargs["encoding"], "utf-8")
             self.assertEqual(call.kwargs["errors"], "replace")
 
+    def test_apksigner_certificate_is_read_from_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "test.apk"
+            with zipfile.ZipFile(apk, "w") as archive:
+                archive.writestr("AndroidManifest.xml", b"manifest")
+            results = [
+                subprocess.CompletedProcess(
+                    [],
+                    0,
+                    (
+                        "package: name='com.example.studyassistant.journal' "
+                        "versionCode='56' versionName='1.7.4'\n"
+                    ),
+                    "",
+                ),
+                subprocess.CompletedProcess(
+                    [],
+                    0,
+                    "",
+                    (
+                        "Signer #1 certificate SHA-256 digest: "
+                        f"{sync.SIGNER_SHA256}\n"
+                    ),
+                ),
+            ]
+            with mock.patch.object(
+                sync.subprocess, "run", side_effect=results
+            ):
+                identity = sync.inspect_apk(
+                    apk,
+                    aapt=Path("aapt"),
+                    apksigner=Path("apksigner"),
+                )
+
+        self.assertEqual(identity["versionCode"], 56)
+
 
 if __name__ == "__main__":
     unittest.main()

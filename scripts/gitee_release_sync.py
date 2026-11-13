@@ -704,9 +704,10 @@ def inspect_apk(apk_path: Path, *, aapt: Path, apksigner: Path) -> dict[str, Any
     )
     if signature.returncode != 0:
         raise SyncError("APK signature verification failed.")
+    signature_output = f"{signature.stdout}\n{signature.stderr}"
     certificate = re.search(
         r"Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F:]+)",
-        signature.stdout,
+        signature_output,
     )
     if (
         certificate is None
