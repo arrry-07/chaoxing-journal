@@ -40,6 +40,9 @@ jobs:
         run: |
           python3 tool/check_release_metadata.py
           python3 tool/check_changed_format.py
+      - name: Check Gitee distribution scripts
+        working-directory: ${{ github.workspace }}
+        run: |
           python3 -m py_compile scripts/gitee_release_sync.py
           python3 scripts/test_gitee_release_sync.py
           python3 scripts/test_gitee_workflow.py
