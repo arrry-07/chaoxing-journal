@@ -60,11 +60,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install APK verification tools
-        run: sdkmanager "build-tools;36.0.0"
+        run: |
+          # ubuntu-latest already provides the Android SDK and cmdline tools.
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "build-tools;36.0.0"
 
       - name: Run offline synchronizer tests
         run: |

@@ -53,6 +53,10 @@ class GiteeWorkflowTests(unittest.TestCase):
         self.assertIn("permissions:\n  contents: read", self.text)
         self.assertNotIn("contents: write", self.text)
 
+    def test_workflow_uses_preinstalled_android_sdk(self) -> None:
+        self.assertNotIn("android-actions/setup-android", self.text)
+        self.assertIn('sdkmanager "build-tools;36.0.0"', self.text)
+
 
 if __name__ == "__main__":
     unittest.main()
