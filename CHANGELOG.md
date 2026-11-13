@@ -2,6 +2,14 @@
 
 安装包与原始发布说明见 [Releases](https://github.com/arrry-07/chaoxing-journal/releases)。1.2.2–1.2.6 曾以本地体验包验证，没有对应公开 Release；不要把历史本地包文件名当成可下载地址。
 
+## 1.7.52（59） — Gitee 国内更新迁移（2026-11-13 正式发布）
+
+- 客户端默认读取 Gitee 固定 stable/manual 清单，APK 主源为 Gitee；Gitee 清单失败时自动回退 GitHub 正式 Release。
+- 每份清单保留同大小、同 SHA-256 的 GitHub APK 备用地址；Gitee APK 瞬时失败时安全回退，摘要不符立即停止。
+- 新增无第三方依赖的 Gitee 同步器和每日 GitHub Actions：云端校验、上传、匿名回下载复核后原子更新 JSON。
+- Gitee 最多保留 3 个 APK Release，始终保护 stable、manual 引用的版本；旧版本继续从 GitHub Releases 获取。
+- 启动与手动检查保留忽略版本、单次冷启动提示和主动下载/安装行为。
+
 ## 1.7.51（58） — 近期体验修复（2026-11-13 正式发布）
 
 - 新增“未截止”筛选，保留原有“无截止日期”含义与账号偏好。
