@@ -2268,9 +2268,6 @@ class AssignmentStore extends ChangeNotifier {
     if (raw.contains('没有获取到作业')) {
       return '暂时没有刷新到作业。如果你确认学习通里有未完成作业，请稍后再试。';
     }
-    if (raw.contains('登录失败')) {
-      return '登录失败，请检查账号和密码。';
-    }
     if (raw.contains('同步失败')) {
       return '学习通作业同步失败，请稍后再试。';
     }

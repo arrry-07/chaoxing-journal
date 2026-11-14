@@ -20,6 +20,25 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  test('login keeps a specific platform refusal and leaves credentials unsaved',
+      () async {
+    final session = _MemorySessionStore();
+    final store = AssignmentStore(
+      sessionStore: session,
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      chaoxingClient: _RefusedLoginClient(),
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.loginChaoxing(
+        account: 'synthetic', password: 'synthetic', agreementAccepted: true);
+    expect(store.isAuthenticated, isFalse);
+    expect(store.error, '登录失败，请完成安全验证');
+    expect(session.account, isNull);
+    expect(session.password, isNull);
+  });
+
   test('authentication returns while homework remains blocked', () async {
     final client = _BlockedClient();
     final store = AssignmentStore(
@@ -319,6 +338,13 @@ class _RefreshingChaoxingClient extends ChaoxingLocalClient {
       ),
     ];
   }
+}
+
+class _RefusedLoginClient extends ChaoxingLocalClient {
+  @override
+  Future<ChaoxingLoginResult> login(
+          {required String account, required String password}) async =>
+      const ChaoxingLoginResult(success: false, message: '登录失败，请完成安全验证');
 }
 
 class _MemorySessionStore extends SecureSessionStore {
