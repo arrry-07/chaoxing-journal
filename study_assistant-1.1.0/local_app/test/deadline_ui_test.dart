@@ -137,6 +137,46 @@ void main() {
     expect(find.text('无期限'), findsOneWidget);
   });
 
+  testWidgets('sorted card keeps date and time in the left rail',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    final now = DateTime.utc(2026, 11, 28, 10);
+    final assignment = Assignment(
+      id: 'cx:work:1:2:rail-date',
+      courseName: '大学物理B（下）',
+      title: '电磁学（上）练习一',
+      deadlineAt: DateTime.utc(2026, 11, 28, 14, 50),
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentCard(
+          assignment: assignment,
+          now: now,
+          onTap: () {},
+          onOpenAssignment: () {},
+          showDateInRail: true,
+          showFullDeadline: false,
+        ),
+      ),
+    ));
+
+    final date = find.text('11/28');
+    final time = find.text('22:50');
+    final title = find.text('电磁学（上）练习一');
+    expect(date, findsOneWidget);
+    expect(time, findsOneWidget);
+    expect(find.textContaining('截止 11月28日'), findsNothing);
+    expect((tester.getTopLeft(date).dx - tester.getTopLeft(time).dx).abs(),
+        lessThan(0.5));
+    expect(tester.getTopLeft(date).dy, lessThan(tester.getTopLeft(time).dy));
+    expect(tester.getTopLeft(date).dy,
+        lessThanOrEqualTo(tester.getTopLeft(title).dy));
+  });
+
   testWidgets('card keeps the original placeholder time rail without a time',
       (tester) async {
     final assignment = Assignment(

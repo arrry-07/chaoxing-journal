@@ -15,15 +15,15 @@ class GiteeWorkflowTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.text = WORKFLOW.read_text(encoding="utf-8")
 
-    def test_daily_schedule_and_manual_dispatch_only(self) -> None:
-        self.assertIn("schedule:", self.text)
-        self.assertIn('cron: "17 19 * * *"', self.text)
+    def test_manual_batch_dispatch_only(self) -> None:
+        self.assertNotIn("schedule:", self.text)
+        self.assertNotIn("cron:", self.text)
         self.assertIn("workflow_dispatch:", self.text)
         self.assertNotIn("release:", self.text)
 
     def test_dispatch_only_uploads_latest_or_explicit_seed(self) -> None:
         self.assertIn("mode:", self.text)
-        self.assertIn("default: daily", self.text)
+        self.assertIn("default: latest", self.text)
         self.assertIn("tags:", self.text)
         self.assertIn("retention:", self.text)
         self.assertIn("default: \"3\"", self.text)
@@ -32,7 +32,7 @@ class GiteeWorkflowTests(unittest.TestCase):
         self.assertNotIn('"${{ inputs.tags }}"', self.text)
         self.assertNotIn('--mode "${{ inputs.mode', self.text)
         self.assertIn('TAGS: ${{ inputs.tags }}', self.text)
-        self.assertIn("MODE: ${{ inputs.mode || 'daily' }}", self.text)
+        self.assertIn("MODE: ${{ inputs.mode || 'latest' }}", self.text)
         self.assertIn("RETENTION: ${{ inputs.retention || '3' }}", self.text)
 
     def test_token_is_read_only_from_secret_environment(self) -> None:

@@ -16,6 +16,7 @@ class AssignmentCard extends StatelessWidget {
       this.compact = false,
       this.countdown = false,
       this.showFullDeadline = true,
+      this.showDateInRail = false,
       this.deadlinePending = false,
       this.previewOnly = false,
       this.previewSaving = false});
@@ -25,6 +26,7 @@ class AssignmentCard extends StatelessWidget {
   final VoidCallback? onOpenAssignment;
   final bool opening;
   final bool showFullDeadline;
+  final bool showDateInRail;
   final bool deadlinePending, previewOnly, previewSaving;
   final bool compact, countdown;
   @override
@@ -69,15 +71,29 @@ class AssignmentCard extends StatelessWidget {
     final hasTime = d != null && a.deadlineTrusted && !a.deadlineReadFailed;
     final clock =
         hasTime ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d)) : '—';
+    final railDate =
+        hasTime ? DateFormat('M/d').format(AssignmentQuery.beijing(d)) : null;
     // Measure at the user's text scale: a fixed rail clips times at 2× size.
-    final measure = TextPainter(
+    final timeMeasure = TextPainter(
         text: const TextSpan(text: '00:00', style: Journal.time),
         textDirection: Directionality.of(context),
         textScaler: MediaQuery.textScalerOf(context))
       ..layout();
-    final railWidth = measure.width.ceilToDouble() + 4;
+    final dateMeasure = TextPainter(
+        text: TextSpan(
+            text: '00/00',
+            style: Journal.metadata.copyWith(fontWeight: FontWeight.w600)),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context))
+      ..layout();
+    final railWidth = (timeMeasure.width > dateMeasure.width
+                ? timeMeasure.width
+                : dateMeasure.width)
+            .ceilToDouble() +
+        4;
     final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
-    measure.dispose();
+    timeMeasure.dispose();
+    dateMeasure.dispose();
     final metadata = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -140,7 +156,24 @@ class AssignmentCard extends StatelessWidget {
                                         ),
                                       )
                                     else
-                                      Text(clock, style: Journal.time),
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          if (showDateInRail &&
+                                              railDate != null) ...[
+                                            Text(
+                                              railDate,
+                                              style: Journal.metadata.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                                height: 1.15,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                          ],
+                                          Text(clock, style: Journal.time),
+                                        ],
+                                      ),
                                   ],
                                 ),
                               ),

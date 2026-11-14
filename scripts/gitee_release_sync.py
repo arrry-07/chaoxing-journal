@@ -3,6 +3,10 @@
 
 Historical APKs are checked without a Gitee redownload. The latest manual APK
 is downloaded anonymously and verified before manifests are published.
+
+Gitee is an optional batched mirror. GitHub Releases remain mandatory for every
+formal package; this synchronizer runs only at explicit domestic mirror
+checkpoints.
 """
 
 from __future__ import annotations
@@ -1097,15 +1101,16 @@ def render_readme(
 - stable：`{stable}`，只随主/次版本前进。
 - manual：`{manual}`，指向最新正式补丁。
 - 最多保留 3 个 APK Release；更早版本请前往 GitHub Releases。
-- GitHub 是发布源和备用下载源，Gitee 是国内主下载源。
+- GitHub 是每次正式发布的必发源和备用下载源，Gitee 是国内批量镜像。
 
 固定清单：
 
 - {GITEE_RAW_BASE}/update-stable.json
 - {GITEE_RAW_BASE}/update-manual.json
 
-维护流程由 `arrry-07/chaoxing-journal` 的 GitHub Actions 每日执行。所有 APK
-在发布清单前都经过大小、SHA-256、包名、版本和签名校验。
+维护流程由 `arrry-07/chaoxing-journal` 的 GitHub Actions 在维护者指定的
+批量同步点手动执行，不跟随每个 GitHub Release 上传 APK。所有 APK 在发布
+清单前都经过大小、SHA-256、包名、版本和签名校验。
 """
 
 
@@ -1447,7 +1452,7 @@ def synchronize(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("daily", "seed"), default="daily")
+    parser.add_argument("--mode", choices=("latest", "seed"), default="latest")
     parser.add_argument("--tags", default="")
     parser.add_argument("--retention", type=int, default=3)
     parser.add_argument("--work-dir", default="")

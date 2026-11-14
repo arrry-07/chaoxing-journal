@@ -171,7 +171,7 @@ void main() {
 
     await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
-    await tapSheetOption(t, '未逾期');
+    await tapSheetOption(t, '未截止');
     await tapSheetOption(t, '应用');
     expect(find.text('高等数学练习'), findsOneWidget);
     expect(find.text('English Essay'), findsOneWidget);
@@ -240,7 +240,7 @@ void main() {
     expect(
         t
             .widgetList<AssignmentCard>(find.byType(AssignmentCard))
-            .every((card) => card.showFullDeadline),
+            .every((card) => card.showDateInRail && !card.showFullDeadline),
         isTrue);
 
     final alphaTop =
