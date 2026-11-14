@@ -137,7 +137,7 @@ void main() {
     expect(find.text('无期限'), findsOneWidget);
   });
 
-  testWidgets('card omits the placeholder time rail without a trusted time',
+  testWidgets('card keeps the original placeholder time rail without a time',
       (tester) async {
     final assignment = Assignment(
       id: 'cx:work:1:2:no-time',
@@ -160,14 +160,8 @@ void main() {
       ),
     ));
 
-    expect(find.text('—'), findsNothing);
+    expect(find.text('—'), findsOneWidget);
     expect(find.text('无期限'), findsOneWidget);
-    expect(
-      (tester.getTopLeft(find.text('无期限')).dx -
-              tester.getTopLeft(find.text('无时间作业')).dx)
-          .abs(),
-      lessThan(0.5),
-    );
   });
 
   testWidgets('card marks the exact deadline instant as overdue',

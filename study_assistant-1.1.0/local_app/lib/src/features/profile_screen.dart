@@ -78,14 +78,13 @@ class ProfileScreen extends StatelessWidget {
                         onTap: () => context.push('/profile/arrangements'),
                       ),
                       _SettingsTile(
-                        icon: Icons.tune,
-                        title: '显示与小组件',
-                        subtitle: '密度、日期与桌面显示范围',
-                        onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                                builder: (_) =>
-                                    DisplaySettingsScreen(store: store))),
-                      ),
+                          icon: Icons.tune,
+                          title: '显示与小组件',
+                          subtitle: '密度、日期与桌面显示范围',
+                          onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      DisplaySettingsScreen(store: store)))),
                       _SettingsTile(
                         icon: Icons.inventory_2_outlined,
                         title: '学习记录',

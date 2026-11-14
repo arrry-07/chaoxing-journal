@@ -201,16 +201,8 @@ void main() {
       );
       final noticeFinder = find.text('课程与作业数据保存在本机。');
       final notice = tester.widget<Text>(noticeFinder);
-      expect(notice.style?.fontSize, 14.5);
-      expect(notice.style?.fontWeight, FontWeight.w600);
-      expect(notice.style?.color, Journal.ink);
-      final agreementText = find.text('我已阅读并同意');
-      expect(
-        (tester.getTopLeft(noticeFinder).dx -
-                tester.getTopLeft(agreementText).dx)
-            .abs(),
-        lessThan(0.5),
-      );
+      expect(notice.style?.fontSize, 13.5);
+      expect(notice.style?.color, Journal.muted);
       expect(
         find.text('账号密码保存在本机安全存储中。'),
         findsNothing,

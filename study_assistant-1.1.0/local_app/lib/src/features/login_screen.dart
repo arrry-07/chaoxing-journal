@@ -167,36 +167,37 @@ class _AgreementPanel extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Semantics(
-            container: true,
-            child: Checkbox(
-              value: accepted,
-              semanticLabel: '我已阅读并同意服务协议和隐私协议',
-              materialTapTargetSize: MaterialTapTargetSize.padded,
-              visualDensity: VisualDensity.standard,
-              shape: const CircleBorder(),
-              checkColor: Journal.sheet,
-              fillColor: WidgetStateProperty.resolveWith((states) =>
-                  states.contains(WidgetState.selected)
-                      ? Journal.ink
-                      : Journal.sage),
-              side: BorderSide(
-                color: Journal.rule,
-                width: 1,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Semantics(
+                container: true,
+                child: Checkbox(
+                  value: accepted,
+                  semanticLabel: '我已阅读并同意服务协议和隐私协议',
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  visualDensity: VisualDensity.standard,
+                  shape: const CircleBorder(),
+                  checkColor: Journal.sheet,
+                  fillColor: WidgetStateProperty.resolveWith((states) =>
+                      states.contains(WidgetState.selected)
+                          ? Journal.ink
+                          : Journal.sage),
+                  side: BorderSide(
+                    color: Journal.rule,
+                    width: 1,
+                  ),
+                  onChanged:
+                      enabled ? (value) => onChanged(value ?? false) : null,
+                ),
               ),
-              onChanged: enabled ? (value) => onChanged(value ?? false) : null,
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Wrap(
                     spacing: 0,
                     runSpacing: 0,
                     crossAxisAlignment: WrapCrossAlignment.center,
@@ -214,17 +215,18 @@ class _AgreementPanel extends StatelessWidget {
                       _link(AgreementKind.privacy),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '课程与作业数据保存在本机。',
-                    style: Journal.metadata.copyWith(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w600,
-                      height: 1.45,
-                      color: Journal.ink,
-                    ),
-                  ),
-                ],
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(2, 12, 2, 0),
+            child: Text(
+              '课程与作业数据保存在本机。',
+              style: Journal.metadata.copyWith(
+                fontSize: 13.5,
+                height: 1.58,
+                color: Journal.muted,
               ),
             ),
           ),
