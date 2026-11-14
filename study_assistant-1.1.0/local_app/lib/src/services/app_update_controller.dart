@@ -55,8 +55,7 @@ class AppUpdateController extends ChangeNotifier {
   Future<void>? _startupRequest;
   bool _manualDuringStartup = false;
   static const _ignoredVersionKey = 'update.ignoredVersion';
-  String get _candidateKey =>
-      '${update?.versionName}+${update?.versionCode ?? 0}';
+  String get _candidateKey => update?.versionName ?? '';
 
   /// Only cold starts check automatically. Manual checks deliberately bypass
   /// the ignored release, so the user can change their mind from Settings.
@@ -79,9 +78,13 @@ class AppUpdateController extends ChangeNotifier {
     }
     try {
       final prefs = await SharedPreferences.getInstance();
-      return !_disposed &&
-          !hasShownDialog &&
-          prefs.getString(_ignoredVersionKey) != _candidateKey;
+      final ignored = prefs.getString(_ignoredVersionKey) ?? '';
+      final candidate = _candidateKey;
+      // Legacy builds included versionCode in the key even when GitHub tags
+      // omitted it. Treat any build suffix for this display version as ignored.
+      final isIgnored =
+          ignored == candidate || ignored.startsWith('$candidate+');
+      return !_disposed && !hasShownDialog && !isIgnored;
     } catch (_) {
       // A preference read failure must not prevent discovery of a new release.
       return !_disposed && !hasShownDialog;

@@ -69,6 +69,7 @@ class AppUpdateService {
           const String.fromEnvironment('UPDATE_STABLE_MANIFEST_URL'),
       this.manualManifestUrl =
           const String.fromEnvironment('UPDATE_MANUAL_MANIFEST_URL'),
+      this.officialDualSource = false,
       this.githubFallbackEnabled = true})
       : _dio = dio ??
             Dio(
@@ -101,6 +102,7 @@ class AppUpdateService {
           hasCustomManifest ? stableManifestUrl : _giteeStableManifestUrl,
       manualManifestUrl:
           hasCustomManifest ? manualManifestUrl : _giteeManualManifestUrl,
+      officialDualSource: !hasCustomManifest,
     );
   }
 
@@ -122,6 +124,7 @@ class AppUpdateService {
   final String manifestUrl;
   final String stableManifestUrl;
   final String manualManifestUrl;
+  final bool officialDualSource;
   final bool githubFallbackEnabled;
   static const _downloadDirectoryPrefix = '.apk-download-';
   static const _downloadOwnerFile = 'owner.marker';
@@ -144,6 +147,16 @@ class AppUpdateService {
     await cleanupStaleDownloads();
     final url = manualManifestUrl.isNotEmpty ? manualManifestUrl : manifestUrl;
     if (url.isNotEmpty) {
+      if (officialDualSource &&
+          githubFallbackEnabled &&
+          _isOfficialGiteeManifest(url)) {
+        return _checkDualOfficialSources(
+          manifestUrl: url,
+          currentVersionName: currentVersionName,
+          currentVersionCode: currentVersionCode,
+          cancelToken: cancelToken,
+        );
+      }
       return _checkManifestWithFallback(
         manifestUrl: url,
         currentVersionName: currentVersionName,
@@ -180,6 +193,125 @@ class AppUpdateService {
       currentVersionName: AppVersion.name,
       currentVersionCode: currentVersionCode,
       cancelToken: cancelToken,
+    );
+  }
+
+  Future<UpdateCheckResult> _checkDualOfficialSources({
+    required String manifestUrl,
+    required String currentVersionName,
+    required int currentVersionCode,
+    CancelToken? cancelToken,
+  }) async {
+    if (cancelToken?.isCancelled == true) {
+      return const UpdateCheckResult(UpdateCheckStatus.cancelled);
+    }
+    final results = await Future.wait([
+      _checkManifest(
+        manifestUrl: manifestUrl,
+        currentVersionName: currentVersionName,
+        currentVersionCode: currentVersionCode,
+        startupOnly: false,
+        cancelToken: cancelToken,
+      ),
+      _checkGitHub(
+        currentVersionName: currentVersionName,
+        currentVersionCode: currentVersionCode,
+        cancelToken: cancelToken,
+        listReleases: true,
+      ),
+    ]);
+    return _mergeOfficialResults(results[0], results[1]);
+  }
+
+  UpdateCheckResult _mergeOfficialResults(
+    UpdateCheckResult gitee,
+    UpdateCheckResult github,
+  ) {
+    if (gitee.status == UpdateCheckStatus.cancelled ||
+        github.status == UpdateCheckStatus.cancelled) {
+      return const UpdateCheckResult(UpdateCheckStatus.cancelled);
+    }
+    final giteeUpdate = gitee.update;
+    final githubUpdate = github.update;
+    if (giteeUpdate != null && githubUpdate != null) {
+      final comparison = _compareUpdateVersions(giteeUpdate, githubUpdate);
+      if (comparison > 0) {
+        return UpdateCheckResult(UpdateCheckStatus.available,
+            update: giteeUpdate);
+      }
+      if (comparison < 0) {
+        return UpdateCheckResult(UpdateCheckStatus.available,
+            update: githubUpdate);
+      }
+      return UpdateCheckResult(
+        UpdateCheckStatus.available,
+        update: _mergeSameVersion(giteeUpdate, githubUpdate),
+      );
+    }
+    if (giteeUpdate != null) {
+      return UpdateCheckResult(UpdateCheckStatus.available,
+          update: giteeUpdate);
+    }
+    if (githubUpdate != null) {
+      return UpdateCheckResult(UpdateCheckStatus.available,
+          update: githubUpdate);
+    }
+    if (gitee.status == UpdateCheckStatus.upToDate ||
+        github.status == UpdateCheckStatus.upToDate) {
+      return const UpdateCheckResult(UpdateCheckStatus.upToDate);
+    }
+    for (final status in const [
+      UpdateCheckStatus.rateLimited,
+      UpdateCheckStatus.authRequired,
+      UpdateCheckStatus.packageUnavailable,
+      UpdateCheckStatus.noRelease,
+      UpdateCheckStatus.invalidManifest,
+    ]) {
+      if (gitee.status == status || github.status == status) {
+        return UpdateCheckResult(status);
+      }
+    }
+    if (gitee.status == UpdateCheckStatus.networkError &&
+        github.status != UpdateCheckStatus.networkError) {
+      return UpdateCheckResult(github.status);
+    }
+    return UpdateCheckResult(gitee.status);
+  }
+
+  int _compareUpdateVersions(AppUpdateInfo first, AppUpdateInfo second) {
+    if (first.versionName == second.versionName) return 0;
+    if (isRemoteVersionNewer(first.versionName, second.versionName)) return 1;
+    if (isRemoteVersionNewer(second.versionName, first.versionName)) return -1;
+    return 0;
+  }
+
+  AppUpdateInfo _mergeSameVersion(
+    AppUpdateInfo gitee,
+    AppUpdateInfo github,
+  ) {
+    final sameContent = gitee.apkSize == github.apkSize &&
+        gitee.sha256Hash?.toLowerCase() == github.sha256Hash?.toLowerCase();
+    if (!sameContent) {
+      // Conflicting Gitee metadata must never redirect a verified GitHub
+      // release to different bytes.
+      return github;
+    }
+    final versionCode = github.versionCode ?? gitee.versionCode;
+    return AppUpdateInfo(
+      versionName: github.versionName,
+      versionCode: versionCode,
+      applicationId: github.applicationId ?? gitee.applicationId,
+      sha256Hash: github.sha256Hash ?? gitee.sha256Hash,
+      releaseUrl: github.releaseUrl,
+      apkName: github.apkName,
+      apkDownloadUrl: gitee.apkDownloadUrl,
+      backupApkUrls: [
+        github.apkDownloadUrl,
+        ...github.backupApkUrls,
+        ...gitee.backupApkUrls,
+      ],
+      releaseNotes: github.releaseNotes,
+      apkSize: github.apkSize ?? gitee.apkSize,
     );
   }
 
@@ -529,7 +661,7 @@ class AppUpdateService {
         lastStackTrace = stackTrace;
         final canUseBackup = index + 1 < sources.length &&
             cancelToken?.isCancelled != true &&
-            _isTransientNetworkFailure(error);
+            _canTryBackupSource(error);
         if (!canUseBackup) {
           Error.throwWithStackTrace(error, stackTrace);
         }
@@ -711,7 +843,10 @@ class AppUpdateService {
   int? _fullResponseSize(
       Response<ResponseBody> response, int? declared, String expectedUrl) {
     if (response.statusCode != 200 || response.data == null) {
-      throw StateError('下载 APK 失败');
+      throw ApkSourceUnavailableException(
+        '下载 APK 失败',
+        statusCode: response.statusCode,
+      );
     }
     if (!_redirectChainIsSecure(response, expectedUrl)) {
       throw StateError('安装包下载重定向不安全');
@@ -911,7 +1046,16 @@ class AppUpdateService {
     return List<String>.unmodifiable(result);
   }
 
-  bool _isTransientNetworkFailure(Object error) {
+  bool _canTryBackupSource(Object error) {
+    if (error is ApkSourceUnavailableException) {
+      final status = error.statusCode;
+      return status == null ||
+          status == 404 ||
+          status == 408 ||
+          status == 410 ||
+          status == 429 ||
+          status >= 500;
+    }
     if (error is! DioException) return false;
     return switch (error.type) {
       DioExceptionType.connectionError ||
@@ -921,8 +1065,11 @@ class AppUpdateService {
       DioExceptionType.unknown ||
       DioExceptionType.cancel =>
         true,
-      DioExceptionType.badResponse => error.response?.statusCode != null &&
-          error.response!.statusCode! >= 500,
+      DioExceptionType.badResponse => switch (error.response?.statusCode) {
+          null => false,
+          404 || 408 || 410 || 429 => true,
+          final status => status >= 500,
+        },
       _ => false,
     };
   }
@@ -973,6 +1120,12 @@ class AppUpdateService {
 
 class ApkVerificationException extends StateError {
   ApkVerificationException(super.message);
+}
+
+class ApkSourceUnavailableException extends StateError {
+  ApkSourceUnavailableException(super.message, {this.statusCode});
+
+  final int? statusCode;
 }
 
 enum UpdateCheckStatus {

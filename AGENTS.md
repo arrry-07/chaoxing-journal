@@ -16,10 +16,12 @@
 ## 发布渠道与维护成本
 
 - 每个冻结并递增版本的正式包都必须在 GitHub 完成 CI、原签名 APK、`SHA256SUMS.txt`、Tag、Release 和回下载校验；GitHub 发布是正式交付的必选门禁。
-- Gitee 是可选的国内批量镜像，不跟随每个 GitHub Release 上传 APK。默认积累多个补丁或由维护者指定同步点后，再手动运行一次 Gitee 同步。
-- Gitee workflow 只允许 `workflow_dispatch`，不得增加 `schedule`、`release` 或其他自动触发。
-- Gitee 未同步不阻塞 GitHub 正式发布，但发布说明和状态文件必须明确写出当前 Gitee 版本；不得把 GitHub 已发布写成 Gitee 已同步。
-- Gitee 批量同步只上传选定的最新 APK，不重复上传或完整下载历史 APK；上传后仍需匿名回下载、哈希、签名和清单校验。
+- 每个 GitHub 正式 Release 发布后，Gitee workflow 自动运行 `index` 模式，只更新几 KB 的 `update-manual.json`；正式 APK 仍只以 GitHub 为权威发布源。
+- 新版本尚未镜像到 Gitee 时，索引中的 `apkUrl` 指向 GitHub 同版本 APK，并省略 `backupApkUrl`；只有经过完整校验的 Gitee 镜像才切换为主地址并保留 GitHub 备用地址。
+- Gitee APK 是可选的国内批量镜像，不跟随每个 Release 上传。维护者选定同步点后手动运行 `latest`/`seed`；`index` 不下载、不上传 APK，也不清理 Gitee 附件。
+- Gitee workflow 允许 `release: published` 的索引触发和 `workflow_dispatch`；不得增加 `schedule`，也不得让 Release 事件执行 APK 上传或附件清理。
+- 索引更新失败时不阻塞 GitHub 发布，但必须在发布说明和状态文件中明确写出 Gitee 索引/镜像实际版本；双渠道交付只有在索引重跑成功后才能声称完成。
+- Gitee 批量同步只上传选定的最新 APK，不重复上传或完整下载历史 APK；上传后仍需匿名回下载、哈希、签名和清单校验。`stable` 只在主/次版本升级时前进。
 
 ## 并行执行与代理协作
 

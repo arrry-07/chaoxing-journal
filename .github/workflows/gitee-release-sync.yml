@@ -1,20 +1,23 @@
-name: Gitee release sync (manual batch)
+name: GitHub release index and Gitee batch sync
 
-# GitHub Releases remain mandatory for every formal package. Gitee is an
-# optional batched mirror; run this workflow only at an explicit checkpoint.
+# Every published GitHub Release updates the small Gitee index. APK mirroring
+# remains an explicit batch operation with no scheduled or per-release upload.
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       mode:
-        description: Sync the current GitHub latest at a batch checkpoint or seed explicit tags
+        description: Update the small index, sync a batch checkpoint, or seed explicit tags
         required: true
         type: choice
-        default: latest
+        default: index
         options:
+          - index
           - latest
           - seed
       tags:
-        description: Comma-separated seed tags, for example v1.7.4,v1.7.5,v1.7.52
+        description: Optional index/seed tag, or comma-separated seed tags
         required: false
         type: string
         default: ""
@@ -37,14 +40,14 @@ concurrency:
 
 jobs:
   sync:
-    name: Verify and publish to Gitee
+    name: Update index or verify and publish a Gitee batch
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       GITHUB_TOKEN: ${{ github.token }}
       GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-      MODE: ${{ inputs.mode || 'latest' }}
-      TAGS: ${{ inputs.tags }}
+      MODE: ${{ github.event_name == 'release' && 'index' || inputs.mode || 'index' }}
+      TAGS: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tags }}
       RETENTION: ${{ inputs.retention || '3' }}
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
@@ -60,6 +63,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install APK verification tools
+        if: ${{ github.event_name != 'release' && inputs.mode != 'index' }}
         run: |
           # ubuntu-latest already provides the Android SDK and cmdline tools.
           SDKMANAGER="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager"
@@ -83,9 +87,11 @@ jobs:
           if [[ -n "$TAGS" ]]; then
             args+=(--tags "$TAGS")
           fi
-          AAPT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools/36.0.0/aapt"
-          APKSIGNER="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools/36.0.0/apksigner"
-          test -x "$AAPT"
-          test -x "$APKSIGNER"
-          args+=(--aapt "$AAPT" --apksigner "$APKSIGNER")
+          if [[ "$MODE" != "index" ]]; then
+            AAPT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools/36.0.0/aapt"
+            APKSIGNER="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools/36.0.0/apksigner"
+            test -x "$AAPT"
+            test -x "$APKSIGNER"
+            args+=(--aapt "$AAPT" --apksigner "$APKSIGNER")
+          fi
           python3 scripts/gitee_release_sync.py "${args[@]}"
