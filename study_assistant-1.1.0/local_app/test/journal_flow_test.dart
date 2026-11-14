@@ -130,7 +130,7 @@ void main() {
           home: Scaffold(body: AssignmentListScreen(store: store))));
       expect(find.text('今天截止'), findsNothing);
       expect(find.text(label), findsOneWidget);
-      expect(find.textContaining('${tomorrow.month}月${tomorrow.day}日  周'),
+      expect(find.textContaining('${tomorrow.month}月${tomorrow.day}日 周'),
           findsOneWidget);
     });
   }

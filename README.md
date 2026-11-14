@@ -6,13 +6,13 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.7.55](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.55/chaoxing-journal-1.7.55.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.55) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.7.56](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.56/chaoxing-journal-1.7.56.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.56) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
 ## 功能
 
-- **作业时间轴**：按北京时间显示日期与截止时刻，未逾期在前、逾期在后；不确定的日期或提交状态单独保留，不靠猜测补全。
+- **作业时间轴**：按北京时间用日期标题分隔作业，卡片左栏只显示截止时刻，未逾期在前、逾期在后；不确定的日期或提交状态单独保留，不靠猜测补全。
 - **搜索、期限筛选与排序**：按作业标题或课程搜索，期限固定为“全部 / 未截止 / 已逾期”；可按默认分组、截止时间、课程或作业名称排序，中文拼音、英文和数字自然排序，并记住账号隔离偏好。
 - **明确的同步反馈**：首次同步先显示课程和作业，逐份确认截止时间时即时更新；完成、部分成功和失败分别提示，并支持登录失效和安全验证后的恢复。
 - **白天后台检查与本地提醒**：学习通作业默认每 4 小时在 08:00—次日 00:00 内由 WorkManager 兜底检查，可选 2/4/6 小时；新增正式作业与截止提醒分别设置，桌面小组件显示最近保存的本机快照。
@@ -32,20 +32,20 @@
 
 ## 下载安装
 
-**首次安装或手动升级均下载 1.7.55（62）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**首次安装或手动升级均下载 1.7.56（63）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.7.55.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.55/chaoxing-journal-1.7.55.apk)。发布说明及校验文件见 [1.7.55 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.55)。
+1. [下载 chaoxing-journal-1.7.56.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.56/chaoxing-journal-1.7.56.apk)。发布说明及校验文件见 [1.7.56 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.56)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到 1.7.55？</summary>
+<summary>已经安装：如何升级到 1.7.56？</summary>
 
-1.7.55 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版尚未单独上传 Gitee APK，因此国内镜像仍可能停留在上一批量点，但索引会指向 GitHub 同版本包。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
+1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版不单独上传 Gitee APK，因此国内镜像仍可能停留在上一批量点，但索引会指向 GitHub 同版本包。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
-体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.7.55 继续沿用既有体验身份。
+体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.7.56 继续沿用既有体验身份。
 
 ## 使用边界
 

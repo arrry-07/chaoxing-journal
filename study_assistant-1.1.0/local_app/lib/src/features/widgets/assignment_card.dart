@@ -16,7 +16,6 @@ class AssignmentCard extends StatelessWidget {
       this.compact = false,
       this.countdown = false,
       this.showFullDeadline = true,
-      this.showDateInRail = false,
       this.deadlinePending = false,
       this.previewOnly = false,
       this.previewSaving = false});
@@ -26,7 +25,6 @@ class AssignmentCard extends StatelessWidget {
   final VoidCallback? onOpenAssignment;
   final bool opening;
   final bool showFullDeadline;
-  final bool showDateInRail;
   final bool deadlinePending, previewOnly, previewSaving;
   final bool compact, countdown;
   @override
@@ -71,29 +69,15 @@ class AssignmentCard extends StatelessWidget {
     final hasTime = d != null && a.deadlineTrusted && !a.deadlineReadFailed;
     final clock =
         hasTime ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d)) : '—';
-    final railDate =
-        hasTime ? DateFormat('M/d').format(AssignmentQuery.beijing(d)) : null;
     // Measure at the user's text scale: a fixed rail clips times at 2× size.
     final timeMeasure = TextPainter(
         text: const TextSpan(text: '00:00', style: Journal.time),
         textDirection: Directionality.of(context),
         textScaler: MediaQuery.textScalerOf(context))
       ..layout();
-    final dateMeasure = TextPainter(
-        text: TextSpan(
-            text: '00/00',
-            style: Journal.metadata.copyWith(fontWeight: FontWeight.w600)),
-        textDirection: Directionality.of(context),
-        textScaler: MediaQuery.textScalerOf(context))
-      ..layout();
-    final railWidth = (timeMeasure.width > dateMeasure.width
-                ? timeMeasure.width
-                : dateMeasure.width)
-            .ceilToDouble() +
-        4;
+    final railWidth = timeMeasure.width.ceilToDouble() + 4;
     final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
     timeMeasure.dispose();
-    dateMeasure.dispose();
     final metadata = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -121,7 +105,7 @@ class AssignmentCard extends StatelessWidget {
           button: onCardTap != null,
           onTap: onCardTap,
           label:
-              '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}$deadline',
+              '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${hasTime ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}' : deadline}',
           excludeSemantics: true,
           child: SizedBox(
               width: double.infinity,
@@ -156,24 +140,7 @@ class AssignmentCard extends StatelessWidget {
                                         ),
                                       )
                                     else
-                                      Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          if (showDateInRail &&
-                                              railDate != null) ...[
-                                            Text(
-                                              railDate,
-                                              style: Journal.metadata.copyWith(
-                                                fontWeight: FontWeight.w600,
-                                                height: 1.15,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 2),
-                                          ],
-                                          Text(clock, style: Journal.time),
-                                        ],
-                                      ),
+                                      Text(clock, style: Journal.time),
                                   ],
                                 ),
                               ),
