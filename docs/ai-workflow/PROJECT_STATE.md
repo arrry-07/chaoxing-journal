@@ -1,6 +1,6 @@
 # 当前工程状态
 
-更新时间：2026-11-12（Asia/Shanghai）。这是工作摘要，接手时须核对现场；以下早期机制初始化记录保留为历史，当前任务以末尾最新条目为准。
+更新时间：2026-11-14（Asia/Shanghai）。这是工作摘要，接手时须核对现场；以下早期机制初始化记录保留为历史，当前任务以末尾最新条目为准。
 
 ## 当前目标与范围
 
@@ -235,3 +235,15 @@
 - MuMu Android 15 从 `1.7.53+60` 同签名覆盖到正式包，`firstInstallTime` 保持 `2026-11-04 19:05:10`，登录态与课程作业保留；实际核对三筛选项顺序，以及课程名称/作业名称排序的左上角日期时间。设备 `base.apk` 哈希与正式 APK 一致。
 - 文档新增执行方案、完整发布记录和三张 MuMu 证据；后续文档提交不移动 Tag，应用源码以 `06eb2df` 为准。
 - 未完成：Gitee manual 仍为 `1.7.52+59`，本版按新规则不逐包上传，等待下一次维护者选择的批量点；Gitee 大陆多网络、群聊漏拉、年份/状态补全、音效、完整反馈服务、API31、锁屏、TalkBack 与实体手机后台/Doze 仍未验证。
+
+## 2026-11-14 1.7.55 GitHub + Gitee 双更新渠道正式发布
+
+- 按用户要求本对话只做阶段一，不改首页作业 UI。功能提交 `f5cd6c0` 经 PR #24 合并到 main `9a31a88c1bdad569999f5cf91ac046e9e1a57198`；annotated Tag `v1.7.55`（object `074b2427a87ec87b79dd899cad5ed37728709c96`）指向最终 main，版本 `1.7.55+62`。
+- 客户端默认官方源并行检查 Gitee manual 与 GitHub Release；同版本优先 GitHub 元数据，摘要/大小一致时 Gitee 主、GitHub 备，冲突只保留 GitHub。Gitee `404/410/408/429/5xx` 可使用备用 APK；忽略版本键稳定为显示版本并兼容旧键。
+- Gitee 新增 Release published 自动 `index`，只更新小索引、不下载/上传 APK、不清附件、不推进普通补丁 stable；未镜像版本使用 GitHub `apkUrl` 且省略 backup。`latest` 与无 tag index 使用最高公开正式 Release。
+- 验证：Flutter 全量 `871 passed / 1 skipped`；上海/洛杉矶各 `35 passed`；Gitee synchronizer `33`、workflow `10`、PowerShell 清单 `69` 通过；ASCII `flutter analyze`、格式 191 文件 0 改动、原生合成 41+38、Gradle JVM/仪器测试编译/lint 通过。`actionlint` 因本机 GitHub 下载 TLS 失败未安装，未宣称通过。
+- PR CI `43567883131`、`43568386752`，main CI `43570064108`，Tag CI `43570850225` 均成功。正式 APK 58,852,230 字节，SHA-256 `36da9805eb6dd9dc69c28a89344fdcf94218de6ead68908eba8108f95acf5d60`；草稿与公开匿名完整回下载、digest、ZIP、v2 原证书、双 ABI 和 16 KiB 对齐均通过。
+- Release <https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.55> 已公开、非预发布并设为 latest。MuMu 从 `1.7.54+61` 同签名覆盖，`firstInstallTime` 保持 `2026-11-04 19:05:10`，登录态与课程作业保留，设备 `base.apk` 哈希一致。
+- Release 自动索引 run `43571846398` 成功：stable `1.7.4+56`、manual `1.7.55+62`、deleted `[]`；manual 的 `apkUrl` 为 GitHub 正式包且无 `backupApkUrl`。手动重跑 `43572300683` 输出 `changed=false`。隔离 `emulator-5554` 的 `1.7.53+60` 冷启动已从 Gitee 索引发现 `1.7.55`；该实例无登录态，只验证发现，不验证安装。
+- 文档新增[1.7.55 双更新渠道验收与发布记录](../reviews/2026-11-14-1.7.55双更新渠道验收与发布记录.md)及两张证据；后续文档提交不移动 Tag，应用源码以 `9a31a88` 为准。
+- 未完成：Gitee APK 仍停在 `1.7.52+59`，需维护者选定批量点后上传并完整校验；Gitee 大陆多网络、旧客户端完整下载/安装、API31、锁屏、TalkBack 与实体手机后台/Doze 仍未验证。首页作业日期分组 UI 留到独立对话以 `1.7.56+63` 发布。
