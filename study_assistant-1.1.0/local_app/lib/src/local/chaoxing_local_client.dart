@@ -542,6 +542,7 @@ class ChaoxingLocalClient {
         } on ChaoxingAuthenticationException {
           rethrow;
         } on SyncReadException catch (e) {
+          if (e.issue.kind == SyncIssueKind.cancelled) rethrow;
           if (generation != _sessionGeneration) return const [];
           failure = e.issue;
         } catch (_) {
@@ -688,14 +689,21 @@ class ChaoxingLocalClient {
     }
     progress?.addRows(parsed);
     return _hydrateWorkDeadlines(parsed,
-        generation: generation, progress: progress);
+        generation: generation,
+        progress: progress,
+        readStartTimes: () async => (await _readV3FormalHomework(course,
+                generation: generation, requestKind: '截止时间佐证'))
+            .starts);
   }
 
   Future<List<Assignment>> _hydrateWorkDeadlines(List<Assignment> rows,
       {required int generation,
       _SyncProgressTracker? progress,
-      Map<String, DateTime> starts = const {}}) async {
+      Map<String, DateTime> starts = const {},
+      Future<Map<String, DateTime>> Function()? readStartTimes}) async {
     final result = <Assignment>[];
+    var startTimes = starts;
+    var startTimesRequested = false;
     progress?.beginDetails(rows);
     for (final item in rows) {
       if (item.isCompleted) {
@@ -736,13 +744,35 @@ class ChaoxingLocalClient {
             return (
               body: body,
               evidence: ChaoxingAssignmentParser.readDetailDeadline(body,
-                  startedAt: starts[item.id]),
+                  startedAt: startTimes[item.id]),
             );
           });
           evidence = detail.evidence;
+          if (evidence.missingYear &&
+              startTimes[item.id] == null &&
+              readStartTimes != null) {
+            // Signed HTML lists omit absolute starts. Read the formal API only
+            // when needed; its validated course/class/work identity supplies an
+            // anchor, never a replacement list or status. The detail parser
+            // still requires the displayed start to match to the minute.
+            if (!startTimesRequested) {
+              startTimesRequested = true;
+              startTimes = await readStartTimes();
+              if (generation != _sessionGeneration) {
+                progress?.clearPending();
+                return const [];
+              }
+            }
+            if (startTimes[item.id] != null) {
+              evidence = _measureParse(
+                  '作业详情',
+                  () => ChaoxingAssignmentParser.readDetailDeadline(detail.body,
+                      startedAt: startTimes[item.id]));
+            }
+          }
           if (kDebugMode) {
             debugPrint(
-                '[DeadlineRead] status=${response?.statusCode} bytes=${detail.body.length} startAnchor=${starts.containsKey(item.id)} exact=${evidence.deadlineAt != null} noLimit=${evidence.noLimit} missingYear=${evidence.missingYear} notOpen=${evidence.notOpen}');
+                '[DeadlineRead] status=${response?.statusCode} bytes=${detail.body.length} startAnchor=${startTimes.containsKey(item.id)} exact=${evidence.deadlineAt != null} noLimit=${evidence.noLimit} missingYear=${evidence.missingYear} notOpen=${evidence.notOpen}');
           }
           if (evidence.deadlineAt == null && !evidence.noLimit) {
             _noteParseFailure('作业详情');
@@ -769,6 +799,11 @@ class ChaoxingLocalClient {
               courseKey: item.courseKey,
               elapsedMs: watch.elapsedMilliseconds);
         } on SyncReadException catch (e) {
+          if (e.issue.kind == SyncIssueKind.cancelled) rethrow;
+          if (generation != _sessionGeneration) {
+            progress?.clearPending();
+            return const [];
+          }
           failure = SyncIssue(e.issue.kind, e.issue.message,
               stage: 'detail',
               courseKey: item.courseKey,
@@ -905,6 +940,18 @@ class ChaoxingLocalClient {
   // fanyav3 fetches homework separately from its exam and activity APIs.
   Future<List<Assignment>> _fetchV3FormalHomework(ChaoxingCourseRef course,
       {required int generation, _SyncProgressTracker? progress}) async {
+    final list = await _readV3FormalHomework(course,
+        generation: generation, progress: progress);
+    if (generation != _sessionGeneration) return const [];
+    return _hydrateWorkDeadlines(list.rows,
+        generation: generation, starts: list.starts, progress: progress);
+  }
+
+  Future<({List<Assignment> rows, Map<String, DateTime> starts})>
+      _readV3FormalHomework(ChaoxingCourseRef course,
+          {required int generation,
+          _SyncProgressTracker? progress,
+          String requestKind = '作业列表'}) async {
     final result = <Assignment>[];
     final starts = <String, DateTime>{};
     final seen = <String>{};
@@ -919,12 +966,14 @@ class ChaoxingLocalClient {
               'pageNum': page,
               'pageSize': 100
             },
-            headers: {
-              'User-Agent': courseUserAgent
-            });
+            requestKind: requestKind,
+            headers: {'User-Agent': courseUserAgent});
         if (generation != _sessionGeneration) {
           progress?.retractCourse(courseKey);
-          return const [];
+          return (
+            rows: const <Assignment>[],
+            starts: const <String, DateTime>{}
+          );
         }
         final pageRows = <Assignment>[];
         final pageResult = _measureParse('作业列表', () {
@@ -1035,8 +1084,7 @@ class ChaoxingLocalClient {
           progress?.addRows(pageRows, courseKey: courseKey);
         }
         if (result.length == pageResult.total) {
-          return _hydrateWorkDeadlines(result,
-              generation: generation, starts: starts, progress: progress);
+          return (rows: result, starts: starts);
         }
         if (pageResult.rowCount == 0) {
           _noteParseFailure('作业列表');
@@ -1104,12 +1152,20 @@ class ChaoxingLocalClient {
     String uri, {
     Map<String, dynamic>? queryParameters,
     Map<String, String>? headers,
+    String? requestKind,
   }) async {
     final parsedUri = Uri.parse(uri);
-    final kind = _requestKind(parsedUri.path);
+    final kind = requestKind ?? _requestKind(parsedUri.path);
     final generation = _sessionGeneration;
     var attempt = 0;
     while (true) {
+      if (_stopRequested) {
+        throw const SyncReadException(SyncIssue(
+          SyncIssueKind.cancelled,
+          '本次同步已取消',
+          stage: 'request',
+        ));
+      }
       if (generation != _sessionGeneration) return null;
       final circuit = _openCircuits[kind];
       if (circuit != null) {
@@ -1381,7 +1437,7 @@ class ChaoxingLocalClient {
         '课程列表' => 'courses',
         '课程入口' => 'coursePage',
         '课程导航' || '作业列表' => 'workList',
-        '作业详情' => 'detail',
+        '作业详情' || '截止时间佐证' => 'detail',
         _ => 'courses',
       };
 
