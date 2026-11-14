@@ -24,7 +24,9 @@ class AssignmentChangesScreen extends StatelessWidget {
           Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                  onPressed: () => context.go('/profile'),
+                  onPressed: () => context.canPop()
+                      ? context.pop()
+                      : context.go('/profile/records'),
                   icon: const Icon(Icons.arrow_back),
                   label: const Text('返回'))),
           Text('作业变化', style: Theme.of(context).textTheme.headlineMedium),

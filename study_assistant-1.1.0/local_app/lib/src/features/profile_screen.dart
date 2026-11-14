@@ -65,6 +65,19 @@ class ProfileScreen extends StatelessWidget {
                     title: '学习与同步',
                     children: [
                       _SettingsTile(
+                        icon: Icons.sync,
+                        title: '同步学习通',
+                        subtitle: '更新课程与作业等学习数据',
+                        compactSubtitle: true,
+                        onTap: () => context.push('/sync'),
+                      ),
+                      _SettingsTile(
+                        icon: Icons.event_note_outlined,
+                        title: '个人安排',
+                        subtitle: '个人待办、考试与每日计划',
+                        onTap: () => context.push('/profile/arrangements'),
+                      ),
+                      _SettingsTile(
                           icon: Icons.tune,
                           title: '显示与小组件',
                           subtitle: '密度、日期与桌面显示范围',
@@ -73,46 +86,11 @@ class ProfileScreen extends StatelessWidget {
                                   builder: (_) =>
                                       DisplaySettingsScreen(store: store)))),
                       _SettingsTile(
-                          icon: Icons.event_note_outlined,
-                          title: '个人待办与考试',
-                          subtitle: '手动安排，独立于学习通作业',
-                          onTap: () => context.push('/agenda')),
-                      _SettingsTile(
-                          icon: Icons.inventory_2_outlined,
-                          title: '学期归档',
-                          subtitle: '保存与回看本机学期快照',
-                          onTap: () => context.push('/terms')),
-                      _SettingsTile(
-                        icon: Icons.notifications_none,
-                        title: '每日计划',
-                        subtitle: '个人安排与预计耗时，不改变提交状态',
-                        onTap: () => context.push('/plan'),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.sync,
-                        title: '同步学习通',
-                        subtitle: '更新课程与作业等学习数据',
-                        compactSubtitle: true,
-                        onTap: () => context.push('/sync'),
-                      ),
-                      _SettingsTile(
                         icon: Icons.inventory_2_outlined,
-                        title: '本地记录',
-                        subtitle: '${store.assignments.length} 条作业记录保存在本机',
-                        onTap: () => context.push('/records'),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.visibility_off_outlined,
-                        title: '已隐藏作业',
+                        title: '学习记录',
                         subtitle:
-                            '${store.hiddenAssignments.length} 条，可恢复到作业清单',
-                        onTap: () => _showHiddenAssignments(context),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.history,
-                        title: '作业变化',
-                        subtitle: '${store.changes.length} 条最近变化',
-                        onTap: () => context.push('/changes'),
+                            '${store.assignments.length} 条作业 · ${store.changes.length} 条变化',
+                        onTap: () => context.push('/profile/records'),
                       ),
                     ],
                   ),
@@ -251,43 +229,6 @@ class ProfileScreen extends StatelessWidget {
     } catch (_) {
       if (context.mounted) _showLogoutFailure(context);
     }
-  }
-
-  void _showHiddenAssignments(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.7,
-        child: AnimatedBuilder(
-          animation: store,
-          builder: (context, _) => Column(children: [
-            const Padding(padding: EdgeInsets.all(16), child: Text('已隐藏作业')),
-            if (store.error != null)
-              Padding(
-                  padding: const EdgeInsets.all(12), child: Text(store.error!)),
-            Expanded(
-                child: store.hiddenAssignments.isEmpty
-                    ? const Center(child: Text('暂无隐藏作业'))
-                    : ListView.builder(
-                        itemCount: store.hiddenAssignments.length,
-                        itemBuilder: (context, index) {
-                          final item = store.hiddenAssignments[index];
-                          return ListTile(
-                              title: Text(item.title),
-                              subtitle: Text(item.courseName),
-                              trailing: TextButton(
-                                  onPressed: store.isLoading
-                                      ? null
-                                      : () => store.updateCompletion(
-                                          item.id, false),
-                                  child: const Text('恢复')));
-                        })),
-          ]),
-        ),
-      ),
-    );
   }
 
   void _showLogoutFailure(BuildContext context) {
