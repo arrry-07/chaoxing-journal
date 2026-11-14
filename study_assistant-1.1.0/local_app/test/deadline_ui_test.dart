@@ -137,8 +137,9 @@ void main() {
     expect(find.text('无期限'), findsOneWidget);
   });
 
-  testWidgets('sorted card keeps date and time in the left rail',
+  testWidgets('card keeps only time in the left rail with full semantics',
       (tester) async {
+    final semantics = tester.ensureSemantics();
     await initializeDateFormatting('zh_CN');
     final now = DateTime.utc(2026, 11, 28, 10);
     final assignment = Assignment(
@@ -158,23 +159,25 @@ void main() {
           now: now,
           onTap: () {},
           onOpenAssignment: () {},
-          showDateInRail: true,
           showFullDeadline: false,
+          countdown: true,
         ),
       ),
     ));
 
-    final date = find.text('11/28');
     final time = find.text('22:50');
     final title = find.text('电磁学（上）练习一');
-    expect(date, findsOneWidget);
+    expect(find.text('11/28'), findsNothing);
     expect(time, findsOneWidget);
     expect(find.textContaining('截止 11月28日'), findsNothing);
-    expect((tester.getTopLeft(date).dx - tester.getTopLeft(time).dx).abs(),
-        lessThan(0.5));
-    expect(tester.getTopLeft(date).dy, lessThan(tester.getTopLeft(time).dy));
-    expect(tester.getTopLeft(date).dy,
+    expect(tester.getTopLeft(time).dx, lessThan(tester.getTopLeft(title).dx));
+    expect(tester.getTopLeft(time).dy,
         lessThanOrEqualTo(tester.getTopLeft(title).dy));
+    expect(
+      find.bySemanticsLabel(RegExp('截止 11月28日 22:50')),
+      findsOneWidget,
+    );
+    semantics.dispose();
   });
 
   testWidgets('card keeps the original placeholder time rail without a time',

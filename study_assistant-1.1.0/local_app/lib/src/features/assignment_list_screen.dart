@@ -266,7 +266,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             assignment: a,
             now: now,
             showFullDeadline: false,
-            showDateInRail: sortOrder != HomeSortOrder.grouped,
             compact: store.display.compact,
             countdown: store.display.countdown,
             deadlinePending: store.isHomeDeadlinePending(a.id),
@@ -429,7 +428,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   ],
                   ...timeline(groups.overdue),
                 ] else
-                  ...sortedItems.map(card),
+                  ...timeline(sortedItems),
               ] else if (recoveryScope != null) ...[
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
@@ -477,7 +476,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text(
             '${day.year == AssignmentQuery.beijing(now).year ? '' : '${day.year}年'}'
-            '${day.month}月${day.day}日  周${'一二三四五六日'[day.weekday - 1]}',
+            '${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}',
             style: Journal.metadata.copyWith(
                 color: Journal.ink, fontSize: 16, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),

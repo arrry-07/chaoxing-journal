@@ -21,15 +21,15 @@ void main() {
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.resetDevicePixelRatio);
     addTearDown(t.view.resetPhysicalSize);
-    for (final width in [320.0, 393.0]) {
+    for (final width in [320.0, 390.0]) {
       for (final scale in [1.0, 2.0]) {
         var details = 0, opens = 0;
         t.view.physicalSize = Size(width, 850);
         final key = GlobalKey();
         final item = Assignment(
             id: 'cx:work:1:2:3',
-            title: '综合实验与分析报告（样例）',
-            courseName: '计算方法与实践',
+            title: '综合实验与分析报告及课程项目复盘总结材料（样例）',
+            courseName: '计算方法与实践专题研讨课程',
             requirementsText: '',
             status: 'pending',
             deadlineAt: DateTime.utc(2026, 11, 7, 7, 23),
@@ -60,8 +60,14 @@ void main() {
         await t.pumpAndSettle();
         expect(t.takeException(), isNull, reason: '$width/$scale');
         final action = find.text('在学习通内打开作业');
-        expect(t.getSize(find.widgetWithText(TextButton, '在学习通内打开作业')).height,
-            greaterThanOrEqualTo(48));
+        final actionButton = find.widgetWithText(TextButton, '在学习通内打开作业');
+        expect(t.getSize(actionButton).height, greaterThanOrEqualTo(48));
+        final titleRect = t.getRect(find.text(item.title));
+        final actionRect = t.getRect(actionButton);
+        final timeRect = t.getRect(find.text('15:23'));
+        expect(titleRect.overlaps(actionRect), isFalse,
+            reason: '$width/$scale');
+        expect(titleRect.overlaps(timeRect), isFalse, reason: '$width/$scale');
         await t.tap(action);
         expect(opens, 1);
         expect(details, 0);
@@ -70,7 +76,7 @@ void main() {
         await t.tap(find.text('待提交'));
         expect(details, 2);
         await t.pumpAndSettle();
-        if (width == 393 && scale == 1) {
+        if (width == 390 && scale == 1) {
           expect(
               (t.getCenter(find.text('待提交')).dy - t.getCenter(action).dy).abs(),
               lessThan(4));

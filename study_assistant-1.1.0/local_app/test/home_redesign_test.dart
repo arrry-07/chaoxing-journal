@@ -213,6 +213,10 @@ void main() {
         work(3, title: 'Zulu 作业', due: now.add(const Duration(days: 10)));
     final s = _Store()..replaceAssignmentsForTest([zulu, mike, alpha]);
     addTearDown(s.dispose);
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(1000, 2000);
+    addTearDown(t.view.resetDevicePixelRatio);
+    addTearDown(t.view.resetPhysicalSize);
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
     await t.pumpAndSettle();
@@ -240,7 +244,7 @@ void main() {
     expect(
         t
             .widgetList<AssignmentCard>(find.byType(AssignmentCard))
-            .every((card) => card.showDateInRail && !card.showFullDeadline),
+            .every((card) => !card.showFullDeadline),
         isTrue);
 
     final alphaTop =
@@ -254,8 +258,8 @@ void main() {
     expect(
         find.byWidgetPredicate((widget) =>
             widget is Text &&
-            RegExp(r'^\d+月\d+日  周[一二三四五六日]$').hasMatch(widget.data ?? '')),
-        findsNothing);
+            RegExp(r'^\d+月\d+日 周[一二三四五六日]$').hasMatch(widget.data ?? '')),
+        findsNWidgets(3));
 
     await t.tap(find.text('搜索与筛选'));
     await t.pumpAndSettle();
