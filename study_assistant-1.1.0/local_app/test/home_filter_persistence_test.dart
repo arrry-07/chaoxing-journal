@@ -291,7 +291,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('home deadline picker shows only the three current choices',
+  testWidgets('home deadline picker keeps three choices with all first',
       (tester) async {
     final store = makeStore(Session());
     addTearDown(store.dispose);
@@ -306,7 +306,8 @@ void main() {
         .widgetList<ChoiceChip>(find.byType(ChoiceChip))
         .map((chip) => (chip.label as Text).data)
         .toList();
-    expect(chips, ['未逾期', '全部', '已逾期']);
+    expect(chips, ['全部', '未截止', '已逾期']);
+    expect(find.text('未逾期'), findsNothing);
     expect(find.text('7天内'), findsNothing);
     expect(find.text('30天内'), findsNothing);
     expect(find.text('期限待确认'), findsNothing);
@@ -346,7 +347,7 @@ void main() {
     await t.tap(find.text('搜索与筛选'));
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), '数学');
-    await tapSheetOption(t, '未逾期');
+    await tapSheetOption(t, '未截止');
     await tapSheetOption(t, '作业名称');
     await tapSheetOption(t, '应用');
     expect(s.homeFilters.sortOrder, HomeSortOrder.title);

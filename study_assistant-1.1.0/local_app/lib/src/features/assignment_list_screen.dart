@@ -265,7 +265,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             key: ValueKey('assignment-${a.id}'),
             assignment: a,
             now: now,
-            showFullDeadline: sortOrder != HomeSortOrder.grouped,
+            showFullDeadline: false,
+            showDateInRail: sortOrder != HomeSortOrder.grouped,
             compact: store.display.compact,
             countdown: store.display.countdown,
             deadlinePending: store.isHomeDeadlinePending(a.id),
@@ -525,7 +526,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         AssignmentDeadlineFilter.overdue => '已逾期',
         AssignmentDeadlineFilter.uncertain => '期限待确认',
         AssignmentDeadlineFilter.noDeadline => '无截止日期',
-        AssignmentDeadlineFilter.notExpired => '未逾期',
+        AssignmentDeadlineFilter.notExpired => '未截止',
       };
 
   String _sortLabel(HomeSortOrder order) => switch (order) {

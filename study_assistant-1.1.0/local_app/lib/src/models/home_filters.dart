@@ -11,8 +11,8 @@ enum AssignmentDeadlineFilter {
 }
 
 const homeDeadlineFilterChoices = [
-  AssignmentDeadlineFilter.notExpired,
   AssignmentDeadlineFilter.all,
+  AssignmentDeadlineFilter.notExpired,
   AssignmentDeadlineFilter.overdue,
 ];
 

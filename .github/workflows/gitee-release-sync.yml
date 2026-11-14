@@ -1,18 +1,17 @@
-name: Gitee release sync
+name: Gitee release sync (manual batch)
 
+# GitHub Releases remain mandatory for every formal package. Gitee is an
+# optional batched mirror; run this workflow only at an explicit checkpoint.
 on:
-  schedule:
-    # 19:17 UTC is 03:17 on the following day in Asia/Shanghai.
-    - cron: "17 19 * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: Sync the current GitHub latest or seed explicit historical tags
+        description: Sync the current GitHub latest at a batch checkpoint or seed explicit tags
         required: true
         type: choice
-        default: daily
+        default: latest
         options:
-          - daily
+          - latest
           - seed
       tags:
         description: Comma-separated seed tags, for example v1.7.4,v1.7.5,v1.7.52
@@ -44,7 +43,7 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
       GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-      MODE: ${{ inputs.mode || 'daily' }}
+      MODE: ${{ inputs.mode || 'latest' }}
       TAGS: ${{ inputs.tags }}
       RETENTION: ${{ inputs.retention || '3' }}
       PYTHONUTF8: "1"
