@@ -7,6 +7,50 @@ import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 
 void main() {
+  for (final key in ['mes', 'msg2', 'errorMsg']) {
+    test('login reads the platform $key refusal field', () async {
+      final dio = Dio()
+        ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+          h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data: {'status': false, key: '请先完成登录验证'}));
+        }));
+      final result = await ChaoxingLocalClient(dio: dio)
+          .login(account: 'synthetic', password: 'synthetic');
+      expect(result.message, '请先完成登录验证');
+    });
+  }
+  for (final asJsonText in [false, true]) {
+    test('login preserves the platform refusal reason (JSON text=$asJsonText)',
+        () async {
+      final dio = Dio()
+        ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+          h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data: asJsonText
+                  ? '{"status":false,"msg":"登录失败，请完成安全验证"}'
+                  : {'status': false, 'msg': '登录失败，请完成安全验证'}));
+        }));
+      final result = await ChaoxingLocalClient(dio: dio)
+          .login(account: 'synthetic', password: 'synthetic');
+      expect(result.success, isFalse);
+      expect(result.message, '登录失败，请完成安全验证');
+    });
+  }
+  test('unrecognized login refusal does not diagnose an incorrect password',
+      () async {
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        h.resolve(Response(
+            requestOptions: o, statusCode: 200, data: {'status': false}));
+      }));
+    final result = await ChaoxingLocalClient(dio: dio)
+        .login(account: 'synthetic', password: 'synthetic');
+    expect(result.success, isFalse);
+    expect(result.message, isNot(contains('检查账号和密码')));
+  });
   Future<void> verifyStaleDetailFetchIsDiscarded(
       {required bool singleCourse}) async {
     final detailStarted = Completer<void>();

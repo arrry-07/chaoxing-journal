@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.7.56](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.56/chaoxing-journal-1.7.56.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.56) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.7.57](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.57/chaoxing-journal-1.7.57.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.57) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
@@ -32,20 +32,20 @@
 
 ## 下载安装
 
-**首次安装或手动升级均下载 1.7.56（63）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**首次安装或手动升级均下载 1.7.57（64）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.7.56.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.56/chaoxing-journal-1.7.56.apk)。发布说明及校验文件见 [1.7.56 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.56)。
+1. [下载 chaoxing-journal-1.7.57.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.7.57/chaoxing-journal-1.7.57.apk)。发布说明及校验文件见 [1.7.57 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.57)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到 1.7.56？</summary>
+<summary>已经安装：如何升级到 1.7.57？</summary>
 
 1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版不单独上传 Gitee APK，因此国内镜像仍可能停留在上一批量点，但索引会指向 GitHub 同版本包。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
-体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.7.56 继续沿用既有体验身份。
+体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.7.57 继续沿用既有体验身份。
 
 ## 使用边界
 

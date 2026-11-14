@@ -4,9 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/app/app_version.dart';
 
 void main() {
-  test('home assignment timeline release uses frozen version', () {
-    expect(AppVersion.name, '1.7.56');
-    expect(AppVersion.code, 63);
+  test('login refusal message release uses frozen version', () {
+    expect(AppVersion.name, '1.7.57');
+    expect(AppVersion.code, 64);
   });
 
   test('AppVersion matches pubspec version', () {

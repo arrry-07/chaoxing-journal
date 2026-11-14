@@ -365,14 +365,35 @@ class ChaoxingLocalClient {
       return const ChaoxingLoginResult(success: false, message: '会话已切换，请重试');
     }
     _rememberCookies(response);
-    final body = response.data?.toString() ?? '';
     final payload = _decodeJsonPayload(response.data);
+    if (const bool.fromEnvironment('AUTH_DIAGNOSTICS')) {
+      // Local diagnostic builds record shape only, never response values,
+      // credentials, cookies, redirect URLs or personal identifiers.
+      final map = payload is Map ? payload : const {};
+      debugPrint('[AuthShape] ${jsonEncode({
+            'http': response.statusCode,
+            'contentType':
+                response.headers.value('content-type')?.split(';').first,
+            'map': payload is Map,
+            'string': payload is String,
+            'statusType': map['status']?.runtimeType.toString(),
+            'statusTrue': map['status'] == true,
+            'resultType': map['result']?.runtimeType.toString(),
+            'resultTrue': map['result'] == true,
+            'messageFields': [
+              for (final key in ['mes', 'msg', 'msg2', 'message', 'errorMsg'])
+                if (map[key] is String) key,
+            ],
+            'html': payload is String && payload.contains('<html'),
+            'length': response.data.toString().length,
+          })}');
+    }
     final success = payload is Map &&
         (payload['status'] == true || payload['result'] == true);
     if (!success) {
       return ChaoxingLoginResult(
         success: false,
-        message: _extractMessage(body) ?? '学习通登录失败，请检查账号和密码',
+        message: _extractMessage(payload) ?? '学习通未确认登录，请稍后重试',
       );
     }
     final sessionProfile = await _completeLoginSession(response.data);
@@ -1428,9 +1449,13 @@ class ChaoxingLocalClient {
     return byId.values.toList()..sort(Assignment.compareByDeadline);
   }
 
-  String? _extractMessage(String body) {
-    final match = RegExp(r'"(?:msg|message)"\s*:\s*"([^"]+)"').firstMatch(body);
-    return match?.group(1);
+  String? _extractMessage(dynamic payload) {
+    if (payload is! Map) return null;
+    for (final key in const ['mes', 'msg', 'msg2', 'message', 'errorMsg']) {
+      final value = payload[key];
+      if (value is String && value.trim().isNotEmpty) return value.trim();
+    }
+    return null;
   }
 
   Future<_ChaoxingProfile> _completeLoginSession(dynamic payload) async {
