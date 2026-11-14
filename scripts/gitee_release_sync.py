@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Verify mirrored Gitee releases and publish the public update manifests.
+"""Publish the GitHub-backed index or verify a Gitee APK batch.
 
-Historical APKs are checked without a Gitee redownload. The latest manual APK
-is downloaded anonymously and verified before manifests are published.
+Index mode reads only release metadata, checksum text and the Tag's version
+file. Batch mode checks historical assets without redownloading them; the
+latest manual APK is downloaded anonymously and verified before switching from
+the GitHub URL to a Gitee mirror.
 
 Gitee is an optional batched mirror. GitHub Releases remain mandatory for every
-formal package; this synchronizer runs only at explicit domestic mirror
-checkpoints.
+formal package.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
@@ -52,6 +54,7 @@ MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024
 GITEE_UPLOAD_TIMEOUT_SECONDS = 600
 USER_AGENT = "chaoxing-journal-gitee-sync/1.0"
+VERSION_FILE_PATH = "study_assistant-1.1.0/local_app/pubspec.yaml"
 TAG_PATTERN = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 RAW_VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -157,6 +160,24 @@ def choose_stable_release(
     return current
 
 
+def select_latest_stable_release(
+    releases: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    candidates = [
+        release
+        for release in releases
+        if release.get("draft") is False
+        and release.get("prerelease") is False
+        and is_managed_tag(str(release.get("tag_name", "")))
+    ]
+    if not candidates:
+        raise SyncError("No public non-draft release was available.")
+    return max(
+        candidates,
+        key=lambda release: tag_tuple(str(release["tag_name"])),
+    )
+
+
 def choose_previous_manual(
     target: ReleaseArtifact,
     *,
@@ -206,17 +227,25 @@ def build_manifest(
     *,
     gitee_repository: str,
     github_repository: str,
+    gitee_verified: bool = True,
 ) -> dict[str, Any]:
-    return {
+    github_url = canonical_github_apk_url(github_repository, release)
+    manifest = {
         "versionCode": release.version_code,
         "versionName": release.version_name,
-        "apkUrl": canonical_gitee_apk_url(gitee_repository, release),
-        "backupApkUrl": canonical_github_apk_url(github_repository, release),
+        "apkUrl": (
+            canonical_gitee_apk_url(gitee_repository, release)
+            if gitee_verified
+            else github_url
+        ),
         "sha256": release.sha256,
         "applicationId": APPLICATION_ID,
         "notes": release.notes,
         "size": release.size,
     }
+    if gitee_verified:
+        manifest["backupApkUrl"] = github_url
+    return manifest
 
 
 def parse_checksum(text: str, apk_name: str) -> str:
@@ -570,6 +599,27 @@ class HttpClient:
             raise SyncError("Published update manifest was not a JSON object.")
         return value
 
+    def public_text(
+        self,
+        url: str,
+        *,
+        token: str = "",
+        max_bytes: int = 64 * 1024,
+    ) -> str:
+        status, body, _ = self._request(
+            "GET",
+            url,
+            token=token,
+            headers={"Accept": "text/plain, application/octet-stream"},
+            max_bytes=max_bytes,
+        )
+        if status != 200:
+            raise safe_io_error(url, status)
+        try:
+            return body.decode("utf-8")
+        except UnicodeDecodeError:
+            raise SyncError("Remote text response was not UTF-8.") from None
+
 
 class GitHubReleaseSource:
     def __init__(
@@ -584,15 +634,137 @@ class GitHubReleaseSource:
         self.work_dir = work_dir
 
     def metadata(self, tag: str | None) -> dict[str, Any]:
-        endpoint = "/latest" if tag is None else f"/tags/{urllib.parse.quote(tag, safe='')}"
-        value = self.client.github_json(
-            f"/repos/{self.repository}/releases{endpoint}"
-        )
+        if tag is None:
+            values: list[dict[str, Any]] = []
+            page = 1
+            while True:
+                response = self.client.github_json(
+                    f"/repos/{self.repository}/releases"
+                    f"?per_page=100&page={page}"
+                )
+                if not isinstance(response, list) or any(
+                    not isinstance(item, dict) for item in response
+                ):
+                    raise SyncError("GitHub release list was invalid.")
+                values.extend(response)
+                if len(response) < 100:
+                    break
+                page += 1
+            value = select_latest_stable_release(values)
+        else:
+            value = self.client.github_json(
+                f"/repos/{self.repository}/releases/tags/"
+                f"{urllib.parse.quote(tag, safe='')}"
+            )
         if not isinstance(value, dict):
             raise SyncError("GitHub release metadata was invalid.")
         if value.get("draft") is not False or value.get("prerelease") is not False:
             raise SyncError("Only public non-draft stable releases may be mirrored.")
         return value
+
+    def index_metadata(
+        self,
+        tag: str | None,
+    ) -> tuple[ReleaseArtifact, dict[str, Any]]:
+        """Read release identity and checksum metadata without APK bytes."""
+        release = self.metadata(tag)
+        release_tag = str(release.get("tag_name", ""))
+        version_name = version_from_tag(release_tag)
+        apk_name = f"chaoxing-journal-{version_name}.apk"
+        assets = release.get("assets")
+        if not isinstance(assets, list):
+            raise SyncError("GitHub release assets were invalid.")
+        apk_assets = [
+            item
+            for item in assets
+            if isinstance(item, dict) and item.get("name") == apk_name
+        ]
+        checksum_assets = [
+            item
+            for item in assets
+            if isinstance(item, dict) and item.get("name") == "SHA256SUMS.txt"
+        ]
+        if len(apk_assets) != 1 or len(checksum_assets) != 1:
+            raise SyncError("GitHub release must contain one APK and SHA256SUMS.")
+        apk_asset = apk_assets[0]
+        checksum_asset = checksum_assets[0]
+        digest_text = str(apk_asset.get("digest", ""))
+        if not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest_text):
+            raise SyncError("GitHub APK digest was missing or invalid.")
+        github_sha = digest_text[7:].lower()
+        size = apk_asset.get("size")
+        if not isinstance(size, int) or size <= 0 or size > MAX_DOWNLOAD_BYTES:
+            raise SyncError("GitHub APK size was invalid.")
+        apk_url = str(apk_asset.get("browser_download_url", ""))
+        expected_apk_url = (
+            f"https://github.com/{self.repository}/releases/download/"
+            f"{release_tag}/{apk_name}"
+        )
+        if apk_url != expected_apk_url:
+            raise SyncError("GitHub APK URL did not match the official release route.")
+        checksum_url = str(checksum_asset.get("browser_download_url", ""))
+        expected_checksum_url = (
+            f"https://github.com/{self.repository}/releases/download/"
+            f"{release_tag}/SHA256SUMS.txt"
+        )
+        if checksum_url != expected_checksum_url:
+            raise SyncError(
+                "GitHub checksum URL did not match the official release route."
+            )
+        checksum_text = self.client.public_text(
+            checksum_url,
+            token=self.client._github_token,
+        )
+        try:
+            checksum = parse_checksum(checksum_text, apk_name)
+        except ValueError as error:
+            raise SyncError(str(error)) from None
+        if checksum != github_sha:
+            raise SyncError("SHA256SUMS did not match the GitHub asset digest.")
+        version_code = self._version_code_for_tag(release_tag, version_name)
+        artifact = ReleaseArtifact(
+            tag=release_tag,
+            version_name=version_name,
+            version_code=version_code,
+            apk_name=apk_name,
+            size=size,
+            sha256=github_sha,
+            notes=str(release.get("body") or ""),
+            github_release_url=str(release.get("html_url") or ""),
+        )
+        return artifact, release
+
+    def _version_code_for_tag(self, tag: str, version_name: str) -> int:
+        path = urllib.parse.quote(VERSION_FILE_PATH, safe="/")
+        ref = urllib.parse.quote(tag, safe="")
+        value = self.client.github_json(
+            f"/repos/{self.repository}/contents/{path}?ref={ref}"
+        )
+        if not isinstance(value, dict):
+            raise SyncError("GitHub version file metadata was invalid.")
+        if value.get("encoding") != "base64" or not isinstance(
+            value.get("content"), str
+        ):
+            raise SyncError("GitHub version file content was unavailable.")
+        try:
+            encoded = "".join(value["content"].split())
+            decoded = base64.b64decode(encoded, validate=True)
+            text = decoded.decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            raise SyncError("GitHub version file content was invalid.") from None
+        if len(decoded) > 64 * 1024:
+            raise SyncError("GitHub version file exceeded the size limit.")
+        match = re.search(
+            r"^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$",
+            text,
+            flags=re.MULTILINE,
+        )
+        if match is None or match.group(1) != version_name:
+            raise SyncError("GitHub version file did not match the release tag.")
+        version_code = int(match.group(2))
+        if version_code <= 0:
+            raise SyncError("GitHub versionCode was invalid.")
+        return version_code
 
     def download_and_verify(
         self,
@@ -990,6 +1162,55 @@ def read_public_manifests(
     return stable, manual
 
 
+def manifest_has_verified_gitee_mirror(
+    value: dict[str, Any] | None,
+    release: ReleaseArtifact,
+    *,
+    gitee_repository: str,
+    github_repository: str,
+) -> bool:
+    if value is None:
+        return False
+    try:
+        return (
+            value.get("versionName") == release.version_name
+            and value.get("versionCode") == release.version_code
+            and value.get("applicationId") == APPLICATION_ID
+            and value.get("size") == release.size
+            and str(value.get("sha256", "")).lower() == release.sha256
+            and value.get("apkUrl")
+            == canonical_gitee_apk_url(gitee_repository, release)
+            and value.get("backupApkUrl")
+            == canonical_github_apk_url(github_repository, release)
+        )
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def build_index_manifest(
+    release: ReleaseArtifact,
+    *,
+    existing_manifests: Iterable[dict[str, Any] | None],
+    gitee_repository: str,
+    github_repository: str,
+) -> dict[str, Any]:
+    gitee_verified = any(
+        manifest_has_verified_gitee_mirror(
+            value,
+            release,
+            gitee_repository=gitee_repository,
+            github_repository=github_repository,
+        )
+        for value in existing_manifests
+    )
+    return build_manifest(
+        release,
+        gitee_repository=gitee_repository,
+        github_repository=github_repository,
+        gitee_verified=gitee_verified,
+    )
+
+
 def _askpass_script(directory: Path) -> Path:
     path = directory / "gitee-askpass.sh"
     path.write_text(
@@ -1109,8 +1330,9 @@ def render_readme(
 - {GITEE_RAW_BASE}/update-manual.json
 
 维护流程由 `arrry-07/chaoxing-journal` 的 GitHub Actions 在维护者指定的
-批量同步点手动执行，不跟随每个 GitHub Release 上传 APK。所有 APK 在发布
-清单前都经过大小、SHA-256、包名、版本和签名校验。
+批量同步点手动上传和校验 APK。GitHub Release 发布后只自动更新小索引；
+未镜像版本直接使用 GitHub 下载地址，镜像版本只有在大小、SHA-256、包名、
+版本和签名校验通过后才切换为 Gitee 主地址。
 """
 
 
@@ -1268,6 +1490,107 @@ def _evidence(
     }
 
 
+def synchronize_index(
+    args: argparse.Namespace,
+    *,
+    client: HttpClient,
+    github: GitHubReleaseSource,
+    work_dir: Path,
+    current_stable_json: dict[str, Any] | None,
+    current_manual_json: dict[str, Any] | None,
+    tags: list[str],
+) -> int:
+    if len(tags) > 1:
+        raise SyncError("Index mode accepts at most one release tag.")
+    current_stable = (
+        manifest_artifact(current_stable_json)
+        if current_stable_json is not None
+        else None
+    )
+    if current_stable is None:
+        raise SyncError("Stable manifest is missing; initialize it before indexing.")
+    current_manual = (
+        manifest_artifact(current_manual_json)
+        if current_manual_json is not None
+        else None
+    )
+    candidate, _ = github.index_metadata(tags[0] if tags else None)
+    target_manual = choose_effective_manual_release(current_manual, [candidate])
+    if target_manual is candidate:
+        baseline = current_manual or current_stable
+        if candidate.version_code <= baseline.version_code:
+            raise SyncError(
+                "Indexed manual versionCode did not advance the current release."
+            )
+    if current_manual is not None and target_manual is current_manual:
+        manual_manifest = current_manual_json
+    else:
+        manual_manifest = build_index_manifest(
+            target_manual,
+            existing_manifests=(current_stable_json, current_manual_json),
+            gitee_repository=args.gitee_repository,
+            github_repository=args.github_repository,
+        )
+        assert manual_manifest is not None
+    target_stable = choose_stable_release(current_stable, target_manual)
+    if target_stable is current_stable:
+        stable_manifest = current_stable_json
+    else:
+        if target_stable.version_code <= current_stable.version_code:
+            raise SyncError(
+                "Indexed stable versionCode did not advance the current release."
+            )
+        stable_manifest = build_index_manifest(
+            target_stable,
+            existing_manifests=(current_stable_json, current_manual_json),
+            gitee_repository=args.gitee_repository,
+            github_repository=args.github_repository,
+        )
+        assert stable_manifest is not None
+    if args.dry_run:
+        print(
+            json.dumps(
+                {
+                    "mode": "index",
+                    "stable": stable_manifest["versionName"],
+                    "manual": manual_manifest["versionName"],
+                    "manualPrimary": (
+                        "gitee"
+                        if manual_manifest.get("backupApkUrl")
+                        else "github"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
+    changed = publish_manifests(
+        work_dir=work_dir,
+        stable_manifest=stable_manifest,
+        manual_manifest=manual_manifest,
+        repository=args.gitee_repository,
+        token=os.environ.get("GITEE_TOKEN", ""),
+    )
+    verify_published_manifests(
+        client,
+        expected_stable=stable_manifest,
+        expected_manual=manual_manifest,
+    )
+    print(
+        json.dumps(
+            {
+                "mode": "index",
+                "changed": changed,
+                "stable": stable_manifest["versionName"],
+                "manual": manual_manifest["versionName"],
+                "deleted": [],
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
 def synchronize(args: argparse.Namespace) -> int:
     if args.retention < 3 or args.retention > 5:
         raise SyncError("Retention must be between 3 and 5.")
@@ -1296,10 +1619,22 @@ def synchronize(args: argparse.Namespace) -> int:
     if args.mode == "seed" and not seed_tags:
         raise SyncError("Seed mode requires comma-separated tags.")
     tags: list[str | None]
-    if args.mode == "seed":
+    if args.mode == "index":
+        tags = seed_tags
+    elif args.mode == "seed":
         tags = seed_tags
     else:
         tags = [None]
+    if args.mode == "index":
+        return synchronize_index(
+            args,
+            client=client,
+            github=github,
+            work_dir=work_dir,
+            current_stable_json=current_stable_json,
+            current_manual_json=current_manual_json,
+            tags=seed_tags,
+        )
     aapt = Path(args.aapt) if args.aapt else find_android_tool("aapt")
     apksigner = Path(args.apksigner) if args.apksigner else find_android_tool(
         "apksigner"
@@ -1368,6 +1703,12 @@ def synchronize(args: argparse.Namespace) -> int:
     generated_dir.mkdir(parents=True, exist_ok=True)
     stable_output = generated_dir / "update-stable.json"
     manual_output = generated_dir / "update-manual.json"
+    stable_is_mirrored = manifest_has_verified_gitee_mirror(
+        current_stable_json,
+        target_stable,
+        gitee_repository=args.gitee_repository,
+        github_repository=args.github_repository,
+    )
     if current_stable_json is None or target_stable != current_stable:
         raw = raw_releases[target_stable.tag]
         evidence_path = generated_dir / "stable-evidence.json"
@@ -1391,11 +1732,39 @@ def synchronize(args: argparse.Namespace) -> int:
             gitee_repository=args.gitee_repository,
             github_repository=args.github_repository,
         )
+    elif not stable_is_mirrored and target_stable.tag == target_manual.tag:
+        # A GitHub-backed stable entry may be switched to a fully verified
+        # same-version Gitee mirror. The manifest generator correctly requires
+        # a newer stable version for normal generation, so this narrow refresh
+        # uses the already verified manual identity and download bytes.
+        stable_manifest = build_manifest(
+            target_manual,
+            gitee_repository=args.gitee_repository,
+            github_repository=args.github_repository,
+            gitee_verified=True,
+        )
     else:
         stable_manifest = current_stable_json
 
+    manual_is_mirrored = manifest_has_verified_gitee_mirror(
+        current_manual_json,
+        target_manual,
+        gitee_repository=args.gitee_repository,
+        github_repository=args.github_repository,
+    )
     if current_manual_json is not None and target_manual == current_manual:
-        manual_manifest = current_manual_json
+        if manual_is_mirrored:
+            manual_manifest = current_manual_json
+        else:
+            # The latest manual APK has just passed the anonymous Gitee
+            # redownload/hash checks. Same-version URL refresh must not ask the
+            # normal generator for a strictly older previous release.
+            manual_manifest = build_manifest(
+                target_manual,
+                gitee_repository=args.gitee_repository,
+                github_repository=args.github_repository,
+                gitee_verified=True,
+            )
     else:
         previous = choose_previous_manual(
             target_manual,
@@ -1452,7 +1821,11 @@ def synchronize(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("latest", "seed"), default="latest")
+    parser.add_argument(
+        "--mode",
+        choices=("index", "latest", "seed"),
+        default="index",
+    )
     parser.add_argument("--tags", default="")
     parser.add_argument("--retention", type=int, default=3)
     parser.add_argument("--work-dir", default="")

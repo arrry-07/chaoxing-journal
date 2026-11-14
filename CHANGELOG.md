@@ -2,6 +2,14 @@
 
 安装包与原始发布说明见 [Releases](https://github.com/arrry-07/chaoxing-journal/releases)。1.2.2–1.2.6 曾以本地体验包验证，没有对应公开 Release；不要把历史本地包文件名当成可下载地址。
 
+## 1.7.55（62） — GitHub + Gitee 双更新渠道（2026-11-14 正式发布）
+
+- 默认官方更新源并行检查 Gitee `update-manual.json` 与 GitHub 正式 Release 列表；Gitee 返回“已是最新”后仍会继续比较 GitHub。
+- 两源按显示版本选择较新候选；同版本优先采用 GitHub 元数据，并在大小、SHA-256 一致时使用 Gitee 下载、GitHub 备用。
+- 同版本摘要或大小冲突时丢弃冲突的 Gitee 地址，只保留 GitHub 官方 APK；单源故障时继续使用另一有效渠道。
+- GitHub 正式 Release 发布后自动运行 Gitee 小索引更新，不上传、不下载 APK，也不清理 Gitee 附件；APK 仍按维护者选定批量点镜像。
+- 未镜像版本的小索引直接指向 GitHub 同版本 APK；完成 Gitee 匿名回下载、哈希和签名校验后才切换为 Gitee 主地址。
+
 ## 1.7.54（61） — UI 边界纠正与发布节奏收口（2026-11-14 正式发布）
 
 - 恢复 1.7.53 之前登录协议区和作业卡片的时间栏与排版；期限分类、状态冲突待确认、排序与邮件草稿功能保持不变。

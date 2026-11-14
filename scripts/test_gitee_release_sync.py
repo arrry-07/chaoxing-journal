@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import replace
 from pathlib import Path
 import subprocess
@@ -74,6 +75,41 @@ class VersionSelectionTests(unittest.TestCase):
         selected = sync.choose_stable_release(stable, candidate)
 
         self.assertEqual(selected, candidate)
+
+    def test_highest_public_release_wins_even_when_latest_flag_is_elsewhere(
+        self,
+    ) -> None:
+        selected = sync.select_latest_stable_release(
+            [
+                {
+                    "tag_name": "v1.7.54",
+                    "draft": False,
+                    "prerelease": False,
+                },
+                {
+                    "tag_name": "v1.7.55",
+                    "draft": False,
+                    "prerelease": False,
+                },
+                {
+                    "tag_name": "v1.7.56",
+                    "draft": True,
+                    "prerelease": False,
+                },
+                {
+                    "tag_name": "v1.8.0",
+                    "draft": False,
+                    "prerelease": True,
+                },
+                {
+                    "tag_name": "release-1.9.0",
+                    "draft": False,
+                    "prerelease": False,
+                },
+            ]
+        )
+
+        self.assertEqual(selected["tag_name"], "v1.7.55")
 
 
 class ManifestTests(unittest.TestCase):
@@ -365,6 +401,383 @@ class RetentionTests(unittest.TestCase):
         )
 
         self.assertEqual(previous.tag, "v1.7.5")
+
+
+class IndexTests(unittest.TestCase):
+    def test_unmirrored_index_uses_github_primary_without_backup(self) -> None:
+        release = artifact("1.7.55", 62)
+
+        manifest = sync.build_manifest(
+            release,
+            gitee_repository="arrry-07/chaoxing-journal-updates",
+            github_repository="arrry-07/chaoxing-journal",
+            gitee_verified=False,
+        )
+
+        self.assertEqual(
+            manifest["apkUrl"],
+            "https://github.com/arrry-07/chaoxing-journal/"
+            "releases/download/v1.7.55/chaoxing-journal-1.7.55.apk",
+        )
+        self.assertNotIn("backupApkUrl", manifest)
+
+    def test_verified_mirror_keeps_gitee_primary_and_github_backup(self) -> None:
+        release = artifact("1.7.55", 62)
+        current = sync.build_manifest(
+            release,
+            gitee_repository="arrry-07/chaoxing-journal-updates",
+            github_repository="arrry-07/chaoxing-journal",
+        )
+
+        manifest = sync.build_index_manifest(
+            release,
+            existing_manifests=(current,),
+            gitee_repository="arrry-07/chaoxing-journal-updates",
+            github_repository="arrry-07/chaoxing-journal",
+        )
+
+        self.assertEqual(manifest, current)
+
+    def test_index_metadata_reads_version_and_checksum_without_apk(self) -> None:
+        release_name = "1.7.55"
+        tag = f"v{release_name}"
+        version_code = 62
+        sha = "a" * 64
+        apk_name = f"chaoxing-journal-{release_name}.apk"
+        release_value = {
+            "tag_name": tag,
+            "html_url": (
+                "https://github.com/arrry-07/chaoxing-journal/"
+                f"releases/tag/{tag}"
+            ),
+            "body": "Release notes",
+            "draft": False,
+            "prerelease": False,
+            "assets": [
+                {
+                    "name": apk_name,
+                    "browser_download_url": (
+                        "https://github.com/arrry-07/chaoxing-journal/"
+                        f"releases/download/{tag}/{apk_name}"
+                    ),
+                    "size": 12345,
+                    "digest": f"sha256:{sha}",
+                },
+                {
+                    "name": "SHA256SUMS.txt",
+                    "browser_download_url": (
+                        "https://github.com/arrry-07/chaoxing-journal/"
+                        f"releases/download/{tag}/SHA256SUMS.txt"
+                    ),
+                },
+            ],
+        }
+        pubspec = f"name: study_assistant_mobile\nversion: {release_name}+{version_code}\n"
+
+        class FakeClient:
+            _github_token = "token"
+
+            def github_json(self, path: str) -> dict:
+                if "/contents/" in path:
+                    return {
+                        "encoding": "base64",
+                        "content": base64.b64encode(pubspec.encode()).decode(),
+                    }
+                return release_value
+
+            def public_text(self, _url: str, **_kwargs: object) -> str:
+                return f"{sha}  {apk_name}\n"
+
+            def download(self, *_args: object, **_kwargs: object) -> None:
+                raise AssertionError("index mode must not download APK bytes")
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = sync.GitHubReleaseSource(
+                FakeClient(),  # type: ignore[arg-type]
+                work_dir=Path(directory),
+            )
+            indexed, raw = source.index_metadata(tag)
+
+        self.assertEqual(indexed.version_name, release_name)
+        self.assertEqual(indexed.version_code, version_code)
+        self.assertEqual(indexed.sha256, sha)
+        self.assertEqual(indexed.size, 12345)
+        self.assertEqual(raw["tag_name"], tag)
+
+    def test_index_rejects_checksum_or_version_mismatch(self) -> None:
+        for failure in ("checksum", "version"):
+            with self.subTest(failure=failure):
+                release_name = "1.7.55"
+                tag = f"v{release_name}"
+                sha = "a" * 64
+                apk_name = f"chaoxing-journal-{release_name}.apk"
+                release_value = {
+                    "tag_name": tag,
+                    "draft": False,
+                    "prerelease": False,
+                    "assets": [
+                        {
+                            "name": apk_name,
+                            "browser_download_url": (
+                                "https://github.com/arrry-07/chaoxing-journal/"
+                                f"releases/download/{tag}/{apk_name}"
+                            ),
+                            "size": 12345,
+                            "digest": f"sha256:{sha}",
+                        },
+                        {
+                            "name": "SHA256SUMS.txt",
+                            "browser_download_url": (
+                                "https://github.com/arrry-07/chaoxing-journal/"
+                                f"releases/download/{tag}/SHA256SUMS.txt"
+                            ),
+                        },
+                    ],
+                }
+                version_name = "1.7.54" if failure == "version" else release_name
+                pubspec = f"version: {version_name}+62\n"
+
+                class FakeClient:
+                    _github_token = "token"
+
+                    def github_json(self, path: str) -> dict:
+                        if "/contents/" in path:
+                            return {
+                                "encoding": "base64",
+                                "content": base64.b64encode(
+                                    pubspec.encode()
+                                ).decode(),
+                            }
+                        return release_value
+
+                    def public_text(self, _url: str, **_kwargs: object) -> str:
+                        value = "b" * 64 if failure == "checksum" else sha
+                        return f"{value}  {apk_name}\n"
+
+                    def download(self, *_args: object, **_kwargs: object) -> None:
+                        raise AssertionError("index mode must not download APK bytes")
+
+                with tempfile.TemporaryDirectory() as directory:
+                    source = sync.GitHubReleaseSource(
+                        FakeClient(),  # type: ignore[arg-type]
+                        work_dir=Path(directory),
+                    )
+                    with self.assertRaises(sync.SyncError):
+                        source.index_metadata(tag)
+
+    def test_index_sync_updates_manual_only_for_patch_and_is_idempotent(
+        self,
+    ) -> None:
+        stable = sync.build_manifest(
+            artifact("1.7.4", 56),
+            gitee_repository="arrry-07/chaoxing-journal-updates",
+            github_repository="arrry-07/chaoxing-journal",
+        )
+        manual = sync.build_manifest(
+            artifact("1.7.52", 59),
+            gitee_repository="arrry-07/chaoxing-journal-updates",
+            github_repository="arrry-07/chaoxing-journal",
+        )
+        candidate = artifact("1.7.55", 62)
+
+        class FakeGitHub:
+            def index_metadata(self, tag: str | None) -> tuple:
+                self.tag = tag
+                return candidate, {"tag_name": "v1.7.55"}
+
+        github = FakeGitHub()
+        args = sync.build_parser().parse_args(
+            [
+                "--mode",
+                "index",
+                "--work-dir",
+                tempfile.mkdtemp(prefix="journal-index-test-"),
+            ]
+        )
+        published: list[tuple[dict, dict]] = []
+
+        def publish(**kwargs: object) -> bool:
+            published.append(
+                (kwargs["stable_manifest"], kwargs["manual_manifest"])  # type: ignore[index]
+            )
+            return True
+
+        with (
+            mock.patch.object(
+                sync, "publish_manifests", side_effect=publish
+            ),
+            mock.patch.object(sync, "verify_published_manifests"),
+            mock.patch.object(sync, "prune_gitee_releases") as prune,
+        ):
+            result = sync.synchronize_index(
+                args,
+                client=mock.sentinel.client,  # type: ignore[arg-type]
+                github=github,  # type: ignore[arg-type]
+                work_dir=Path(args.work_dir),
+                current_stable_json=stable,
+                current_manual_json=manual,
+                tags=["v1.7.55"],
+            )
+            first_stable, first_manual = published[-1]
+            result_again = sync.synchronize_index(
+                args,
+                client=mock.sentinel.client,  # type: ignore[arg-type]
+                github=github,  # type: ignore[arg-type]
+                work_dir=Path(args.work_dir),
+                current_stable_json=first_stable,
+                current_manual_json=first_manual,
+                tags=["v1.7.55"],
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(result_again, 0)
+        self.assertEqual(github.tag, "v1.7.55")
+        self.assertEqual(first_stable, stable)
+        self.assertEqual(first_manual["versionName"], "1.7.55")
+        self.assertEqual(first_manual["apkUrl"], candidate_github_url(candidate))
+        self.assertNotIn("backupApkUrl", first_manual)
+        self.assertEqual(published[-1], (first_stable, first_manual))
+        prune.assert_not_called()
+
+    def test_batch_switches_same_version_github_index_to_verified_mirror(
+        self,
+    ) -> None:
+        candidate = artifact("1.7.55", 62)
+        indexed = sync.build_manifest(
+            candidate,
+            gitee_repository="arrry-07/chaoxing-journal-updates",
+            github_repository="arrry-07/chaoxing-journal",
+            gitee_verified=False,
+        )
+
+        class FakeGitHub:
+            def download_and_verify(
+                self, _tag: str | None, **_kwargs: object
+            ) -> tuple:
+                return candidate, {"tag_name": "v1.7.55"}
+
+        args = sync.build_parser().parse_args(
+            [
+                "--mode",
+                "latest",
+                "--work-dir",
+                tempfile.mkdtemp(prefix="journal-batch-test-"),
+            ]
+        )
+        published: list[tuple[dict, dict]] = []
+
+        def publish(**kwargs: object) -> bool:
+            published.append(
+                (
+                    kwargs["stable_manifest"],  # type: ignore[index]
+                    kwargs["manual_manifest"],  # type: ignore[index]
+                )
+            )
+            return True
+
+        release = sync.GiteeRelease(
+            release_id=7,
+            tag=candidate.tag,
+            assets=({"name": candidate.apk_name},),
+        )
+        with (
+            mock.patch.dict("os.environ", {"GITEE_TOKEN": "token"}),
+            mock.patch.object(
+                sync,
+                "read_public_manifests",
+                return_value=(indexed, indexed),
+            ),
+            mock.patch.object(
+                sync,
+                "GitHubReleaseSource",
+                return_value=FakeGitHub(),
+            ),
+            mock.patch.object(
+                sync,
+                "find_android_tool",
+                return_value=Path("android-tool"),
+            ),
+            mock.patch.object(
+                sync.GiteeReleaseClient,
+                "verify_access",
+                return_value="arrry-07",
+            ),
+            mock.patch.object(
+                sync,
+                "verify_gitee_artifacts",
+                return_value={candidate.tag: release},
+            ),
+            mock.patch.object(
+                sync,
+                "publish_manifests",
+                side_effect=publish,
+            ),
+            mock.patch.object(sync, "verify_published_manifests"),
+            mock.patch.object(
+                sync,
+                "prune_gitee_releases",
+                return_value=[],
+            ),
+        ):
+            result = sync.synchronize(args)
+
+        self.assertEqual(result, 0)
+        stable_manifest, manual_manifest = published[-1]
+        for value in (stable_manifest, manual_manifest):
+            self.assertEqual(
+                value["apkUrl"],
+                sync.canonical_gitee_apk_url(
+                    "arrry-07/chaoxing-journal-updates",
+                    candidate,
+                ),
+            )
+            self.assertEqual(
+                value["backupApkUrl"],
+                sync.canonical_github_apk_url(
+                    "arrry-07/chaoxing-journal",
+                    candidate,
+                ),
+            )
+
+    def test_index_synchronize_skips_android_tools(self) -> None:
+        stable = sync.build_manifest(
+            artifact("1.7.4", 56),
+            gitee_repository="arrry-07/chaoxing-journal-updates",
+            github_repository="arrry-07/chaoxing-journal",
+        )
+        candidate = artifact("1.7.55", 62)
+
+        class FakeGitHub:
+            def index_metadata(self, _tag: str | None) -> tuple:
+                return candidate, {}
+
+        args = sync.build_parser().parse_args(["--mode", "index", "--dry-run"])
+        with (
+            mock.patch.object(
+                sync,
+                "read_public_manifests",
+                return_value=(stable, None),
+            ),
+            mock.patch.object(
+                sync,
+                "GitHubReleaseSource",
+                return_value=FakeGitHub(),
+            ),
+            mock.patch.object(sync, "find_android_tool") as android_tool,
+            mock.patch.object(sync, "publish_manifests") as publish,
+        ):
+            result = sync.synchronize(args)
+
+        self.assertEqual(result, 0)
+        android_tool.assert_not_called()
+        publish.assert_not_called()
+
+
+def candidate_github_url(release: sync.ReleaseArtifact) -> str:
+    return (
+        "https://github.com/arrry-07/chaoxing-journal/releases/download/"
+        f"{release.tag}/{release.apk_name}"
+    )
 
 
 class SafetyTests(unittest.TestCase):

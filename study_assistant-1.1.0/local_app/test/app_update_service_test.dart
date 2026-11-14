@@ -138,6 +138,51 @@ void main() {
     expect(file.path, endsWith('-$digest.apk'));
   });
 
+  test('missing primary asset falls back to a same-digest backup', () async {
+    final bytes = Uint8List.fromList([0x50, 0x4b, 3, 4, 1, 2, 3]);
+    final digest = sha256.convert(bytes).toString();
+    final requests = <String>[];
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        requests.add(options.uri.toString());
+        if (options.uri.host == 'primary.example.org') {
+          handler.resolve(Response<ResponseBody>(
+            requestOptions: options,
+            statusCode: 404,
+            data: ResponseBody(Stream.value(Uint8List(0)), 404),
+          ));
+          return;
+        }
+        handler.resolve(Response<ResponseBody>(
+          requestOptions: options,
+          statusCode: 200,
+          data: ResponseBody(Stream.value(bytes), 200),
+        ));
+      }));
+    final dir = await Directory.systemTemp.createTemp('journal-404-backup-');
+    addTearDown(() => dir.delete(recursive: true));
+
+    final file = await AppUpdateService(dio: dio).downloadApk(
+      AppUpdateInfo(
+        versionName: '1.7.55',
+        releaseUrl: 'https://example.org/release',
+        apkName: 'journal.apk',
+        apkDownloadUrl: 'https://primary.example.org/journal.apk',
+        backupApkUrls: const ['https://backup.example.org/journal.apk'],
+        releaseNotes: '',
+        apkSize: bytes.length,
+        sha256Hash: digest,
+      ),
+      targetDirectory: dir.path,
+    );
+
+    expect(requests, [
+      'https://primary.example.org/journal.apk',
+      'https://backup.example.org/journal.apk',
+    ]);
+    expect(await file.readAsBytes(), bytes);
+  });
+
   test('a primary digest mismatch never falls through to the backup', () async {
     final expectedBytes = Uint8List.fromList([0x50, 0x4b, 3, 4, 1]);
     final wrongBytes = Uint8List.fromList([0x50, 0x4b, 3, 4, 2]);

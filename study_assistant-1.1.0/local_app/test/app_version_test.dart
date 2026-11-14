@@ -5,8 +5,8 @@ import 'package:study_assistant_mobile/src/app/app_version.dart';
 
 void main() {
   test('assignment data release uses frozen version', () {
-    expect(AppVersion.name, '1.7.54');
-    expect(AppVersion.code, 61);
+    expect(AppVersion.name, '1.7.55');
+    expect(AppVersion.code, 62);
   });
 
   test('AppVersion matches pubspec version', () {
