@@ -261,3 +261,16 @@
 - Gitee index run `43580639928` 成功：`manual=1.7.56+63` 指向 GitHub 且无 backup，`stable=1.7.4+56`，`deleted=[]`；APK 工具安装步骤 skipped，本轮未下载/上传 APK。
 - 文档新增[1.7.56 首页作业日期分组恢复验收与发布记录](../reviews/2026-11-14-1.7.56首页作业日期分组恢复验收与发布记录.md)及 MuMu 证据；后续文档提交不移动 Tag，应用源码以 `ac253def` 为准。
 - 未完成：Gitee APK 仍按批量点维护，本版未上传；Gitee 大陆多网络、实体手机后台/Doze、TalkBack、API31、锁屏及真实账号提交操作未在本轮重新验证。
+
+## 2026-11-14 1.7.57 登录失败原因修复（已发布）
+
+- 现场从 `codex/login-response-fix` 的 4 个未提交登录修复改动接手；基线 main `be68a52`（1.7.56 已发布）。保留既有未跟踪 `scripts/demo-video/`。
+- 修复范围：登录失败读取平台 `mes/msg/msg2/message/errorMsg` 消息字段，安全验证/风控原因不再被统一替换为“请检查账号和密码”；无具体原因时提示“学习通未确认登录，请稍后重试”；Store 不再改写登录错误；新增默认关闭、仅记录响应结构的 `AUTH_DIAGNOSTICS` 诊断开关。不含 UI 改动。
+- 验证：定向 30 项、全量 Flutter `881 passed / 1 skipped`（跳过为需 `RUN_STORAGE_BENCHMARK=true` 的容量基准）、截止 35 项本地通过、`dart analyze lib test` 无问题（build/ 下 6 条提示属 git 忽略的本机调查临时文件）、格式 0 改动、元数据/changed-format 通过、原生合成 41+38、Gitee 脚本测试通过。双时区与 Gradle 门禁由 CI 覆盖。
+- 冻结 `1.7.57+64`：GitHub/Gitee 均无 `v1.7.57` 占用。提交 `9ee469c` → PR #29 → main `56cbf76`；push CI `43591358232`、PR CI `43591383773`、main CI `43592250319`、Tag CI `43592929259` 均成功。annotated Tag `v1.7.57`（object `7c8654b`）。
+- 最终 APK 从 main 干净 ASCII 导出（325 个应用输入逐一哈希核对）原签名构建：58,852,146 字节，SHA-256 `6dcfff22c076c271d99912cd1ded4da724e394cbbf3d6a05786efaf1e27b7e17`；包名 `.journal`、64/1.7.57、min26/target36、双 ABI、v2 原体验证书 `d36a57…`、ZIP CRC 与 16 KiB 对齐通过。首次构建遇 Kotlin daemon 缓存关闭失败（Windows 文件锁），停 daemon 清理后重建成功，未改构建参数。
+- MuMu Android 15（`127.0.0.1:16448`）从 1.7.56+63 同签名覆盖，`firstInstallTime` 保持 `2026-11-04 19:05:10`，登录态与 7 门课程作业保留，“关于我们”显示 v1.7.57 (64)，设备 `base.apk` 哈希与正式包一致。
+- Release <https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.57> 已公开、非预发布并设为 latest（`published_at=2026-11-14T12:50:41Z`）；草稿认证回下载与公开匿名回下载（8 连接分段）的大小、哈希、清单、签名、对齐一致；旧 Release 与历史草稿未动。
+- Gitee index run `43596793159` 成功：`manual=1.7.57+64` 指向 GitHub 同版本 APK 且无 backup，`stable=1.7.4+56` 不变；本轮未上传 Gitee APK。发布后 MuMu“检查更新”实际显示“当前已是最新版本”。
+- 文档新增[1.7.57 登录失败原因修复验收与发布记录](../reviews/2026-11-14-1.7.57登录失败原因修复验收与发布记录.md)，更新验收基线与文档索引；文档提交不移动 Tag，应用源码以 `56cbf76` 为准。
+- 未完成：登录拒绝文案实机触发未执行（不退出真实账号），由 30 项定向测试覆盖；Gitee APK 仍按批量点维护，本版未上传；实体手机后台/Doze、TalkBack、API31、锁屏、真实官方学习通通知链路（已接受缺项）未在本轮重新验证。
