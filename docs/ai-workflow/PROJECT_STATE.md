@@ -222,3 +222,16 @@
 - 已在 `codex/revert-unrequested-ui` 恢复登录协议区和作业卡片的 1.7.52 视觉结构，同时保留期限分类、排序、状态冲突待确认和邮件草稿功能。
 - 按维护者当前明确要求，仅重新启用“学习与同步”收纳：顶层保留“同步学习通 / 个人安排 / 显示与小组件 / 学习记录”，二级页继续进入原有功能路由；其余 1.7.53 视觉改动不恢复。
 - 验证现场：定向登录/作业卡/设置测试 `33 passed`；全量 Flutter `855 passed`；`dart analyze` 无问题；ASCII 副本以原签名重建 Release 并覆盖 MuMu，`firstInstallTime` 保持 `2026-11-04 19:05:10`。未创建新 Tag、未发布新 APK、未上传 Gitee `v1.7.53`。
+
+## 2026-11-14 1.7.54 发布节奏与筛选时间栏修复正式发布
+
+- 功能提交 `9b74f41` 经 PR #22 合并到 main `06eb2df4e60fbf9c6a8e4639d04450204889597b`；annotated Tag `v1.7.54`（object `9f80247fe150dd5999b6dfa0c6263d0465cc1c75`）指向同一提交。版本 `1.7.54+61`。
+- 期限筛选固定为“全部 / 未截止 / 已逾期”，全部第一；旧 7 天/30 天/待确认偏好归一为全部，无截止偏好归一为未截止。
+- 截止时间、课程名称和作业名称排序统一在卡片左上角显示“日期在上、时间在下”，正文不再重复小字截止日期。
+- GitHub 发布规则改为每个正式包必发；Gitee workflow 删除 `schedule` 与逐 Release 触发，只保留 `workflow_dispatch` 的手动批量镜像。长期路线图按产品定位重排，作业拉取完整性、截止可信度与同步可靠性列为 P0。
+- 验证：Flutter 全量 `856 passed`；上海/洛杉矶各 `35 passed`；`dart analyze` 无问题；格式 190 文件 0 改动；原生合成检查 41+38 项、PowerShell 69、Gitee synchronizer 25、workflow 8 和 `actionlint` 通过。PR CI `43550735940`/`43550770956`、main CI `43552014357`、Tag CI `43552683041` 均成功。
+- 正式 APK：`chaoxing-journal-1.7.54.apk`，58,852,146 字节，SHA-256 `6f9a2e3d4e2cbf491c5382a2be8d864a72816d5578e50490df2d5dbe1bd8fc62`；`SHA256SUMS.txt` 94 字节，SHA-256 `4454827559a23680043a2516e53936b4031166f664fb877ce4a24f00ee81fc79`。包名、61/1.7.54、min26/target36、双 ABI、v2 原证书、ZIP CRC 与 16 KiB 对齐通过。
+- Release <https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.7.54> 已公开、非预发布并设为 latest。草稿资产与公开匿名资产均完整回下载并通过哈希、digest、ZIP、签名和对齐核对。
+- MuMu Android 15 从 `1.7.53+60` 同签名覆盖到正式包，`firstInstallTime` 保持 `2026-11-04 19:05:10`，登录态与课程作业保留；实际核对三筛选项顺序，以及课程名称/作业名称排序的左上角日期时间。设备 `base.apk` 哈希与正式 APK 一致。
+- 文档新增执行方案、完整发布记录和三张 MuMu 证据；后续文档提交不移动 Tag，应用源码以 `06eb2df` 为准。
+- 未完成：Gitee manual 仍为 `1.7.52+59`，本版按新规则不逐包上传，等待下一次维护者选择的批量点；Gitee 大陆多网络、群聊漏拉、年份/状态补全、音效、完整反馈服务、API31、锁屏、TalkBack 与实体手机后台/Doze 仍未验证。
