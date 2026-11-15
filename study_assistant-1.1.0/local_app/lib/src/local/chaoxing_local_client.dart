@@ -10,6 +10,7 @@ import '../models/assignment_sync_progress.dart';
 import '../models/sync_report.dart';
 import 'chaoxing_api_parser.dart';
 import 'chaoxing_assignment_parser.dart';
+import 'chaoxing_classroom_parser.dart';
 
 class ChaoxingAuthenticationException implements Exception {
   const ChaoxingAuthenticationException([this.httpStatus]);
@@ -38,7 +39,10 @@ class ChaoxingLocalClient {
   // The signed work list is the desktop course surface, as in the reference CLI.
   static const courseUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-  ChaoxingLocalClient({Dio? dio, Future<void> Function(Duration)? wait})
+  ChaoxingLocalClient(
+      {Dio? dio,
+      Future<void> Function(Duration)? wait,
+      this.enableClassroomTasks = true})
       : _dio = dio ??
             Dio(
               BaseOptions(
@@ -63,6 +67,8 @@ class ChaoxingLocalClient {
   static const _maxRetryDelay = Duration(seconds: 2);
 
   final Dio _dio;
+  final bool enableClassroomTasks;
+  List<SyncSourceResult> sourceResults = const [];
   final Future<void> Function(Duration) _wait;
   CancelToken? _activeRequestToken;
   bool _stopRequested = false;
@@ -331,6 +337,7 @@ class ChaoxingLocalClient {
     courses = [];
     hasCourseResponse = false;
     issues = [];
+    sourceResults = const [];
     succeededCourses = 0;
     failedCourses = 0;
     _verificationTarget = null;
@@ -431,6 +438,7 @@ class ChaoxingLocalClient {
     final syncWatch = Stopwatch()..start();
     _resetSyncTracking(clearRequestStats: false);
     issues = [];
+    sourceResults = const [];
     _deadlineReadsBlockedBy = null;
     try {
       final mcode =
@@ -452,16 +460,32 @@ class ChaoxingLocalClient {
             SyncIssueKind.notFound, '目标课程暂时无法读取，请刷新作业后重试',
             stage: 'courses'));
       }
-      final rows = await _fetchCourseWork(course, generation: generation);
+      List<Assignment>? rows;
+      try {
+        rows = await _fetchCourseWork(course, generation: generation);
+      } on ChaoxingAuthenticationException {
+        rethrow;
+      } on SyncReadException catch (e) {
+        if (e.issue.kind == SyncIssueKind.cancelled) rethrow;
+        if (generation != _sessionGeneration) return const [];
+        issues.add(e.issue);
+      }
       if (generation != _sessionGeneration) return const [];
-      if (rows == null) {
+      sourceResults = [
+        _formalSourceResult(
+            rows ?? const [], rows == null ? 0 : 1, rows == null ? 1 : 0)
+      ];
+      final classroom =
+          await _fetchClassroomTasks([course], generation: generation);
+      if (generation != _sessionGeneration) return const [];
+      if (rows == null && !classroom.recognized) {
         final issue = issues.isNotEmpty
             ? issues.first
             : const SyncIssue(SyncIssueKind.schemaChanged, '本次未能读取目标课程作业',
                 stage: 'work');
         throw SyncReadException(issue);
       }
-      return _dedupeAssignments(rows);
+      return _dedupeAssignments([...?rows, ...classroom.rows]);
     } finally {
       if (generation == _sessionGeneration) {
         _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
@@ -480,6 +504,7 @@ class ChaoxingLocalClient {
     lastSyncWarning = null;
     _deadlineReadsBlockedBy = null;
     issues = [];
+    sourceResults = const [];
     hasCourseResponse = false;
     succeededCourses = 0;
     failedCourses = 0;
@@ -519,6 +544,7 @@ class ChaoxingLocalClient {
         problems.add('部分课程无法识别');
       }
       final assignments = <Assignment>[];
+      final attemptedFormalCourses = <String>{};
       var recognized = courses.isEmpty;
       for (final course in courses) {
         if (shouldStop?.call() == true) {
@@ -533,6 +559,7 @@ class ChaoxingLocalClient {
           break;
         }
         List<Assignment>? work;
+        attemptedFormalCourses.add('${course.courseId}:${course.clazzId}');
         final watch = Stopwatch()..start();
         SyncIssue? failure;
         try {
@@ -591,6 +618,32 @@ class ChaoxingLocalClient {
           break;
         }
       }
+      sourceResults = [
+        _formalSourceResult(assignments, succeededCourses, failedCourses)
+      ];
+      final formalFailureKeys = {
+        for (final issue in issues)
+          if (issue.courseKey != null) issue.courseKey!,
+        for (final course in courses)
+          if (!attemptedFormalCourses
+              .contains('${course.courseId}:${course.clazzId}'))
+            '${course.courseId}:${course.clazzId}',
+      };
+      final classroom = await _fetchClassroomTasks(courses,
+          generation: generation,
+          unreadCourses: raw.length - courses.length,
+          progress: progress);
+      if (generation != _sessionGeneration) return const [];
+      assignments.addAll(classroom.rows);
+      recognized = recognized || classroom.recognized;
+      if (enableClassroomTasks) {
+        failedCourses = raw.length -
+            courses.length +
+            {...formalFailureKeys, ...classroom.failedCourseKeys}.length;
+      }
+      if (classroom.failedCourses > 0) {
+        problems.add('部分课堂任务信息尚未读取');
+      }
       if (problems.isNotEmpty) {
         lastSyncWarning = '已更新 $succeededCourses 门课程，$failedCourses 门待重试';
       }
@@ -608,6 +661,288 @@ class ChaoxingLocalClient {
         _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
       }
     }
+  }
+
+  SyncSourceResult _formalSourceResult(
+          List<Assignment> rows, int succeeded, int failed) =>
+      SyncSourceResult(
+          source: 'courseWork',
+          phase: failed == 0
+              ? SyncSourcePhase.success
+              : succeeded > 0
+                  ? SyncSourcePhase.partial
+                  : SyncSourcePhase.failed,
+          succeededCourses: succeeded,
+          failedCourses: failed,
+          recordCount: rows.length,
+          unconfirmedCount: rows
+              .where((a) =>
+                  a.status == 'unknown' ||
+                  !a.deadlineTrusted ||
+                  a.deadlineReadFailed)
+              .length);
+
+  /// Enumerate the server course activity list independently of formal work.
+  /// A task detail failure remains unknown, cancelling stale pending reminders.
+  Future<
+          ({
+            List<Assignment> rows,
+            bool recognized,
+            int failedCourses,
+            Set<String> failedCourseKeys
+          })>
+      _fetchClassroomTasks(List<ChaoxingCourseRef> refs,
+          {required int generation,
+          int unreadCourses = 0,
+          _SyncProgressTracker? progress}) async {
+    const stale = (
+      rows: <Assignment>[],
+      recognized: false,
+      failedCourses: 0,
+      failedCourseKeys: <String>{}
+    );
+    if (!enableClassroomTasks) return stale;
+    bool isCurrent() {
+      if (_stopRequested) {
+        throw const SyncReadException(
+            SyncIssue(SyncIssueKind.cancelled, '本次同步已取消'));
+      }
+      return generation == _sessionGeneration;
+    }
+
+    bool blocks(SyncIssueKind kind) => const {
+          SyncIssueKind.authExpired,
+          SyncIssueKind.verificationRequired,
+          SyncIssueKind.rateLimited,
+        }.contains(kind);
+    final rows = <Assignment>[];
+    final success = {35: 0, 42: 0},
+        failure = {35: unreadCourses, 42: unreadCourses};
+    final reasons = {35: <String>{}, 42: <String>{}};
+    if (unreadCourses > 0) {
+      for (final type in [35, 42]) {
+        reasons[type]!.add('courseIdentityFailed');
+      }
+    }
+    final blockedTypes = <int>{};
+    SyncIssueKind? listBlockedBy;
+    final failedCourseKeys = <String>{};
+    var recognized = refs.isEmpty && unreadCourses == 0;
+    final uid = _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
+    for (final course in refs) {
+      if (!isCurrent()) return stale;
+      if (shouldStop?.call() == true || listBlockedBy != null) {
+        final remaining = refs.length - refs.indexOf(course);
+        for (final type in [35, 42]) {
+          failure[type] = failure[type]! + remaining;
+          reasons[type]!.add('readStopped');
+        }
+        failedCourseKeys.addAll(refs
+            .skip(refs.indexOf(course))
+            .map((c) => '${c.courseId}:${c.clazzId}'));
+        issues.add(const SyncIssue(SyncIssueKind.partial, '部分课堂任务尚未读取，请稍后刷新',
+            stage: 'classroom'));
+        break;
+      }
+      List<dynamic> activities;
+      try {
+        final response = await _safeGet<dynamic>(
+            'https://mobilelearn.chaoxing.com/v2/apis/active/student/activelist',
+            queryParameters: {
+              'fid': 0,
+              'courseId': course.courseId,
+              'classId': course.clazzId,
+              'showNotStartedActive': 0
+            },
+            requestKind: '课堂活动列表');
+        if (!isCurrent()) return stale;
+        activities = _measureParse(
+            '课堂活动列表',
+            () => ChaoxingClassroomParser.readActivityList(
+                _decodeJsonPayload(response?.data)));
+        recognized = true;
+      } catch (e) {
+        if (e is SyncReadException && e.issue.kind == SyncIssueKind.cancelled) {
+          rethrow;
+        }
+        if (!isCurrent()) return stale;
+        final issue = _classroomIssue(e);
+        issues.add(issue);
+        if (blocks(issue.kind)) listBlockedBy = issue.kind;
+        for (final type in [35, 42]) {
+          failure[type] = failure[type]! + 1;
+          reasons[type]!.add('activityListFailed');
+        }
+        failedCourseKeys.add('${course.courseId}:${course.clazzId}');
+        continue;
+      }
+      for (final type in [35, 42]) {
+        var complete = true;
+        try {
+          final seeds = ChaoxingClassroomParser.parseActivities(activities,
+              courseId: course.courseId,
+              clazzId: course.clazzId,
+              courseName: course.courseName,
+              activityType: type);
+          progress?.addRows(seeds,
+              courseKey:
+                  '${course.courseId}:${course.clazzId}:classroomActivity:$type');
+          if (!isCurrent()) return stale;
+          for (final seed in seeds) {
+            Assignment task = seed;
+            progress?.attempt(seed.id);
+            if (!isCurrent()) return stale;
+            if (blockedTypes.contains(type) || shouldStop?.call() == true) {
+              complete = false;
+              reasons[type]!.add('sourceReadStopped');
+            } else {
+              try {
+                task = await _hydrateClassroomTask(seed,
+                    uid: uid, generation: generation);
+              } catch (e) {
+                if (e is SyncReadException &&
+                    e.issue.kind == SyncIssueKind.cancelled) {
+                  rethrow;
+                }
+                if (!isCurrent()) return stale;
+                complete = false;
+                reasons[type]!.add('personalDetailFailed');
+                final issue = _classroomIssue(e);
+                issues.add(issue);
+                if (issue.kind == SyncIssueKind.authExpired) {
+                  // Same login, while already read formal results remain valid.
+                  blockedTypes.addAll([35, 42]);
+                } else if (blocks(issue.kind)) {
+                  blockedTypes.add(type);
+                }
+              }
+            }
+            if (!isCurrent()) return stale;
+            rows.add(task);
+            progress?.resolve(seed.id, task);
+            if (!isCurrent()) return stale;
+          }
+        } catch (e) {
+          if (e is SyncReadException &&
+              e.issue.kind == SyncIssueKind.cancelled) {
+            rethrow;
+          }
+          if (!isCurrent()) return stale;
+          complete = false;
+          reasons[type]!.add('activityIdentityFailed');
+          issues.add(_classroomIssue(e));
+          progress?.retractCourse(
+              '${course.courseId}:${course.clazzId}:classroomActivity:$type');
+          if (!isCurrent()) return stale;
+        }
+        if (complete) {
+          success[type] = success[type]! + 1;
+        } else {
+          failure[type] = failure[type]! + 1;
+          failedCourseKeys.add('${course.courseId}:${course.clazzId}');
+        }
+      }
+    }
+    if (!isCurrent()) return stale;
+    sourceResults = [
+      ...sourceResults,
+      for (final type in [35, 42])
+        SyncSourceResult(
+            source: 'classroomActivity:$type',
+            phase: failure[type] == 0
+                ? SyncSourcePhase.success
+                : success[type]! > 0 || rows.any((a) => a.activityType == type)
+                    ? SyncSourcePhase.partial
+                    : SyncSourcePhase.failed,
+            succeededCourses: success[type]!,
+            failedCourses: failure[type]!,
+            recordCount: rows.where((a) => a.activityType == type).length,
+            unconfirmedCount: rows
+                .where((a) =>
+                    a.activityType == type &&
+                    (a.status == 'unknown' ||
+                        !a.deadlineTrusted ||
+                        a.availability == AssignmentAvailability.unknown))
+                .length,
+            reasonCodes: reasons[type]!.toList()),
+      const SyncSourceResult(
+          source: 'groupHistory', phase: SyncSourcePhase.notEnabled)
+    ];
+    return (
+      rows: rows,
+      recognized: recognized,
+      failedCourses: failedCourseKeys.length + unreadCourses,
+      failedCourseKeys: failedCourseKeys
+    );
+  }
+
+  SyncIssue _classroomIssue(Object error) {
+    final issue = error is SyncReadException ? error.issue : null;
+    return SyncIssue(
+        issue?.kind ??
+            (error is ChaoxingAuthenticationException
+                ? SyncIssueKind.authExpired
+                : SyncIssueKind.schemaChanged),
+        '部分课堂任务信息未能确认，请稍后刷新',
+        stage: 'classroom',
+        httpStatus: issue?.httpStatus ??
+            (error is ChaoxingAuthenticationException
+                ? error.httpStatus
+                : null),
+        retryAfter: issue?.retryAfter,
+        retryAfterSeconds: issue?.retryAfterSeconds,
+        circuitOpen: issue?.circuitOpen ?? false);
+  }
+
+  Future<Assignment> _hydrateClassroomTask(Assignment seed,
+      {required String? uid, required int generation}) async {
+    final kind = seed.activityType == 35 ? '个人分组任务' : '随堂练习';
+    Future<dynamic> read(String path, Map<String, dynamic> parameters) async {
+      final response = await _safeGet<dynamic>(
+          'https://mobilelearn.chaoxing.com$path',
+          queryParameters: parameters,
+          requestKind: kind);
+      if (generation != _sessionGeneration) return null;
+      return _decodeJsonPayload(response?.data);
+    }
+
+    final q = {'activeId': seed.activityId!};
+    if (seed.activityType == 35) {
+      final metadataPayload = await read('/v2/apis/taskStu/getActiveInfoForMe',
+          {...q, 'fid': 0, 'courseId': seed.courseId!});
+      if (generation != _sessionGeneration) return seed;
+      final metadata =
+          ChaoxingClassroomParser.taskMetadata(metadataPayload, seed);
+      if (ChaoxingClassroomParser.isUnavailable(metadata)) {
+        return ChaoxingClassroomParser.unavailable(seed);
+      }
+      final detail = await read('/v2/apis/task/getTaskActiveInfo', q);
+      if (generation != _sessionGeneration) return seed;
+      final personal = uid == null
+          ? {'result': 1, 'data': <String, dynamic>{}}
+          : await read('/v2/apis/taskStu/getMyGroupInfo', {...q, 'puid': uid});
+      if (generation != _sessionGeneration) return seed;
+      return _measureParse(
+          kind,
+          () => ChaoxingClassroomParser.parseTask(seed,
+              metadata: metadata,
+              detailPayload: detail,
+              personalPayload: personal,
+              currentUid: uid));
+    }
+    final detail = await read('/v2/apis/quiz/quizDetail2', {
+      ...q,
+      'moreClassAttendEnc': '',
+      'DB_STRATEGY': 'PRIMARY_KEY',
+      'STRATEGY_PARA': 'activeId'
+    });
+    if (generation != _sessionGeneration) return seed;
+    final answer = await read('/v2/apis/studentQuestion/getAnswerResult', q);
+    if (generation != _sessionGeneration) return seed;
+    return _measureParse(
+        kind,
+        () => ChaoxingClassroomParser.parseQuiz(seed,
+            detailPayload: detail, answerPayload: answer, currentUid: uid));
   }
 
   Future<List<Assignment>?> _fetchCourseWork(ChaoxingCourseRef course,

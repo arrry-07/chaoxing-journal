@@ -17,6 +17,76 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
+  test('store baselines new sources silently and retains formal new reminders',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway()
+      ..baseline = true
+      ..baselinedSources = {'courseWork'};
+    final deadline = DateTime.now().add(const Duration(days: 2));
+    final task = _assignment('task', deadline).copyWith(
+      id: 'cx:activity:1:2:task',
+      source: AssignmentSource.classroomActivity,
+      activityType: 35,
+    );
+    final quiz = _assignment('quiz', deadline).copyWith(
+      id: 'cx:activity:1:2:quiz',
+      source: AssignmentSource.classroomActivity,
+      activityType: 42,
+    );
+    final nextTask = task.copyWith(id: 'cx:activity:1:2:next-task');
+    final client = _ClientQueue([
+      [_assignment('formal-new', deadline), task, quiz],
+      [_assignment('formal-new', deadline), task, nextTask, quiz],
+    ], sourceResultsBySync: const [
+      [
+        SyncSourceResult(source: 'courseWork', phase: SyncSourcePhase.success),
+        SyncSourceResult(
+            source: 'classroomActivity:35', phase: SyncSourcePhase.success),
+        SyncSourceResult(
+            source: 'classroomActivity:42', phase: SyncSourcePhase.partial),
+      ],
+      [
+        SyncSourceResult(
+            source: 'classroomActivity:35', phase: SyncSourcePhase.partial),
+        SyncSourceResult(
+            source: 'classroomActivity:42', phase: SyncSourcePhase.success),
+      ],
+    ]);
+    final store = _store(gateway: gateway, client: client);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.syncAssignments();
+    expect(gateway.plans.last.newEvents.map((e) => e.assignmentId),
+        ['cx:work:1:2:formal-new']);
+    expect(gateway.baselinedSources, {'courseWork', 'classroomActivity:35'});
+    expect(gateway.plans.last.deadlineEvents.map((e) => e.assignmentId),
+        contains(task.id));
+    await store.syncAssignments();
+    expect(
+        gateway.plans.last.newEvents.map((e) => e.assignmentId), [nextTask.id]);
+    expect(gateway.baselinedSources,
+        {'courseWork', 'classroomActivity:35', 'classroomActivity:42'});
+  });
+
+  test(
+      'local reminder rebuild cannot establish stale successful source baseline',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway();
+    final client = _ClientQueue([[]])
+      ..sourceResults = const [
+        SyncSourceResult(
+            source: 'classroomActivity:35', phase: SyncSourcePhase.success),
+      ];
+    final store = _store(gateway: gateway, client: client);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.refreshAssignments();
+    expect(gateway.plans, isNotEmpty);
+    expect(gateway.baselinedSources, isEmpty);
+  });
+
   test('complete sync builds a silent baseline then emits one new event',
       () async {
     SharedPreferences.setMockInitialValues({});
@@ -344,9 +414,10 @@ Assignment _assignment(String suffix, DateTime? deadline) => Assignment(
     );
 
 class _ClientQueue extends ChaoxingLocalClient {
-  _ClientQueue(this.results);
+  _ClientQueue(this.results, {this.sourceResultsBySync});
 
   final List<List<Assignment>> results;
+  final List<List<SyncSourceResult>>? sourceResultsBySync;
   int calls = 0;
 
   @override
@@ -355,6 +426,13 @@ class _ClientQueue extends ChaoxingLocalClient {
   @override
   Future<List<Assignment>> fetchAssignments() async {
     final result = results[calls.clamp(0, results.length - 1)];
+    final sources = sourceResultsBySync;
+    sourceResults = sources == null
+        ? const [
+            SyncSourceResult(
+                source: 'courseWork', phase: SyncSourcePhase.success)
+          ]
+        : sources[calls.clamp(0, sources.length - 1)];
     calls++;
     succeededCourses = 1;
     failedCourses = 0;
@@ -504,6 +582,7 @@ class _FakeGateway extends BackgroundReminderGateway {
   final syncReleases = <String>[];
   final clearedAccounts = <String>[];
   bool baseline = false;
+  Set<String> baselinedSources = {};
   int mutationVersion = 0;
   Set<String> known = {};
   Set<String> sentNew = {};
@@ -624,6 +703,7 @@ class _FakeGateway extends BackgroundReminderGateway {
         accountHash: accountHash,
         sessionEpoch: sessionEpoch,
         baselineCompleted: baseline,
+        baselinedSources: {...baselinedSources},
         knownAssignmentIds: {...known},
         sentNewAssignmentIds: {...sentNew},
         lastAttemptAt: lastAttempt,
@@ -645,6 +725,7 @@ class _FakeGateway extends BackgroundReminderGateway {
     expect(expectedMutationVersion, mutationVersion);
     plans.add(plan);
     baseline = plan.baselineCompleted;
+    baselinedSources = {...plan.baselinedSources};
     known = {...plan.knownAssignmentIds};
     sentNew.addAll(plan.newEvents.map((event) => event.assignmentId));
     if (syncCompleted) {

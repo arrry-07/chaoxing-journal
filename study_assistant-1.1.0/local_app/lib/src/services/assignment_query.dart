@@ -150,7 +150,7 @@ class AssignmentQuery {
           List<Assignment> records, Set<String> followed) =>
       records
           .where((a) =>
-              a.isFormal &&
+              a.isInAssignmentScope &&
               (followed.isEmpty || followed.contains(a.courseKey)))
           .toList();
 

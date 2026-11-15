@@ -1,3 +1,4 @@
+// Formal-source fixtures intentionally isolate the existing formal request flow.
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -39,7 +40,7 @@ void main() {
             : '<html>unrecognized</html>';
         h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
       }));
-    final c = ChaoxingLocalClient(dio: dio);
+    final c = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
     await expectLater(c.fetchAssignments(), throwsA(isA<SyncReadException>()));
     expect(await c.verifyInBrowser(), isTrue);
     expect(c.succeededCourses, 0);

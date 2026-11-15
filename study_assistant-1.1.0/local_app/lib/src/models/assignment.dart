@@ -14,6 +14,8 @@ enum AssignmentDeadlineBucket {
   completed,
 }
 
+enum AssignmentAvailability { available, unknown, unavailable }
+
 class Assignment {
   Assignment({
     required this.id,
@@ -28,17 +30,89 @@ class Assignment {
     this.deadlineReadFailed = false,
     this.deadlineTrusted = true,
     this.deadlineRawText,
+    this.activityType,
+    this.persistedCourseTaskKey,
+    this.availability = AssignmentAvailability.available,
     AssignmentSource? source,
   }) : source = source ?? inferSource(id, submitUrl);
 
   final AssignmentSource source;
-  String? get courseId => _identity?[0];
-  String? get clazzId => _identity?[1];
-  String? get workId => _identity?[2];
+  final int? activityType;
+
+  /// Validated journal/backup identity, independent of expiring access links.
+  final String? persistedCourseTaskKey;
+  final AssignmentAvailability availability;
+  String? get courseId => (_activityIdentity ?? _identity)?[0];
+  String? get clazzId => (_activityIdentity ?? _identity)?[1];
+  String? get workId =>
+      source == AssignmentSource.courseWork ? (_identity?[2]) : null;
+  String? get activityId => _activityIdentity?[2];
   String? get courseKey => courseId == null ? null : '$courseId:$clazzId';
   bool get isFormal =>
       source == AssignmentSource.courseWork && _identity != null;
+  bool get isSupportedClassroomTask =>
+      source == AssignmentSource.classroomActivity &&
+      const {35, 42}.contains(activityType) &&
+      _activityIdentity != null;
+  bool get hasCourseTaskIdentity => isFormal || isSupportedClassroomTask;
+  bool get isInAssignmentScope =>
+      hasCourseTaskIdentity &&
+      availability != AssignmentAvailability.unavailable;
+  String? get reminderSourceKey => isFormal
+      ? 'courseWork'
+      : isSupportedClassroomTask
+          ? 'classroomActivity:$activityType'
+          : null;
+  String? get courseTaskKey => isFormal
+      ? 'cx:work:$courseId:$clazzId:$workId'
+      : _activityIdentity != null
+          ? 'cx:activity:$courseId:$clazzId:$activityId'
+          : null;
+  List<String>? get _activityIdentity {
+    if (source != AssignmentSource.classroomActivity) return null;
+    final parts = id.split(':');
+    if (parts.length == 5 &&
+        parts[0] == 'cx' &&
+        parts[1] == 'activity' &&
+        parts.sublist(2).every((v) => v.isNotEmpty)) {
+      return parts.sublist(2);
+    }
+    List<String>? retainedIdentity() {
+      final retained = persistedCourseTaskKey?.split(':');
+      return retained != null &&
+              retained.length == 5 &&
+              retained[0] == 'cx' &&
+              retained[1] == 'activity' &&
+              retained.sublist(2).every((v) => v.isNotEmpty)
+          ? retained.sublist(2)
+          : null;
+    }
+
+    return _linkedActivityIdentity ?? retainedIdentity();
+  }
+
+  String? get linkedActivityKey => _linkedActivityIdentity == null
+      ? null
+      : 'cx:activity:${_linkedActivityIdentity!.join(':')}';
+
+  List<String>? get _linkedActivityIdentity {
+    final uri = Uri.tryParse(submitUrl ?? '');
+    if (uri == null ||
+        !uri.host.endsWith('.chaoxing.com') ||
+        !(uri.path.startsWith('/page/renwu') ||
+            uri.path.startsWith('/page/quiz/') ||
+            uri.path == '/widget/pcpick/stu/index')) {
+      return null;
+    }
+    final q = uri.queryParameters.map((k, v) => MapEntry(k.toLowerCase(), v));
+    final c = q['courseid'],
+        cl = q['classid'] ?? q['clazzid'] ?? q['jclassid'],
+        a = q['activeid'];
+    return [c, cl, a].any((v) => v == null || v.isEmpty) ? null : [c!, cl!, a!];
+  }
+
   bool get isPendingConfirmed =>
+      availability == AssignmentAvailability.available &&
       const {'pending', 'returned', 'overdue'}.contains(status);
   List<String>? get _identity {
     final parts = id.split(':');
@@ -98,6 +172,13 @@ class Assignment {
       source: AssignmentSource.values
           .where((s) => s.name == json['source'])
           .firstOrNull,
+      activityType:
+          json['activityType'] is int ? json['activityType'] as int : null,
+      persistedCourseTaskKey: json['courseTaskKey'] as String?,
+      availability: AssignmentAvailability.values
+              .where((v) => v.name == json['availability'])
+              .firstOrNull ??
+          AssignmentAvailability.available,
       deadlineReadFailed: json['deadlineReadFailed'] == true,
       // Versions 32–33 incorrectly interpreted list endTime=0 as no deadline.
       deadlineTrusted: json['deadlineTrusted'] == true &&
@@ -127,6 +208,10 @@ class Assignment {
   Map<String, dynamic> toJson() => {
         'id': id,
         'source': source.name,
+        if (activityType != null) 'activityType': activityType,
+        if (persistedCourseTaskKey != null)
+          'courseTaskKey': persistedCourseTaskKey,
+        'availability': availability.name,
         'deadlineTrusted': deadlineTrusted,
         if (deadlineRawText != null) 'deadlineRawText': deadlineRawText,
         if (deadlineReadFailed) 'deadlineReadFailed': true,
@@ -144,6 +229,10 @@ class Assignment {
       RegExp(r'(?:[zZ]|[+-]\d{2}:?\d{2})$').hasMatch(value);
 
   Assignment copyWith({
+    AssignmentSource? source,
+    int? activityType,
+    String? persistedCourseTaskKey,
+    AssignmentAvailability? availability,
     String? id,
     String? courseName,
     String? title,
@@ -163,7 +252,11 @@ class Assignment {
   }) {
     return Assignment(
       id: id ?? this.id,
-      source: source,
+      source: source ?? this.source,
+      activityType: activityType ?? this.activityType,
+      persistedCourseTaskKey:
+          persistedCourseTaskKey ?? this.persistedCourseTaskKey,
+      availability: availability ?? this.availability,
       deadlineTrusted: deadlineTrusted ?? this.deadlineTrusted,
       deadlineRawText:
           clearDeadlineRawText ? null : deadlineRawText ?? this.deadlineRawText,

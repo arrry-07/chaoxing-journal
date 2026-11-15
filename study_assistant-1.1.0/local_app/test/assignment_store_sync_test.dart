@@ -1,3 +1,4 @@
+// Formal-source fixtures intentionally isolate the existing formal request flow.
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'dart:async';
@@ -55,7 +56,8 @@ void main() {
         sessionStore: _MemorySessionStore(account: 'student'),
         notificationService: _NoopNotificationService(),
         widgetSnapshotService: _NoopWidgetSnapshotService(),
-        chaoxingClient: ChaoxingLocalClient(dio: dio));
+        chaoxingClient:
+            ChaoxingLocalClient(enableClassroomTasks: false, dio: dio));
     addTearDown(store.dispose);
     await store.repository
         .mergeAndSave([_assignment(id: 'cx:activity:7:11:88', title: '旧课堂题')]);

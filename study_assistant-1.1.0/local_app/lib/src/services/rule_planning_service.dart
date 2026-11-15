@@ -103,7 +103,7 @@ class RulePlanningService {
     final candidates = assignments
         .where((a) =>
             selectedIds.contains(a.id) &&
-            a.isFormal &&
+            a.isInAssignmentScope &&
             !a.isCompleted &&
             !hiddenIds.contains(a.id) &&
             !unfollowedCourseKeys.contains(a.courseKey) &&

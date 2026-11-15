@@ -27,9 +27,41 @@ class AssignmentWebLink {
           uri.hasFragment ||
           !(uri.host == 'chaoxing.com' || uri.host.endsWith('.chaoxing.com')) ||
           !RegExp(r'^[a-z0-9-]+(?:\.[a-z0-9-]+)*$').hasMatch(uri.host) ||
-          !RegExp(r'^/(?:mooc-ans/(?:mooc2/)?|mooc2/|mooc2-ans/)?work/[a-zA-Z0-9_.-]+$')
-              .hasMatch(uri.path)) {
+          (assignment.isSupportedClassroomTask
+              ? !_activityPathMatches(assignment.activityType!, uri.path)
+              : !RegExp(
+                      r'^/(?:mooc-ans/(?:mooc2/)?|mooc2/|mooc2-ans/)?work/[a-zA-Z0-9_.-]+$')
+                  .hasMatch(uri.path))) {
         return null;
+      }
+
+      if (assignment.isSupportedClassroomTask) {
+        if (assignment.availability == AssignmentAvailability.unavailable) {
+          return null;
+        }
+        final expected = {
+          'courseid': assignment.courseId,
+          'classid': assignment.clazzId,
+          'clazzid': assignment.clazzId,
+          'jclassid': assignment.clazzId,
+          'activeid': assignment.activityId
+        };
+        final found = <String>{};
+        for (final entry in uri.queryParametersAll.entries) {
+          final key = entry.key.toLowerCase();
+          if (!expected.containsKey(key)) continue;
+          if (entry.value.any((v) => v.isEmpty || v != expected[key])) {
+            return null;
+          }
+          found.add(key);
+        }
+        if (!found.contains('courseid') ||
+            !found.contains('activeid') ||
+            !found.any(
+                (k) => const {'classid', 'clazzid', 'jclassid'}.contains(k))) {
+          return null;
+        }
+        return raw;
       }
 
       final expected = {
@@ -59,5 +91,20 @@ class AssignmentWebLink {
     } on ArgumentError {
       return null;
     }
+  }
+
+  static bool _activityPathMatches(int type, String path) {
+    if (type == 42) return path == '/page/quiz/stu/answerQuestion2';
+    if (type != 35) return false;
+    return const {
+      '/page/renwuNew/stu/taskDetailStuForAnswer_new',
+      '/page/renwuNew/stu/taskDetailStuAndAnsDetail_new',
+      '/page/renwu/stu/taskDetailStuForAnswer',
+      '/page/renwu/stu/taskDetailStuAndAnsDetail',
+      '/page/renwuNew/notGroup/taskDetailStuForAnswerNotGroup_new',
+      '/page/renwuNew/notGroup/taskDetailStuAndAnsDetailNotGroup_new',
+      '/page/renwu/notGroup/taskDetailStuForAnswerNotGroup',
+      '/page/renwu/notGroup/taskDetailStuAndAnsDetailNotGroup',
+    }.contains(path);
   }
 }

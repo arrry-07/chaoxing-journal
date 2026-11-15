@@ -19,12 +19,14 @@ class BackupSnapshot {
       List<int> reminderOffsets,
       this.autoSyncIntervalMinutes,
       this.personal,
-      this.notebook)
+      this.notebook,
+      Map<String, String> courseTaskKeys)
       : records = List.unmodifiable(records),
         hidden = Set.unmodifiable(hidden),
         courses = List.unmodifiable(courses),
         unfollowed = Set.unmodifiable(unfollowed),
-        reminderOffsets = List.unmodifiable(reminderOffsets);
+        reminderOffsets = List.unmodifiable(reminderOffsets),
+        courseTaskKeys = Map.unmodifiable(courseTaskKeys);
 
   static const maxPlaintextBytes = 8 * 1024 * 1024;
   final String owner;
@@ -37,22 +39,37 @@ class BackupSnapshot {
   final int autoSyncIntervalMinutes;
   final PersonalWorkspace personal;
   final StudyNotebook notebook;
+  final Map<String, String> courseTaskKeys;
   static String ownerFor(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
 
-  static Map<String, dynamic> _record(Assignment a) => {
-        'id': a.id,
-        'source': a.source.name,
-        'courseName': a.courseName,
-        'title': a.title,
-        // Server descriptions may embed signed links as plain text or HTML.
-        // Re-fetch the source body after restore instead of exporting access data.
-        'requirementsText': '',
-        'status': a.status,
-        'deadlineAt': a.deadlineAt?.toUtc().toIso8601String(),
-        'completedAt': a.completedAt?.toUtc().toIso8601String(),
-        'lastSyncedAt': a.lastSyncedAt.toUtc().toIso8601String(),
-      };
+  static Map<String, dynamic> _record(Assignment a, String? retainedKey) {
+    return {
+      'id': a.id,
+      'source': a.source.name,
+      'activityType': a.activityType,
+      'availability': a.availability.name,
+      'courseTaskKey': a.source == AssignmentSource.classroomActivity
+          ? a.courseTaskKey ?? retainedKey
+          : null,
+      'courseName': a.courseName,
+      'title': a.title,
+      // Server descriptions may embed signed links as plain text or HTML.
+      // Re-fetch the source body after restore instead of exporting access data.
+      'requirementsText': '',
+      'status': a.status,
+      'deadlineAt': a.deadlineAt?.toUtc().toIso8601String(),
+      'completedAt': a.completedAt?.toUtc().toIso8601String(),
+      'lastSyncedAt': a.lastSyncedAt.toUtc().toIso8601String(),
+    };
+  }
+
+  /// Validate a portable activity identity without inferring it from a title.
+  static bool isValidCourseTaskKey(Assignment record, Object? key) =>
+      record.source == AssignmentSource.classroomActivity &&
+      key is String &&
+      record.copyWith(id: key, clearSubmitUrl: true).courseTaskKey == key &&
+      (record.courseTaskKey == null || record.courseTaskKey == key);
 
   factory BackupSnapshot.create(
           {required String owner,
@@ -63,15 +80,17 @@ class BackupSnapshot {
           required Set<String> unfollowed,
           required List<int> reminderOffsets,
           required int autoSyncIntervalMinutes,
+          Map<String, String> courseTaskKeys = const {},
           PersonalWorkspace? personal,
           StudyNotebook? notebook}) =>
       BackupSnapshot.decode(jsonEncode({
-        'schema': 3,
+        'schema': 4,
         'notebook': (notebook ?? StudyNotebook()).toJson(),
         'personal': (personal ?? PersonalWorkspace()).toJson(portable: true),
         'owner': owner,
         'createdAt': createdAt.toUtc().toIso8601String(),
-        'records': records.map(_record).toList(),
+        'records':
+            records.map((a) => _record(a, courseTaskKeys[a.id])).toList(),
         'hidden': hidden.toList(),
         'courses': courses.map((c) => c.toJson()).toList(),
         'unfollowed': unfollowed.toList(),
@@ -80,12 +99,13 @@ class BackupSnapshot {
       }));
 
   String encode() => jsonEncode({
-        'schema': 3,
+        'schema': 4,
         'notebook': notebook.toJson(),
         'personal': personal.toJson(portable: true),
         'owner': owner,
         'createdAt': createdAt.toUtc().toIso8601String(),
-        'records': records.map(_record).toList(),
+        'records':
+            records.map((a) => _record(a, courseTaskKeys[a.id])).toList(),
         'hidden': hidden.toList(),
         'courses': courses.map((c) => c.toJson()).toList(),
         'unfollowed': unfollowed.toList(),
@@ -139,7 +159,7 @@ class BackupSnapshot {
     }
     final decoded = jsonDecode(plaintext);
     final version = decoded is Map ? decoded['schema'] : null;
-    if (version is! int || !{1, 2, 3}.contains(version)) _bad();
+    if (version is! int || !{1, 2, 3, 4}.contains(version)) _bad();
     final j = _map(decoded, {
       if (version >= 2) 'personal',
       if (version >= 3) 'notebook',
@@ -156,8 +176,12 @@ class BackupSnapshot {
     final owner = _text(j['owner'], max: 64);
     if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(owner)) _bad();
     final records = <Assignment>[];
+    final courseTaskKeys = <String, String>{};
     for (final value in _list(j['records'])) {
       final r = _map(value, {
+        if (version >= 4) 'activityType',
+        if (version >= 4) 'availability',
+        if (version >= 4) 'courseTaskKey',
         'id',
         'source',
         'courseName',
@@ -171,6 +195,16 @@ class BackupSnapshot {
       final source = AssignmentSource.values
           .where((s) => s.name == r['source'])
           .firstOrNull;
+      final activityType = version >= 4 ? r['activityType'] : null;
+      final availability = version >= 4
+          ? AssignmentAvailability.values
+              .where((v) => v.name == r['availability'])
+              .firstOrNull
+          : AssignmentAvailability.available;
+      if ((activityType != null && activityType is! int) ||
+          availability == null) {
+        _bad();
+      }
       if (source == null ||
           !{
             'pending',
@@ -184,9 +218,11 @@ class BackupSnapshot {
           }.contains(r['status'])) {
         _bad();
       }
-      records.add(Assignment(
+      var record = Assignment(
           id: _text(r['id']),
           source: source,
+          activityType: activityType,
+          availability: availability,
           courseName: _text(r['courseName']),
           title: _text(r['title'], max: 2000),
           requirementsText:
@@ -196,7 +232,14 @@ class BackupSnapshot {
           completedAt:
               r['completedAt'] == null ? null : _date(r['completedAt']),
           lastSyncedAt: _date(r['lastSyncedAt']),
-          deadlineTrusted: false));
+          deadlineTrusted: false);
+      final taskKey = version >= 4 ? r['courseTaskKey'] : null;
+      if (taskKey != null) {
+        if (!isValidCourseTaskKey(record, taskKey)) _bad();
+        courseTaskKeys[record.id] = _text(taskKey);
+        record = record.copyWith(persistedCourseTaskKey: _text(taskKey));
+      }
+      records.add(record);
     }
     final ids = records.map((r) => r.id).toSet();
     if (ids.length != records.length) _bad();
@@ -236,6 +279,7 @@ class BackupSnapshot {
             : PersonalWorkspace.fromJson(j['personal']),
         version < 3
             ? StudyNotebook()
-            : StudyNotebook.decode(jsonEncode(j['notebook'])));
+            : StudyNotebook.decode(jsonEncode(j['notebook'])),
+        courseTaskKeys);
   }
 }

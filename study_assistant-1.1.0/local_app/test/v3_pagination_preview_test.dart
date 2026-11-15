@@ -1,3 +1,4 @@
+// Formal-source fixtures intentionally isolate the existing formal request flow.
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -97,7 +98,8 @@ void main() {
         'data': [_row(2)],
       }));
     });
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableClassroomTasks: false, dio: dio, wait: (_) async {});
     client.onProgress = events.add;
     var finished = false;
     final fetching = () async {
@@ -167,7 +169,8 @@ void main() {
           }));
         },
       );
-      final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+      final client = ChaoxingLocalClient(
+          enableClassroomTasks: false, dio: dio, wait: (_) async {});
       client.onProgress = events.add;
 
       final rows = await client.fetchAssignments();
@@ -232,7 +235,8 @@ void main() {
       notificationService: notifications,
       widgetSnapshotService: _NoopWidgetSnapshotService(),
       repository: repository,
-      chaoxingClient: ChaoxingLocalClient(dio: dio, wait: (_) async {}),
+      chaoxingClient: ChaoxingLocalClient(
+          enableClassroomTasks: false, dio: dio, wait: (_) async {}),
     );
     addTearDown(store.dispose);
     await store.restoreSession();
@@ -292,7 +296,8 @@ void main() {
       notificationService: _RecordingNotificationService(),
       widgetSnapshotService: _NoopWidgetSnapshotService(),
       repository: repository,
-      chaoxingClient: ChaoxingLocalClient(dio: dio, wait: (_) async {}),
+      chaoxingClient: ChaoxingLocalClient(
+          enableClassroomTasks: false, dio: dio, wait: (_) async {}),
     );
     addTearDown(store.dispose);
     await store.restoreSession();

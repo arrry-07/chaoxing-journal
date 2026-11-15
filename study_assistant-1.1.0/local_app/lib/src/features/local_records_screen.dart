@@ -19,8 +19,9 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
       builder: (context, _) {
         final records = (category == 2
                 ? widget.store.hiddenAssignments
-                : widget.store.assignments
-                    .where((a) => category == 0 ? a.isFormal : !a.isFormal))
+                : widget.store.assignments.where((a) => category == 0
+                    ? a.hasCourseTaskIdentity
+                    : !a.hasCourseTaskIdentity))
             .where((a) => '${a.title} ${a.courseName}'.contains(search))
             .toList();
         return Scaffold(
@@ -33,7 +34,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
               Wrap(spacing: 8, children: [
                 for (var i = 0; i < 3; i++)
                   ChoiceChip(
-                      label: Text(['正式作业', '历史与其他来源', '已隐藏'][i]),
+                      label: Text(['作业与任务', '历史与其他来源', '已隐藏'][i]),
                       selected: category == i,
                       onSelected: (_) => setState(() => category = i))
               ]),

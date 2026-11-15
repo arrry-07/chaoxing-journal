@@ -47,7 +47,7 @@ class ReminderDatabaseAccountTest {
                     courseName = "合成课程",
                     title = "合成待发作业",
                     deadlineAt = null,
-                    deadlineTrusted = false,
+                    deadlineTrusted = true,
                     deadlineReadFailed = false,
                     status = "pending",
                     completed = false,

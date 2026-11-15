@@ -5,6 +5,199 @@ import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.
 void main() {
   final now = DateTime(2026, 11, 11, 9);
 
+  test('first activity baselines are silent alongside a new formal assignment',
+      () {
+    final plan = _plan(
+      now: now,
+      assignments: [
+        _assignment(id: 'cx:work:1:2:new'),
+        _assignment(
+            id: 'cx:activity:1:2:task',
+            activityType: 35,
+            deadline: now.add(const Duration(days: 2))),
+        _assignment(id: 'cx:activity:1:2:quiz', activityType: 42),
+      ],
+      known: {},
+      baseline: true,
+      complete: false,
+      baselinedSources: {'courseWork'},
+      completedSourceKeys: {'classroomActivity:35', 'classroomActivity:42'},
+    );
+    expect(plan.newEvents.map((e) => e.assignmentId), ['cx:work:1:2:new']);
+    expect(plan.baselinedSources,
+        {'courseWork', 'classroomActivity:35', 'classroomActivity:42'});
+    expect(plan.deadlineEvents, isNotEmpty);
+    final task = plan.snapshotJson
+        .singleWhere((s) => s['assignmentId'] == 'cx:activity:1:2:task');
+    expect(task['inAssignmentScope'], isTrue);
+    expect(task['formal'], isFalse);
+  });
+
+  test('activity baseline allows later new records during a partial sync', () {
+    final plan = _plan(
+      now: now,
+      assignments: [_assignment(id: 'cx:activity:1:2:new', activityType: 42)],
+      known: {},
+      baseline: false,
+      complete: false,
+      baselinedSources: {'classroomActivity:42'},
+    );
+    expect(plan.newEvents.single.assignmentId, 'cx:activity:1:2:new');
+    expect(plan.baselineCompleted, isFalse);
+  });
+
+  test('explicit empty sources suppress legacy baseline fallback', () {
+    final plan = _plan(
+      now: now,
+      assignments: [_assignment(id: 'cx:work:1:2:new')],
+      known: {},
+      baseline: true,
+      complete: true,
+      baselinedSources: {},
+    );
+    expect(plan.newEvents, isEmpty);
+    expect(plan.baselinedSources, isEmpty);
+    expect(plan.baselineCompleted, isFalse);
+  });
+
+  test('source success establishes its baseline even with no assignments', () {
+    final plan = _plan(
+      now: now,
+      assignments: [],
+      known: {},
+      baseline: false,
+      complete: false,
+      baselinedSources: {},
+      completedSourceKeys: {'classroomActivity:35'},
+    );
+    expect(plan.baselinedSources, {'classroomActivity:35'});
+  });
+
+  test('incomplete activity source stays silent until its first success', () {
+    final existing = _assignment(
+      id: 'cx:activity:1:2:existing',
+      activityType: 35,
+    );
+    final partial = _plan(
+      now: now,
+      assignments: [existing],
+      known: {},
+      baseline: true,
+      complete: false,
+      baselinedSources: {'courseWork'},
+    );
+    expect(partial.baselinedSources, {'courseWork'});
+    expect(partial.newEvents, isEmpty);
+
+    final firstSuccess = _plan(
+      now: now,
+      assignments: [
+        existing,
+        _assignment(id: 'cx:activity:1:2:backlog', activityType: 35),
+        _assignment(id: 'cx:activity:1:2:quiz', activityType: 42),
+      ],
+      known: partial.knownAssignmentIds,
+      baseline: partial.baselineCompleted,
+      complete: false,
+      baselinedSources: partial.baselinedSources,
+      completedSourceKeys: {'classroomActivity:35'},
+    );
+    expect(
+        firstSuccess.baselinedSources, {'courseWork', 'classroomActivity:35'});
+    expect(firstSuccess.newEvents, isEmpty);
+
+    final later = _plan(
+      now: now,
+      assignments: [
+        _assignment(id: 'cx:activity:1:2:new-task', activityType: 35),
+        _assignment(id: 'cx:activity:1:2:new-quiz', activityType: 42),
+      ],
+      known: firstSuccess.knownAssignmentIds,
+      baseline: firstSuccess.baselineCompleted,
+      complete: false,
+      baselinedSources: firstSuccess.baselinedSources,
+    );
+    expect(later.newEvents.map((event) => event.assignmentId),
+        ['cx:activity:1:2:new-task']);
+  });
+
+  test('legacy completion maps only to course work without source statistics',
+      () {
+    final legacy = _plan(
+        now: now, assignments: [], known: {}, baseline: false, complete: true);
+    expect(legacy.baselinedSources, {'courseWork'});
+    final withStatistics = _plan(
+        now: now,
+        assignments: [],
+        known: {},
+        baseline: false,
+        complete: true,
+        completedSourceKeys: {'classroomActivity:42'});
+    expect(withStatistics.baselinedSources, {'classroomActivity:42'});
+    expect(withStatistics.baselineCompleted, isFalse);
+  });
+
+  test('unsupported and unavailable identities never emit events', () {
+    final plan = _plan(
+      now: now,
+      assignments: [
+        _assignment(id: 'cx:activity:1:2:ai', activityType: 77),
+        _assignment(
+            id: 'cx:activity:1:2:missing',
+            activityType: 35,
+            availability: AssignmentAvailability.unavailable),
+        _assignment(
+            id: 'cx:activity:1:2:unknown',
+            activityType: 42,
+            status: 'unknown',
+            deadline: now.add(const Duration(days: 2))),
+        _assignment(
+            id: 'cx:activity:1:2:failed',
+            activityType: 35,
+            deadlineReadFailed: true,
+            deadline: now.add(const Duration(days: 2))),
+      ],
+      known: {},
+      baseline: true,
+      complete: true,
+      baselinedSources: {
+        'courseWork',
+        'classroomActivity:35',
+        'classroomActivity:42'
+      },
+    );
+    expect(plan.newEvents, isEmpty);
+    expect(plan.deadlineEvents, isEmpty);
+    expect(
+        plan.snapshotJson.singleWhere((s) =>
+            s['assignmentId'] ==
+            'cx:activity:1:2:missing')['inAssignmentScope'],
+        isFalse);
+  });
+
+  test('unconfirmed availability encodes unknown status for native snapshots',
+      () {
+    final plan = _plan(
+        now: now,
+        assignments: [
+          _assignment(
+              id: 'cx:activity:1:2:unknown-availability',
+              activityType: 35,
+              availability: AssignmentAvailability.unknown,
+              deadline: now.add(const Duration(days: 2))),
+          _assignment(
+              id: 'cx:work:1:2:unavailable',
+              availability: AssignmentAvailability.unavailable),
+        ],
+        known: {},
+        baseline: true,
+        complete: false,
+        baselinedSources: {'courseWork', 'classroomActivity:35'});
+    expect(plan.snapshotJson.map((s) => s['status']), ['unknown', 'unknown']);
+    expect(plan.newEvents, isEmpty);
+    expect(plan.deadlineEvents, isEmpty);
+  });
+
   test('first complete sync establishes a silent baseline', () {
     final plan = _plan(
       now: now,
@@ -243,6 +436,8 @@ AssignmentReminderPlan _plan({
   List<int> offsets = const [1440, 180, 30],
   bool newEnabled = true,
   bool detectNew = true,
+  Set<String>? baselinedSources,
+  Set<String> completedSourceKeys = const {},
 }) =>
     AssignmentReminderPlanner.planAfterSync(
       accountHash: 'account-hash',
@@ -253,6 +448,8 @@ AssignmentReminderPlan _plan({
       knownAssignmentIds: known,
       sentNewAssignmentIds: sentNew,
       baselineCompleted: baseline,
+      baselinedSources: baselinedSources,
+      completedSourceKeys: completedSourceKeys,
       completeSync: complete,
       detectNewAssignments: detectNew,
       newAssignmentReminderEnabled: newEnabled,
@@ -265,6 +462,9 @@ Assignment _assignment({
   DateTime? deadline,
   String course = '1:2',
   String status = 'pending',
+  int? activityType,
+  AssignmentAvailability availability = AssignmentAvailability.available,
+  bool deadlineReadFailed = false,
 }) {
   final parts = id.split(':');
   final courseId = parts.length >= 5 ? parts[2] : course.split(':')[0];
@@ -277,7 +477,9 @@ Assignment _assignment({
     status: status,
     lastSyncedAt: DateTime(2026, 11, 11, 9),
     deadlineTrusted: true,
-    deadlineReadFailed: false,
+    deadlineReadFailed: deadlineReadFailed,
+    activityType: activityType,
+    availability: availability,
     source: id.startsWith('cx:work:')
         ? AssignmentSource.courseWork
         : AssignmentSource.classroomActivity,
