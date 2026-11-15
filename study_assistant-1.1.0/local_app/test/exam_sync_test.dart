@@ -30,6 +30,10 @@ const accountEmpty =
 class ExamFixture {
   Dio? legacy;
   bool emptyPhone = false;
+  bool redirectedMiddle = false, compoundNotice = false;
+  int middleReads = 0;
+  String redirectedClass = '11';
+  String redirectedExtras = '';
   int examHttp = 200;
   int formalHttp = 200;
   bool partialPc = false;
@@ -55,6 +59,16 @@ class ExamFixture {
             ]
           };
         case '/visit/stucoursemiddle':
+          body =
+              '<input id="workEnc" value="synthetic"><input id="examEnc" value="synthetic">';
+          middleReads++;
+          if (redirectedMiddle && middleReads > 1) {
+            status = 302;
+            headers['location'] = [
+              'https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu?courseid=7&clazzid=$redirectedClass$redirectedExtras'
+            ];
+          }
+        case '/mooc2-ans/mycourse/stu':
           body =
               '<input id="workEnc" value="synthetic"><input id="examEnc" value="synthetic">';
         case '/mooc2/work/list':
@@ -102,7 +116,9 @@ class ExamFixture {
                     'lastGetId': 'cursor',
                     'list': [
                       {
-                        'uuid': 'notice-1',
+                        'uuid': compoundNotice
+                            ? 'synthetic-notice:opaque-resource'
+                            : 'notice-1',
                         'title': '考试安排通知',
                         'content': '请核对考试地点',
                         'sendTime': '2030-04-01',
@@ -131,6 +147,92 @@ class ExamFixture {
 }
 
 void main() {
+  test('verified course middle redirect preserves exam time collection',
+      () async {
+    final f = ExamFixture()..redirectedMiddle = true;
+    final c = f.client();
+    final rows = await c.fetchAssignments();
+    expect(
+        rows.firstWhere((a) => a.isExam && !a.exam!.noticeOnly).timelineTrusted,
+        isTrue);
+    expect(c.sourceResults.firstWhere((s) => s.source == 'exam').phase,
+        SyncSourcePhase.success);
+  });
+  test('compound notice UUID remains a stable portable identity', () async {
+    final f = ExamFixture()..compoundNotice = true;
+    final c = f.client();
+    final rows = await c.fetchAssignments();
+    expect(rows.where((a) => a.exam!.noticeOnly).length, 1);
+    final notice = rows.firstWhere((a) => a.exam!.noticeOnly);
+    expect(notice.hasExamIdentity, isTrue);
+    expect(notice.exam!.examId, isNot(contains(':')));
+    expect(Assignment.fromJson(notice.toJson()).hasExamIdentity, isTrue);
+    expect(c.sourceResults.firstWhere((s) => s.source == 'examNotice').phase,
+        SyncSourcePhase.success);
+  });
+  test('course middle redirect cannot substitute another class identity',
+      () async {
+    final f = ExamFixture()
+      ..redirectedMiddle = true
+      ..redirectedClass = '12';
+    final c = f.client();
+    await c.fetchAssignments();
+    expect(f.requests.any((r) => r.uri.path == '/mooc2-ans/mycourse/stu'),
+        isFalse);
+    expect(c.sourceResults.firstWhere((s) => s.source == 'exam').phase,
+        SyncSourcePhase.partial);
+  });
+  test('notice identity depends on the whole opaque resource UUID, never title',
+      () {
+    Map<String, dynamic> payload(String id, String title) => {
+          'status': true,
+          'notices': {
+            'list': [
+              {'uuid': id, 'title': title}
+            ]
+          }
+        };
+    final a = ChaoxingExamParser.notices(payload('synthetic:1', '考试原通知'))!
+        .rows
+        .single;
+    final b = ChaoxingExamParser.notices(payload('synthetic:1', '考试改期通知'))!
+        .rows
+        .single;
+    final c = ChaoxingExamParser.notices(payload('synthetic:2', '考试原通知'))!
+        .rows
+        .single;
+    expect(a.id, b.id);
+    expect(a.id, isNot(c.id));
+    expect(ChaoxingExamParser.notices(payload('bad\nidentity', '考试')), isNull);
+  });
+  test('redirect checks every repeated and aliased identity parameter',
+      () async {
+    for (final extra in ['&classId=12', '&clazzid=12', '&courseId=8']) {
+      final f = ExamFixture()
+        ..redirectedMiddle = true
+        ..redirectedExtras = extra;
+      final c = f.client();
+      await c.fetchAssignments();
+      expect(f.requests.any((r) => r.uri.path == '/mooc2-ans/mycourse/stu'),
+          isFalse);
+      expect(c.sourceResults.firstWhere((s) => s.source == 'exam').phase,
+          SyncSourcePhase.partial);
+    }
+  });
+  test('unrelated notice with unavailable UUID does not erase exam candidates',
+      () {
+    final parsed = ChaoxingExamParser.notices({
+      'status': true,
+      'notices': {
+        'list': [
+          {'uuid': null, 'title': '普通通知'},
+          {'uuid': 'opaque:exam', 'title': '考试通知'}
+        ]
+      }
+    });
+    expect(parsed!.rows.length, 1);
+    expect(parsed.rows.single.hasExamIdentity, isTrue);
+  });
   test(
       'formal failure cannot discard successful exam observations in full or course refresh',
       () async {

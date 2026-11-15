@@ -317,6 +317,10 @@ extension _ExamCollection on ChaoxingLocalClient {
 
   Future<Response<dynamic>?> _examListGet(Uri uri,
       {required int generation}) async {
+    final initial =
+        uri.queryParameters.map((k, v) => MapEntry(k.toLowerCase(), v));
+    final expectedCourse = initial['courseid'];
+    final expectedClass = initial['classid'] ?? initial['clazzid'];
     for (var i = 0; i < 5; i++) {
       if (generation != _sessionGeneration) return null;
       if (uri.scheme != 'https' ||
@@ -326,12 +330,37 @@ extension _ExamCollection on ChaoxingLocalClient {
           !uri.host.endsWith('.chaoxing.com') ||
           !const {
             '/visit/stucoursemiddle',
+            '/mooc2-ans/mycourse/stu',
             '/phone/moocAnalysis/examList',
             '/mooc-ans/phone/moocAnalysis/examList',
             '/exam/test',
             '/exam-ans/exam/test',
             '/exam-ans/exam/test/examcode/examlist',
           }.contains(uri.path)) {
+        throw StateError('unsafeExamRedirect');
+      }
+      final isCoursePage = uri.path == '/mooc2-ans/mycourse/stu';
+      if (isCoursePage &&
+          (uri.host != 'mooc2-ans.chaoxing.com' ||
+              expectedCourse == null ||
+              expectedClass == null)) {
+        throw StateError('unsafeExamRedirect');
+      }
+      final found = <String>{};
+      for (final entry in uri.queryParametersAll.entries) {
+        final key = entry.key.toLowerCase();
+        final expected = key == 'courseid'
+            ? expectedCourse
+            : const {'classid', 'clazzid'}.contains(key)
+                ? expectedClass
+                : null;
+        if (expected == null) continue;
+        if (entry.value.any((v) => v != expected)) {
+          throw StateError('unsafeExamRedirect');
+        }
+        found.add(key == 'courseid' ? 'course' : 'class');
+      }
+      if (isCoursePage && found.length != 2) {
         throw StateError('unsafeExamRedirect');
       }
       final response = await _safeGet<dynamic>(uri.toString(),

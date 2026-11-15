@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import '../models/assignment.dart';
 import 'chaoxing_api_parser.dart';
 import 'chaoxing_assignment_parser.dart';
@@ -287,16 +289,25 @@ class ChaoxingExamParser {
     if (box is! Map || box['list'] is! List) return null;
     final rows = <Assignment>[];
     for (final item in box['list'] as List) {
-      if (item is! Map || item['uuid'] is! String || item['title'] is! String) {
+      if (item is! Map || item['title'] is! String) {
         return null;
       }
-      final id = item['uuid'] as String;
-      if (!RegExp(r'^[a-zA-Z0-9_-]{1,128}$').hasMatch(id)) return null;
       final title = text(item['title'] as String);
       final content =
           item['content'] is String ? text(item['content'] as String) : '';
       // This is deliberately a candidate notice, never a formal exam or date.
       if (!'$title $content'.contains('考试')) continue;
+      final rawId = item['uuid'];
+      if (rawId is! String ||
+          rawId.isEmpty ||
+          rawId.length > 512 ||
+          rawId.trim() != rawId ||
+          RegExp(r'[\x00-\x20\x7f]').hasMatch(rawId)) {
+        return null;
+      }
+      // The platform's uuid is an opaque compound resource reference, not
+      // necessarily an RFC UUID. Hash it whole to retain stable portable IDs.
+      final id = sha256.convert(utf8.encode(rawId)).toString();
       rows.add(make(
           id: id,
           title: title.isEmpty ? '考试通知' : title,
