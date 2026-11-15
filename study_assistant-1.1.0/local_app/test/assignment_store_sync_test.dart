@@ -56,8 +56,8 @@ void main() {
         sessionStore: _MemorySessionStore(account: 'student'),
         notificationService: _NoopNotificationService(),
         widgetSnapshotService: _NoopWidgetSnapshotService(),
-        chaoxingClient:
-            ChaoxingLocalClient(enableClassroomTasks: false, dio: dio));
+        chaoxingClient: ChaoxingLocalClient(
+            enableExams: false, enableClassroomTasks: false, dio: dio));
     addTearDown(store.dispose);
     await store.repository
         .mergeAndSave([_assignment(id: 'cx:activity:7:11:88', title: '旧课堂题')]);

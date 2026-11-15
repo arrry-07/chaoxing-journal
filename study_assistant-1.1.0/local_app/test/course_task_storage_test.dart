@@ -581,7 +581,7 @@ void main() {
     await repo.savePersonalWorkspace(personal, _account);
     final snapshot = await repo.createBackupSnapshot(_account);
     final encoded = snapshot.encode();
-    expect(jsonDecode(encoded)['schema'], 4);
+    expect(jsonDecode(encoded)['schema'], 5);
     expect(encoded, isNot(contains('synthetic-link-secret')));
     expect(encoded, isNot(contains('synthetic-body-secret')));
     expect(encoded, isNot(contains('submitUrl')));
@@ -641,6 +641,7 @@ void main() {
       record.remove('activityType');
       record.remove('availability');
       record.remove('courseTaskKey');
+      record.remove('exam');
       // Historical backups can contain server descriptions with access data.
       record['requirementsText'] = original.requirementsText;
       final decoded = BackupSnapshot.decode(jsonEncode(raw));
@@ -664,7 +665,7 @@ void main() {
       expect(
           jsonDecode(
               (await repo.createBackupSnapshot(_account)).encode())['schema'],
-          4);
+          5);
     });
   }
 
@@ -731,7 +732,9 @@ void main() {
 
   test('backup 4 rejects invalid new fields and future schemas', () {
     final raw = jsonDecode(_backup([_task()]).encode()) as Map<String, dynamic>;
+    raw['schema'] = 4;
     final record = (raw['records'] as List).single as Map;
+    record.remove('exam');
     for (final invalid in ['35', 35.0, true]) {
       record['activityType'] = invalid;
       expect(
@@ -744,7 +747,7 @@ void main() {
           () => BackupSnapshot.decode(jsonEncode(raw)), throwsFormatException);
     }
     record['availability'] = 'available';
-    for (final version in [5, 99]) {
+    for (final version in [6, 99]) {
       raw['schema'] = version;
       expect(
           () => BackupSnapshot.decode(jsonEncode(raw)), throwsFormatException);

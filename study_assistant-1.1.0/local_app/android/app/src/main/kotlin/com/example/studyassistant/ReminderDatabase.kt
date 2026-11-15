@@ -50,17 +50,20 @@ data class StoredReminderSnapshot(
     val followed: Boolean,
     val formal: Boolean,
     val inAssignmentScope: Boolean = formal,
+    val eventKind: String = "deadline",
 ) {
     fun eligibleAt(now: Long): Boolean =
         inAssignmentScope && followed && !completed && !hidden &&
             (status == "pending" || status == "returned") &&
             deadlineTrusted && !deadlineReadFailed &&
+            (eventKind == "deadline" || eventKind == "examStart") &&
+            (eventKind != "examStart" || deadlineAt != null) &&
             (deadlineAt == null || deadlineAt > now)
 
     fun matchesEvent(event: StoredReminderEvent, now: Long): Boolean =
         eligibleAt(now) && accountHash == event.accountHash &&
             sessionEpoch == event.sessionEpoch && assignmentId == event.assignmentId &&
-            deadlineAt == event.deadlineAt &&
+            eventKind == event.eventKind && deadlineAt == event.deadlineAt &&
             (event.type == ReminderDatabase.EVENT_NEW ||
                 (event.type == ReminderDatabase.EVENT_DEADLINE &&
                     deadlineAt != null && event.notifyAt < deadlineAt))
@@ -80,6 +83,7 @@ data class StoredReminderEvent(
     val batchId: String?,
     val status: String,
     val notificationId: Int,
+    val eventKind: String = "deadline",
 )
 
 class ReminderDatabase private constructor(context: Context) :
@@ -125,6 +129,7 @@ class ReminderDatabase private constructor(context: Context) :
                 course_name TEXT NOT NULL,
                 title TEXT NOT NULL,
                 deadline_at INTEGER,
+                event_kind TEXT NOT NULL DEFAULT 'deadline',
                 deadline_trusted INTEGER NOT NULL,
                 deadline_read_failed INTEGER NOT NULL,
                 completed INTEGER NOT NULL,
@@ -149,6 +154,7 @@ class ReminderDatabase private constructor(context: Context) :
                 title TEXT NOT NULL,
                 notify_at INTEGER NOT NULL,
                 deadline_at INTEGER,
+                event_kind TEXT NOT NULL DEFAULT 'deadline',
                 offsets TEXT NOT NULL DEFAULT '[]',
                 batch_id TEXT,
                 status TEXT NOT NULL,
@@ -177,6 +183,10 @@ class ReminderDatabase private constructor(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 3 && newVersion >= 3) {
+            db.execSQL("ALTER TABLE snapshots ADD COLUMN event_kind TEXT NOT NULL DEFAULT 'deadline'")
+            db.execSQL("ALTER TABLE events ADD COLUMN event_kind TEXT NOT NULL DEFAULT 'deadline'")
+        }
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE accounts ADD COLUMN baselined_sources TEXT NOT NULL DEFAULT '[]'")
             db.execSQL("ALTER TABLE snapshots ADD COLUMN in_assignment_scope INTEGER NOT NULL DEFAULT 0")
@@ -468,6 +478,7 @@ class ReminderDatabase private constructor(context: Context) :
                     put("session_epoch", sessionEpoch)
                     put("course_name", snapshot.courseName)
                     put("title", snapshot.title)
+                    put("event_kind", snapshot.eventKind)
                     snapshot.deadlineAt?.let { put("deadline_at", it) }
                         ?: putNull("deadline_at")
                     put("deadline_trusted", if (snapshot.deadlineTrusted) 1 else 0)
@@ -584,6 +595,7 @@ class ReminderDatabase private constructor(context: Context) :
                 put("session_epoch", sessionEpoch)
                 put("notify_at", event.notifyAt)
                 put("deadline_at", event.deadlineAt)
+                put("event_kind", event.eventKind)
                 put("offsets", JSONArray(event.offsets).toString())
                 put("status", status)
                 put("updated_at", now)
@@ -915,6 +927,7 @@ class ReminderDatabase private constructor(context: Context) :
                 put("course_name", event.courseName)
                 put("title", event.title)
                 put("notify_at", event.notifyAt)
+                put("event_kind", event.eventKind)
                 event.deadlineAt?.let { put("deadline_at", it) } ?: putNull("deadline_at")
                 put("offsets", JSONArray(event.offsets).toString())
                 event.batchId?.let { put("batch_id", it) } ?: putNull("batch_id")
@@ -992,6 +1005,7 @@ class ReminderDatabase private constructor(context: Context) :
         followed = getInt(getColumnIndexOrThrow("followed")) == 1,
         formal = getInt(getColumnIndexOrThrow("formal")) == 1,
         inAssignmentScope = getInt(getColumnIndexOrThrow("in_assignment_scope")) == 1,
+        eventKind = getString(getColumnIndexOrThrow("event_kind")),
     )
 
     private fun Cursor.toEvent() = StoredReminderEvent(
@@ -1008,6 +1022,7 @@ class ReminderDatabase private constructor(context: Context) :
         batchId = nullableString("batch_id"),
         status = getString(getColumnIndexOrThrow("status")),
         notificationId = getInt(getColumnIndexOrThrow("notification_id")),
+        eventKind = getString(getColumnIndexOrThrow("event_kind")),
     )
 
     private fun Cursor.nullableLong(column: String): Long? {
@@ -1029,7 +1044,7 @@ class ReminderDatabase private constructor(context: Context) :
         const val STATUS_INVALID = "invalid"
 
         private const val DATABASE_NAME = "assignment_reminders_v1.db"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 3
 
         @Volatile
         private var instance: ReminderDatabase? = null
@@ -1078,6 +1093,7 @@ class ReminderDatabase private constructor(context: Context) :
                 accountHash = accountHash,
                 sessionEpoch = sessionEpoch,
                 type = json.getString("type"),
+                eventKind = json.optString("eventKind", "deadline"),
                 assignmentId = json.getString("assignmentId"),
                 courseName = json.optString("courseName"),
                 title = json.optString("title"),
@@ -1108,6 +1124,7 @@ class ReminderDatabase private constructor(context: Context) :
             hidden = json.optBoolean("hidden"),
             followed = json.optBoolean("followed", true),
             formal = json.optBoolean("formal"),
+            eventKind = json.optString("eventKind", "deadline"),
             inAssignmentScope = json.optBoolean("inAssignmentScope", json.optBoolean("formal")),
         )
 

@@ -50,7 +50,8 @@ void main() {
         }
         h.resolve(Response(requestOptions: o, statusCode: 200, data: ''));
       }));
-    final c = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
+    final c = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio)
       ..deferProfile = true;
     await c.login(account: 'A', password: 'dummy');
     final old = c.loadProfile();
@@ -80,7 +81,8 @@ void main() {
         };
         h.resolve(Response(requestOptions: o, statusCode: 200, data: body));
       }));
-    final c = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final c = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
     expect(await c.fetchAssignments(), isEmpty);
     expect(c.failedCourses, 1);
     expect(c.issues.single.kind, SyncIssueKind.schemaChanged);
@@ -127,7 +129,8 @@ void main() {
             onRequest: (o, h) => h.resolve(Response(
                 requestOptions: o, statusCode: sample.$1, data: sample.$2))));
       await expectLater(
-          ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
+          ChaoxingLocalClient(
+                  enableExams: false, enableClassroomTasks: false, dio: dio)
               .fetchAssignments(),
           throwsA(isA<SyncReadException>()
               .having((e) => e.issue.kind, 'kind', sample.$3)));
@@ -139,7 +142,8 @@ void main() {
           onRequest: (o, h) => h.resolve(Response(
               requestOptions: o, statusCode: 200, data: {'courses': []}))));
     expect(
-        await ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
+        await ChaoxingLocalClient(
+                enableExams: false, enableClassroomTasks: false, dio: dio)
             .fetchAssignments(),
         isEmpty);
   });

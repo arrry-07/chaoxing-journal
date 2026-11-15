@@ -1,5 +1,6 @@
 import '../models/assignment.dart';
 import '../models/personal_workspace.dart';
+import 'assignment_reminder_planner.dart';
 
 class SummaryNotice {
   const SummaryNotice(this.id, this.at, this.body);
@@ -22,14 +23,24 @@ class DailySummary {
       if (!at.isAfter(now)) continue;
       final day = PersonalWorkspace.dayKey(at);
       final due = rows.where((a) {
+        if (a.isExam) return false;
         final bucket = a.deadlineBucketAt(now);
         return bucket == AssignmentDeadlineBucket.notExpiredWithDeadline &&
             PersonalWorkspace.dayKey(a.deadlineAt!) == day;
       }).length;
+      final exams = rows
+          .where((a) =>
+              a.isExam &&
+              AssignmentReminderSnapshot(
+                      assignment: a, hidden: false, followed: true)
+                  .eligibleAt(at) &&
+              PersonalWorkspace.dayKey(a.reminderAnchorAt!) == day)
+          .length;
+      final examText = exams == 0 ? '' : ' · 今日开考 $exams 项';
       final plans = personal.plans.where((p) => p.day == day && !p.done).length;
       final stamp = synced == null ? '尚未同步' : PersonalWorkspace.dayKey(synced);
       result.add(SummaryNotice(baseId + result.length, at,
-          '今日截止 $due 项 · 个人计划 $plans 项。基于 $stamp 本机快照，请打开应用刷新核对。'));
+          '今日截止 $due 项$examText · 个人计划 $plans 项。基于 $stamp 本机快照，请打开应用刷新核对。'));
     }
     return result;
   }

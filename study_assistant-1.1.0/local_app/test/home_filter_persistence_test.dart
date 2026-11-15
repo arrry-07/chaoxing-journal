@@ -303,7 +303,10 @@ void main() {
     await tester.pumpAndSettle();
 
     final chips = tester
-        .widgetList<ChoiceChip>(find.byType(ChoiceChip))
+        .widgetList<ChoiceChip>(find.byWidgetPredicate((widget) =>
+            widget is ChoiceChip &&
+            widget.key is ValueKey<String> &&
+            (widget.key as ValueKey<String>).value.startsWith('deadline-')))
         .map((chip) => (chip.label as Text).data)
         .toList();
     expect(chips, ['全部', '未截止', '已逾期']);
@@ -348,15 +351,15 @@ void main() {
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), '数学');
     await tapSheetOption(t, '未截止');
-    await tapSheetOption(t, '作业名称');
+    await tapSheetOption(t, '名称');
     await tapSheetOption(t, '应用');
     expect(s.homeFilters.sortOrder, HomeSortOrder.title);
     expect(find.byKey(const ValueKey('current-home-sort')), findsOneWidget);
-    expect(find.text('作业名称'), findsOneWidget);
+    expect(find.text('名称'), findsOneWidget);
     for (final tab in ['日历', '统计', '我的']) {
       await t.tap(find.text(tab));
       await t.pumpAndSettle();
-      await t.tap(find.text('作业'));
+      await t.tap(find.text('首页'));
       await t.pumpAndSettle();
       expect(find.text('已筛选'), findsOneWidget);
       expect(s.homeFilters.query, '数学');
@@ -407,7 +410,7 @@ void main() {
     await t.tap(find.text('搜索与筛选'));
     await t.pumpAndSettle();
     expect(find.text('搜索、筛选与排序'), findsOneWidget);
-    await tapSheetOption(t, '作业名称');
+    await tapSheetOption(t, '名称');
 
     session.account = 'B';
     await s.restoreSession();

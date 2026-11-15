@@ -133,7 +133,7 @@ void main() {
         ..mixed = true
         ..failPersonal = true
         ..personalHttp = code;
-      final c = ChaoxingLocalClient(dio: f.dio);
+      final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
       final rows = await c.fetchAssignments();
       expect(rows.where((a) => a.isFormal).length, 1);
       expect(rows.where((a) => a.activityType == 35).single.status, 'pending');
@@ -160,7 +160,7 @@ void main() {
         'AI late response after ${cancel ? 'cancellation' : 'session replacement'} is discarded',
         () async {
       final f = AiFixture()..gate = Completer<void>();
-      final c = ChaoxingLocalClient(dio: f.dio);
+      final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
       final future = c.fetchAssignments();
       await f.started.future;
       if (cancel) {
@@ -186,7 +186,7 @@ void main() {
         'AI practice uses its own personal API and enters assignment scope: $completed',
         () async {
       final f = AiFixture()..completed = completed;
-      final c = ChaoxingLocalClient(dio: f.dio);
+      final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
       final rows = await c.fetchAssignments();
       expect(rows, hasLength(1));
       final a = rows.single;
@@ -217,7 +217,7 @@ void main() {
         ..wrongRelation = failure == 'relation'
         ..failPersonal = failure == 'personal'
         ..missingEntry = failure == 'entry';
-      final c = ChaoxingLocalClient(dio: f.dio);
+      final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
       final a = (await c.fetchAssignments()).single;
       expect(a.isInAssignmentScope, isTrue);
       expect(a.status, 'unknown');

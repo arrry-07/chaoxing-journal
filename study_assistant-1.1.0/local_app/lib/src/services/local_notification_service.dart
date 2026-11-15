@@ -10,6 +10,7 @@ import 'package:timezone/data/latest.dart' as timezone_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../models/assignment.dart';
+import 'assignment_reminder_planner.dart';
 import 'reminder_rule_store.dart';
 import 'daily_summary.dart';
 import '../models/personal_workspace.dart';
@@ -447,7 +448,8 @@ class LocalNotificationService {
     }
   }
 
-  static String formatDeadlineRemainingText(int offsetMinutes) {
+  static String formatDeadlineRemainingText(int offsetMinutes,
+      {bool examStart = false}) {
     final safeMinutes = offsetMinutes < 0 ? 0 : offsetMinutes;
     final days = safeMinutes ~/ 1440;
     final hours = (safeMinutes % 1440) ~/ 60;
@@ -457,7 +459,7 @@ class LocalNotificationService {
       if (hours > 0) '$hours 小时',
       if (minutes > 0 || (days == 0 && hours == 0)) '$minutes 分钟',
     ];
-    return '还剩 ${parts.join(' ')}截止';
+    return '还剩 ${parts.join(' ')}${examStart ? '开考' : '截止'}';
   }
 
   void setPayloadHandler(NotificationPayloadHandler? onPayload) {
@@ -1331,10 +1333,12 @@ class LocalNotificationService {
       final seen = <String>{};
       final now = DateTime.now();
       for (final assignment in assignments.where((item) =>
-          item.deadlineBucketAt(now) ==
-          AssignmentDeadlineBucket.notExpiredWithDeadline)) {
+          AssignmentReminderSnapshot(
+                  assignment: item, hidden: false, followed: true)
+              .eligibleAt(now))) {
         for (final offset in offsets) {
-          final at = assignment.deadlineAt?.subtract(Duration(minutes: offset));
+          final at =
+              assignment.reminderAnchorAt?.subtract(Duration(minutes: offset));
           if (at == null || !at.isAfter(now)) continue;
           if (!seen.add('${assignment.id}:$offset')) {
             throw StateError('作业提醒存在重复标识，请重新同步后重试');
@@ -1365,17 +1369,20 @@ class LocalNotificationService {
     int offset,
     int notificationId,
   ) async {
-    final notifyAt = assignment.deadlineAt?.subtract(Duration(minutes: offset));
+    final notifyAt =
+        assignment.reminderAnchorAt?.subtract(Duration(minutes: offset));
     if (notifyAt == null || notifyAt.difference(DateTime.now()).isNegative) {
       return;
     }
     await _zonedSchedule(
       id: notificationId,
       channelId: assignmentChannel,
-      title: '作业即将截止',
+      title: assignment.isExam ? '考试即将开考' : '作业即将截止',
       body: showDetails
-          ? '${assignment.courseName} · ${assignment.title}，${formatDeadlineRemainingText(offset)}'
-          : '有作业即将截止，请打开课业手记查看',
+          ? '${assignment.courseName} · ${assignment.title}，${formatDeadlineRemainingText(offset, examStart: assignment.isExam)}'
+          : assignment.isExam
+              ? '有考试即将开考，请打开课业手记查看'
+              : '有作业即将截止，请打开课业手记查看',
       notifyAt: notifyAt,
       payload:
           'a:studyassistant:///assignments/${Uri.encodeComponent(assignment.id)}',

@@ -86,12 +86,14 @@ object AssignmentNotificationPublisher {
 
         val remaining = formatRemaining(
             Duration.ofMillis(deadline - now.toEpochMilli()).toMinutes(),
+            event.eventKind,
         )
-        val title = "作业即将截止"
+        val title = if (event.eventKind == "examStart") "考试即将开考" else "作业即将截止"
         val body = if (account.showDetails) {
             "${event.courseName} · ${event.title}，$remaining"
         } else {
-            "有作业即将截止，请打开课业手记查看"
+            if (event.eventKind == "examStart") "有考试即将开考，请打开课业手记查看"
+            else "有作业即将截止，请打开课业手记查看"
         }
         val click = clickIntent(
             context = context,
@@ -192,11 +194,13 @@ object AssignmentNotificationPublisher {
         channelId: String,
     ): NotificationCompat.Builder {
         val single = events.singleOrNull()
+        val hasExams = events.any { it.eventKind == "examStart" }
+        val subject = if (hasExams) "课业" else "作业"
         val body = if (!showDetails) {
             if (single == null) {
-                "有 ${events.size} 项作业有新变化，请打开课业手记查看"
+                "有 ${events.size} 项${subject}有新变化，请打开课业手记查看"
             } else {
-                "有作业有新变化，请打开课业手记查看"
+                "有${subject}有新变化，请打开课业手记查看"
             }
         } else if (single == null) {
             val names = events.take(3).joinToString("、") { it.title }
@@ -204,8 +208,8 @@ object AssignmentNotificationPublisher {
         } else {
             val deadlineText = single.deadlineAt?.let {
                 val minutes = Duration.ofMillis(it - now.toEpochMilli()).toMinutes()
-                "，${formatRemaining(minutes)}"
-            } ?: "，截止时间待确认"
+                "，${formatRemaining(minutes, single.eventKind)}"
+            } ?: if (single.eventKind == "examStart") "，开考时间待确认" else "，截止时间待确认"
             "${single.courseName} · ${single.title}$deadlineText"
         }
         val click = clickIntent(
@@ -217,7 +221,7 @@ object AssignmentNotificationPublisher {
         return baseBuilder(
             context,
             channelId,
-            "发现新的学习通作业",
+            if (hasExams) "发现新的学习通课业" else "发现新的学习通作业",
             body,
             showDetails,
         )
@@ -506,16 +510,17 @@ object AssignmentNotificationPublisher {
         return PendingIntent.getActivity(context, requestCode, intent, flags)
     }
 
-    private fun formatRemaining(minutes: Long): String {
+    private fun formatRemaining(minutes: Long, eventKind: String = "deadline"): String {
+        val action = if (eventKind == "examStart") "开考" else "截止"
         val safe = minutes.coerceAtLeast(1)
-        if (safe < 60) return "还剩 $safe 分钟截止"
+        if (safe < 60) return "还剩 $safe 分钟$action"
         if (safe < 24 * 60) {
             val hours = safe / 60
             val rest = safe % 60
-            return if (rest == 0L) "还剩 $hours 小时截止" else "还剩 $hours 小时 $rest 分钟截止"
+            return if (rest == 0L) "还剩 $hours 小时$action" else "还剩 $hours 小时 $rest 分钟$action"
         }
         val days = safe / (24 * 60)
         val hours = (safe % (24 * 60)) / 60
-        return if (hours == 0L) "还剩 $days 天截止" else "还剩 $days 天 $hours 小时截止"
+        return if (hours == 0L) "还剩 $days 天$action" else "还剩 $days 天 $hours 小时$action"
     }
 }

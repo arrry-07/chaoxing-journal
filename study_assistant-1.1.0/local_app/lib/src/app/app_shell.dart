@@ -101,7 +101,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             NavigationDestination(
               icon: Icon(Icons.assignment_outlined),
               selectedIcon: Icon(Icons.assignment),
-              label: '作业',
+              label: '首页',
             ),
             NavigationDestination(
               icon: Icon(Icons.calendar_today_outlined),

@@ -435,6 +435,8 @@ void main() {
   });
 
   test('a newer Gitee version wins over an older GitHub release', () async {
+    final parts = AppVersion.name.split('.').map(int.parse).toList();
+    final nextMinor = '${parts[0]}.${parts[1] + 1}.0';
     final dio = Dio(BaseOptions(validateStatus: (_) => true))
       ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
         handler.resolve(Response(
@@ -442,9 +444,9 @@ void main() {
           statusCode: 200,
           data: options.uri.host == 'raw.giteeusercontent.com'
               ? manifest(
-                  versionName: '1.8.0',
+                  versionName: nextMinor,
                   versionCode: AppVersion.code + 5,
-                  apkUrl: giteeApkUrl.replaceAll('9.0.0', '1.8.0'),
+                  apkUrl: giteeApkUrl.replaceAll('9.0.0', nextMinor),
                 )
               : [release(versionName: nextPatchVersion())],
         ));
@@ -454,7 +456,7 @@ void main() {
         .checkConfigured(currentVersionCode: AppVersion.code);
 
     expect(result.status, UpdateCheckStatus.available);
-    expect(result.update!.versionName, '1.8.0');
+    expect(result.update!.versionName, nextMinor);
     expect(result.update!.apkDownloadUrl, contains('gitee.com'));
   });
 

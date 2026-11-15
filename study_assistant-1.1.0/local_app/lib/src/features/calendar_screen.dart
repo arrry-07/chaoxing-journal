@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../app/journal.dart';
-import '../models/assignment.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
@@ -69,12 +68,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
               : d == selected;
         }).toList()
           ..sort((a, b) => a.at!.compareTo(b.at!));
-        final dated = all.where((assignment) {
-          final bucket = assignment.deadlineBucketAt(now);
-          return (bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
-                  bucket == AssignmentDeadlineBucket.overdue) &&
-              assignment.deadlineAt != null;
-        }).toList();
+        final dated = all
+            .where((assignment) =>
+                AssignmentQuery.isCalendarDated(assignment, now))
+            .toList();
         final noDeadlineCount = all
             .where((a) => AssignmentRecoveryScope.noDeadline.matches(a, now))
             .length;
@@ -84,11 +81,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
             .length;
         final agenda = selected == null
             ? dated.where((a) {
-                final d = AssignmentQuery.dayKey(a.deadlineAt!);
+                final d = AssignmentQuery.dayKey(a.timelineAt!);
                 return d.year == month.year && d.month == month.month;
               }).toList()
             : AssignmentQuery.forDay(all, selected!, {}, now: now);
-        agenda.sort((a, b) => a.deadlineAt!.compareTo(b.deadlineAt!));
+        agenda.sort((a, b) => a.timelineAt!.compareTo(b.timelineAt!));
         final days = DateTime(month.year, month.month + 1, 0).day,
             leading = month.weekday % 7;
         final large = MediaQuery.textScalerOf(context).scale(14) > 21;
@@ -96,7 +93,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         return ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             children: [
-              const Text('截止日历', style: Journal.section),
+              const Text('课业日历', style: Journal.section),
               TextButton.icon(
                   onPressed: () => context.push('/agenda'),
                   icon: const Icon(Icons.event_note_outlined),
@@ -172,15 +169,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                         {},
                                         now: now);
                                 final unknown = items
-                                    .where((a) => !a.isPendingConfirmed)
+                                    .where((a) =>
+                                        !a.isExam && !a.isPendingConfirmed)
                                     .length;
+                                final exams =
+                                    items.where((a) => a.isExam).length;
                                 final personalCount = manual
                                     .where((e) =>
                                         AssignmentQuery.dayKey(e.at!) == date)
                                     .length;
                                 return Semantics(
                                     label:
-                                        '${month.month}月$day日，${items.length - unknown}份待交，$unknown份待确认，$personalCount项个人安排',
+                                        '${month.month}月$day日，${items.length - unknown - exams}份待交，$unknown份待确认，$exams项考试或考试通知，$personalCount项个人安排',
                                     selected: selected == date,
                                     button: true,
                                     onTap: () =>
@@ -223,7 +223,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       ]))),
               const Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text('日期下方数字为作业与未完成个人安排的合计，均按北京时间',
+                  child: Text('日期下方数字为作业、任务、考试及个人安排合计；考试按开考日，其余按截止日，均为北京时间',
                       style: TextStyle(fontSize: 12, color: Journal.muted))),
               Text(
                   selected == null
@@ -238,7 +238,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             ? '本次读取失败，请到同步详情重试'
                             : widget.store.lastSyncAt == null && all.isEmpty
                                 ? '尚未获取作业，请先同步'
-                                : '所选范围没有已知截止作业')),
+                                : '所选范围没有已知日期的课业')),
               for (final a in agenda)
                 AssignmentCard(
                     assignment: a,

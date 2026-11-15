@@ -154,6 +154,48 @@ class ReminderAggregateNotificationTest {
         assertTrue(manager.activeNotifications.any { it.id == sharedId })
     }
 
+    @Test
+    fun singleExamNewEventUsesStartTextAndCancelsWhenPersonalStatusBecomesUnknown() {
+        val exam = snapshot("合成考试", formal = false).copy(
+            assignmentId = "cx:exam:synthetic:class:exam",
+            eventKind = "examStart", deadlineAt = System.currentTimeMillis() + 3_600_000L,
+        )
+        val start = event(exam)
+        apply(listOf(exam), listOf(start))
+        val published = AssignmentNotificationPublisher.publishPendingNewAssignments(
+            context, database, accountHash, Instant.now(), channelId,
+        )
+        assertTrue(published.submitted)
+        val id = published.notificationId!!
+        val notification = awaitNotification(id)
+        val text = notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString()
+        assertTrue(text.contains("开考"))
+        assertFalse(text.contains("截止"))
+        reconcile(apply(listOf(exam.copy(status = "unknown"))))
+        awaitAbsent(id)
+        assertEquals(ReminderDatabase.STATUS_CANCELLED, database.event(start.eventId)!!.status)
+    }
+
+    @Test
+    fun mixedExamAndWorkNotificationKeepsTheWorkWhenExamIsCancelled() {
+        val work = snapshot("合成作业", formal = true)
+        val exam = snapshot("合成考试", formal = false).copy(
+            assignmentId = "cx:exam:synthetic:class:exam",
+            eventKind = "examStart", deadlineAt = System.currentTimeMillis() + 3_600_000L,
+        )
+        val sharedId = publishBatch(listOf(work, exam))
+        val initial = awaitNotification(sharedId)
+        assertEquals("发现新的学习通课业", initial.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+        reconcile(apply(listOf(work, exam.copy(status = "unknown"))))
+        val survivor = awaitNotification(sharedId) {
+            it.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains(work.title) &&
+                !it.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains(exam.title)
+        }
+        assertTrue(AssignmentNotificationPublisher.matchesClickIntent(
+            context, survivor.contentIntent, database.event(event(work).eventId)!!,
+        ))
+    }
+
     private fun publishBatch(snapshots: List<StoredReminderSnapshot>): Int {
         val events = snapshots.map(::event)
         apply(snapshots, events)
@@ -201,9 +243,10 @@ class ReminderAggregateNotificationTest {
         val id = "$accountHash|${snapshot.assignmentId}|new"
         return StoredReminderEvent(
             id, accountHash, epoch, ReminderDatabase.EVENT_NEW, snapshot.assignmentId,
-            snapshot.courseName, snapshot.title, System.currentTimeMillis(), null,
+            snapshot.courseName, snapshot.title, System.currentTimeMillis(), snapshot.deadlineAt,
             emptyList(), "synthetic-batch", ReminderDatabase.STATUS_PENDING,
             ReminderDatabase.stableNotificationId(id),
+            snapshot.eventKind,
         )
     }
 

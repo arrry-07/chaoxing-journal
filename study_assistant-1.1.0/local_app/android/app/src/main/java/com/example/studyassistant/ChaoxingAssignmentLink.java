@@ -37,15 +37,37 @@ public final class ChaoxingAssignmentLink {
                 CLASSROOM_PATHS.contains(uri.getRawPath()) && hasClassroomIdentity(uri);
             boolean ai = host.equals("mooc2-ans.chaoxing.com") &&
                 uri.getRawPath().equals("/ai-evaluate/v2/redirect/active/stu") && hasAiIdentity(uri);
-            if (!formal && !classroom && !ai) return null;
+            boolean examList = isReadOnlyExamList(uri);
+            boolean noticeList = host.equals("notice.chaoxing.com") &&
+                uri.getRawPath().equals("/pc/notice/myNotice") && uri.getRawQuery() == null;
+            if (!formal && !classroom && !ai && !examList && !noticeList) return null;
             // Encode the complete original once; the receiving app decodes the
             // outer query once. Rebuilding the inner signed URL breaks enc.
             return "chaoxingshareback://xuexitong.com?sharebacktype=1&url=" +
                 URLEncoder.encode(original, "UTF-8") + "&title=" +
-                URLEncoder.encode("作业详情", "UTF-8");
+                URLEncoder.encode(noticeList ? "通知收件箱" : examList ? "考试列表" : "作业详情", "UTF-8");
         } catch (Exception invalid) {
             return null;
         }
+    }
+
+    private static boolean isReadOnlyExamList(URI uri) throws Exception {
+        if (!"mooc1-api.chaoxing.com".equals(uri.getHost())) return false;
+        if ("/exam-ans/exam/test/examcode/examlist".equals(uri.getRawPath())) {
+            return uri.getRawQuery() == null;
+        }
+        if (!"/phone/moocAnalysis/examList".equals(uri.getRawPath()) ||
+            uri.getRawQuery() == null) return false;
+        Map<String, String> values = new HashMap<>();
+        for (String part : uri.getRawQuery().split("&", -1)) {
+            String[] pair = part.split("=", 2);
+            String key = URLDecoder.decode(pair[0], "UTF-8");
+            if (!key.equals("courseId") && !key.equals("classId")) return false;
+            String value = pair.length == 2 ? URLDecoder.decode(pair[1], "UTF-8") : "";
+            if (!value.matches("[a-zA-Z0-9_-]+") || values.containsKey(key)) return false;
+            values.put(key, value);
+        }
+        return values.size() == 2;
     }
 
     private static boolean hasAiIdentity(URI uri) throws Exception {

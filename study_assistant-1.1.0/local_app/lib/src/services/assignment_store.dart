@@ -193,10 +193,12 @@ class AssignmentStore extends ChangeNotifier {
     _visitLeftApp = false;
     if (generation != _generation || !_authenticated || _disposed) return;
     final target = findAssignment(id);
-    if (target == null || target.courseId == null || target.clazzId == null) {
+    if (target == null ||
+        (!target.isExam &&
+            (target.courseId == null || target.clazzId == null))) {
       return;
     }
-    returnCheckMessage = '正在核对刚才作业的提交状态…';
+    returnCheckMessage = target.isExam ? '正在核对刚才考试的作答状态…' : '正在核对刚才作业的提交状态…';
     notifyListeners();
     var confirmed = false;
     await _run(() async {
@@ -209,12 +211,16 @@ class AssignmentStore extends ChangeNotifier {
       };
       late List<Assignment> incoming;
       try {
-        incoming = await chaoxingClient.fetchAssignmentsForCourse(
-            courseId: target.courseId!, clazzId: target.clazzId!);
+        incoming = target.courseId == null
+            ? await chaoxingClient.fetchAssignments()
+            : await chaoxingClient.fetchAssignmentsForCourse(
+                courseId: target.courseId!, clazzId: target.clazzId!);
       } on ChaoxingAuthenticationException {
         await _refreshChaoxingSession();
-        incoming = await chaoxingClient.fetchAssignmentsForCourse(
-            courseId: target.courseId!, clazzId: target.clazzId!);
+        incoming = target.courseId == null
+            ? await chaoxingClient.fetchAssignments()
+            : await chaoxingClient.fetchAssignmentsForCourse(
+                courseId: target.courseId!, clazzId: target.clazzId!);
       }
       if (generation != _generation || !_authenticated || _disposed) return;
       final observed = incoming
@@ -226,6 +232,7 @@ class AssignmentStore extends ChangeNotifier {
       final before = [..._assignments, ..._hiddenAssignments];
       final accepted = incoming
           .where((a) =>
+              a.isExam ||
               a.isSupportedClassroomTask ||
               a.id != id ||
               a.statusLabel != '提交状态未知')
@@ -248,11 +255,13 @@ class AssignmentStore extends ChangeNotifier {
       final latestBefore =
           before.where((a) => a.id == id).firstOrNull ?? target;
       final conflictsWithConfirmation = latestBefore.isCompleted &&
+          !latestBefore.isExam &&
           !latestBefore.isSupportedClassroomTask &&
           observed != null &&
           !observed.isCompleted &&
           observed.status != 'returned';
       returnCheckMessage = observed == null ||
+              observed.status == 'unknown' ||
               observed.statusLabel == '提交状态未知' ||
               conflictsWithConfirmation
           ? (observed?.isSupportedClassroomTask == true
@@ -422,7 +431,7 @@ class AssignmentStore extends ChangeNotifier {
       courseAssignments.where((a) => a.isFormal).toList();
   List<Assignment> get courseAssignments =>
       AssignmentQuery.scope(_assignments, {})
-          .where((a) => follows(a.courseKey!))
+          .where((a) => a.courseKey == null || follows(a.courseKey!))
           .toList();
   bool _privacyCleanupPending = false;
   final Set<String> _pendingNativeCleanupAccounts = <String>{};
@@ -493,7 +502,8 @@ class AssignmentStore extends ChangeNotifier {
 
   List<Assignment> _visibleAssignmentsFrom(Iterable<Assignment> records) =>
       AssignmentQuery.scope(records.toList(), {})
-          .where((a) => follows(a.courseKey!) && !a.isCompleted)
+          .where((a) =>
+              (a.courseKey == null || follows(a.courseKey!)) && !a.isCompleted)
           .toList();
 
   void _handleHomeProgress(int generation, AssignmentSyncProgress progress) {
@@ -1558,8 +1568,7 @@ class AssignmentStore extends ChangeNotifier {
         }
       } else {
         try {
-          await notificationService.rescheduleAssignments(
-              scoped.where((a) => a.deadlineTrusted).toList(),
+          await notificationService.rescheduleAssignments(scoped,
               offsetsMinutes: _reminderOffsetsMinutes);
         } catch (_) {
           _serviceWarnings.add('提醒安排失败，请检查通知权限后重试');

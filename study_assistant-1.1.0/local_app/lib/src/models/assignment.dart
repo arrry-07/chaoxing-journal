@@ -1,4 +1,6 @@
 import 'ai_practice_entry.dart';
+import 'exam_info.dart';
+export 'exam_info.dart';
 
 enum AssignmentSource {
   courseWork,
@@ -35,19 +37,40 @@ class Assignment {
     this.activityType,
     this.aiPracticePublishUuid,
     this.persistedCourseTaskKey,
+    this.exam,
     this.availability = AssignmentAvailability.available,
     AssignmentSource? source,
   }) : source = source ?? inferSource(id, submitUrl);
 
   final AssignmentSource source;
+  final ExamInfo? exam;
+  bool get isExam => source == AssignmentSource.exam && exam != null;
+  bool get hasExamIdentity =>
+      isExam &&
+      exam!.examId.isNotEmpty &&
+      (exam!.noticeOnly
+          ? id == 'cx:examNotice:inbox:${exam!.examId}'
+          : id ==
+              'cx:exam:${exam!.courseId ?? 'account'}:${exam!.clazzId ?? 'account'}:${exam!.examId}');
+  DateTime? get timelineAt => isExam ? exam!.startAt : deadlineAt;
+  bool get timelineTrusted => isExam ? exam!.startTrusted : deadlineTrusted;
+  DateTime? get reminderAnchorAt => isExam
+      ? (exam!.startTrusted &&
+              exam!.lifecycle != 'cancelled' &&
+              !exam!.noticeOnly
+          ? exam!.startAt
+          : null)
+      : deadlineAt;
   final int? activityType;
   final String? aiPracticePublishUuid;
 
   /// Validated journal/backup identity, independent of expiring access links.
   final String? persistedCourseTaskKey;
   final AssignmentAvailability availability;
-  String? get courseId => (_activityIdentity ?? _identity)?[0];
-  String? get clazzId => (_activityIdentity ?? _identity)?[1];
+  String? get courseId =>
+      isExam ? exam!.courseId : (_activityIdentity ?? _identity)?[0];
+  String? get clazzId =>
+      isExam ? exam!.clazzId : (_activityIdentity ?? _identity)?[1];
   String? get workId =>
       source == AssignmentSource.courseWork ? (_identity?[2]) : null;
   String? get activityId => _activityIdentity?[2];
@@ -58,20 +81,29 @@ class Assignment {
       source == AssignmentSource.classroomActivity &&
       const {35, 42, 77}.contains(activityType) &&
       _activityIdentity != null;
-  bool get hasCourseTaskIdentity => isFormal || isSupportedClassroomTask;
+  bool get hasCourseTaskIdentity =>
+      isFormal || isSupportedClassroomTask || hasExamIdentity;
   bool get isInAssignmentScope =>
       hasCourseTaskIdentity &&
       availability != AssignmentAvailability.unavailable;
-  String? get reminderSourceKey => isFormal
-      ? 'courseWork'
-      : isSupportedClassroomTask
-          ? 'classroomActivity:$activityType'
-          : null;
-  String? get courseTaskKey => isFormal
-      ? 'cx:work:$courseId:$clazzId:$workId'
-      : _activityIdentity != null
-          ? 'cx:activity:$courseId:$clazzId:$activityId'
-          : null;
+  String? get reminderSourceKey => hasExamIdentity
+      ? (exam!.noticeOnly
+          ? 'examNotice'
+          : exam!.courseId == null
+              ? 'examAccount'
+              : 'exam')
+      : isFormal
+          ? 'courseWork'
+          : isSupportedClassroomTask
+              ? 'classroomActivity:$activityType'
+              : null;
+  String? get courseTaskKey => hasExamIdentity
+      ? id
+      : isFormal
+          ? 'cx:work:$courseId:$clazzId:$workId'
+          : _activityIdentity != null
+              ? 'cx:activity:$courseId:$clazzId:$activityId'
+              : null;
   List<String>? get _activityIdentity {
     if (source != AssignmentSource.classroomActivity) return null;
     final parts = id.split(':');
@@ -167,6 +199,7 @@ class Assignment {
       return AssignmentSource.classroomActivity;
     }
     if (id.startsWith('cx:exam:')) return AssignmentSource.exam;
+    if (id.startsWith('cx:examNotice:')) return AssignmentSource.exam;
     if (id.startsWith('cx:manual:')) return AssignmentSource.manual;
     final u = Uri.tryParse(url ?? '');
     if (u != null &&
@@ -202,6 +235,9 @@ class Assignment {
           json['activityType'] is int ? json['activityType'] as int : null,
       persistedCourseTaskKey: json['courseTaskKey'] as String?,
       aiPracticePublishUuid: json['aiPracticePublishUuid'] as String?,
+      exam: json['exam'] is Map<String, dynamic>
+          ? ExamInfo.fromJson(json['exam'] as Map<String, dynamic>)
+          : null,
       availability: AssignmentAvailability.values
               .where((v) => v.name == json['availability'])
               .firstOrNull ??
@@ -235,6 +271,7 @@ class Assignment {
   Map<String, dynamic> toJson() => {
         'id': id,
         'source': source.name,
+        if (exam != null) 'exam': exam!.toJson(),
         if (activityType != null) 'activityType': activityType,
         if (persistedCourseTaskKey != null)
           'courseTaskKey': persistedCourseTaskKey,
@@ -259,6 +296,7 @@ class Assignment {
 
   Assignment copyWith({
     AssignmentSource? source,
+    ExamInfo? exam,
     int? activityType,
     String? aiPracticePublishUuid,
     bool clearAiPracticePublishUuid = false,
@@ -284,6 +322,7 @@ class Assignment {
     return Assignment(
       id: id ?? this.id,
       source: source ?? this.source,
+      exam: exam ?? this.exam,
       activityType: activityType ?? this.activityType,
       aiPracticePublishUuid: clearAiPracticePublishUuid
           ? null
@@ -307,11 +346,12 @@ class Assignment {
   }
 
   /// 已提交、待批阅、已完成都视为完成状态
-  bool get isCompleted =>
-      status == 'completed' ||
-      status == 'submitted' ||
-      status == 'reviewing' ||
-      status == 'graded';
+  bool get isCompleted => isExam
+      ? status == 'submitted'
+      : status == 'completed' ||
+          status == 'submitted' ||
+          status == 'reviewing' ||
+          status == 'graded';
 
   AssignmentDeadlineBucket deadlineBucketAt(DateTime now) {
     if (isCompleted) return AssignmentDeadlineBucket.completed;
@@ -349,17 +389,27 @@ class Assignment {
     return deadlineTrusted ? '未设置截止时间' : '截止时间待确认';
   }
 
-  String get statusLabel => switch (status) {
-        'returned' => '已退回',
-        'submitted' => '已提交',
-        'reviewing' => '待批阅',
-        'graded' => '已批阅',
-        'completed' => '已完成',
-        'unknown' => '提交状态未知',
-        'overdue' => '已逾期',
-        'pending' => '待提交',
-        _ => '提交状态未知',
-      };
+  String get statusLabel => isExam && !isCompleted
+      ? exam!.noticeOnly
+          ? '考试通知 · 待确认'
+          : switch (exam!.lifecycle) {
+              'cancelled' => '已取消',
+              'scheduled' => '未开始',
+              'inProgress' => '进行中',
+              'ended' => '已结束 · 作答状态待确认',
+              _ => '作答状态待确认',
+            }
+      : switch (status) {
+          'returned' => '已退回',
+          'submitted' => '已提交',
+          'reviewing' => '待批阅',
+          'graded' => '已批阅',
+          'completed' => '已完成',
+          'unknown' => '提交状态未知',
+          'overdue' => '已逾期',
+          'pending' => '待提交',
+          _ => '提交状态未知',
+        };
 
   static int compareByDeadline(Assignment a, Assignment b) {
     final left = a.deadlineAt;

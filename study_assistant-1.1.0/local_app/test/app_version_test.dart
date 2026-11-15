@@ -4,9 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/app/app_version.dart';
 
 void main() {
-  test('classroom task source release uses frozen version', () {
-    expect(AppVersion.name, '1.7.59');
-    expect(AppVersion.code, 66);
+  test('AI practice and exam release uses frozen version', () {
+    expect(AppVersion.name, '1.8.0');
+    expect(AppVersion.code, 67);
   });
 
   test('AppVersion matches pubspec version', () {

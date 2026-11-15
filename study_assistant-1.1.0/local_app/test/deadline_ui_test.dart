@@ -61,8 +61,9 @@ void main() {
     expect(find.textContaining('已退回'), findsOneWidget);
     expect(t.takeException(), isNull);
     await show(CalendarScreen(store: store));
-    await t.scrollUntilVisible(find.text('所选范围没有已知截止作业'), 180,
+    await t.scrollUntilVisible(find.text('所选范围没有已知日期的课业'), 180,
         scrollable: find.byType(Scrollable).first);
+    expect(find.text('所选范围没有已知日期的课业'), findsOneWidget);
     expect(find.text(title), findsNothing);
     expect(t.takeException(), isNull);
     await show(StatsScreen(store: store));

@@ -24,6 +24,17 @@ enum HomeSortOrder {
   title,
 }
 
+enum AssignmentTypeFilter {
+  all('全部'),
+  homework('作业'),
+  task('任务'),
+  exam('考试'),
+  examNotice('考试通知');
+
+  const AssignmentTypeFilter(this.label);
+  final String label;
+}
+
 /// UI preferences only; relative deadlines are evaluated against the current time.
 class HomeFilters {
   const HomeFilters({
@@ -31,18 +42,21 @@ class HomeFilters {
     this.courseKey,
     this.deadline = AssignmentDeadlineFilter.all,
     this.sortOrder = HomeSortOrder.grouped,
+    this.type = AssignmentTypeFilter.all,
   });
 
   final String query;
   final String? courseKey;
   final AssignmentDeadlineFilter deadline;
   final HomeSortOrder sortOrder;
+  final AssignmentTypeFilter type;
 
   String encode() => jsonEncode({
         'query': query.trim(),
         'courseKey': courseKey,
         'deadline': deadline.name,
         'sortOrder': sortOrder.name,
+        'type': type.name,
       });
 
   factory HomeFilters.decode(String? raw) {
@@ -75,6 +89,10 @@ class HomeFilters {
           query: (value['query'] as String).trim(),
           courseKey: value['courseKey'] == '' ? null : value['courseKey'],
           deadline: deadline,
+          type: AssignmentTypeFilter.values
+                  .where((type) => type.name == value['type'])
+                  .firstOrNull ??
+              AssignmentTypeFilter.all,
           sortOrder: sortOrder);
     } catch (_) {
       return const HomeFilters();

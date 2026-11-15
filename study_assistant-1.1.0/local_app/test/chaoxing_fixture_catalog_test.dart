@@ -56,7 +56,10 @@ void main() {
               data: route['body']));
         }));
       final client = ChaoxingLocalClient(
-          enableClassroomTasks: false, dio: dio, wait: (_) async {});
+          enableExams: false,
+          enableClassroomTasks: false,
+          dio: dio,
+          wait: (_) async {});
       if (entry['exception'] == 'auth') {
         await expectLater(client.fetchAssignments(),
             throwsA(isA<ChaoxingAuthenticationException>()));

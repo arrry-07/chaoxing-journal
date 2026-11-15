@@ -21,6 +21,9 @@ for name, main, files in [
     ('ai-practice', 'journal.qa.AiPracticeLinkTest', [
         root / 'tool/android_upgrade_probe/AiPracticeLinkTest.java',
         source / 'BrowserPolicy.java', source / 'ChaoxingAssignmentLink.java']),
+    ('exam-lists', 'journal.qa.ExamListLinkTest', [
+        root / 'tool/android_upgrade_probe/ExamListLinkTest.java',
+        source / 'BrowserPolicy.java', source / 'ChaoxingAssignmentLink.java']),
     ('update-policy', 'com.example.studyassistant.UpdateApkPolicyTest', [
         root / 'tool/android_upgrade_probe/UpdateApkPolicyTest.java',
         source / 'UpdateApkPolicy.java'])]:

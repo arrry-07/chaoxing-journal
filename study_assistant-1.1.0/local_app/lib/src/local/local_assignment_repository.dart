@@ -277,6 +277,7 @@ class LocalAssignmentRepository {
           state.byId[a.id] = Assignment(
               id: a.id,
               source: a.source,
+              exam: a.exam,
               activityType: a.activityType,
               availability: a.availability,
               courseName: a.courseName,
@@ -1010,6 +1011,22 @@ class _Journal {
       }
     }
     for (var item in incoming) {
+      if (item.hasExamIdentity) {
+        final prior = byId[item.id];
+        if (prior == null || !item.lastSyncedAt.isBefore(prior.lastSyncedAt)) {
+          if (prior?.hasExamIdentity == true) {
+            final info = item.exam!.retainingHistoricalTimes(prior!.exam!);
+            item = item.copyWith(
+                exam: info,
+                deadlineAt: info.endAt,
+                deadlineTrusted: info.endTrusted,
+                clearDeadlineAt: info.endAt == null);
+          }
+          byId[item.id] =
+              item.isCompleted ? item : item.copyWith(clearCompletedAt: true);
+        }
+        continue;
+      }
       if (item.isSupportedClassroomTask) {
         _mergeClassroomTask(item);
         continue;

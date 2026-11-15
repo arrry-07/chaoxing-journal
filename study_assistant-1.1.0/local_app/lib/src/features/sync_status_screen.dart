@@ -169,6 +169,9 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                                 'classroomActivity:35': '个人与分组任务',
                                 'classroomActivity:42': '随堂练习',
                                 'classroomActivity:77': 'AI 实践',
+                                'exam': '课程考试',
+                                'examAccount': '账号考试',
+                                'examNotice': '考试通知',
                                 'groupHistory': '课程群补充',
                               }[source.source] ??
                               '其他来源'),

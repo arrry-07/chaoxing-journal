@@ -12,6 +12,9 @@ import '../models/sync_report.dart';
 import 'chaoxing_api_parser.dart';
 import 'chaoxing_assignment_parser.dart';
 import 'chaoxing_classroom_parser.dart';
+import 'chaoxing_exam_parser.dart';
+
+part 'chaoxing_exam_client.dart';
 
 class ChaoxingAuthenticationException implements Exception {
   const ChaoxingAuthenticationException([this.httpStatus]);
@@ -43,7 +46,8 @@ class ChaoxingLocalClient {
   ChaoxingLocalClient(
       {Dio? dio,
       Future<void> Function(Duration)? wait,
-      this.enableClassroomTasks = true})
+      this.enableClassroomTasks = true,
+      this.enableExams = true})
       : _dio = dio ??
             Dio(
               BaseOptions(
@@ -69,6 +73,7 @@ class ChaoxingLocalClient {
 
   final Dio _dio;
   final bool enableClassroomTasks;
+  final bool enableExams;
   List<SyncSourceResult> sourceResults = const [];
   final Future<void> Function(Duration) _wait;
   CancelToken? _activeRequestToken;
@@ -479,14 +484,17 @@ class ChaoxingLocalClient {
       final classroom =
           await _fetchClassroomTasks([course], generation: generation);
       if (generation != _sessionGeneration) return const [];
-      if (rows == null && !classroom.recognized) {
+      final exams = await _fetchExams([course],
+          generation: generation, includeAccount: false);
+      if (generation != _sessionGeneration) return const [];
+      if (rows == null && !classroom.recognized && !_hasExamObservation) {
         final issue = issues.isNotEmpty
             ? issues.first
             : const SyncIssue(SyncIssueKind.schemaChanged, '本次未能读取目标课程作业',
                 stage: 'work');
         throw SyncReadException(issue);
       }
-      return _dedupeAssignments([...?rows, ...classroom.rows]);
+      return _dedupeAssignments([...?rows, ...classroom.rows, ...exams]);
     } finally {
       if (generation == _sessionGeneration) {
         _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
@@ -645,8 +653,19 @@ class ChaoxingLocalClient {
       if (classroom.failedCourses > 0) {
         problems.add('部分课堂任务信息尚未读取');
       }
+      final exams = await _fetchExams(courses, generation: generation);
+      if (generation != _sessionGeneration) return const [];
+      assignments.addAll(exams);
+      recognized = recognized || _hasExamObservation;
+      if (sourceResults.any((s) =>
+          const {'exam', 'examAccount', 'examNotice'}.contains(s.source) &&
+          s.phase != SyncSourcePhase.success)) {
+        problems.add('部分考试或通知来源尚未读取');
+      }
       if (problems.isNotEmpty) {
-        lastSyncWarning = '已更新 $succeededCourses 门课程，$failedCourses 门待重试';
+        lastSyncWarning = failedCourses == 0
+            ? '课程作业已更新，部分考试或通知信息尚未确认，请查看读取来源后重试'
+            : '已更新 $succeededCourses 门课程，$failedCourses 门待重试';
       }
       if (!recognized) {
         final issue = issues.isNotEmpty
@@ -1510,6 +1529,8 @@ class ChaoxingLocalClient {
     Map<String, dynamic>? queryParameters,
     Map<String, String>? headers,
     String? requestKind,
+    String method = 'GET',
+    Map<String, dynamic>? form,
   }) async {
     final parsedUri = Uri.parse(uri);
     final kind = requestKind ?? _requestKind(parsedUri.path);
@@ -1543,10 +1564,14 @@ class ChaoxingLocalClient {
       try {
         // ResponseType.plain keeps Dio's JSON transformer out of the measured
         // network window; JSON/HTML parsing is measured separately below.
-        response = await _dio.get<T>(
+        response = await _dio.request<T>(
           uri,
           queryParameters: queryParameters,
+          data: form,
           options: Options(
+            method: method,
+            contentType:
+                form == null ? null : Headers.formUrlEncodedContentType,
             responseType: ResponseType.plain,
             validateStatus: (status) => status != null,
             headers: _headers(parsedUri, headers),

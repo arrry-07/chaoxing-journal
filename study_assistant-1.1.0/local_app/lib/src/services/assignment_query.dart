@@ -4,7 +4,7 @@ import '../models/assignment.dart';
 import '../models/home_filters.dart';
 
 export '../models/home_filters.dart'
-    show AssignmentDeadlineFilter, HomeSortOrder;
+    show AssignmentDeadlineFilter, AssignmentTypeFilter, HomeSortOrder;
 
 class _NaturalKey {
   _NaturalKey(String value)
@@ -98,7 +98,7 @@ int _nameGroupRank(AssignmentDeadlineBucket bucket) => switch (bucket) {
 
 class _PreparedAssignment {
   _PreparedAssignment(this.assignment, this.index, DateTime now)
-      : bucket = assignment.deadlineBucketAt(now),
+      : bucket = AssignmentQuery.timelineBucketAt(assignment, now),
         course = _NaturalKey(assignment.courseName),
         title = _NaturalKey(assignment.title),
         courseKey = _NaturalKey(assignment.courseKey ?? ''),
@@ -151,13 +151,57 @@ class AssignmentQuery {
       records
           .where((a) =>
               a.isInAssignmentScope &&
-              (followed.isEmpty || followed.contains(a.courseKey)))
+              (followed.isEmpty ||
+                  (a.isExam && a.courseKey == null) ||
+                  followed.contains(a.courseKey)))
           .toList();
 
   static bool _hasTrustedPendingDeadline(Assignment assignment) =>
       assignment.isPendingConfirmed &&
-      !assignment.deadlineReadFailed &&
-      assignment.deadlineTrusted;
+      assignment.timelineTrusted &&
+      (assignment.isExam || !assignment.deadlineReadFailed);
+
+  /// Exams are placed by their opening time. An exam ending is not evidence
+  /// that this student submitted it, nor does opening make it overdue.
+  static AssignmentDeadlineBucket timelineBucketAt(
+      Assignment assignment, DateTime now) {
+    if (!assignment.isExam) return assignment.deadlineBucketAt(now);
+    if (assignment.isCompleted) return AssignmentDeadlineBucket.completed;
+    final exam = assignment.exam;
+    if (exam == null ||
+        !assignment.timelineTrusted ||
+        assignment.timelineAt == null ||
+        !assignment.isPendingConfirmed ||
+        exam.lifecycle == 'ended' ||
+        exam.lifecycle == 'cancelled' ||
+        (exam.endTrusted && exam.endAt != null && !exam.endAt!.isAfter(now))) {
+      return AssignmentDeadlineBucket.unconfirmed;
+    }
+    return AssignmentDeadlineBucket.notExpiredWithDeadline;
+  }
+
+  static bool matchesType(Assignment assignment, AssignmentTypeFilter type) =>
+      switch (type) {
+        AssignmentTypeFilter.all => true,
+        AssignmentTypeFilter.homework => assignment.isFormal,
+        AssignmentTypeFilter.task => assignment.isSupportedClassroomTask,
+        AssignmentTypeFilter.exam =>
+          assignment.isExam && assignment.exam?.noticeOnly == false,
+        AssignmentTypeFilter.examNotice =>
+          assignment.isExam && assignment.exam?.noticeOnly == true,
+      };
+
+  static bool isCalendarDated(Assignment assignment, DateTime now) {
+    if (assignment.isCompleted ||
+        !assignment.timelineTrusted ||
+        assignment.timelineAt == null) {
+      return false;
+    }
+    if (assignment.isExam) return true;
+    final bucket = assignment.deadlineBucketAt(now);
+    return bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
+        bucket == AssignmentDeadlineBucket.overdue;
+  }
 
   /// Lightweight home querying only. It does not reinterpret submission or
   /// deadline states; untrusted deadline rows remain discoverable.
@@ -166,12 +210,15 @@ class AssignmentQuery {
     String query = '',
     String? courseKey,
     AssignmentDeadlineFilter deadline = AssignmentDeadlineFilter.all,
+    AssignmentTypeFilter type = AssignmentTypeFilter.all,
     Set<String> followed = const {},
     required DateTime now,
   }) {
     final needle = query.trim().toLowerCase();
     return scope(records, followed).where((a) {
-      if (a.isCompleted || (courseKey != null && a.courseKey != courseKey)) {
+      if (a.isCompleted ||
+          !matchesType(a, type) ||
+          (courseKey != null && a.courseKey != courseKey)) {
         return false;
       }
       if (needle.isNotEmpty &&
@@ -179,9 +226,11 @@ class AssignmentQuery {
           !a.courseName.toLowerCase().contains(needle)) {
         return false;
       }
-      final due = a.deadlineAt;
-      final trusted = _hasTrustedPendingDeadline(a);
-      final bucket = a.deadlineBucketAt(now);
+      final due = a.timelineAt;
+      final bucket = timelineBucketAt(a, now);
+      final trusted = _hasTrustedPendingDeadline(a) &&
+          (!a.isExam ||
+              bucket == AssignmentDeadlineBucket.notExpiredWithDeadline);
       return switch (deadline) {
         AssignmentDeadlineFilter.all => true,
         AssignmentDeadlineFilter.next7Days => trusted &&
@@ -225,8 +274,8 @@ class AssignmentQuery {
         if (group != 0) return group;
         if (left.bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
             left.bucket == AssignmentDeadlineBucket.overdue) {
-          final deadline = left.assignment.deadlineAt!
-              .compareTo(right.assignment.deadlineAt!);
+          final deadline = left.assignment.timelineAt!
+              .compareTo(right.assignment.timelineAt!);
           if (deadline != 0) {
             return order == HomeSortOrder.deadlineDesc ? -deadline : deadline;
           }
@@ -245,7 +294,7 @@ class AssignmentQuery {
       List<Assignment> records, DateTime now, Set<String> followed) {
     final g = HomeAssignmentGroups();
     for (final a in scope(records, followed).where((a) => !a.isCompleted)) {
-      switch (a.deadlineBucketAt(now)) {
+      switch (timelineBucketAt(a, now)) {
         case AssignmentDeadlineBucket.completed:
           break;
         case AssignmentDeadlineBucket.unconfirmed:
@@ -255,7 +304,7 @@ class AssignmentQuery {
         case AssignmentDeadlineBucket.overdue:
           g.overdue.add(a);
         case AssignmentDeadlineBucket.notExpiredWithDeadline:
-          final deadline = a.deadlineAt!;
+          final deadline = a.timelineAt!;
           if (deadline.isAfter(now.add(const Duration(days: 30)))) {
             g.far.add(a);
           } else {
@@ -290,11 +339,12 @@ class AssignmentQuery {
     required DateTime now,
   }) =>
       scope(records, followed).where((assignment) {
-        final bucket = assignment.deadlineBucketAt(now);
-        return (bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
-                bucket == AssignmentDeadlineBucket.overdue) &&
-            dayKey(assignment.deadlineAt!) ==
+        return isCalendarDated(assignment, now) &&
+            dayKey(assignment.timelineAt!) ==
                 DateTime(day.year, day.month, day.day);
       }).toList()
-        ..sort(Assignment.compareByDeadline);
+        ..sort((a, b) {
+          final time = a.timelineAt!.compareTo(b.timelineAt!);
+          return time != 0 ? time : Assignment.compareByDeadline(a, b);
+        });
 }
