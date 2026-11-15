@@ -260,6 +260,7 @@ object BackgroundReminderBridge {
                         result.success(
                             mapOf(
                                 "baselineCompleted" to state.baselineCompleted,
+                                "baselinedSources" to state.baselinedSources.toList(),
                                 "knownAssignmentIds" to state.knownAssignmentIds.toList(),
                                 "sentNewAssignmentIds" to state.sentNewAssignmentIds.toList(),
                                 "lastAttemptAt" to state.lastAttemptAt?.toIsoUtc(),
@@ -302,15 +303,17 @@ object BackgroundReminderBridge {
                             syncCompleted = call.argument<Boolean>("syncCompleted") == true,
                             expectedMutationVersion =
                                 call.requiredLong("expectedMutationVersion"),
+                            baselinedSources = call.argument<List<String>>("baselinedSources")?.toSet(),
                         )
-                        application.invalidatedEvents.forEach {
-                            AssignmentAlarmScheduler.cancelDeadline(appContext, it)
-                            NotificationManagerCompat.from(appContext).cancel(it.notificationId)
-                        }
+                        var warning = AssignmentNotificationPublisher.reconcileInvalidatedEvents(
+                            appContext, database, application.invalidatedEvents,
+                        )
                         application.desiredDeadlineEvents.forEach {
                             AssignmentAlarmScheduler.scheduleDeadline(appContext, it)
                         }
-                        var warning: String? = null
+                        if (application.pendingNewCount == 0) {
+                            AssignmentAlarmScheduler.cancelNewAssignmentWindow(appContext, accountHash)
+                        }
                         val now = ZonedDateTime.now()
                         if (now.hour >= 8) {
                             val published = AssignmentNotificationPublisher.publishPendingNewAssignments(
@@ -319,7 +322,8 @@ object BackgroundReminderBridge {
                                 accountHash,
                                 now.toInstant(),
                             )
-                            warning = published.warning
+                            warning = listOfNotNull(warning, published.warning)
+                                .distinct().takeIf { it.isNotEmpty() }?.joinToString("；")
                         } else if (application.pendingNewCount > 0) {
                             AssignmentAlarmScheduler.scheduleNewAssignmentWindow(
                                 appContext,

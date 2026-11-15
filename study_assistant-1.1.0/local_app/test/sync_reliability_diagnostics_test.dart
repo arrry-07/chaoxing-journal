@@ -1,3 +1,4 @@
+// Formal-source fixtures intentionally isolate the existing formal request flow.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -135,6 +136,7 @@ void main() {
     }, requests);
     final waits = <Duration>[];
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -188,6 +190,7 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -225,6 +228,7 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -268,6 +272,7 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -311,6 +316,7 @@ void main() {
         }
       }, requests);
       final client = ChaoxingLocalClient(
+        enableClassroomTasks: false,
         dio: dio,
         wait: (delay) async => waits.add(delay),
       );
@@ -353,6 +359,7 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -399,6 +406,7 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -434,6 +442,7 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -484,6 +493,7 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -534,6 +544,7 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -581,6 +592,7 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -627,7 +639,9 @@ void main() {
       ],
     ], 2, requests);
 
-    final rows = await ChaoxingLocalClient(dio: dio).fetchAssignments();
+    final rows =
+        await ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
+            .fetchAssignments();
 
     expect(rows, hasLength(2));
     final workPages = requests
@@ -646,7 +660,8 @@ void main() {
       ],
       [],
     ], 2, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableClassroomTasks: false, dio: dio, wait: (_) async {});
 
     await expectLater(
       client.fetchAssignments(),
@@ -671,7 +686,8 @@ void main() {
         _workRow(1),
       ],
     ], 2, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableClassroomTasks: false, dio: dio, wait: (_) async {});
 
     await expectLater(
       client.fetchAssignments(),
@@ -697,7 +713,8 @@ void main() {
       ],
       [],
     ], 3, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableClassroomTasks: false, dio: dio, wait: (_) async {});
 
     await expectLater(
       client.fetchAssignments(),
@@ -743,7 +760,8 @@ void main() {
           throw StateError('unexpected endpoint ${request.uri.path}');
       }
     }, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableClassroomTasks: false, dio: dio, wait: (_) async {});
 
     final rows = await client.fetchAssignments();
 
@@ -794,7 +812,8 @@ void main() {
           throw StateError('unexpected endpoint ${request.uri.path}');
       }
     }, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableClassroomTasks: false, dio: dio, wait: (_) async {});
 
     final rows = await client.fetchAssignments();
     expect(rows.single.title, title);
@@ -834,7 +853,8 @@ void main() {
           throw StateError('unexpected endpoint ${request.uri.path}');
       }
     }, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableClassroomTasks: false, dio: dio, wait: (_) async {});
 
     await client.fetchAssignments();
     expect(client.diagnostics.requests, isNotEmpty);
@@ -867,6 +887,7 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );

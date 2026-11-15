@@ -1,3 +1,4 @@
+// Formal-source fixtures intentionally isolate the existing formal request flow.
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
@@ -32,7 +33,10 @@ void main() {
                   }
                 : {})));
       }));
-    expect(await ChaoxingLocalClient(dio: dio).fetchAssignments(), isEmpty);
+    expect(
+        await ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
+            .fetchAssignments(),
+        isEmpty);
     expect(
         visited.any(
             (u) => u.path == '/mycourse/studentcourse' && u.scheme == 'https'),

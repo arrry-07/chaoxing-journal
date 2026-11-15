@@ -1,3 +1,4 @@
+// Formal-source fixtures intentionally isolate the existing formal request flow.
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -43,7 +44,8 @@ ChaoxingLocalClient client(List<Map<String, dynamic>> rows,
       };
       h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
     }));
-  return ChaoxingLocalClient(dio: dio, wait: (_) async {});
+  return ChaoxingLocalClient(
+      enableClassroomTasks: false, dio: dio, wait: (_) async {});
 }
 
 Assignment oldWork() => Assignment(

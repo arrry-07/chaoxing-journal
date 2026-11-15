@@ -51,11 +51,14 @@ class ReminderPlanState {
     required this.lastFullSuccessAt,
     required this.pendingUpdate,
     required this.mutationVersion,
-  });
+    Set<String>? baselinedSources,
+  }) : baselinedSources = baselinedSources ??
+            (baselineCompleted ? const {'courseWork'} : const {});
 
   final String accountHash;
   final int sessionEpoch;
   final bool baselineCompleted;
+  final Set<String> baselinedSources;
   final Set<String> knownAssignmentIds;
   final Set<String> sentNewAssignmentIds;
   final DateTime? lastAttemptAt;
@@ -305,6 +308,9 @@ class BackgroundReminderGateway {
       accountHash: accountHash,
       sessionEpoch: sessionEpoch,
       baselineCompleted: value['baselineCompleted'] == true,
+      baselinedSources: value.containsKey('baselinedSources')
+          ? _strings(value['baselinedSources'])
+          : null,
       knownAssignmentIds: _strings(value['knownAssignmentIds']),
       sentNewAssignmentIds: _strings(value['sentNewAssignmentIds']),
       lastAttemptAt: _date(value['lastAttemptAt']),
@@ -341,6 +347,7 @@ class BackgroundReminderGateway {
       'syncCompleted': syncCompleted,
       'expectedMutationVersion': expectedMutationVersion,
       'baselineCompleted': plan.baselineCompleted,
+      'baselinedSources': plan.baselinedSources.toList(),
       'knownAssignmentIds': plan.knownAssignmentIds.toList(),
       'snapshots': plan.snapshotJson,
       'events': plan.eventJson,

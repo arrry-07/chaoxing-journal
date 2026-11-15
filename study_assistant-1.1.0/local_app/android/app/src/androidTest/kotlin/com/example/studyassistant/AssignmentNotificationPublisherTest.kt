@@ -93,6 +93,29 @@ class AssignmentNotificationPublisherTest {
     }
 
     @Test
+    fun bDisabledChannelKeepsClassroomActivityPending() {
+        assertTrue(LegacyAssignmentMigrationState.confirm(context))
+        notificationId = seedPendingNewAssignment(formal = false)
+        notificationManager.createNotificationChannel(
+            NotificationChannel(
+                AssignmentNotificationPublisher.CHANNEL_UPDATES,
+                "测试关闭通道",
+                NotificationManager.IMPORTANCE_NONE,
+            ),
+        )
+        val result = AssignmentNotificationPublisher.publishPendingNewAssignments(
+            context, database, accountHash, Instant.now(),
+        )
+        assertFalse(result.submitted)
+        assertEquals("对应通知通道已关闭，请在系统通知设置中重新开启", result.warning)
+        val pending = database.pendingNewEvents(accountHash).single()
+        val snapshot = database.snapshot(accountHash, pending.assignmentId)!!
+        assertFalse(snapshot.formal)
+        assertTrue(snapshot.inAssignmentScope)
+        assertEquals("pending", snapshot.status)
+    }
+
+    @Test
     fun pendingUpdateKeepsDeadlineEventPending() {
         val event = seedPendingDeadlineAssignment()
         database.markPendingUpdate(accountHash, event.sessionEpoch)
@@ -113,7 +136,7 @@ class AssignmentNotificationPublisherTest {
         )
     }
 
-    private fun seedPendingNewAssignment(): Int {
+    private fun seedPendingNewAssignment(formal: Boolean = true): Int {
         val sessionEpoch = database.ensureActiveAccount(accountHash).sessionEpoch
         database.updateSettings(
             accountHash = accountHash,
@@ -125,7 +148,11 @@ class AssignmentNotificationPublisherTest {
             showDetails = true,
         )
         val state = database.loadPlanState(accountHash, sessionEpoch)
-        val assignmentId = "cx:work:instrumentation:class:new"
+        val assignmentId = if (formal) {
+            "cx:work:instrumentation:class:new"
+        } else {
+            "cx:activity:instrumentation:class:new"
+        }
         val eventId = "$accountHash|$assignmentId|new"
         val stableId = ReminderDatabase.stableNotificationId(eventId)
         val now = System.currentTimeMillis()
@@ -142,13 +169,14 @@ class AssignmentNotificationPublisherTest {
                     courseName = "合成课程",
                     title = "合成新增作业",
                     deadlineAt = null,
-                    deadlineTrusted = false,
+                    deadlineTrusted = true,
                     deadlineReadFailed = false,
                     status = "pending",
                     completed = false,
                     hidden = false,
                     followed = true,
-                    formal = true,
+                    formal = formal,
+                    inAssignmentScope = true,
                 ),
             ),
             events = listOf(

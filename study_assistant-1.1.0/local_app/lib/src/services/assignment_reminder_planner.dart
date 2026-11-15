@@ -15,7 +15,7 @@ class AssignmentReminderSnapshot {
   final bool followed;
 
   bool eligibleAt(DateTime now) {
-    if (!assignment.isFormal ||
+    if (!assignment.isInAssignmentScope ||
         !assignment.isPendingConfirmed ||
         assignment.isCompleted ||
         hidden ||
@@ -34,11 +34,14 @@ class AssignmentReminderSnapshot {
         'deadlineAt': assignment.deadlineAt?.toUtc().toIso8601String(),
         'deadlineTrusted': assignment.deadlineTrusted,
         'deadlineReadFailed': assignment.deadlineReadFailed,
-        'status': assignment.status,
+        'status': assignment.availability == AssignmentAvailability.available
+            ? assignment.status
+            : 'unknown',
         'completed': assignment.isCompleted,
         'hidden': hidden,
         'followed': followed,
         'formal': assignment.isFormal,
+        'inAssignmentScope': assignment.isInAssignmentScope,
       };
 }
 
@@ -85,13 +88,16 @@ class AssignmentReminderPlan {
     required this.deadlineEvents,
     required this.knownAssignmentIds,
     required this.baselineCompleted,
-  });
+    Set<String>? baselinedSources,
+  }) : baselinedSources = baselinedSources ??
+            (baselineCompleted ? const {'courseWork'} : const {});
 
   final List<AssignmentReminderSnapshot> snapshots;
   final List<AssignmentReminderEvent> newEvents;
   final List<AssignmentReminderEvent> deadlineEvents;
   final Set<String> knownAssignmentIds;
   final bool baselineCompleted;
+  final Set<String> baselinedSources;
 
   List<Map<String, dynamic>> get snapshotJson =>
       snapshots.map((snapshot) => snapshot.toJson()).toList();
@@ -119,9 +125,11 @@ class AssignmentReminderPlanner {
     required bool newAssignmentReminderEnabled,
     required List<int> reminderOffsetsMinutes,
     required DateTime now,
+    Set<String>? baselinedSources,
+    Set<String> completedSourceKeys = const {},
   }) {
     final snapshots = assignments
-        .where((assignment) => assignment.isFormal)
+        .where((assignment) => assignment.hasCourseTaskIdentity)
         .map((assignment) => AssignmentReminderSnapshot(
               assignment: assignment,
               hidden: hiddenAssignmentIds.contains(assignment.id),
@@ -131,21 +139,31 @@ class AssignmentReminderPlanner {
       ..sort(
           (a, b) => Assignment.compareByDeadline(a.assignment, b.assignment));
 
-    final currentFormalIds =
+    final currentAssignmentIds =
         snapshots.map((snapshot) => snapshot.assignment.id).toSet();
     final previousKnown = knownAssignmentIds;
-    final nextKnown = {...previousKnown, ...currentFormalIds};
-    final nextBaseline = baselineCompleted || completeSync;
+    final nextKnown = {...previousKnown, ...currentAssignmentIds};
+    final previousSources = baselinedSources ??
+        (baselineCompleted ? const {'courseWork'} : const <String>{});
+    final nextSources = {
+      ...previousSources,
+      ...completedSourceKeys,
+      // Calls predating per-source statistics can complete only the original
+      // course-work baseline. An explicit source set opts into source tracking.
+      if (baselinedSources == null &&
+          completedSourceKeys.isEmpty &&
+          completeSync)
+        'courseWork',
+    };
+    final nextBaseline = nextSources.contains('courseWork');
 
     final newEvents = <AssignmentReminderEvent>[];
-    if (baselineCompleted &&
-        detectNewAssignments &&
-        newAssignmentReminderEnabled &&
-        nextBaseline) {
+    if (detectNewAssignments && newAssignmentReminderEnabled) {
       final batchId = now.toUtc().microsecondsSinceEpoch.toString();
       for (final snapshot in snapshots) {
         final assignment = snapshot.assignment;
-        if (previousKnown.contains(assignment.id) ||
+        if (!previousSources.contains(assignment.reminderSourceKey) ||
+            previousKnown.contains(assignment.id) ||
             sentNewAssignmentIds.contains(assignment.id) ||
             !snapshot.eligibleAt(now) ||
             _deadlinePassed(assignment, now)) {
@@ -211,6 +229,7 @@ class AssignmentReminderPlanner {
       deadlineEvents: rawDeadlineEvents,
       knownAssignmentIds: nextKnown,
       baselineCompleted: nextBaseline,
+      baselinedSources: Set.unmodifiable(nextSources),
     );
   }
 

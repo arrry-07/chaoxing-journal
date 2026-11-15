@@ -31,6 +31,8 @@ data class ReminderAccountState(
     val lastFailure: String?,
     val nextCheckAt: Long?,
     val migrationState: String,
+    val baselinedSources: Set<String> =
+        if (baselineCompleted) setOf("courseWork") else emptySet(),
 )
 
 data class StoredReminderSnapshot(
@@ -47,7 +49,22 @@ data class StoredReminderSnapshot(
     val hidden: Boolean,
     val followed: Boolean,
     val formal: Boolean,
-)
+    val inAssignmentScope: Boolean = formal,
+) {
+    fun eligibleAt(now: Long): Boolean =
+        inAssignmentScope && followed && !completed && !hidden &&
+            (status == "pending" || status == "returned") &&
+            deadlineTrusted && !deadlineReadFailed &&
+            (deadlineAt == null || deadlineAt > now)
+
+    fun matchesEvent(event: StoredReminderEvent, now: Long): Boolean =
+        eligibleAt(now) && accountHash == event.accountHash &&
+            sessionEpoch == event.sessionEpoch && assignmentId == event.assignmentId &&
+            deadlineAt == event.deadlineAt &&
+            (event.type == ReminderDatabase.EVENT_NEW ||
+                (event.type == ReminderDatabase.EVENT_DEADLINE &&
+                    deadlineAt != null && event.notifyAt < deadlineAt))
+}
 
 data class StoredReminderEvent(
     val eventId: String,
@@ -81,6 +98,7 @@ class ReminderDatabase private constructor(context: Context) :
                 new_assignment_enabled INTEGER NOT NULL DEFAULT 1,
                 show_details INTEGER NOT NULL DEFAULT 0,
                 baseline_completed INTEGER NOT NULL DEFAULT 0,
+                baselined_sources TEXT NOT NULL DEFAULT '[]',
                 known_ids TEXT NOT NULL DEFAULT '[]',
                 sent_new_ids TEXT NOT NULL DEFAULT '[]',
                 pending_update INTEGER NOT NULL DEFAULT 0,
@@ -113,6 +131,8 @@ class ReminderDatabase private constructor(context: Context) :
                 hidden INTEGER NOT NULL,
                 followed INTEGER NOT NULL,
                 formal INTEGER NOT NULL,
+                in_assignment_scope INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'unknown',
                 PRIMARY KEY (account_hash, assignment_id)
             )
             """.trimIndent(),
@@ -157,8 +177,17 @@ class ReminderDatabase private constructor(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Version 1 is the first persisted format. Future upgrades must migrate
-        // in place and must never drop reminder history or task identities.
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE accounts ADD COLUMN baselined_sources TEXT NOT NULL DEFAULT '[]'")
+            db.execSQL("ALTER TABLE snapshots ADD COLUMN in_assignment_scope INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE snapshots ADD COLUMN status TEXT NOT NULL DEFAULT 'unknown'")
+            db.execSQL("UPDATE snapshots SET in_assignment_scope = formal")
+            db.execSQL("UPDATE accounts SET baselined_sources = '[\"courseWork\"]' " +
+                "WHERE baseline_completed = 1")
+            // v1 never persisted personal status. Wait for Dart to rebuild the
+            // snapshot before allowing any restored event to be delivered.
+            db.execSQL("UPDATE accounts SET pending_update = 1, mutation_version = mutation_version + 1")
+        }
     }
 
     @Synchronized
@@ -242,7 +271,8 @@ class ReminderDatabase private constructor(context: Context) :
             )
             writableDatabase.execSQL(
                 "UPDATE accounts SET session_epoch = session_epoch + 1, active = 0, " +
-                    "baseline_completed = 0, known_ids = '[]', sent_new_ids = '[]', " +
+                    "baseline_completed = 0, baselined_sources = '[]', " +
+                    "known_ids = '[]', sent_new_ids = '[]', " +
                     "pending_update = 0, pending_signal_version = 0, " +
                     "consumed_signal_version = 0, last_signal_at = NULL, " +
                     "last_attempt_at = NULL, last_data_success_at = NULL, " +
@@ -415,6 +445,7 @@ class ReminderDatabase private constructor(context: Context) :
         failure: String?,
         syncCompleted: Boolean,
         expectedMutationVersion: Long,
+        baselinedSources: Set<String>? = null,
     ): PlanApplication = transaction {
         validateSession(accountHash, sessionEpoch)
         val currentAccount = readAccount(accountHash)!!
@@ -445,21 +476,26 @@ class ReminderDatabase private constructor(context: Context) :
                     put("hidden", if (snapshot.hidden) 1 else 0)
                     put("followed", if (snapshot.followed) 1 else 0)
                     put("formal", if (snapshot.formal) 1 else 0)
+                    put("in_assignment_scope", if (snapshot.inAssignmentScope) 1 else 0)
+                    put("status", snapshot.status)
                 },
             )
         }
 
-        val desiredDeadline = events.filter { it.type == EVENT_DEADLINE }
+        val snapshotsById = snapshots.associateBy { it.assignmentId }
+        val validEvents = events.filter {
+            it.accountHash == accountHash && it.sessionEpoch == sessionEpoch &&
+                snapshotsById[it.assignmentId]?.matchesEvent(it, now) == true
+        }
+        val desiredDeadline = validEvents.filter { it.type == EVENT_DEADLINE }
         val desiredIds = desiredDeadline.map { it.eventId }.toSet()
         val invalidatedEvents = mutableListOf<StoredReminderEvent>()
         val existing = eventsForAccount(accountHash)
-        val eligibleAssignmentIds = snapshots
-            .filter { it.formal && it.followed && !it.completed && !it.hidden }
-            .map { it.assignmentId }
-            .toSet()
         existing.filter {
             (it.status == STATUS_PENDING || it.status == STATUS_SUBMITTED) &&
-                it.assignmentId !in eligibleAssignmentIds
+                (snapshotsById[it.assignmentId]?.matchesEvent(it, now) != true ||
+                    (it.type == EVENT_DEADLINE && it.status == STATUS_PENDING &&
+                        it.eventId !in desiredIds))
         }.forEach {
             invalidatedEvents.add(it)
             writableDatabase.update(
@@ -472,24 +508,6 @@ class ReminderDatabase private constructor(context: Context) :
                 arrayOf(it.eventId),
             )
         }
-        existing.filter {
-            it.type == EVENT_DEADLINE &&
-                it.status == STATUS_PENDING &&
-                it.eventId !in desiredIds &&
-                it.assignmentId in eligibleAssignmentIds
-        }.forEach {
-            invalidatedEvents.add(it)
-            writableDatabase.update(
-                "events",
-                ContentValues().apply {
-                    put("status", STATUS_CANCELLED)
-                    put("updated_at", now)
-                },
-                "event_id = ?",
-                arrayOf(it.eventId),
-            )
-        }
-
         desiredDeadline.forEach { event ->
             val current = existing.firstOrNull { it.eventId == event.eventId }
             when {
@@ -506,17 +524,23 @@ class ReminderDatabase private constructor(context: Context) :
         }
 
         val newEvents = mutableListOf<StoredReminderEvent>()
-        events.filter { it.type == EVENT_NEW }.forEach { event ->
+        validEvents.filter { it.type == EVENT_NEW }.forEach { event ->
             if (eventsForAccount(accountHash).none { it.eventId == event.eventId }) {
                 insertEvent(event, now)
                 newEvents.add(event)
             }
         }
 
+        val nextSources = baselinedSources ?: if (baselineCompleted) {
+            currentAccount.baselinedSources + "courseWork"
+        } else {
+            currentAccount.baselinedSources - "courseWork"
+        }
         writableDatabase.update(
             "accounts",
             ContentValues().apply {
-                put("baseline_completed", if (baselineCompleted) 1 else 0)
+                put("baseline_completed", if ("courseWork" in nextSources) 1 else 0)
+                put("baselined_sources", JSONArray(nextSources.toList()).toString())
                 put("known_ids", JSONArray(knownIds.toList()).toString())
                 put("pending_update", 0)
                 if (syncCompleted) {
@@ -629,7 +653,21 @@ class ReminderDatabase private constructor(context: Context) :
     }
 
     @Synchronized
-    fun event(eventId: String): StoredReminderEvent? {        readableDatabase.query(
+    fun submittedNotificationMembers(notificationId: Int, now: Long): List<StoredReminderEvent> =
+        eventsForNotification(notificationId).mapNotNull { event ->
+            if (event.status != STATUS_SUBMITTED) return@mapNotNull null
+            val account = readAccount(event.accountHash) ?: return@mapNotNull null
+            if (!account.active || account.sessionEpoch != event.sessionEpoch ||
+                (event.type == EVENT_NEW && !account.newAssignmentEnabled)
+            ) return@mapNotNull null
+            val snapshot = snapshot(event.accountHash, event.assignmentId) ?: return@mapNotNull null
+            if (!snapshot.matchesEvent(event, now)) return@mapNotNull null
+            event.copy(courseName = snapshot.courseName, title = snapshot.title)
+        }
+
+    @Synchronized
+    fun event(eventId: String): StoredReminderEvent? {
+        readableDatabase.query(
             "events",
             null,
             "event_id = ?",
@@ -924,6 +962,7 @@ class ReminderDatabase private constructor(context: Context) :
         newAssignmentEnabled = getInt(getColumnIndexOrThrow("new_assignment_enabled")) == 1,
         showDetails = getInt(getColumnIndexOrThrow("show_details")) == 1,
         baselineCompleted = getInt(getColumnIndexOrThrow("baseline_completed")) == 1,
+        baselinedSources = stringSet(getString(getColumnIndexOrThrow("baselined_sources"))),
         knownAssignmentIds = stringSet(getString(getColumnIndexOrThrow("known_ids"))),
         sentNewAssignmentIds = stringSet(getString(getColumnIndexOrThrow("sent_new_ids"))),
         pendingUpdate = getInt(getColumnIndexOrThrow("pending_update")) == 1,
@@ -947,11 +986,12 @@ class ReminderDatabase private constructor(context: Context) :
         deadlineAt = nullableLong("deadline_at"),
         deadlineTrusted = getInt(getColumnIndexOrThrow("deadline_trusted")) == 1,
         deadlineReadFailed = getInt(getColumnIndexOrThrow("deadline_read_failed")) == 1,
-        status = "",
+        status = getString(getColumnIndexOrThrow("status")),
         completed = getInt(getColumnIndexOrThrow("completed")) == 1,
         hidden = getInt(getColumnIndexOrThrow("hidden")) == 1,
         followed = getInt(getColumnIndexOrThrow("followed")) == 1,
         formal = getInt(getColumnIndexOrThrow("formal")) == 1,
+        inAssignmentScope = getInt(getColumnIndexOrThrow("in_assignment_scope")) == 1,
     )
 
     private fun Cursor.toEvent() = StoredReminderEvent(
@@ -989,7 +1029,7 @@ class ReminderDatabase private constructor(context: Context) :
         const val STATUS_INVALID = "invalid"
 
         private const val DATABASE_NAME = "assignment_reminders_v1.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
 
         @Volatile
         private var instance: ReminderDatabase? = null
@@ -1063,11 +1103,12 @@ class ReminderDatabase private constructor(context: Context) :
             deadlineAt = parseInstant(json.opt("deadlineAt")),
             deadlineTrusted = json.optBoolean("deadlineTrusted"),
             deadlineReadFailed = json.optBoolean("deadlineReadFailed"),
-            status = json.optString("status"),
+            status = json.optString("status", "unknown"),
             completed = json.optBoolean("completed"),
             hidden = json.optBoolean("hidden"),
             followed = json.optBoolean("followed", true),
             formal = json.optBoolean("formal"),
+            inAssignmentScope = json.optBoolean("inAssignmentScope", json.optBoolean("formal")),
         )
 
         fun stableNotificationId(eventId: String): Int =

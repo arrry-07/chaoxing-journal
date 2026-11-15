@@ -44,7 +44,7 @@ class _StatsScreenState extends State<StatsScreen> {
         final now = _now;
         // Use one instant for the overview and each course, including deadlines
         // that pass while the widget is building.
-        final records = store.formalAssignments;
+        final records = store.courseAssignments;
         final stats = AssignmentStatistics(records, now: now);
         final keys = records.map((a) => a.courseKey!).toSet().toList()..sort();
         final names = {

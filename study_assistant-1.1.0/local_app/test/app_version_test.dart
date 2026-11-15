@@ -4,9 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/app/app_version.dart';
 
 void main() {
-  test('signed deadline anchor release uses frozen version', () {
-    expect(AppVersion.name, '1.7.58');
-    expect(AppVersion.code, 65);
+  test('classroom task source release uses frozen version', () {
+    expect(AppVersion.name, '1.7.59');
+    expect(AppVersion.code, 66);
   });
 
   test('AppVersion matches pubspec version', () {

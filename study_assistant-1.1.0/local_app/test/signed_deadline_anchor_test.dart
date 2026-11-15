@@ -1,3 +1,4 @@
+// Formal-source fixtures intentionally isolate the existing formal request flow.
 import 'dart:async';
 
 import 'package:dio/dio.dart';
@@ -52,7 +53,8 @@ void main() {
         handler.resolve(
             Response(requestOptions: options, statusCode: 200, data: data));
       }));
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableClassroomTasks: false, dio: dio, wait: (_) async {});
     final works = await client.fetchAssignments();
     expect(works, hasLength(1));
     expect(works.single.deadlineAt?.toUtc(), DateTime.utc(2024, 11, 5, 15, 59));
@@ -504,6 +506,7 @@ class _Harness {
         handler.resolve(_ok(request, data));
       }));
     client = ChaoxingLocalClient(
+        enableClassroomTasks: false,
         dio: dio,
         wait: (_) async {
           retryWaits++;

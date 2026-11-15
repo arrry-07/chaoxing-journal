@@ -217,28 +217,47 @@ class AssignmentStore extends ChangeNotifier {
             courseId: target.courseId!, clazzId: target.clazzId!);
       }
       if (generation != _generation || !_authenticated || _disposed) return;
-      final observed = incoming.where((a) => a.id == id).firstOrNull;
+      final observed = incoming
+          .where((a) =>
+              a.id == id ||
+              (target.courseTaskKey != null &&
+                  a.courseTaskKey == target.courseTaskKey))
+          .firstOrNull;
       final before = [..._assignments, ..._hiddenAssignments];
       final accepted = incoming
-          .where((a) => a.id != id || a.statusLabel != '提交状态未知')
+          .where((a) =>
+              a.isSupportedClassroomTask ||
+              a.id != id ||
+              a.statusLabel != '提交状态未知')
           .toList();
       await _markReminderMutationPending();
-      await repository.mergeAndSave(accepted, completeSync: false);
+      await repository.mergeAndSave(accepted,
+          completeSync: false,
+          canCommit: () async =>
+              generation == _generation && _authenticated && !_disposed);
       if (generation != _generation || !_authenticated || _disposed) return;
       await _reloadJournal();
       if (generation != _generation || !_authenticated || _disposed) return;
       await _recordChanges(before, accepted);
       if (generation != _generation || !_authenticated || _disposed) return;
+      if (repository.identityConflictCount > 0) {
+        returnCheckMessage = '已读取最新状态，部分旧记录存在重复关联，已暂停其提醒；请查看本地记录。';
+        confirmed = true;
+        return;
+      }
       final latestBefore =
           before.where((a) => a.id == id).firstOrNull ?? target;
       final conflictsWithConfirmation = latestBefore.isCompleted &&
+          !latestBefore.isSupportedClassroomTask &&
           observed != null &&
           !observed.isCompleted &&
           observed.status != 'returned';
       returnCheckMessage = observed == null ||
               observed.statusLabel == '提交状态未知' ||
               conflictsWithConfirmation
-          ? '本次未能确认提交状态，已保留原记录；请稍后刷新核对。'
+          ? (observed?.isSupportedClassroomTask == true
+              ? '本次未能确认提交状态，已更新为待确认；确认前暂停提醒。'
+              : '本次未能确认提交状态，已保留原记录；请稍后刷新核对。')
           : observed.isCompleted
               ? '已确认提交：${observed.title}（${observed.statusLabel}）'
               : '刚才的作业仍为${observed.statusLabel}，提醒继续保留。';
@@ -254,8 +273,18 @@ class AssignmentStore extends ChangeNotifier {
       {bool completeSync = false}) async {
     final generation = _generation;
     try {
-      await changeLog.record(before, [..._assignments, ..._hiddenAssignments],
-          incoming.map((a) => a.id).toSet(),
+      final after = [..._assignments, ..._hiddenAssignments];
+      final observedIds = incoming.expand<String>((a) {
+        final ids = after
+            .where((saved) =>
+                saved.id == a.id ||
+                (a.courseTaskKey != null &&
+                    saved.courseTaskKey == a.courseTaskKey))
+            .map((saved) => saved.id)
+            .toSet();
+        return ids.isEmpty ? [a.id] : ids;
+      }).toSet();
+      await changeLog.record(before, after, observedIds,
           completeSync: completeSync);
       if (generation != _generation || _disposed) return;
       final loaded = await changeLog.load();
@@ -390,6 +419,8 @@ class AssignmentStore extends ChangeNotifier {
   List<CourseRef> get courses => List.unmodifiable(_courses);
   bool follows(String key) => !_unfollowed.contains(key);
   List<Assignment> get formalAssignments =>
+      courseAssignments.where((a) => a.isFormal).toList();
+  List<Assignment> get courseAssignments =>
       AssignmentQuery.scope(_assignments, {})
           .where((a) => follows(a.courseKey!))
           .toList();
@@ -427,14 +458,14 @@ class AssignmentStore extends ChangeNotifier {
         display = next;
         try {
           await widgetSnapshotService.saveAssignments(display.forWidget(
-              _authenticated ? formalAssignments : <Assignment>[],
+              _authenticated ? courseAssignments : <Assignment>[],
               DateTime.now()));
         } catch (_) {
           throw StateError('显示设置已保存，小组件更新失败，请稍后刷新');
         }
       });
   List<Assignment> get visibleAssignments =>
-      formalAssignments.where((a) => !a.isCompleted).toList();
+      courseAssignments.where((a) => !a.isCompleted).toList();
   AssignmentSyncProgress? _homeSyncProgress;
   List<Assignment> _homePreviewAssignments = [];
   Set<String> _homePendingDeadlineIds = {};
@@ -1495,7 +1526,7 @@ class AssignmentStore extends ChangeNotifier {
     _serviceWarnings.clear();
     // Restored app preferences can outlive excluded/nonportable credentials.
     // Do not publish their private content to lockscreen or widget before login.
-    final scoped = _authenticated ? formalAssignments : <Assignment>[];
+    final scoped = _authenticated ? courseAssignments : <Assignment>[];
     if (_privacyCleanupPending) {
       try {
         await _cancelPrivateNotifications();
@@ -1642,6 +1673,13 @@ class AssignmentStore extends ChangeNotifier {
       knownAssignmentIds: state.knownAssignmentIds,
       sentNewAssignmentIds: state.sentNewAssignmentIds,
       baselineCompleted: state.baselineCompleted,
+      baselinedSources: state.baselinedSources,
+      completedSourceKeys: syncCompleted
+          ? {
+              for (final source in chaoxingClient.sourceResults)
+                if (source.phase == SyncSourcePhase.success) source.source,
+            }
+          : const {},
       completeSync: completeSync,
       detectNewAssignments: detectNewAssignments,
       newAssignmentReminderEnabled:
@@ -1762,7 +1800,7 @@ class AssignmentStore extends ChangeNotifier {
     }
     if (generation != _generation || _disposed) return;
     _ensureSyncActive(operation);
-    final warning = chaoxingClient.lastSyncWarning;
+    var warning = chaoxingClient.lastSyncWarning;
     if (_needsProfileRecovery && !chaoxingClient.deferProfile) {
       _needsProfileRecovery = false;
       try {
@@ -1780,18 +1818,45 @@ class AssignmentStore extends ChangeNotifier {
       incoming,
       completeSync: warning == null,
       canCommit: _nativeReminderAvailable
-          ? () => backgroundReminderGateway.isSessionCurrent(
-                _accountHash!,
-                _nativeSessionEpoch,
-              )
-          : null,
+          ? () async {
+              _ensureSyncActive(operation);
+              if (generation != _generation || _disposed) {
+                throw const SyncCancelledException();
+              }
+              final current = await backgroundReminderGateway.isSessionCurrent(
+                  _accountHash!, _nativeSessionEpoch);
+              _ensureSyncActive(operation);
+              if (generation != _generation || _disposed) {
+                throw const SyncCancelledException();
+              }
+              return current;
+            }
+          : () async {
+              _ensureSyncActive(operation);
+              return generation == _generation && !_disposed;
+            },
     );
     if (generation != _generation || _disposed) return;
+    if (repository.identityConflictCount > 0) {
+      warning ??= '部分旧记录存在重复关联，已暂停其提醒，请查看本地记录';
+      final sources = repository.identityConflictSources;
+      chaoxingClient.sourceResults = [
+        for (final source in chaoxingClient.sourceResults)
+          sources.contains(source.source)
+              ? source.withIdentityConflict()
+              : source,
+      ];
+    }
     final dataSuccessAt = DateTime.now();
     final dataMirrorSaved = await _writePreferenceAndVerify(
         prefs, 'sync_data_at', dataSuccessAt.toUtc().toIso8601String());
     final timestampMirrorFailed = !attemptMirrorSaved || !dataMirrorSaved;
     final reportIssues = List<SyncIssue>.of(chaoxingClient.issues);
+    if (repository.identityConflictCount > 0) {
+      reportIssues.add(const SyncIssue(
+          SyncIssueKind.partial, '部分旧记录存在重复关联，已暂停其提醒，请查看本地记录',
+          stage: 'identity'));
+    }
     if (timestampMirrorFailed) {
       reportIssues.add(const SyncIssue(SyncIssueKind.storage,
           '作业数据已保存，但兼容同步时间记录未能完整更新；当前同步报告保留了准确时间，请重试以修复记录',
@@ -1806,6 +1871,7 @@ class AssignmentStore extends ChangeNotifier {
         lastFullSuccessAt: warning == null ? dataSuccessAt : _lastSyncAt,
         succeededCourses: chaoxingClient.succeededCourses,
         failedCourses: chaoxingClient.failedCourses,
+        sourceResults: chaoxingClient.sourceResults,
         issues: reportIssues);
     await _updateServerBackoff(reportIssues);
     final timestampWarning =
@@ -1829,6 +1895,7 @@ class AssignmentStore extends ChangeNotifier {
           lastFullSuccessAt: warning == null ? dataSuccessAt : _lastSyncAt,
           succeededCourses: chaoxingClient.succeededCourses,
           failedCourses: chaoxingClient.failedCourses,
+          sourceResults: chaoxingClient.sourceResults,
           issues: [
             ...reportIssues,
             const SyncIssue(

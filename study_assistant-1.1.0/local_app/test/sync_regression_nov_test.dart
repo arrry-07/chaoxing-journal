@@ -1,3 +1,4 @@
+// Formal-source fixtures intentionally isolate the existing formal request flow.
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
@@ -21,7 +22,7 @@ void main() {
         };
         h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
       }));
-    final client = ChaoxingLocalClient(dio: dio);
+    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
     expect(await client.fetchAssignments(), isEmpty);
     expect(client.succeededCourses, 1);
   });
@@ -42,7 +43,8 @@ void main() {
                 ? {'status': true, 'url': 'https://i.chaoxing.com/sso/start'}
                 : ''));
       }));
-    await (ChaoxingLocalClient(dio: dio)..deferProfile = true)
+    await (ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
+          ..deferProfile = true)
         .login(account: 'fixture', password: 'fixture');
     expect(paths, contains('/sso/end'));
   });

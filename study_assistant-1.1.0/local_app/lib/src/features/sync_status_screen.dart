@@ -160,6 +160,24 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                             },
                       icon: const Icon(Icons.verified_user_outlined),
                       label: const Text('完成安全验证')),
+                if (store.syncReport.sourceResults.isNotEmpty)
+                  ExpansionTile(title: const Text('读取来源'), children: [
+                    for (final source in store.syncReport.sourceResults)
+                      ListTile(
+                          title: Text(const {
+                                'courseWork': '正式作业',
+                                'classroomActivity:35': '个人与分组任务',
+                                'classroomActivity:42': '随堂练习',
+                                'groupHistory': '课程群补充',
+                              }[source.source] ??
+                              '其他来源'),
+                          subtitle: Text('${switch (source.phase) {
+                            SyncSourcePhase.success => '读取完成',
+                            SyncSourcePhase.partial => '部分信息待重试',
+                            SyncSourcePhase.failed => '读取失败',
+                            SyncSourcePhase.notEnabled => '尚未启用',
+                          }} · ${source.recordCount} 条 · ${source.unconfirmedCount} 条待确认')),
+                  ]),
                 if (store.syncReport.issues.isNotEmpty)
                   ExpansionTile(
                       title: Text('问题明细（${store.syncReport.issues.length}）'),

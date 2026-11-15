@@ -22,9 +22,61 @@ class TargetClient extends f.Client {
   }
 }
 
+Assignment classroomSample(String status) => Assignment(
+    id: 'cx:activity:1:2:task',
+    activityType: 35,
+    courseName: '合成课程',
+    title: '合成个人任务',
+    deadlineAt: DateTime.utc(2030),
+    requirementsText: '',
+    status: status,
+    lastSyncedAt: DateTime.now(),
+    submitUrl:
+        'https://mobilelearn.chaoxing.com/page/renwuNew/stu/taskDetailStuForAnswer_new?courseId=1&classId=2&activeId=task');
+
+class ClassroomTargetClient extends TargetClient {
+  @override
+  Future<List<Assignment>> fetchAssignmentsForCourse(
+          {required String courseId, required String clazzId}) async =>
+      [classroomSample(targetStatus)];
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  test(
+      'classroom return persists unknown and removes pending reminder eligibility',
+      () async {
+    final client = ClassroomTargetClient()..targetStatus = 'unknown';
+    final store = f.makeStore(f.Session(), client: client);
+    await store.restoreSession();
+    await store.repository.mergeAndSave([classroomSample('pending')]);
+    await store.refreshAssignments();
+    expect(store.visibleAssignments.any((a) => a.id == 'cx:activity:1:2:task'),
+        isTrue);
+    store.beginAssignmentVisit('cx:activity:1:2:task');
+    store.markAssignmentVisitLeftApp();
+    await store.checkReturnedAssignment();
+    final saved = store.findAssignment('cx:activity:1:2:task')!;
+    expect(saved.status, 'unknown');
+    expect(saved.isPendingConfirmed, isFalse);
+    expect(store.returnCheckMessage, contains('未能确认'));
+    store.dispose();
+  });
+  test('verified classroom reopening updates previous completed status',
+      () async {
+    final client = ClassroomTargetClient()..targetStatus = 'pending';
+    final store = f.makeStore(f.Session(), client: client);
+    await store.restoreSession();
+    await store.repository.mergeAndSave([classroomSample('submitted')]);
+    await store.refreshAssignments();
+    store.beginAssignmentVisit('cx:activity:1:2:task');
+    store.markAssignmentVisitLeftApp();
+    await store.checkReturnedAssignment();
+    expect(store.findAssignment('cx:activity:1:2:task')!.status, 'pending');
+    expect(store.returnCheckMessage, contains('仍为'));
+    store.dispose();
+  });
   test('queued return uses the latest confirmed state from preceding full sync',
       () async {
     final client = TargetClient()
