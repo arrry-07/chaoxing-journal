@@ -17,9 +17,9 @@ void main() {
               statusCode: 200,
               data: {'status': false, key: '请先完成登录验证'}));
         }));
-      final result =
-          await ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
-              .login(account: 'synthetic', password: 'synthetic');
+      final result = await ChaoxingLocalClient(
+              enableExams: false, enableClassroomTasks: false, dio: dio)
+          .login(account: 'synthetic', password: 'synthetic');
       expect(result.message, '请先完成登录验证');
     });
   }
@@ -35,9 +35,9 @@ void main() {
                   ? '{"status":false,"msg":"登录失败，请完成安全验证"}'
                   : {'status': false, 'msg': '登录失败，请完成安全验证'}));
         }));
-      final result =
-          await ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
-              .login(account: 'synthetic', password: 'synthetic');
+      final result = await ChaoxingLocalClient(
+              enableExams: false, enableClassroomTasks: false, dio: dio)
+          .login(account: 'synthetic', password: 'synthetic');
       expect(result.success, isFalse);
       expect(result.message, '登录失败，请完成安全验证');
     });
@@ -49,9 +49,9 @@ void main() {
         h.resolve(Response(
             requestOptions: o, statusCode: 200, data: {'status': false}));
       }));
-    final result =
-        await ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
-            .login(account: 'synthetic', password: 'synthetic');
+    final result = await ChaoxingLocalClient(
+            enableExams: false, enableClassroomTasks: false, dio: dio)
+        .login(account: 'synthetic', password: 'synthetic');
     expect(result.success, isFalse);
     expect(result.message, isNot(contains('检查账号和密码')));
   });
@@ -94,7 +94,8 @@ void main() {
         handler.resolve(
             Response(requestOptions: options, statusCode: 200, data: body));
       }));
-    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final client = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
     final fetch = singleCourse
         ? client.fetchAssignmentsForCourse(courseId: '7', clazzId: '11')
         : client.fetchAssignments();
@@ -159,9 +160,9 @@ void main() {
         }
         h.resolve(Response(requestOptions: o, statusCode: 200, data: body));
       }));
-    final rows =
-        await ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
-            .fetchAssignmentsForCourse(courseId: '7', clazzId: '22');
+    final rows = await ChaoxingLocalClient(
+            enableExams: false, enableClassroomTasks: false, dio: dio)
+        .fetchAssignmentsForCourse(courseId: '7', clazzId: '22');
     expect(queried, ['22']);
     expect(rows.single.clazzId, '22');
     expect(rows.single.isCompleted, isTrue);
@@ -182,7 +183,8 @@ void main() {
               'set-cookie': ['UID=dummy; Domain=chaoxing.com; Path=/']
             })));
       }));
-    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final client = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
     await client.login(account: 'dummy', password: 'dummy');
     await expectLater(client.fetchAssignments(),
         throwsA(isA<ChaoxingAuthenticationException>()));
@@ -196,7 +198,8 @@ void main() {
             statusCode: 200,
             data: o.uri.path == '/v11/loginregister' ? {'status': true} : ''));
       }));
-    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
+    final client = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio)
       ..trackedActivityIds = {'cx:activity:1'};
     await client.login(account: 'dummy', password: 'dummy');
     expect(client.trackedActivityIds, {'cx:activity:1'});
@@ -226,7 +229,8 @@ void main() {
         }
         fail('unexpected endpoint ${options.uri}');
       }));
-    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final client = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
 
     final login = client.login(account: 'student', password: 'password');
     await ssoStarted.future;
@@ -267,7 +271,8 @@ void main() {
                   : []
             })));
       }));
-    await ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
+    await ChaoxingLocalClient(
+            enableExams: false, enableClassroomTasks: false, dio: dio)
         .login(account: 'dummy', password: 'dummy');
     expect(sent['sso.chaoxing.com'], contains('shared=ok'));
     expect(sent['sso.chaoxing.com'], isNot(contains('private=')));
@@ -291,9 +296,9 @@ void main() {
               'set-cookie': ['UID=dummy; Path=/']
             })));
       }));
-    final result =
-        await ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
-            .login(account: 'dummy', password: 'dummy');
+    final result = await ChaoxingLocalClient(
+            enableExams: false, enableClassroomTasks: false, dio: dio)
+        .login(account: 'dummy', password: 'dummy');
     expect(result.success, isTrue);
     expect(hosts, isNot(contains('chaoxing.com.example.org')));
   });
@@ -345,7 +350,8 @@ void main() {
         }
         h.resolve(Response(requestOptions: o, statusCode: 200, data: body));
       }));
-    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final client = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
     final work = await client.fetchAssignments();
     expect(queried, ['11', '22']);
     expect(work.map((a) => a.id), ['cx:work:7:11:9', 'cx:work:7:22:9']);
@@ -376,7 +382,8 @@ void main() {
         };
         h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
       }));
-    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final client = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
     expect(await client.fetchAssignments(), isEmpty);
     expect(client.lastSyncWarning, isNull);
     for (final bad in ['没有此页面访问权限', '请登录', '<html></html>']) {
@@ -477,7 +484,8 @@ void main() {
           },
         ),
       );
-    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final client = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
 
     final result = await client.login(account: 'student', password: 'password');
 
@@ -577,7 +585,8 @@ void main() {
           },
         ),
       );
-    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final client = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
 
     final result = await client.login(account: 'student', password: 'password');
 
@@ -593,7 +602,8 @@ void main() {
       () async {
     final started = Completer<void>();
     final dio = Dio()..httpClientAdapter = _BlockingAdapter(started);
-    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final client = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
     final fetch = client.fetchAssignments();
     await started.future.timeout(const Duration(seconds: 2));
 

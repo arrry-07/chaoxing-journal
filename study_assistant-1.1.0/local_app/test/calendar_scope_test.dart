@@ -227,7 +227,7 @@ void main() {
     await tester.tap(find.text('退出临时范围'));
     await tester.pumpAndSettle();
     expect(find.text('临时范围 · 截止待确认'), findsNothing);
-    expect(find.text('没有符合搜索或期限条件的作业'), findsOneWidget);
+    expect(find.text('没有符合搜索、类型或期限条件的记录'), findsOneWidget);
     expect(store.homeFilters.query, '完全不匹配');
     expect(store.homeFilters.sortOrder, HomeSortOrder.title);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -294,7 +294,7 @@ void main() {
     await tester.tap(find.text('退出临时范围'));
     await tester.pumpAndSettle();
     expect(find.text('临时范围 · 截止待确认'), findsNothing);
-    expect(find.text('没有符合搜索或期限条件的作业'), findsOneWidget);
+    expect(find.text('没有符合搜索、类型或期限条件的记录'), findsOneWidget);
     expect(store.homeFilters.query, '首页搜索');
     expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     await tester.pumpWidget(const SizedBox.shrink());

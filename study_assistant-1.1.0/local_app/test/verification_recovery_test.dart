@@ -49,7 +49,8 @@ void main() {
             data: data,
             headers: Headers.fromMap(headers)));
       }));
-    final c = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final c = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
     await expectLater(
         c.fetchAssignments(),
         throwsA(isA<SyncReadException>().having(

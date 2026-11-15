@@ -22,7 +22,8 @@ void main() {
         };
         h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
       }));
-    final client = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final client = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
     expect(await client.fetchAssignments(), isEmpty);
     expect(client.succeededCourses, 1);
   });
@@ -43,7 +44,8 @@ void main() {
                 ? {'status': true, 'url': 'https://i.chaoxing.com/sso/start'}
                 : ''));
       }));
-    await (ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
+    await (ChaoxingLocalClient(
+            enableExams: false, enableClassroomTasks: false, dio: dio)
           ..deferProfile = true)
         .login(account: 'fixture', password: 'fixture');
     expect(paths, contains('/sso/end'));

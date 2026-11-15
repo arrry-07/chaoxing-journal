@@ -40,7 +40,8 @@ void main() {
             : '<html>unrecognized</html>';
         h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
       }));
-    final c = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final c = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
     await expectLater(c.fetchAssignments(), throwsA(isA<SyncReadException>()));
     expect(await c.verifyInBrowser(), isTrue);
     expect(c.succeededCourses, 0);

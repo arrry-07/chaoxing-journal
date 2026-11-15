@@ -11,7 +11,7 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
-  testWidgets('bottom navigation uses assignments calendar stats and profile',
+  testWidgets('bottom navigation uses home calendar stats and profile',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     final store = AssignmentStore(
@@ -31,7 +31,7 @@ void main() {
           routes: [
             GoRoute(
               path: '/assignments',
-              builder: (context, state) => const Text('作业页'),
+              builder: (context, state) => const Text('首页内容'),
             ),
             GoRoute(
               path: '/calendar',
@@ -54,14 +54,15 @@ void main() {
     await tester.pumpWidget(MaterialApp.router(
         theme: StudyAssistantTheme.light, routerConfig: router));
 
-    expect(find.text('作业'), findsOneWidget);
+    expect(find.text('首页'), findsOneWidget);
     expect(find.text('日历'), findsOneWidget);
     expect(find.text('统计'), findsOneWidget);
     expect(find.text('我的'), findsOneWidget);
     expect(find.text('同步'), findsNothing);
     expect(find.text('提醒'), findsNothing);
 
-    const labels = ['作业', '日历', '统计', '我的'];
+    const labels = ['首页', '日历', '统计', '我的'];
+    const pages = ['首页内容', '日历页', '统计页', '我的页'];
     const icons = [
       (Icons.assignment_outlined, Icons.assignment),
       (Icons.calendar_today_outlined, Icons.calendar_today),
@@ -72,7 +73,7 @@ void main() {
     for (final selected in [0, 1, 2, 3, 2, 0]) {
       await tester.tap(find.text(labels[selected]));
       await tester.pumpAndSettle();
-      expect(find.text('${labels[selected]}页'), findsOneWidget);
+      expect(find.text(pages[selected]), findsOneWidget);
       expect(
           tester
               .widget<NavigationBar>(find.byType(NavigationBar))

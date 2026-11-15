@@ -49,6 +49,7 @@ class BackupSnapshot {
       'source': a.source.name,
       'activityType': a.activityType,
       'availability': a.availability.name,
+      'exam': a.exam?.toJson(),
       'courseTaskKey': a.source == AssignmentSource.classroomActivity
           ? a.courseTaskKey ?? retainedKey
           : null,
@@ -84,7 +85,7 @@ class BackupSnapshot {
           PersonalWorkspace? personal,
           StudyNotebook? notebook}) =>
       BackupSnapshot.decode(jsonEncode({
-        'schema': 4,
+        'schema': 5,
         'notebook': (notebook ?? StudyNotebook()).toJson(),
         'personal': (personal ?? PersonalWorkspace()).toJson(portable: true),
         'owner': owner,
@@ -99,7 +100,7 @@ class BackupSnapshot {
       }));
 
   String encode() => jsonEncode({
-        'schema': 4,
+        'schema': 5,
         'notebook': notebook.toJson(),
         'personal': personal.toJson(portable: true),
         'owner': owner,
@@ -159,7 +160,7 @@ class BackupSnapshot {
     }
     final decoded = jsonDecode(plaintext);
     final version = decoded is Map ? decoded['schema'] : null;
-    if (version is! int || !{1, 2, 3, 4}.contains(version)) _bad();
+    if (version is! int || !{1, 2, 3, 4, 5}.contains(version)) _bad();
     final j = _map(decoded, {
       if (version >= 2) 'personal',
       if (version >= 3) 'notebook',
@@ -182,6 +183,7 @@ class BackupSnapshot {
         if (version >= 4) 'activityType',
         if (version >= 4) 'availability',
         if (version >= 4) 'courseTaskKey',
+        if (version >= 5) 'exam',
         'id',
         'source',
         'courseName',
@@ -221,6 +223,7 @@ class BackupSnapshot {
       var record = Assignment(
           id: _text(r['id']),
           source: source,
+          exam: version >= 5 ? _exam(r['exam']) : null,
           activityType: activityType,
           availability: availability,
           courseName: _text(r['courseName']),
@@ -233,6 +236,10 @@ class BackupSnapshot {
               r['completedAt'] == null ? null : _date(r['completedAt']),
           lastSyncedAt: _date(r['lastSyncedAt']),
           deadlineTrusted: false);
+      if (record.exam != null &&
+          (source != AssignmentSource.exam || !record.hasExamIdentity)) {
+        _bad();
+      }
       final taskKey = version >= 4 ? r['courseTaskKey'] : null;
       if (taskKey != null) {
         if (!isValidCourseTaskKey(record, taskKey)) _bad();
@@ -281,5 +288,79 @@ class BackupSnapshot {
             ? StudyNotebook()
             : StudyNotebook.decode(jsonEncode(j['notebook'])),
         courseTaskKeys);
+  }
+
+  static ExamInfo? _exam(dynamic value) {
+    if (value == null) return null;
+    final e = _map(value, {
+      if (value is Map && value.containsKey('relatedExamId')) 'relatedExamId',
+      'examId',
+      'courseId',
+      'clazzId',
+      'startAt',
+      'endAt',
+      'startTrusted',
+      'endTrusted',
+      'durationMinutes',
+      'location',
+      'lifecycle',
+      'noticeOnly',
+    });
+    String? identity(dynamic v) {
+      if (v == null) return null;
+      final text = _text(v);
+      if (text.contains(':') ||
+          text != text.trim() ||
+          RegExp(r'[\s\x00-\x1f]').hasMatch(text)) {
+        _bad();
+      }
+      return text;
+    }
+
+    final examId = identity(e['examId']);
+    final courseId = identity(e['courseId']), clazzId = identity(e['clazzId']);
+    final relatedExamId = e['relatedExamId'];
+    if (relatedExamId != null &&
+        (relatedExamId is! String ||
+            relatedExamId.length > 500 ||
+            RegExp(r'[0-9]+').matchAsPrefix(relatedExamId)?.end !=
+                relatedExamId.length ||
+            e['noticeOnly'] != true ||
+            courseId == null ||
+            clazzId == null)) {
+      _bad();
+    }
+    if (examId == null ||
+        e['startTrusted'] is! bool ||
+        e['endTrusted'] is! bool ||
+        e['noticeOnly'] is! bool ||
+        !const {'scheduled', 'inProgress', 'ended', 'cancelled', 'unknown'}
+            .contains(e['lifecycle'])) {
+      _bad();
+    }
+    final start = e['startAt'] == null ? null : _date(e['startAt']);
+    final end = e['endAt'] == null ? null : _date(e['endAt']);
+    final duration = e['durationMinutes'];
+    if ((start != null && end != null && end.isBefore(start)) ||
+        (e['startTrusted'] == true && start == null) ||
+        (e['endTrusted'] == true && end == null) ||
+        (duration != null && (duration is! int || duration <= 0))) {
+      _bad();
+    }
+    return ExamInfo(
+      examId: examId,
+      relatedExamId: relatedExamId as String?,
+      courseId: courseId,
+      clazzId: clazzId,
+      startAt: start,
+      endAt: end,
+      // A portable observation has no live personal state or safe entry.
+      startTrusted: false,
+      endTrusted: false,
+      durationMinutes: duration as int?,
+      location: _text(e['location'], max: 2000, empty: true),
+      lifecycle: e['lifecycle'] as String,
+      noticeOnly: e['noticeOnly'] as bool,
+    );
   }
 }

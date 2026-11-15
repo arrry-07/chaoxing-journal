@@ -1,3 +1,4 @@
+import '../models/ai_practice_entry.dart';
 import '../models/assignment.dart';
 
 /// Validate at the browser/clipboard boundary, including previously cached data.
@@ -5,6 +6,34 @@ import '../models/assignment.dart';
 class AssignmentWebLink {
   static String? validatedUrl(Assignment assignment) {
     final raw = assignment.submitUrl;
+    if (assignment.isExam) {
+      if (!assignment.hasExamIdentity ||
+          assignment.availability == AssignmentAvailability.unavailable) {
+        return null;
+      }
+      final expected = assignment.exam!.noticeOnly
+          ? 'https://notice.chaoxing.com/pc/notice/myNotice'
+          : assignment.courseId == null
+              ? 'https://mooc1-api.chaoxing.com/exam-ans/exam/test/examcode/examlist'
+              : Uri.https(
+                  'mooc1-api.chaoxing.com', '/phone/moocAnalysis/examList', {
+                  'courseId': assignment.courseId!,
+                  'classId': assignment.clazzId!
+                }).toString();
+      return raw == expected ? raw : null;
+    }
+    if (assignment.isSupportedClassroomTask && assignment.activityType == 77) {
+      return raw != null &&
+              assignment.aiPracticePublishUuid != null &&
+              assignment.availability != AssignmentAvailability.unavailable &&
+              AiPracticeEntry.validate(raw,
+                      courseId: assignment.courseId!,
+                      clazzId: assignment.clazzId!,
+                      publishUuid: assignment.aiPracticePublishUuid) !=
+                  null
+          ? raw
+          : null;
+    }
     if (raw == null ||
         raw.isEmpty ||
         raw.trim() != raw ||

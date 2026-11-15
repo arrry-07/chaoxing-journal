@@ -24,6 +24,10 @@ Assignment _task({
       id: id ?? 'cx:activity:$course:$clazz:$active',
       source: AssignmentSource.classroomActivity,
       activityType: type,
+      persistedCourseTaskKey:
+          type == 77 ? 'cx:activity:$course:$clazz:$active' : null,
+      aiPracticePublishUuid:
+          type == 77 ? '11111111-1111-4111-8111-111111111111' : null,
       availability: availability,
       courseName: '合成课程',
       title: '同名合成任务',
@@ -33,9 +37,11 @@ Assignment _task({
       deadlineAt: DateTime.utc(2026, 12, 2),
       deadlineRawText: '2026-12-02 08:00',
       lastSyncedAt: observedAt ?? DateTime.utc(2026, 11, 15),
-      submitUrl: 'https://mobilelearn.chaoxing.com/page/renwu/task'
-          '?courseId=$course&classId=$clazz&activeId=$active'
-          '&enc=synthetic-link-secret',
+      submitUrl: type == 77
+          ? 'https://mooc2-ans.chaoxing.com/ai-evaluate/v2/redirect/active/stu?courseid=$course&clazzid=$clazz&publishUuid=11111111-1111-4111-8111-111111111111'
+          : 'https://mobilelearn.chaoxing.com/page/renwu/task'
+              '?courseId=$course&classId=$clazz&activeId=$active'
+              '&enc=synthetic-link-secret',
     );
 
 Future<void> _seedJournal(List<Assignment> rows,
@@ -130,7 +136,7 @@ void main() {
     expect(restored.isPendingConfirmed, isFalse);
   });
 
-  for (final type in [35, 42]) {
+  for (final type in [35, 42, 77]) {
     for (final availability in AssignmentAvailability.values) {
       test('type $type and $availability survive JSON copy and journal reload',
           () async {
@@ -575,7 +581,7 @@ void main() {
     await repo.savePersonalWorkspace(personal, _account);
     final snapshot = await repo.createBackupSnapshot(_account);
     final encoded = snapshot.encode();
-    expect(jsonDecode(encoded)['schema'], 4);
+    expect(jsonDecode(encoded)['schema'], 5);
     expect(encoded, isNot(contains('synthetic-link-secret')));
     expect(encoded, isNot(contains('synthetic-body-secret')));
     expect(encoded, isNot(contains('submitUrl')));
@@ -635,6 +641,7 @@ void main() {
       record.remove('activityType');
       record.remove('availability');
       record.remove('courseTaskKey');
+      record.remove('exam');
       // Historical backups can contain server descriptions with access data.
       record['requirementsText'] = original.requirementsText;
       final decoded = BackupSnapshot.decode(jsonEncode(raw));
@@ -658,11 +665,11 @@ void main() {
       expect(
           jsonDecode(
               (await repo.createBackupSnapshot(_account)).encode())['schema'],
-          4);
+          5);
     });
   }
 
-  for (final type in [35, 42]) {
+  for (final type in [35, 42, 77]) {
     test('backup 4 retains opaque type $type identity without signed access',
         () async {
       final repo = LocalAssignmentRepository();
@@ -725,7 +732,9 @@ void main() {
 
   test('backup 4 rejects invalid new fields and future schemas', () {
     final raw = jsonDecode(_backup([_task()]).encode()) as Map<String, dynamic>;
+    raw['schema'] = 4;
     final record = (raw['records'] as List).single as Map;
+    record.remove('exam');
     for (final invalid in ['35', 35.0, true]) {
       record['activityType'] = invalid;
       expect(
@@ -738,7 +747,7 @@ void main() {
           () => BackupSnapshot.decode(jsonEncode(raw)), throwsFormatException);
     }
     record['availability'] = 'available';
-    for (final version in [5, 99]) {
+    for (final version in [6, 99]) {
       raw['schema'] = version;
       expect(
           () => BackupSnapshot.decode(jsonEncode(raw)), throwsFormatException);

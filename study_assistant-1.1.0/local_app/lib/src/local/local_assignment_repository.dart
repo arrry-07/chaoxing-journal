@@ -277,6 +277,7 @@ class LocalAssignmentRepository {
           state.byId[a.id] = Assignment(
               id: a.id,
               source: a.source,
+              exam: a.exam,
               activityType: a.activityType,
               availability: a.availability,
               courseName: a.courseName,
@@ -878,7 +879,7 @@ class _Journal {
 
   static bool _isTypedClassroomTask(Assignment a) =>
       a.source == AssignmentSource.classroomActivity &&
-      const {35, 42}.contains(a.activityType);
+      const {35, 42, 77}.contains(a.activityType);
 
   static String? _workKey(Assignment a) {
     // A classroom task may carry a work URL, but activeId is not workId.
@@ -913,7 +914,8 @@ class _Journal {
   }
 
   static String? _classroomTaskKey(Assignment a) {
-    if (a.activityType != null && !const {35, 42}.contains(a.activityType)) {
+    if (a.activityType != null &&
+        !const {35, 42, 77}.contains(a.activityType)) {
       return null;
     }
     if (a.source == AssignmentSource.legacyUnknown) {
@@ -967,12 +969,18 @@ class _Journal {
     if (prior != null) {
       if (item.lastSyncedAt.isBefore(prior.lastSyncedAt)) return;
       item = item.copyWith(
-          id: prior.id, submitUrl: item.submitUrl ?? prior.submitUrl);
+          id: prior.id,
+          submitUrl: item.submitUrl ?? prior.submitUrl,
+          aiPracticePublishUuid: item.submitUrl == null
+              ? prior.aiPracticePublishUuid
+              : item.aiPracticePublishUuid);
       // An opaque legacy ID depends on its verified activity URL. A work URL
       // or a URL for another activity must not change that retained identity.
       if (item.submitUrl != null && item.linkedActivityKey != key) {
         item = item.copyWith(
             submitUrl: prior.submitUrl,
+            aiPracticePublishUuid: prior.aiPracticePublishUuid,
+            clearAiPracticePublishUuid: prior.aiPracticePublishUuid == null,
             clearSubmitUrl: prior.submitUrl == null);
       }
       item = _preserveFailedDeadline(item, prior);
@@ -1003,6 +1011,22 @@ class _Journal {
       }
     }
     for (var item in incoming) {
+      if (item.hasExamIdentity) {
+        final prior = byId[item.id];
+        if (prior == null || !item.lastSyncedAt.isBefore(prior.lastSyncedAt)) {
+          if (prior?.hasExamIdentity == true) {
+            final info = item.exam!.retainingHistoricalTimes(prior!.exam!);
+            item = item.copyWith(
+                exam: info,
+                deadlineAt: info.endAt,
+                deadlineTrusted: info.endTrusted,
+                clearDeadlineAt: info.endAt == null);
+          }
+          byId[item.id] =
+              item.isCompleted ? item : item.copyWith(clearCompletedAt: true);
+        }
+        continue;
+      }
       if (item.isSupportedClassroomTask) {
         _mergeClassroomTask(item);
         continue;

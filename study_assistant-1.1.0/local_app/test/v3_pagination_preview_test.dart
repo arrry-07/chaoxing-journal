@@ -99,7 +99,10 @@ void main() {
       }));
     });
     final client = ChaoxingLocalClient(
-        enableClassroomTasks: false, dio: dio, wait: (_) async {});
+        enableExams: false,
+        enableClassroomTasks: false,
+        dio: dio,
+        wait: (_) async {});
     client.onProgress = events.add;
     var finished = false;
     final fetching = () async {
@@ -170,7 +173,10 @@ void main() {
         },
       );
       final client = ChaoxingLocalClient(
-          enableClassroomTasks: false, dio: dio, wait: (_) async {});
+          enableExams: false,
+          enableClassroomTasks: false,
+          dio: dio,
+          wait: (_) async {});
       client.onProgress = events.add;
 
       final rows = await client.fetchAssignments();
@@ -236,7 +242,10 @@ void main() {
       widgetSnapshotService: _NoopWidgetSnapshotService(),
       repository: repository,
       chaoxingClient: ChaoxingLocalClient(
-          enableClassroomTasks: false, dio: dio, wait: (_) async {}),
+          enableExams: false,
+          enableClassroomTasks: false,
+          dio: dio,
+          wait: (_) async {}),
     );
     addTearDown(store.dispose);
     await store.restoreSession();
@@ -297,7 +306,10 @@ void main() {
       widgetSnapshotService: _NoopWidgetSnapshotService(),
       repository: repository,
       chaoxingClient: ChaoxingLocalClient(
-          enableClassroomTasks: false, dio: dio, wait: (_) async {}),
+          enableExams: false,
+          enableClassroomTasks: false,
+          dio: dio,
+          wait: (_) async {}),
     );
     addTearDown(store.dispose);
     await store.restoreSession();

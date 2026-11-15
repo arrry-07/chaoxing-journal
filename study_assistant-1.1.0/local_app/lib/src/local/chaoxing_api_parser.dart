@@ -84,7 +84,7 @@ class ChaoxingApiParser {
     final data = _asMap(root?['data']) ?? root;
     final rows = _asList(data?['activeList']) ?? const [];
     return [
-      for (final type in [35, 42])
+      for (final type in [35, 42, 77])
         ...ChaoxingClassroomParser.parseActivities(rows,
             courseId: course.courseId,
             clazzId: course.clazzId,

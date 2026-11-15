@@ -62,6 +62,58 @@ class ReminderSourceScopeTest {
     }
 
     @Test
+    fun examStartKindPersistsAndUnknownStateCancelsItsEvents() {
+        val exam = snapshot().copy(eventKind = "examStart")
+        val reminder = event(exam)
+        val sources = setOf("exam", "examAccount", "examNotice")
+        apply(exam, listOf(reminder), sources)
+        assertEquals(exam, database.snapshot(accountHash, exam.assignmentId))
+        assertEquals("examStart", database.event(reminder.eventId)!!.eventKind)
+        assertEquals(sources, database.loadPlanState(accountHash, epoch).baselinedSources)
+        assertFalse(database.snapshot(accountHash, exam.assignmentId)!!.matchesEvent(
+            reminder.copy(eventKind = "deadline"), System.currentTimeMillis(),
+        ))
+        apply(exam.copy(status = "unknown"), emptyList(), sources)
+        assertEquals(ReminderDatabase.STATUS_CANCELLED, database.event(reminder.eventId)!!.status)
+    }
+
+    @Test
+    fun versionTwoUpgradeDefaultsOldEventsToDeadlineAndKeepsHistory() {
+        val file = File(context.cacheDir, "synthetic-reminder-v2-${System.nanoTime()}.db")
+        try {
+            SQLiteDatabase.openOrCreateDatabase(file, null).use { old ->
+                old.execSQL("CREATE TABLE snapshots (assignment_id TEXT)")
+                old.execSQL("INSERT INTO snapshots VALUES ('old-work')")
+                old.execSQL("CREATE TABLE events (event_id TEXT, status TEXT)")
+                old.execSQL("INSERT INTO events VALUES ('keep-history', 'submitted')")
+                old.version = 2
+            }
+            val helper = object : SQLiteOpenHelper(context, file.absolutePath, null, 3) {
+                override fun onCreate(db: SQLiteDatabase) = error("Expected existing v2 database")
+                override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                    database.onUpgrade(db, oldVersion, newVersion)
+                }
+            }
+            helper.use {
+                val upgraded = it.writableDatabase
+                assertEquals(3, upgraded.version)
+                upgraded.rawQuery("SELECT event_id, status, event_kind FROM events", null).use { row ->
+                    assertTrue(row.moveToFirst())
+                    assertEquals("keep-history", row.getString(0))
+                    assertEquals("submitted", row.getString(1))
+                    assertEquals("deadline", row.getString(2))
+                }
+                upgraded.rawQuery("SELECT event_kind FROM snapshots", null).use { row ->
+                    assertTrue(row.moveToFirst())
+                    assertEquals("deadline", row.getString(0))
+                }
+            }
+        } finally {
+            SQLiteDatabase.deleteDatabase(file)
+        }
+    }
+
+    @Test
     fun latestUnknownFailedOrOutOfScopeSnapshotCancelsPendingAndSubmittedEvents() {
         val invalidSnapshots = listOf<(StoredReminderSnapshot) -> StoredReminderSnapshot>(
             { it.copy(status = "unknown") },
@@ -343,6 +395,7 @@ class ReminderSourceScopeTest {
             batchId = null,
             status = ReminderDatabase.STATUS_PENDING,
             notificationId = ReminderDatabase.stableNotificationId(id),
+            eventKind = snapshot.eventKind,
         )
     }
 

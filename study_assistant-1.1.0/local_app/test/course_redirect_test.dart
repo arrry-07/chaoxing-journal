@@ -34,7 +34,8 @@ void main() {
                 : {})));
       }));
     expect(
-        await ChaoxingLocalClient(enableClassroomTasks: false, dio: dio)
+        await ChaoxingLocalClient(
+                enableExams: false, enableClassroomTasks: false, dio: dio)
             .fetchAssignments(),
         isEmpty);
     expect(

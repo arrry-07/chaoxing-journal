@@ -36,12 +36,19 @@ enum AssignmentRecoveryScope {
 
   /// Retained historical dates remain visible here even though the trusted
   /// calendar grid excludes them.
-  bool matches(Assignment assignment, DateTime now) => switch (this) {
-        noDeadline => assignment.deadlineBucketAt(now) ==
-            AssignmentDeadlineBucket.confirmedNoDeadline,
-        deadlinePending => assignment.deadlineBucketAt(now) ==
-            AssignmentDeadlineBucket.unconfirmed,
-      };
+  bool matches(Assignment assignment, DateTime now) {
+    if (assignment.isExam) {
+      return !assignment.isCompleted &&
+          this == deadlinePending &&
+          (!assignment.timelineTrusted || assignment.timelineAt == null);
+    }
+    return switch (this) {
+      noDeadline => AssignmentQuery.timelineBucketAt(assignment, now) ==
+          AssignmentDeadlineBucket.confirmedNoDeadline,
+      deadlinePending => AssignmentQuery.timelineBucketAt(assignment, now) ==
+          AssignmentDeadlineBucket.unconfirmed,
+    };
+  }
 }
 
 class AssignmentListScreen extends StatefulWidget {
@@ -76,6 +83,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
   String get _query => store.homeFilters.query;
   AssignmentDeadlineFilter get _deadlineFilter => store.homeFilters.deadline;
   HomeSortOrder get _sortOrder => store.homeFilters.sortOrder;
+  AssignmentTypeFilter get _typeFilter => store.homeFilters.type;
   final _openingAssignments = <String>{};
   AssignmentStore get store => widget.store;
 
@@ -235,6 +243,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                 query: _query,
                 courseKey: _courseKey,
                 deadline: _deadlineFilter,
+                type: _typeFilter,
                 now: now,
               )
             : displayAssignments
@@ -257,6 +266,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         final freshness = _freshnessLabel(sync.summary,
             store.syncReport.lastDataSuccessAt ?? store.lastSyncAt, now);
         final filtersActive = _query.trim().isNotEmpty ||
+            _typeFilter != AssignmentTypeFilter.all ||
             _courseKey != null ||
             _deadlineFilter != AssignmentDeadlineFilter.all;
         final compactFilterAction = MediaQuery.textScalerOf(context).scale(14) >
@@ -295,12 +305,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
           DateTime? previous;
           return [
             for (final a in list) ...[
-              if (a.deadlineAt != null &&
-                  a.deadlineTrusted &&
-                  !a.deadlineReadFailed &&
-                  previous != AssignmentQuery.dayKey(a.deadlineAt!))
+              if (a.timelineAt != null &&
+                  a.timelineTrusted &&
+                  (a.isExam || !a.deadlineReadFailed) &&
+                  previous != AssignmentQuery.dayKey(a.timelineAt!))
                 dayHeading(
-                    previous = AssignmentQuery.dayKey(a.deadlineAt!), now),
+                    previous = AssignmentQuery.dayKey(a.timelineAt!), now),
               card(a),
             ]
           ];
@@ -439,14 +449,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                       store.assignments.isNotEmpty)) ...[
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
-                    child: Text('没有符合搜索或期限条件的作业')),
+                    child: Text('没有符合搜索、类型或期限条件的记录')),
                 TextButton(
                     onPressed: () => _saveFilters(
                           HomeFilters(sortOrder: _sortOrder),
                           store.accountEpoch,
                           store.account,
                         ),
-                    child: const Text('清除搜索与期限条件')),
+                    child: const Text('清除搜索与筛选条件')),
               ] else if (store.assignments.isNotEmpty) ...[
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
@@ -464,7 +474,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                             store.syncReport.phase == SyncPhase.running
                         ? '正在读取课程与作业，请稍候。'
                         : store.syncReport.phase == SyncPhase.success
-                            ? '暂无作业，已读取的正式作业会显示在这里。'
+                            ? '暂无待办，已读取的作业、任务与考试会显示在这里。'
                             : store.syncReport.phase == SyncPhase.failed
                                 ? '本次尚未取得作业，请点击右上角刷新继续。'
                                 : '点击右上角刷新，开始整理这本课业手记。')),
@@ -530,10 +540,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
 
   String _sortLabel(HomeSortOrder order) => switch (order) {
         HomeSortOrder.grouped => '默认分组',
-        HomeSortOrder.deadlineAsc => '截止时间：近到远',
-        HomeSortOrder.deadlineDesc => '截止时间：远到近',
+        HomeSortOrder.deadlineAsc => '时间：近到远（考试按开考）',
+        HomeSortOrder.deadlineDesc => '时间：远到近（考试按开考）',
         HomeSortOrder.courseName => '课程名称',
-        HomeSortOrder.title => '作业名称',
+        HomeSortOrder.title => '名称',
       };
 
   String _syncProgressLabel(AssignmentStore store) {
@@ -575,6 +585,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
     var query = _query;
     var courseKey = _courseKey;
     var deadline = _deadlineFilter;
+    var type = _typeFilter;
     var sortOrder = _sortOrder;
     final selection = await showModalBottomSheet<_HomeFilterSelection>(
       context: context,
@@ -597,9 +608,24 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   onChanged: (value) => setSheetState(() => query = value),
                   textInputAction: TextInputAction.search,
                   decoration: const InputDecoration(
-                    labelText: '搜索作业或课程',
+                    labelText: '搜索作业、任务、考试或课程',
                     prefixIcon: Icon(Icons.search),
                   ),
+                ),
+                const SizedBox(height: 16),
+                Text('类型', style: Theme.of(context).textTheme.titleMedium),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final option in AssignmentTypeFilter.values)
+                      ChoiceChip(
+                        key: ValueKey('type-${option.name}'),
+                        selected: type == option,
+                        onSelected: (_) => setSheetState(() => type = option),
+                        label: Text(option.label),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 Wrap(
@@ -669,6 +695,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                           query = '';
                           courseKey = null;
                           deadline = AssignmentDeadlineFilter.all;
+                          type = AssignmentTypeFilter.all;
                           controller.clear();
                         }),
                         child: const Text('清空筛选'),
@@ -683,6 +710,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                                 query: query,
                                 courseKey: courseKey,
                                 deadline: deadline,
+                                type: type,
                                 sortOrder: sortOrder)),
                         child: const Text('应用'),
                       ),
@@ -705,6 +733,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             query: selection.query.trim(),
             courseKey: selection.courseKey,
             deadline: selection.deadline,
+            type: selection.type,
             sortOrder: selection.sortOrder),
         openingEpoch,
         openingAccount);
@@ -716,11 +745,13 @@ class _HomeFilterSelection {
     required this.query,
     required this.courseKey,
     required this.deadline,
+    required this.type,
     required this.sortOrder,
   });
 
   final String query;
   final String? courseKey;
   final AssignmentDeadlineFilter deadline;
+  final AssignmentTypeFilter type;
   final HomeSortOrder sortOrder;
 }

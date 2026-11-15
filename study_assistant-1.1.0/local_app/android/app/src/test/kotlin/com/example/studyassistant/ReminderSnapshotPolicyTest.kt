@@ -89,4 +89,21 @@ class ReminderSnapshotPolicyTest {
             type = ReminderDatabase.EVENT_NEW, deadlineAt = null,
         ), now))
     }
+
+    @Test
+    fun examStartMustMatchKindAndTrustedFutureAnchor() {
+        val exam = snapshot.copy(eventKind = "examStart")
+        val start = event.copy(eventKind = "examStart")
+        assertTrue(exam.matchesEvent(start, now))
+        assertTrue(exam.matchesEvent(start.copy(type = ReminderDatabase.EVENT_NEW), now))
+        assertFalse(exam.matchesEvent(event, now))
+        assertFalse(snapshot.matchesEvent(start, now))
+        assertFalse(exam.copy(deadlineAt = null).matchesEvent(start.copy(deadlineAt = null), now))
+        assertFalse(exam.copy(deadlineTrusted = false).matchesEvent(start, now))
+        assertFalse(exam.copy(status = "unknown").matchesEvent(start, now))
+        assertFalse(exam.matchesEvent(start, exam.deadlineAt!!))
+        assertFalse(exam.copy(eventKind = "unsupported").matchesEvent(
+            start.copy(eventKind = "unsupported"), now,
+        ))
+    }
 }

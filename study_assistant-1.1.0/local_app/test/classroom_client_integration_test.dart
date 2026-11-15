@@ -66,7 +66,6 @@ class ClassroomFixture {
                         'activeType': 42,
                         'nameOne': '随堂练习'
                       },
-                      {'id': '77', 'activeType': 77, 'nameOne': '排除类型'},
                       {'id': '47', 'activeType': 47, 'nameOne': '计时器'}
                     ]
                   }
@@ -154,7 +153,7 @@ void main() {
   test('an unparsed course keeps both classroom baselines incomplete',
       () async {
     final f = ClassroomFixture()..invalidExtraCourse = true;
-    final c = ChaoxingLocalClient(dio: f.dio);
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
     expect((await c.fetchAssignments()).length, 2);
     expect(c.failedCourses, 1);
     for (final s in c.sourceResults
@@ -169,7 +168,7 @@ void main() {
     final f = ClassroomFixture()
       ..hasFormal = true
       ..taskHttpStatus = 401;
-    final c = ChaoxingLocalClient(dio: f.dio);
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
     final rows = await c.fetchAssignments();
     expect(rows.where((a) => a.isFormal).length, 1);
     expect(c.sourceResults.first.phase, SyncSourcePhase.success);
@@ -181,7 +180,7 @@ void main() {
     final f = ClassroomFixture()
       ..totalCourses = 2
       ..taskHttpStatus = 429;
-    final c = ChaoxingLocalClient(dio: f.dio);
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
     final rows = await c.fetchAssignments();
     expect(
         rows.where((a) => a.activityType == 42 && a.status == 'pending').length,
@@ -196,7 +195,7 @@ void main() {
         'last progress callback ${cancel ? 'cancels' : 'switches session'} without restoring old source results',
         () async {
       final f = ClassroomFixture();
-      final c = ChaoxingLocalClient(dio: f.dio);
+      final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
       var changed = false;
       c.onProgress = (p) {
         if (!changed && p.resolvedCount == 2 && p.pendingDetailIds.isEmpty) {
@@ -224,7 +223,7 @@ void main() {
   test('conflicting types for the same activity never overwrite each other',
       () async {
     final f = ClassroomFixture()..duplicateActivity = true;
-    final c = ChaoxingLocalClient(dio: f.dio);
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
     expect(await c.fetchAssignments(), isEmpty);
     expect(
         c.sourceResults
@@ -234,10 +233,10 @@ void main() {
   });
   for (final single in [false, true]) {
     test(
-        'normal ${single ? 'single-course' : 'full'} entry reads 35/42 without inbox and excludes 77/47',
+        'normal ${single ? 'single-course' : 'full'} entry reads 35/42 without inbox and excludes 47',
         () async {
       final f = ClassroomFixture();
-      final c = ChaoxingLocalClient(dio: f.dio);
+      final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
       final rows = single
           ? await c.fetchAssignmentsForCourse(courseId: '7', clazzId: '11')
           : await c.fetchAssignments();
@@ -253,14 +252,14 @@ void main() {
           c.sourceResults
               .where((s) => s.phase == SyncSourcePhase.success)
               .length,
-          3);
+          4);
       expect(c.sourceResults.last.phase, SyncSourcePhase.notEnabled);
     });
   }
   test('formal access refusal does not discard valid classroom tasks',
       () async {
     final f = ClassroomFixture()..formalFails = true;
-    final c = ChaoxingLocalClient(dio: f.dio);
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
     expect((await c.fetchAssignments()).length, 2);
     expect(c.sourceResults.first.phase, SyncSourcePhase.failed);
     expect(c.sourceResults[1].phase, SyncSourcePhase.success);
@@ -270,7 +269,7 @@ void main() {
     final f = ClassroomFixture()
       ..taskFails = true
       ..answered = true;
-    final c = ChaoxingLocalClient(dio: f.dio);
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
     final rows = await c.fetchAssignments();
     expect(rows.firstWhere((a) => a.activityType == 35).isPendingConfirmed,
         isFalse);
@@ -282,7 +281,7 @@ void main() {
     final f = ClassroomFixture()
       ..wrongUser = true
       ..answered = true;
-    final c = ChaoxingLocalClient(dio: f.dio);
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
     final rows = await c.fetchAssignments();
     expect(rows.firstWhere((a) => a.activityType == 42).status, 'unknown');
     expect(rows.firstWhere((a) => a.activityType == 35).status, 'pending');
@@ -291,7 +290,7 @@ void main() {
       'deleted task stays outside the assignment scope without personal requests',
       () async {
     final f = ClassroomFixture()..deleted = true;
-    final c = ChaoxingLocalClient(dio: f.dio);
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
     final rows = await c.fetchAssignments();
     expect(rows.firstWhere((a) => a.activityType == 35).availability,
         AssignmentAvailability.unavailable);
@@ -300,7 +299,7 @@ void main() {
   test('session replacement retracts classroom preview and discards late data',
       () async {
     final f = ClassroomFixture()..gate = Completer<void>();
-    final c = ChaoxingLocalClient(dio: f.dio);
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
     final future = c.fetchAssignments();
     await f.started.future;
     c.clearSession();
@@ -311,7 +310,7 @@ void main() {
   });
   test('explicit cancellation is never a valid empty source', () async {
     final f = ClassroomFixture()..gate = Completer<void>();
-    final c = ChaoxingLocalClient(dio: f.dio);
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
     final future = c.fetchAssignments();
     await f.started.future;
     c.cancelActiveRequests();

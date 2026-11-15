@@ -28,6 +28,11 @@ String nextPatchVersion() {
   return '${parts[0]}.${parts[1]}.${parts[2] + 1}';
 }
 
+String nextMinorVersion() {
+  final parts = AppVersion.name.split('.').map(int.parse).toList();
+  return '${parts[0]}.${parts[1] + 1}.0';
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -40,7 +45,9 @@ void main() {
         final startup = !gate.isCompleted;
         if (startup) await gate.future;
         h.resolve(Response(
-            requestOptions: o, statusCode: 200, data: [release('1.8.0')]));
+            requestOptions: o,
+            statusCode: 200,
+            data: [release(nextMinorVersion())]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
@@ -50,7 +57,7 @@ void main() {
     gate.complete();
     expect(await startup, false);
     await manual;
-    expect(task.update?.versionName, '1.8.0');
+    expect(task.update?.versionName, nextMinorVersion());
   });
 
   test('manual click during startup waits then checks the patch list',
@@ -130,7 +137,11 @@ void main() {
     ]);
   });
 
-  for (final row in [('1.7.999', true), ('1.8.0', true), ('2.0.0', true)]) {
+  for (final row in [
+    (nextPatchVersion(), true),
+    (nextMinorVersion(), true),
+    ('2.0.0', true)
+  ]) {
     test('startup iteration gate for ${row.$1}', () async {
       final dio = Dio()
         ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
@@ -154,8 +165,8 @@ void main() {
               requestOptions: o,
               statusCode: 200,
               data: o.uri.path.endsWith('/latest')
-                  ? release('1.8.0')
-                  : [release('1.8.0')]))));
+                  ? release(nextMinorVersion())
+                  : [release(nextMinorVersion())]))));
     final service = AppUpdateService(dio: dio);
     final first = AppUpdateController(service: service);
     addTearDown(first.dispose);
@@ -165,7 +176,7 @@ void main() {
     addTearDown(second.dispose);
     expect(await second.checkOnStartup(), false);
     await second.check();
-    expect(second.update!.versionName, '1.8.0');
+    expect(second.update!.versionName, nextMinorVersion());
   });
 
   test('manual reads all pages, excludes draft/prerelease and sorts by version',
@@ -185,13 +196,13 @@ void main() {
                     release('99.0.0', draft: true),
                     release('98.0.0', prerelease: true),
                     release('1.7.4'),
-                    release('1.8.0'),
+                    release(nextMinorVersion()),
                     release('1.7.4')
                   ]));
       }));
     final result = await AppUpdateService(dio: dio)
         .checkConfigured(currentVersionCode: AppVersion.code);
-    expect(result.update!.versionName, '1.8.0');
+    expect(result.update!.versionName, nextMinorVersion());
     expect(pages, [1, 2]);
   });
 
@@ -210,7 +221,7 @@ void main() {
             onRequest: (o, h) => h.resolve(Response(
                 requestOptions: o,
                 statusCode: 200,
-                data: [release('1.8.0'), newest]))));
+                data: [release(nextMinorVersion()), newest]))));
       final result = await AppUpdateService(dio: dio)
           .checkConfigured(currentVersionCode: AppVersion.code);
       expect(result.update, isNull);
@@ -230,7 +241,7 @@ void main() {
           onRequest: (o, h) => h.resolve(Response(
               requestOptions: o,
               statusCode: o.queryParameters['page'] == 1 ? 200 : 503,
-              data: List.generate(100, (_) => release('1.8.0'))))));
+              data: List.generate(100, (_) => release(nextMinorVersion()))))));
     final result = await AppUpdateService(dio: dio)
         .checkConfigured(currentVersionCode: AppVersion.code);
     expect(result.status, UpdateCheckStatus.networkError);

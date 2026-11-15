@@ -33,7 +33,8 @@ void main() {
         }
         h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
       }));
-    final c = ChaoxingLocalClient(enableClassroomTasks: false, dio: dio);
+    final c = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
     expect(await c.fetchAssignments(), isEmpty);
     expect(c.succeededCourses, 3);
     expect(middle, 1);

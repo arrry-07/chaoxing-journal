@@ -8,6 +8,7 @@ import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_web_link.dart';
 import '../services/external_link_service.dart';
+import 'widgets/assignment_card.dart';
 
 class AssignmentDetailScreen extends StatefulWidget {
   const AssignmentDetailScreen({
@@ -27,6 +28,17 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
   final _links = ExternalLinkService();
   bool _opening = false, _hiding = false, _refreshing = false;
   String? _actionMessage;
+
+  String get _itemLabel {
+    final assignment = widget.store.findAssignment(widget.assignmentId);
+    return assignment?.isExam == true
+        ? assignment!.exam!.noticeOnly
+            ? '考试通知'
+            : '考试'
+        : assignment?.isSupportedClassroomTask == true
+            ? '任务'
+            : '作业';
+  }
 
   String? get _currentUrl {
     final assignment = widget.store.findAssignment(widget.assignmentId);
@@ -102,8 +114,8 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
     final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-              title: const Text('复制作业链接'),
-              content: const Text('链接含作业访问参数，请只在本人设备使用，勿转发或公开。'),
+              title: Text('复制$_itemLabel链接'),
+              content: Text('链接含$_itemLabel访问参数，请只在本人设备使用，勿转发或公开。'),
               actions: [
                 TextButton(
                     onPressed: () => Navigator.pop(context, false),
@@ -218,9 +230,11 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        assignment.deadlineAt == null
-                            ? assignment.deadlineLabel
-                            : '${DateFormat('yyyy年M月d日 HH:mm', 'zh_CN').format(AssignmentQuery.beijing(assignment.deadlineAt!))}（北京时间）',
+                        assignment.isExam
+                            ? '${AssignmentCard.examScheduleLines(assignment).join('\n')}\n（北京时间）'
+                            : assignment.deadlineAt == null
+                                ? assignment.deadlineLabel
+                                : '${DateFormat('yyyy年M月d日 HH:mm', 'zh_CN').format(AssignmentQuery.beijing(assignment.deadlineAt!))}（北京时间）',
                       ),
                     ),
                   ],
@@ -234,13 +248,23 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(assignment.statusLabel),
-                      if (!assignment.deadlineTrusted &&
+                      Text(assignment.isExam
+                          ? AssignmentCard.examStateLabel(
+                              assignment, DateTime.now())
+                          : assignment.statusLabel),
+                      if (assignment.isExam)
+                        const Text('考试安排与个人提交状态分别显示；已结束不代表已提交。'),
+                      if (assignment.isExam && !assignment.timelineTrusted)
+                        const Text('开考时间待确认，不参与日历和开考提醒'),
+                      if (!assignment.isExam &&
+                          !assignment.deadlineTrusted &&
                           assignment.deadlineAt != null)
                         const Text('历史截止时间待确认，不参与日历和提醒'),
-                      if (assignment.deadlineRawText != null)
+                      if (!assignment.isExam &&
+                          assignment.deadlineRawText != null)
                         Text(assignment.deadlineRawText!),
-                      if (assignment.deadlineReadFailed &&
+                      if (!assignment.isExam &&
+                          assignment.deadlineReadFailed &&
                           assignment.deadlineAt != null)
                         Text(assignment.deadlineLabel),
                       if (assignment.requirementsText.isNotEmpty) ...[
@@ -265,20 +289,24 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
                   ? null
                   : _openAssignment,
               icon: const Icon(Icons.launch),
-              label: Text(_opening ? '正在打开…' : '在学习通内打开作业'),
+              label: Text(_opening
+                  ? '正在打开…'
+                  : assignment.isExam
+                      ? '在学习通内查看$_itemLabel'
+                      : '在学习通内打开作业'),
             ),
             const SizedBox(height: 8),
             FilledButton.icon(
               onPressed:
                   _opening || _hiding || _currentUrl == null ? null : _openWeb,
               icon: const Icon(Icons.open_in_browser),
-              label: Text(_opening ? '正在请求浏览器…' : '打开作业网页'),
+              label: Text(_opening ? '正在请求浏览器…' : '打开$_itemLabel网页'),
             ),
             const SizedBox(height: 8),
-            const Text('将在学习通内打开作业网页；也可主动选择浏览器打开，可能需要另行登录。返回后可刷新核对提交状态。'),
+            Text('将在学习通内打开$_itemLabel网页；也可主动选择浏览器打开，可能需要另行登录。返回后可刷新核对提交状态。'),
             if (_currentUrl == null) ...[
               const SizedBox(height: 8),
-              const Text('作业链接暂不可用，请刷新作业信息；尚未开放的作业请稍后重试。'),
+              Text('$_itemLabel链接暂不可用，请刷新信息；尚未开放时请稍后重试。'),
             ],
             if (_actionMessage != null) ...[
               const SizedBox(height: 8),
@@ -290,12 +318,12 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
                     ? null
                     : _refresh,
                 icon: const Icon(Icons.refresh),
-                label: Text(_refreshing ? '正在刷新…' : '刷新作业信息'),
+                label: Text(_refreshing ? '正在刷新…' : '刷新$_itemLabel信息'),
               ),
               TextButton.icon(
                 onPressed: _currentUrl == null || _hiding ? null : _copyLink,
                 icon: const Icon(Icons.copy_outlined),
-                label: const Text('复制作业链接'),
+                label: Text('复制$_itemLabel链接'),
               ),
             ]),
             const SizedBox(height: 12),
@@ -303,7 +331,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
               TextButton.icon(
                 onPressed: _hiding || _opening || _refreshing ? null : _hide,
                 icon: const Icon(Icons.visibility_off_outlined),
-                label: const Text('在本机隐藏此作业'),
+                label: Text('在本机隐藏此$_itemLabel'),
               ),
           ],
         );
