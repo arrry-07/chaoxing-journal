@@ -314,7 +314,7 @@ void main() {
     expect(find.text('已完成'), findsNothing);
     expect(find.text('开考时间待确认'), findsOneWidget);
     expect(find.text('结束时间待确认'), findsOneWidget);
-    expect(find.text('地点待确认'), findsOneWidget);
+    expect(find.text('地点 通知未提供实体考场'), findsOneWidget);
     expect(find.text('在学习通内查看考试通知'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

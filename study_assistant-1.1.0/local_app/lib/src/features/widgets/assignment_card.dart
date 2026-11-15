@@ -64,7 +64,11 @@ class AssignmentCard extends StatelessWidget {
       time('结束', exam.endAt, exam.endTrusted),
       if (exam.durationMinutes != null && exam.durationMinutes! > 0)
         '时长 ${exam.durationMinutes} 分钟',
-      exam.location.trim().isEmpty ? '地点待确认' : '地点 ${exam.location.trim()}',
+      exam.location.trim().isEmpty
+          ? exam.noticeOnly
+              ? '地点 通知未提供实体考场'
+              : '地点 官方考试页未提供实体考场'
+          : '地点 ${exam.location.trim()}',
     ];
   }
 

@@ -34,6 +34,8 @@ class ExamFixture {
   int middleReads = 0;
   String redirectedClass = '11';
   String redirectedExtras = '';
+  String pcMetadata = '';
+  List<Map<String, dynamic>>? noticeRows;
   int examHttp = 200;
   int formalHttp = 200;
   bool partialPc = false;
@@ -93,7 +95,7 @@ class ExamFixture {
             ];
           }
         case '/exam/test':
-          body = badPc ? '<unknown>' : pcRow();
+          body = badPc ? '<unknown>' : pcRow() + pcMetadata;
           if (partialPc) {
             if (o.uri.queryParameters['start'] == '0') {
               body = [
@@ -114,18 +116,19 @@ class ExamFixture {
                   'status': true,
                   'notices': {
                     'lastGetId': 'cursor',
-                    'list': [
-                      {
-                        'uuid': compoundNotice
-                            ? 'synthetic-notice:opaque-resource'
-                            : 'notice-1',
-                        'title': '考试安排通知',
-                        'content': '请核对考试地点',
-                        'sendTime': '2030-04-01',
-                        'completeTime': '2030-04-02'
-                      },
-                      {'uuid': 'notice-2', 'title': '普通通知', 'content': '欢迎'}
-                    ]
+                    'list': noticeRows ??
+                        [
+                          {
+                            'uuid': compoundNotice
+                                ? 'synthetic-notice:opaque-resource'
+                                : 'notice-1',
+                            'title': '考试安排通知',
+                            'content': '请核对考试地点',
+                            'sendTime': '2030-04-01',
+                            'completeTime': '2030-04-02'
+                          },
+                          {'uuid': 'notice-2', 'title': '普通通知', 'content': '欢迎'}
+                        ]
                   }
                 }
               : {'status': true};
@@ -203,7 +206,8 @@ void main() {
         .single;
     expect(a.id, b.id);
     expect(a.id, isNot(c.id));
-    expect(ChaoxingExamParser.notices(payload('bad\nidentity', '考试')), isNull);
+    expect(
+        ChaoxingExamParser.notices(payload('bad\nidentity', '考试通知')), isNull);
   });
   test('redirect checks every repeated and aliased identity parameter',
       () async {

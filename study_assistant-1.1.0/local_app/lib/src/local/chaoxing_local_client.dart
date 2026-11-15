@@ -13,6 +13,7 @@ import 'chaoxing_api_parser.dart';
 import 'chaoxing_assignment_parser.dart';
 import 'chaoxing_classroom_parser.dart';
 import 'chaoxing_exam_parser.dart';
+import 'chaoxing_exam_visibility.dart';
 
 part 'chaoxing_exam_client.dart';
 
@@ -1697,9 +1698,13 @@ class ChaoxingLocalClient {
     }
     // Shared course scripts include captcha libraries even without a challenge.
     // Inspect visible text, never library names or hidden script configuration.
-    final visible = body.replaceAll(
-        RegExp(r'<(script|style)\b[^>]*>[\s\S]*?</\1>', caseSensitive: false),
-        '');
+    final visible = examListChallengeBody(
+        body.replaceAll(
+            RegExp(r'<(script|style)\b[^>]*>[\s\S]*?</\1>',
+                caseSensitive: false),
+            ''),
+        uri: uri,
+        requestKind: kind);
     final challenge = RegExp(
                 r'请输入验证码|请完成.{0,12}(?:验证|校验)|安全验证|访问异常|人机验证|verify\.chaoxing',
                 caseSensitive: false)

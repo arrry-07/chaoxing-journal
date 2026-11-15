@@ -293,6 +293,7 @@ class BackupSnapshot {
   static ExamInfo? _exam(dynamic value) {
     if (value == null) return null;
     final e = _map(value, {
+      if (value is Map && value.containsKey('relatedExamId')) 'relatedExamId',
       'examId',
       'courseId',
       'clazzId',
@@ -317,6 +318,18 @@ class BackupSnapshot {
     }
 
     final examId = identity(e['examId']);
+    final courseId = identity(e['courseId']), clazzId = identity(e['clazzId']);
+    final relatedExamId = e['relatedExamId'];
+    if (relatedExamId != null &&
+        (relatedExamId is! String ||
+            relatedExamId.length > 500 ||
+            RegExp(r'[0-9]+').matchAsPrefix(relatedExamId)?.end !=
+                relatedExamId.length ||
+            e['noticeOnly'] != true ||
+            courseId == null ||
+            clazzId == null)) {
+      _bad();
+    }
     if (examId == null ||
         e['startTrusted'] is! bool ||
         e['endTrusted'] is! bool ||
@@ -336,8 +349,9 @@ class BackupSnapshot {
     }
     return ExamInfo(
       examId: examId,
-      courseId: identity(e['courseId']),
-      clazzId: identity(e['clazzId']),
+      relatedExamId: relatedExamId as String?,
+      courseId: courseId,
+      clazzId: clazzId,
       startAt: start,
       endAt: end,
       // A portable observation has no live personal state or safe entry.

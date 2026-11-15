@@ -20,6 +20,7 @@ Assignment _exam({
   bool endTrusted = true,
   bool notice = false,
   bool entry = true,
+  String? relatedExamId,
   DateTime? start,
 }) =>
     Assignment(
@@ -37,6 +38,7 @@ Assignment _exam({
           : null,
       exam: ExamInfo(
         examId: notice ? 'notice1' : 'exam1',
+        relatedExamId: relatedExamId,
         courseId: '1',
         clazzId: '2',
         startAt: start ?? _start,
@@ -219,6 +221,147 @@ void main() {
     expect(exam.endTrusted, isFalse);
     expect(restored.last.exam!.noticeOnly, isTrue);
     expect(_plan(restored).eventJson, isEmpty);
+  });
+
+  test('notice model persists related exam without replacing notice identity',
+      () {
+    final notice = _exam(notice: true, relatedExamId: '123456');
+    final decoded = Assignment.fromJson(notice.toJson());
+    expect(decoded.exam!.relatedExamId, '123456');
+    expect(decoded.exam!.examId, 'notice1');
+    expect(decoded.id, 'cx:examNotice:inbox:notice1');
+    expect(decoded.courseTaskKey, notice.courseTaskKey);
+    expect(decoded.exam!.noticeOnly, isTrue);
+    expect(_plan([decoded]).eventJson, isEmpty);
+
+    final historical =
+        _exam(notice: true).exam!.retainingHistoricalTimes(decoded.exam!);
+    expect(historical.relatedExamId, '123456');
+    expect(ExamInfo.fromJson(historical.toJson()).relatedExamId, '123456');
+    final changed = _exam(notice: true, relatedExamId: '987654')
+        .exam!
+        .retainingHistoricalTimes(decoded.exam!);
+    expect(changed.relatedExamId, '987654');
+    for (final different in [
+      const ExamInfo(
+          examId: 'another-notice',
+          courseId: '1',
+          clazzId: '2',
+          noticeOnly: true),
+      const ExamInfo(
+          examId: 'notice1', courseId: '3', clazzId: '2', noticeOnly: true),
+      const ExamInfo(
+          examId: 'notice1', courseId: '1', clazzId: '3', noticeOnly: true),
+      const ExamInfo(examId: 'notice1', noticeOnly: true),
+    ]) {
+      expect(different.retainingHistoricalTimes(decoded.exam!).relatedExamId,
+          isNull);
+    }
+  });
+
+  test('model rejects malformed or incomplete notice exam association', () {
+    final original =
+        _exam(notice: true, relatedExamId: '123456').exam!.toJson();
+    for (final invalid in <Map<String, dynamic>>[
+      {'relatedExamId': ''},
+      {'relatedExamId': 'exam123'},
+      {'relatedExamId': '123:456'},
+      {'relatedExamId': '123\n'},
+      {'relatedExamId': 123456},
+      {'relatedExamId': true},
+      {'noticeOnly': false},
+      {'courseId': null},
+      {'clazzId': null},
+      {'courseId': ''},
+      {'clazzId': ' '},
+    ]) {
+      expect(() => ExamInfo.fromJson({...original, ...invalid}),
+          throwsFormatException);
+    }
+  });
+
+  test(
+      'schema 5 backup accepts related notice identity and missing optional field',
+      () {
+    final notice = _exam(notice: true, relatedExamId: '123456');
+    final encoded = _backup([notice]).encode();
+    expect(jsonDecode(encoded)['schema'], 5);
+    final restored = BackupSnapshot.decode(encoded).records.single;
+    expect(restored.id, notice.id);
+    expect(restored.exam!.examId, 'notice1');
+    expect(restored.exam!.relatedExamId, '123456');
+    expect(restored.exam!.courseId, '1');
+    expect(restored.exam!.clazzId, '2');
+    expect(restored.exam!.startTrusted, isFalse);
+    expect(restored.exam!.endTrusted, isFalse);
+    expect(restored.submitUrl, isNull);
+    expect(_plan([restored]).eventJson, isEmpty);
+
+    final legacy = jsonDecode(encoded) as Map<String, dynamic>;
+    final info =
+        (legacy['records'] as List).single['exam'] as Map<String, dynamic>;
+    info.remove('relatedExamId');
+    final old = BackupSnapshot.decode(jsonEncode(legacy)).records.single;
+    expect(old.exam!.relatedExamId, isNull);
+    expect(old.id, notice.id);
+    expect(ExamInfo.fromJson(info).relatedExamId, isNull);
+    info['relatedExamId'] = null;
+    expect(
+        BackupSnapshot.decode(jsonEncode(legacy))
+            .records
+            .single
+            .exam!
+            .relatedExamId,
+        isNull);
+  });
+
+  test('backup rejects invalid related identity and incomplete notice scope',
+      () {
+    final encoded =
+        _backup([_exam(notice: true, relatedExamId: '123456')]).encode();
+    for (final invalid in <Map<String, dynamic>>[
+      {'relatedExamId': ''},
+      {'relatedExamId': 'exam123'},
+      {'relatedExamId': '123:456'},
+      {'relatedExamId': '123\n'},
+      {'relatedExamId': 123456},
+      {'relatedExamId': true},
+      {'relatedExamId': '1' * 501},
+      {'noticeOnly': false},
+      {'courseId': null},
+      {'clazzId': null},
+      {'courseId': ''},
+      {'clazzId': ' '},
+    ]) {
+      final raw = jsonDecode(encoded) as Map<String, dynamic>;
+      final record = (raw['records'] as List).single as Map<String, dynamic>;
+      final info = record['exam'] as Map<String, dynamic>;
+      info.addAll(invalid);
+      if (invalid['noticeOnly'] == false) {
+        // Keep the normal exam identity valid so rejection checks the relation.
+        record['id'] = 'cx:exam:1:2:notice1';
+      }
+      expect(
+          () => BackupSnapshot.decode(jsonEncode(raw)), throwsFormatException);
+    }
+  });
+
+  test('repository restores related notice without trusting it as a live exam',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('synthetic-owner');
+    final notice = _exam(notice: true, relatedExamId: '123456');
+    await repo.restoreBackupSnapshot(_backup([notice]), 'synthetic-owner');
+    final restored = (await repo.loadJournal()).single;
+    expect(restored.id, notice.id);
+    expect(restored.exam!.examId, 'notice1');
+    expect(restored.exam!.relatedExamId, '123456');
+    expect(restored.status, 'unknown');
+    expect(restored.exam!.startTrusted, isFalse);
+    expect(restored.exam!.endTrusted, isFalse);
+    expect(restored.submitUrl, isNull);
+    expect(_plan([restored]).eventJson, isEmpty);
   });
 
   test('daily summary counts exam start instead of exam end as a deadline', () {

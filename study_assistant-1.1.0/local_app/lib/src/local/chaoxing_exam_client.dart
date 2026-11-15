@@ -312,7 +312,27 @@ extension _ExamCollection on ChaoxingLocalClient {
           clearCompletedAt: true,
           lastSyncedAt: DateTime.now()));
     }
-    return rows;
+    final enriched = ChaoxingExamParser.enrichNotices(rows);
+    final freshNotices = enriched
+        .where((a) => a.isExam && a.exam!.noticeOnly && ids.contains(a.id))
+        .toList();
+    sourceResults = [
+      for (final source in sourceResults)
+        if (source.source == 'examNotice')
+          SyncSourceResult(
+              source: source.source,
+              phase: source.phase,
+              succeededCourses: source.succeededCourses,
+              failedCourses: source.failedCourses,
+              recordCount: freshNotices.length,
+              unconfirmedCount: freshNotices
+                  .where((a) => a.status == 'unknown' || !a.timelineTrusted)
+                  .length,
+              reasonCodes: source.reasonCodes)
+        else
+          source
+    ];
+    return enriched;
   }
 
   Future<Response<dynamic>?> _examListGet(Uri uri,
