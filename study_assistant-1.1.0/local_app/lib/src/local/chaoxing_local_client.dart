@@ -1,3 +1,4 @@
+import 'chaoxing_ai_practice_parser.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -716,11 +717,11 @@ class ChaoxingLocalClient {
           SyncIssueKind.rateLimited,
         }.contains(kind);
     final rows = <Assignment>[];
-    final success = {35: 0, 42: 0},
-        failure = {35: unreadCourses, 42: unreadCourses};
-    final reasons = {35: <String>{}, 42: <String>{}};
+    final success = {35: 0, 42: 0, 77: 0},
+        failure = {35: unreadCourses, 42: unreadCourses, 77: unreadCourses};
+    final reasons = {35: <String>{}, 42: <String>{}, 77: <String>{}};
     if (unreadCourses > 0) {
-      for (final type in [35, 42]) {
+      for (final type in [35, 42, 77]) {
         reasons[type]!.add('courseIdentityFailed');
       }
     }
@@ -733,7 +734,7 @@ class ChaoxingLocalClient {
       if (!isCurrent()) return stale;
       if (shouldStop?.call() == true || listBlockedBy != null) {
         final remaining = refs.length - refs.indexOf(course);
-        for (final type in [35, 42]) {
+        for (final type in [35, 42, 77]) {
           failure[type] = failure[type]! + remaining;
           reasons[type]!.add('readStopped');
         }
@@ -769,14 +770,14 @@ class ChaoxingLocalClient {
         final issue = _classroomIssue(e);
         issues.add(issue);
         if (blocks(issue.kind)) listBlockedBy = issue.kind;
-        for (final type in [35, 42]) {
+        for (final type in [35, 42, 77]) {
           failure[type] = failure[type]! + 1;
           reasons[type]!.add('activityListFailed');
         }
         failedCourseKeys.add('${course.courseId}:${course.clazzId}');
         continue;
       }
-      for (final type in [35, 42]) {
+      for (final type in [35, 42, 77]) {
         var complete = true;
         try {
           final seeds = ChaoxingClassroomParser.parseActivities(activities,
@@ -798,7 +799,7 @@ class ChaoxingLocalClient {
             } else {
               try {
                 task = await _hydrateClassroomTask(seed,
-                    uid: uid, generation: generation);
+                    uid: uid, generation: generation, expectedCpi: course.cpi);
               } catch (e) {
                 if (e is SyncReadException &&
                     e.issue.kind == SyncIssueKind.cancelled) {
@@ -811,7 +812,7 @@ class ChaoxingLocalClient {
                 issues.add(issue);
                 if (issue.kind == SyncIssueKind.authExpired) {
                   // Same login, while already read formal results remain valid.
-                  blockedTypes.addAll([35, 42]);
+                  blockedTypes.addAll([35, 42, 77]);
                 } else if (blocks(issue.kind)) {
                   blockedTypes.add(type);
                 }
@@ -846,7 +847,7 @@ class ChaoxingLocalClient {
     if (!isCurrent()) return stale;
     sourceResults = [
       ...sourceResults,
-      for (final type in [35, 42])
+      for (final type in [35, 42, 77])
         SyncSourceResult(
             source: 'classroomActivity:$type',
             phase: failure[type] == 0
@@ -895,7 +896,27 @@ class ChaoxingLocalClient {
   }
 
   Future<Assignment> _hydrateClassroomTask(Assignment seed,
-      {required String? uid, required int generation}) async {
+      {required String? uid,
+      required int generation,
+      String? expectedCpi}) async {
+    if (seed.activityType == 77) {
+      if (seed.submitUrl == null) {
+        throw const FormatException('aiPracticeEntryMissing');
+      }
+      final page = await _courseGet(Uri.parse(seed.submitUrl!),
+          generation: generation, requestKind: 'AI实践');
+      if (generation != _sessionGeneration) return seed;
+      final context = ChaoxingAiPracticeParser.pageContext(
+          seed, page?.data?.toString() ?? '',
+          uid: uid, expectedCpi: expectedCpi);
+      final response = await _safeGet<dynamic>(
+          'https://mooc2-ans.chaoxing.com/mooc2-ans/ai-evaluate/v2/answer/load-data',
+          queryParameters: context,
+          requestKind: 'AI实践');
+      if (generation != _sessionGeneration) return seed;
+      return ChaoxingAiPracticeParser.personal(
+          seed, _decodeJsonPayload(response?.data), context);
+    }
     final kind = seed.activityType == 35 ? '个人分组任务' : '随堂练习';
     Future<dynamic> read(String path, Map<String, dynamic> parameters) async {
       final response = await _safeGet<dynamic>(
@@ -1442,7 +1463,8 @@ class ChaoxingLocalClient {
 
   // Only forward the authenticated session within Chaoxing when the course
   // middle page redirects to the current deployment.
-  Future<Response<dynamic>?> _courseGet(Uri uri, {int? generation}) async {
+  Future<Response<dynamic>?> _courseGet(Uri uri,
+      {int? generation, String? requestKind}) async {
     final expectedGeneration = generation ?? _sessionGeneration;
     for (var i = 0; i < 5; i++) {
       // Some deployments still advertise HTTP in Location. Upgrade locally;
@@ -1454,7 +1476,7 @@ class ChaoxingLocalClient {
         return null;
       }
       final response = await _safeGet<dynamic>(uri.toString(),
-          headers: {'User-Agent': courseUserAgent});
+          headers: {'User-Agent': courseUserAgent}, requestKind: requestKind);
       if (expectedGeneration != _sessionGeneration) return null;
       if (response == null || (response.statusCode ?? 0) < 300) {
         if (kDebugMode) {

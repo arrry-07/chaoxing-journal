@@ -18,6 +18,9 @@ for name, main, files in [
         root / 'tool/android_upgrade_probe/NativePoliciesTest.java',
         root / 'tool/android_upgrade_probe/UpgradeFixture.java',
         source / 'BrowserPolicy.java', source / 'ChaoxingAssignmentLink.java']),
+    ('ai-practice', 'journal.qa.AiPracticeLinkTest', [
+        root / 'tool/android_upgrade_probe/AiPracticeLinkTest.java',
+        source / 'BrowserPolicy.java', source / 'ChaoxingAssignmentLink.java']),
     ('update-policy', 'com.example.studyassistant.UpdateApkPolicyTest', [
         root / 'tool/android_upgrade_probe/UpdateApkPolicyTest.java',
         source / 'UpdateApkPolicy.java'])]:

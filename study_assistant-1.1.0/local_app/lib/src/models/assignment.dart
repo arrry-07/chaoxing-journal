@@ -1,3 +1,5 @@
+import 'ai_practice_entry.dart';
+
 enum AssignmentSource {
   courseWork,
   classroomActivity,
@@ -31,6 +33,7 @@ class Assignment {
     this.deadlineTrusted = true,
     this.deadlineRawText,
     this.activityType,
+    this.aiPracticePublishUuid,
     this.persistedCourseTaskKey,
     this.availability = AssignmentAvailability.available,
     AssignmentSource? source,
@@ -38,6 +41,7 @@ class Assignment {
 
   final AssignmentSource source;
   final int? activityType;
+  final String? aiPracticePublishUuid;
 
   /// Validated journal/backup identity, independent of expiring access links.
   final String? persistedCourseTaskKey;
@@ -52,7 +56,7 @@ class Assignment {
       source == AssignmentSource.courseWork && _identity != null;
   bool get isSupportedClassroomTask =>
       source == AssignmentSource.classroomActivity &&
-      const {35, 42}.contains(activityType) &&
+      const {35, 42, 77}.contains(activityType) &&
       _activityIdentity != null;
   bool get hasCourseTaskIdentity => isFormal || isSupportedClassroomTask;
   bool get isInAssignmentScope =>
@@ -96,6 +100,28 @@ class Assignment {
       : 'cx:activity:${_linkedActivityIdentity!.join(':')}';
 
   List<String>? get _linkedActivityIdentity {
+    if (activityType == 77) {
+      final candidates = [id, persistedCourseTaskKey];
+      for (final candidate in candidates) {
+        final parts = candidate?.split(':');
+        if (parts == null ||
+            parts.length != 5 ||
+            parts[0] != 'cx' ||
+            parts[1] != 'activity' ||
+            parts.sublist(2).any((v) => v.isEmpty)) {
+          continue;
+        }
+        if (aiPracticePublishUuid != null &&
+            AiPracticeEntry.validate(submitUrl ?? '',
+                    courseId: parts[2],
+                    clazzId: parts[3],
+                    publishUuid: aiPracticePublishUuid) !=
+                null) {
+          return parts.sublist(2);
+        }
+      }
+      return null;
+    }
     final uri = Uri.tryParse(submitUrl ?? '');
     if (uri == null ||
         !uri.host.endsWith('.chaoxing.com') ||
@@ -175,6 +201,7 @@ class Assignment {
       activityType:
           json['activityType'] is int ? json['activityType'] as int : null,
       persistedCourseTaskKey: json['courseTaskKey'] as String?,
+      aiPracticePublishUuid: json['aiPracticePublishUuid'] as String?,
       availability: AssignmentAvailability.values
               .where((v) => v.name == json['availability'])
               .firstOrNull ??
@@ -211,6 +238,8 @@ class Assignment {
         if (activityType != null) 'activityType': activityType,
         if (persistedCourseTaskKey != null)
           'courseTaskKey': persistedCourseTaskKey,
+        if (aiPracticePublishUuid != null)
+          'aiPracticePublishUuid': aiPracticePublishUuid,
         'availability': availability.name,
         'deadlineTrusted': deadlineTrusted,
         if (deadlineRawText != null) 'deadlineRawText': deadlineRawText,
@@ -231,6 +260,8 @@ class Assignment {
   Assignment copyWith({
     AssignmentSource? source,
     int? activityType,
+    String? aiPracticePublishUuid,
+    bool clearAiPracticePublishUuid = false,
     String? persistedCourseTaskKey,
     AssignmentAvailability? availability,
     String? id,
@@ -254,6 +285,9 @@ class Assignment {
       id: id ?? this.id,
       source: source ?? this.source,
       activityType: activityType ?? this.activityType,
+      aiPracticePublishUuid: clearAiPracticePublishUuid
+          ? null
+          : aiPracticePublishUuid ?? this.aiPracticePublishUuid,
       persistedCourseTaskKey:
           persistedCourseTaskKey ?? this.persistedCourseTaskKey,
       availability: availability ?? this.availability,

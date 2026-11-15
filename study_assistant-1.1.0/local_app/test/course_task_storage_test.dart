@@ -24,6 +24,10 @@ Assignment _task({
       id: id ?? 'cx:activity:$course:$clazz:$active',
       source: AssignmentSource.classroomActivity,
       activityType: type,
+      persistedCourseTaskKey:
+          type == 77 ? 'cx:activity:$course:$clazz:$active' : null,
+      aiPracticePublishUuid:
+          type == 77 ? '11111111-1111-4111-8111-111111111111' : null,
       availability: availability,
       courseName: '合成课程',
       title: '同名合成任务',
@@ -33,9 +37,11 @@ Assignment _task({
       deadlineAt: DateTime.utc(2026, 12, 2),
       deadlineRawText: '2026-12-02 08:00',
       lastSyncedAt: observedAt ?? DateTime.utc(2026, 11, 15),
-      submitUrl: 'https://mobilelearn.chaoxing.com/page/renwu/task'
-          '?courseId=$course&classId=$clazz&activeId=$active'
-          '&enc=synthetic-link-secret',
+      submitUrl: type == 77
+          ? 'https://mooc2-ans.chaoxing.com/ai-evaluate/v2/redirect/active/stu?courseid=$course&clazzid=$clazz&publishUuid=11111111-1111-4111-8111-111111111111'
+          : 'https://mobilelearn.chaoxing.com/page/renwu/task'
+              '?courseId=$course&classId=$clazz&activeId=$active'
+              '&enc=synthetic-link-secret',
     );
 
 Future<void> _seedJournal(List<Assignment> rows,
@@ -130,7 +136,7 @@ void main() {
     expect(restored.isPendingConfirmed, isFalse);
   });
 
-  for (final type in [35, 42]) {
+  for (final type in [35, 42, 77]) {
     for (final availability in AssignmentAvailability.values) {
       test('type $type and $availability survive JSON copy and journal reload',
           () async {
@@ -662,7 +668,7 @@ void main() {
     });
   }
 
-  for (final type in [35, 42]) {
+  for (final type in [35, 42, 77]) {
     test('backup 4 retains opaque type $type identity without signed access',
         () async {
       final repo = LocalAssignmentRepository();

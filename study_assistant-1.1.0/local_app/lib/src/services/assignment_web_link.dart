@@ -1,3 +1,4 @@
+import '../models/ai_practice_entry.dart';
 import '../models/assignment.dart';
 
 /// Validate at the browser/clipboard boundary, including previously cached data.
@@ -5,6 +6,18 @@ import '../models/assignment.dart';
 class AssignmentWebLink {
   static String? validatedUrl(Assignment assignment) {
     final raw = assignment.submitUrl;
+    if (assignment.isSupportedClassroomTask && assignment.activityType == 77) {
+      return raw != null &&
+              assignment.aiPracticePublishUuid != null &&
+              assignment.availability != AssignmentAvailability.unavailable &&
+              AiPracticeEntry.validate(raw,
+                      courseId: assignment.courseId!,
+                      clazzId: assignment.clazzId!,
+                      publishUuid: assignment.aiPracticePublishUuid) !=
+                  null
+          ? raw
+          : null;
+    }
     if (raw == null ||
         raw.isEmpty ||
         raw.trim() != raw ||

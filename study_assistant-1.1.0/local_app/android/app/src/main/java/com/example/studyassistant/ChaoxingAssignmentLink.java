@@ -35,7 +35,9 @@ public final class ChaoxingAssignmentLink {
                 "^/(?:mooc-ans/(?:mooc2/)?|mooc2/|mooc2-ans/)?work/[a-zA-Z0-9_.-]+$");
             boolean classroom = host.equals("mobilelearn.chaoxing.com") &&
                 CLASSROOM_PATHS.contains(uri.getRawPath()) && hasClassroomIdentity(uri);
-            if (!formal && !classroom) return null;
+            boolean ai = host.equals("mooc2-ans.chaoxing.com") &&
+                uri.getRawPath().equals("/ai-evaluate/v2/redirect/active/stu") && hasAiIdentity(uri);
+            if (!formal && !classroom && !ai) return null;
             // Encode the complete original once; the receiving app decodes the
             // outer query once. Rebuilding the inner signed URL breaks enc.
             return "chaoxingshareback://xuexitong.com?sharebacktype=1&url=" +
@@ -44,6 +46,23 @@ public final class ChaoxingAssignmentLink {
         } catch (Exception invalid) {
             return null;
         }
+    }
+
+    private static boolean hasAiIdentity(URI uri) throws Exception {
+        if (uri.getRawQuery() == null) return false;
+        Map<String, String> values = new HashMap<>();
+        for (String part : uri.getRawQuery().split("&")) {
+            String[] pair = part.split("=", 2);
+            String key = URLDecoder.decode(pair[0], "UTF-8").toLowerCase(Locale.ROOT);
+            if (key.equals("classid") || key.equals("jclassid")) key = "clazzid";
+            if (!key.equals("courseid") && !key.equals("clazzid") && !key.equals("publishuuid")) continue;
+            String value = pair.length == 2 ? URLDecoder.decode(pair[1], "UTF-8") : "";
+            if (value.trim().isEmpty() || (values.containsKey(key) && !values.get(key).equals(value))) return false;
+            values.put(key, value);
+        }
+        return values.containsKey("courseid") && values.containsKey("clazzid") &&
+            values.containsKey("publishuuid") && values.get("publishuuid").matches(
+                "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
     }
 
     private static boolean hasClassroomIdentity(URI uri) throws Exception {

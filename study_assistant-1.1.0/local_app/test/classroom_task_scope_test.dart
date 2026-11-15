@@ -32,8 +32,7 @@ void main() {
     expect(AssignmentQuery.filterHome([task], now: DateTime.utc(2026, 11, 15)),
         [task]);
     expect(
-        AssignmentQuery.scope(
-            [activity(type: 47), activity(type: 77), activity(type: null)], {}),
+        AssignmentQuery.scope([activity(type: 47), activity(type: null)], {}),
         isEmpty);
     expect(
         AssignmentQuery.scope(

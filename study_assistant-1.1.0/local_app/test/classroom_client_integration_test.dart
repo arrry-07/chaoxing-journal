@@ -66,7 +66,6 @@ class ClassroomFixture {
                         'activeType': 42,
                         'nameOne': '随堂练习'
                       },
-                      {'id': '77', 'activeType': 77, 'nameOne': '排除类型'},
                       {'id': '47', 'activeType': 47, 'nameOne': '计时器'}
                     ]
                   }
@@ -234,7 +233,7 @@ void main() {
   });
   for (final single in [false, true]) {
     test(
-        'normal ${single ? 'single-course' : 'full'} entry reads 35/42 without inbox and excludes 77/47',
+        'normal ${single ? 'single-course' : 'full'} entry reads 35/42 without inbox and excludes 47',
         () async {
       final f = ClassroomFixture();
       final c = ChaoxingLocalClient(dio: f.dio);
@@ -253,7 +252,7 @@ void main() {
           c.sourceResults
               .where((s) => s.phase == SyncSourcePhase.success)
               .length,
-          3);
+          4);
       expect(c.sourceResults.last.phase, SyncSourcePhase.notEnabled);
     });
   }

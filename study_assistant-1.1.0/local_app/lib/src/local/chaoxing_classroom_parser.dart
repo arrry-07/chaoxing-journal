@@ -1,3 +1,4 @@
+import 'chaoxing_ai_practice_parser.dart';
 import '../models/assignment.dart';
 
 /// Read-only classroom metadata. Lifecycle status never proves submission.
@@ -12,7 +13,7 @@ class ChaoxingClassroomParser {
     for (final row in rows) {
       final type = _integer(row['activeType']);
       if (type == null) throw const FormatException('activityTypeSchema');
-      if (const {35, 42}.contains(type)) {
+      if (const {35, 42, 77}.contains(type)) {
         final id = _text(row['id'] ?? row['activeId']);
         if (id == null || !identities.add(id)) {
           throw const FormatException('activityIdentity');
@@ -52,7 +53,9 @@ class ChaoxingClassroomParser {
         lastSyncedAt: now ?? DateTime.now(),
       );
       checkIdentity(row, seed);
-      result.add(seed);
+      result.add(activityType == 77
+          ? ChaoxingAiPracticeParser.seedEntry(seed, row['content'])
+          : seed);
     }
     return result;
   }
