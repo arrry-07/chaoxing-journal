@@ -798,6 +798,13 @@ void main() {
     expect(workList.p50HttpMs, greaterThanOrEqualTo(20));
     expect(workList.maxHttpMs, greaterThanOrEqualTo(20));
     expect(client.diagnostics.fullSyncElapsedMs, greaterThanOrEqualTo(25));
+    expect(client.diagnostics.phaseElapsedMs.keys,
+        containsAll(['courseList', 'formalWork', 'classroomTasks', 'exams']));
+    expect(client.diagnostics.phaseElapsedMs['formalWork'],
+        greaterThanOrEqualTo(20));
+    expect(
+        client.diagnostics.phaseElapsedMs.values.every((value) => value >= 0),
+        isTrue);
     expect(client.requestTimings['作业列表']!.elapsedMs,
         greaterThanOrEqualTo(workList.averageHttpMs));
   });

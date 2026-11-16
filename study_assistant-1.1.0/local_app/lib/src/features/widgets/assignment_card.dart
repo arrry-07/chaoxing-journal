@@ -14,6 +14,7 @@ class AssignmentCard extends StatelessWidget {
       required this.onTap,
       this.onOpenAssignment,
       this.examSources = const [],
+      this.displayIndex,
       this.opening = false,
       this.compact = false,
       this.countdown = false,
@@ -23,6 +24,7 @@ class AssignmentCard extends StatelessWidget {
       this.previewSaving = false});
   final Assignment assignment;
   final List<Assignment> examSources;
+  final AssignmentDisplayIndex? displayIndex;
   final DateTime now;
   final VoidCallback onTap;
   final VoidCallback? onOpenAssignment;
@@ -105,7 +107,8 @@ class AssignmentCard extends StatelessWidget {
                 ? '任务 · ${a.statusLabel}'
                 : a.statusLabel;
     final examSchedule = a.isExam
-        ? ExamSchedulePresentation.build(a, records: examSources)
+        ? ExamSchedulePresentation.build(a,
+            records: examSources, index: displayIndex)
         : null;
     final examLines = a.isExam
         ? <String>[

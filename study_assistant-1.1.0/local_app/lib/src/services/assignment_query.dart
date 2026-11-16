@@ -92,6 +92,8 @@ int _nameGroupRank(AssignmentDeadlineBucket bucket) => switch (bucket) {
 class _PreparedAssignment {
   _PreparedAssignment(this.assignment, this.index, DateTime now, this.displayAt)
       : bucket = AssignmentQuery.timelineBucketAt(assignment, now),
+        ended =
+            assignment.isExam && AssignmentQuery.isExamEnded(assignment, now),
         course = _NaturalKey(assignment.courseName),
         title = _NaturalKey(assignment.title),
         courseKey = _NaturalKey(assignment.courseKey ?? ''),
@@ -101,6 +103,7 @@ class _PreparedAssignment {
   final int index;
   final AssignmentDeadlineBucket bucket;
   final DateTime? displayAt;
+  final bool ended;
   final _NaturalKey course;
   final _NaturalKey title;
   final _NaturalKey courseKey;
@@ -121,6 +124,20 @@ class _PreparedAssignment {
     if (assignmentId != 0) return assignmentId;
     return index.compareTo(other.index);
   }
+
+  /// The home timeline keeps actionable, undated, and historical records ahead
+  /// of overdue work. An overdue date being earlier must never put it first.
+  int get homeTier {
+    if (bucket == AssignmentDeadlineBucket.overdue) return 2;
+    if (bucket == AssignmentDeadlineBucket.completed || ended) return 1;
+    if (bucket == AssignmentDeadlineBucket.confirmedNoDeadline) return 1;
+    if (bucket == AssignmentDeadlineBucket.notExpiredWithDeadline) return 0;
+    // A display-only exam projection is valid timeline evidence for ordering,
+    // without promoting its start time or calendar trust in the model. Course
+    // work with unknown submission state remains in the undated middle tier.
+    if (assignment.isExam && displayAt != null) return 0;
+    return 1;
+  }
 }
 
 class HomeAssignmentGroups {
@@ -131,7 +148,102 @@ class HomeAssignmentGroups {
       noDeadline = <Assignment>[];
 }
 
+class _DisplayProjection {
+  _DisplayProjection(List<Assignment> records) {
+    for (final assignment in records) {
+      final key = AssignmentQuery.examDisplayKey(assignment);
+      if (key == null) continue;
+      (sourcesByKey[key] ??= []).add(assignment);
+      final previous = representatives[key];
+      if (previous == null ||
+          (previous.exam!.noticeOnly && !assignment.exam!.noticeOnly) ||
+          (previous.exam!.noticeOnly == assignment.exam!.noticeOnly &&
+              assignment.id.compareTo(previous.id) < 0)) {
+        representatives[key] = assignment;
+      }
+    }
+    final emitted = <String>{};
+    for (final assignment in records) {
+      final key = AssignmentQuery.examDisplayKey(assignment);
+      if (key == null) {
+        projected.add(assignment);
+      } else if (emitted.add(key)) {
+        projected.add(AssignmentQuery._supplementDisplay(
+            representatives[key]!, sourcesByKey[key]!));
+      }
+    }
+  }
+
+  final Map<String, List<Assignment>> sourcesByKey = {};
+  final Map<String, Assignment> representatives = {};
+  final List<Assignment> projected = [];
+}
+
+/// Immutable display index for one record source snapshot. It contains only
+/// data-derived projections and parsed notice ranges; time-dependent filtering,
+/// sorting and calendar decisions are recomputed by the caller.
+class AssignmentDisplayIndex {
+  AssignmentDisplayIndex.from(List<Assignment> records)
+      : _origin = records,
+        sources = List<Assignment>.unmodifiable(records) {
+    final projection = _DisplayProjection(records);
+    projected = List<Assignment>.unmodifiable(projection.projected);
+    for (final entry in projection.sourcesByKey.entries) {
+      sourcesByKey[entry.key] = List<Assignment>.unmodifiable(entry.value);
+    }
+  }
+
+  final List<Assignment> sources;
+  final List<Assignment> _origin;
+  final Map<String, List<Assignment>> sourcesByKey = {};
+  late final List<Assignment> projected;
+  final Map<String, ExamNoticeRange?> _rangesByText = {};
+  int _noticeRangeReadCount = 0;
+  int get noticeRangeReadCount => _noticeRangeReadCount;
+
+  bool matches(List<Assignment> records) => identical(_origin, records);
+
+  List<Assignment> sourcesFor(Assignment representative, String key) =>
+      sourcesByKey[key] ?? [representative];
+
+  ExamNoticeRange? readNoticeRange(String raw) {
+    if (_rangesByText.containsKey(raw)) return _rangesByText[raw];
+    _noticeRangeReadCount++;
+    final value = ExamNoticeRange.read(raw);
+    _rangesByText[raw] = value;
+    return value;
+  }
+}
+
 class AssignmentQuery {
+  static Expando<_DisplayProjection> _displayProjections =
+      Expando<_DisplayProjection>();
+  static int _projectionBuildCount = 0;
+  static int _noticeRangeReadCount = 0;
+
+  static int get debugProjectionBuildCount => _projectionBuildCount;
+  static int get debugNoticeRangeReadCount => _noticeRangeReadCount;
+
+  static void debugResetDisplayCaches() {
+    _displayProjections = Expando<_DisplayProjection>();
+    _projectionBuildCount = 0;
+    _noticeRangeReadCount = 0;
+  }
+
+  static _DisplayProjection _displayProjectionFor(List<Assignment> records) {
+    final cached = _displayProjections[records];
+    if (cached != null) return cached;
+    _projectionBuildCount++;
+    final created = _DisplayProjection(records);
+    _displayProjections[records] = created;
+    return created;
+  }
+
+  static ExamNoticeRange? _cachedNoticeRange(String raw) {
+    _noticeRangeReadCount++;
+    return ExamNoticeRange.read(raw);
+  }
+
   static DateTime beijing(DateTime instant) =>
       instant.toUtc().add(const Duration(hours: 8));
   static DateTime dayKey(DateTime instant) {
@@ -163,11 +275,17 @@ class AssignmentQuery {
 
   /// All original source IDs remain available for details/archive integration.
   static List<Assignment> displaySources(
-      Assignment representative, List<Assignment> records) {
+    Assignment representative,
+    List<Assignment> records, {
+    AssignmentDisplayIndex? index,
+  }) {
     final key = examDisplayKey(representative);
-    return key == null
-        ? [representative]
-        : records.where((a) => examDisplayKey(a) == key).toList();
+    if (key == null) return [representative];
+    if (index != null && index.matches(records)) {
+      return List<Assignment>.of(index.sourcesFor(representative, key));
+    }
+    final cached = _displayProjectionFor(records).sourcesByKey[key];
+    return cached == null ? [representative] : List<Assignment>.of(cached);
   }
 
   /// Resolve one unambiguous wall-time range from an exam's linked notices.
@@ -175,10 +293,11 @@ class AssignmentQuery {
   static List<ExamNoticeRange> displayNoticeRanges(
     Assignment assignment, {
     List<Assignment> records = const [],
+    AssignmentDisplayIndex? index,
   }) {
     final exam = assignment.exam;
     if (exam == null) return const [];
-    final sources = displaySources(assignment, records);
+    final sources = displaySources(assignment, records, index: index);
     if (exam.noticeOnly &&
         !sources.any((source) => source.id == assignment.id)) {
       sources.add(assignment);
@@ -192,7 +311,9 @@ class AssignmentQuery {
     final ranges = <String, ExamNoticeRange>{};
     for (final source
         in sources.where((item) => item.exam?.noticeOnly == true)) {
-      final range = ExamNoticeRange.read(source.requirementsText);
+      final range = index != null && index.matches(records)
+          ? index.readNoticeRange(source.requirementsText)
+          : _cachedNoticeRange(source.requirementsText);
       if (range == null) continue;
       if ((exam.startTrusted &&
               exam.startAt != null &&
@@ -215,8 +336,10 @@ class AssignmentQuery {
   static ExamNoticeRange? displayNoticeRange(
     Assignment assignment, {
     List<Assignment> records = const [],
+    AssignmentDisplayIndex? index,
   }) {
-    final ranges = displayNoticeRanges(assignment, records: records);
+    final ranges =
+        displayNoticeRanges(assignment, records: records, index: index);
     return ranges.length == 1 ? ranges.single : null;
   }
 
@@ -226,6 +349,7 @@ class AssignmentQuery {
   static DateTime? displayTimelineAt(
     Assignment assignment, {
     List<Assignment> records = const [],
+    AssignmentDisplayIndex? index,
     required DateTime now,
   }) {
     if (!assignment.isExam) {
@@ -235,13 +359,15 @@ class AssignmentQuery {
     }
     final exam = assignment.exam!;
     if (exam.startTrusted && exam.startAt != null) return exam.startAt;
-    final range = displayNoticeRange(assignment, records: records);
+    final range =
+        displayNoticeRange(assignment, records: records, index: index);
     return range?.start?.projectedAt(beijing(now).year);
   }
 
   static DateTime? displayTimelineEndAt(
     Assignment assignment, {
     List<Assignment> records = const [],
+    AssignmentDisplayIndex? index,
     required DateTime now,
   }) {
     if (!assignment.isExam) {
@@ -251,10 +377,12 @@ class AssignmentQuery {
     }
     final exam = assignment.exam!;
     if (exam.endTrusted && exam.endAt != null) return exam.endAt;
-    final range = displayNoticeRange(assignment, records: records);
+    final range =
+        displayNoticeRange(assignment, records: records, index: index);
     final noticeEnd = range?.end?.projectedAt(beijing(now).year);
     if (noticeEnd != null) return noticeEnd;
-    final start = displayTimelineAt(assignment, records: records, now: now);
+    final start =
+        displayTimelineAt(assignment, records: records, index: index, now: now);
     final duration = exam.durationMinutes;
     return start != null && duration != null && duration > 0
         ? start.add(Duration(minutes: duration))
@@ -345,30 +473,14 @@ class AssignmentQuery {
 
   /// Select a real record, preserving its original ID and submission state.
   /// A formal exam wins over its notices, including when it is submitted.
-  static List<Assignment> projectDisplay(List<Assignment> records) {
-    final representatives = <String, Assignment>{};
-    final sources = <String, List<Assignment>>{};
-    for (final a in records) {
-      final key = examDisplayKey(a);
-      if (key == null) continue;
-      sources.putIfAbsent(key, () => []).add(a);
-      final previous = representatives[key];
-      if (previous == null ||
-          (previous.exam!.noticeOnly && !a.exam!.noticeOnly) ||
-          (previous.exam!.noticeOnly == a.exam!.noticeOnly &&
-              a.id.compareTo(previous.id) < 0)) {
-        representatives[key] = a;
-      }
-    }
-    final emitted = <String>{};
-    return [
-      for (final a in records)
-        if (examDisplayKey(a) case final key?) ...[
-          if (emitted.add(key))
-            _supplementDisplay(representatives[key]!, sources[key]!),
-        ] else
-          a
-    ];
+  static List<Assignment> projectDisplay(
+    List<Assignment> records, {
+    AssignmentDisplayIndex? index,
+  }) {
+    final source = index != null && index.matches(records)
+        ? index.projected
+        : _displayProjectionFor(records).projected;
+    return List<Assignment>.of(source);
   }
 
   static bool isExamEnded(Assignment a, DateTime now) {
@@ -380,10 +492,29 @@ class AssignmentQuery {
   }
 
   static List<Assignment> currentDisplay(
-          List<Assignment> records, DateTime now) =>
-      projectDisplay(records)
-          .where((a) => !a.isCompleted && !isExamEnded(a, now))
+    List<Assignment> records,
+    DateTime now, {
+    AssignmentDisplayIndex? index,
+  }) =>
+      projectDisplay(records, index: index)
+          .where((a) =>
+              !a.isCompleted &&
+              !isExamEnded(a, now) &&
+              !isArchivedClassroomPractice(a, now))
           .toList();
+
+  /// A trusted, elapsed classroom deadline with no confirmed submission is a
+  /// local historical observation, not a current task to reconcile. Formal
+  /// coursework and untrusted/yearless times stay in the current scope.
+  static bool isArchivedClassroomPractice(Assignment assignment, DateTime now) {
+    final deadline = assignment.deadlineAt;
+    return assignment.isSupportedClassroomTask &&
+        assignment.status == 'unknown' &&
+        assignment.deadlineTrusted &&
+        !assignment.deadlineReadFailed &&
+        deadline != null &&
+        !deadline.isAfter(now);
+  }
 
   static bool isUnknownExam(Assignment a, DateTime now) =>
       a.isExam &&
@@ -422,7 +553,8 @@ class AssignmentQuery {
   static bool matchesType(Assignment assignment, AssignmentTypeFilter type) =>
       switch (type) {
         AssignmentTypeFilter.all => true,
-        AssignmentTypeFilter.homework => assignment.isFormal,
+        AssignmentTypeFilter.homework =>
+          assignment.isFormal || assignment.isSupportedClassroomTask,
         AssignmentTypeFilter.task => assignment.isSupportedClassroomTask,
         AssignmentTypeFilter.exam => assignment.isExam,
         AssignmentTypeFilter.examNotice =>
@@ -448,12 +580,16 @@ class AssignmentQuery {
   static bool _displayExamNotExpired(
     Assignment assignment,
     List<Assignment> sources,
-    DateTime now,
-  ) {
-    if (displayTimelineAt(assignment, records: sources, now: now) == null) {
+    DateTime now, {
+    AssignmentDisplayIndex? index,
+  }) {
+    if (displayTimelineAt(assignment,
+            records: sources, index: index, now: now) ==
+        null) {
       return false;
     }
-    final end = displayTimelineEndAt(assignment, records: sources, now: now);
+    final end = displayTimelineEndAt(assignment,
+        records: sources, index: index, now: now);
     return end == null || end.isAfter(now);
   }
 
@@ -467,11 +603,16 @@ class AssignmentQuery {
     AssignmentTypeFilter type = AssignmentTypeFilter.all,
     bool includeHistorical = false,
     Set<String> followed = const {},
+    AssignmentDisplayIndex? index,
     required DateTime now,
   }) {
     final needle = query.trim().toLowerCase();
-    final sourceRecords = scope(records, followed);
-    return projectDisplay(sourceRecords).where((a) {
+    final sourceRecords =
+        index != null && index.matches(records) && followed.isEmpty
+            ? records
+            : scope(records, followed);
+    return projectDisplay(sourceRecords, index: index).where((a) {
+      if (isArchivedClassroomPractice(a, now)) return false;
       final historical = a.isCompleted || (a.isExam && isExamEnded(a, now));
       if ((!includeHistorical && historical) ||
           !matchesType(a, type) ||
@@ -483,7 +624,8 @@ class AssignmentQuery {
           !a.courseName.toLowerCase().contains(needle)) {
         return false;
       }
-      final due = displayTimelineAt(a, records: sourceRecords, now: now);
+      final due =
+          displayTimelineAt(a, records: sourceRecords, index: index, now: now);
       final bucket = timelineBucketAt(a, now);
       final trusted =
           a.isExam ? !historical && due != null : _hasTrustedPendingDeadline(a);
@@ -506,7 +648,7 @@ class AssignmentQuery {
         AssignmentDeadlineFilter.notExpired => historical
             ? false
             : a.isExam
-                ? _displayExamNotExpired(a, sourceRecords, now)
+                ? _displayExamNotExpired(a, sourceRecords, now, index: index)
                 : bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
                     bucket == AssignmentDeadlineBucket.confirmedNoDeadline,
       };
@@ -532,6 +674,7 @@ class AssignmentQuery {
     HomeSortOrder order, {
     required DateTime now,
     List<Assignment> sourceRecords = const [],
+    AssignmentDisplayIndex? displayIndex,
   }) {
     if (order == HomeSortOrder.grouped) {
       return List<Assignment>.of(records);
@@ -543,12 +686,18 @@ class AssignmentQuery {
           records[index],
           index,
           now,
-          displayTimelineAt(records[index], records: sources, now: now),
+          displayTimelineAt(records[index],
+              records: sources, index: displayIndex, now: now),
         ),
     ];
     prepared.sort((left, right) {
       if (order == HomeSortOrder.deadlineAsc ||
           order == HomeSortOrder.deadlineDesc) {
+        final tier = left.homeTier.compareTo(right.homeTier);
+        if (tier != 0) return tier;
+        if (left.homeTier == 1) {
+          return left.compareNameKeys(right, HomeSortOrder.courseName);
+        }
         final leftTime = left.displayAt;
         final rightTime = right.displayAt;
         if (leftTime == null && rightTime != null) return 1;

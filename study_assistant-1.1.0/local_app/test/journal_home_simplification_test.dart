@@ -77,7 +77,7 @@ void main() {
             .widget<AssignmentCard>(find.byType(AssignmentCard).first)
             .assignment
             .title,
-        '过去作业4');
+        '下一份作业');
     expect(AssignmentQuery.nextActionable(s.courseAssignments, now: now)?.title,
         '下一份作业');
     final list = find.byType(Scrollable).first;

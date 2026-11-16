@@ -993,7 +993,13 @@ class _Journal {
   }
 
   static Assignment _preserveFailedDeadline(Assignment item, Assignment prior) {
-    if (!item.deadlineReadFailed) return item;
+    // Completed work sometimes stops exposing its deadline in a refreshed
+    // list. That absence is not evidence that the previous time was wrong.
+    final preserveCompleted = item.isCompleted &&
+        !item.deadlineTrusted &&
+        prior.deadlineTrusted &&
+        prior.deadlineAt != null;
+    if (!item.deadlineReadFailed && !preserveCompleted) return item;
     return item.copyWith(
         deadlineAt: prior.deadlineAt,
         deadlineTrusted: prior.deadlineTrusted,

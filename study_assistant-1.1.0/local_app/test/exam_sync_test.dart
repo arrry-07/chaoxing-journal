@@ -24,6 +24,8 @@ String pcRow(
         String courseId = '7',
         int total = 1}) =>
     '''<input id="courseId" value="$courseId"><input id="classId" value="11"><ul><li class="lookLi"><div class="titTxt"><p><a title="合成考试" onclick="show(0)">合成考试</a></p><span>$start 至 $end</span><span><strong>已完成<strong onclick="goTest('7','99','2','2030','3','0','secret')">不得保留成绩</strong></strong></span></div></li></ul><script>page.showPage(0/9+1,Math.ceil($total/9),"changePage");</script>''';
+String notViewablePcRow() =>
+    '''<input id="courseId" value="7"><input id="classId" value="11"><ul><li class="lookLi"><div class="titTxt"><p><a title="合成考试" onclick="WAY.box.show({'divid':'notAllowLookPaperWin'});">合成考试</a></p><span>2030-04-01 09:00 至 2030-04-02 10:00</span><span><strong>已完成</strong></span></div><div class="titOper"><span>查看</span></div></li></ul><script>page.showPage(0/9+1,Math.ceil(1/9),"changePage");</script>''';
 const accountEmpty =
     '<table class="dataTable"><tr><th>考试名称</th><th>作答状态</th></tr></table><script>page.showPage(0/12+1,Math.ceil(0/12));</script>';
 
@@ -39,6 +41,8 @@ class ExamFixture {
   int examHttp = 200;
   int formalHttp = 200;
   bool partialPc = false;
+  bool notViewablePc = false;
+  int extraPhoneExams = 0;
   bool badPc = false, repeatPhone = false, unsafeRedirect = false;
   Completer<void>? gate;
   final started = Completer<void>();
@@ -92,7 +96,13 @@ class ExamFixture {
             await gate!.future;
           }
           status = examHttp;
-          body = emptyPhone ? phoneEmpty : phoneRow('完成', more: repeatPhone);
+          body = emptyPhone
+              ? phoneEmpty
+              : [
+                  phoneRow('完成', more: repeatPhone),
+                  for (var i = 0; i < extraPhoneExams; i++)
+                    phoneRow('未开始', id: '${100 + i}'),
+                ].join();
           if (unsafeRedirect) {
             status = 302;
             headers['location'] = [
@@ -100,7 +110,11 @@ class ExamFixture {
             ];
           }
         case '/exam/test':
-          body = badPc ? '<unknown>' : pcRow() + pcMetadata;
+          body = badPc
+              ? '<unknown>'
+              : notViewablePc
+                  ? notViewablePcRow()
+                  : pcRow() + pcMetadata;
           if (partialPc) {
             if (o.uri.queryParameters['start'] == '0') {
               body = [
@@ -114,6 +128,8 @@ class ExamFixture {
           }
         case '/exam-ans/exam/test/examcode/examlist':
           body = accountEmpty;
+        case '/work/task':
+          body = '作答时间：2026-01-01 00:00 至 2026-01-01 00:30';
         case '/pc/notice/getNoticeList':
           expect(o.method, 'POST');
           body = (o.data as Map)['lastValue'] == ''
@@ -327,6 +343,11 @@ void main() {
             .hasExamIdentity,
         isTrue);
     expect(a.deadlineAt, a.exam!.endAt);
+    final notViewable =
+        ChaoxingExamParser.coursePc(notViewablePcRow(), course)!;
+    expect(notViewable.rows, isEmpty);
+    expect(notViewable.skipped, 1);
+    expect(notViewable.observed, 1);
     expect(ChaoxingExamParser.coursePc(pcRow(courseId: '8'), course), isNull);
     expect(
         ChaoxingExamParser.coursePc(pcRow(end: '2029-04-01 01:00'), course)!
@@ -382,6 +403,58 @@ void main() {
     final f = ExamFixture()..emptyPhone = true;
     final rows = await f.client().fetchAssignments();
     expect(rows.where((a) => a.isExam && !a.exam!.noticeOnly).length, 1);
+  });
+  test('non-viewable completed PC row never fails a successful phone list',
+      () async {
+    final f = ExamFixture()..notViewablePc = true;
+    final client = f.client();
+    final rows = await client.fetchAssignments();
+
+    expect(rows.where((a) => a.isExam && !a.exam!.noticeOnly), hasLength(1));
+    expect(client.issues.where((issue) => issue.stage == 'exam'), isEmpty);
+    expect(
+        client.sourceResults
+            .singleWhere((source) => source.source == 'exam')
+            .phase,
+        SyncSourcePhase.success);
+  });
+  test('non-viewable PC row without a phone identity stays a visible failure',
+      () async {
+    final f = ExamFixture()
+      ..emptyPhone = true
+      ..notViewablePc = true;
+    final client = f.client();
+    await client.fetchAssignments();
+
+    expect(
+        client.sourceResults
+            .singleWhere((source) => source.source == 'exam')
+            .phase,
+        SyncSourcePhase.failed);
+    expect(
+        client.issues.any((issue) =>
+            issue.stage == 'exam' &&
+            issue.message.contains('examPcUnreadable')),
+        isTrue);
+  });
+  test('non-viewable PC row only explains one missing phone identity',
+      () async {
+    final f = ExamFixture()
+      ..notViewablePc = true
+      ..extraPhoneExams = 1;
+    final client = f.client();
+    await client.fetchAssignments();
+
+    expect(
+        client.sourceResults
+            .singleWhere((source) => source.source == 'exam')
+            .phase,
+        SyncSourcePhase.partial);
+    expect(
+        client.issues.any((issue) =>
+            issue.stage == 'exam' &&
+            issue.message.contains('examListDisagreement')),
+        isTrue);
   });
   test('background window ending before exam reads preserves formal work',
       () async {

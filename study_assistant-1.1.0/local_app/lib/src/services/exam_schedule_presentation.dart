@@ -35,15 +35,33 @@ class ExamSchedulePresentation {
   final List<String> cardTimeLines, detailTimeLines;
   final String? verificationNote;
   final ExamTimelineStamp? timeline;
+  static Expando<_PresentationCacheEntry> _cache =
+      Expando<_PresentationCacheEntry>();
+
+  static void debugResetCache() {
+    _cache = Expando<_PresentationCacheEntry>();
+  }
 
   static ExamSchedulePresentation build(Assignment a,
-      {List<Assignment> records = const []}) {
+      {List<Assignment> records = const [], AssignmentDisplayIndex? index}) {
+    final cacheKey = index ?? records;
+    final cached = _cache[a];
+    if (cached != null && identical(cached.sourceKey, cacheKey)) {
+      return cached.value;
+    }
+    final value = _build(a, records, index);
+    _cache[a] = _PresentationCacheEntry(cacheKey, value);
+    return value;
+  }
+
+  static ExamSchedulePresentation _build(
+      Assignment a, List<Assignment> records, AssignmentDisplayIndex? index) {
     final exam = a.exam;
     if (exam == null) {
       return const ExamSchedulePresentation([], [], null);
     }
     final displayRanges =
-        AssignmentQuery.displayNoticeRanges(a, records: records);
+        AssignmentQuery.displayNoticeRanges(a, records: records, index: index);
     final ranges = <String, ExamNoticeRange>{
       for (final range in displayRanges) range.key: range,
     };
@@ -96,4 +114,10 @@ class ExamSchedulePresentation {
     return result(lines, lines,
         range.missingYear ? '通知未注明年份，暂不作为定时依据' : '通知原文时间尚未核实，暂不作为定时依据');
   }
+}
+
+class _PresentationCacheEntry {
+  const _PresentationCacheEntry(this.sourceKey, this.value);
+  final Object sourceKey;
+  final ExamSchedulePresentation value;
 }

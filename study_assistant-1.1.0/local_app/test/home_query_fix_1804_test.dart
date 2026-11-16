@@ -149,7 +149,7 @@ void main() {
     store.notifyListeners();
     await tester.pumpAndSettle();
 
-    expect(_visibleTitles(tester), ['已提交一', '已提交二', '待提交']);
+    expect(_visibleTitles(tester), ['待提交', '已提交二', '已提交一']);
     expect(find.text('已提交'), findsNWidgets(2));
   });
 

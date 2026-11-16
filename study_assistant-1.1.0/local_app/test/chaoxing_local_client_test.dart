@@ -359,8 +359,8 @@ void main() {
     expect(work.first.deadlineAt!.toUtc(), DateTime.utc(2027, 1, 2, 4));
     expect(work.last.status, 'reviewing');
     expect(work.last.deadlineAt, isNull);
-    expect(work.last.deadlineReadFailed, isFalse);
-    expect(client.lastSyncWarning, isNull);
+    expect(work.last.deadlineReadFailed, isTrue);
+    expect(client.lastSyncWarning, isNotNull);
   });
 
   test('confirmed empty work list succeeds but permission and login pages fail',

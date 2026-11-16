@@ -45,6 +45,9 @@ enum AssignmentRecoveryScope {
           !AssignmentQuery.isExamEnded(assignment, now) &&
           !assignment.isCompleted;
     }
+    if (AssignmentQuery.isArchivedClassroomPractice(assignment, now)) {
+      return false;
+    }
     return switch (this) {
       noDeadline => AssignmentQuery.timelineBucketAt(assignment, now) ==
           AssignmentDeadlineBucket.confirmedNoDeadline,
@@ -279,6 +282,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             _courseKey != null ||
             _deadlineFilter != AssignmentDeadlineFilter.all;
         final catalogAssignments = store.homeCatalogAssignments;
+        final examSources = catalogAssignments;
         final catalogDisplay =
             AssignmentQuery.currentDisplay(catalogAssignments, now);
         final projectedCatalog =
@@ -302,6 +306,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 deadline: _deadlineFilter,
                 type: _typeFilter,
                 includeHistorical: filtersActive,
+                index: store.homeDisplayIndex,
                 now: now,
               )
             : displayAssignments
@@ -313,6 +318,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           sortOrder,
           now: now,
           sourceRecords: catalogAssignments,
+          displayIndex: store.homeDisplayIndex,
         );
         final today = PersonalWorkspace.dayKey(now);
         final plans =
@@ -332,7 +338,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         Widget card(Assignment a) => AssignmentCard(
             key: ValueKey('assignment-${a.id}'),
             assignment: a,
-            examSources: store.courseAssignments,
+            examSources: examSources,
+            displayIndex: store.homeDisplayIndex,
             now: now,
             showFullDeadline: false,
             compact: store.display.compact,
@@ -368,7 +375,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             String? heading;
             if (a.isExam) {
               final stamp = ExamSchedulePresentation.build(a,
-                      records: store.courseAssignments)
+                      records: examSources, index: store.homeDisplayIndex)
                   .timeline;
               key = stamp?.key;
               heading = stamp?.heading;

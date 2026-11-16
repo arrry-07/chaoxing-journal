@@ -170,7 +170,7 @@ void main() {
     });
   }
 
-  test('exact, unlimited and submitted HTML work never request metadata',
+  test('exact, unlimited and submitted HTML work resolve deadlines safely',
       () async {
     final h = _Harness(ids: [
       9,
@@ -181,6 +181,7 @@ void main() {
     }, details: {
       9: '作答时间：2024-10-27 08:00 至 2024-11-05 23:59',
       10: '作答时间：不限',
+      11: '作答时间：2024-10-27 08:00 至 2024-11-06 23:59',
     });
     final works = await h.client.fetchAssignments();
     final byId = {for (final work in works) work.id: work};
@@ -192,9 +193,11 @@ void main() {
     expect(byId['cx:work:7:11:10']!.deadlineTrusted, isTrue);
     expect(byId['cx:work:7:11:10']!.deadlineReadFailed, isFalse);
     expect(byId['cx:work:7:11:11']!.status, 'submitted');
+    expect(byId['cx:work:7:11:11']!.deadlineAt!.toUtc(),
+        DateTime.utc(2024, 11, 6, 15, 59));
     expect(byId['cx:work:7:11:11']!.deadlineReadFailed, isFalse);
     expect(h.metadataReads, 0);
-    expect(h.detailReads, [9, 10]);
+    expect(h.detailReads, [9, 10, 11]);
     expect(h.client.issues, isEmpty);
   });
 

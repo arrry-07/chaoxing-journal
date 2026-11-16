@@ -51,6 +51,8 @@ class ClassroomFixture {
           data = hasFormal
               ? '<li onclick="goTask(this);" data="$url"><p class="overHidden2 fl">合成正式作业</p><p class="status fl">已提交</p></li>'
               : '<div class="no_data">暂无作业</div>';
+        case '/work/task':
+          data = '作答时间：2026-01-01 00:00 至 2026-01-01 00:30';
         case '/v2/apis/active/student/activelist':
           activeClass = o.queryParameters['classId'].toString();
           expect(o.queryParameters['showNotStartedActive'], 0);

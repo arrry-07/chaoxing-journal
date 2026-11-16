@@ -38,7 +38,6 @@ enum AssignmentTypeFilter {
 const homeTypeFilterChoices = [
   AssignmentTypeFilter.all,
   AssignmentTypeFilter.homework,
-  AssignmentTypeFilter.task,
   AssignmentTypeFilter.exam
 ];
 const homeSortOrderChoices = [
@@ -51,7 +50,11 @@ HomeSortOrder normalizedHomeSort(HomeSortOrder order) =>
         ? HomeSortOrder.deadlineAsc
         : order;
 AssignmentTypeFilter normalizedHomeType(AssignmentTypeFilter type) =>
-    type == AssignmentTypeFilter.examNotice ? AssignmentTypeFilter.exam : type;
+    switch (type) {
+      AssignmentTypeFilter.task => AssignmentTypeFilter.homework,
+      AssignmentTypeFilter.examNotice => AssignmentTypeFilter.exam,
+      _ => type,
+    };
 
 /// UI preferences only; relative deadlines are evaluated against the current time.
 class HomeFilters {

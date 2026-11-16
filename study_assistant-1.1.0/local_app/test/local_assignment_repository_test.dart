@@ -76,6 +76,40 @@ void main() {
     expect(afterReload, isEmpty);
   });
 
+  test('FB-006 submitted null deadline keeps the last trusted deadline',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = LocalAssignmentRepository();
+    final trusted = DateTime.parse('2026-11-20T10:00:00.000Z');
+    final first = Assignment(
+      id: 'cx:work:course:class:submitted',
+      courseName: '大学英语',
+      title: '已提交作业',
+      deadlineAt: trusted,
+      requirementsText: '',
+      status: 'submitted',
+      deadlineTrusted: true,
+      deadlineRawText: '2026-11-20 18:00',
+      lastSyncedAt: DateTime.parse('2026-11-16T08:00:00.000Z'),
+    );
+    final refreshed = first.copyWith(
+      deadlineTrusted: false,
+      clearDeadlineAt: true,
+      clearDeadlineRawText: true,
+      lastSyncedAt: DateTime.parse('2026-11-16T09:00:00.000Z'),
+    );
+
+    await repository.mergeAndSave([first]);
+    await repository.mergeAndSave([refreshed]);
+
+    final stored = (await repository.loadJournal())
+        .singleWhere((item) => item.id == first.id);
+    expect(stored.status, 'submitted');
+    expect(stored.deadlineAt!.toUtc(), trusted);
+    expect(stored.deadlineTrusted, isTrue);
+    expect(stored.deadlineRawText, '2026-11-20 18:00');
+  });
+
   test(
     'mergeAssignments keeps unfinished peer review and filters completed peer review',
     () {

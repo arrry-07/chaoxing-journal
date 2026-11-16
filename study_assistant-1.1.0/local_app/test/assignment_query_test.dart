@@ -54,7 +54,7 @@ void main() {
     expect(
         AssignmentQuery.sortHome(records, HomeSortOrder.deadlineAsc, now: now)
             .first,
-        expired);
+        next);
     expect(AssignmentQuery.nextActionable(records, now: now), next);
     expect(AssignmentQuery.nextActionable([expired, unknown, failed], now: now),
         isNull);
@@ -187,9 +187,7 @@ void main() {
     expect(grouped[2].id, endsWith(':id-z'));
   });
 
-  test(
-      'deadline order is chronological with unknown dates last in both directions',
-      () {
+  test('FB-005 overdue stays after actionable and undated rows both ways', () {
     final now = DateTime.utc(2026, 11, 12, 2);
     final near = _sortRecord(
       'near',
@@ -244,11 +242,11 @@ void main() {
 
     expect(
       titles(HomeSortOrder.deadlineAsc),
-      ['早逾期', '晚逾期', '近期', '较远', '待确认', '无截止'],
+      ['近期', '较远', '待确认', '无截止', '早逾期', '晚逾期'],
     );
     expect(
       titles(HomeSortOrder.deadlineDesc),
-      ['较远', '近期', '晚逾期', '早逾期', '待确认', '无截止'],
+      ['较远', '近期', '待确认', '无截止', '晚逾期', '早逾期'],
     );
   });
 

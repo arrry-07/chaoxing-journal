@@ -313,7 +313,7 @@ void main() {
       expect(filters.query, 'test');
       expect(filters.courseKey, '1:2');
     }
-    expect(homeTypeFilterChoices, hasLength(4));
+    expect(homeTypeFilterChoices, hasLength(3));
     expect(homeSortOrderChoices, hasLength(3));
     expect(homeDeadlineFilterChoices, hasLength(3));
   });

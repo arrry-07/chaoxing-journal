@@ -114,4 +114,34 @@ void main() {
         findsOneWidget);
     expect(find.text('当前没有待处理的课程'), findsOneWidget);
   });
+
+  testWidgets('FB-001 account exam without course key renders its own row',
+      (t) async {
+    final store = AssignmentStore(
+        sessionStore: SecureSessionStore(),
+        notificationService: LocalNotificationService(),
+        widgetSnapshotService: WidgetSnapshotService());
+    addTearDown(store.dispose);
+    store.replaceAssignmentsForTest([
+      work(0, 'pending', due: DateTime(2026, 12, 1)),
+      Assignment(
+        id: 'cx:exam:account:account:9001',
+        source: AssignmentSource.exam,
+        courseName: '账号考试',
+        title: '账号级考试',
+        deadlineAt: null,
+        requirementsText: '以官方考试列表为准',
+        status: 'pending',
+        lastSyncedAt: DateTime(2026, 11, 16),
+        exam: const ExamInfo(examId: '9001'),
+      ),
+    ]);
+
+    await t.pumpWidget(
+        MaterialApp(home: Scaffold(body: StatsScreen(store: store))));
+
+    expect(t.takeException(), isNull);
+    expect(find.text('账号考试'), findsOneWidget);
+    expect(find.text('共 2 份作业'), findsOneWidget);
+  });
 }
