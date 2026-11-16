@@ -172,7 +172,7 @@ void main() {
 
     await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
-    await tapSheetOption(t, '未截止', key: const ValueKey('deadline-notExpired'));
+    await tapSheetOption(t, '未逾期', key: const ValueKey('deadline-notExpired'));
     await tapSheetOption(t, '应用');
     expect(find.text('高等数学练习'), findsOneWidget);
     expect(find.text('English Essay'), findsOneWidget);
@@ -189,7 +189,7 @@ void main() {
     expect(find.text('逾期的实验报告'), findsOneWidget);
     await t.scrollUntilVisible(find.text('待确认作业'), 180);
     expect(find.text('待确认作业'), findsOneWidget);
-    expect(find.text('状态或截止待确认'), findsWidgets);
+    expect(find.text('提交状态未知'), findsWidgets);
     expect(find.text('需要确认'), findsNothing);
     await t.scrollUntilVisible(find.text('今日计划'), -180);
 
@@ -203,7 +203,7 @@ void main() {
   });
 
   testWidgets(
-      'title sort uses one full-deadline list and survives clearing filters',
+      'time sort uses one chronological list and survives clearing filters',
       (t) async {
     final now = DateTime.now();
     final alpha =
@@ -226,20 +226,18 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('搜索、筛选与排序'), findsOneWidget);
     for (final label in [
-      '默认分组',
       '时间：近到远（考试按开考）',
       '时间：远到近（考试按开考）',
-      '课程名称',
-      '名称',
+      '按课程',
     ]) {
       expect(find.text(label), findsOneWidget);
     }
-    await tapSheetOption(t, '名称');
+    await tapSheetOption(t, '时间：远到近（考试按开考）');
     await tapSheetOption(t, '应用');
 
-    expect(s.homeFilters.sortOrder, HomeSortOrder.title);
+    expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     expect(find.byKey(const ValueKey('current-home-sort')), findsOneWidget);
-    expect(find.text('名称'), findsOneWidget);
+    expect(find.text('时间远到近'), findsOneWidget);
     expect(find.text('已筛选'), findsNothing);
     expect(find.text('搜索与筛选'), findsOneWidget);
     expect(
@@ -254,8 +252,8 @@ void main() {
         t.getTopLeft(find.byKey(ValueKey('assignment-${mike.id}'))).dy;
     final zuluTop =
         t.getTopLeft(find.byKey(ValueKey('assignment-${zulu.id}'))).dy;
+    expect(zuluTop, lessThan(alphaTop));
     expect(alphaTop, lessThan(mikeTop));
-    expect(mikeTop, lessThan(zuluTop));
     expect(
         find.byWidgetPredicate((widget) =>
             widget is Text &&
@@ -272,7 +270,7 @@ void main() {
     await t.tap(find.text('清除搜索与筛选条件'));
     await t.pumpAndSettle();
     expect(s.homeFilters.query, '');
-    expect(s.homeFilters.sortOrder, HomeSortOrder.title);
+    expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     expect(find.text('Alpha 作业'), findsOneWidget);
     expect(find.text('Mike 作业'), findsOneWidget);
     expect(find.text('Zulu 作业'), findsOneWidget);

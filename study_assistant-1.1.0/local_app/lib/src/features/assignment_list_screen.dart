@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
+import '../app/transient_feedback.dart';
 import '../models/assignment.dart';
 import '../models/assignment_sync_progress.dart';
 import '../models/home_filters.dart';
@@ -18,7 +19,8 @@ import 'widgets/assignment_card.dart';
 /// [HomeFilters], so opening or leaving it cannot rewrite saved preferences.
 enum AssignmentRecoveryScope {
   noDeadline('noDeadline', '无截止日期'),
-  deadlinePending('deadlinePending', '截止待确认');
+  deadlinePending('deadlinePending', '截止时间未知'),
+  examUnknown('examUnknown', '考试时间未知');
 
   const AssignmentRecoveryScope(this.queryValue, this.label);
 
@@ -38,13 +40,13 @@ enum AssignmentRecoveryScope {
   /// calendar grid excludes them.
   bool matches(Assignment assignment, DateTime now) {
     if (assignment.isExam) {
-      return !assignment.isCompleted &&
-          this == deadlinePending &&
-          (!assignment.timelineTrusted || assignment.timelineAt == null);
+      return this == examUnknown &&
+          AssignmentQuery.isUnknownExam(assignment, now);
     }
     return switch (this) {
       noDeadline => AssignmentQuery.timelineBucketAt(assignment, now) ==
           AssignmentDeadlineBucket.confirmedNoDeadline,
+      examUnknown => false,
       deadlinePending => AssignmentQuery.timelineBucketAt(assignment, now) ==
           AssignmentDeadlineBucket.unconfirmed,
     };
@@ -58,15 +60,45 @@ class AssignmentListScreen extends StatefulWidget {
   State<AssignmentListScreen> createState() => _AssignmentListScreenState();
 }
 
-class _AssignmentListScreenState extends State<AssignmentListScreen> {
+class _AssignmentListScreenState extends State<AssignmentListScreen>
+    with WidgetsBindingObserver {
   // Keep both the label and icon button inside a narrow screen while allowing
   // a larger tap target and readable text.
   static const _compactFilterTextThreshold = 18.0;
 
   Timer? _clock;
+  final _feedback = TransientFeedbackController();
+  late int _feedbackEpoch;
+  String? _feedbackAccount;
+
+  void _checkFeedbackAccount() {
+    if (_feedbackEpoch != store.accountEpoch ||
+        _feedbackAccount != store.account) {
+      _feedback.dismiss();
+      _feedbackEpoch = store.accountEpoch;
+      _feedbackAccount = store.account;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant AssignmentListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.store != store) {
+      oldWidget.store.removeListener(_checkFeedbackAccount);
+      _feedback.dismiss();
+      _feedbackEpoch = store.accountEpoch;
+      _feedbackAccount = store.account;
+      store.addListener(_checkFeedbackAccount);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _feedbackEpoch = store.accountEpoch;
+    _feedbackAccount = store.account;
+    store.addListener(_checkFeedbackAccount);
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -74,18 +106,53 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    store.removeListener(_checkFeedbackAccount);
+    _feedback.dispose();
     _clock?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) setState(() {});
   }
 
   bool _refreshing = false;
   String? get _courseKey => store.homeFilters.courseKey;
   String get _query => store.homeFilters.query;
   AssignmentDeadlineFilter get _deadlineFilter => store.homeFilters.deadline;
-  HomeSortOrder get _sortOrder => store.homeFilters.sortOrder;
-  AssignmentTypeFilter get _typeFilter => store.homeFilters.type;
+  HomeSortOrder get _sortOrder =>
+      normalizedHomeSort(store.homeFilters.sortOrder);
+  AssignmentTypeFilter get _typeFilter =>
+      normalizedHomeType(store.homeFilters.type);
   final _openingAssignments = <String>{};
   AssignmentStore get store => widget.store;
+
+  Future<void> _archiveExam(Assignment assignment) async {
+    final epoch = store.accountEpoch;
+    final account = store.account;
+    final sources =
+        AssignmentQuery.displaySources(assignment, store.courseAssignments);
+    if (sources.isEmpty) {
+      feedback('记录尚未保存，暂时无法归档，请同步完成后重试');
+      return;
+    }
+    for (final source in sources) {
+      if (!mounted || epoch != store.accountEpoch || account != store.account) {
+        return;
+      }
+      final saved = await store.hideAssignment(source.id);
+      if (!mounted || epoch != store.accountEpoch || account != store.account) {
+        return;
+      }
+      if (!saved) {
+        feedback('归档未全部完成，请在本地记录中核对');
+        return;
+      }
+    }
+    feedback('已归档，可在本地记录中恢复');
+  }
 
   Future<void> openAssignment(String id) async {
     if (_openingAssignments.contains(id)) return;
@@ -109,9 +176,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
 
   void feedback(String message, {bool details = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
+    _feedback.show(
+        context,
+        SnackBar(
           behavior: SnackBarBehavior.floating,
           backgroundColor: Journal.ink,
           content: Text(message,
@@ -121,9 +188,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   label: '查看详情',
                   textColor: Journal.sheet,
                   onPressed: () {
+                    _feedback.dismiss();
                     if (mounted) context.push('/sync');
-                  })
-              : null));
+                  },
+                )
+              : null,
+        ));
   }
 
   Future<bool> act(HomeSyncAction action) async {
@@ -226,7 +296,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             store.isLoading ||
             store.syncReport.phase == SyncPhase.running;
         final recoveryScope = _recoveryScope(context);
-        final displayAssignments = store.homeDisplayAssignments;
+        final displayAssignments = AssignmentQuery.currentDisplay(
+            store.homeDisplayAssignments, DateTime.now());
         final options = <String, String>{
           for (final a in displayAssignments)
             if (a.courseKey case final key?) key: a.courseName
@@ -249,6 +320,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             : displayAssignments
                 .where((assignment) => recoveryScope.matches(assignment, now))
                 .toList();
+        final unknownExams = recoveryScope == null
+            ? items.where((a) => AssignmentQuery.isUnknownExam(a, now)).toList()
+            : <Assignment>[];
+        items.removeWhere((a) => unknownExams.contains(a));
         final sortOrder = _sortOrder;
         final sortedItems = sortOrder == HomeSortOrder.grouped
             ? items
@@ -288,6 +363,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             opening: _openingAssignments.contains(a.id),
             onTap: () =>
                 context.push('/assignments/${Uri.encodeComponent(a.id)}'));
+        Widget unknownExam(Assignment a) => Column(children: [
+              card(a),
+              Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: busy ? null : () => _archiveExam(a),
+                    child: const Text('归档'),
+                  )),
+            ]);
         Widget filterAction() => compactFilterAction
             ? IconButton(
                 tooltip: filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选',
@@ -311,7 +395,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   previous != AssignmentQuery.dayKey(a.timelineAt!))
                 dayHeading(
                     previous = AssignmentQuery.dayKey(a.timelineAt!), now),
-              card(a),
+              if (AssignmentQuery.isUnknownExam(a, now))
+                unknownExam(a)
+              else
+                card(a),
             ]
           ];
         }
@@ -323,34 +410,32 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
             key: PageStorageKey(recoveryScope == null
                 ? 'home-list'
                 : 'home-recovery-${recoveryScope.queryValue}'),
-            padding: const EdgeInsets.fromLTRB(20, 22, 20, 32),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
             children: [
-              JournalHeading('课业手记',
-                  eyebrow: 'CAMPUS JOURNAL   /   01',
-                  bookTitle: true,
-                  trailingWidth: 96,
-                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                    IconButton(
-                        tooltip: '刷新作业',
-                        onPressed: busy
-                            ? null
-                            : () => refresh(
-                                sync.action == HomeSyncAction.login ||
-                                        sync.action == HomeSyncAction.verify
-                                    ? sync.action
-                                    : HomeSyncAction.retry),
-                        icon: busy
-                            ? const SizedBox.square(
-                                dimension: 20,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Journal.ink))
-                            : const Icon(Icons.sync_rounded)),
-                    IconButton(
-                        tooltip: '同步详情',
-                        onPressed: () => context.push('/sync'),
-                        icon: const Icon(Icons.more_horiz_rounded)),
-                  ])),
-              const SizedBox(height: 20),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Expanded(child: Text('课业手记', style: Journal.display)),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  IconButton(
+                      tooltip: '刷新作业',
+                      onPressed: busy
+                          ? null
+                          : () => refresh(sync.action == HomeSyncAction.login ||
+                                  sync.action == HomeSyncAction.verify
+                              ? sync.action
+                              : HomeSyncAction.retry),
+                      icon: busy
+                          ? const SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Journal.ink))
+                          : const Icon(Icons.sync_rounded)),
+                  IconButton(
+                      tooltip: '同步详情',
+                      onPressed: () => context.push('/sync'),
+                      icon: const Icon(Icons.more_horiz_rounded)),
+                ]),
+              ]),
+              const SizedBox(height: 12),
               if (recoveryScope != null) ...[
                 _recoveryHeader(context, recoveryScope, items.length),
                 const SizedBox(height: 12),
@@ -374,7 +459,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => context.push('/plan')));
               }),
-              const Divider(height: 24),
+              const Divider(height: 16),
               Row(children: [
                 const Icon(Icons.schedule, size: 16, color: Journal.muted),
                 const SizedBox(width: 6),
@@ -402,11 +487,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                       children: [
                         const Icon(Icons.sort, size: 16, color: Journal.muted),
                         const SizedBox(width: 6),
-                        Text(
-                          _sortLabel(sortOrder),
+                        Flexible(
+                            child: Text(
+                          _shortSortLabel(sortOrder),
                           key: const ValueKey('current-home-sort'),
+                          textAlign: TextAlign.right,
                           style: Journal.metadata,
-                        ),
+                        )),
                       ],
                     ),
                   ),
@@ -425,6 +512,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                     padding: EdgeInsets.symmetric(vertical: 12),
                     child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
                         style: Journal.metadata)),
+              if (unknownExams.isNotEmpty)
+                ExpansionTile(
+                  key: const PageStorageKey('unknown-exams'),
+                  initiallyExpanded: false,
+                  title: Text('考试时间未知（${unknownExams.length}）'),
+                  children: [for (final a in unknownExams) unknownExam(a)],
+                ),
               if (sortedItems.isNotEmpty) ...[
                 if (groups != null) ...[
                   ...timeline([...groups.near, ...groups.far]),
@@ -442,9 +536,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
               ] else if (recoveryScope != null) ...[
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
-                    child: Text('这个临时范围当前没有作业，可能已随同步更新。',
-                        style: Journal.metadata)),
-              ] else if (filtersActive &&
+                    child: Text('当前范围没有课业', style: Journal.metadata)),
+              ] else if (unknownExams.isNotEmpty)
+                ...[]
+              else if (filtersActive &&
                   (displayAssignments.isNotEmpty ||
                       store.assignments.isNotEmpty)) ...[
                 const Padding(
@@ -507,20 +602,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                 const Icon(Icons.filter_alt_outlined,
                     size: 18, color: Journal.muted),
                 const SizedBox(width: 8),
-                Expanded(
-                    child: Text('临时范围 · ${scope.label}',
-                        style: Journal.entryTitle)),
+                Expanded(child: Text(scope.label, style: Journal.entryTitle)),
               ]),
               const SizedBox(height: 4),
               Text(
-                '共 $count 项。不受已保存的搜索、课程和期限筛选影响，返回后原偏好保留。',
+                '共 $count 项',
                 style: Journal.metadata,
               ),
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton(
                   onPressed: () => _exitRecoveryScope(context),
-                  child: const Text('退出临时范围'),
+                  child: const Text('返回全部'),
                 ),
               ),
             ],
@@ -535,14 +628,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
         AssignmentDeadlineFilter.overdue => '已逾期',
         AssignmentDeadlineFilter.uncertain => '期限待确认',
         AssignmentDeadlineFilter.noDeadline => '无截止日期',
-        AssignmentDeadlineFilter.notExpired => '未截止',
+        AssignmentDeadlineFilter.notExpired => '未逾期',
+      };
+
+  String _shortSortLabel(HomeSortOrder order) =>
+      switch (normalizedHomeSort(order)) {
+        HomeSortOrder.deadlineDesc => '时间远到近',
+        HomeSortOrder.courseName => '按课程',
+        _ => '时间近到远',
       };
 
   String _sortLabel(HomeSortOrder order) => switch (order) {
         HomeSortOrder.grouped => '默认分组',
         HomeSortOrder.deadlineAsc => '时间：近到远（考试按开考）',
         HomeSortOrder.deadlineDesc => '时间：远到近（考试按开考）',
-        HomeSortOrder.courseName => '课程名称',
+        HomeSortOrder.courseName => '按课程',
         HomeSortOrder.title => '名称',
       };
 
@@ -618,7 +718,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    for (final option in AssignmentTypeFilter.values)
+                    for (final option in homeTypeFilterChoices)
                       ChoiceChip(
                         key: ValueKey('type-${option.name}'),
                         selected: type == option,
@@ -673,7 +773,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen> {
                   },
                   child: Column(
                     children: [
-                      for (final order in HomeSortOrder.values)
+                      for (final order in homeSortOrderChoices)
                         RadioListTile<HomeSortOrder>(
                           key: ValueKey('sort-${order.name}'),
                           value: order,

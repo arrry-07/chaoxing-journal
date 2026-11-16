@@ -196,19 +196,22 @@ class _AgreementPanel extends StatelessWidget {
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: EdgeInsets.zero,
                   child: Wrap(
                     spacing: 0,
                     runSpacing: 0,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Text(
-                        '我已阅读并同意',
-                        style: Journal.metadata.copyWith(
-                          color: Journal.ink,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14.5,
-                          height: 1.45,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 13.5),
+                        child: Text(
+                          '我已阅读并同意',
+                          style: Journal.metadata.copyWith(
+                            color: Journal.ink,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14.5,
+                            height: 1.45,
+                          ),
                         ),
                       ),
                       _link(AgreementKind.service),
@@ -220,7 +223,7 @@ class _AgreementPanel extends StatelessWidget {
             ],
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(2, 12, 2, 0),
+            padding: const EdgeInsets.fromLTRB(48, 12, 0, 0),
             child: Text(
               '课程与作业数据保存在本机。',
               style: Journal.metadata.copyWith(

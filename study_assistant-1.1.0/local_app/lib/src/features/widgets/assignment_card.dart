@@ -39,36 +39,43 @@ class AssignmentCard extends StatelessWidget {
             ? '已结束'
             : exam.lifecycle == 'inProgress'
                 ? '进行中'
-                : exam.startTrusted &&
-                        exam.startAt != null &&
-                        exam.startAt!.isAfter(now)
+                : exam.lifecycle == 'scheduled' ||
+                        (exam.startTrusted &&
+                            exam.startAt != null &&
+                            exam.startAt!.isAfter(now))
                     ? '未开始'
-                    : '考试安排待确认';
+                    : null;
     final personal = assignment.status == 'submitted'
         ? '已提交'
-        : assignment.status == 'pending' && lifecycle == '未开始'
-            ? '待参加'
-            : assignment.status == 'pending' && lifecycle == '进行中'
+        : assignment.status == 'pending'
+            ? lifecycle == '进行中'
                 ? '待提交'
-                : '个人提交状态待确认';
-    return '${exam.noticeOnly ? '考试通知' : '考试'} · $lifecycle · $personal';
+                : lifecycle == '未开始'
+                    ? '待参加'
+                    : '待完成'
+            : const {
+                'graded': '已批阅',
+                'reviewing': '待批阅',
+                'completed': '已完成',
+                'returned': '已退回'
+              }[assignment.status];
+    return [
+      exam.noticeOnly ? '考试通知' : '考试',
+      if (lifecycle != null) lifecycle,
+      if (personal != null) personal,
+    ].join(' · ');
   }
 
   static List<String> examScheduleLines(Assignment assignment) {
     final exam = assignment.exam!;
-    String time(String label, DateTime? at, bool trusted) => at == null
-        ? '$label时间待确认'
-        : '$label ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(at))}${trusted ? '' : '（待确认）'}';
+    String time(String label, DateTime at) =>
+        '$label ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(at))}';
     return [
-      time('开考', exam.startAt, exam.startTrusted),
-      time('结束', exam.endAt, exam.endTrusted),
+      if (exam.startAt != null && exam.startTrusted) time('开考', exam.startAt!),
+      if (exam.endAt != null && exam.endTrusted) time('结束', exam.endAt!),
       if (exam.durationMinutes != null && exam.durationMinutes! > 0)
         '时长 ${exam.durationMinutes} 分钟',
-      exam.location.trim().isEmpty
-          ? exam.noticeOnly
-              ? '地点 通知未提供实体考场'
-              : '地点 官方考试页未提供实体考场'
-          : '地点 ${exam.location.trim()}',
+      if (exam.location.trim().isNotEmpty) '地点 ${exam.location.trim()}',
     ];
   }
 
@@ -119,8 +126,9 @@ class AssignmentCard extends StatelessWidget {
     final color = urgent != null ? Journal.berry : Journal.ink;
     final hasTime =
         d != null && a.timelineTrusted && (a.isExam || !a.deadlineReadFailed);
+    final showRail = hasTime || (deadlinePending && !a.isExam);
     final clock =
-        hasTime ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d)) : '—';
+        hasTime ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d)) : '';
     // Measure at the user's text scale: a fixed rail clips times at 2× size.
     final timeMeasure = TextPainter(
         text: const TextSpan(text: '00:00', style: Journal.time),
@@ -134,7 +142,8 @@ class AssignmentCard extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(state, style: Journal.metadata.copyWith(color: Journal.ink)),
+        if (state.isNotEmpty)
+          Text(state, style: Journal.metadata.copyWith(color: Journal.ink)),
         if (previewOnly)
           Text(
             previewSaving ? '正在保存到本机' : '待保存预览',
@@ -159,7 +168,7 @@ class AssignmentCard extends StatelessWidget {
           button: onCardTap != null,
           onTap: onCardTap,
           label:
-              '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${a.isExam ? '${examLines.join('，')}，北京时间' : hasTime ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}' : deadline}',
+              '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${a.isExam ? '${examLines.join('，')}${a.exam!.startTrusted || a.exam!.endTrusted ? '，北京时间' : ''}' : hasTime ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}' : deadline}',
           excludeSemantics: true,
           child: SizedBox(
               width: double.infinity,
@@ -177,36 +186,47 @@ class AssignmentCard extends StatelessWidget {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              SizedBox(
-                                width: railWidth,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (deadlinePending && !a.isExam)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: SizedBox.square(
-                                          dimension: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            semanticsLabel: '正在确认截止时间',
+                              if (showRail)
+                                SizedBox(
+                                  width: railWidth,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (deadlinePending && !a.isExam)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 4),
+                                          child: SizedBox.square(
+                                            dimension: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              semanticsLabel: '正在确认截止时间',
+                                            ),
                                           ),
-                                        ),
-                                      )
-                                    else
-                                      Text(clock, style: Journal.time),
-                                  ],
+                                        )
+                                      else
+                                        Text(clock, style: Journal.time),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
+                              if (showRail) const SizedBox(width: 12),
                               Expanded(
                                   child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.stretch,
                                       children: [
-                                    Text(a.title, style: Journal.entryTitle),
-                                    const SizedBox(height: 4),
-                                    Text(a.courseName, style: Journal.metadata),
+                                    if (a.title.trim().isNotEmpty)
+                                      Text(a.title.trim(),
+                                          style: Journal.entryTitle),
+                                    if (a.courseName.trim().isNotEmpty) ...[
+                                      if (a.title.trim().isNotEmpty)
+                                        const SizedBox(height: 4),
+                                      Text(a.courseName.trim(),
+                                          style: a.title.trim().isEmpty
+                                              ? Journal.entryTitle
+                                              : Journal.metadata),
+                                    ],
                                     if (onOpenAssignment == null) ...[
                                       const SizedBox(height: 4),
                                       metadata,
@@ -216,15 +236,16 @@ class AssignmentCard extends StatelessWidget {
                           )))))),
       if (onOpenAssignment != null)
         Padding(
-          padding:
-              EdgeInsets.only(left: largeText ? 0 : railWidth + 12, bottom: 8),
+          padding: EdgeInsets.only(
+              left: largeText || !showRail ? 0 : railWidth + 12, bottom: 8),
           child: Wrap(
             alignment: WrapAlignment.spaceBetween,
             crossAxisAlignment: WrapCrossAlignment.center,
             spacing: 8,
             children: [
               Padding(
-                padding: EdgeInsets.only(left: largeText ? railWidth + 12 : 0),
+                padding: EdgeInsets.only(
+                    left: largeText && showRail ? railWidth + 12 : 0),
                 child: ExcludeSemantics(
                     child: InkWell(onTap: onCardTap, child: metadata)),
               ),

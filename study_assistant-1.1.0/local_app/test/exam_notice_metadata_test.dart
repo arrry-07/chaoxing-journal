@@ -187,10 +187,28 @@ void main() {
         .single;
     expect(noMatch.exam!.durationMinutes, isNull);
   });
-  test('missing physical venue is disclosed rather than invented', () {
+  test('missing venue is omitted while trusted schedule and duration remain',
+      () {
     final row = parse(noticePayload(full));
     expect(row.exam!.location, isEmpty);
-    expect(AssignmentCard.examScheduleLines(row), contains('地点 通知未提供实体考场'));
+    expect(
+      AssignmentCard.examScheduleLines(row),
+      orderedEquals([
+        '开考 2030年4月1日 09:00',
+        '结束 2030年4月1日 11:00',
+        '时长 60 分钟',
+      ]),
+    );
+    final withVenue = parse(noticePayload('$full\r考试地点：合成教学楼A301'));
+    expect(
+      AssignmentCard.examScheduleLines(withVenue),
+      orderedEquals([
+        '开考 2030年4月1日 09:00',
+        '结束 2030年4月1日 11:00',
+        '时长 60 分钟',
+        '地点 合成教学楼A301',
+      ]),
+    );
   });
   test('normal full client refresh enriches notice records before persistence',
       () async {

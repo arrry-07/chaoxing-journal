@@ -1,5 +1,6 @@
 import '../models/assignment.dart';
 import 'daytime_check_policy.dart';
+import 'assignment_query.dart';
 
 enum AssignmentReminderEventType { newAssignment, deadline }
 
@@ -42,7 +43,10 @@ class AssignmentReminderSnapshot {
       return false;
     }
     if (assignment.isExam) {
-      return anchorTrusted && anchorAt != null && anchorAt!.isAfter(now);
+      return !AssignmentQuery.isExamEnded(assignment, now) &&
+          anchorTrusted &&
+          anchorAt != null &&
+          anchorAt!.isAfter(now);
     }
     final bucket = assignment.deadlineBucketAt(now);
     return bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||

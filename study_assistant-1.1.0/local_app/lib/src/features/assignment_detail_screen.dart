@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../app/journal.dart';
@@ -15,19 +17,49 @@ class AssignmentDetailScreen extends StatefulWidget {
     super.key,
     required this.store,
     required this.assignmentId,
+    this.clock,
   });
 
   final AssignmentStore store;
   final String assignmentId;
+  final DateTime Function()? clock;
 
   @override
   State<AssignmentDetailScreen> createState() => _AssignmentDetailScreenState();
 }
 
-class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
+class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
+    with WidgetsBindingObserver {
   final _links = ExternalLinkService();
   bool _opening = false, _hiding = false, _refreshing = false;
   String? _actionMessage;
+  Timer? _clock;
+  late DateTime _now;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _now = widget.clock?.call() ?? DateTime.now();
+    _clock = Timer.periodic(const Duration(minutes: 1), (_) => _refreshClock());
+  }
+
+  void _refreshClock() {
+    if (!mounted) return;
+    setState(() => _now = widget.clock?.call() ?? DateTime.now());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshClock();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _clock?.cancel();
+    super.dispose();
+  }
 
   String get _itemLabel {
     final assignment = widget.store.findAssignment(widget.assignmentId);
@@ -168,7 +200,15 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
     return AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
-        final assignment = widget.store.findAssignment(widget.assignmentId);
+        final original = widget.store.findAssignment(widget.assignmentId);
+        // Use the same display projection as the list; actions above keep
+        // resolving the original ID so supplementation cannot rewrite records.
+        final assignment = original == null
+            ? null
+            : AssignmentQuery.projectDisplay(widget.store.courseAssignments)
+                    .where((a) => a.id == original.id)
+                    .firstOrNull ??
+                original;
         if (assignment == null) {
           return Center(
             child: Padding(
@@ -193,6 +233,32 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
           );
         }
 
+        final exam = assignment.isExam ? assignment.exam : null;
+        final examLines = exam == null
+            ? const <String>[]
+            : AssignmentCard.examScheduleLines(assignment);
+        final hasExamTime = exam != null &&
+            ((exam.startTrusted && exam.startAt != null) ||
+                (exam.endTrusted && exam.endAt != null));
+        final unverified = exam != null &&
+            (!exam.startTrusted ||
+                exam.startAt == null ||
+                !exam.endTrusted ||
+                exam.endAt == null ||
+                !const {
+                  'pending',
+                  'submitted',
+                  'graded',
+                  'reviewing',
+                  'completed',
+                  'returned'
+                }.contains(assignment.status));
+        final unverifiedTimes = <String>[
+          if (exam != null && exam.startAt != null && !exam.startTrusted)
+            '开考（未核实） ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(exam.startAt!))}',
+          if (exam != null && exam.endAt != null && !exam.endTrusted)
+            '结束（未核实） ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(exam.endAt!))}',
+        ];
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -207,40 +273,45 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              assignment.courseName,
-              style: Theme.of(context).textTheme.labelLarge,
-            ),
+            if (assignment.courseName.trim().isNotEmpty)
+              Text(
+                assignment.courseName.trim(),
+                style: assignment.title.trim().isEmpty
+                    ? Journal.section
+                    : Theme.of(context).textTheme.labelLarge,
+              ),
             const SizedBox(height: 8),
-            Text(
-              assignment.title,
-              style: const TextStyle(
-                  fontSize: 26,
-                  height: 1.4,
-                  fontWeight: FontWeight.w600,
-                  color: Journal.ink),
-            ),
+            if (assignment.title.trim().isNotEmpty)
+              Text(
+                assignment.title.trim(),
+                style: const TextStyle(
+                    fontSize: 26,
+                    height: 1.4,
+                    fontWeight: FontWeight.w600,
+                    color: Journal.ink),
+              ),
             const SizedBox(height: 16),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    const Icon(Icons.event_available),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        assignment.isExam
-                            ? '${AssignmentCard.examScheduleLines(assignment).join('\n')}\n（北京时间）'
-                            : assignment.deadlineAt == null
-                                ? assignment.deadlineLabel
-                                : '${DateFormat('yyyy年M月d日 HH:mm', 'zh_CN').format(AssignmentQuery.beijing(assignment.deadlineAt!))}（北京时间）',
+            if (exam == null || examLines.isNotEmpty)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.event_available),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          assignment.isExam
+                              ? '${examLines.join('\n')}${hasExamTime ? '\n（北京时间）' : ''}'
+                              : assignment.deadlineAt == null
+                                  ? assignment.deadlineLabel
+                                  : '${!assignment.deadlineTrusted || assignment.deadlineReadFailed ? '历史截止（未核实） ' : ''}${DateFormat('yyyy年M月d日 HH:mm', 'zh_CN').format(AssignmentQuery.beijing(assignment.deadlineAt!))}（北京时间）',
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
             const SizedBox(height: 12),
             Card(
               child: Padding(
@@ -249,13 +320,18 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(assignment.isExam
-                          ? AssignmentCard.examStateLabel(
-                              assignment, DateTime.now())
+                          ? AssignmentCard.examStateLabel(assignment, _now)
                           : assignment.statusLabel),
-                      if (assignment.isExam)
-                        const Text('考试安排与个人提交状态分别显示；已结束不代表已提交。'),
-                      if (assignment.isExam && !assignment.timelineTrusted)
-                        const Text('开考时间待确认，不参与日历和开考提醒'),
+                      if (unverified) const Text('部分信息尚未核实'),
+                      if (unverifiedTimes.isNotEmpty)
+                        ExpansionTile(
+                          tilePadding: EdgeInsets.zero,
+                          title: const Text('未核实的时间记录'),
+                          children: [
+                            for (final line in unverifiedTimes) Text(line),
+                            const Text('时间记录尚未核实，仅供参考，不作为当前考试安排。以上时间均为北京时间。'),
+                          ],
+                        ),
                       if (!assignment.isExam &&
                           !assignment.deadlineTrusted &&
                           assignment.deadlineAt != null)

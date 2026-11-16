@@ -251,17 +251,21 @@ void main() {
             reason: '$scene input font');
       }
       if (scene == 'mixed' && scale == 1) {
-        final cards = find
+        final cardRects = find
             .byType(AssignmentCard)
             .evaluate()
             .map((e) => t.getRect(find.byWidget(e.widget)))
-            .where((r) => r.bottom < height - 96 && r.top >= 0)
-            .length;
+            .toList();
+        final cards =
+            cardRects.where((r) => r.bottom < height - 96 && r.top >= 0).length;
         // Restored book heading and dated timeline intentionally use more room
         // than the previous compact toolbar. Keep a complete entry visible on
         // narrow phones and at least two on standard phones.
         expect(cards, greaterThanOrEqualTo(width == 320 ? 1 : 2),
-            reason: 'first-screen density $width: $cards');
+            reason:
+                'first-screen density $width: $cards; viewport=$width×$height; '
+                'complete-entry bottom limit=${height - 96}; '
+                'card bounds=$cardRects');
       }
       if (const bool.fromEnvironment('CAPTURE_UI')) {
         final render = boundary.currentContext!.findRenderObject()!

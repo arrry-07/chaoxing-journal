@@ -28,6 +28,38 @@ Assignment _sortRecord(
     );
 
 void main() {
+  test(
+      'next recommendation selects trusted future pending independently of sorting',
+      () {
+    final now = DateTime.utc(2026, 11, 16);
+    final expired = _sortRecord('old',
+        courseName: 'A',
+        title: 'old',
+        deadlineAt: now.subtract(const Duration(days: 1)));
+    final unknown = _sortRecord('unknown',
+        courseName: 'A',
+        title: 'unknown',
+        status: 'unknown',
+        deadlineAt: now.add(const Duration(minutes: 1)));
+    final failed = _sortRecord('failed',
+        courseName: 'A',
+        title: 'failed',
+        failed: true,
+        deadlineAt: now.add(const Duration(minutes: 2)));
+    final next = _sortRecord('next',
+        courseName: 'A',
+        title: 'next',
+        deadlineAt: now.add(const Duration(hours: 1)));
+    final records = [expired, unknown, failed, next];
+    expect(
+        AssignmentQuery.sortHome(records, HomeSortOrder.deadlineAsc, now: now)
+            .first,
+        expired);
+    expect(AssignmentQuery.nextActionable(records, now: now), next);
+    expect(AssignmentQuery.nextActionable([expired, unknown, failed], now: now),
+        isNull);
+  });
+
   test('sortHome supports all orders without mutating the source list', () {
     final now = DateTime.utc(2026, 11, 12, 2);
     final alpha = _sortRecord(
@@ -84,11 +116,11 @@ void main() {
             records),
         isFalse);
     expect(ids(HomeSortOrder.deadlineAsc),
-        ['Bravo', 'alpha', 'echo', 'charlie', 'delta']);
+        ['Bravo', 'alpha', 'charlie', 'delta', 'echo']);
     expect(ids(HomeSortOrder.deadlineDesc),
-        ['alpha', 'Bravo', 'echo', 'charlie', 'delta']);
+        ['alpha', 'Bravo', 'charlie', 'delta', 'echo']);
     expect(ids(HomeSortOrder.courseName),
-        ['Bravo', 'alpha', 'echo', 'charlie', 'delta']);
+        ['Bravo', 'alpha', 'charlie', 'delta', 'echo']);
     expect(ids(HomeSortOrder.title),
         ['alpha', 'Bravo', 'echo', 'charlie', 'delta']);
   });
@@ -155,7 +187,9 @@ void main() {
     expect(grouped[2].id, endsWith(':id-z'));
   });
 
-  test('deadline order keeps bucket priority when direction changes', () {
+  test(
+      'deadline order is chronological with unknown dates last in both directions',
+      () {
     final now = DateTime.utc(2026, 11, 12, 2);
     final near = _sortRecord(
       'near',
@@ -210,15 +244,16 @@ void main() {
 
     expect(
       titles(HomeSortOrder.deadlineAsc),
-      ['近期', '较远', '无截止', '待确认', '早逾期', '晚逾期'],
+      ['早逾期', '晚逾期', '近期', '较远', '待确认', '无截止'],
     );
     expect(
       titles(HomeSortOrder.deadlineDesc),
-      ['较远', '近期', '无截止', '待确认', '晚逾期', '早逾期'],
+      ['较远', '近期', '晚逾期', '早逾期', '待确认', '无截止'],
     );
   });
 
-  test('name order puts actionable work before pending and overdue buckets',
+  test(
+      'course order groups alphabetically while legacy title order retains buckets',
       () {
     final now = DateTime.utc(2026, 11, 12, 2);
     final actionable = _sortRecord(
@@ -254,7 +289,7 @@ void main() {
 
     expect(
       titles(HomeSortOrder.courseName),
-      ['Albatross', 'Zulu', 'Alpha', 'Beta'],
+      ['Albatross', 'Alpha', 'Beta', 'Zulu'],
     );
     expect(
       titles(HomeSortOrder.title),

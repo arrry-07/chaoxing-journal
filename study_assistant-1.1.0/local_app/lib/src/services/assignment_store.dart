@@ -474,7 +474,7 @@ class AssignmentStore extends ChangeNotifier {
         }
       });
   List<Assignment> get visibleAssignments =>
-      courseAssignments.where((a) => !a.isCompleted).toList();
+      AssignmentQuery.currentDisplay(courseAssignments, DateTime.now());
   AssignmentSyncProgress? _homeSyncProgress;
   List<Assignment> _homePreviewAssignments = [];
   Set<String> _homePendingDeadlineIds = {};
@@ -501,10 +501,11 @@ class AssignmentStore extends ChangeNotifier {
       !_assignments.any((a) => a.id == assignmentId);
 
   List<Assignment> _visibleAssignmentsFrom(Iterable<Assignment> records) =>
-      AssignmentQuery.scope(records.toList(), {})
-          .where((a) =>
-              (a.courseKey == null || follows(a.courseKey!)) && !a.isCompleted)
-          .toList();
+      AssignmentQuery.currentDisplay(
+          AssignmentQuery.scope(records.toList(), {})
+              .where((a) => a.courseKey == null || follows(a.courseKey!))
+              .toList(),
+          DateTime.now());
 
   void _handleHomeProgress(int generation, AssignmentSyncProgress progress) {
     if (generation != _generation || !_authenticated || _disposed) return;

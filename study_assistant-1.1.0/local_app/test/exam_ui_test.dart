@@ -112,10 +112,10 @@ void main() {
     );
     await repository.saveHomeFilters(filters, 'exam-ui-test');
     final restored = await repository.loadHomeFilters();
-    expect(restored.type, AssignmentTypeFilter.examNotice);
+    expect(restored.type, AssignmentTypeFilter.exam);
     expect(restored.query, '考试');
     expect(restored.courseKey, 'c:k');
-    expect(restored.sortOrder, HomeSortOrder.title);
+    expect(restored.sortOrder, HomeSortOrder.deadlineAsc);
     for (final raw in [
       '{"query":"旧搜索","courseKey":"c:k","deadline":"all","sortOrder":"title"}',
       '{"query":"旧搜索","courseKey":"c:k","deadline":"all","sortOrder":"title","type":"futureType"}',
@@ -124,12 +124,12 @@ void main() {
       expect(decoded.type, AssignmentTypeFilter.all);
       expect(decoded.query, '旧搜索');
       expect(decoded.courseKey, 'c:k');
-      expect(decoded.sortOrder, HomeSortOrder.title);
+      expect(decoded.sortOrder, HomeSortOrder.deadlineAsc);
     }
   });
 
   test(
-      'all five types are exclusive and global exams survive followed-course scope',
+      'four visible types group notices as exams and global exams survive followed-course scope',
       () {
     final homework = _task('work');
     final task = _task('task', activityType: 35);
@@ -142,7 +142,7 @@ void main() {
       AssignmentTypeFilter.all: records,
       AssignmentTypeFilter.homework: [homework],
       AssignmentTypeFilter.task: [task, quiz, ai],
-      AssignmentTypeFilter.exam: [exam],
+      AssignmentTypeFilter.exam: [exam, notice],
       AssignmentTypeFilter.examNotice: [notice],
     };
     for (final entry in expected.entries) {
@@ -186,8 +186,7 @@ void main() {
         [midnight]);
   });
 
-  test(
-      'ended unknown remains visible and dated while untrusted time remains searchable',
+  test('ended exits current display while untrusted time remains searchable',
       () {
     final ended = _exam('ended',
         lifecycle: 'ended',
@@ -202,18 +201,18 @@ void main() {
     final cancelled = _exam('cancelled',
         lifecycle: 'cancelled', start: _now.add(const Duration(days: 1)));
     expect(AssignmentQuery.filterHome([ended, untrusted, submitted], now: _now),
-        [ended, untrusted]);
-    expect(AssignmentQuery.home([ended], _now, {}).uncertain, [ended]);
+        [untrusted]);
+    expect(AssignmentQuery.home([ended], _now, {}).uncertain, isEmpty);
     expect(AssignmentQuery.home([ended], _now, {}).overdue, isEmpty);
     expect(
         AssignmentQuery.forDay(
             [ended, untrusted, submitted], DateTime(2026, 11, 16), {},
             now: _now),
-        [ended]);
+        isEmpty);
     expect(
         AssignmentRecoveryScope.deadlinePending.matches(ended, _now), isFalse);
-    expect(AssignmentRecoveryScope.deadlinePending.matches(untrusted, _now),
-        isTrue);
+    expect(
+        AssignmentRecoveryScope.examUnknown.matches(untrusted, _now), isTrue);
     expect(
         AssignmentQuery.filterHome([cancelled],
             now: _now, deadline: AssignmentDeadlineFilter.next7Days),
@@ -222,7 +221,7 @@ void main() {
         [untrusted]);
   });
 
-  test('only explicit personal submission removes an exam from home', () {
+  test('ended exams leave home without changing personal submission', () {
     final records = [
       for (final status in [
         'unknown',
@@ -244,8 +243,7 @@ void main() {
     }
     expect(records.where((a) => a.isCompleted).map((a) => a.status),
         ['submitted']);
-    expect(AssignmentQuery.filterHome(records, now: _now),
-        records.take(4).toList());
+    expect(AssignmentQuery.filterHome(records, now: _now), isEmpty);
   });
 
   testWidgets(
@@ -310,11 +308,11 @@ void main() {
           assignment: notice, now: _now, onTap: () {}, onOpenAssignment: () {}),
     ]))));
     await tester.pumpAndSettle();
-    expect(find.text('考试 · 已结束 · 个人提交状态待确认'), findsOneWidget);
+    expect(find.text('考试 · 已结束'), findsOneWidget);
     expect(find.text('已完成'), findsNothing);
-    expect(find.text('开考时间待确认'), findsOneWidget);
-    expect(find.text('结束时间待确认'), findsOneWidget);
-    expect(find.text('地点 通知未提供实体考场'), findsOneWidget);
+    expect(find.text('开考时间待确认'), findsNothing);
+    expect(find.text('结束时间待确认'), findsNothing);
+    expect(find.text('地点 通知未提供实体考场'), findsNothing);
     expect(find.text('在学习通内查看考试通知'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -332,21 +330,23 @@ void main() {
     await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: store))));
     await _tap(tester, '搜索与筛选');
-    for (final type in AssignmentTypeFilter.values) {
+    for (final type in homeTypeFilterChoices) {
       expect(find.byKey(ValueKey('type-${type.name}')), findsOneWidget);
     }
-    final noticeType = find.byKey(const ValueKey('type-examNotice'));
+    final noticeType = find.byKey(const ValueKey('type-exam'));
     await tester.ensureVisible(noticeType);
     await tester.tap(noticeType);
     await tester.pumpAndSettle();
     await _tap(tester, '应用');
-    expect(store.homeFilters.type, AssignmentTypeFilter.examNotice);
+    expect(store.homeFilters.type, AssignmentTypeFilter.exam);
+    expect(find.text('期末考试'), findsNothing);
+    await _tap(tester, '考试时间未知（1）');
     expect(find.text('期末考试'), findsOneWidget);
     expect(find.text('课后作业'), findsNothing);
     await _tap(tester, '已筛选');
-    await _tap(tester, '课程名称');
+    await _tap(tester, '按课程');
     await _tap(tester, '应用');
-    expect(store.homeFilters.type, AssignmentTypeFilter.examNotice);
+    expect(store.homeFilters.type, AssignmentTypeFilter.exam);
     expect(store.homeFilters.sortOrder, HomeSortOrder.courseName);
     await _tap(tester, '已筛选');
     await _tap(tester, '清空筛选');
@@ -396,8 +396,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('开考 2026年11月16日 06:00'), findsOneWidget);
     expect(find.textContaining('地点 教学楼 A301'), findsOneWidget);
-    expect(find.text('考试 · 已结束 · 个人提交状态待确认'), findsOneWidget);
-    expect(find.text('考试安排与个人提交状态分别显示；已结束不代表已提交。'), findsOneWidget);
+    expect(find.text('考试 · 已结束'), findsOneWidget);
+    expect(find.text('部分信息尚未核实'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
