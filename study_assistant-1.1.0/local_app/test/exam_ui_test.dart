@@ -140,7 +140,7 @@ void main() {
     final records = [homework, task, quiz, ai, exam, notice];
     final expected = {
       AssignmentTypeFilter.all: records,
-      AssignmentTypeFilter.homework: [homework],
+      AssignmentTypeFilter.homework: [homework, task, quiz, ai],
       AssignmentTypeFilter.task: [task, quiz, ai],
       AssignmentTypeFilter.exam: [exam, notice],
       AssignmentTypeFilter.examNotice: [notice],

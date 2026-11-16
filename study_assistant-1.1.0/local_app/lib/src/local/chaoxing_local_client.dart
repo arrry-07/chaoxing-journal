@@ -83,6 +83,7 @@ class ChaoxingLocalClient {
       Future<void>.delayed(delay);
 
   final _requestStats = <String, _RequestStats>{};
+  final _phaseElapsedMs = <String, int>{};
   Map<String, Response<dynamic>>? _syncCourseEntries;
   final _openCircuits = <String, SyncIssue>{};
   final _consecutiveTransientFailures = <String, int>{};
@@ -138,6 +139,7 @@ class ChaoxingLocalClient {
 
   SyncDiagnostics get diagnostics => SyncDiagnostics(
         fullSyncElapsedMs: _fullSyncElapsedMs,
+        phaseElapsedMs: Map.unmodifiable(_phaseElapsedMs),
         requests: Map.unmodifiable({
           for (final entry in _requestStats.entries)
             entry.key: SyncRequestDiagnostics(
@@ -171,10 +173,15 @@ class ChaoxingLocalClient {
 
   void _resetSyncTracking({required bool clearRequestStats}) {
     if (clearRequestStats) _requestStats.clear();
+    _phaseElapsedMs.clear();
     _openCircuits.clear();
     _consecutiveTransientFailures.clear();
     _syncRetryCount = 0;
     _fullSyncElapsedMs = null;
+  }
+
+  void _recordPhase(String phase, Stopwatch watch) {
+    _phaseElapsedMs[phase] = watch.elapsedMilliseconds;
   }
 
   void _recordHttp(
@@ -460,6 +467,7 @@ class ChaoxingLocalClient {
     sourceResults = const [];
     _deadlineReadsBlockedBy = null;
     try {
+      final courseListWatch = Stopwatch()..start();
       final mcode =
           _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
       final response = await _safeGet<dynamic>(
@@ -470,6 +478,7 @@ class ChaoxingLocalClient {
           '课程列表',
           () => ChaoxingApiParser.parseCourseRefs(
               _decodeJsonPayload(response?.data)));
+      _recordPhase('courseList', courseListWatch);
       final course = refs
           .where((c) => c.courseId == courseId && c.clazzId == clazzId)
           .firstOrNull;
@@ -480,6 +489,7 @@ class ChaoxingLocalClient {
             stage: 'courses'));
       }
       List<Assignment>? rows;
+      final formalWatch = Stopwatch()..start();
       try {
         rows = await _fetchCourseWork(course, generation: generation);
       } on ChaoxingAuthenticationException {
@@ -491,15 +501,20 @@ class ChaoxingLocalClient {
       }
       if (generation != _sessionGeneration) return const [];
       if (rows == null) _syncCourseEntries?.clear();
+      _recordPhase('formalWork', formalWatch);
       sourceResults = [
         _formalSourceResult(
             rows ?? const [], rows == null ? 0 : 1, rows == null ? 1 : 0)
       ];
+      final classroomWatch = Stopwatch()..start();
       final classroom =
           await _fetchClassroomTasks([course], generation: generation);
+      _recordPhase('classroomTasks', classroomWatch);
       if (generation != _sessionGeneration) return const [];
+      final examWatch = Stopwatch()..start();
       final exams = await _fetchExams([course],
           generation: generation, includeAccount: false);
+      _recordPhase('exams', examWatch);
       if (generation != _sessionGeneration) return const [];
       if (rows == null && !classroom.recognized && !_hasExamObservation) {
         final issue = issues.isNotEmpty
@@ -534,6 +549,7 @@ class ChaoxingLocalClient {
     succeededCourses = 0;
     failedCourses = 0;
     try {
+      final courseListWatch = Stopwatch()..start();
       final mcode =
           _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
       final response = await _safeGet<dynamic>(
@@ -549,6 +565,7 @@ class ChaoxingLocalClient {
         final refs = ChaoxingApiParser.parseCourseRefs(payload);
         return (payload: payload, raw: raw, refs: refs);
       });
+      _recordPhase('courseList', courseListWatch);
       final payload = parsedCourses.payload;
       final raw = parsedCourses.raw;
       courses = parsedCourses.refs;
@@ -571,6 +588,7 @@ class ChaoxingLocalClient {
       final assignments = <Assignment>[];
       final attemptedFormalCourses = <String>{};
       var recognized = courses.isEmpty;
+      final formalWatch = Stopwatch()..start();
       for (final course in courses) {
         if (shouldStop?.call() == true) {
           failedCourses += courses.length - succeededCourses;
@@ -644,6 +662,7 @@ class ChaoxingLocalClient {
           break;
         }
       }
+      _recordPhase('formalWork', formalWatch);
       sourceResults = [
         _formalSourceResult(assignments, succeededCourses, failedCourses)
       ];
@@ -655,10 +674,12 @@ class ChaoxingLocalClient {
               .contains('${course.courseId}:${course.clazzId}'))
             '${course.courseId}:${course.clazzId}',
       };
+      final classroomWatch = Stopwatch()..start();
       final classroom = await _fetchClassroomTasks(courses,
           generation: generation,
           unreadCourses: raw.length - courses.length,
           progress: progress);
+      _recordPhase('classroomTasks', classroomWatch);
       if (generation != _sessionGeneration) return const [];
       assignments.addAll(classroom.rows);
       recognized = recognized || classroom.recognized;
@@ -670,7 +691,9 @@ class ChaoxingLocalClient {
       if (classroom.failedCourses > 0) {
         problems.add('部分课堂任务信息尚未读取');
       }
+      final examWatch = Stopwatch()..start();
       final exams = await _fetchExams(courses, generation: generation);
+      _recordPhase('exams', examWatch);
       if (generation != _sessionGeneration) return const [];
       assignments.addAll(exams);
       recognized = recognized || _hasExamObservation;
@@ -1099,13 +1122,19 @@ class ChaoxingLocalClient {
     var startTimesRequested = false;
     progress?.beginDetails(rows);
     for (final item in rows) {
-      if (item.isCompleted) {
-        final prior = previousAssignments[item.id];
+      final prior = previousAssignments[item.id];
+      final completedDeadlineKnown =
+          item.deadlineAt != null && item.deadlineTrusted;
+      final priorDeadlineKnown = prior?.deadlineTrusted == true;
+      if (item.isCompleted && (completedDeadlineKnown || priorDeadlineKnown)) {
         final completed = item.copyWith(
             deadlineAt: item.deadlineAt ?? prior?.deadlineAt,
             deadlineTrusted:
                 item.deadlineAt != null || prior?.deadlineTrusted == true,
-            deadlineRawText: prior?.deadlineRawText);
+            deadlineReadFailed: false,
+            deadlineRawText: item.deadlineAt != null
+                ? item.deadlineRawText
+                : prior?.deadlineRawText);
         result.add(completed);
         progress?.replace(completed);
         continue;
@@ -1460,7 +1489,10 @@ class ChaoxingLocalClient {
                     : null,
                 deadlineTrusted: trusted,
                 deadlineRawText: trusted ? end.toString() : null,
-                deadlineReadFailed: false,
+                // endTime=0 is not a confirmed no-deadline value. Keep the
+                // observation untrusted so the same work's detail page can
+                // resolve it, including for already-submitted rows.
+                deadlineReadFailed: !trusted,
                 requirementsText: '',
                 status: state,
                 submitUrl: url.toString(),

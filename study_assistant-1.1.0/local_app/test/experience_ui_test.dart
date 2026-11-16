@@ -55,7 +55,7 @@ void main() {
             .widget<AssignmentCard>(find.byType(AssignmentCard).first)
             .assignment
             .title,
-        '三月旧题');
+        '近期待交题');
     await t.scrollUntilVisible(find.text('三月旧题'), 160,
         scrollable: find.byType(Scrollable).first);
     expect(find.text('三月旧题'), findsOneWidget);

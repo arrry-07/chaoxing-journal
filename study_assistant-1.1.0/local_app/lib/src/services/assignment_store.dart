@@ -484,21 +484,21 @@ class AssignmentStore extends ChangeNotifier {
   AssignmentSyncProgress? get homeSyncProgress => _homeSyncProgress;
 
   List<Assignment> get homeDisplayAssignments {
-    if (_homePreviewAssignments.isEmpty) return visibleAssignments;
-    final merged = LocalAssignmentRepository.mergeAssignments(
-      [..._assignments, ..._hiddenAssignments],
-      _homePreviewAssignments,
-      hiddenCompletedIds: _hiddenAssignments.map((a) => a.id).toSet(),
-    );
-    return _visibleAssignmentsFrom(merged);
+    return AssignmentQuery.currentDisplay(
+        homeCatalogAssignments, DateTime.now(),
+        index: homeDisplayIndex);
   }
 
   /// Complete scoped source catalog used only while explicit filters are
   /// active. It retains notice sources for display-time ordering; the
   /// unfiltered home continues to use [homeDisplayAssignments].
   List<Assignment> get homeCatalogAssignments {
+    if (_homeCatalogCache != null) return _homeCatalogCache!;
     if (_homePreviewAssignments.isEmpty) {
-      return AssignmentQuery.scope(courseAssignments, {});
+      final next = List<Assignment>.unmodifiable(
+          AssignmentQuery.scope(courseAssignments, {}));
+      _homeCatalogCache = next;
+      return next;
     }
     final merged = LocalAssignmentRepository.mergeAssignments(
       [..._assignments, ..._hiddenAssignments],
@@ -506,7 +506,20 @@ class AssignmentStore extends ChangeNotifier {
       hiddenCompletedIds:
           _hiddenAssignments.map((assignment) => assignment.id).toSet(),
     );
-    return _catalogAssignmentsFrom(merged);
+    final next = List<Assignment>.unmodifiable(_catalogAssignmentsFrom(merged));
+    _homeCatalogCache = next;
+    return next;
+  }
+
+  List<Assignment>? _homeCatalogCache;
+  AssignmentDisplayIndex? _homeDisplayIndex;
+
+  AssignmentDisplayIndex get homeDisplayIndex =>
+      _homeDisplayIndex ??= AssignmentDisplayIndex.from(homeCatalogAssignments);
+
+  void _invalidateHomeDisplayIndex() {
+    _homeCatalogCache = null;
+    _homeDisplayIndex = null;
   }
 
   bool isHomeDeadlinePending(String assignmentId) =>
@@ -515,13 +528,6 @@ class AssignmentStore extends ChangeNotifier {
   bool isHomeAssignmentPreviewOnly(String assignmentId) =>
       _homePreviewAssignments.any((a) => a.id == assignmentId) &&
       !_assignments.any((a) => a.id == assignmentId);
-
-  List<Assignment> _visibleAssignmentsFrom(Iterable<Assignment> records) =>
-      AssignmentQuery.currentDisplay(
-          AssignmentQuery.scope(records.toList(), {})
-              .where((a) => a.courseKey == null || follows(a.courseKey!))
-              .toList(),
-          DateTime.now());
 
   List<Assignment> _catalogAssignmentsFrom(Iterable<Assignment> records) =>
       AssignmentQuery.scope(records.toList(), {})
@@ -557,6 +563,7 @@ class AssignmentStore extends ChangeNotifier {
     _homeSyncProgress = progress;
     _homePreviewAssignments = List.of(progress.assignments);
     _homePendingDeadlineIds = Set.of(progress.pendingDetailIds);
+    _invalidateHomeDisplayIndex();
     notifyListeners();
   }
 
@@ -584,6 +591,7 @@ class AssignmentStore extends ChangeNotifier {
     _homeSyncProgress = null;
     _homePreviewAssignments = [];
     _homePendingDeadlineIds = {};
+    _invalidateHomeDisplayIndex();
     if (notify && hadPreview && !_disposed) notifyListeners();
   }
 
@@ -602,6 +610,7 @@ class AssignmentStore extends ChangeNotifier {
         _unfollowed
           ..clear()
           ..addAll(next);
+        _invalidateHomeDisplayIndex();
         await _afterAssignmentsChanged();
       });
 
@@ -989,6 +998,7 @@ class AssignmentStore extends ChangeNotifier {
           _hiddenAssignments = [];
           _courses = [];
           _unfollowed.clear();
+          _invalidateHomeDisplayIndex();
           try {
             await sessionStore.clear();
           } catch (_) {/* Already failed closed. */}
@@ -1182,6 +1192,7 @@ class AssignmentStore extends ChangeNotifier {
       ..addAll(journal);
     _hiddenAssignments = await repository.loadHiddenAssignments();
     if (generation != _generation || _disposed) return;
+    _invalidateHomeDisplayIndex();
     final durableSyncAt = await repository.lastSyncAt();
     if (generation != _generation || _disposed) return;
     _lastSyncAt = durableSyncAt;
@@ -1525,6 +1536,7 @@ class AssignmentStore extends ChangeNotifier {
       _hiddenAssignments = [];
       _courses = [];
       _unfollowed.clear();
+      _invalidateHomeDisplayIndex();
       syncReport = const SyncReport();
       _visitedAssignment = null;
       returnCheckMessage = null;
@@ -1547,6 +1559,7 @@ class AssignmentStore extends ChangeNotifier {
     _assignments
       ..clear()
       ..addAll(assignments);
+    _invalidateHomeDisplayIndex();
   }
 
   Future<void> _afterAssignmentsChanged({

@@ -231,15 +231,49 @@ void main() {
         isTrue);
   });
 
-  test('known list timestamps and completed work avoid detail requests',
+  test('known list time avoids detail but completed untrusted time is resolved',
       () async {
-    final c = client([
-      row(1, end: DateTime.utc(2026, 11, 5).millisecondsSinceEpoch),
-      row(2, status: 4)
-    ], (o, h) => fail('must not request a detail'));
+    var calls = 0;
+    final c = client(
+      [
+        row(1, end: DateTime.utc(2026, 11, 5).millisecondsSinceEpoch),
+        row(2, status: 4)
+      ],
+      (o, h) {
+        calls++;
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: '作答时间：10-27 08:00 至 10-30 18:00'));
+      },
+    );
     final work = await c.fetchAssignments();
-    expect(work.first.deadlineAt!.toUtc(), DateTime.utc(2026, 11, 5));
-    expect(work.last.isCompleted, isTrue);
+    final known = work.singleWhere((item) => item.id.endsWith(':1'));
+    final completed = work.singleWhere((item) => item.id.endsWith(':2'));
+    expect(known.deadlineAt!.toUtc(), DateTime.utc(2026, 11, 5));
+    expect(completed.isCompleted, isTrue);
+    expect(completed.deadlineAt!.toUtc(), DateTime.utc(2024, 10, 30, 10));
+    expect(completed.deadlineTrusted, isTrue);
+    expect(completed.deadlineReadFailed, isFalse);
+    expect(calls, 1);
+  });
+
+  test('completed work with a prior trusted deadline avoids detail', () async {
+    final c = client(
+        [row(2, status: 4)], (o, h) => fail('must not request a detail'));
+    c.previousAssignments = {
+      'cx:work:1:2:2': Assignment(
+        id: 'cx:work:1:2:2',
+        courseName: '课1',
+        title: '题2',
+        deadlineAt: DateTime.utc(2026, 10, 30),
+        requirementsText: '',
+        status: 'submitted',
+        lastSyncedAt: DateTime.utc(2026, 10, 1),
+      )
+    };
+    final work = await c.fetchAssignments();
+    expect(work.single.deadlineAt!.toUtc(), DateTime.utc(2026, 10, 30));
   });
 
   test('first trusted deadline is visible while the second detail is pending',

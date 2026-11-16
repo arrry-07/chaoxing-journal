@@ -264,13 +264,19 @@ class SyncRequestDiagnostics {
 }
 
 class SyncDiagnostics {
-  const SyncDiagnostics({this.fullSyncElapsedMs, this.requests = const {}});
+  const SyncDiagnostics({
+    this.fullSyncElapsedMs,
+    this.phaseElapsedMs = const {},
+    this.requests = const {},
+  });
 
   final int? fullSyncElapsedMs;
+  final Map<String, int> phaseElapsedMs;
   final Map<String, SyncRequestDiagnostics> requests;
 
   Map<String, dynamic> toJson() => {
         'fullSyncElapsedMs': fullSyncElapsedMs,
+        'phaseElapsedMs': phaseElapsedMs,
         'requests': {
           for (final entry in requests.entries) entry.key: entry.value.toJson()
         },

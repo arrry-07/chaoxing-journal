@@ -188,9 +188,8 @@ class ChaoxingExamParser {
   }
 
   /// PC rows are accepted only with matching hidden course/class identities.
-  static ({List<Assignment> rows, int total})? coursePc(
-      String html, ChaoxingCourseRef course,
-      {DateTime? now}) {
+  static ({List<Assignment> rows, int total, int skipped, int observed})?
+      coursePc(String html, ChaoxingCourseRef course, {DateTime? now}) {
     for (final entry
         in {'courseId': course.courseId, 'classId': course.clazzId}.entries) {
       if (ChaoxingAssignmentParser.hiddenValue(html, entry.key) !=
@@ -203,21 +202,36 @@ class ChaoxingExamParser {
     if (totalMatch == null) return null;
     final total = int.parse(totalMatch[1]!);
     final rows = <Assignment>[];
+    var skipped = 0;
+    var observed = 0;
     final metadata = _listMetadata(html);
     for (final m in RegExp(r'<li\b([^>]*)>(.*?)</li>',
             caseSensitive: false, dotAll: true)
         .allMatches(html)) {
       if (!(attr(m[1]!, 'class') ?? '').split(' ').contains('lookLi')) continue;
+      observed++;
       final row = entities(m[2]!);
       final call =
           RegExp(r'goTest\(\s*["\x27](\d+)["\x27]\s*,\s*["\x27](\d+)["\x27]')
               .firstMatch(row);
-      if (call == null || call[1] != course.courseId) return null;
       final titleMatch = RegExp(r'<a\b([^>]*)>', caseSensitive: false)
           .allMatches(row)
           .map((a) => attr(a[1]!, 'title'))
           .whereType<String>()
           .firstOrNull;
+      if (call == null) {
+        // Completed exams may deliberately hide "view paper". They still have
+        // a valid title/time row but no node ID, so they cannot be matched to
+        // the phone list. Keep them as a known skipped supplement only.
+        if (titleMatch != null &&
+            text(titleMatch).isNotEmpty &&
+            RegExp(r'notAllowLookPaperWin|不允许查看').hasMatch(row)) {
+          skipped++;
+          continue;
+        }
+        return null;
+      }
+      if (call[1] != course.courseId) return null;
       if (titleMatch == null || text(titleMatch).isEmpty) return null;
       final ts = times(row);
       final states = RegExp(r'<strong\b[^>]*>([^<]*)', caseSensitive: false)
@@ -243,10 +257,12 @@ class ChaoxingExamParser {
           end: ts.length == 2 ? ts[1] : null,
           now: now));
     }
-    if (rows.isEmpty && (total != 0 || !text(html).contains('暂无内容'))) {
+    if (rows.isEmpty &&
+        skipped == 0 &&
+        (total != 0 || !text(html).contains('暂无内容'))) {
       return null;
     }
-    return (rows: rows, total: total);
+    return (rows: rows, total: total, skipped: skipped, observed: observed);
   }
 
   static ({List<Assignment> rows, int total})? account(String html,

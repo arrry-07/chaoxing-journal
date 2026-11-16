@@ -1,5 +1,37 @@
 part of 'chaoxing_local_client.dart';
 
+String _examFailureMessage(String source, Object error) {
+  if (error is SyncReadException) return error.issue.message;
+  final code = error is StateError ? error.message.toString() : '';
+  final reason = switch (code) {
+    'examPhoneSchema' => '课程考试列表页面结构无法识别',
+    'examRepeatedPage' => '课程考试列表分页出现重复记录',
+    'examEmptyMore' => '课程考试列表分页为空但仍提示更多',
+    'examPageLimit' => '课程考试列表分页超过安全上限',
+    'examCredentialMissing' => '课程页未提供考试读取凭证',
+    'examPcSchema' => '考试时间页面结构无法识别',
+    'examPcRepeated' => '考试时间列表分页出现重复记录',
+    'examPcIncomplete' => '考试时间列表分页数量不完整',
+    'examPcUnreadable' => '已完成考试不允许查看，未能确认考试信息',
+    'examListDisagreement' => '手机考试列表与考试时间列表不一致',
+    'accountExamSchema' => '账号考试列表页面结构无法识别',
+    'accountExamRepeated' => '账号考试列表分页出现重复记录',
+    'accountExamIncomplete' => '账号考试列表分页数量不完整',
+    'examNoticeSchema' => '考试通知列表结构无法识别',
+    'examNoticeRepeated' => '考试通知分页游标重复',
+    'examNoticeLimit' => '考试通知分页超过安全上限',
+    'unsafeExamRedirect' => '考试页面跳转未通过安全检查',
+    'examRedirectMissing' => '考试页面跳转缺少目标地址',
+    'examRedirectLimit' => '考试页面跳转次数超过上限',
+    _ => source == 'examAccount'
+        ? '账号考试读取失败'
+        : source == 'examNotice'
+            ? '考试通知读取失败'
+            : '课程考试读取失败',
+  };
+  return code.isEmpty ? reason : '$reason（$code）';
+}
+
 extension _ExamCollection on ChaoxingLocalClient {
   bool get _hasExamObservation => sourceResults.any((s) =>
       const {'exam', 'examAccount', 'examNotice'}.contains(s.source) &&
@@ -34,7 +66,7 @@ extension _ExamCollection on ChaoxingLocalClient {
           : error is ChaoxingAuthenticationException
               ? SyncIssueKind.authExpired
               : SyncIssueKind.schemaChanged;
-      issues.add(SyncIssue(reason, '部分考试或通知信息尚未确认，请查看读取来源后重试',
+      issues.add(SyncIssue(reason, _examFailureMessage(source, error),
           stage: source,
           courseKey: courseKey,
           httpStatus:
@@ -126,6 +158,8 @@ extension _ExamCollection on ChaoxingLocalClient {
           final pcRows = <Assignment>[];
           final phoneIds = observed.map((a) => a.id).toSet();
           final pcSeen = <String>{};
+          var pcSkipped = 0;
+          var pcObserved = 0;
           int? expectedTotal;
           for (var page = 0; page < 100; page++) {
             checkWindow();
@@ -151,6 +185,8 @@ extension _ExamCollection on ChaoxingLocalClient {
               throw StateError('examPcSchema');
             }
             expectedTotal = parsed.total;
+            pcObserved += parsed.observed;
+            pcSkipped += parsed.skipped;
             if (parsed.rows.any((r) => !pcSeen.add(r.id))) {
               throw StateError('examPcRepeated');
             }
@@ -164,13 +200,21 @@ extension _ExamCollection on ChaoxingLocalClient {
                 observed.add(row);
               }
             }
-            if (pcRows.length >= parsed.total) break;
-            if (parsed.rows.isEmpty) throw StateError('examPcIncomplete');
+            if (pcObserved >= parsed.total) break;
+            if (parsed.observed == 0) throw StateError('examPcIncomplete');
           }
-          if (pcRows.length != expectedTotal) {
+          if (pcRows.length + pcSkipped != expectedTotal) {
             throw StateError('examPcIncomplete');
           }
-          if (!phoneIds.every(pcSeen.contains)) {
+          // A completed, non-viewable PC row has no stable node ID. It is a
+          // legitimate supplemental gap only when the phone list already
+          // supplied an identity; it must not turn the whole course into a
+          // schema failure or be guessed by title/order.
+          if (observed.isEmpty && pcSkipped > 0 && pcRows.isEmpty) {
+            throw StateError('examPcUnreadable');
+          }
+          final unmatchedPhoneIds = phoneIds.difference(pcSeen);
+          if (unmatchedPhoneIds.length > pcSkipped) {
             throw StateError('examListDisagreement');
           }
         }

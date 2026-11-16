@@ -27,6 +27,8 @@ class _Store extends AssignmentStore {
   @override
   List<Assignment> get courseAssignments => records;
   @override
+  List<Assignment> get homeCatalogAssignments => records;
+  @override
   Future<bool> saveHomeFilters(HomeFilters next, int expectedEpoch) async {
     saves++;
     homeFilters = next;

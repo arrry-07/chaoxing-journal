@@ -69,8 +69,8 @@ class _CalendarScreenState extends State<CalendarScreen>
       animation: widget.store,
       builder: (context, _) {
         final now = _now;
-        final all =
-            AssignmentQuery.projectDisplay(widget.store.courseAssignments);
+        final courseSources = widget.store.courseAssignments;
+        final all = AssignmentQuery.projectDisplay(courseSources);
         final manual = widget.store.notebook.entries
             .where((e) => !e.done && e.at != null)
             .toList();
@@ -255,7 +255,7 @@ class _CalendarScreenState extends State<CalendarScreen>
               for (final a in agenda)
                 AssignmentCard(
                     assignment: a,
-                    examSources: widget.store.courseAssignments,
+                    examSources: courseSources,
                     now: now,
                     showFullDeadline: false,
                     onTap: () => context

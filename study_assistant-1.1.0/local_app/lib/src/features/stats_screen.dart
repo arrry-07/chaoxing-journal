@@ -2,9 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import '../app/journal.dart';
+import '../models/assignment.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_statistics.dart';
 import 'widgets/completion_pie_chart.dart';
+
+class _StatsGroup {
+  const _StatsGroup(this.name, this.records, {this.accountExam = false});
+  final String name;
+  final List<Assignment> records;
+  final bool accountExam;
+}
 
 class StatsScreen extends StatefulWidget {
   const StatsScreen({super.key, required this.store, this.clock});
@@ -46,11 +54,27 @@ class _StatsScreenState extends State<StatsScreen> {
         // that pass while the widget is building.
         final records = store.courseAssignments;
         final stats = AssignmentStatistics(records, now: now);
-        final keys = records.map((a) => a.courseKey!).toSet().toList()..sort();
-        final names = {
+        final keyed = <String, List<Assignment>>{};
+        final accountExams = <Assignment>[];
+        final otherUnkeyed = <Assignment>[];
+        for (final record in records) {
+          final key = record.courseKey;
+          if (key != null) {
+            (keyed[key] ??= []).add(record);
+          } else if (record.isExam) {
+            accountExams.add(record);
+          } else {
+            otherUnkeyed.add(record);
+          }
+        }
+        final keys = keyed.keys.toList()..sort();
+        final groups = <_StatsGroup>[
           for (final key in keys)
-            key: records.firstWhere((a) => a.courseKey == key).courseName
-        };
+            _StatsGroup(keyed[key]!.first.courseName, keyed[key]!),
+          if (accountExams.isNotEmpty)
+            _StatsGroup('账号考试', accountExams, accountExam: true),
+          if (otherUnkeyed.isNotEmpty) _StatsGroup('其他课业', otherUnkeyed),
+        ];
         Widget legend() => ExcludeSemantics(
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -155,24 +179,26 @@ class _StatsScreenState extends State<StatsScreen> {
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
                     child: Text('当前没有待处理的课程', style: Journal.metadata)),
-              for (final key in keys)
+              for (final group in groups)
                 Builder(builder: (context) {
-                  final own = AssignmentStatistics(
-                      records.where((a) => a.courseKey == key),
-                      now: now);
+                  final own = AssignmentStatistics(group.records, now: now);
                   if (own.pending + own.expired + own.unknown == 0) {
                     return const SizedBox.shrink();
                   }
-                  final same =
-                      keys.where((k) => names[k] == names[key]).toList();
+                  final same = group.accountExam
+                      ? const <_StatsGroup>[]
+                      : groups
+                          .where((other) =>
+                              !other.accountExam && other.name == group.name)
+                          .toList();
                   final name =
-                      '${names[key]}${same.length > 1 ? ' · 分组${same.indexOf(key) + 1}' : ''}';
+                      '${group.name}${same.length > 1 ? ' · 分组${same.indexOf(group) + 1}' : ''}';
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          CourseMark(names[key]!, size: 32),
+                          CourseMark(group.name, size: 32),
                           const SizedBox(width: 12),
                           Expanded(
                               child: Column(
