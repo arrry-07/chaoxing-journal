@@ -39,6 +39,7 @@ class DisplayPreferences {
             a.timelineAt != null &&
             a.timelineTrusted &&
             (a.isExam || !a.deadlineReadFailed) &&
+            !AssignmentQuery.dayKey(a.timelineAt!).isBefore(today) &&
             AssignmentQuery.dayKey(a.timelineAt!).isBefore(end))
         .toList();
   }

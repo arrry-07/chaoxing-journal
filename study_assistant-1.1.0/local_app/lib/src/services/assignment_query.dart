@@ -214,8 +214,8 @@ class AssignmentQuery {
         endTrusted: false,
         lifecycle: 'unknown',
         noticeOnly: true,
-        location: locations.length == 1 ? locations.single : '',
-        durationMinutes: durations.length == 1 ? durations.single : null,
+        location: '',
+        durationMinutes: null,
       ));
     }
     final contradictsFormal = !e.noticeOnly &&
@@ -226,9 +226,9 @@ class AssignmentQuery {
                 e.endAt != null &&
                 ends.any((v) => v != e.endAt!.toUtc())) ||
             (e.lifecycle != 'unknown' && states.any((v) => v != e.lifecycle)));
-    final canSupplementTime = !conflict && !contradictsFormal;
-    var start = e.startAt ?? (canSupplementTime ? uniqueStart : null);
-    var end = e.endAt ?? (canSupplementTime ? uniqueEnd : null);
+    final canSupplement = !conflict && !contradictsFormal;
+    var start = e.startAt ?? (canSupplement ? uniqueStart : null);
+    var end = e.endAt ?? (canSupplement ? uniqueEnd : null);
     if (start != null && end != null && end.isBefore(start)) {
       start = e.startAt;
       end = e.endAt;
@@ -242,11 +242,11 @@ class AssignmentQuery {
       endTrusted: e.endAt != null ? e.endTrusted : end != null,
       // A notice cannot resolve an unknown formal lifecycle without chronology.
       lifecycle: e.lifecycle, noticeOnly: e.noticeOnly,
-      location: e.location.isEmpty && locations.length == 1
+      location: canSupplement && e.location.isEmpty && locations.length == 1
           ? locations.single
           : e.location,
       durationMinutes: e.durationMinutes ??
-          (durations.length == 1 ? durations.single : null),
+          (canSupplement && durations.length == 1 ? durations.single : null),
     ));
   }
 

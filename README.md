@@ -6,11 +6,11 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.8.01](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.01/chaoxing-journal-1.8.01.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.01) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载当前正式版：1.8.0](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.0/chaoxing-journal-1.8.0.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.0) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
-1.8.01 精简考试信息、日历待核对入口和筛选排序；未知时间、地点不再逐行占位。已结束考试退出当前待办，历史记录保留；明确身份关联的考试与通知只展示一次。修复通知冷启动导航及底部提示停留，同次同步减少重复课程入口读取。AI 实践、正式作业及课堂任务继续保留。独立课程群云历史仍未接入，不能保证覆盖所有来源。
+开发目标 1.8.01 精简考试信息、日历待核对入口和筛选排序；未知时间、地点不再逐行占位。已结束考试退出当前待办，历史记录保留；明确身份关联的考试与通知只展示一次。修复通知冷启动导航及底部提示停留，同次同步减少重复课程入口读取。AI 实践、正式作业及课堂任务继续保留。独立课程群云历史仍未接入，不能保证覆盖所有来源。
 
 ## 功能
 
@@ -34,7 +34,7 @@
 
 ## 下载安装
 
-**首次安装或手动升级均下载 1.8.01（68）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**当前正式包为 1.8.0（67），开发目标为 1.8.01（68）；新版本发布后再更新下载入口。已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
 1. [下载 chaoxing-journal-1.8.0.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.0/chaoxing-journal-1.8.0.apk)。发布说明及校验文件见 [1.8.0 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.0)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。

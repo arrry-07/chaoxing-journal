@@ -47,7 +47,8 @@ class _DailyPlanState extends State<DailyPlanScreen> {
   }
 
   Future<void> add() async {
-    final candidates = widget.store.courseAssignments
+    final candidates = AssignmentQuery.currentDisplay(
+            widget.store.courseAssignments, DateTime.now())
         .where((a) =>
             !a.isCompleted &&
             !widget.store.personal.plans
