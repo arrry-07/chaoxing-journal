@@ -1,0 +1,181 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
+import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/exam_schedule_presentation.dart';
+import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
+import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
+import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
+
+final _now = DateTime.utc(2026, 11, 16);
+const _body = '试卷名称：合成考试\n考试时间：11-16 07:06:00 至 11-30 07:06:31\n答题时长：60分钟';
+
+Assignment _exam(
+        {bool notice = false, String clazz = '2', bool trusted = false}) =>
+    Assignment(
+      id: notice ? 'cx:examNotice:inbox:n$clazz' : 'cx:exam:1:$clazz:3',
+      source: AssignmentSource.exam,
+      courseName: '合成课程',
+      title: '合成考试',
+      deadlineAt: null,
+      requirementsText: notice ? _body : '',
+      status: 'pending',
+      lastSyncedAt: _now,
+      exam: ExamInfo(
+        examId: notice ? 'n$clazz' : '3',
+        relatedExamId: notice ? '3' : null,
+        courseId: '1',
+        clazzId: clazz,
+        noticeOnly: notice,
+        startAt: trusted ? _now : null,
+        endAt: trusted ? _now.add(const Duration(hours: 1)) : null,
+        startTrusted: trusted,
+        endTrusted: trusted,
+        durationMinutes: 60,
+        location: '',
+      ),
+    );
+
+class _Store extends AssignmentStore {
+  _Store(this.records)
+      : super(
+          sessionStore: SecureSessionStore(),
+          notificationService: LocalNotificationService(),
+          widgetSnapshotService: WidgetSnapshotService(),
+        );
+  final List<Assignment> records;
+  final hidden = <String>[];
+  bool failSecond = false, throwSecond = false, switchAccount = false;
+  int epoch = 0;
+  @override
+  int get accountEpoch => epoch;
+  @override
+  List<Assignment> get courseAssignments => records;
+  @override
+  Assignment? findAssignment(String id) =>
+      records.where((a) => a.id == id).firstOrNull;
+  @override
+  Future<bool> hideAssignment(String id) async {
+    hidden.add(id);
+    if (switchAccount) epoch++;
+    if (hidden.length == 2 && throwSecond) {
+      throw StateError('synthetic failure');
+    }
+    return !(hidden.length == 2 && failSecond);
+  }
+}
+
+Future<void> _detail(WidgetTester t, _Store store) async {
+  await t.pumpWidget(MaterialApp(
+      home: Scaffold(
+          body: AssignmentDetailScreen(
+              store: store, assignmentId: store.records.first.id))));
+}
+
+void main() {
+  test('static compatibility reads own notice without promoting dates', () {
+    final a = _exam(notice: true);
+    final before = a.toJson();
+    expect(AssignmentCard.examScheduleLines(a),
+        ['考试时间：11-16 07:06:00 至 11-30 07:06:31', '时长 60 分钟']);
+    expect(a.toJson(), before);
+    expect(a.reminderAnchorAt, isNull);
+  });
+
+  test('static compatibility keeps trusted absolute schedule and metadata', () {
+    expect(AssignmentCard.examScheduleLines(_exam(trusted: true)),
+        ['开考 2026年11月16日 08:00', '结束 2026年11月16日 09:00', '时长 60 分钟']);
+  });
+
+  testWidgets(
+      'card uses linked notice sources with no archive button or placeholders',
+      (t) async {
+    final a = _exam(), n = _exam(notice: true);
+    await t.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: AssignmentCard(
+                assignment: a, examSources: [a, n], now: _now, onTap: () {}))));
+    expect(find.text('考试时间：11-16 07:06:00 至 11-30 07:06:31'), findsOneWidget);
+    expect(find.text('时长 60 分钟'), findsOneWidget);
+    expect(find.text('归档'), findsNothing);
+    expect(find.text('—'), findsNothing);
+    expect(find.textContaining('待确认'), findsNothing);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('card does not borrow same title from another class', (t) async {
+    await t.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: AssignmentCard(
+                assignment: _exam(),
+                examSources: [_exam(notice: true, clazz: '9')],
+                now: _now,
+                onTap: () {}))));
+    expect(find.textContaining('07:06'), findsNothing);
+  });
+
+  testWidgets('detail uses source time and a single helper verification note',
+      (t) async {
+    final store = _Store([_exam(), _exam(notice: true)]);
+    addTearDown(store.dispose);
+    final schedule = ExamSchedulePresentation.build(store.records.first,
+        records: store.records);
+    expect(schedule.verificationNote, isNotNull);
+    await _detail(t, store);
+    expect(find.textContaining('考试时间：11-16 07:06:00 至 11-30 07:06:31'),
+        findsOneWidget);
+    expect(find.text(schedule.verificationNote!), findsOneWidget);
+    expect(find.text('部分信息尚未核实'), findsNothing);
+    expect(find.textContaining('地点'), findsNothing);
+    expect(t.takeException(), isNull);
+  });
+
+  for (final mode in ['success', 'false', 'throw', 'account']) {
+    testWidgets('detail hides complete identity sources: $mode', (t) async {
+      final a = _exam(), n = _exam(notice: true);
+      final other = _exam(notice: true, clazz: '9');
+      final store = _Store([a, n, other])
+        ..failSecond = mode == 'false'
+        ..throwSecond = mode == 'throw'
+        ..switchAccount = mode == 'account';
+      addTearDown(store.dispose);
+      final router = GoRouter(initialLocation: '/detail', routes: [
+        GoRoute(
+            path: '/detail',
+            builder: (_, __) => Scaffold(
+                body:
+                    AssignmentDetailScreen(store: store, assignmentId: a.id))),
+        GoRoute(
+            path: '/assignments',
+            builder: (_, __) => const Scaffold(body: Text('返回列表成功'))),
+      ]);
+      addTearDown(router.dispose);
+      await t.pumpWidget(MaterialApp.router(routerConfig: router));
+      await t.pumpAndSettle();
+      final hide = find.widgetWithText(TextButton, '在本机隐藏此考试');
+      // ListView builds offscreen children lazily. Build the action by scrolling
+      // before ensureVisible, which requires an already mounted element.
+      await t.scrollUntilVisible(hide, 250,
+          scrollable: find.byType(Scrollable).first);
+      await t.pumpAndSettle();
+      await Scrollable.ensureVisible(t.element(hide), alignment: 0.5);
+      await t.pumpAndSettle();
+      expect(hide.hitTestable(), findsOneWidget);
+      expect(t.widget<TextButton>(hide).onPressed, isNotNull);
+      await t.tap(hide);
+      await t.pumpAndSettle();
+      expect(store.hidden, mode == 'account' ? [a.id] : [a.id, n.id]);
+      expect(store.hidden, isNot(contains(other.id)));
+      expect(find.text('返回列表成功'),
+          mode == 'success' ? findsOneWidget : findsNothing);
+      if (mode != 'success') {
+        expect(find.textContaining('隐藏失败'), findsOneWidget);
+      }
+      expect(store.records.map((r) => r.status), everyElement('pending'));
+      expect(t.takeException(), isNull);
+    });
+  }
+}

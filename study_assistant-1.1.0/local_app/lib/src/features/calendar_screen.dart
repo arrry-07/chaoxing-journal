@@ -92,9 +92,6 @@ class _CalendarScreenState extends State<CalendarScreen>
             .where(
                 (a) => AssignmentRecoveryScope.deadlinePending.matches(a, now))
             .length;
-        final unknownExamCount = all
-            .where((a) => AssignmentRecoveryScope.examUnknown.matches(a, now))
-            .length;
         final agenda = selected == null
             ? dated.where((a) {
                 final d = AssignmentQuery.dayKey(a.timelineAt!);
@@ -258,6 +255,7 @@ class _CalendarScreenState extends State<CalendarScreen>
               for (final a in agenda)
                 AssignmentCard(
                     assignment: a,
+                    examSources: widget.store.courseAssignments,
                     now: now,
                     showFullDeadline: false,
                     onTap: () => context
@@ -272,9 +270,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                         '${e.kind == 'exam' ? '手动考试' : '个人待办'} · ${e.title}'),
                     subtitle: Text(manualTime(e.at)),
                     onTap: () => context.push('/agenda')),
-              if (noDeadlineCount > 0 ||
-                  pendingDeadlineCount > 0 ||
-                  unknownExamCount > 0) ...[
+              if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
                 const Divider(height: 24),
                 const Text('待核对课业', style: Journal.section),
                 if (noDeadlineCount > 0)
@@ -291,18 +287,6 @@ class _CalendarScreenState extends State<CalendarScreen>
                           AssignmentRecoveryScope.deadlinePending)),
                       icon: const Icon(Icons.help_outline),
                       label: Text('截止时间未知（$pendingDeadlineCount）')),
-                if (unknownExamCount > 0)
-                  ExpansionTile(
-                    initiallyExpanded: false,
-                    title: Text('考试时间未知（$unknownExamCount）'),
-                    children: [
-                      TextButton(
-                        onPressed: () => context.go(_recoveryLocation(
-                            AssignmentRecoveryScope.examUnknown)),
-                        child: const Text('查看考试'),
-                      )
-                    ],
-                  ),
               ],
             ]);
       });
