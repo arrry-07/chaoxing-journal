@@ -57,6 +57,8 @@ class _PreviewArchiveStore extends AssignmentStore {
   @override
   List<Assignment> get homeDisplayAssignments => [preview];
   @override
+  List<Assignment> get homeCatalogAssignments => [preview];
+  @override
   List<Assignment> get courseAssignments => [];
   @override
   Future<bool> hideAssignment(String id) async {

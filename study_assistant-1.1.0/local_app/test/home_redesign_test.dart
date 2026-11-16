@@ -32,6 +32,14 @@ class _Store extends AssignmentStore {
       ? super.homeDisplayAssignments
       : previewAssignments;
   @override
+  List<Assignment> get homeCatalogAssignments => previewAssignments.isEmpty
+      ? super.homeCatalogAssignments
+      : List<Assignment>.unmodifiable([
+          ...super.homeCatalogAssignments.where((base) =>
+              !previewAssignments.any((preview) => preview.id == base.id)),
+          ...previewAssignments,
+        ]);
+  @override
   AssignmentSyncProgress? get homeSyncProgress => previewProgress;
   @override
   bool isHomeAssignmentPreviewOnly(String assignmentId) =>

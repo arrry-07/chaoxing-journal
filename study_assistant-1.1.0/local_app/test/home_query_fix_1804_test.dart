@@ -131,7 +131,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('type filter includes submitted homework while default does not',
+  testWidgets(
+      'home catalog shows submitted homework by default and under type filter',
       (tester) async {
     final rows = [
       _work('done-1', '已提交一', DateTime.utc(2026, 11, 1), status: 'submitted'),
@@ -140,7 +141,7 @@ void main() {
     ];
     final store = _Store(rows);
     await _pump(tester, store);
-    expect(_visibleTitles(tester), ['待提交']);
+    expect(_visibleTitles(tester), ['已提交一', '已提交二', '待提交']);
 
     store.homeFilters = const HomeFilters(
       type: AssignmentTypeFilter.homework,
@@ -149,7 +150,7 @@ void main() {
     store.notifyListeners();
     await tester.pumpAndSettle();
 
-    expect(_visibleTitles(tester), ['待提交', '已提交二', '已提交一']);
+    expect(_visibleTitles(tester), ['已提交一', '已提交二', '待提交']);
     expect(find.text('已提交'), findsNWidgets(2));
   });
 
@@ -179,7 +180,7 @@ void main() {
       _work('done', '历史作业', DateTime.utc(2026, 11, 1), status: 'submitted'),
     ]);
     await _pump(tester, store);
-    expect(find.text('历史作业'), findsNothing);
+    expect(find.text('历史作业'), findsOneWidget);
 
     await tester.tap(find.text('搜索与筛选'));
     await tester.pumpAndSettle();

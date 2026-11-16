@@ -38,7 +38,8 @@ void main() {
         lastSyncedAt: DateTime.now());
     store.replaceAssignmentsForTest([
       work,
-      work.copyWith(id: 'cx:work:1:2:submitted', status: 'submitted')
+      work.copyWith(
+          id: 'cx:work:1:2:submitted', title: '已提交综合实验报告', status: 'submitted')
     ]);
     Future<void> show(Widget page) async {
       await t.pumpWidget(MaterialApp(

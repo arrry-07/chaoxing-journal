@@ -5,8 +5,8 @@ import 'package:study_assistant_mobile/src/app/app_version.dart';
 
 void main() {
   test('experience and exam lifecycle release uses frozen version', () {
-    expect(AppVersion.name, '1.8.05');
-    expect(AppVersion.code, 72);
+    expect(AppVersion.name, '1.8.06');
+    expect(AppVersion.code, 73);
   });
 
   test('AppVersion matches pubspec version', () {

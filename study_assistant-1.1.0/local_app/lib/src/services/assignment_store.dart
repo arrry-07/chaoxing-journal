@@ -489,9 +489,10 @@ class AssignmentStore extends ChangeNotifier {
         index: homeDisplayIndex);
   }
 
-  /// Complete scoped source catalog used only while explicit filters are
-  /// active. It retains notice sources for display-time ordering; the
-  /// unfiltered home continues to use [homeDisplayAssignments].
+  /// Complete scoped source catalog for the home list, including submitted
+  /// homework and ended exams. It retains notice sources for display-time
+  /// ordering and stays consistent while a sync preview is published;
+  /// current-todo callers continue to use [homeDisplayAssignments].
   List<Assignment> get homeCatalogAssignments {
     if (_homeCatalogCache != null) return _homeCatalogCache!;
     if (_homePreviewAssignments.isEmpty) {
@@ -505,6 +506,7 @@ class AssignmentStore extends ChangeNotifier {
       _homePreviewAssignments,
       hiddenCompletedIds:
           _hiddenAssignments.map((assignment) => assignment.id).toSet(),
+      includeCompleted: true,
     );
     final next = List<Assignment>.unmodifiable(_catalogAssignmentsFrom(merged));
     _homeCatalogCache = next;
