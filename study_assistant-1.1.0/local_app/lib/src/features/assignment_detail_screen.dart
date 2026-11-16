@@ -184,10 +184,14 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     final sources = original == null
         ? const <String>[]
         : {
-            original.id,
             ...AssignmentQuery.displaySources(
                     original, widget.store.courseAssignments)
+                .where((a) => a.id != original.id)
                 .map((a) => a.id),
+            // Reload removes hidden rows from findAssignment. Keep this route's
+            // representative until all supplemental writes succeed so partial
+            // failure leaves a usable detail page and retry action.
+            original.id,
           }.toList();
     var hidden = sources.isNotEmpty;
     try {

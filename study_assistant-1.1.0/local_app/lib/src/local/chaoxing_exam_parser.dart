@@ -362,6 +362,9 @@ class ChaoxingExamParser {
     );
   }
 
+  /// Safe plaintext with source line boundaries retained for display parsing.
+  static String noticeBodyForDisplay(String value) => _noticeBody(value);
+
   static String _noticeBody(dynamic value) {
     if (value is! String || value.isEmpty) return '';
     final clean = _withoutNoticeLinks(entities(value

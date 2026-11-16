@@ -14,9 +14,12 @@ final _now = DateTime.utc(2026, 11, 16);
 const _body = '试卷名称：合成考试\n考试时间：11-16 07:06:00 至 11-30 07:06:31\n答题时长：60分钟';
 
 Assignment _exam(
-        {bool notice = false, String clazz = '2', bool trusted = false}) =>
+        {bool notice = false,
+        String clazz = '2',
+        bool trusted = false,
+        String suffix = ''}) =>
     Assignment(
-      id: notice ? 'cx:examNotice:inbox:n$clazz' : 'cx:exam:1:$clazz:3',
+      id: notice ? 'cx:examNotice:inbox:n$clazz$suffix' : 'cx:exam:1:$clazz:3',
       source: AssignmentSource.exam,
       courseName: '合成课程',
       title: '合成考试',
@@ -25,7 +28,7 @@ Assignment _exam(
       status: 'pending',
       lastSyncedAt: _now,
       exam: ExamInfo(
-        examId: notice ? 'n$clazz' : '3',
+        examId: notice ? 'n$clazz$suffix' : '3',
         relatedExamId: notice ? '3' : null,
         courseId: '1',
         clazzId: clazz,
@@ -48,15 +51,18 @@ class _Store extends AssignmentStore {
         );
   final List<Assignment> records;
   final hidden = <String>[];
+  final persistedHidden = <String>{};
+  int reloads = 0;
   bool failSecond = false, throwSecond = false, switchAccount = false;
   int epoch = 0;
   @override
   int get accountEpoch => epoch;
   @override
-  List<Assignment> get courseAssignments => records;
+  List<Assignment> get courseAssignments =>
+      records.where((a) => !persistedHidden.contains(a.id)).toList();
   @override
   Assignment? findAssignment(String id) =>
-      records.where((a) => a.id == id).firstOrNull;
+      courseAssignments.where((a) => a.id == id).firstOrNull;
   @override
   Future<bool> hideAssignment(String id) async {
     hidden.add(id);
@@ -64,7 +70,13 @@ class _Store extends AssignmentStore {
     if (hidden.length == 2 && throwSecond) {
       throw StateError('synthetic failure');
     }
-    return !(hidden.length == 2 && failSecond);
+    if (hidden.length == 2 && failSecond) return false;
+    // Simulate persistence + journal reload: hidden records disappear from
+    // lookup and display sources before notifying the mounted detail page.
+    persistedHidden.add(id);
+    reloads++;
+    notifyListeners();
+    return true;
   }
 }
 
@@ -136,8 +148,9 @@ void main() {
   for (final mode in ['success', 'false', 'throw', 'account']) {
     testWidgets('detail hides complete identity sources: $mode', (t) async {
       final a = _exam(), n = _exam(notice: true);
+      final second = _exam(notice: true, suffix: 'second');
       final other = _exam(notice: true, clazz: '9');
-      final store = _Store([a, n, other])
+      final store = _Store([a, n, second, other])
         ..failSecond = mode == 'false'
         ..throwSecond = mode == 'throw'
         ..switchAccount = mode == 'account';
@@ -167,12 +180,47 @@ void main() {
       expect(t.widget<TextButton>(hide).onPressed, isNotNull);
       await t.tap(hide);
       await t.pumpAndSettle();
-      expect(store.hidden, mode == 'account' ? [a.id] : [a.id, n.id]);
+      if (mode == 'false' || mode == 'throw') {
+        expect(store.findAssignment(a.id), same(a),
+            reason:
+                'Partial archive must retain the detail representative for retry');
+        expect(find.textContaining('尚未在当前账号的本机记录中找到'), findsNothing);
+      }
+      expect(
+          store.hidden,
+          mode == 'account'
+              ? [n.id]
+              : mode == 'success'
+                  ? [n.id, second.id, a.id]
+                  : [n.id, second.id]);
       expect(store.hidden, isNot(contains(other.id)));
       expect(find.text('返回列表成功'),
           mode == 'success' ? findsOneWidget : findsNothing);
       if (mode != 'success') {
         expect(find.textContaining('隐藏失败'), findsOneWidget);
+        expect(store.findAssignment(a.id), same(a));
+        expect(store.findAssignment(n.id), isNull);
+        expect(store.reloads, 1);
+        expect(find.textContaining('尚未在当前账号的本机记录中找到'), findsNothing);
+        expect(hide.hitTestable(), findsOneWidget);
+        expect(t.widget<TextButton>(hide).onPressed, isNotNull);
+        if (mode != 'account') {
+          // Retry without reopening: skip persisted sources, hide primary last.
+          store.failSecond = false;
+          store.throwSecond = false;
+          await t.tap(hide);
+          await t.pumpAndSettle();
+          expect(store.hidden, [n.id, second.id, second.id, a.id]);
+          expect(store.findAssignment(a.id), isNull);
+          expect(store.findAssignment(second.id), isNull);
+          expect(store.findAssignment(other.id), same(other));
+          expect(store.reloads, 3);
+          expect(find.text('返回列表成功'), findsOneWidget);
+        }
+      } else {
+        expect(store.findAssignment(a.id), isNull);
+        expect(store.findAssignment(other.id), same(other));
+        expect(store.reloads, 3);
       }
       expect(store.records.map((r) => r.status), everyElement('pending'));
       expect(t.takeException(), isNull);

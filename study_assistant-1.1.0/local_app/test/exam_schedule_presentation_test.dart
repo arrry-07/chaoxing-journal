@@ -151,4 +151,32 @@ void main() {
             .cardTimeLines,
         isEmpty);
   });
+  test('unlabeled instruction on next line does not hide a valid range', () {
+    final a = notice('考试时间：11-16 08:00 至 11-16 10:00\n请提前到场');
+    expect(ExamSchedulePresentation.build(a).cardTimeLines,
+        ['考试时间：11-16 08:00 至 11-16 10:00']);
+  });
+  test('conflicting duplicate fields never select the first schedule', () {
+    final a = notice(
+        '考试时间：11-16 08:00 至 11-16 10:00\n考试时间：11-17 08:00 至 11-17 10:00');
+    expect(ExamSchedulePresentation.build(a).cardTimeLines, isEmpty);
+    final same = notice(
+        '考试时间：11-16 08:00 至 11-16 10:00\n考试时间：11-16 08:00 至 11-16 10:00');
+    expect(ExamSchedulePresentation.build(same).cardTimeLines, hasLength(1));
+  });
+  test('trusted notification preserves explicitly supplied zero seconds', () {
+    final a = notice('考试时间：2030-04-01 09:00:00 至 2030-04-01 10:00:00').copyWith(
+        exam: ExamInfo(
+            examId: 'n',
+            relatedExamId: '3',
+            courseId: '1',
+            clazzId: '2',
+            noticeOnly: true,
+            startAt: DateTime.utc(2030, 4, 1, 1),
+            endAt: DateTime.utc(2030, 4, 1, 2),
+            startTrusted: true,
+            endTrusted: true));
+    expect(ExamSchedulePresentation.build(a).cardTimeLines,
+        ['开考 2030年4月1日 09:00:00', '结束 2030年4月1日 10:00:00']);
+  });
 }

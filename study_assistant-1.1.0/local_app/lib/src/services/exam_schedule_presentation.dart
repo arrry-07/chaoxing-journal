@@ -14,19 +14,6 @@ class ExamSchedulePresentation {
       {List<Assignment> records = const []}) {
     final e = a.exam;
     if (e == null) return const ExamSchedulePresentation([], [], null);
-    String absolute(DateTime at) =>
-        DateFormat(at.second == 0 ? 'yyyy年M月d日 HH:mm' : 'yyyy年M月d日 HH:mm:ss')
-            .format(AssignmentQuery.beijing(at));
-    final trusted = <String>[
-      if (e.startTrusted && e.startAt != null) '开考 ${absolute(e.startAt!)}',
-      if (e.endTrusted && e.endAt != null) '结束 ${absolute(e.endAt!)}',
-    ];
-    if (e.startTrusted &&
-        e.startAt != null &&
-        e.endTrusted &&
-        e.endAt != null) {
-      return ExamSchedulePresentation(trusted, trusted, null);
-    }
     final sources = AssignmentQuery.displaySources(a, records);
     if (e.noticeOnly && !sources.any((s) => s.id == a.id)) sources.add(a);
     final ranges = <String, _NoticeRange>{};
@@ -47,6 +34,25 @@ class ExamSchedulePresentation {
       if (prior == null || range.precision > prior.precision) {
         ranges[range.key] = range;
       }
+    }
+    String absolute(DateTime at, bool explicitSeconds) =>
+        DateFormat(explicitSeconds || at.second != 0
+                ? 'yyyy年M月d日 HH:mm:ss'
+                : 'yyyy年M月d日 HH:mm')
+            .format(AssignmentQuery.beijing(at));
+    final startSeconds = ranges.values.any((r) => r.start?.second != null);
+    final endSeconds = ranges.values.any((r) => r.end?.second != null);
+    final trusted = <String>[
+      if (e.startTrusted && e.startAt != null)
+        '开考 ${absolute(e.startAt!, startSeconds)}',
+      if (e.endTrusted && e.endAt != null)
+        '结束 ${absolute(e.endAt!, endSeconds)}',
+    ];
+    if (e.startTrusted &&
+        e.startAt != null &&
+        e.endTrusted &&
+        e.endAt != null) {
+      return ExamSchedulePresentation(trusted, trusted, null);
     }
     if (ranges.length > 1) {
       final labels = ranges.values.map((r) => r.label).toList()..sort();
@@ -144,18 +150,27 @@ class _NoticeRange {
           : '结束（通知） ${end!.label}';
   static const labels =
       '考试起止时间|起止时间|考试时间|考试开始时间|开始时间|开考时间|考试结束时间|结束时间|截止时间|答题时长|考试时长|时长|课程名称|试卷名称|考试名称|考试地点|地点';
-  static String field(String body, String name) =>
-      RegExp('(?:^|\\s|[;；。])(?:$name)\\s*[:：]\\s*(.*?)(?=\\s*(?:$labels|[\u4e00-\u9fff]{2,16}|[A-Za-z][A-Za-z ]{1,24})\\s*[:：]|\$)',
-              dotAll: true)
-          .firstMatch(body)?[1] ??
-      '';
+  static List<String> fields(String body, String name) => RegExp(
+          '(?:^|[ \\t;；。])(?:$name)[ \\t]*[:：][ \\t]*(.*?)(?=\\n|[ \\t]+(?:$labels|[\u4e00-\u9fff]{2,16}|[A-Za-z][A-Za-z ]{1,24})[ \\t]*[:：]|\$)',
+          multiLine: true)
+      .allMatches(body)
+      .map((m) => m[1]!.trim())
+      .where((v) => v.isNotEmpty)
+      .toSet()
+      .toList();
   static _NoticeRange? read(String raw) {
-    final body = ChaoxingExamParser.text(raw);
-    final range = _WallTime.read(field(body, '考试起止时间|起止时间|考试时间'));
-    if (range.length == 2) return _NoticeRange(range[0], range[1]);
-    if (range.isNotEmpty) return null;
-    final starts = _WallTime.read(field(body, '考试开始时间|开始时间|开考时间'));
-    final ends = _WallTime.read(field(body, '考试结束时间|结束时间|截止时间'));
+    final body = ChaoxingExamParser.noticeBodyForDisplay(raw);
+    final values = fields(body, '考试起止时间|起止时间|考试时间');
+    if (values.length > 1) return null;
+    if (values.isNotEmpty) {
+      final range = _WallTime.read(values.single);
+      return range.length == 2 ? _NoticeRange(range[0], range[1]) : null;
+    }
+    final startValues = fields(body, '考试开始时间|开始时间|开考时间');
+    final endValues = fields(body, '考试结束时间|结束时间|截止时间');
+    if (startValues.length > 1 || endValues.length > 1) return null;
+    final starts = _WallTime.read(startValues.firstOrNull ?? '');
+    final ends = _WallTime.read(endValues.firstOrNull ?? '');
     if (starts.length > 1 ||
         ends.length > 1 ||
         (starts.isEmpty && ends.isEmpty)) {
