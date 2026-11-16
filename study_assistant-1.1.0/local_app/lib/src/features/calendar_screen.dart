@@ -19,7 +19,8 @@ class CalendarScreen extends StatefulWidget {
   State<CalendarScreen> createState() => _CalendarScreenState();
 }
 
-class _CalendarScreenState extends State<CalendarScreen> {
+class _CalendarScreenState extends State<CalendarScreen>
+    with WidgetsBindingObserver {
   Timer? _clock;
   late DateTime _now;
   late DateTime today;
@@ -29,6 +30,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _now = widget.clock?.call() ?? DateTime.now();
     today = AssignmentQuery.dayKey(_now);
     month = DateTime(today.year, today.month);
@@ -44,8 +46,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _clock?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    setState(() {
+      _now = widget.clock?.call() ?? DateTime.now();
+      today = AssignmentQuery.dayKey(_now);
+    });
   }
 
   void move(int delta) => setState(() {
@@ -57,7 +69,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
       animation: widget.store,
       builder: (context, _) {
         final now = _now;
-        final all = widget.store.visibleAssignments;
+        final all =
+            AssignmentQuery.projectDisplay(widget.store.courseAssignments);
         final manual = widget.store.notebook.entries
             .where((e) => !e.done && e.at != null)
             .toList();
@@ -78,6 +91,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
         final pendingDeadlineCount = all
             .where(
                 (a) => AssignmentRecoveryScope.deadlinePending.matches(a, now))
+            .length;
+        final unknownExamCount = all
+            .where((a) => AssignmentRecoveryScope.examUnknown.matches(a, now))
             .length;
         final agenda = selected == null
             ? dated.where((a) {
@@ -256,9 +272,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         '${e.kind == 'exam' ? '手动考试' : '个人待办'} · ${e.title}'),
                     subtitle: Text(manualTime(e.at)),
                     onTap: () => context.push('/agenda')),
-              if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
+              if (noDeadlineCount > 0 ||
+                  pendingDeadlineCount > 0 ||
+                  unknownExamCount > 0) ...[
                 const Divider(height: 24),
-                const Text('待核对作业', style: Journal.section),
+                const Text('待核对课业', style: Journal.section),
                 if (noDeadlineCount > 0)
                   TextButton.icon(
                       key: const ValueKey('calendar-no-deadline-scope'),
@@ -272,7 +290,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       onPressed: () => context.go(_recoveryLocation(
                           AssignmentRecoveryScope.deadlinePending)),
                       icon: const Icon(Icons.help_outline),
-                      label: Text('截止待确认（$pendingDeadlineCount）')),
+                      label: Text('截止时间未知（$pendingDeadlineCount）')),
+                if (unknownExamCount > 0)
+                  ExpansionTile(
+                    initiallyExpanded: false,
+                    title: Text('考试时间未知（$unknownExamCount）'),
+                    children: [
+                      TextButton(
+                        onPressed: () => context.go(_recoveryLocation(
+                            AssignmentRecoveryScope.examUnknown)),
+                        child: const Text('查看考试'),
+                      )
+                    ],
+                  ),
               ],
             ]);
       });

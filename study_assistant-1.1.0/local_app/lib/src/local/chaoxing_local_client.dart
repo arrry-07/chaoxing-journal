@@ -83,6 +83,7 @@ class ChaoxingLocalClient {
       Future<void>.delayed(delay);
 
   final _requestStats = <String, _RequestStats>{};
+  Map<String, Response<dynamic>>? _syncCourseEntries;
   final _openCircuits = <String, SyncIssue>{};
   final _consecutiveTransientFailures = <String, int>{};
   int _syncRetryCount = 0;
@@ -91,6 +92,7 @@ class ChaoxingLocalClient {
   void Function(AssignmentSyncProgress)? onProgress;
 
   void cancelActiveRequests({bool reportCancelled = true}) {
+    _syncCourseEntries = null;
     _stopRequested = reportCancelled;
     _activeRequestToken?.cancel('主动停止后台学习通请求');
     _activeRequestToken = null;
@@ -98,6 +100,7 @@ class ChaoxingLocalClient {
   }
 
   CancelToken _startRequestToken() {
+    _syncCourseEntries = null;
     _activeRequestToken?.cancel('开始新的学习通请求');
     _stopRequested = false;
     return _activeRequestToken = CancelToken();
@@ -149,12 +152,20 @@ class ChaoxingLocalClient {
 
   static String _requestKind(String path) {
     if (path == '/mycourse/backclazzdata') return '课程列表';
-    if (path.contains('stucoursemiddle')) return '课程入口';
+    if (path.contains('stucoursemiddle') || path == '/mooc2-ans/mycourse/stu') {
+      return '课程入口';
+    }
     if (path.contains('stu-base-info')) return '课程导航';
     if (path.endsWith('/work/list') || path.endsWith('/work/api/task')) {
       return '作业列表';
     }
     if (path.contains('/work/')) return '作业详情';
+    if (path.contains('/examcode/examlist')) return '账号考试';
+    if (path.contains('/exam/') ||
+        path.contains('/exam-ans/') ||
+        path.endsWith('/examList')) {
+      return '课程考试';
+    }
     return '其他';
   }
 
@@ -444,6 +455,7 @@ class ChaoxingLocalClient {
     final generation = _sessionGeneration;
     final syncWatch = Stopwatch()..start();
     _resetSyncTracking(clearRequestStats: false);
+    final entryCache = _syncCourseEntries = <String, Response<dynamic>>{};
     issues = [];
     sourceResults = const [];
     _deadlineReadsBlockedBy = null;
@@ -478,6 +490,7 @@ class ChaoxingLocalClient {
         issues.add(e.issue);
       }
       if (generation != _sessionGeneration) return const [];
+      if (rows == null) _syncCourseEntries?.clear();
       sourceResults = [
         _formalSourceResult(
             rows ?? const [], rows == null ? 0 : 1, rows == null ? 1 : 0)
@@ -497,6 +510,7 @@ class ChaoxingLocalClient {
       }
       return _dedupeAssignments([...?rows, ...classroom.rows, ...exams]);
     } finally {
+      if (identical(_syncCourseEntries, entryCache)) _syncCourseEntries = null;
       if (generation == _sessionGeneration) {
         _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
       }
@@ -508,6 +522,7 @@ class ChaoxingLocalClient {
     final generation = _sessionGeneration;
     final syncWatch = Stopwatch()..start();
     _resetSyncTracking(clearRequestStats: true);
+    final entryCache = _syncCourseEntries = <String, Response<dynamic>>{};
     final progress =
         onProgress == null ? null : _SyncProgressTracker(onProgress!);
     progress?.setStage(AssignmentSyncStage.courses);
@@ -588,6 +603,7 @@ class ChaoxingLocalClient {
         }
         final label = '${course.courseName}（班级 ${course.clazzId}）';
         if (work == null) {
+          _syncCourseEntries?.clear();
           failedCourses++;
           final issue = SyncIssue(failure?.kind ?? SyncIssueKind.schemaChanged,
               '$label ${failure?.message ?? '作业页签名或列表无法识别'}',
@@ -678,6 +694,7 @@ class ChaoxingLocalClient {
       }
       return _dedupeAssignments(assignments);
     } finally {
+      if (identical(_syncCourseEntries, entryCache)) _syncCourseEntries = null;
       if (generation == _sessionGeneration) {
         _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
       }
@@ -1495,8 +1512,8 @@ class ChaoxingLocalClient {
       if (uri.scheme != 'https' || !uri.host.endsWith('.chaoxing.com')) {
         return null;
       }
-      final response = await _safeGet<dynamic>(uri.toString(),
-          headers: {'User-Agent': courseUserAgent}, requestKind: requestKind);
+      final response = await _readCourseEntryOrGet(uri,
+          generation: expectedGeneration, requestKind: requestKind);
       if (expectedGeneration != _sessionGeneration) return null;
       if (response == null || (response.statusCode ?? 0) < 300) {
         if (kDebugMode) {
@@ -1524,6 +1541,52 @@ class ChaoxingLocalClient {
   }
 
   // ---------- Shared ----------
+
+  /// Share only a successful terminal credential page within one refresh. The
+  /// callers still validate redirects independently; never cache a redirect,
+  /// failed/missing credential response, or a page from a replaced session.
+  Future<Response<dynamic>?> _readCourseEntryOrGet(Uri uri,
+      {required int generation, String? requestKind}) async {
+    final cache = _syncCourseEntries;
+    final token = _activeRequestToken;
+    final eligible = cache != null &&
+        uri.scheme == 'https' &&
+        ((uri.host == 'mooc1.chaoxing.com' &&
+                uri.path == '/visit/stucoursemiddle') ||
+            (uri.host == 'mooc2-ans.chaoxing.com' &&
+                uri.path == '/mooc2-ans/mycourse/stu')) &&
+        uri.userInfo.isEmpty &&
+        !uri.hasFragment &&
+        uri.port == 443;
+    // Canonicalize only parameter order, not identities or signature values.
+    final keys = uri.queryParametersAll.keys.toList()..sort();
+    final key = uri.replace(queryParameters: {
+      for (final k in keys) k: uri.queryParametersAll[k]!,
+    }).toString();
+    if (generation != _sessionGeneration ||
+        _stopRequested ||
+        token?.isCancelled == true) {
+      return null;
+    }
+    if (eligible && cache.containsKey(key)) return cache[key];
+    final response = await _safeGet<dynamic>(uri.toString(),
+        headers: {'User-Agent': courseUserAgent}, requestKind: requestKind);
+    if (eligible &&
+        identical(cache, _syncCourseEntries) &&
+        identical(token, _activeRequestToken) &&
+        !_stopRequested &&
+        generation == _sessionGeneration &&
+        response?.statusCode == 200) {
+      final html = response?.data?.toString() ?? '';
+      if (ChaoxingAssignmentParser.hiddenValue(html, 'workEnc')?.isNotEmpty ==
+              true &&
+          ChaoxingAssignmentParser.hiddenValue(html, 'examEnc')?.isNotEmpty ==
+              true) {
+        cache[key] = response!;
+      }
+    }
+    return response;
+  }
 
   Future<Response<T>?> _safeGet<T>(
     String uri, {

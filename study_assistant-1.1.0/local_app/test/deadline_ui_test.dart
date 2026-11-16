@@ -181,7 +181,7 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('card keeps the original placeholder time rail without a time',
+  testWidgets('undated card removes placeholder rail and aligns content',
       (tester) async {
     final assignment = Assignment(
       id: 'cx:work:1:2:no-time',
@@ -204,8 +204,18 @@ void main() {
       ),
     ));
 
-    expect(find.text('—'), findsOneWidget);
+    expect(find.text('—'), findsNothing);
     expect(find.text('无期限'), findsOneWidget);
+    final title = find.text('无时间作业');
+    final course = find.text('课程');
+    final deadline = find.text('无期限');
+    expect(title, findsOneWidget);
+    expect(course, findsOneWidget);
+    final cardLeft = tester.getTopLeft(find.byType(AssignmentCard)).dx;
+    expect(tester.getTopLeft(title).dx, cardLeft);
+    expect(tester.getTopLeft(course).dx, cardLeft);
+    expect(tester.getTopLeft(deadline).dx, cardLeft);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('card marks the exact deadline instant as overdue',

@@ -79,14 +79,6 @@ int _compareKey(_NaturalKey left, _NaturalKey right) {
   return _compareNatural(left.raw, right.raw);
 }
 
-int _deadlineGroupRank(AssignmentDeadlineBucket bucket) => switch (bucket) {
-      AssignmentDeadlineBucket.notExpiredWithDeadline => 0,
-      AssignmentDeadlineBucket.confirmedNoDeadline => 1,
-      AssignmentDeadlineBucket.unconfirmed => 2,
-      AssignmentDeadlineBucket.overdue => 3,
-      AssignmentDeadlineBucket.completed => 4,
-    };
-
 int _nameGroupRank(AssignmentDeadlineBucket bucket) => switch (bucket) {
       AssignmentDeadlineBucket.notExpiredWithDeadline ||
       AssignmentDeadlineBucket.confirmedNoDeadline =>
@@ -156,6 +148,160 @@ class AssignmentQuery {
                   followed.contains(a.courseKey)))
           .toList();
 
+  /// Display-only identity. Never use this projection for persistence/statistics.
+  static String? examDisplayKey(Assignment a) {
+    if (!a.hasExamIdentity) return null;
+    final e = a.exam!;
+    final course = e.courseId, clazz = e.clazzId;
+    final exam = e.noticeOnly ? e.relatedExamId : e.examId;
+    bool valid(String? v) => v != null && RegExp(r'^[0-9]+$').hasMatch(v);
+    if (!valid(course) || !valid(clazz) || !valid(exam)) return null;
+    return '$course:$clazz:$exam';
+  }
+
+  /// All original source IDs remain available for details/archive integration.
+  static List<Assignment> displaySources(
+      Assignment representative, List<Assignment> records) {
+    final key = examDisplayKey(representative);
+    return key == null
+        ? [representative]
+        : records.where((a) => examDisplayKey(a) == key).toList();
+  }
+
+  static Assignment _supplementDisplay(
+      Assignment primary, List<Assignment> sources) {
+    if (!primary.isExam || sources.length < 2) return primary;
+    final e = primary.exam!;
+    final notices =
+        sources.where((a) => a.exam!.noticeOnly).map((a) => a.exam!).toList();
+    if (notices.isEmpty) return primary;
+    final starts = notices
+        .where((n) => n.startTrusted && n.startAt != null)
+        .map((n) => n.startAt!.toUtc())
+        .toSet();
+    final ends = notices
+        .where((n) => n.endTrusted && n.endAt != null)
+        .map((n) => n.endAt!.toUtc())
+        .toSet();
+    final states =
+        notices.map((n) => n.lifecycle).where((v) => v != 'unknown').toSet();
+    final locations = notices
+        .map((n) => n.location.trim())
+        .where((v) => v.isNotEmpty)
+        .toSet();
+    final durations =
+        notices.map((n) => n.durationMinutes).whereType<int>().toSet();
+    final uniqueStart = starts.length == 1 ? starts.single : null;
+    final uniqueEnd = ends.length == 1 ? ends.single : null;
+    final conflict = starts.length > 1 ||
+        ends.length > 1 ||
+        states.length > 1 ||
+        (uniqueStart != null &&
+            uniqueEnd != null &&
+            uniqueEnd.isBefore(uniqueStart));
+    // Sync time and hashed resource IDs say nothing about publication order.
+    // Conflicting notices remain discoverable but cannot retire an exam.
+    if (e.noticeOnly && conflict) {
+      return primary.copyWith(
+          exam: ExamInfo(
+        examId: e.examId,
+        relatedExamId: e.relatedExamId,
+        courseId: e.courseId,
+        clazzId: e.clazzId,
+        startAt: e.startAt,
+        endAt: e.endAt,
+        startTrusted: false,
+        endTrusted: false,
+        lifecycle: 'unknown',
+        noticeOnly: true,
+        location: locations.length == 1 ? locations.single : '',
+        durationMinutes: durations.length == 1 ? durations.single : null,
+      ));
+    }
+    final contradictsFormal = !e.noticeOnly &&
+        ((e.startTrusted &&
+                e.startAt != null &&
+                starts.any((v) => v != e.startAt!.toUtc())) ||
+            (e.endTrusted &&
+                e.endAt != null &&
+                ends.any((v) => v != e.endAt!.toUtc())) ||
+            (e.lifecycle != 'unknown' && states.any((v) => v != e.lifecycle)));
+    final canSupplementTime = !conflict && !contradictsFormal;
+    var start = e.startAt ?? (canSupplementTime ? uniqueStart : null);
+    var end = e.endAt ?? (canSupplementTime ? uniqueEnd : null);
+    if (start != null && end != null && end.isBefore(start)) {
+      start = e.startAt;
+      end = e.endAt;
+    }
+    return primary.copyWith(
+        exam: ExamInfo(
+      examId: e.examId, relatedExamId: e.relatedExamId,
+      courseId: e.courseId, clazzId: e.clazzId,
+      startAt: start, endAt: end,
+      startTrusted: e.startAt != null ? e.startTrusted : start != null,
+      endTrusted: e.endAt != null ? e.endTrusted : end != null,
+      // A notice cannot resolve an unknown formal lifecycle without chronology.
+      lifecycle: e.lifecycle, noticeOnly: e.noticeOnly,
+      location: e.location.isEmpty && locations.length == 1
+          ? locations.single
+          : e.location,
+      durationMinutes: e.durationMinutes ??
+          (durations.length == 1 ? durations.single : null),
+    ));
+  }
+
+  /// Select a real record, preserving its original ID and submission state.
+  /// A formal exam wins over its notices, including when it is submitted.
+  static List<Assignment> projectDisplay(List<Assignment> records) {
+    final representatives = <String, Assignment>{};
+    final sources = <String, List<Assignment>>{};
+    for (final a in records) {
+      final key = examDisplayKey(a);
+      if (key == null) continue;
+      sources.putIfAbsent(key, () => []).add(a);
+      final previous = representatives[key];
+      if (previous == null ||
+          (previous.exam!.noticeOnly && !a.exam!.noticeOnly) ||
+          (previous.exam!.noticeOnly == a.exam!.noticeOnly &&
+              a.id.compareTo(previous.id) < 0)) {
+        representatives[key] = a;
+      }
+    }
+    final emitted = <String>{};
+    return [
+      for (final a in records)
+        if (examDisplayKey(a) case final key?) ...[
+          if (emitted.add(key))
+            _supplementDisplay(representatives[key]!, sources[key]!),
+        ] else
+          a
+    ];
+  }
+
+  static bool isExamEnded(Assignment a, DateTime now) {
+    if (!a.isExam) return false;
+    final e = a.exam!;
+    return e.lifecycle == 'ended' ||
+        e.lifecycle == 'cancelled' ||
+        (e.endTrusted && e.endAt != null && !e.endAt!.isAfter(now));
+  }
+
+  static List<Assignment> currentDisplay(
+          List<Assignment> records, DateTime now) =>
+      projectDisplay(records)
+          .where((a) => !a.isCompleted && !isExamEnded(a, now))
+          .toList();
+
+  static bool isUnknownExam(Assignment a, DateTime now) =>
+      a.isExam &&
+      !a.isCompleted &&
+      !isExamEnded(a, now) &&
+      (!a.timelineTrusted || a.timelineAt == null);
+
+  static List<Assignment> calendarDisplay(
+          List<Assignment> records, DateTime now) =>
+      projectDisplay(records).where((a) => isCalendarDated(a, now)).toList();
+
   static bool _hasTrustedPendingDeadline(Assignment assignment) =>
       assignment.isPendingConfirmed &&
       assignment.timelineTrusted &&
@@ -185,19 +331,22 @@ class AssignmentQuery {
         AssignmentTypeFilter.all => true,
         AssignmentTypeFilter.homework => assignment.isFormal,
         AssignmentTypeFilter.task => assignment.isSupportedClassroomTask,
-        AssignmentTypeFilter.exam =>
-          assignment.isExam && assignment.exam?.noticeOnly == false,
+        AssignmentTypeFilter.exam => assignment.isExam,
         AssignmentTypeFilter.examNotice =>
           assignment.isExam && assignment.exam?.noticeOnly == true,
       };
 
   static bool isCalendarDated(Assignment assignment, DateTime now) {
-    if (assignment.isCompleted ||
+    if ((!assignment.isExam && assignment.isCompleted) ||
         !assignment.timelineTrusted ||
         assignment.timelineAt == null) {
       return false;
     }
-    if (assignment.isExam) return true;
+    if (assignment.isExam) {
+      final pastDay = dayKey(assignment.timelineAt!).isBefore(dayKey(now));
+      return (!assignment.isCompleted && !isExamEnded(assignment, now)) ||
+          pastDay;
+    }
     final bucket = assignment.deadlineBucketAt(now);
     return bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
         bucket == AssignmentDeadlineBucket.overdue;
@@ -215,7 +364,7 @@ class AssignmentQuery {
     required DateTime now,
   }) {
     final needle = query.trim().toLowerCase();
-    return scope(records, followed).where((a) {
+    return currentDisplay(scope(records, followed), now).where((a) {
       if (a.isCompleted ||
           !matchesType(a, type) ||
           (courseKey != null && a.courseKey != courseKey)) {
@@ -254,6 +403,20 @@ class AssignmentQuery {
     }).toList();
   }
 
+  /// Recommendation is independent of the user's chronological list order.
+  static Assignment? nextActionable(List<Assignment> records,
+      {required DateTime now}) {
+    final eligible = currentDisplay(scope(records, {}), now)
+        .where((a) =>
+            a.isPendingConfirmed &&
+            a.timelineTrusted &&
+            (a.isExam || !a.deadlineReadFailed) &&
+            a.timelineAt != null &&
+            a.timelineAt!.isAfter(now))
+        .toList();
+    return sortHome(eligible, HomeSortOrder.deadlineAsc, now: now).firstOrNull;
+  }
+
   static List<Assignment> sortHome(
     List<Assignment> records,
     HomeSortOrder order, {
@@ -269,18 +432,41 @@ class AssignmentQuery {
     prepared.sort((left, right) {
       if (order == HomeSortOrder.deadlineAsc ||
           order == HomeSortOrder.deadlineDesc) {
-        final group = _deadlineGroupRank(left.bucket)
-            .compareTo(_deadlineGroupRank(right.bucket));
-        if (group != 0) return group;
-        if (left.bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
-            left.bucket == AssignmentDeadlineBucket.overdue) {
-          final deadline = left.assignment.timelineAt!
-              .compareTo(right.assignment.timelineAt!);
-          if (deadline != 0) {
-            return order == HomeSortOrder.deadlineDesc ? -deadline : deadline;
+        final leftTime = left.assignment.timelineTrusted &&
+                (left.assignment.isExam || !left.assignment.deadlineReadFailed)
+            ? left.assignment.timelineAt
+            : null;
+        final rightTime = right.assignment.timelineTrusted &&
+                (right.assignment.isExam ||
+                    !right.assignment.deadlineReadFailed)
+            ? right.assignment.timelineAt
+            : null;
+        if (leftTime == null && rightTime != null) return 1;
+        if (rightTime == null && leftTime != null) return -1;
+        if (leftTime != null && rightTime != null) {
+          final time = leftTime.compareTo(rightTime);
+          if (time != 0) {
+            return order == HomeSortOrder.deadlineDesc ? -time : time;
           }
         }
         return left.compareNameKeys(right, HomeSortOrder.courseName);
+      }
+      if (order == HomeSortOrder.courseName) {
+        final course = _compareKey(left.course, right.course);
+        if (course != 0) return course;
+        final l = (left.assignment.timelineTrusted &&
+                (left.assignment.isExam || !left.assignment.deadlineReadFailed))
+            ? left.assignment.timelineAt
+            : null;
+        final r = right.assignment.timelineTrusted &&
+                (right.assignment.isExam ||
+                    !right.assignment.deadlineReadFailed)
+            ? right.assignment.timelineAt
+            : null;
+        if (l == null && r != null) return 1;
+        if (r == null && l != null) return -1;
+        if (l != null && r != null && l != r) return l.compareTo(r);
+        return left.compareNameKeys(right, order);
       }
       final group =
           _nameGroupRank(left.bucket).compareTo(_nameGroupRank(right.bucket));
@@ -293,7 +479,7 @@ class AssignmentQuery {
   static HomeAssignmentGroups home(
       List<Assignment> records, DateTime now, Set<String> followed) {
     final g = HomeAssignmentGroups();
-    for (final a in scope(records, followed).where((a) => !a.isCompleted)) {
+    for (final a in currentDisplay(scope(records, followed), now)) {
       switch (timelineBucketAt(a, now)) {
         case AssignmentDeadlineBucket.completed:
           break;
@@ -338,7 +524,7 @@ class AssignmentQuery {
     Set<String> followed, {
     required DateTime now,
   }) =>
-      scope(records, followed).where((assignment) {
+      projectDisplay(scope(records, followed)).where((assignment) {
         return isCalendarDated(assignment, now) &&
             dayKey(assignment.timelineAt!) ==
                 DateTime(day.year, day.month, day.day);

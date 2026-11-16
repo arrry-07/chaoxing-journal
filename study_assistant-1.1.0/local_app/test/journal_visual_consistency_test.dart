@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
@@ -31,7 +32,8 @@ void main() {
         theme: StudyAssistantTheme.light,
         home: Scaffold(body: AssignmentListScreen(store: s))));
     expect(find.text('课业手记'), findsOneWidget);
-    expect(find.text('CAMPUS JOURNAL   /   01'), findsOneWidget);
+    expect(find.text('CAMPUS JOURNAL   /   01'), findsNothing);
+    expect(t.widget<Text>(find.text('课业手记')).style, Journal.display);
     expect(find.byTooltip('刷新作业'), findsOneWidget);
     expect(find.byTooltip('同步详情'), findsOneWidget);
   });

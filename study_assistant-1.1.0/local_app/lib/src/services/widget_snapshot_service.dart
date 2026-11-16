@@ -38,7 +38,7 @@ class WidgetSnapshotService {
     ];
     final items = pending.take(6).map(
       (assignment) {
-        final bucket = assignment.deadlineBucketAt(now);
+        final bucket = AssignmentQuery.timelineBucketAt(assignment, now);
         final hasTrustedTime =
             bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
                 bucket == AssignmentDeadlineBucket.overdue;
@@ -46,23 +46,31 @@ class WidgetSnapshotService {
           assignmentId: assignment.id,
           title: assignment.title,
           courseName: assignment.courseName,
-          deadlineAt: hasTrustedTime ? assignment.deadlineAt : null,
+          deadlineAt: hasTrustedTime ? assignment.timelineAt : null,
           remainingText: switch (bucket) {
             AssignmentDeadlineBucket.overdue => '已逾期',
-            AssignmentDeadlineBucket.notExpiredWithDeadline =>
-              _remainingText(assignment.deadlineAt!, now),
+            AssignmentDeadlineBucket.notExpiredWithDeadline => assignment.isExam
+                ? (assignment.timelineAt!.isAfter(now)
+                    ? '距开考 ${_remainingText(assignment.timelineAt!, now)}'
+                    : '已开考')
+                : _remainingText(assignment.timelineAt!, now),
             AssignmentDeadlineBucket.confirmedNoDeadline =>
               assignment.deadlineLabel,
-            AssignmentDeadlineBucket.unconfirmed =>
-              assignment.deadlineReadFailed || !assignment.deadlineTrusted
-                  ? assignment.deadlineLabel
-                  : '状态或截止待确认',
+            AssignmentDeadlineBucket.unconfirmed => assignment.isExam
+                ? '考试时间未知'
+                : (assignment.deadlineReadFailed || !assignment.deadlineTrusted
+                    ? assignment.deadlineLabel
+                    : '状态或截止待确认'),
             AssignmentDeadlineBucket.completed => '已完成',
           },
-          urgencyLevel: _urgencyLevel(
-            hasTrustedTime ? assignment.deadlineAt : null,
-            now,
-          ),
+          urgencyLevel: assignment.isExam &&
+                  assignment.timelineAt != null &&
+                  !assignment.timelineAt!.isAfter(now)
+              ? 'normal'
+              : _urgencyLevel(
+                  hasTrustedTime ? assignment.timelineAt : null,
+                  now,
+                ),
           deepLinkUrl: AppDeepLinks.assignmentUri(assignment.id),
         );
       },

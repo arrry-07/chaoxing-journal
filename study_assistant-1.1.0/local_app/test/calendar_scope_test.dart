@@ -164,12 +164,12 @@ void main() {
     await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: CalendarScreen(store: store))));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('截止待确认（6）'), 200,
+    await tester.scrollUntilVisible(find.text('截止时间未知（6）'), 200,
         scrollable: find.byType(Scrollable).first);
 
-    expect(find.text('待核对作业'), findsOneWidget);
+    expect(find.text('待核对课业'), findsOneWidget);
     expect(find.text('无截止日期（1）'), findsOneWidget);
-    expect(find.text('截止待确认（6）'), findsOneWidget);
+    expect(find.text('截止时间未知（6）'), findsOneWidget);
     expect(find.text('保留但不可信的日期'), findsNothing);
     expect(find.text('读取失败后保留的日期'), findsNothing);
     expect(find.text('状态未知但有日期'), findsNothing);
@@ -207,26 +207,26 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(CalendarScreen), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('截止待确认（1）'), 200,
+    await tester.scrollUntilVisible(find.text('截止时间未知（1）'), 200,
         scrollable: find.byType(Scrollable).first);
-    await tester.ensureVisible(find.text('截止待确认（1）'));
+    await tester.ensureVisible(find.text('截止时间未知（1）'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('截止待确认（1）'));
+    await tester.tap(find.text('截止时间未知（1）'));
     await tester.pumpAndSettle();
 
     expect(find.byType(AssignmentListScreen), findsOneWidget);
-    expect(find.text('临时范围 · 截止待确认'), findsOneWidget);
+    expect(find.text('截止时间未知'), findsOneWidget);
     expect(find.textContaining('共 1 项'), findsOneWidget);
     expect(find.text('被首页筛选隐藏的待确认作业'), findsOneWidget);
-    expect(find.text('退出临时范围'), findsOneWidget);
+    expect(find.text('返回全部'), findsOneWidget);
     expect(store.homeFilters.query, '完全不匹配');
     expect(store.homeFilters.courseKey, 'other:key');
     expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
     expect(store.homeFilters.sortOrder, HomeSortOrder.title);
 
-    await tester.tap(find.text('退出临时范围'));
+    await tester.tap(find.text('返回全部'));
     await tester.pumpAndSettle();
-    expect(find.text('临时范围 · 截止待确认'), findsNothing);
+    expect(find.text('截止时间未知'), findsNothing);
     expect(find.text('没有符合搜索、类型或期限条件的记录'), findsOneWidget);
     expect(store.homeFilters.query, '完全不匹配');
     expect(store.homeFilters.sortOrder, HomeSortOrder.title);
@@ -274,7 +274,7 @@ void main() {
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
     await tester.pumpAndSettle();
 
-    expect(find.text('临时范围 · 截止待确认'), findsOneWidget);
+    expect(find.text('截止时间未知'), findsOneWidget);
     expect(find.textContaining('共 1 项'), findsOneWidget);
     expect(find.text('待确认作业'), findsOneWidget);
     expect(find.text('已筛选'), findsNothing);
@@ -291,9 +291,9 @@ void main() {
     expect(persisted.deadline, AssignmentDeadlineFilter.notExpired);
     expect(persisted.sortOrder, HomeSortOrder.deadlineDesc);
 
-    await tester.tap(find.text('退出临时范围'));
+    await tester.tap(find.text('返回全部'));
     await tester.pumpAndSettle();
-    expect(find.text('临时范围 · 截止待确认'), findsNothing);
+    expect(find.text('截止时间未知'), findsNothing);
     expect(find.text('没有符合搜索、类型或期限条件的记录'), findsOneWidget);
     expect(store.homeFilters.query, '首页搜索');
     expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);

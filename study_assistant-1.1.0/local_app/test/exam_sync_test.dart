@@ -64,6 +64,11 @@ class ExamFixture {
           body =
               '<input id="workEnc" value="synthetic"><input id="examEnc" value="synthetic">';
           middleReads++;
+          // Force the exam reader to revisit the entry in redirect scenarios;
+          // a complete first credential page is legitimately shared in-sync.
+          if (redirectedMiddle && middleReads == 1) {
+            body = '<input id="workEnc" value="synthetic">';
+          }
           if (redirectedMiddle && middleReads > 1) {
             status = 302;
             headers['location'] = [

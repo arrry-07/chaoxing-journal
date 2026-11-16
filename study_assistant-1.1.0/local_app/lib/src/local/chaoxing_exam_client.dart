@@ -383,9 +383,13 @@ extension _ExamCollection on ChaoxingLocalClient {
       if (isCoursePage && found.length != 2) {
         throw StateError('unsafeExamRedirect');
       }
-      final response = await _safeGet<dynamic>(uri.toString(),
-          headers: {'User-Agent': ChaoxingLocalClient.courseUserAgent},
-          requestKind: '课程考试');
+      final response = await _readCourseEntryOrGet(uri,
+          generation: generation,
+          requestKind: uri.path.contains('/examcode/examlist')
+              ? '账号考试'
+              : uri.path == '/visit/stucoursemiddle'
+                  ? '课程入口'
+                  : '课程考试');
       if (generation != _sessionGeneration) return null;
       if (response == null || (response.statusCode ?? 0) < 300) return response;
       final location = response.headers.value('location');

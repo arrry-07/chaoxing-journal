@@ -99,23 +99,23 @@ void main() {
 
     final expected = {
       HomeSortOrder.grouped: (
-        ['Alpha 作业', 'Beta 作业', 'Gamma 作业', 'Delta 作业', 'Unknown 作业'],
+        ['Alpha 作业', 'Beta 作业', 'Gamma 作业', 'Unknown 作业', 'Delta 作业'],
         [_heading(dayOne), _heading(dayTwo)],
       ),
       HomeSortOrder.deadlineAsc: (
-        ['Alpha 作业', 'Beta 作业', 'Gamma 作业', 'Delta 作业', 'Unknown 作业'],
+        ['Alpha 作业', 'Beta 作业', 'Gamma 作业', 'Unknown 作业', 'Delta 作业'],
         [_heading(dayOne), _heading(dayTwo)],
       ),
       HomeSortOrder.deadlineDesc: (
-        ['Gamma 作业', 'Beta 作业', 'Alpha 作业', 'Delta 作业', 'Unknown 作业'],
+        ['Gamma 作业', 'Beta 作业', 'Alpha 作业', 'Unknown 作业', 'Delta 作业'],
         [_heading(dayTwo), _heading(dayOne)],
       ),
       HomeSortOrder.courseName: (
-        ['Beta 作业', 'Gamma 作业', 'Alpha 作业', 'Delta 作业', 'Unknown 作业'],
+        ['Beta 作业', 'Gamma 作业', 'Alpha 作业', 'Unknown 作业', 'Delta 作业'],
         [_heading(dayOne), _heading(dayTwo), _heading(dayOne)],
       ),
       HomeSortOrder.title: (
-        ['Alpha 作业', 'Beta 作业', 'Delta 作业', 'Gamma 作业', 'Unknown 作业'],
+        ['Alpha 作业', 'Beta 作业', 'Gamma 作业', 'Unknown 作业', 'Delta 作业'],
         [_heading(dayOne), _heading(dayTwo)],
       ),
     };
@@ -164,11 +164,11 @@ void main() {
           RegExp(r'^\d+月\d+日 周[一二三四五六日]$').hasMatch(widget.data ?? '')),
       findsNothing,
     );
-    expect(find.text('未设置截止时间'), findsOneWidget);
-    expect(find.text('状态或截止待确认'), findsOneWidget);
+    expect(find.text('未设置截止时间'), findsNothing);
+    expect(find.byType(AssignmentCard), findsNWidgets(2));
     expect(find.text('无期限'), findsOneWidget);
     expect(find.text('截止时间待确认'), findsOneWidget);
-    expect(find.text('—'), findsNWidgets(2));
+    expect(find.text('—'), findsNothing);
   });
 
   testWidgets('home date heading and long title reflow without overlaps',

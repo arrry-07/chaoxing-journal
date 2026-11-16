@@ -35,13 +35,31 @@ enum AssignmentTypeFilter {
   final String label;
 }
 
+const homeTypeFilterChoices = [
+  AssignmentTypeFilter.all,
+  AssignmentTypeFilter.homework,
+  AssignmentTypeFilter.task,
+  AssignmentTypeFilter.exam
+];
+const homeSortOrderChoices = [
+  HomeSortOrder.deadlineAsc,
+  HomeSortOrder.deadlineDesc,
+  HomeSortOrder.courseName
+];
+HomeSortOrder normalizedHomeSort(HomeSortOrder order) =>
+    order == HomeSortOrder.grouped || order == HomeSortOrder.title
+        ? HomeSortOrder.deadlineAsc
+        : order;
+AssignmentTypeFilter normalizedHomeType(AssignmentTypeFilter type) =>
+    type == AssignmentTypeFilter.examNotice ? AssignmentTypeFilter.exam : type;
+
 /// UI preferences only; relative deadlines are evaluated against the current time.
 class HomeFilters {
   const HomeFilters({
     this.query = '',
     this.courseKey,
     this.deadline = AssignmentDeadlineFilter.all,
-    this.sortOrder = HomeSortOrder.grouped,
+    this.sortOrder = HomeSortOrder.deadlineAsc,
     this.type = AssignmentTypeFilter.all,
   });
 
@@ -89,11 +107,11 @@ class HomeFilters {
           query: (value['query'] as String).trim(),
           courseKey: value['courseKey'] == '' ? null : value['courseKey'],
           deadline: deadline,
-          type: AssignmentTypeFilter.values
+          type: normalizedHomeType(AssignmentTypeFilter.values
                   .where((type) => type.name == value['type'])
                   .firstOrNull ??
-              AssignmentTypeFilter.all,
-          sortOrder: sortOrder);
+              AssignmentTypeFilter.all),
+          sortOrder: normalizedHomeSort(sortOrder));
     } catch (_) {
       return const HomeFilters();
     }

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../services/assignment_store.dart';
 import 'journal.dart';
 import 'unsaved_edit_guard.dart';
+import 'transient_feedback.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -74,20 +75,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             builder: (context, _) {
               final message = widget.assignmentStore.returnCheckMessage;
               if (message == null) return const SizedBox.shrink();
-              return Material(
-                  color: Theme.of(context).colorScheme.secondaryContainer,
-                  child: Padding(
-                      padding: const EdgeInsets.only(left: 16),
-                      child: Row(children: [
-                        Expanded(
-                            child: Semantics(
-                                liveRegion: true, child: Text(message))),
-                        IconButton(
-                            tooltip: '关闭核对提示',
-                            onPressed:
-                                widget.assignmentStore.dismissReturnCheck,
-                            icon: const Icon(Icons.close)),
-                      ])));
+              final epoch = widget.assignmentStore.accountEpoch;
+              return TimedReturnCheck(
+                key: ValueKey((epoch, message)),
+                message: message,
+                onDismiss: () {
+                  if (widget.assignmentStore.accountEpoch == epoch &&
+                      widget.assignmentStore.returnCheckMessage == message) {
+                    widget.assignmentStore.dismissReturnCheck();
+                  }
+                },
+              );
             }),
         if (AppUpdateScope.maybeOf(context) case final updates?)
           UpdateDownloadBanner(controller: updates),
