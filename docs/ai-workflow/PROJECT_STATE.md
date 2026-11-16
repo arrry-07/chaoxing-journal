@@ -4,7 +4,7 @@
 
 ## 当前目标与范围
 
-- 当前正式版本为 `1.8.04+71`；应用源码提交与 Tag `v1.8.04` 指向 `a4a4b01cbabad01f72e445de0c05f18d78af46b0`，PR #36 已合并；后续文档提交使 main 前进到 `b23d2b956144c994c5bca0b28550f2e4ab1ad668`。详见末尾最新条目与[验收及发布记录](../reviews/2026-11-16-1.8.04首页排序与筛选验收与发布记录.md)。下方早期条目保留各自历史基线。
+- 当前正式版本为 `1.8.04+71`；应用源码提交与 Tag `v1.8.04` 指向 `a4a4b01cbabad01f72e445de0c05f18d78af46b0`，PR #36 已合并。交接生成时文档 main 为 `37496f2189a3815bbcd823b0ea27db02fa5eeead`；后续文档提交只推进 main，不改变应用源码或 Tag。详见末尾最新条目与[验收及发布记录](../reviews/2026-11-16-1.8.04首页排序与筛选验收与发布记录.md)。下方早期条目保留各自历史基线。
 - 1.8.04 修复考试与作业时间混排、未逾期筛选丢失考试，以及类型“作业”只显示三份中一份的问题；GitHub Release 与 Gitee manual 小索引已完成，完成文档收口后无待发布业务改动。
 - 独立课程群云历史仍未启用，部分考试来源仍可能报告结构失败；不能将课程读取成功等同全部来源完整。
 - 保留无关 `scripts/demo-video/` 及并行工作；后续同类发布继续按实际 Git、CI、产物和设备证据核对，不继承旧版本通过结论。
@@ -378,7 +378,7 @@
 
 ## 2026-11-16 1.8.04 首页排序与筛选修复（已正式发布）
 
-- 功能提交 `3a712120c9c5b87acac72c91dd38d9835d0c474b` 经 [PR #36](https://github.com/arrry-07/chaoxing-journal/pull/36) 合入应用源码 `a4a4b01cbabad01f72e445de0c05f18d78af46b0`；annotated Tag `v1.8.04`（object `51cbf84b8bf20f02908a73b3bf3061a34966b566`）固定指向该源码。后续文档提交 `b23d2b9` 只更新说明与合成截图，不移动 Tag、不替换资产。
+- 功能提交 `3a712120c9c5b87acac72c91dd38d9835d0c474b` 经 [PR #36](https://github.com/arrry-07/chaoxing-journal/pull/36) 合入应用源码 `a4a4b01cbabad01f72e445de0c05f18d78af46b0`；annotated Tag `v1.8.04`（object `51cbf84b8bf20f02908a73b3bf3061a34966b566`）固定指向该源码。后续文档提交 `b23d2b9`、`37496f2` 只更新说明、状态与合成截图，不移动 Tag、不替换资产。
 - 考试与作业按统一展示时间混排，未知时间在双向排序中均置后；“未逾期”使用唯一通知时间窗口保留当前考试。显式筛选覆盖完整可见本地目录，类型“作业”包含已提交记录，清除筛选后恢复当前待办。无年份通知只生成排序/期限投影，不写回 `startAt/endAt`、信任字段、日历、提醒、自动结束或备份。
 - PR/push/main/Tag CI [43817476851](https://github.com/arrry-07/chaoxing-journal/actions/runs/43817476851)、[43817469391](https://github.com/arrry-07/chaoxing-journal/actions/runs/43817469391)、[43820730477](https://github.com/arrry-07/chaoxing-journal/actions/runs/43820730477)、[43821979442](https://github.com/arrry-07/chaoxing-journal/actions/runs/43821979442) 均 1231 通过/1 项可选基准跳过，双时区各 49 项，原生/分析/双 ABI 通过。云端自动代码审查因额度未完成，不列作通过；本地独立审查发现的历史课程下拉和通知时长冲突已修正。
 - 正式 1.8.04+71 APK 59,442,050 字节，SHA-256 `56145a93b625fc2326f920200720bd7acd2ff4dc6b177b92a53f9572729e1d45`；原包名/v2 签名、SDK/ABI、ZIP 与 16 KiB 对齐通过。366 个规范应用输入、签名及构建参数与最终 main 一致，r1 完整候选按证据晋升，不重复构建。
@@ -386,3 +386,4 @@
 - [Release v1.8.04](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.04) id `446717018` 于北京时间 2026-11-16 15:26:28 公开、非预发布并设 latest；APK asset `753885064`、SUMS asset `753885062`。草稿认证和公开匿名完整回下载的大小、摘要、身份、签名、ZIP 与对齐通过；发布后实际检查更新显示当前已是最新版本 1.8.04（71）。
 - [Gitee index 43823879212](https://github.com/arrry-07/chaoxing-journal/actions/runs/43823879212) 成功，实际结果为 `mode=index, stable=1.8.0, manual=1.8.04, deleted=[]`。公开 manual=1.8.04+71 指向 GitHub 同包且无 backup，stable 保持 1.8.0+67；APK 镜像仍为批量点 1.7.52+59，本版未上传镜像或重下历史包。
 - 完整证据及未覆盖项见[验收与发布记录](../reviews/2026-11-16-1.8.04首页排序与筛选验收与发布记录.md)。现有部分考试来源结构失败、群云历史未启用；实体手机、Doze、TalkBack、API31、锁屏通知及本版日历设备全流程未重验。
+- 面向新规划窗口的当前状态、决策、证据与未决项见[1.8.04 收尾与下一轮规划交接](handoffs/2026-11-16-1.8.04收尾与下一轮规划交接.md)。
