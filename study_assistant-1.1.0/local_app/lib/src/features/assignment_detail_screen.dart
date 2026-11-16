@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
+import '../services/exam_schedule_presentation.dart';
 import '../services/assignment_web_link.dart';
 import '../services/external_link_service.dart';
 import 'widgets/assignment_card.dart';
@@ -178,10 +179,34 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
       _hiding = true;
       _actionMessage = null;
     });
-    var hidden = false;
+    final epoch = widget.store.accountEpoch;
+    final original = widget.store.findAssignment(widget.assignmentId);
+    final sources = original == null
+        ? const <String>[]
+        : {
+            ...AssignmentQuery.displaySources(
+                    original, widget.store.courseAssignments)
+                .where((a) => a.id != original.id)
+                .map((a) => a.id),
+            // Reload removes hidden rows from findAssignment. Keep this route's
+            // representative until all supplemental writes succeed so partial
+            // failure leaves a usable detail page and retry action.
+            original.id,
+          }.toList();
+    var hidden = sources.isNotEmpty;
     try {
-      hidden = await widget.store.hideAssignment(widget.assignmentId);
+      // Snapshot all source IDs before the first reload. Do not archive records
+      // from a replacement account if the session changes between writes.
+      for (final id in sources) {
+        if (widget.store.accountEpoch != epoch ||
+            !await widget.store.hideAssignment(id) ||
+            widget.store.accountEpoch != epoch) {
+          hidden = false;
+          break;
+        }
+      }
     } catch (_) {
+      hidden = false;
       // Preserve the detail view for retry, including persistence exceptions.
     }
     if (!mounted) return;
@@ -191,7 +216,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     }
     setState(() {
       _hiding = false;
-      _actionMessage = '隐藏失败，请稍后重试；本机记录仍保留。';
+      _actionMessage = '隐藏失败，请稍后重试；部分记录可能已隐藏，可在本机记录中恢复。';
     });
   }
 
@@ -234,9 +259,19 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
         }
 
         final exam = assignment.isExam ? assignment.exam : null;
+        final schedule = exam == null
+            ? null
+            : ExamSchedulePresentation.build(assignment,
+                records: widget.store.courseAssignments);
         final examLines = exam == null
             ? const <String>[]
-            : AssignmentCard.examScheduleLines(assignment);
+            : <String>[
+                ...schedule!.detailTimeLines,
+                if (exam.durationMinutes != null && exam.durationMinutes! > 0)
+                  '时长 ${exam.durationMinutes} 分钟',
+                if (exam.location.trim().isNotEmpty)
+                  '地点 ${exam.location.trim()}',
+              ];
         final hasExamTime = exam != null &&
             ((exam.startTrusted && exam.startAt != null) ||
                 (exam.endTrusted && exam.endAt != null));
@@ -322,7 +357,10 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                       Text(assignment.isExam
                           ? AssignmentCard.examStateLabel(assignment, _now)
                           : assignment.statusLabel),
-                      if (unverified) const Text('部分信息尚未核实'),
+                      if (schedule?.verificationNote != null)
+                        Text(schedule!.verificationNote!)
+                      else if (unverified)
+                        const Text('部分信息尚未核实'),
                       if (unverifiedTimes.isNotEmpty)
                         ExpansionTile(
                           tilePadding: EdgeInsets.zero,

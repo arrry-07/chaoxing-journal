@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../app/journal.dart';
 import '../../models/assignment.dart';
 import '../../services/assignment_query.dart';
+import '../../services/exam_schedule_presentation.dart';
 
 class AssignmentCard extends StatelessWidget {
   const AssignmentCard(
@@ -12,6 +13,7 @@ class AssignmentCard extends StatelessWidget {
       required this.now,
       required this.onTap,
       this.onOpenAssignment,
+      this.examSources = const [],
       this.opening = false,
       this.compact = false,
       this.countdown = false,
@@ -20,6 +22,7 @@ class AssignmentCard extends StatelessWidget {
       this.previewOnly = false,
       this.previewSaving = false});
   final Assignment assignment;
+  final List<Assignment> examSources;
   final DateTime now;
   final VoidCallback onTap;
   final VoidCallback? onOpenAssignment;
@@ -68,11 +71,8 @@ class AssignmentCard extends StatelessWidget {
 
   static List<String> examScheduleLines(Assignment assignment) {
     final exam = assignment.exam!;
-    String time(String label, DateTime at) =>
-        '$label ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(at))}';
     return [
-      if (exam.startAt != null && exam.startTrusted) time('开考', exam.startAt!),
-      if (exam.endAt != null && exam.endTrusted) time('结束', exam.endAt!),
+      ...ExamSchedulePresentation.build(assignment).cardTimeLines,
       if (exam.durationMinutes != null && exam.durationMinutes! > 0)
         '时长 ${exam.durationMinutes} 分钟',
       if (exam.location.trim().isNotEmpty) '地点 ${exam.location.trim()}',
@@ -104,7 +104,16 @@ class AssignmentCard extends StatelessWidget {
             : a.isSupportedClassroomTask
                 ? '任务 · ${a.statusLabel}'
                 : a.statusLabel;
-    final examLines = a.isExam ? examScheduleLines(a) : const <String>[];
+    final examLines = a.isExam
+        ? <String>[
+            ...ExamSchedulePresentation.build(a, records: examSources)
+                .cardTimeLines,
+            if (a.exam!.durationMinutes != null && a.exam!.durationMinutes! > 0)
+              '时长 ${a.exam!.durationMinutes} 分钟',
+            if (a.exam!.location.trim().isNotEmpty)
+              '地点 ${a.exam!.location.trim()}',
+          ]
+        : const <String>[];
     final deadline = deadlinePending
         ? '正在确认截止时间'
         : a.deadlineReadFailed

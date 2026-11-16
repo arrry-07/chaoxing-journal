@@ -339,8 +339,7 @@ void main() {
     await tester.pumpAndSettle();
     await _tap(tester, '应用');
     expect(store.homeFilters.type, AssignmentTypeFilter.exam);
-    expect(find.text('期末考试'), findsNothing);
-    await _tap(tester, '考试时间未知（1）');
+    expect(find.textContaining('考试时间未知'), findsNothing);
     expect(find.text('期末考试'), findsOneWidget);
     expect(find.text('课后作业'), findsNothing);
     await _tap(tester, '已筛选');

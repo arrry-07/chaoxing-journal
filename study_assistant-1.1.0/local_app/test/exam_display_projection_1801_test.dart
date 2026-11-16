@@ -66,24 +66,18 @@ class _PreviewArchiveStore extends AssignmentStore {
 }
 
 void main() {
-  testWidgets(
-      'archive with no persisted sources reports failure instead of success',
+  testWidgets('unsaved exam preview is visible without a separate archive row',
       (tester) async {
     final store = _PreviewArchiveStore(exam());
     addTearDown(store.dispose);
     await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: store))));
-    await tester.ensureVisible(find.text('考试时间未知（1）'));
-    await tester.tap(find.text('考试时间未知（1）'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('归档'));
-    await tester.tap(find.text('归档'));
-    await tester.pump();
+    expect(find.text('同名考试'), findsOneWidget);
+    expect(find.textContaining('考试时间未知'), findsNothing);
+    expect(find.text('归档'), findsNothing);
     expect(store.hiddenCalls, 0);
-    expect(find.text('记录尚未保存，暂时无法归档，请同步完成后重试'), findsOneWidget);
-    expect(find.text('已归档，可在本地记录中恢复'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(const Duration(milliseconds: 400));
   });
 
   test('conflicting notices never infer publication order from sync time or ID',

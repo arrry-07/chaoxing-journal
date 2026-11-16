@@ -20,7 +20,7 @@ import 'widgets/assignment_card.dart';
 enum AssignmentRecoveryScope {
   noDeadline('noDeadline', '无截止日期'),
   deadlinePending('deadlinePending', '截止时间未知'),
-  examUnknown('examUnknown', '考试时间未知');
+  examUnknown('examUnknown', '考试');
 
   const AssignmentRecoveryScope(this.queryValue, this.label);
 
@@ -41,7 +41,8 @@ enum AssignmentRecoveryScope {
   bool matches(Assignment assignment, DateTime now) {
     if (assignment.isExam) {
       return this == examUnknown &&
-          AssignmentQuery.isUnknownExam(assignment, now);
+          !AssignmentQuery.isExamEnded(assignment, now) &&
+          !assignment.isCompleted;
     }
     return switch (this) {
       noDeadline => AssignmentQuery.timelineBucketAt(assignment, now) ==
@@ -128,31 +129,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       normalizedHomeType(store.homeFilters.type);
   final _openingAssignments = <String>{};
   AssignmentStore get store => widget.store;
-
-  Future<void> _archiveExam(Assignment assignment) async {
-    final epoch = store.accountEpoch;
-    final account = store.account;
-    final sources =
-        AssignmentQuery.displaySources(assignment, store.courseAssignments);
-    if (sources.isEmpty) {
-      feedback('记录尚未保存，暂时无法归档，请同步完成后重试');
-      return;
-    }
-    for (final source in sources) {
-      if (!mounted || epoch != store.accountEpoch || account != store.account) {
-        return;
-      }
-      final saved = await store.hideAssignment(source.id);
-      if (!mounted || epoch != store.accountEpoch || account != store.account) {
-        return;
-      }
-      if (!saved) {
-        feedback('归档未全部完成，请在本地记录中核对');
-        return;
-      }
-    }
-    feedback('已归档，可在本地记录中恢复');
-  }
 
   Future<void> openAssignment(String id) async {
     if (_openingAssignments.contains(id)) return;
@@ -320,17 +296,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             : displayAssignments
                 .where((assignment) => recoveryScope.matches(assignment, now))
                 .toList();
-        final unknownExams = recoveryScope == null
-            ? items.where((a) => AssignmentQuery.isUnknownExam(a, now)).toList()
-            : <Assignment>[];
-        items.removeWhere((a) => unknownExams.contains(a));
         final sortOrder = _sortOrder;
-        final sortedItems = sortOrder == HomeSortOrder.grouped
-            ? items
-            : AssignmentQuery.sortHome(items, sortOrder, now: now);
-        final groups = sortOrder == HomeSortOrder.grouped
-            ? AssignmentQuery.home(items, now, {})
-            : null;
+        final sortedItems =
+            AssignmentQuery.sortHome(items, sortOrder, now: now);
+        final today = PersonalWorkspace.dayKey(now);
+        final plans =
+            store.personal.plans.where((p) => p.day == today).toList();
         final sync = HomeSyncPresentation.from(store.syncReport,
             loading: store.isLoading,
             hasCache: displayAssignments.isNotEmpty,
@@ -349,6 +320,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         Widget card(Assignment a) => AssignmentCard(
             key: ValueKey('assignment-${a.id}'),
             assignment: a,
+            examSources: store.courseAssignments,
             now: now,
             showFullDeadline: false,
             compact: store.display.compact,
@@ -363,15 +335,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             opening: _openingAssignments.contains(a.id),
             onTap: () =>
                 context.push('/assignments/${Uri.encodeComponent(a.id)}'));
-        Widget unknownExam(Assignment a) => Column(children: [
-              card(a),
-              Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: busy ? null : () => _archiveExam(a),
-                    child: const Text('归档'),
-                  )),
-            ]);
         Widget filterAction() => compactFilterAction
             ? IconButton(
                 tooltip: filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选',
@@ -395,71 +358,76 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   previous != AssignmentQuery.dayKey(a.timelineAt!))
                 dayHeading(
                     previous = AssignmentQuery.dayKey(a.timelineAt!), now),
-              if (AssignmentQuery.isUnknownExam(a, now))
-                unknownExam(a)
-              else
-                card(a),
+              card(a),
             ]
           ];
         }
 
-        Widget note(String label) => Padding(
-            padding: const EdgeInsets.only(top: 20, bottom: 8),
-            child: Text(label, style: Journal.metadata));
         return ListView(
             key: PageStorageKey(recoveryScope == null
                 ? 'home-list'
                 : 'home-recovery-${recoveryScope.queryValue}'),
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
             children: [
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Expanded(child: Text('课业手记', style: Journal.display)),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  IconButton(
-                      tooltip: '刷新作业',
-                      onPressed: busy
-                          ? null
-                          : () => refresh(sync.action == HomeSyncAction.login ||
-                                  sync.action == HomeSyncAction.verify
-                              ? sync.action
-                              : HomeSyncAction.retry),
-                      icon: busy
-                          ? const SizedBox.square(
-                              dimension: 20,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Journal.ink))
-                          : const Icon(Icons.sync_rounded)),
-                  IconButton(
-                      tooltip: '同步详情',
-                      onPressed: () => context.push('/sync'),
-                      icon: const Icon(Icons.more_horiz_rounded)),
-                ]),
-              ]),
+              Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const Text('课业手记', style: Journal.display),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (plans.isEmpty)
+                        IconButton(
+                            key: const ValueKey('home-plan-entry'),
+                            tooltip: '今日计划',
+                            constraints: const BoxConstraints(
+                                minWidth: 48, minHeight: 48),
+                            onPressed: () => context.push('/plan'),
+                            icon: const Icon(Icons.checklist)),
+                      IconButton(
+                          tooltip: '刷新作业',
+                          onPressed: busy
+                              ? null
+                              : () => refresh(
+                                  sync.action == HomeSyncAction.login ||
+                                          sync.action == HomeSyncAction.verify
+                                      ? sync.action
+                                      : HomeSyncAction.retry),
+                          icon: busy
+                              ? const SizedBox.square(
+                                  dimension: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Journal.ink))
+                              : const Icon(Icons.sync_rounded)),
+                      IconButton(
+                          tooltip: '同步详情',
+                          onPressed: () => context.push('/sync'),
+                          icon: const Icon(Icons.more_horiz_rounded)),
+                    ]),
+                  ]),
               const SizedBox(height: 12),
               if (recoveryScope != null) ...[
                 _recoveryHeader(context, recoveryScope, items.length),
                 const SizedBox(height: 12),
               ],
-              Builder(builder: (context) {
-                final today = PersonalWorkspace.dayKey(now);
-                final plans =
-                    store.personal.plans.where((p) => p.day == today).toList();
-                final minutes = plans
-                    .where((p) => !p.done)
-                    .fold<int>(0, (v, p) => v + p.minutes);
-                return Material(
+              if (plans.isNotEmpty)
+                Material(
                     type: MaterialType.transparency,
-                    child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.checklist),
-                        title: const Text('今日计划'),
-                        subtitle: Text(plans.isEmpty
-                            ? '选两三份作业，安排今天要做的事'
-                            : '${plans.where((p) => p.done).length}/${plans.length} 项已勾选 · 预计剩余 $minutes 分钟'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => context.push('/plan')));
-              }),
-              const Divider(height: 16),
+                    child: InkWell(
+                        key: const ValueKey('home-plan-summary'),
+                        onTap: () => context.push('/plan'),
+                        child: ConstrainedBox(
+                            constraints: const BoxConstraints(minHeight: 48),
+                            child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 8),
+                                child: Row(children: [
+                                  const Icon(Icons.checklist),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                      child: Text(
+                                          '今日计划 · 已完成${plans.where((p) => p.done).length}/${plans.length}')),
+                                  const Icon(Icons.chevron_right),
+                                ]))))),
               Row(children: [
                 const Icon(Icons.schedule, size: 16, color: Journal.muted),
                 const SizedBox(width: 6),
@@ -512,34 +480,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     padding: EdgeInsets.symmetric(vertical: 12),
                     child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
                         style: Journal.metadata)),
-              if (unknownExams.isNotEmpty)
-                ExpansionTile(
-                  key: const PageStorageKey('unknown-exams'),
-                  initiallyExpanded: false,
-                  title: Text('考试时间未知（${unknownExams.length}）'),
-                  children: [for (final a in unknownExams) unknownExam(a)],
-                ),
               if (sortedItems.isNotEmpty) ...[
-                if (groups != null) ...[
-                  ...timeline([...groups.near, ...groups.far]),
-                  if (groups.noDeadline.isNotEmpty) ...[
-                    note('未设置截止时间'),
-                    ...timeline(groups.noDeadline),
-                  ],
-                  if (groups.uncertain.isNotEmpty) ...[
-                    note('状态或截止待确认'),
-                    ...timeline(groups.uncertain),
-                  ],
-                  ...timeline(groups.overdue),
-                ] else
-                  ...timeline(sortedItems),
+                ...timeline(sortedItems),
               ] else if (recoveryScope != null) ...[
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
                     child: Text('当前范围没有课业', style: Journal.metadata)),
-              ] else if (unknownExams.isNotEmpty)
-                ...[]
-              else if (filtersActive &&
+              ] else if (filtersActive &&
                   (displayAssignments.isNotEmpty ||
                       store.assignments.isNotEmpty)) ...[
                 const Padding(
