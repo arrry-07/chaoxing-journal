@@ -493,6 +493,22 @@ class AssignmentStore extends ChangeNotifier {
     return _visibleAssignmentsFrom(merged);
   }
 
+  /// Complete scoped source catalog used only while explicit filters are
+  /// active. It retains notice sources for display-time ordering; the
+  /// unfiltered home continues to use [homeDisplayAssignments].
+  List<Assignment> get homeCatalogAssignments {
+    if (_homePreviewAssignments.isEmpty) {
+      return AssignmentQuery.scope(courseAssignments, {});
+    }
+    final merged = LocalAssignmentRepository.mergeAssignments(
+      [..._assignments, ..._hiddenAssignments],
+      _homePreviewAssignments,
+      hiddenCompletedIds:
+          _hiddenAssignments.map((assignment) => assignment.id).toSet(),
+    );
+    return _catalogAssignmentsFrom(merged);
+  }
+
   bool isHomeDeadlinePending(String assignmentId) =>
       _homePendingDeadlineIds.contains(assignmentId);
 
@@ -506,6 +522,12 @@ class AssignmentStore extends ChangeNotifier {
               .where((a) => a.courseKey == null || follows(a.courseKey!))
               .toList(),
           DateTime.now());
+
+  List<Assignment> _catalogAssignmentsFrom(Iterable<Assignment> records) =>
+      AssignmentQuery.scope(records.toList(), {})
+          .where((assignment) =>
+              assignment.courseKey == null || follows(assignment.courseKey!))
+          .toList();
 
   void _handleHomeProgress(int generation, AssignmentSyncProgress progress) {
     if (generation != _generation || !_authenticated || _disposed) return;

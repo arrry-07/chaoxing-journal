@@ -2,6 +2,7 @@ import 'package:lpinyin/lpinyin.dart';
 
 import '../models/assignment.dart';
 import '../models/home_filters.dart';
+import 'exam_wall_time.dart';
 
 export '../models/home_filters.dart'
     show AssignmentDeadlineFilter, AssignmentTypeFilter, HomeSortOrder;
@@ -89,7 +90,7 @@ int _nameGroupRank(AssignmentDeadlineBucket bucket) => switch (bucket) {
     };
 
 class _PreparedAssignment {
-  _PreparedAssignment(this.assignment, this.index, DateTime now)
+  _PreparedAssignment(this.assignment, this.index, DateTime now, this.displayAt)
       : bucket = AssignmentQuery.timelineBucketAt(assignment, now),
         course = _NaturalKey(assignment.courseName),
         title = _NaturalKey(assignment.title),
@@ -99,6 +100,7 @@ class _PreparedAssignment {
   final Assignment assignment;
   final int index;
   final AssignmentDeadlineBucket bucket;
+  final DateTime? displayAt;
   final _NaturalKey course;
   final _NaturalKey title;
   final _NaturalKey courseKey;
@@ -166,6 +168,97 @@ class AssignmentQuery {
     return key == null
         ? [representative]
         : records.where((a) => examDisplayKey(a) == key).toList();
+  }
+
+  /// Resolve one unambiguous wall-time range from an exam's linked notices.
+  /// This is display evidence only and is never promoted into exam trust.
+  static List<ExamNoticeRange> displayNoticeRanges(
+    Assignment assignment, {
+    List<Assignment> records = const [],
+  }) {
+    final exam = assignment.exam;
+    if (exam == null) return const [];
+    final sources = displaySources(assignment, records);
+    if (exam.noticeOnly &&
+        !sources.any((source) => source.id == assignment.id)) {
+      sources.add(assignment);
+    }
+    final durations = sources
+        .where((source) => source.exam?.noticeOnly == true)
+        .map((source) => source.exam!.durationMinutes)
+        .whereType<int>()
+        .toSet();
+    if (durations.length > 1) return const [];
+    final ranges = <String, ExamNoticeRange>{};
+    for (final source
+        in sources.where((item) => item.exam?.noticeOnly == true)) {
+      final range = ExamNoticeRange.read(source.requirementsText);
+      if (range == null) continue;
+      if ((exam.startTrusted &&
+              exam.startAt != null &&
+              range.start != null &&
+              !range.start!.matches(exam.startAt!)) ||
+          (exam.endTrusted &&
+              exam.endAt != null &&
+              range.end != null &&
+              !range.end!.matches(exam.endAt!))) {
+        continue;
+      }
+      final prior = ranges[range.key];
+      if (prior == null || range.precision > prior.precision) {
+        ranges[range.key] = range;
+      }
+    }
+    return ranges.values.toList();
+  }
+
+  static ExamNoticeRange? displayNoticeRange(
+    Assignment assignment, {
+    List<Assignment> records = const [],
+  }) {
+    final ranges = displayNoticeRanges(assignment, records: records);
+    return ranges.length == 1 ? ranges.single : null;
+  }
+
+  /// A display-only opening time used to mix exams and coursework in list
+  /// order. Yearless notices use the current Beijing year without promoting
+  /// trust, writing a timestamp, or scheduling a reminder.
+  static DateTime? displayTimelineAt(
+    Assignment assignment, {
+    List<Assignment> records = const [],
+    required DateTime now,
+  }) {
+    if (!assignment.isExam) {
+      return assignment.timelineTrusted && !assignment.deadlineReadFailed
+          ? assignment.timelineAt
+          : null;
+    }
+    final exam = assignment.exam!;
+    if (exam.startTrusted && exam.startAt != null) return exam.startAt;
+    final range = displayNoticeRange(assignment, records: records);
+    return range?.start?.projectedAt(beijing(now).year);
+  }
+
+  static DateTime? displayTimelineEndAt(
+    Assignment assignment, {
+    List<Assignment> records = const [],
+    required DateTime now,
+  }) {
+    if (!assignment.isExam) {
+      return assignment.timelineTrusted && !assignment.deadlineReadFailed
+          ? assignment.timelineAt
+          : null;
+    }
+    final exam = assignment.exam!;
+    if (exam.endTrusted && exam.endAt != null) return exam.endAt;
+    final range = displayNoticeRange(assignment, records: records);
+    final noticeEnd = range?.end?.projectedAt(beijing(now).year);
+    if (noticeEnd != null) return noticeEnd;
+    final start = displayTimelineAt(assignment, records: records, now: now);
+    final duration = exam.durationMinutes;
+    return start != null && duration != null && duration > 0
+        ? start.add(Duration(minutes: duration))
+        : null;
   }
 
   static Assignment _supplementDisplay(
@@ -352,6 +445,18 @@ class AssignmentQuery {
         bucket == AssignmentDeadlineBucket.overdue;
   }
 
+  static bool _displayExamNotExpired(
+    Assignment assignment,
+    List<Assignment> sources,
+    DateTime now,
+  ) {
+    if (displayTimelineAt(assignment, records: sources, now: now) == null) {
+      return false;
+    }
+    final end = displayTimelineEndAt(assignment, records: sources, now: now);
+    return end == null || end.isAfter(now);
+  }
+
   /// Lightweight home querying only. It does not reinterpret submission or
   /// deadline states; untrusted deadline rows remain discoverable.
   static List<Assignment> filterHome(
@@ -360,12 +465,15 @@ class AssignmentQuery {
     String? courseKey,
     AssignmentDeadlineFilter deadline = AssignmentDeadlineFilter.all,
     AssignmentTypeFilter type = AssignmentTypeFilter.all,
+    bool includeHistorical = false,
     Set<String> followed = const {},
     required DateTime now,
   }) {
     final needle = query.trim().toLowerCase();
-    return currentDisplay(scope(records, followed), now).where((a) {
-      if (a.isCompleted ||
+    final sourceRecords = scope(records, followed);
+    return projectDisplay(sourceRecords).where((a) {
+      final historical = a.isCompleted || (a.isExam && isExamEnded(a, now));
+      if ((!includeHistorical && historical) ||
           !matchesType(a, type) ||
           (courseKey != null && a.courseKey != courseKey)) {
         return false;
@@ -375,11 +483,10 @@ class AssignmentQuery {
           !a.courseName.toLowerCase().contains(needle)) {
         return false;
       }
-      final due = a.timelineAt;
+      final due = displayTimelineAt(a, records: sourceRecords, now: now);
       final bucket = timelineBucketAt(a, now);
-      final trusted = _hasTrustedPendingDeadline(a) &&
-          (!a.isExam ||
-              bucket == AssignmentDeadlineBucket.notExpiredWithDeadline);
+      final trusted =
+          a.isExam ? !historical && due != null : _hasTrustedPendingDeadline(a);
       return switch (deadline) {
         AssignmentDeadlineFilter.all => true,
         AssignmentDeadlineFilter.next7Days => trusted &&
@@ -396,9 +503,12 @@ class AssignmentQuery {
           bucket == AssignmentDeadlineBucket.unconfirmed,
         AssignmentDeadlineFilter.noDeadline =>
           bucket == AssignmentDeadlineBucket.confirmedNoDeadline,
-        AssignmentDeadlineFilter.notExpired =>
-          bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
-              bucket == AssignmentDeadlineBucket.confirmedNoDeadline,
+        AssignmentDeadlineFilter.notExpired => historical
+            ? false
+            : a.isExam
+                ? _displayExamNotExpired(a, sourceRecords, now)
+                : bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
+                    bucket == AssignmentDeadlineBucket.confirmedNoDeadline,
       };
     }).toList();
   }
@@ -421,26 +531,26 @@ class AssignmentQuery {
     List<Assignment> records,
     HomeSortOrder order, {
     required DateTime now,
+    List<Assignment> sourceRecords = const [],
   }) {
     if (order == HomeSortOrder.grouped) {
       return List<Assignment>.of(records);
     }
+    final sources = sourceRecords.isEmpty ? records : sourceRecords;
     final prepared = [
       for (var index = 0; index < records.length; index++)
-        _PreparedAssignment(records[index], index, now),
+        _PreparedAssignment(
+          records[index],
+          index,
+          now,
+          displayTimelineAt(records[index], records: sources, now: now),
+        ),
     ];
     prepared.sort((left, right) {
       if (order == HomeSortOrder.deadlineAsc ||
           order == HomeSortOrder.deadlineDesc) {
-        final leftTime = left.assignment.timelineTrusted &&
-                (left.assignment.isExam || !left.assignment.deadlineReadFailed)
-            ? left.assignment.timelineAt
-            : null;
-        final rightTime = right.assignment.timelineTrusted &&
-                (right.assignment.isExam ||
-                    !right.assignment.deadlineReadFailed)
-            ? right.assignment.timelineAt
-            : null;
+        final leftTime = left.displayAt;
+        final rightTime = right.displayAt;
         if (leftTime == null && rightTime != null) return 1;
         if (rightTime == null && leftTime != null) return -1;
         if (leftTime != null && rightTime != null) {
@@ -454,15 +564,8 @@ class AssignmentQuery {
       if (order == HomeSortOrder.courseName) {
         final course = _compareKey(left.course, right.course);
         if (course != 0) return course;
-        final l = (left.assignment.timelineTrusted &&
-                (left.assignment.isExam || !left.assignment.deadlineReadFailed))
-            ? left.assignment.timelineAt
-            : null;
-        final r = right.assignment.timelineTrusted &&
-                (right.assignment.isExam ||
-                    !right.assignment.deadlineReadFailed)
-            ? right.assignment.timelineAt
-            : null;
+        final l = left.displayAt;
+        final r = right.displayAt;
         if (l == null && r != null) return 1;
         if (r == null && l != null) return -1;
         if (l != null && r != null && l != r) return l.compareTo(r);

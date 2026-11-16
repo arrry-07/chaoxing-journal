@@ -273,49 +273,60 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             store.isLoading ||
             store.syncReport.phase == SyncPhase.running;
         final recoveryScope = _recoveryScope(context);
-        final displayAssignments = AssignmentQuery.currentDisplay(
-            store.homeDisplayAssignments, DateTime.now());
+        final now = DateTime.now();
+        final filtersActive = _query.trim().isNotEmpty ||
+            _typeFilter != AssignmentTypeFilter.all ||
+            _courseKey != null ||
+            _deadlineFilter != AssignmentDeadlineFilter.all;
+        final catalogAssignments = store.homeCatalogAssignments;
+        final catalogDisplay =
+            AssignmentQuery.currentDisplay(catalogAssignments, now);
+        final projectedCatalog =
+            AssignmentQuery.projectDisplay(catalogAssignments);
+        final displayAssignments =
+            filtersActive ? catalogDisplay : store.homeDisplayAssignments;
         final options = <String, String>{
-          for (final a in displayAssignments)
+          for (final a in projectedCatalog)
             if (a.courseKey case final key?) key: a.courseName
         };
         if (_courseKey != null && !options.containsKey(_courseKey)) {
           options[_courseKey!] = '已选课程（当前无可显示作业）';
         }
-        final now = DateTime.now();
         // Recovery views are route-scoped. They deliberately bypass the saved
         // query/course/deadline filters without ever writing them back.
         final items = recoveryScope == null
             ? AssignmentQuery.filterHome(
-                displayAssignments,
+                filtersActive ? catalogAssignments : displayAssignments,
                 query: _query,
                 courseKey: _courseKey,
                 deadline: _deadlineFilter,
                 type: _typeFilter,
+                includeHistorical: filtersActive,
                 now: now,
               )
             : displayAssignments
                 .where((assignment) => recoveryScope.matches(assignment, now))
                 .toList();
         final sortOrder = _sortOrder;
-        final sortedItems =
-            AssignmentQuery.sortHome(items, sortOrder, now: now);
+        final sortedItems = AssignmentQuery.sortHome(
+          items,
+          sortOrder,
+          now: now,
+          sourceRecords: catalogAssignments,
+        );
         final today = PersonalWorkspace.dayKey(now);
         final plans =
             store.personal.plans.where((p) => p.day == today).toList();
         final sync = HomeSyncPresentation.from(store.syncReport,
             loading: store.isLoading,
-            hasCache: displayAssignments.isNotEmpty,
+            hasCache:
+                catalogAssignments.isNotEmpty || displayAssignments.isNotEmpty,
             now: now,
             successAt: store.lastSyncAt,
             serviceWarning: store.error != null &&
                 store.syncReport.phase == SyncPhase.success);
         final freshness = _freshnessLabel(sync.summary,
             store.syncReport.lastDataSuccessAt ?? store.lastSyncAt, now);
-        final filtersActive = _query.trim().isNotEmpty ||
-            _typeFilter != AssignmentTypeFilter.all ||
-            _courseKey != null ||
-            _deadlineFilter != AssignmentDeadlineFilter.all;
         final compactFilterAction = MediaQuery.textScalerOf(context).scale(14) >
             _compactFilterTextThreshold;
         Widget card(Assignment a) => AssignmentCard(
@@ -492,7 +503,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             style: Journal.metadata))),
               if (recoveryScope == null &&
                   _courseKey != null &&
-                  !displayAssignments.any((a) => a.courseKey == _courseKey))
+                  !displayAssignments.any((a) => a.courseKey == _courseKey) &&
+                  !(filtersActive &&
+                      projectedCatalog.any((a) => a.courseKey == _courseKey)))
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 12),
                     child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',

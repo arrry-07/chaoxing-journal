@@ -77,8 +77,7 @@ void main() {
   setUpAll(() => initializeDateFormatting('zh_CN'));
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets(
-      'notice-only wall date uses work heading style without changing sorting',
+  testWidgets('notice-only wall date participates in chronological sorting',
       (tester) async {
     tester.view.physicalSize = const Size(800, 2400);
     tester.view.devicePixelRatio = 1;
@@ -105,7 +104,7 @@ void main() {
     expect(find.textContaining('考试时间：'), findsNothing);
     final cards =
         tester.widgetList<AssignmentCard>(find.byType(AssignmentCard)).toList();
-    expect(cards.map((c) => c.assignment.title), ['work', '通知合成考试']);
+    expect(cards.map((c) => c.assignment.title), ['通知合成考试', 'work']);
     expect(notice.timelineAt, isNull);
     expect(notice.timelineTrusted, isFalse);
     expect(tester.takeException(), isNull);
