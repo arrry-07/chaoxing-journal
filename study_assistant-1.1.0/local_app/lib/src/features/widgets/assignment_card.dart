@@ -104,16 +104,23 @@ class AssignmentCard extends StatelessWidget {
             : a.isSupportedClassroomTask
                 ? '任务 · ${a.statusLabel}'
                 : a.statusLabel;
+    final examSchedule = a.isExam
+        ? ExamSchedulePresentation.build(a, records: examSources)
+        : null;
     final examLines = a.isExam
         ? <String>[
-            ...ExamSchedulePresentation.build(a, records: examSources)
-                .cardTimeLines,
             if (a.exam!.durationMinutes != null && a.exam!.durationMinutes! > 0)
               '时长 ${a.exam!.durationMinutes} 分钟',
             if (a.exam!.location.trim().isNotEmpty)
               '地点 ${a.exam!.location.trim()}',
           ]
         : const <String>[];
+    // Keep the complete schedule available to screen readers and details,
+    // while the visual card follows the assignment timeline layout.
+    final examSemantics = [
+      ...?examSchedule?.detailTimeLines,
+      ...examLines,
+    ].join('，');
     final deadline = deadlinePending
         ? '正在确认截止时间'
         : a.deadlineReadFailed
@@ -135,9 +142,10 @@ class AssignmentCard extends StatelessWidget {
     final color = urgent != null ? Journal.berry : Journal.ink;
     final hasTime =
         d != null && a.timelineTrusted && (a.isExam || !a.deadlineReadFailed);
-    final showRail = hasTime || (deadlinePending && !a.isExam);
-    final clock =
-        hasTime ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d)) : '';
+    final clock = hasTime
+        ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d))
+        : examSchedule?.timeline?.clock ?? '';
+    final showRail = clock.isNotEmpty || (deadlinePending && !a.isExam);
     // Measure at the user's text scale: a fixed rail clips times at 2× size.
     final timeMeasure = TextPainter(
         text: const TextSpan(text: '00:00', style: Journal.time),
@@ -177,7 +185,7 @@ class AssignmentCard extends StatelessWidget {
           button: onCardTap != null,
           onTap: onCardTap,
           label:
-              '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${a.isExam ? '${examLines.join('，')}${a.exam!.startTrusted || a.exam!.endTrusted ? '，北京时间' : ''}' : hasTime ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}' : deadline}',
+              '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${a.isExam ? '$examSemantics${a.exam!.startTrusted || a.exam!.endTrusted ? '，北京时间' : ''}' : hasTime ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}' : deadline}',
           excludeSemantics: true,
           child: SizedBox(
               width: double.infinity,

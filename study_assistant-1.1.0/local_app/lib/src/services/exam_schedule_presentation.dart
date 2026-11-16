@@ -3,12 +3,35 @@ import '../local/chaoxing_exam_parser.dart';
 import '../models/assignment.dart';
 import 'assignment_query.dart';
 
+/// A wall-time label for list layout, never a scheduling or sorting instant.
+class ExamTimelineStamp {
+  const ExamTimelineStamp(
+      {required this.key, required this.heading, required this.clock});
+  final String key, heading, clock;
+
+  static ExamTimelineStamp _fromWallTime(_WallTime time) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    final year = time.year;
+    final weekday = year == null
+        ? ''
+        : ' 周${'一二三四五六日'[DateTime.utc(year, time.month, time.day).weekday - 1]}';
+    return ExamTimelineStamp(
+      key: '${year ?? 'notice'}:${time.month}:${time.day}',
+      heading:
+          '${year == null ? '' : '$year年'}${time.month}月${time.day}日$weekday',
+      clock: '${two(time.hour)}:${two(time.minute)}',
+    );
+  }
+}
+
 /// Display-only evidence. Never use these labels for ordering or alarms.
 class ExamSchedulePresentation {
   const ExamSchedulePresentation(
-      this.cardTimeLines, this.detailTimeLines, this.verificationNote);
+      this.cardTimeLines, this.detailTimeLines, this.verificationNote,
+      {this.timeline});
   final List<String> cardTimeLines, detailTimeLines;
   final String? verificationNote;
+  final ExamTimelineStamp? timeline;
 
   static ExamSchedulePresentation build(Assignment a,
       {List<Assignment> records = const []}) {
@@ -35,6 +58,22 @@ class ExamSchedulePresentation {
         ranges[range.key] = range;
       }
     }
+    // Only an unambiguous start can occupy the opening-time rail. End-only
+    // notices stay undated in the list and retain their text in details.
+    final start = e.startTrusted && e.startAt != null
+        ? AssignmentQuery.beijing(e.startAt!)
+        : null;
+    final wallStart = start != null
+        ? _WallTime(start.year, start.month, start.day, start.hour,
+            start.minute, start.second)
+        : ranges.length == 1
+            ? ranges.values.single.start
+            : null;
+    final timeline =
+        wallStart == null ? null : ExamTimelineStamp._fromWallTime(wallStart);
+    ExamSchedulePresentation result(
+            List<String> card, List<String> detail, String? note) =>
+        ExamSchedulePresentation(card, detail, note, timeline: timeline);
     String absolute(DateTime at, bool explicitSeconds) =>
         DateFormat(explicitSeconds || at.second != 0
                 ? 'yyyy年M月d日 HH:mm:ss'
@@ -52,14 +91,13 @@ class ExamSchedulePresentation {
         e.startAt != null &&
         e.endTrusted &&
         e.endAt != null) {
-      return ExamSchedulePresentation(trusted, trusted, null);
+      return result(trusted, trusted, null);
     }
     if (ranges.length > 1) {
       final labels = ranges.values.map((r) => r.label).toList()..sort();
-      return ExamSchedulePresentation(
-          trusted, [...trusted, ...labels], '通知时间存在不一致，请查看官方通知');
+      return result(trusted, [...trusted, ...labels], '通知时间存在不一致，请查看官方通知');
     }
-    if (ranges.isEmpty) return ExamSchedulePresentation(trusted, trusted, null);
+    if (ranges.isEmpty) return result(trusted, trusted, null);
     final range = ranges.values.single;
     final lines = trusted.isEmpty
         ? <String>[range.label]
@@ -70,7 +108,7 @@ class ExamSchedulePresentation {
             if (!e.endTrusted && range.end != null)
               '结束（通知） ${range.end!.label}',
           ];
-    return ExamSchedulePresentation(lines, lines,
+    return result(lines, lines,
         range.missingYear ? '通知未注明年份，暂不作为定时依据' : '通知原文时间尚未核实，暂不作为定时依据');
   }
 }

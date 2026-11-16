@@ -77,6 +77,41 @@ void main() {
   setUpAll(() => initializeDateFormatting('zh_CN'));
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  testWidgets(
+      'notice-only wall date uses work heading style without changing sorting',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final notice = Assignment(
+        id: 'cx:examNotice:inbox:n',
+        source: AssignmentSource.exam,
+        title: '通知合成考试',
+        courseName: '合成课程',
+        deadlineAt: null,
+        requirementsText: '考试时间：11-16 07:06:00 至 11-30 07:06:31',
+        status: 'unknown',
+        lastSyncedAt: DateTime.now(),
+        exam: ExamInfo(examId: 'n', noticeOnly: true));
+    final store = _Store([
+      _work('work', deadline: DateTime.now().add(const Duration(days: 1))),
+      notice
+    ]);
+    addTearDown(store.dispose);
+    await _home(tester, store);
+    expect(find.text('11月16日'), findsOneWidget);
+    expect(find.text('07:06'), findsOneWidget);
+    expect(find.textContaining('考试时间：'), findsNothing);
+    final cards =
+        tester.widgetList<AssignmentCard>(find.byType(AssignmentCard)).toList();
+    expect(cards.map((c) => c.assignment.title), ['work', '通知合成考试']);
+    expect(notice.timelineAt, isNull);
+    expect(notice.timelineTrusted, isFalse);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final sort in [HomeSortOrder.deadlineAsc, HomeSortOrder.deadlineDesc]) {
     testWidgets('mixed exams keep unknown dates last for ${sort.name}',
         (tester) async {

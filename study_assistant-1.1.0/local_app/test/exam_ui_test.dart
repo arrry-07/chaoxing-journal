@@ -247,7 +247,7 @@ void main() {
   });
 
   testWidgets(
-      'exam card shows opening ending location and separate submission at narrow large text',
+      'exam card uses opening rail with location and separate submission at narrow large text',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(320, 1800);
@@ -279,8 +279,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('09:00'), findsOneWidget);
-    expect(find.text('开考 2026年11月16日 09:00'), findsOneWidget);
-    expect(find.text('结束 2026年11月16日 11:00'), findsOneWidget);
+    expect(find.text('开考 2026年11月16日 09:00'), findsNothing);
+    expect(find.text('结束 2026年11月16日 11:00'), findsNothing);
     expect(find.text('地点 第一教学楼三楼 A301 多媒体教室'), findsOneWidget);
     expect(find.text('考试 · 未开始 · 待参加'), findsOneWidget);
     expect(find.textContaining('今天截止'), findsNothing);
@@ -372,7 +372,7 @@ void main() {
         home: Scaffold(body: CalendarScreen(store: store, clock: () => _now))));
     await tester.pumpAndSettle();
     expect(find.text('期末考试'), findsOneWidget);
-    expect(find.textContaining('开考 2026年11月16日'), findsOneWidget);
+    expect(find.text('09:00'), findsOneWidget);
     await tester.tap(find.text('17'));
     await tester.pumpAndSettle();
     expect(find.text('期末考试'), findsNothing);
