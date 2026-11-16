@@ -157,7 +157,29 @@ void main() {
     expect(
         find.bySemanticsLabel(RegExp(RegExp.escape(_range))), findsOneWidget);
     expect(find.text(_range), findsNothing);
+    expect(find.bySemanticsLabel(RegExp('通知未注明年份，暂不作为定时依据')), findsOneWidget);
     semantics.dispose();
+  });
+
+  testWidgets(
+      'conflicting schedules announce verification warning exactly once',
+      (t) async {
+    final semantics = t.ensureSemantics();
+    try {
+      final a = _exam();
+      await _pump(t, a, sources: [
+        a,
+        _exam(notice: true, body: _range),
+        _exam(notice: true, body: '考试时间：12-01 08:00 至 12-02 08:00')
+      ]);
+      final label = find.bySemanticsLabel(RegExp('通知时间存在不一致，请查看官方通知'));
+      expect(label, findsOneWidget);
+      final text = t.getSemantics(label).label;
+      expect('通知时间存在不一致'.allMatches(text), hasLength(1));
+      expect(find.textContaining(RegExp(r'\d{2}:\d{2}')), findsNothing);
+    } finally {
+      semantics.dispose();
+    }
   });
 
   for (final openButton in [false, true]) {

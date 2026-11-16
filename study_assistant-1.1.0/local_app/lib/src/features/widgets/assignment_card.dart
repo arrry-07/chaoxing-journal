@@ -119,6 +119,8 @@ class AssignmentCard extends StatelessWidget {
     // while the visual card follows the assignment timeline layout.
     final examSemantics = [
       ...?examSchedule?.detailTimeLines,
+      if (examSchedule?.verificationNote != null)
+        examSchedule!.verificationNote!,
       ...examLines,
     ].join('，');
     final deadline = deadlinePending
