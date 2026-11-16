@@ -54,7 +54,7 @@ void main() {
     expect(
         AssignmentQuery.sortHome(records, HomeSortOrder.deadlineAsc, now: now)
             .first,
-        next);
+        unknown);
     expect(AssignmentQuery.nextActionable(records, now: now), next);
     expect(AssignmentQuery.nextActionable([expired, unknown, failed], now: now),
         isNull);
@@ -766,7 +766,8 @@ void main() {
     expect(notice.exam!.startTrusted, isFalse);
   });
 
-  test('active filters include completed homework while default stays current',
+  test(
+      'home catalog keeps completed homework for every type while current-todo callers do not',
       () {
     final now = DateTime.utc(2026, 11, 16);
     Assignment homework(String id, String status, DateTime due) => Assignment(
@@ -783,8 +784,9 @@ void main() {
     final pending = homework('3', 'pending', DateTime.utc(2026, 11, 20));
 
     expect(
-      AssignmentQuery.filterHome([first, second, pending], now: now),
-      [pending],
+      AssignmentQuery.filterHome([first, second, pending],
+          includeHistorical: true, now: now),
+      [first, second, pending],
     );
     expect(
       AssignmentQuery.filterHome(
@@ -794,6 +796,19 @@ void main() {
         now: now,
       ),
       [first, second, pending],
+    );
+    expect(
+      AssignmentQuery.filterHome([first, second, pending],
+              type: AssignmentTypeFilter.exam,
+              includeHistorical: true,
+              now: now)
+          .map((assignment) => assignment.id)
+          .toSet(),
+      isEmpty,
+    );
+    expect(
+      AssignmentQuery.currentDisplay([first, second, pending], now),
+      [pending],
     );
   });
 

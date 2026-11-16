@@ -67,10 +67,6 @@ class AssignmentListScreen extends StatefulWidget {
 
 class _AssignmentListScreenState extends State<AssignmentListScreen>
     with WidgetsBindingObserver {
-  // Keep both the label and icon button inside a narrow screen while allowing
-  // a larger tap target and readable text.
-  static const _compactFilterTextThreshold = 18.0;
-
   Timer? _clock;
   final _feedback = TransientFeedbackController();
   late int _feedbackEpoch;
@@ -283,12 +279,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             _deadlineFilter != AssignmentDeadlineFilter.all;
         final catalogAssignments = store.homeCatalogAssignments;
         final examSources = catalogAssignments;
-        final catalogDisplay =
-            AssignmentQuery.currentDisplay(catalogAssignments, now);
-        final projectedCatalog =
-            AssignmentQuery.projectDisplay(catalogAssignments);
-        final displayAssignments =
-            filtersActive ? catalogDisplay : store.homeDisplayAssignments;
+        final displayIndex = store.homeDisplayIndex;
+        final projectedCatalog = AssignmentQuery.projectDisplay(
+            catalogAssignments,
+            index: displayIndex);
+        final displayAssignments = AssignmentQuery.currentDisplay(
+            catalogAssignments, now,
+            index: displayIndex);
         final options = <String, String>{
           for (final a in projectedCatalog)
             if (a.courseKey case final key?) key: a.courseName
@@ -296,17 +293,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         if (_courseKey != null && !options.containsKey(_courseKey)) {
           options[_courseKey!] = '已选课程（当前无可显示作业）';
         }
-        // Recovery views are route-scoped. They deliberately bypass the saved
-        // query/course/deadline filters without ever writing them back.
+        // The home list always queries the complete visible catalog; filters
+        // only intersect conditions. Recovery views are route-scoped, keep the
+        // current-todo scope and never write saved preferences back.
         final items = recoveryScope == null
             ? AssignmentQuery.filterHome(
-                filtersActive ? catalogAssignments : displayAssignments,
+                catalogAssignments,
                 query: _query,
                 courseKey: _courseKey,
                 deadline: _deadlineFilter,
                 type: _typeFilter,
-                includeHistorical: filtersActive,
-                index: store.homeDisplayIndex,
+                includeHistorical: true,
+                index: displayIndex,
                 now: now,
               )
             : displayAssignments
@@ -318,7 +316,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           sortOrder,
           now: now,
           sourceRecords: catalogAssignments,
-          displayIndex: store.homeDisplayIndex,
+          displayIndex: displayIndex,
         );
         final today = PersonalWorkspace.dayKey(now);
         final plans =
@@ -333,13 +331,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 store.syncReport.phase == SyncPhase.success);
         final freshness = _freshnessLabel(sync.summary,
             store.syncReport.lastDataSuccessAt ?? store.lastSyncAt, now);
-        final compactFilterAction = MediaQuery.textScalerOf(context).scale(14) >
-            _compactFilterTextThreshold;
+        final statusText = sync.showCached ? '$freshness · 显示上次记录' : freshness;
         Widget card(Assignment a) => AssignmentCard(
             key: ValueKey('assignment-${a.id}'),
             assignment: a,
             examSources: examSources,
-            displayIndex: store.homeDisplayIndex,
+            displayIndex: displayIndex,
             now: now,
             showFullDeadline: false,
             compact: store.display.compact,
@@ -354,19 +351,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             opening: _openingAssignments.contains(a.id),
             onTap: () =>
                 context.push('/assignments/${Uri.encodeComponent(a.id)}'));
-        Widget filterAction() => compactFilterAction
-            ? IconButton(
-                tooltip: filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选',
-                onPressed: () => _openFilters(options),
-                icon: Badge(
-                    isLabelVisible: filtersActive,
-                    child: const Icon(Icons.filter_list)),
-              )
-            : TextButton.icon(
-                onPressed: () => _openFilters(options),
-                icon: const Icon(Icons.filter_list, size: 18),
-                label: Text(filtersActive ? '已筛选' : '搜索与筛选'),
-              );
         List<Widget> timeline(List<Assignment> list) {
           String? previous;
           final widgets = <Widget>[];
@@ -375,7 +359,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             String? heading;
             if (a.isExam) {
               final stamp = ExamSchedulePresentation.build(a,
-                      records: examSources, index: store.homeDisplayIndex)
+                      records: examSources, index: displayIndex)
                   .timeline;
               key = stamp?.key;
               heading = stamp?.heading;
@@ -389,11 +373,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   '${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}';
             }
             if (heading != null && key != previous) {
-              widgets.add(dayHeading(heading));
+              widgets.add(dayHeading(heading, top: widgets.isEmpty ? 8 : 12));
             }
             // Reset after an undated row so a later dated item gets its header.
             previous = key;
-            widgets.add(card(a));
+            final row = card(a);
+            widgets.add(widgets.isEmpty
+                ? Padding(padding: const EdgeInsets.only(top: 8), child: row)
+                : row);
           }
           return widgets;
         }
@@ -463,44 +450,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                           '今日计划 · 已完成${plans.where((p) => p.done).length}/${plans.length}')),
                                   const Icon(Icons.chevron_right),
                                 ]))))),
-              Row(children: [
-                const Icon(Icons.schedule, size: 16, color: Journal.muted),
-                const SizedBox(width: 6),
-                Expanded(
-                    child: Semantics(
-                  liveRegion: true,
-                  label: '数据新鲜度',
-                  child: Row(children: [
-                    Flexible(child: Text(freshness, style: Journal.metadata)),
-                    if (sync.showCached) ...[
-                      const SizedBox(width: 6),
-                      const Text('上次记录', style: Journal.metadata),
-                    ],
-                  ]),
-                )),
-                if (recoveryScope == null) filterAction(),
-              ]),
-              if (recoveryScope == null && sortOrder != HomeSortOrder.grouped)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.sort, size: 16, color: Journal.muted),
-                        const SizedBox(width: 6),
-                        Flexible(
-                            child: Text(
-                          _shortSortLabel(sortOrder),
-                          key: const ValueKey('current-home-sort'),
-                          textAlign: TextAlign.right,
-                          style: Journal.metadata,
-                        )),
-                      ],
-                    ),
-                  ),
-                ),
+              Semantics(
+                liveRegion: true,
+                label: statusText,
+                child: Row(children: [
+                  const Icon(Icons.schedule, size: 16, color: Journal.muted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                      child: ExcludeSemantics(
+                          child: Text(statusText, style: Journal.metadata))),
+                ]),
+              ),
+              if (recoveryScope == null) ...[
+                const SizedBox(height: 4),
+                _homeActions(context, options, filtersActive, sortOrder),
+              ],
               if (busy)
                 Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -510,9 +474,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             style: Journal.metadata))),
               if (recoveryScope == null &&
                   _courseKey != null &&
-                  !displayAssignments.any((a) => a.courseKey == _courseKey) &&
-                  !(filtersActive &&
-                      projectedCatalog.any((a) => a.courseKey == _courseKey)))
+                  !projectedCatalog.any((a) => a.courseKey == _courseKey))
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 12),
                     child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
@@ -539,7 +501,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               ] else if (store.assignments.isNotEmpty) ...[
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
-                    child: Text('本机有已完成、已隐藏、未关注或历史来源的记录，当前首页未显示。')),
+                    child: Text('本机有已隐藏、未关注、历史课堂练习或非课业来源的记录，当前首页未显示。')),
                 TextButton(
                     onPressed: () => context.push('/records'),
                     child: const Text('查看全部本地记录')),
@@ -560,8 +522,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             ]);
       });
 
-  Widget dayHeading(String label) => Padding(
-      padding: const EdgeInsets.only(top: 12, bottom: 4),
+  Widget dayHeading(String label, {double top = 12}) => Padding(
+      padding: EdgeInsets.only(top: top, bottom: 4),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text(label,
             style: Journal.metadata.copyWith(
@@ -619,6 +581,84 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         HomeSortOrder.courseName => '按课程',
         _ => '时间近到远',
       };
+
+  Widget _homeActions(BuildContext context, Map<String, String> options,
+      bool filtersActive, HomeSortOrder sortOrder) {
+    final actionColor = Theme.of(context).colorScheme.primary;
+    final textStyle = Journal.metadata.copyWith(color: actionColor);
+    final scaler = MediaQuery.textScalerOf(context);
+    final filterLabel = filtersActive ? '已筛选' : '搜索与筛选';
+    final sortLabel = _shortSortLabel(sortOrder);
+    double labelWidth(String text) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: textStyle),
+        textScaler: scaler,
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final width = painter.width.ceilToDouble();
+      painter.dispose();
+      return width;
+    }
+
+    const entryHorizontalPadding = 8.0;
+    final filterWidth =
+        18 + 8 + labelWidth(filterLabel) + entryHorizontalPadding;
+    final sortWidth = 18 + 8 + labelWidth(sortLabel) + entryHorizontalPadding;
+    Widget entry({
+      required IconData icon,
+      required String label,
+      required String message,
+      Key? labelKey,
+    }) =>
+        Semantics(
+          button: true,
+          label: message,
+          child: ExcludeSemantics(
+            child: Tooltip(
+              message: message,
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  onTap: () => _openFilters(options),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 48),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(icon, size: 18, color: actionColor),
+                        const SizedBox(width: 8),
+                        Flexible(
+                            child:
+                                Text(label, key: labelKey, style: textStyle)),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+    final filterEntry = entry(
+      icon: Icons.filter_list,
+      label: filterLabel,
+      message: filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选',
+    );
+    final sortEntry = entry(
+      icon: Icons.sort,
+      label: sortLabel,
+      message: '当前排序：$sortLabel，打开搜索、筛选与排序',
+      labelKey: const ValueKey('current-home-sort'),
+    );
+    return LayoutBuilder(builder: (context, constraints) {
+      if (filterWidth + sortWidth + 16 <= constraints.maxWidth) {
+        return Row(children: [filterEntry, const Spacer(), sortEntry]);
+      }
+      return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [filterEntry, sortEntry]);
+    });
+  }
 
   String _sortLabel(HomeSortOrder order) => switch (order) {
         HomeSortOrder.grouped => '默认分组',

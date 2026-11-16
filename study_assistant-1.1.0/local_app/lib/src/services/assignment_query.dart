@@ -92,8 +92,6 @@ int _nameGroupRank(AssignmentDeadlineBucket bucket) => switch (bucket) {
 class _PreparedAssignment {
   _PreparedAssignment(this.assignment, this.index, DateTime now, this.displayAt)
       : bucket = AssignmentQuery.timelineBucketAt(assignment, now),
-        ended =
-            assignment.isExam && AssignmentQuery.isExamEnded(assignment, now),
         course = _NaturalKey(assignment.courseName),
         title = _NaturalKey(assignment.title),
         courseKey = _NaturalKey(assignment.courseKey ?? ''),
@@ -103,7 +101,6 @@ class _PreparedAssignment {
   final int index;
   final AssignmentDeadlineBucket bucket;
   final DateTime? displayAt;
-  final bool ended;
   final _NaturalKey course;
   final _NaturalKey title;
   final _NaturalKey courseKey;
@@ -125,18 +122,14 @@ class _PreparedAssignment {
     return index.compareTo(other.index);
   }
 
-  /// The home timeline keeps actionable, undated, and historical records ahead
-  /// of overdue work. An overdue date being earlier must never put it first.
+  /// The home timeline orders every non-overdue record with usable display
+  /// time by that time, keeps undated/untrusted records in a stable middle
+  /// tier, and always puts confirmed overdue work last. Completion or an
+  /// ended exam never changes the tier; an earlier overdue date must never
+  /// put overdue work first.
   int get homeTier {
     if (bucket == AssignmentDeadlineBucket.overdue) return 2;
-    if (bucket == AssignmentDeadlineBucket.completed || ended) return 1;
-    if (bucket == AssignmentDeadlineBucket.confirmedNoDeadline) return 1;
-    if (bucket == AssignmentDeadlineBucket.notExpiredWithDeadline) return 0;
-    // A display-only exam projection is valid timeline evidence for ordering,
-    // without promoting its start time or calendar trust in the model. Course
-    // work with unknown submission state remains in the undated middle tier.
-    if (assignment.isExam && displayAt != null) return 0;
-    return 1;
+    return displayAt != null ? 0 : 1;
   }
 }
 
@@ -583,14 +576,19 @@ class AssignmentQuery {
     DateTime now, {
     AssignmentDisplayIndex? index,
   }) {
-    if (displayTimelineAt(assignment,
-            records: sources, index: index, now: now) ==
-        null) {
-      return false;
-    }
+    final start =
+        displayTimelineAt(assignment, records: sources, index: index, now: now);
     final end = displayTimelineEndAt(assignment,
         records: sources, index: index, now: now);
-    return end == null || end.isAfter(now);
+    final exam = assignment.exam!;
+    final trustedEnd = exam.endTrusted && exam.endAt != null;
+    // An opening already in the past with no usable end cannot confirm the
+    // exam is still open; it stays discoverable under "all" only.
+    // A yearless notice end without a projectable opening (for example a leap
+    // day in a non-leap year) is not usable evidence either.
+    if (start == null && !trustedEnd) return false;
+    return (start != null && start.isAfter(now)) ||
+        (end != null && end.isAfter(now));
   }
 
   /// Lightweight home querying only. It does not reinterpret submission or

@@ -640,10 +640,11 @@ class LocalAssignmentRepository {
 
   static List<Assignment> mergeAssignments(
       List<Assignment> existing, List<Assignment> incoming,
-      {Set<String> hiddenCompletedIds = const {}}) {
+      {Set<String> hiddenCompletedIds = const {},
+      bool includeCompleted = false}) {
     final state = _Journal(existing, {...hiddenCompletedIds}, null);
     state.merge(incoming);
-    return state.pending;
+    return includeCompleted ? state.journal : state.pending;
   }
 
   Future<void> clear() => _serialized(() async {
