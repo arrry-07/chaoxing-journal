@@ -110,7 +110,8 @@ void main() {
         home: Scaffold(
             body: AssignmentCard(
                 assignment: a, examSources: [a, n], now: _now, onTap: () {}))));
-    expect(find.text('考试时间：11-16 07:06:00 至 11-30 07:06:31'), findsOneWidget);
+    expect(find.text('07:06'), findsOneWidget);
+    expect(find.text('考试时间：11-16 07:06:00 至 11-30 07:06:31'), findsNothing);
     expect(find.text('时长 60 分钟'), findsOneWidget);
     expect(find.text('归档'), findsNothing);
     expect(find.text('—'), findsNothing);

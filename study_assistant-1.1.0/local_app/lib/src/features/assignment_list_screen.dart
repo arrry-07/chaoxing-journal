@@ -10,6 +10,7 @@ import '../models/sync_report.dart';
 import '../models/personal_workspace.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
+import '../services/exam_schedule_presentation.dart';
 import '../services/home_sync_presentation.dart';
 import '../services/assignment_web_link.dart';
 import '../services/external_link_service.dart';
@@ -349,18 +350,34 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 label: Text(filtersActive ? '已筛选' : '搜索与筛选'),
               );
         List<Widget> timeline(List<Assignment> list) {
-          DateTime? previous;
-          return [
-            for (final a in list) ...[
-              if (a.timelineAt != null &&
-                  a.timelineTrusted &&
-                  (a.isExam || !a.deadlineReadFailed) &&
-                  previous != AssignmentQuery.dayKey(a.timelineAt!))
-                dayHeading(
-                    previous = AssignmentQuery.dayKey(a.timelineAt!), now),
-              card(a),
-            ]
-          ];
+          String? previous;
+          final widgets = <Widget>[];
+          for (final a in list) {
+            String? key;
+            String? heading;
+            if (a.isExam) {
+              final stamp = ExamSchedulePresentation.build(a,
+                      records: store.courseAssignments)
+                  .timeline;
+              key = stamp?.key;
+              heading = stamp?.heading;
+            } else if (a.timelineAt != null &&
+                a.timelineTrusted &&
+                !a.deadlineReadFailed) {
+              final day = AssignmentQuery.dayKey(a.timelineAt!);
+              key = '${day.year}:${day.month}:${day.day}';
+              heading =
+                  '${day.year == AssignmentQuery.beijing(now).year ? '' : '${day.year}年'}'
+                  '${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}';
+            }
+            if (heading != null && key != previous) {
+              widgets.add(dayHeading(heading));
+            }
+            // Reset after an undated row so a later dated item gets its header.
+            previous = key;
+            widgets.add(card(a));
+          }
+          return widgets;
         }
 
         return ListView(
@@ -523,12 +540,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             ]);
       });
 
-  Widget dayHeading(DateTime day, DateTime now) => Padding(
+  Widget dayHeading(String label) => Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 4),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(
-            '${day.year == AssignmentQuery.beijing(now).year ? '' : '${day.year}年'}'
-            '${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}',
+        Text(label,
             style: Journal.metadata.copyWith(
                 color: Journal.ink, fontSize: 16, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),

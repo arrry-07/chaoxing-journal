@@ -40,6 +40,41 @@ Assignment formal({DateTime? start, DateTime? end}) => Assignment(
         endTrusted: end != null,
         lifecycle: 'scheduled'));
 void main() {
+  test('notice timeline keeps month-day without guessing a year or weekday',
+      () {
+    final a = notice('考试时间：11-16 07:06:00 至 11-30 07:06:31');
+    final before = a.toJson();
+    final stamp = ExamSchedulePresentation.build(a).timeline!;
+    expect(stamp.heading, '11月16日');
+    expect(stamp.clock, '07:06');
+    expect(stamp.key, 'notice:11:16');
+    expect(a.toJson(), before);
+    expect(a.timelineAt, isNull);
+    expect(a.timelineTrusted, isFalse);
+  });
+  test('year and weekday are shown only from explicit date evidence', () {
+    final p = ExamSchedulePresentation.build(
+        notice('考试时间：2026-11-16 07:06 至 2026-11-30 07:06'));
+    expect(p.timeline!.heading, '2026年11月16日 周一');
+    expect(p.timeline!.clock, '07:06');
+    final trusted = ExamSchedulePresentation.build(
+        formal(start: DateTime.utc(2026, 11, 16, 0)));
+    expect(trusted.timeline!.heading, '2026年11月16日 周一');
+    expect(trusted.timeline!.clock, '08:00');
+  });
+  test('end-only or conflicting notices cannot supply an opening-time rail',
+      () {
+    expect(ExamSchedulePresentation.build(notice('结束时间：11-30 07:06')).timeline,
+        isNull);
+    final a = formal();
+    expect(
+        ExamSchedulePresentation.build(a, records: [
+          a,
+          notice('考试时间：11-16 08:00 至 11-17 08:00'),
+          notice('考试时间：12-01 08:00 至 12-02 08:00', suffix: 'second')
+        ]).timeline,
+        isNull);
+  });
   test('month-day notification is visible without manufacturing an instant',
       () {
     final a =
