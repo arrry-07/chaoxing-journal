@@ -638,6 +638,29 @@ class LocalAssignmentRepository {
         return state.pending;
       });
 
+  /// Applies one hide/restore operation to every source in a coursework group.
+  /// The optional commit gate runs inside the serialized write transaction so
+  /// an account/session change cannot partially hide a stale group.
+  Future<List<Assignment>> updateCompletionMany(
+    Iterable<String> ids,
+    bool hidden, {
+    Future<bool> Function()? canCommit,
+  }) =>
+      _serialized(() async {
+        if (canCommit != null && !await canCommit()) {
+          throw StateError('账号会话已变化，旧隐藏结果已拒绝提交');
+        }
+        final state = await _read();
+        final existing = ids.where(state.byId.containsKey).toSet();
+        if (hidden) {
+          state.hidden.addAll(existing);
+        } else {
+          state.hidden.removeAll(existing);
+        }
+        await _save(state);
+        return state.pending;
+      });
+
   static List<Assignment> mergeAssignments(
       List<Assignment> existing, List<Assignment> incoming,
       {Set<String> hiddenCompletedIds = const {},

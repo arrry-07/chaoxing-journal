@@ -75,19 +75,22 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
             .joinToString(" · ")
 
     private fun remainingText(item: JSONObject): String {
+        val fallback = item.optString("remainingText")
         val raw = item.optString("deadlineAt")
-        if (raw.isEmpty() || raw == "null") return item.optString("remainingText")
-        return try {
+        if (raw.isEmpty() || raw == "null") return fallback
+        val anchorAt = try {
             val instant = try { OffsetDateTime.parse(raw).toInstant() }
                 catch (_: Exception) { LocalDateTime.parse(raw).atZone(ZoneId.systemDefault()).toInstant() }
-            val minutes = ceil((instant.toEpochMilli() - System.currentTimeMillis()) / 60000.0).toLong()
-            when {
-                minutes <= 0 -> "已截止"
-                minutes < 60 -> "${minutes}分钟"
-                minutes < 1440 -> "${ceil(minutes / 60.0).toLong()}小时"
-                else -> "${ceil(minutes / 1440.0).toLong()}天"
-            }
-        } catch (_: Exception) { "截止时间读取失败" }
+            instant.toEpochMilli()
+        } catch (_: Exception) {
+            return fallback
+        }
+        return AssignmentWidgetTimeText.remainingText(
+            anchorAtMillis = anchorAt,
+            eventKind = item.optString("eventKind", "deadline"),
+            nowMillis = System.currentTimeMillis(),
+            fallback = fallback,
+        )
     }
 
     private fun normalizeDeepLink(target: String): Uri {
@@ -108,5 +111,28 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
         } catch (_: Exception) {
             JSONArray()
         }
+    }
+}
+
+internal object AssignmentWidgetTimeText {
+    fun remainingText(
+        anchorAtMillis: Long?,
+        eventKind: String,
+        nowMillis: Long,
+        fallback: String,
+    ): String {
+        if (anchorAtMillis == null) return fallback
+        val minutes = ceil((anchorAtMillis - nowMillis) / 60000.0).toLong()
+        if (eventKind == "examStart") {
+            if (minutes <= 0) return "已开考"
+            return "距开考 ${remainingLabel(minutes)}"
+        }
+        return if (minutes <= 0) "已截止" else remainingLabel(minutes)
+    }
+
+    private fun remainingLabel(minutes: Long): String = when {
+        minutes < 60 -> "${minutes}分钟"
+        minutes < 1440 -> "${ceil(minutes / 60.0).toLong()}小时"
+        else -> "${ceil(minutes / 1440.0).toLong()}天"
     }
 }

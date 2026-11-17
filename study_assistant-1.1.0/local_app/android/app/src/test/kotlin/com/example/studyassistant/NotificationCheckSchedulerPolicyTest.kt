@@ -51,6 +51,7 @@ class NotificationCheckSchedulerPolicyTest {
             NotificationCheckSchedulerPolicy.shouldScheduleFollowUp(
                 pendingSignalVersion = 7,
                 consumedSignalVersion = 5,
+                attemptedSignalVersion = 6,
             ),
         )
     }
@@ -62,7 +63,52 @@ class NotificationCheckSchedulerPolicyTest {
             NotificationCheckSchedulerPolicy.shouldScheduleFollowUp(
                 pendingSignalVersion = 7,
                 consumedSignalVersion = 7,
+                attemptedSignalVersion = 7,
             ),
+        )
+    }
+
+    @Test
+    fun attemptedButUnconsumedSignalDoesNotScheduleAnotherCheck() {
+        assertEquals(
+            false,
+            NotificationCheckSchedulerPolicy.shouldScheduleFollowUp(
+                pendingSignalVersion = 7,
+                consumedSignalVersion = 5,
+                attemptedSignalVersion = 7,
+            ),
+        )
+        assertEquals(
+            null,
+            NotificationCheckSchedulerPolicy.claimableVersion(
+                pendingSignalVersion = 7,
+                consumedSignalVersion = 5,
+                attemptedSignalVersion = 7,
+            ),
+        )
+    }
+
+    @Test
+    fun signalArrivingDuringAttemptGetsExactlyOneLatestFollowUp() {
+        assertEquals(
+            9L,
+            NotificationCheckSchedulerPolicy.claimableVersion(
+                pendingSignalVersion = 9,
+                consumedSignalVersion = 5,
+                attemptedSignalVersion = 7,
+            ),
+        )
+    }
+
+    @Test
+    fun cooldownUsesActualCheckAttempt() {
+        assertEquals(
+            600_000L,
+            NotificationCheckSchedulerPolicy.cooldownAt(0L),
+        )
+        assertEquals(
+            null,
+            NotificationCheckSchedulerPolicy.cooldownAt(null),
         )
     }
 }

@@ -19,6 +19,7 @@ class ParallelApkTransfer {
     required File destination,
     required Directory working,
     required CancelToken token,
+    void Function(Response<ResponseBody>)? validateResponse,
     void Function(Response<ResponseBody>)? validateFullResponse,
     void Function(int, int)? onProgress,
   }) async {
@@ -43,6 +44,9 @@ class ParallelApkTransfer {
           retryInitialRequest: i == 0,
           // Spend the same single retry on the existing full-response fallback.
           retryWithoutRange: i == 0, validateHeaders: (response) {
+        // Validate status and the complete redirect chain before either the
+        // range probe or any sibling starts reading a response body.
+        validateResponse?.call(response);
         final hasRange = response.requestOptions.headers.keys
             .any((name) => name.toLowerCase() == 'range');
         if (i == 0 && (response.statusCode == 200 || !hasRange)) {

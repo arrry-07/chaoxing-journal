@@ -52,7 +52,7 @@ class _StatsScreenState extends State<StatsScreen> {
         final now = _now;
         // Use one instant for the overview and each course, including deadlines
         // that pass while the widget is building.
-        final records = store.courseAssignments;
+        final records = store.statsAssignments;
         final stats = AssignmentStatistics(records, now: now);
         final keyed = <String, List<Assignment>>{};
         final accountExams = <Assignment>[];

@@ -114,6 +114,50 @@ class ReminderSourceScopeTest {
     }
 
     @Test
+    fun versionThreeUpgradeAddsSignalAttemptStateWithoutLosingAccountData() {
+        val file = File(context.cacheDir, "synthetic-reminder-v3-${System.nanoTime()}.db")
+        try {
+            SQLiteDatabase.openOrCreateDatabase(file, null).use { old ->
+                old.execSQL(
+                    "CREATE TABLE accounts (account_hash TEXT PRIMARY KEY, " +
+                        "pending_signal_version INTEGER, consumed_signal_version INTEGER, " +
+                        "last_signal_at INTEGER)",
+                )
+                old.execSQL(
+                    "INSERT INTO accounts VALUES " +
+                        "('keep-account', 7, 5, 123456789)",
+                )
+                old.version = 3
+            }
+            val helper = object : SQLiteOpenHelper(context, file.absolutePath, null, 4) {
+                override fun onCreate(db: SQLiteDatabase) = error("Expected existing v3 database")
+                override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+                    database.onUpgrade(db, oldVersion, newVersion)
+                }
+            }
+            helper.use {
+                val upgraded = it.writableDatabase
+                assertEquals(4, upgraded.version)
+                upgraded.rawQuery(
+                    "SELECT pending_signal_version, consumed_signal_version, " +
+                        "last_signal_at, attempted_signal_version, last_signal_check_at " +
+                        "FROM accounts WHERE account_hash = 'keep-account'",
+                    null,
+                ).use { row ->
+                    assertTrue(row.moveToFirst())
+                    assertEquals(7L, row.getLong(0))
+                    assertEquals(5L, row.getLong(1))
+                    assertEquals(123456789L, row.getLong(2))
+                    assertEquals(0L, row.getLong(3))
+                    assertTrue(row.isNull(4))
+                }
+            }
+        } finally {
+            SQLiteDatabase.deleteDatabase(file)
+        }
+    }
+
+    @Test
     fun latestUnknownFailedOrOutOfScopeSnapshotCancelsPendingAndSubmittedEvents() {
         val invalidSnapshots = listOf<(StoredReminderSnapshot) -> StoredReminderSnapshot>(
             { it.copy(status = "unknown") },

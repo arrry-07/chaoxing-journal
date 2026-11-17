@@ -111,9 +111,19 @@ object BackgroundWorkScheduler {
     ) {
         val account = database.readAccount(accountHash) ?: return
         if (!account.active || !account.listenerEnabled) return
+        val claimable = NotificationCheckSchedulerPolicy.claimableVersion(
+            account.pendingSignalVersion,
+            account.consumedSignalVersion,
+            account.attemptedSignalVersion,
+        ) ?: return
         val workManager = WorkManager.getInstance(context)
         val state = notificationWorkState(workManager)
-        val request = notificationRequest(database, accountHash, signalVersion)
+        val request = notificationRequest(
+            database,
+            accountHash,
+            account.sessionEpoch,
+            maxOf(signalVersion, claimable),
+        )
         val action = NotificationCheckSchedulerPolicy.action(state)
         if (action == NotificationCheckAction.COALESCE) return
         val policy = when (action) {
@@ -143,6 +153,7 @@ object BackgroundWorkScheduler {
             !NotificationCheckSchedulerPolicy.shouldScheduleFollowUp(
                 account.pendingSignalVersion,
                 account.consumedSignalVersion,
+                account.attemptedSignalVersion,
             )
         ) {
             return
@@ -158,10 +169,13 @@ object BackgroundWorkScheduler {
     private fun notificationRequest(
         database: ReminderDatabase,
         accountHash: String,
+        sessionEpoch: Long,
         signalVersion: Long,
     ): OneTimeWorkRequest {
         val now = System.currentTimeMillis()
-        val cooldownAt = (database.lastSignalAt(accountHash) ?: 0L) + 10 * 60_000L
+        val cooldownAt = NotificationCheckSchedulerPolicy.cooldownAt(
+            database.lastSignalCheckAt(accountHash),
+        ) ?: 0L
         val delayAt = NativeReminderPolicy.notificationTargetAt(
             Instant.ofEpochMilli(now),
             Instant.ofEpochMilli(cooldownAt),
@@ -175,6 +189,7 @@ object BackgroundWorkScheduler {
                 Data.Builder()
                     .putString(FlutterCheckWorker.KEY_REASON, REASON_NOTIFICATION)
                     .putString(FlutterCheckWorker.KEY_ACCOUNT_HASH, accountHash)
+                    .putLong(FlutterCheckWorker.KEY_SESSION_EPOCH, sessionEpoch)
                     .putLong(FlutterCheckWorker.KEY_SIGNAL_VERSION, signalVersion)
                     .putLong(FlutterCheckWorker.KEY_REQUESTED_AT, System.currentTimeMillis())
                     .build(),

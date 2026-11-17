@@ -8,6 +8,7 @@ import androidx.work.WorkManager
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -83,7 +84,61 @@ class NotificationWorkSchedulerTest {
         assertNotEquals(firstWork.id, secondWork.id)
     }
 
+    @Test
+    fun attemptedSignalDoesNotScheduleAnotherEngine() {
+        val epoch = database.readAccount(accountHash)!!.sessionEpoch
+        val version = database.recordSignal(
+            accountHash,
+            epoch,
+            "signal-attempted",
+            System.currentTimeMillis(),
+        )
+        assertEquals(version, database.claimNotificationSignal(accountHash, epoch))
+
+        BackgroundWorkScheduler.scheduleNotificationCheck(
+            context,
+            database,
+            accountHash,
+            version,
+        )
+
+        assertTrue(liveWorks().isEmpty())
+    }
+
+    @Test
+    fun higherSignalAfterFailedAttemptSchedulesOneSuccessor() {
+        val epoch = database.readAccount(accountHash)!!.sessionEpoch
+        val first = database.recordSignal(
+            accountHash,
+            epoch,
+            "signal-first",
+            System.currentTimeMillis(),
+        )
+        database.claimNotificationSignal(accountHash, epoch)
+        val second = database.recordSignal(
+            accountHash,
+            epoch,
+            "signal-second",
+            System.currentTimeMillis() + 1_000L,
+        )
+        assertTrue(second > first)
+
+        BackgroundWorkScheduler.scheduleNotificationCheck(
+            context,
+            database,
+            accountHash,
+            second,
+        )
+
+        liveWork()
+    }
+
     private fun liveWork(): List<WorkInfo> =
+        liveWorks().also {
+            assertEquals(1, it.size)
+        }
+
+    private fun liveWorks(): List<WorkInfo> =
         workManager.getWorkInfosForUniqueWork(
             BackgroundWorkScheduler.NOTIFICATION_WORK,
         ).get(5, TimeUnit.SECONDS)
@@ -91,8 +146,5 @@ class NotificationWorkSchedulerTest {
                 it.state == WorkInfo.State.ENQUEUED ||
                     it.state == WorkInfo.State.RUNNING ||
                     it.state == WorkInfo.State.BLOCKED
-            }
-            .also {
-                assertEquals(1, it.size)
             }
 }

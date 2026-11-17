@@ -202,6 +202,73 @@ void main() {
     expect(client.trackedIds, contains(hidden.id));
     expect(store.hiddenAssignments.single.deadlineAt, hidden.deadlineAt);
   });
+
+  test('hidden exam group stays hidden when a new notice is discovered',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final formal = _exam(
+      id: 'cx:exam:1:2:3',
+      examId: '3',
+      title: '高等数学期末考试',
+    );
+    final noticeA = _exam(
+      id: 'cx:examNotice:inbox:701',
+      examId: '701',
+      related: '3',
+      notice: true,
+      title: '考试通知 A',
+    );
+    final noticeB = _exam(
+      id: 'cx:examNotice:inbox:702',
+      examId: '702',
+      related: '3',
+      notice: true,
+      title: '考试通知 B',
+    );
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(account: 'student'),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      chaoxingClient: _FakeChaoxingClient(const []),
+    );
+    addTearDown(store.dispose);
+    await store.repository.mergeAndSave([formal, noticeA, noticeB]);
+    await store.restoreSession();
+
+    expect(store.courseworkGroups, hasLength(1));
+    expect(store.courseworkGroups.single.sourceCount, 3);
+    expect(store.statsAssignments.single.id, formal.id);
+    await store.setAssignmentsHidden(
+      [formal.id, noticeA.id, noticeB.id],
+      true,
+    );
+    expect(store.hiddenCourseworkGroups.single.sourceCount, 3);
+    expect(store.courseAssignments, isEmpty);
+    expect(store.statsAssignments, isEmpty);
+
+    final newNotice = _exam(
+      id: 'cx:examNotice:inbox:703',
+      examId: '703',
+      related: '3',
+      notice: true,
+      title: '考试通知 C',
+    );
+    await store.repository.mergeAndSave([newNotice]);
+    await store.refreshAssignments();
+
+    expect(store.assignments.map((item) => item.id), contains(newNotice.id));
+    expect(store.hiddenCourseworkGroups.single.sourceCount, 4);
+    expect(store.courseAssignments, isEmpty);
+    expect(store.statsAssignments, isEmpty);
+
+    await store.setCourseworkGroupHidden(
+      store.hiddenCourseworkGroups.single,
+      false,
+    );
+    expect(store.hiddenCourseworkGroups, isEmpty);
+    expect(store.courseworkGroups.single.sourceCount, 4);
+    expect(store.statsAssignments.single.id, formal.id);
+  });
 }
 
 Assignment _assignment({required String id, required String title}) {
@@ -215,6 +282,36 @@ Assignment _assignment({required String id, required String title}) {
     lastSyncedAt: DateTime(2026, 5, 25, 12),
   );
 }
+
+Assignment _exam({
+  required String id,
+  required String examId,
+  String? related,
+  bool notice = false,
+  required String title,
+}) =>
+    Assignment(
+      id: id,
+      source: AssignmentSource.exam,
+      exam: ExamInfo(
+        examId: examId,
+        relatedExamId: related,
+        courseId: '1',
+        clazzId: '2',
+        startAt: DateTime.utc(2026, 11, 20, 1),
+        endAt: DateTime.utc(2026, 11, 20, 2),
+        startTrusted: !notice,
+        endTrusted: !notice,
+        lifecycle: notice ? 'unknown' : 'scheduled',
+        noticeOnly: notice,
+      ),
+      courseName: '高等数学',
+      title: title,
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'unknown',
+      lastSyncedAt: DateTime.utc(2026, 11, 16, 8),
+    );
 
 class _DelayedClient extends ChaoxingLocalClient {
   final started = Completer<void>();

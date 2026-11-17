@@ -15,6 +15,7 @@ import '../models/assignment_sync_progress.dart';
 import '../models/sync_report.dart';
 import '../models/course.dart';
 import 'assignment_query.dart';
+import 'assignment_grouping.dart';
 import 'local_notification_service.dart';
 import 'reminder_rule_store.dart';
 import 'secure_session_store.dart';
@@ -429,10 +430,56 @@ class AssignmentStore extends ChangeNotifier {
   bool follows(String key) => !_unfollowed.contains(key);
   List<Assignment> get formalAssignments =>
       courseAssignments.where((a) => a.isFormal).toList();
+  List<CourseworkGroup>? _courseworkGroupsCache;
+  List<CourseworkGroup>? _localRecordGroupsCache;
+  List<Assignment>? _courseworkSourcesCache;
+  List<Assignment>? _statsAssignmentsCache;
+
+  List<CourseworkGroup> get localRecordGroups =>
+      _localRecordGroupsCache ??= List.unmodifiable(AssignmentGrouping.group(
+        [..._assignments, ..._hiddenAssignments],
+        hiddenIds:
+            _hiddenAssignments.map((assignment) => assignment.id).toSet(),
+      ));
+
+  List<CourseworkGroup> get courseworkGroups =>
+      _courseworkGroupsCache ??= List.unmodifiable(AssignmentGrouping.group(
+        AssignmentQuery.scope([..._assignments, ..._hiddenAssignments], {})
+            .where((assignment) =>
+                assignment.courseKey == null || follows(assignment.courseKey!))
+            .toList(),
+        hiddenIds:
+            _hiddenAssignments.map((assignment) => assignment.id).toSet(),
+      ));
+
   List<Assignment> get courseAssignments =>
-      AssignmentQuery.scope(_assignments, {})
-          .where((a) => a.courseKey == null || follows(a.courseKey!))
-          .toList();
+      _courseworkSourcesCache ??= List.unmodifiable([
+        for (final group in courseworkGroups)
+          if (!group.hidden) ...group.sources,
+      ]);
+
+  /// Original primary records for statistics. Notice supplementation is a
+  /// display-only projection and must never resolve submission state.
+  List<Assignment> get statsAssignments =>
+      _statsAssignmentsCache ??= List.unmodifiable([
+        for (final group in courseworkGroups)
+          if (!group.hidden) group.primary,
+      ]);
+
+  List<CourseworkGroup> get hiddenCourseworkGroups => List.unmodifiable(
+        localRecordGroups.where((group) => group.hidden),
+      );
+
+  List<CourseworkGroup> get localCourseTaskGroups => List.unmodifiable(
+        localRecordGroups.where(
+          (group) => !group.hidden && group.primary.hasCourseTaskIdentity,
+        ),
+      );
+
+  CourseworkGroup? courseworkGroupFor(String assignmentId) => localRecordGroups
+      .where((group) =>
+          group.sources.any((assignment) => assignment.id == assignmentId))
+      .firstOrNull;
   bool _privacyCleanupPending = false;
   final Set<String> _pendingNativeCleanupAccounts = <String>{};
   bool get notificationPrivacyPending => _privacyCleanupPending;
@@ -508,7 +555,15 @@ class AssignmentStore extends ChangeNotifier {
           _hiddenAssignments.map((assignment) => assignment.id).toSet(),
       includeCompleted: true,
     );
-    final next = List<Assignment>.unmodifiable(_catalogAssignmentsFrom(merged));
+    final hiddenIds =
+        _hiddenAssignments.map((assignment) => assignment.id).toSet();
+    final next = List<Assignment>.unmodifiable([
+      for (final group in AssignmentGrouping.group(
+        _catalogAssignmentsFrom(merged),
+        hiddenIds: hiddenIds,
+      ))
+        if (!group.hidden) ...group.sources,
+    ]);
     _homeCatalogCache = next;
     return next;
   }
@@ -522,6 +577,10 @@ class AssignmentStore extends ChangeNotifier {
   void _invalidateHomeDisplayIndex() {
     _homeCatalogCache = null;
     _homeDisplayIndex = null;
+    _courseworkGroupsCache = null;
+    _localRecordGroupsCache = null;
+    _courseworkSourcesCache = null;
+    _statsAssignmentsCache = null;
   }
 
   bool isHomeDeadlinePending(String assignmentId) =>
@@ -1282,26 +1341,54 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> updateCompletion(String assignmentId, bool completed) async {
-    await _run(() async {
-      await _markReminderMutationPending();
-      await repository.updateCompletion(
-        assignmentId,
-        completed,
-      );
-      await _reloadJournal();
-    });
+    await setAssignmentsHidden([assignmentId], completed);
   }
 
   Future<bool> hideAssignment(String assignmentId) async {
+    return setAssignmentsHidden([assignmentId], true);
+  }
+
+  Future<bool> setAssignmentsHidden(
+    Iterable<String> assignmentIds,
+    bool hidden,
+  ) async {
+    final ids = assignmentIds.toSet();
+    if (ids.isEmpty) return true;
+    final epoch = accountEpoch;
+    final accountHash = _accountHash;
+    if (accountHash == null) return false;
     var saved = false;
     await _run(() async {
       await _markReminderMutationPending();
-      await repository.updateCompletion(assignmentId, true);
+      await repository.updateCompletionMany(
+        ids,
+        hidden,
+        canCommit: () async {
+          if (accountEpoch != epoch) return false;
+          if (!_nativeReminderAvailable) return true;
+          return backgroundReminderGateway.isSessionCurrent(
+            accountHash,
+            _nativeSessionEpoch,
+          );
+        },
+      );
+      if (accountEpoch != epoch) {
+        throw StateError('账号会话已变化，隐藏结果未应用到当前账号');
+      }
       await _reloadJournal();
       saved = true;
     });
     return saved;
   }
+
+  Future<bool> setCourseworkGroupHidden(
+    CourseworkGroup group,
+    bool hidden,
+  ) =>
+      setAssignmentsHidden(
+        group.sources.map((assignment) => assignment.id),
+        hidden,
+      );
 
   Future<bool> saveReminderRule(List<int> offsetsMinutes) async {
     var saved = false;
@@ -2064,6 +2151,7 @@ class AssignmentStore extends ChangeNotifier {
           _nativeSessionEpoch,
           _backgroundCheckSettings,
           showDetails: notificationService.showDetails,
+          reconcileSchedules: _manageBackgroundSchedule,
         );
       }
       if (_manageBackgroundSchedule) {

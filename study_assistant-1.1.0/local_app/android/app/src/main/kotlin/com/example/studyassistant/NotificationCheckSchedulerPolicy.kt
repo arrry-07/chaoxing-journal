@@ -26,5 +26,23 @@ internal object NotificationCheckSchedulerPolicy {
     fun shouldScheduleFollowUp(
         pendingSignalVersion: Long,
         consumedSignalVersion: Long,
-    ): Boolean = pendingSignalVersion > consumedSignalVersion
+        attemptedSignalVersion: Long,
+    ): Boolean = claimableVersion(
+        pendingSignalVersion,
+        consumedSignalVersion,
+        attemptedSignalVersion,
+    ) != null
+
+    fun claimableVersion(
+        pendingSignalVersion: Long,
+        consumedSignalVersion: Long,
+        attemptedSignalVersion: Long,
+    ): Long? = pendingSignalVersion.takeIf {
+        it > maxOf(consumedSignalVersion, attemptedSignalVersion)
+    }
+
+    fun cooldownAt(lastSignalCheckAt: Long?): Long? =
+        lastSignalCheckAt?.plus(NOTIFICATION_COOLDOWN_MILLIS)
+
+    private const val NOTIFICATION_COOLDOWN_MILLIS = 10 * 60_000L
 }

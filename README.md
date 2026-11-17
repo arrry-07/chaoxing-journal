@@ -6,11 +6,11 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.8.07](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.07/chaoxing-journal-1.8.07.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.07) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.8.08](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.08/chaoxing-journal-1.8.08.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.08) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
-1.8.07 首页只展示未完成课业：已提交作业与已结束／已提交考试退出首页，可在“本地记录”和统计页查看；相同搜索、课程、期限条件下“全部”仍等于“作业”与“考试”的并集。无日期记录补齐左栏占位并归入“无日期与待确认”分组，标题列与有日期卡片对齐；跨天考试的日期标题写起止范围，无开考时间的考试在卡片内写范围／结束，长窗口考试不再看起来像已过期。排序仍按作业截止、考试开考，确认已逾期双向置底。
+1.8.08 将同一场考试的正式记录与关联通知合并为一项实际课业，列表与统计不再重复计数，原始来源仍可追溯；同一考试可整组隐藏和恢复，新到达的关联通知也会保持隐藏。通知监听不再为同一信号反复续接，个人日程会先撤销已失效提醒，桌面组件区分考试开考与作业截止，多连接更新下载统一执行重定向校验和备用源切换。首页仍只展示未完成课业，现有视觉设计和逾期置底规则不变。
 
 ## 功能
 
@@ -23,6 +23,7 @@
 - **个人待办、考试与学期快照**：手动安排日程并接入日历与提醒，命名保存只读学期快照，回看作业、个人笔记和填写过的预计耗时。
 - **课程与本机记录**：按课程及班级管理关注范围，查看全部课程与本地记录，隐藏和恢复作业。隐藏不等于提交。
 - **完成率统计**：区分已完成、待完成、已逾期和提交未知，保留课程手绘标记。
+- **考试来源合并**：同一场考试的正式记录和关联通知只计一项实际课业，原始来源数量与详情仍保留；整组隐藏/恢复，来源追溯可查看类型、状态和读取时间。
 
 ## 界面预览
 
@@ -34,20 +35,20 @@
 
 ## 下载安装
 
-**当前正式包为 1.8.07（74）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**当前正式包为 1.8.08（75）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.8.07.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.07/chaoxing-journal-1.8.07.apk)。发布说明及校验文件见 [1.8.07 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.07)。
+1. [下载 chaoxing-journal-1.8.08.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.08/chaoxing-journal-1.8.08.apk)。发布说明及校验文件见 [1.8.08 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.08)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到 1.8.07？</summary>
+<summary>已经安装：如何升级到 1.8.08？</summary>
 
-1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版不单独上传 Gitee APK，因此国内镜像仍停留在批量点 1.7.52+59，但 manual 小索引指向 GitHub 1.8.07 正式包，stable 保持 1.8.0。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
+1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版不单独上传 Gitee APK，因此国内镜像仍停留在批量点 1.7.52+59，但 manual 小索引指向 GitHub 1.8.08 正式包，stable 保持 1.8.0。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
-体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.07 继续沿用既有体验身份。
+体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.08 继续沿用既有体验身份。
 
 ## 使用边界
 

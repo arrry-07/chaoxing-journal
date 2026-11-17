@@ -29,13 +29,14 @@ class ProfileRecordsScreen extends StatelessWidget {
                   ProfileMenuTile(
                     icon: Icons.storage_outlined,
                     title: '本地记录',
-                    subtitle: '${store.assignments.length} 条作业记录保存在本机',
+                    subtitle: '${store.localRecordGroups.length} 项课业记录保存在本机',
                     onTap: () => context.push('/records'),
                   ),
                   ProfileMenuTile(
                     icon: Icons.visibility_off_outlined,
                     title: '已隐藏作业',
-                    subtitle: '${store.hiddenAssignments.length} 条，可恢复到作业清单',
+                    subtitle:
+                        '${store.hiddenCourseworkGroups.length} 项，可恢复到作业清单',
                     onTap: () => _showHiddenAssignments(context),
                   ),
                   ProfileMenuTile(
@@ -72,20 +73,22 @@ class ProfileRecordsScreen extends StatelessWidget {
                   child: Text(store.error!),
                 ),
               Expanded(
-                child: store.hiddenAssignments.isEmpty
+                child: store.hiddenCourseworkGroups.isEmpty
                     ? const Center(child: Text('暂无隐藏作业'))
                     : ListView.builder(
-                        itemCount: store.hiddenAssignments.length,
+                        itemCount: store.hiddenCourseworkGroups.length,
                         itemBuilder: (context, index) {
-                          final item = store.hiddenAssignments[index];
+                          final group = store.hiddenCourseworkGroups[index];
                           return ListTile(
-                            title: Text(item.title),
-                            subtitle: Text(item.courseName),
+                            title: Text(group.primary.title),
+                            subtitle: Text(
+                              '${group.primary.courseName} · ${group.sourceLabel}',
+                            ),
                             trailing: TextButton(
                               onPressed: store.isLoading
                                   ? null
-                                  : () =>
-                                      store.updateCompletion(item.id, false),
+                                  : () => store.setCourseworkGroupHidden(
+                                      group, false),
                               child: const Text('恢复'),
                             ),
                           );

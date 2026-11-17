@@ -104,6 +104,7 @@ class _HealthGateway extends BackgroundReminderGateway {
     int sessionEpoch,
     BackgroundCheckSettings settings, {
     required bool showDetails,
+    bool reconcileSchedules = true,
   }) async {}
 
   @override
@@ -1509,45 +1510,278 @@ void main() {
     expect(manualId, isNot(workId));
   });
 
-  test('failed personal batch preserves removed and existing reminders',
-      () async {
+  for (final invalidation in [
+    'deleted',
+    'completed',
+    'reminder off',
+    'window passed',
+  ]) {
+    test(
+        'failed personal batch revokes a $invalidation reminder and preserves valid ones',
+        () async {
+      final active = <int, Map<String, Object?>>{};
+      final cancelled = <int>[];
+      var failNewSchedules = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        switch (call.method) {
+          case 'getNotificationAppLaunchDetails':
+            return {'notificationLaunchedApp': false};
+          case 'getNotificationChannels':
+            return [
+              channelRow('personal_schedule', '个人待办与考试提醒', 4),
+            ];
+          case 'areNotificationsEnabled':
+            return true;
+          case 'canScheduleExactNotifications':
+            return true;
+          case 'pendingNotificationRequests':
+            return active.values.toList();
+          case 'getActiveNotifications':
+            return [];
+          case 'zonedSchedule':
+            if (failNewSchedules) {
+              throw PlatformException(code: 'schedule_failed');
+            }
+            final arguments = Map<String, Object?>.from(call.arguments as Map);
+            active[arguments['id'] as int] = arguments;
+            return null;
+          case 'cancel':
+            final id = (call.arguments as Map)['id'] as int;
+            cancelled.add(id);
+            active.remove(id);
+            return null;
+          default:
+            return true;
+        }
+      });
+      final service = LocalNotificationService();
+      await service.initialize();
+      final now = DateTime.now();
+      ManualEntry entry(String id,
+              {DateTime? at, bool done = false, bool remind = true}) =>
+          ManualEntry(
+              id: id,
+              title: id,
+              kind: 'todo',
+              at: at ?? now.add(const Duration(days: 2)),
+              done: done,
+              remind: remind);
+      final stale = entry('stale');
+      final valid = entry('valid');
+      await service.rescheduleManual([stale, valid]);
+      final staleId = active.entries
+          .singleWhere((item) => item.value['payload'] == 'p:stale')
+          .key;
+      final validId = active.entries
+          .singleWhere((item) => item.value['payload'] == 'p:valid')
+          .key;
+      calls.clear();
+      cancelled.clear();
+      failNewSchedules = true;
+      final current = switch (invalidation) {
+        'deleted' => [valid, entry('other')],
+        'completed' => [stale.completed(true), valid, entry('other')],
+        'reminder off' => [
+            entry('stale', remind: false),
+            valid,
+            entry('other'),
+          ],
+        _ => [
+            entry('stale',
+                at: now.add(const Duration(minutes: 15)), remind: true),
+            valid,
+            entry('other'),
+          ],
+      };
+
+      await expectLater(
+          service.rescheduleManual(current), throwsA(isA<PlatformException>()));
+
+      expect(cancelled, contains(staleId));
+      expect(cancelled, isNot(contains(validId)));
+      expect(active.values.map((item) => item['payload']),
+          containsAll(<Object?>['p:valid']));
+      expect(active.values.map((item) => item['payload']),
+          isNot(contains('p:stale')));
+      expect(active.values.map((item) => item['payload']),
+          isNot(contains('p:other')));
+      expect(await service.hasPendingScheduleRecovery(), isFalse);
+    });
+  }
+
+  test('personal cleanup cancellation failure stays recoverable', () async {
+    final active = <int, Map<String, Object?>>{};
+    final cancelled = <int>[];
+    var failStaleCancellation = true;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      switch (call.method) {
+        case 'getNotificationAppLaunchDetails':
+          return {'notificationLaunchedApp': false};
+        case 'getNotificationChannels':
+          return [
+            channelRow('personal_schedule', '个人待办与考试提醒', 4),
+          ];
+        case 'areNotificationsEnabled':
+          return true;
+        case 'canScheduleExactNotifications':
+          return true;
+        case 'pendingNotificationRequests':
+          return active.values.toList();
+        case 'getActiveNotifications':
+          return [];
+        case 'zonedSchedule':
+          final arguments = Map<String, Object?>.from(call.arguments as Map);
+          active[arguments['id'] as int] = arguments;
+          return null;
+        case 'cancel':
+          final id = (call.arguments as Map)['id'] as int;
+          cancelled.add(id);
+          final payload = active[id]?['payload'];
+          if (payload == 'p:stale' && failStaleCancellation) {
+            throw PlatformException(code: 'cancel_failed');
+          }
+          active.remove(id);
+          return null;
+        default:
+          return true;
+      }
+    });
     final service = LocalNotificationService();
     await service.initialize();
-    calls.clear();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (c) async {
-      calls.add(c);
-      if (c.method == 'pendingNotificationRequests') {
-        return [
-          {
-            'id': 1800000001,
-            'title': 'removed',
-            'body': '',
-            'payload': 'p:removed'
-          }
-        ];
-      }
-      if (c.method == 'zonedSchedule') {
-        throw PlatformException(code: 'schedule_failed');
-      }
-      if (c.method == 'getNotificationChannels') return [];
-      return true;
+    final now = DateTime.now();
+    final stale = ManualEntry(
+        id: 'stale',
+        title: 'stale',
+        kind: 'todo',
+        at: now.add(const Duration(days: 2)),
+        remind: true);
+    final valid = ManualEntry(
+        id: 'valid',
+        title: 'valid',
+        kind: 'todo',
+        at: now.add(const Duration(days: 2)),
+        remind: true);
+    await service.rescheduleManual([stale, valid]);
+    final staleId = active.entries
+        .singleWhere((item) => item.value['payload'] == 'p:stale')
+        .key;
+    final validId = active.entries
+        .singleWhere((item) => item.value['payload'] == 'p:valid')
+        .key;
+
+    await expectLater(
+        service.rescheduleManual([valid]), throwsA(isA<StateError>()));
+
+    expect(cancelled, contains(staleId));
+    expect(active.keys, containsAll([staleId, validId]));
+    expect(await service.hasPendingScheduleRecovery(), isTrue);
+    expect(service.lastWarning, contains('旧通知清理失败'));
+
+    failStaleCancellation = false;
+    await LocalNotificationService().initialize();
+    expect(active.keys, [validId]);
+    expect(await service.hasPendingScheduleRecovery(), isFalse);
+  });
+
+  test(
+      'legacy valid personal reminder survives failed replacement and other categories stay untouched',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'notification_schedule_v2_active_manual': ['1800000002'],
+      'notification_schedule_v2_active_assignments': ['2000000500'],
+      'notification_schedule_v2_active_summary': ['2000000501'],
     });
+    final active = <int, Map<String, Object?>>{
+      1800000001: {
+        'id': 1800000001,
+        'title': 'stale',
+        'body': '',
+        'payload': 'p:stale',
+      },
+      1800000002: {
+        'id': 1800000002,
+        'title': 'valid',
+        'body': '',
+        'payload': 'p:valid',
+      },
+      2000000500: {
+        'id': 2000000500,
+        'title': 'assignment',
+        'body': '',
+        'payload': 'a:keep',
+      },
+      2000000501: {
+        'id': 2000000501,
+        'title': 'summary',
+        'body': '',
+        'payload': 'd:keep',
+      },
+    };
+    final cancelled = <int>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      switch (call.method) {
+        case 'getNotificationAppLaunchDetails':
+          return {'notificationLaunchedApp': false};
+        case 'getNotificationChannels':
+          return [
+            channelRow('personal_schedule', '个人待办与考试提醒', 4),
+          ];
+        case 'areNotificationsEnabled':
+          return true;
+        case 'canScheduleExactNotifications':
+          return true;
+        case 'pendingNotificationRequests':
+          return active.values.toList();
+        case 'getActiveNotifications':
+          return [];
+        case 'zonedSchedule':
+          throw PlatformException(code: 'schedule_failed');
+        case 'cancel':
+          final id = (call.arguments as Map)['id'] as int;
+          cancelled.add(id);
+          active.remove(id);
+          return null;
+        default:
+          return true;
+      }
+    });
+    final service = LocalNotificationService();
+    final now = DateTime.now();
     await expectLater(
         service.rescheduleManual([
+          ManualEntry(
+              id: 'valid',
+              title: 'valid',
+              kind: 'todo',
+              at: now.add(const Duration(days: 2)),
+              remind: true),
           ManualEntry(
               id: 'other',
               title: 'other',
               kind: 'todo',
-              at: DateTime.utc(2030),
-              remind: true)
+              at: now.add(const Duration(days: 3)),
+              remind: true),
         ]),
         throwsA(isA<PlatformException>()));
-    expect(
-        calls.any((c) =>
-            c.method == 'cancel' && (c.arguments as Map)['id'] == 1800000001),
-        isFalse,
-        reason: 'the old batch is retained until the replacement commits');
+
+    expect(cancelled, contains(1800000001));
+    expect(cancelled, isNot(contains(1800000002)));
+    expect(cancelled, isNot(contains(2000000500)));
+    expect(cancelled, isNot(contains(2000000501)));
+    expect(active.keys, containsAll([1800000002, 2000000500, 2000000501]));
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getStringList('notification_schedule_v2_active_manual'),
+        ['1800000002']);
+    expect(prefs.getStringList('notification_schedule_v2_active_assignments'),
+        ['2000000500']);
+    expect(prefs.getStringList('notification_schedule_v2_active_summary'),
+        ['2000000501']);
   });
   test(
       'privacy cancellation also clears delivered IDs from the active manifest',
