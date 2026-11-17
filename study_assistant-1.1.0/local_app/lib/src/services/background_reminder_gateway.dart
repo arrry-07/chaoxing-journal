@@ -175,12 +175,14 @@ class BackgroundReminderGateway {
     int sessionEpoch,
     BackgroundCheckSettings settings, {
     required bool showDetails,
+    bool reconcileSchedules = true,
   }) async {
     await _invokeStrictVoid('updateSettings', {
       'accountHash': accountHash,
       'sessionEpoch': sessionEpoch,
       ...settings.toJson(),
       'showDetails': showDetails,
+      'reconcileSchedules': reconcileSchedules,
     });
   }
 

@@ -25,6 +25,8 @@ data class ReminderAccountState(
     val mutationVersion: Long,
     val pendingSignalVersion: Long,
     val consumedSignalVersion: Long,
+    val attemptedSignalVersion: Long,
+    val lastSignalCheckAt: Long?,
     val lastAttemptAt: Long?,
     val lastDataSuccessAt: Long?,
     val lastFullSuccessAt: Long?,
@@ -110,6 +112,8 @@ class ReminderDatabase private constructor(context: Context) :
                 pending_signal_version INTEGER NOT NULL DEFAULT 0,
                 consumed_signal_version INTEGER NOT NULL DEFAULT 0,
                 last_signal_at INTEGER,
+                attempted_signal_version INTEGER NOT NULL DEFAULT 0,
+                last_signal_check_at INTEGER,
                 last_attempt_at INTEGER,
                 last_data_success_at INTEGER,
                 last_full_success_at INTEGER,
@@ -186,6 +190,13 @@ class ReminderDatabase private constructor(context: Context) :
         if (oldVersion < 3 && newVersion >= 3) {
             db.execSQL("ALTER TABLE snapshots ADD COLUMN event_kind TEXT NOT NULL DEFAULT 'deadline'")
             db.execSQL("ALTER TABLE events ADD COLUMN event_kind TEXT NOT NULL DEFAULT 'deadline'")
+        }
+        if (oldVersion < 4 && newVersion >= 4) {
+            db.execSQL(
+                "ALTER TABLE accounts ADD COLUMN attempted_signal_version " +
+                    "INTEGER NOT NULL DEFAULT 0",
+            )
+            db.execSQL("ALTER TABLE accounts ADD COLUMN last_signal_check_at INTEGER")
         }
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE accounts ADD COLUMN baselined_sources TEXT NOT NULL DEFAULT '[]'")
@@ -285,6 +296,7 @@ class ReminderDatabase private constructor(context: Context) :
                     "known_ids = '[]', sent_new_ids = '[]', " +
                     "pending_update = 0, pending_signal_version = 0, " +
                     "consumed_signal_version = 0, last_signal_at = NULL, " +
+                    "attempted_signal_version = 0, last_signal_check_at = NULL, " +
                     "last_attempt_at = NULL, last_data_success_at = NULL, " +
                     "last_full_success_at = NULL, last_failure = NULL, " +
                     "next_check_at = NULL, migration_state = 'legacy_pending', " +
@@ -850,7 +862,13 @@ class ReminderDatabase private constructor(context: Context) :
 
     @Synchronized
     fun consumeSignal(accountHash: String, version: Long) {
+        consumeSignal(accountHash, version, null)
+    }
+
+    @Synchronized
+    fun consumeSignal(accountHash: String, version: Long, sessionEpoch: Long?) {
         val account = readAccount(accountHash) ?: return
+        if (sessionEpoch != null && account.sessionEpoch != sessionEpoch) return
         val consumed = maxOf(account.consumedSignalVersion, version)
         writableDatabase.update(
             "accounts",
@@ -863,6 +881,45 @@ class ReminderDatabase private constructor(context: Context) :
         )
     }
 
+    /**
+     * Claims the latest signal that has not already been consumed or attempted.
+     *
+     * The attempted version is persisted before the Flutter engine starts, so
+     * failures, timeouts and process death cannot re-create a chain for the
+     * same signal. The unconsumed signal remains available to a normal daytime
+     * or manual check.
+     */
+    @Synchronized
+    fun claimNotificationSignal(
+        accountHash: String,
+        sessionEpoch: Long,
+        attemptedAt: Long = System.currentTimeMillis(),
+    ): Long? = transaction {
+        val account = readAccount(accountHash) ?: return@transaction null
+        if (!account.active ||
+            !account.listenerEnabled ||
+            account.sessionEpoch != sessionEpoch
+        ) {
+            return@transaction null
+        }
+        val claimed = NotificationCheckSchedulerPolicy.claimableVersion(
+            account.pendingSignalVersion,
+            account.consumedSignalVersion,
+            account.attemptedSignalVersion,
+        ) ?: return@transaction null
+        writableDatabase.update(
+            "accounts",
+            ContentValues().apply {
+                put("attempted_signal_version", claimed)
+                put("last_signal_check_at", attemptedAt)
+                put("updated_at", System.currentTimeMillis())
+            },
+            "account_hash = ? AND session_epoch = ?",
+            arrayOf(accountHash, sessionEpoch.toString()),
+        )
+        claimed
+    }
+
     @Synchronized
     fun lastSignalAt(accountHash: String): Long? =
         readAccount(accountHash)?.let {
@@ -873,6 +930,10 @@ class ReminderDatabase private constructor(context: Context) :
                 if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
             }
         }
+
+    @Synchronized
+    fun lastSignalCheckAt(accountHash: String): Long? =
+        readAccount(accountHash)?.lastSignalCheckAt
 
     @Synchronized
     fun counts(
@@ -982,6 +1043,8 @@ class ReminderDatabase private constructor(context: Context) :
         mutationVersion = getLong(getColumnIndexOrThrow("mutation_version")),
         pendingSignalVersion = getLong(getColumnIndexOrThrow("pending_signal_version")),
         consumedSignalVersion = getLong(getColumnIndexOrThrow("consumed_signal_version")),
+        attemptedSignalVersion = getLong(getColumnIndexOrThrow("attempted_signal_version")),
+        lastSignalCheckAt = nullableLong("last_signal_check_at"),
         lastAttemptAt = nullableLong("last_attempt_at"),
         lastDataSuccessAt = nullableLong("last_data_success_at"),
         lastFullSuccessAt = nullableLong("last_full_success_at"),
@@ -1044,7 +1107,7 @@ class ReminderDatabase private constructor(context: Context) :
         const val STATUS_INVALID = "invalid"
 
         private const val DATABASE_NAME = "assignment_reminders_v1.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
 
         @Volatile
         private var instance: ReminderDatabase? = null

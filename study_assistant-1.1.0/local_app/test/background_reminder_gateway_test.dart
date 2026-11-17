@@ -103,6 +103,30 @@ void main() {
     );
   });
 
+  test('background restore can mirror settings without reconciling schedules',
+      () async {
+    Map<Object?, Object?>? arguments;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      arguments = call.arguments as Map<Object?, Object?>;
+      return null;
+    });
+    await const BackgroundReminderGateway().updateSettings(
+      'hash',
+      1,
+      const BackgroundCheckSettings(
+        enabled: true,
+        intervalMinutes: 240,
+        notificationListenerEnabled: true,
+        newAssignmentReminderEnabled: true,
+        migratedFromLegacy: false,
+      ),
+      showDetails: false,
+      reconcileSchedules: false,
+    );
+    expect(arguments?['reconcileSchedules'], isFalse);
+  });
+
   test('criticalControlsNeverSwallowNativeFailures', () async {
     const gateway = BackgroundReminderGateway();
     for (final operation in <Future<Object?> Function()>[

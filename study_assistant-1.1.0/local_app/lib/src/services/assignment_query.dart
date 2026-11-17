@@ -2,6 +2,7 @@ import 'package:lpinyin/lpinyin.dart';
 
 import '../models/assignment.dart';
 import '../models/home_filters.dart';
+import 'assignment_grouping.dart';
 import 'exam_wall_time.dart';
 
 export '../models/home_filters.dart'
@@ -143,27 +144,17 @@ class HomeAssignmentGroups {
 
 class _DisplayProjection {
   _DisplayProjection(List<Assignment> records) {
-    for (final assignment in records) {
-      final key = AssignmentQuery.examDisplayKey(assignment);
-      if (key == null) continue;
-      (sourcesByKey[key] ??= []).add(assignment);
-      final previous = representatives[key];
-      if (previous == null ||
-          (previous.exam!.noticeOnly && !assignment.exam!.noticeOnly) ||
-          (previous.exam!.noticeOnly == assignment.exam!.noticeOnly &&
-              assignment.id.compareTo(previous.id) < 0)) {
-        representatives[key] = assignment;
-      }
-    }
-    final emitted = <String>{};
-    for (final assignment in records) {
-      final key = AssignmentQuery.examDisplayKey(assignment);
+    for (final group in AssignmentGrouping.group(records)) {
+      final key = group.key.startsWith('exam:') ? group.key : null;
       if (key == null) {
-        projected.add(assignment);
-      } else if (emitted.add(key)) {
-        projected.add(AssignmentQuery._supplementDisplay(
-            representatives[key]!, sourcesByKey[key]!));
+        projected.add(group.primary);
+        continue;
       }
+      final displayKey = key.substring('exam:'.length);
+      sourcesByKey[displayKey] = group.sources;
+      representatives[displayKey] = group.primary;
+      projected.add(
+          AssignmentQuery._supplementDisplay(group.primary, group.sources));
     }
   }
 
@@ -255,15 +246,10 @@ class AssignmentQuery {
                   followed.contains(a.courseKey)))
           .toList();
 
-  /// Display-only identity. Never use this projection for persistence/statistics.
+  /// Display key for the same validated grouping identity used by statistics.
   static String? examDisplayKey(Assignment a) {
-    if (!a.hasExamIdentity) return null;
-    final e = a.exam!;
-    final course = e.courseId, clazz = e.clazzId;
-    final exam = e.noticeOnly ? e.relatedExamId : e.examId;
-    bool valid(String? v) => v != null && RegExp(r'^[0-9]+$').hasMatch(v);
-    if (!valid(course) || !valid(clazz) || !valid(exam)) return null;
-    return '$course:$clazz:$exam';
+    final key = AssignmentGrouping.examKey(a);
+    return key?.substring('exam:'.length);
   }
 
   /// All original source IDs remain available for details/archive integration.

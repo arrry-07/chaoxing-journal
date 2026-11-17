@@ -17,6 +17,23 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
+  test('background engine mirrors settings without reconciling schedules',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway();
+    final store = _store(
+      gateway: gateway,
+      client: _ClientQueue([[]]),
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+
+    await store.restoreSession();
+
+    expect(gateway.reconcileSettings, isNotEmpty);
+    expect(gateway.reconcileSettings.last, isFalse);
+  });
+
   test('store baselines new sources silently and retains formal new reminders',
       () async {
     SharedPreferences.setMockInitialValues({});
@@ -142,6 +159,30 @@ void main() {
     await store.hideAssignment(assignment.id);
     expect(gateway.plans.last.deadlineEvents, isEmpty);
     expect(gateway.plans.last.newEvents, isEmpty);
+  });
+
+  test('stale native session rejects a late group hide without a write',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway();
+    final assignment =
+        _assignment('stale-hide', DateTime.now().add(const Duration(days: 2)));
+    final store = _store(
+      gateway: gateway,
+      client: _ClientQueue([
+        [assignment],
+      ]),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.syncAssignments();
+    gateway.sessionCurrent = false;
+
+    final saved = await store.setAssignmentsHidden([assignment.id], true);
+
+    expect(saved, isFalse);
+    expect(store.hiddenAssignments, isEmpty);
+    expect(store.assignments.map((item) => item.id), contains(assignment.id));
   });
 
   for (final fullSuccess in [true, false]) {
@@ -388,6 +429,7 @@ AssignmentStore _store({
   LocalNotificationService? notifications,
   LocalAssignmentRepository? repository,
   SecureSessionStore? session,
+  bool manageBackgroundSchedule = true,
 }) =>
     AssignmentStore(
       sessionStore: session ?? _MemorySessionStore(),
@@ -400,6 +442,7 @@ AssignmentStore _store({
             backgroundReminderGateway: gateway,
           ),
       nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: manageBackgroundSchedule,
     );
 
 Assignment _assignment(String suffix, DateTime? deadline) => Assignment(
@@ -595,12 +638,18 @@ class _FakeGateway extends BackgroundReminderGateway {
   bool failPrivacy = false;
   bool failClear = false;
   bool failSwitch = false;
+  bool sessionCurrent = true;
+  final reconcileSettings = <bool>[];
 
   @override
   Future<bool> isAvailable() async => true;
 
   @override
   Future<int> ensureActiveAccount(String accountHash) async => 1;
+
+  @override
+  Future<bool> isSessionCurrent(String accountHash, int sessionEpoch) async =>
+      sessionCurrent;
 
   @override
   Future<int> switchAccount({
@@ -617,8 +666,10 @@ class _FakeGateway extends BackgroundReminderGateway {
     int sessionEpoch,
     BackgroundCheckSettings settings, {
     required bool showDetails,
+    bool reconcileSchedules = true,
   }) async {
     if (failSettings) throw StateError('synthetic settings failure');
+    reconcileSettings.add(reconcileSchedules);
     mutationVersion++;
   }
 
@@ -669,10 +720,6 @@ class _FakeGateway extends BackgroundReminderGateway {
 
   @override
   Future<void> releaseWriteLease(String owner) async {}
-
-  @override
-  Future<bool> isSessionCurrent(String accountHash, int sessionEpoch) async =>
-      true;
 
   @override
   Future<void> markPendingUpdate({

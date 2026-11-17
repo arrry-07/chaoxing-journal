@@ -745,6 +745,11 @@ class AppUpdateService {
             destination: partial,
             working: working,
             token: transfer,
+            validateResponse: (response) => _validateDownloadResponse(
+                  response,
+                  expectedUrl: downloadUrl,
+                  allowPartial: true,
+                ),
             validateFullResponse: (response) =>
                 _fullResponseSize(response, declared, downloadUrl),
             onProgress: onProgress);
@@ -842,15 +847,11 @@ class AppUpdateService {
 
   int? _fullResponseSize(
       Response<ResponseBody> response, int? declared, String expectedUrl) {
-    if (response.statusCode != 200 || response.data == null) {
-      throw ApkSourceUnavailableException(
-        '下载 APK 失败',
-        statusCode: response.statusCode,
-      );
-    }
-    if (!_redirectChainIsSecure(response, expectedUrl)) {
-      throw StateError('安装包下载重定向不安全');
-    }
+    _validateDownloadResponse(
+      response,
+      expectedUrl: expectedUrl,
+      allowPartial: false,
+    );
     final header = response.headers.value('content-length');
     final size = header == null ? null : int.tryParse(header);
     if ((header != null && (size == null || size <= 0)) ||
@@ -859,6 +860,35 @@ class AppUpdateService {
       throw StateError('安装包响应长度异常');
     }
     return declared ?? size;
+  }
+
+  /// Every response must pass the same redirect policy before its body is
+  /// consumed. Partial transfers additionally accept only 200/206 here; range
+  /// and length checks remain in [ParallelApkTransfer].
+  void _validateDownloadResponse(
+    Response<ResponseBody> response, {
+    required String expectedUrl,
+    required bool allowPartial,
+  }) {
+    if (!_redirectChainIsSecure(response, expectedUrl)) {
+      throw StateError('安装包下载重定向不安全');
+    }
+    final status = response.statusCode;
+    if (allowPartial) {
+      if (status != 200 && status != 206) {
+        throw ApkSourceUnavailableException(
+          '下载 APK 失败',
+          statusCode: status,
+        );
+      }
+      return;
+    }
+    if (status != 200 || response.data == null) {
+      throw ApkSourceUnavailableException(
+        '下载 APK 失败',
+        statusCode: status,
+      );
+    }
   }
 
   /// Removes only stale, direct child directories created by this downloader.

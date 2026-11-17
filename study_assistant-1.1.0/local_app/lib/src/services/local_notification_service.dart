@@ -274,6 +274,7 @@ class LocalNotificationService {
     lastWarning = null;
     await _ensurePluginInitialized();
     final schedules = <(ManualEntry, DateTime)>[];
+    final validIds = <String>{};
     final seen = <String>{};
     var reminderWindowMissed = false;
     for (final e in entries.where((e) => !e.done && e.remind && e.at != null)) {
@@ -285,6 +286,7 @@ class LocalNotificationService {
       if (!seen.add(e.id)) {
         throw StateError('个人提醒存在重复标识，请修改后重试');
       }
+      validIds.add(e.id);
       schedules.add((e, at));
     }
     if (reminderWindowMissed) {
@@ -321,6 +323,10 @@ class LocalNotificationService {
       await _replaceScheduleBatch(
         category: 'manual',
         belongs: (payload) => payload?.startsWith('p:') ?? false,
+        retainOldPayload: (payload) {
+          if (payload == null || !payload.startsWith('p:')) return false;
+          return validIds.contains(payload.substring(2));
+        },
         schedules: schedules,
         schedule: (id, item) {
           final (entry, at) = item as (ManualEntry, DateTime);
@@ -632,19 +638,66 @@ class LocalNotificationService {
   Future<void> _replaceScheduleBatch({
     required String category,
     required bool Function(String?) belongs,
+    bool Function(String?)? retainOldPayload,
     required List<Object> schedules,
     required Future<void> Function(int id, Object item) schedule,
   }) async {
     await _runScheduleMutation(() async {
       await _recoverScheduleTransactionLocked(category);
       final prefs = await SharedPreferences.getInstance();
-      final pending = await _plugin.pendingNotificationRequests();
-      final oldIds = <int>{
+      var pending = await _plugin.pendingNotificationRequests();
+      var oldIds = <int>{
         ..._readActiveIds(prefs, category),
         ...pending
             .where((item) => belongs(item.payload))
             .map((item) => item.id),
       };
+      if (retainOldPayload != null) {
+        final staleIds = <int>{
+          for (final item in pending)
+            if (belongs(item.payload) && !retainOldPayload(item.payload))
+              item.id,
+        };
+        // Delivered notifications usually omit payload on Android. Only an
+        // explicit p: payload is safe evidence for mapping an ID to an entry.
+        try {
+          final visible = await _plugin.getActiveNotifications();
+          for (final item in visible) {
+            final id = item.id;
+            if (id == null ||
+                !belongs(item.payload) ||
+                retainOldPayload(item.payload)) {
+              continue;
+            }
+            staleIds.add(id);
+            oldIds.add(id);
+          }
+        } catch (_) {
+          // Pending requests still cover future reminders. An unreadable
+          // delivered-notification list must not block that cleanup.
+        }
+        if (staleIds.isNotEmpty) {
+          final retained = oldIds.difference(staleIds);
+          await _writeJournal(prefs, category, {
+            'version': 2,
+            'category': category,
+            'phase': 'committed',
+            'oldIds': staleIds.toList()..sort(),
+            'newIds': retained.toList()..sort(),
+          });
+          // Persist the cleanup decision before cancelling. Recovery either
+          // finishes the cancellation or leaves the committed journal for a
+          // later health/startup retry.
+          await _recoverScheduleTransactionLocked(category);
+          pending = await _plugin.pendingNotificationRequests();
+          oldIds = <int>{
+            ..._readActiveIds(prefs, category),
+            ...pending
+                .where((item) => belongs(item.payload))
+                .map((item) => item.id),
+          };
+        }
+      }
       final reserved = <int>{...pending.map((item) => item.id)};
       for (final otherCategory in _scheduleCategories) {
         try {
@@ -1108,7 +1161,13 @@ class LocalNotificationService {
     }
 
     final oldIds = ids(decoded['oldIds']);
-    final newIds = ids(decoded['newIds'], transactional: true);
+    // Staging always allocates fresh transactional IDs. A committed cleanup
+    // may retain still-valid legacy manual IDs in newIds; category ownership
+    // is still verified below before any cancellation.
+    final newIds = ids(
+      decoded['newIds'],
+      transactional: decoded['phase'] == 'staging',
+    );
     if (oldIds.toSet().intersection(newIds.toSet()).isNotEmpty) {
       throw const FormatException('提醒事务新旧 ID 重叠');
     }

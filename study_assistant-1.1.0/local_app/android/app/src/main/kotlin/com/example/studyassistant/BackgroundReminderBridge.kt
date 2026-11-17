@@ -132,18 +132,42 @@ object BackgroundReminderBridge {
                                     showDetails =
                                         call.argument<Boolean>("showDetails") == true,
                                 )
-                                BackgroundWorkScheduler.reconcileDaytime(
-                                    appContext,
-                                    database,
-                                    state.nextCheckAt,
-                                    state.backgroundEnabled,
-                                    state.intervalMinutes,
-                                )
-                                BackgroundWorkScheduler.reconcileNotification(
-                                    appContext,
-                                    database,
-                                    accountHash = state.accountHash,
-                                )
+                                val reconcileSchedules =
+                                    call.argument<Boolean>("reconcileSchedules") != false
+                                if (reconcileSchedules) {
+                                    BackgroundWorkScheduler.reconcileDaytime(
+                                        appContext,
+                                        database,
+                                        state.nextCheckAt,
+                                        state.backgroundEnabled,
+                                        state.intervalMinutes,
+                                    )
+                                    BackgroundWorkScheduler.reconcileNotification(
+                                        appContext,
+                                        database,
+                                        accountHash = state.accountHash,
+                                    )
+                                } else {
+                                    // A restored background engine only mirrors
+                                    // settings. Disabled features still retire
+                                    // work that is no longer permitted.
+                                    if (!state.backgroundEnabled) {
+                                        BackgroundWorkScheduler.reconcileDaytime(
+                                            appContext,
+                                            database,
+                                            state.nextCheckAt,
+                                            false,
+                                            state.intervalMinutes,
+                                        )
+                                    }
+                                    if (!state.listenerEnabled) {
+                                        BackgroundWorkScheduler.reconcileNotification(
+                                            appContext,
+                                            database,
+                                            accountHash = state.accountHash,
+                                        )
+                                    }
+                                }
                             }.onSuccess {
                                 mainHandler.post { result.success(null) }
                             }.onFailure {

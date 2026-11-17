@@ -33,7 +33,8 @@ class FlutterCheckWorker(
         val accountHash = inputData.getString(KEY_ACCOUNT_HASH) ?: return Result.success()
         val requestedAt = inputData.getLong(KEY_REQUESTED_AT, System.currentTimeMillis())
         val intervalMinutes = inputData.getInt(KEY_INTERVAL_MINUTES, 240)
-        val signalVersion = inputData.getLong(KEY_SIGNAL_VERSION, 0L)
+        var signalVersion = inputData.getLong(KEY_SIGNAL_VERSION, 0L)
+        val expectedSessionEpoch = inputData.getLong(KEY_SESSION_EPOCH, -1L)
         val database = ReminderDatabase.get(applicationContext)
         val account = database.readAccount(accountHash)
         if (account == null ||
@@ -42,6 +43,19 @@ class FlutterCheckWorker(
             (reason == BackgroundWorkScheduler.REASON_NOTIFICATION && !account.listenerEnabled)
         ) {
             return Result.success()
+        }
+        if (reason == BackgroundWorkScheduler.REASON_NOTIFICATION) {
+            if (expectedSessionEpoch <= 0L ||
+                account.sessionEpoch != expectedSessionEpoch
+            ) {
+                return Result.success()
+            }
+            // Claim before creating a FlutterEngine. Duplicate or stale work
+            // exits without networking once this signal was attempted.
+            signalVersion = database.claimNotificationSignal(
+                accountHash,
+                expectedSessionEpoch,
+            ) ?: return Result.success()
         }
         val startSignalVersion = if (reason == BackgroundWorkScheduler.REASON_DAYTIME) {
             account.pendingSignalVersion
@@ -147,12 +161,20 @@ class FlutterCheckWorker(
                 effectiveInterval,
             )
             if (workResult.get()?.get("success") == true && startSignalVersion > 0) {
-                database.consumeSignal(accountHash, startSignalVersion)
+                database.consumeSignal(
+                    accountHash,
+                    startSignalVersion,
+                    account.sessionEpoch,
+                )
             }
         } else if (reason == BackgroundWorkScheduler.REASON_NOTIFICATION &&
             workResult.get()?.get("success") == true
         ) {
-            database.consumeSignal(accountHash, signalVersion)
+            database.consumeSignal(
+                accountHash,
+                signalVersion,
+                expectedSessionEpoch,
+            )
             BackgroundWorkScheduler.scheduleNotificationFollowUpIfNeeded(
                 applicationContext,
                 database,
@@ -212,5 +234,6 @@ class FlutterCheckWorker(
         const val KEY_REQUESTED_AT = "requestedAt"
         const val KEY_INTERVAL_MINUTES = "intervalMinutes"
         const val KEY_SIGNAL_VERSION = "signalVersion"
+        const val KEY_SESSION_EPOCH = "sessionEpoch"
     }
 }

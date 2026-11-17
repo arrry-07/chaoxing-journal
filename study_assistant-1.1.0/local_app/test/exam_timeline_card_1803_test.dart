@@ -17,9 +17,10 @@ Assignment _exam({
   bool endTrusted = false,
   String location = '',
   String title = '合成考试',
+  String suffix = '',
 }) =>
     Assignment(
-      id: notice ? 'cx:examNotice:inbox:n' : 'cx:exam:1:2:3',
+      id: notice ? 'cx:examNotice:inbox:n$suffix' : 'cx:exam:1:2:3',
       source: AssignmentSource.exam,
       courseName: '合成课程',
       title: title,
@@ -28,7 +29,7 @@ Assignment _exam({
       status: 'pending',
       lastSyncedAt: _now,
       exam: ExamInfo(
-        examId: notice ? 'n' : '3',
+        examId: notice ? 'n$suffix' : '3',
         relatedExamId: notice ? '3' : null,
         courseId: '1',
         clazzId: '2',
@@ -175,7 +176,10 @@ void main() {
       await _pump(t, a, sources: [
         a,
         _exam(notice: true, body: _range),
-        _exam(notice: true, body: '考试时间：12-01 08:00 至 12-02 08:00')
+        _exam(
+            notice: true,
+            suffix: 'second',
+            body: '考试时间：12-01 08:00 至 12-02 08:00')
       ]);
       final label = find.bySemanticsLabel(RegExp('通知时间存在不一致，请查看官方通知'));
       expect(label, findsOneWidget);

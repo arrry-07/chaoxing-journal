@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/services/assignment_grouping.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/exam_schedule_presentation.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -52,11 +53,25 @@ class _Store extends AssignmentStore {
   final List<Assignment> records;
   final hidden = <String>[];
   final persistedHidden = <String>{};
+  final batches = <List<String>>[];
   int reloads = 0;
-  bool failSecond = false, throwSecond = false, switchAccount = false;
+  bool failBatch = false, throwBatch = false, switchAccount = false;
   int epoch = 0;
   @override
   int get accountEpoch => epoch;
+  @override
+  CourseworkGroup? courseworkGroupFor(String assignmentId) {
+    for (final group in AssignmentGrouping.group(
+      records,
+      hiddenIds: persistedHidden,
+    )) {
+      if (group.sources.any((assignment) => assignment.id == assignmentId)) {
+        return group;
+      }
+    }
+    return null;
+  }
+
   @override
   List<Assignment> get courseAssignments =>
       records.where((a) => !persistedHidden.contains(a.id)).toList();
@@ -64,16 +79,26 @@ class _Store extends AssignmentStore {
   Assignment? findAssignment(String id) =>
       courseAssignments.where((a) => a.id == id).firstOrNull;
   @override
-  Future<bool> hideAssignment(String id) async {
-    hidden.add(id);
-    if (switchAccount) epoch++;
-    if (hidden.length == 2 && throwSecond) {
-      throw StateError('synthetic failure');
+  Future<bool> setAssignmentsHidden(
+    Iterable<String> assignmentIds,
+    bool value,
+  ) async {
+    final ids = List<String>.unmodifiable(assignmentIds);
+    batches.add(ids);
+    if (switchAccount) {
+      epoch++;
+      throw StateError('synthetic account change');
     }
-    if (hidden.length == 2 && failSecond) return false;
-    // Simulate persistence + journal reload: hidden records disappear from
-    // lookup and display sources before notifying the mounted detail page.
-    persistedHidden.add(id);
+    if (throwBatch) throw StateError('synthetic failure');
+    if (failBatch) return false;
+    if (value) {
+      hidden.addAll(ids);
+      persistedHidden.addAll(ids);
+    } else {
+      hidden.removeWhere(ids.contains);
+      persistedHidden.removeAll(ids);
+    }
+    // Simulate one serialized journal write + reload for the whole group.
     reloads++;
     notifyListeners();
     return true;
@@ -152,8 +177,8 @@ void main() {
       final second = _exam(notice: true, suffix: 'second');
       final other = _exam(notice: true, clazz: '9');
       final store = _Store([a, n, second, other])
-        ..failSecond = mode == 'false'
-        ..throwSecond = mode == 'throw'
+        ..failBatch = mode == 'false'
+        ..throwBatch = mode == 'throw'
         ..switchAccount = mode == 'account';
       addTearDown(store.dispose);
       final router = GoRouter(initialLocation: '/detail', routes: [
@@ -169,7 +194,7 @@ void main() {
       addTearDown(router.dispose);
       await t.pumpWidget(MaterialApp.router(routerConfig: router));
       await t.pumpAndSettle();
-      final hide = find.widgetWithText(TextButton, '在本机隐藏此考试');
+      final hide = find.widgetWithText(TextButton, '在本机隐藏此考试（3 条来源）');
       // ListView builds offscreen children lazily. Build the action by scrolling
       // before ensureVisible, which requires an already mounted element.
       await t.scrollUntilVisible(hide, 250,
@@ -187,41 +212,38 @@ void main() {
                 'Partial archive must retain the detail representative for retry');
         expect(find.textContaining('尚未在当前账号的本机记录中找到'), findsNothing);
       }
-      expect(
-          store.hidden,
-          mode == 'account'
-              ? [n.id]
-              : mode == 'success'
-                  ? [n.id, second.id, a.id]
-                  : [n.id, second.id]);
+      final expectedSources = [a.id, n.id, second.id];
+      expect(store.batches, [expectedSources]);
+      expect(store.hidden, mode == 'success' ? expectedSources : isEmpty);
       expect(store.hidden, isNot(contains(other.id)));
       expect(find.text('返回列表成功'),
           mode == 'success' ? findsOneWidget : findsNothing);
       if (mode != 'success') {
         expect(find.textContaining('隐藏失败'), findsOneWidget);
         expect(store.findAssignment(a.id), same(a));
-        expect(store.findAssignment(n.id), isNull);
-        expect(store.reloads, 1);
+        expect(store.findAssignment(n.id), same(n));
+        expect(store.reloads, 0);
         expect(find.textContaining('尚未在当前账号的本机记录中找到'), findsNothing);
         expect(hide.hitTestable(), findsOneWidget);
         expect(t.widget<TextButton>(hide).onPressed, isNotNull);
         if (mode != 'account') {
-          // Retry without reopening: skip persisted sources, hide primary last.
-          store.failSecond = false;
-          store.throwSecond = false;
+          // A failed batch commits no source; retry the whole group at once.
+          store.failBatch = false;
+          store.throwBatch = false;
           await t.tap(hide);
           await t.pumpAndSettle();
-          expect(store.hidden, [n.id, second.id, second.id, a.id]);
+          expect(store.batches, [expectedSources, expectedSources]);
+          expect(store.hidden, expectedSources);
           expect(store.findAssignment(a.id), isNull);
           expect(store.findAssignment(second.id), isNull);
           expect(store.findAssignment(other.id), same(other));
-          expect(store.reloads, 3);
+          expect(store.reloads, 1);
           expect(find.text('返回列表成功'), findsOneWidget);
         }
       } else {
         expect(store.findAssignment(a.id), isNull);
         expect(store.findAssignment(other.id), same(other));
-        expect(store.reloads, 3);
+        expect(store.reloads, 1);
       }
       expect(store.records.map((r) => r.status), everyElement('pending'));
       expect(t.takeException(), isNull);

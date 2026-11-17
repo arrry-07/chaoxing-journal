@@ -43,6 +43,7 @@ void main() {
         notificationService: _NoopNotificationService(),
         widgetSnapshotService: _NoopWidgetSnapshotService());
     addTearDown(store.dispose);
+    await store.restoreSession();
     await store.repository.mergeAndSave([
       Assignment(
           id: 'cx:work:1:2:hidden-1',

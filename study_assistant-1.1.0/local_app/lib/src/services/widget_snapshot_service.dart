@@ -72,6 +72,7 @@ class WidgetSnapshotService {
                   now,
                 ),
           deepLinkUrl: AppDeepLinks.assignmentUri(assignment.id),
+          eventKind: assignment.isExam ? 'examStart' : 'deadline',
         );
       },
     ).toList();

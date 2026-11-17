@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import '../models/assignment.dart';
+import '../services/assignment_grouping.dart';
 import '../services/assignment_store.dart';
 
 class LocalRecordsScreen extends StatefulWidget {
@@ -17,13 +19,21 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
-        final records = (category == 2
-                ? widget.store.hiddenAssignments
-                : widget.store.assignments.where((a) => category == 0
-                    ? a.hasCourseTaskIdentity
-                    : !a.hasCourseTaskIdentity))
-            .where((a) => '${a.title} ${a.courseName}'.contains(search))
-            .toList();
+        final groups = category == 2
+            ? widget.store.hiddenCourseworkGroups
+            : category == 0
+                ? widget.store.localCourseTaskGroups
+                : const <CourseworkGroup>[];
+        final records = category == 1
+            ? widget.store.assignments
+                .where((a) => !a.hasCourseTaskIdentity)
+                .where((a) => '${a.title} ${a.courseName}'.contains(search))
+                .toList()
+            : groups
+                .where((group) =>
+                    '${group.primary.title} ${group.primary.courseName}'
+                        .contains(search))
+                .toList();
         return Scaffold(
             appBar: AppBar(title: const Text('本地记录')),
             body: ListView(padding: const EdgeInsets.all(16), children: [
@@ -39,22 +49,32 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                       onSelected: (_) => setState(() => category = i))
               ]),
               Text('${records.length} 条记录'),
-              for (final a in records)
-                Card(
-                    child: ListTile(
-                        title: Text(a.title),
-                        subtitle: Text(
-                            '${a.courseName}\n来源：${a.source.name}\n最后读取：${DateFormat('yyyy-MM-dd HH:mm').format(a.lastSyncedAt)}'),
-                        onTap: category == 2
-                            ? null
-                            : () => context.push(
-                                '/assignments/${Uri.encodeComponent(a.id)}'),
-                        trailing: category == 2
-                            ? TextButton(
-                                onPressed: () =>
-                                    widget.store.updateCompletion(a.id, false),
-                                child: const Text('恢复'))
-                            : null))
+              if (category == 1)
+                for (final a in records.cast<Assignment>())
+                  Card(
+                      child: ListTile(
+                          title: Text(a.title),
+                          subtitle: Text(
+                              '${a.courseName}\n来源：${a.source.name}\n最后读取：${DateFormat('yyyy-MM-dd HH:mm').format(a.lastSyncedAt)}'),
+                          onTap: () => context.push(
+                              '/assignments/${Uri.encodeComponent(a.id)}')))
+              else
+                for (final group in records.cast<CourseworkGroup>())
+                  Card(
+                      child: ListTile(
+                          title: Text(group.primary.title),
+                          subtitle: Text(
+                              '${group.primary.courseName}\n来源：${group.sourceLabel}\n最后读取：${DateFormat('yyyy-MM-dd HH:mm').format(group.primary.lastSyncedAt)}'),
+                          onTap: category == 2
+                              ? null
+                              : () => context.push(
+                                  '/assignments/${Uri.encodeComponent(group.primary.id)}'),
+                          trailing: category == 2
+                              ? TextButton(
+                                  onPressed: () => widget.store
+                                      .setCourseworkGroupHidden(group, false),
+                                  child: const Text('恢复'))
+                              : null))
             ]));
       });
 }

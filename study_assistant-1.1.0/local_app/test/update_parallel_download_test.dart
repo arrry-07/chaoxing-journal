@@ -198,6 +198,120 @@ void main() {
         throwsA(isA<StateError>()));
     expect(await dir.list().toList(), isEmpty);
   });
+  test('first segment rejects an unsafe redirect before reading its body',
+      () async {
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        final range = RegExp(r'bytes=(\d+)-(\d+)')
+            .firstMatch(o.headers['Range'] as String)!;
+        final begin = int.parse(range[1]!), end = int.parse(range[2]!);
+        h.resolve(Response<ResponseBody>(
+            requestOptions: o,
+            statusCode: 206,
+            headers: Headers.fromMap({
+              'content-range': ['bytes $begin-$end/${bytes.length}']
+            }),
+            redirects: [
+              RedirectRecord(
+                302,
+                'GET',
+                Uri.parse('http://mirror.example.org/first.apk'),
+              )
+            ],
+            data: ResponseBody(
+                Stream.value(Uint8List.sublistView(bytes, begin, end + 1)),
+                206)));
+      }));
+    await expectLater(
+        AppUpdateService(dio: dio, parallelDownloads: true)
+            .downloadApk(candidate(), targetDirectory: dir.path),
+        throwsA(isA<StateError>()));
+    expect(await dir.list().toList(), isEmpty);
+  });
+  test('later segment rejects an unsafe redirect before reading its body',
+      () async {
+    final unsafeStart = bytes.length ~/ 4;
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        final range = RegExp(r'bytes=(\d+)-(\d+)')
+            .firstMatch(o.headers['Range'] as String)!;
+        final begin = int.parse(range[1]!), end = int.parse(range[2]!);
+        h.resolve(Response<ResponseBody>(
+            requestOptions: o,
+            statusCode: 206,
+            headers: Headers.fromMap({
+              'content-range': ['bytes $begin-$end/${bytes.length}']
+            }),
+            redirects: begin == unsafeStart
+                ? [
+                    RedirectRecord(
+                      302,
+                      'GET',
+                      Uri.parse('http://mirror.example.org/later.apk'),
+                    )
+                  ]
+                : const [],
+            data: ResponseBody(
+                Stream.value(Uint8List.sublistView(bytes, begin, end + 1)),
+                206)));
+      }));
+    await expectLater(
+        AppUpdateService(dio: dio, parallelDownloads: true)
+            .downloadApk(candidate(), targetDirectory: dir.path),
+        throwsA(isA<StateError>()));
+    expect(await dir.list().toList(), isEmpty);
+  });
+  test('a later segment HTTP error falls back to a fresh backup transfer',
+      () async {
+    var backupRequests = 0;
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        if (o.uri.host == 'backup.example.org') {
+          backupRequests++;
+          h.resolve(Response<ResponseBody>(
+              requestOptions: o,
+              statusCode: 200,
+              data: ResponseBody(Stream.value(bytes), 200)));
+          return;
+        }
+        final range = RegExp(r'bytes=(\d+)-(\d+)')
+            .firstMatch(o.headers['Range'] as String)!;
+        final begin = int.parse(range[1]!), end = int.parse(range[2]!);
+        if (begin >= (bytes.length * 3 ~/ 4)) {
+          h.resolve(Response<ResponseBody>(
+              requestOptions: o,
+              statusCode: 404,
+              data: ResponseBody(Stream.value(Uint8List(0)), 404)));
+          return;
+        }
+        h.resolve(Response<ResponseBody>(
+            requestOptions: o,
+            statusCode: 206,
+            headers: Headers.fromMap({
+              'content-range': ['bytes $begin-$end/${bytes.length}']
+            }),
+            data: ResponseBody(
+                Stream.value(Uint8List.sublistView(bytes, begin, end + 1)),
+                206)));
+      }));
+    final file =
+        await AppUpdateService(dio: dio, parallelDownloads: true).downloadApk(
+      AppUpdateInfo(
+        versionName: '99',
+        releaseUrl: '',
+        apkName: 'fixture.apk',
+        apkDownloadUrl: 'https://primary.example.org/fixture.apk',
+        backupApkUrls: const ['https://backup.example.org/fixture.apk'],
+        releaseNotes: '',
+        apkSize: bytes.length,
+        sha256Hash: sha256.convert(bytes).toString(),
+      ),
+      targetDirectory: dir.path,
+    );
+    expect(backupRequests, greaterThan(0));
+    expect(await file.readAsBytes(), bytes);
+    expect((await dir.list().toList()).length, 1);
+  });
   test('cancelling all active ranges releases streams and removes partials',
       () async {
     final streams = <StreamController<Uint8List>>[];

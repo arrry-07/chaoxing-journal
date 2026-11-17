@@ -6,6 +6,7 @@ import '../app/journal.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../models/assignment.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
 import '../services/exam_schedule_presentation.dart';
@@ -179,35 +180,17 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
       _hiding = true;
       _actionMessage = null;
     });
-    final epoch = widget.store.accountEpoch;
     final original = widget.store.findAssignment(widget.assignmentId);
-    final sources = original == null
-        ? const <String>[]
-        : {
-            ...AssignmentQuery.displaySources(
-                    original, widget.store.courseAssignments)
-                .where((a) => a.id != original.id)
-                .map((a) => a.id),
-            // Reload removes hidden rows from findAssignment. Keep this route's
-            // representative until all supplemental writes succeed so partial
-            // failure leaves a usable detail page and retry action.
-            original.id,
-          }.toList();
-    var hidden = sources.isNotEmpty;
+    final group =
+        original == null ? null : widget.store.courseworkGroupFor(original.id);
+    final sources =
+        group?.sources.map((assignment) => assignment.id).toList() ??
+            (original == null ? const <String>[] : [original.id]);
+    var hidden = false;
     try {
-      // Snapshot all source IDs before the first reload. Do not archive records
-      // from a replacement account if the session changes between writes.
-      for (final id in sources) {
-        if (widget.store.accountEpoch != epoch ||
-            !await widget.store.hideAssignment(id) ||
-            widget.store.accountEpoch != epoch) {
-          hidden = false;
-          break;
-        }
-      }
+      hidden = await widget.store.setAssignmentsHidden(sources, true);
     } catch (_) {
       hidden = false;
-      // Preserve the detail view for retry, including persistence exceptions.
     }
     if (!mounted) return;
     if (hidden) {
@@ -216,9 +199,56 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     }
     setState(() {
       _hiding = false;
-      _actionMessage = '隐藏失败，请稍后重试；部分记录可能已隐藏，可在本机记录中恢复。';
+      _actionMessage = '隐藏失败，请稍后重试；整组来源均未作为完成结果提交。';
     });
   }
+
+  String _sourceType(Assignment source) {
+    if (source.isExam) {
+      return source.exam!.noticeOnly ? '考试通知' : '正式考试';
+    }
+    if (source.isSupportedClassroomTask) return '课堂任务';
+    return switch (source.source) {
+      AssignmentSource.courseWork => '正式作业',
+      AssignmentSource.manual => '个人记录',
+      AssignmentSource.legacyUnknown => '历史来源',
+      AssignmentSource.classroomActivity => '课堂任务',
+      AssignmentSource.exam => '考试',
+    };
+  }
+
+  Future<void> _showSourceDetail(Assignment source) => showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('原始来源详情'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${_sourceType(source)} · ${source.statusLabel}'),
+                const SizedBox(height: 8),
+                Text(source.courseName),
+                if (source.title.trim().isNotEmpty) Text(source.title),
+                const SizedBox(height: 8),
+                Text(
+                  '读取时间：${DateFormat('yyyy-MM-dd HH:mm').format(source.lastSyncedAt)}',
+                ),
+                if (source.requirementsText.trim().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(source.requirementsText),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -259,6 +289,8 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
         }
 
         final exam = assignment.isExam ? assignment.exam : null;
+        final sourceGroup = widget.store.courseworkGroupFor(assignment.id);
+        final sources = sourceGroup?.sources ?? <Assignment>[assignment];
         final schedule = exam == null
             ? null
             : ExamSchedulePresentation.build(assignment,
@@ -388,6 +420,33 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     ]),
               ),
             ),
+            if (sources.length > 1) ...[
+              const SizedBox(height: 12),
+              Card(
+                child: ExpansionTile(
+                  key: const ValueKey('assignment-source-records'),
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
+                  title: Text('来源记录 · ${sources.length} 条'),
+                  children: [
+                    for (final source in sources)
+                      ListTile(
+                        dense: true,
+                        title: Text(
+                          '${_sourceType(source)} · ${source.statusLabel}',
+                        ),
+                        subtitle: Text(
+                          '读取 ${DateFormat('yyyy-MM-dd HH:mm').format(source.lastSyncedAt)}',
+                        ),
+                        trailing: TextButton(
+                          onPressed: () => _showSourceDetail(source),
+                          child: const Text('查看'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             OutlinedButton.icon(
                 onPressed: () => context.push(
@@ -445,7 +504,11 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
               TextButton.icon(
                 onPressed: _hiding || _opening || _refreshing ? null : _hide,
                 icon: const Icon(Icons.visibility_off_outlined),
-                label: Text('在本机隐藏此$_itemLabel'),
+                label: Text(
+                  sources.length > 1
+                      ? '在本机隐藏此$_itemLabel（${sources.length} 条来源）'
+                      : '在本机隐藏此$_itemLabel',
+                ),
               ),
           ],
         );
