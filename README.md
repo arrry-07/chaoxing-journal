@@ -6,11 +6,11 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.8.06](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.06/chaoxing-journal-1.8.06.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.06) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.8.07](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.07/chaoxing-journal-1.8.07.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.07) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
-1.8.06 统一首页查询范围：相同搜索、课程、期限条件下“全部”等于“作业”与“考试”结果的并集，已提交作业与已结束考试直接出现在完整列表。时间排序恢复真实时间顺序，已提交、已结束或状态未知不再居中按名称排序，确认已逾期在两个方向下均置底；“未逾期”只保留确认未逾期的待办。首页工具栏改为状态独立一行、筛选与排序同排，排序可点击打开现有面板，窄幅或大字号时自动纵向排列。
+1.8.07 首页只展示未完成课业：已提交作业与已结束／已提交考试退出首页，可在“本地记录”和统计页查看；相同搜索、课程、期限条件下“全部”仍等于“作业”与“考试”的并集。无日期记录补齐左栏占位并归入“无日期与待确认”分组，标题列与有日期卡片对齐；跨天考试的日期标题写起止范围，无开考时间的考试在卡片内写范围／结束，长窗口考试不再看起来像已过期。排序仍按作业截止、考试开考，确认已逾期双向置底。
 
 ## 功能
 
@@ -34,20 +34,20 @@
 
 ## 下载安装
 
-**当前正式包为 1.8.06（73）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**当前正式包为 1.8.07（74）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.8.06.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.06/chaoxing-journal-1.8.06.apk)。发布说明及校验文件见 [1.8.06 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.06)。
+1. [下载 chaoxing-journal-1.8.07.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.07/chaoxing-journal-1.8.07.apk)。发布说明及校验文件见 [1.8.07 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.07)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到 1.8.06？</summary>
+<summary>已经安装：如何升级到 1.8.07？</summary>
 
-1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版不单独上传 Gitee APK，因此国内镜像仍停留在批量点 1.7.52+59，但 manual 小索引指向 GitHub 1.8.06 正式包，stable 保持 1.8.0。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
+1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版不单独上传 Gitee APK，因此国内镜像仍停留在批量点 1.7.52+59，但 manual 小索引指向 GitHub 1.8.07 正式包，stable 保持 1.8.0。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
-体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.06 继续沿用既有体验身份。
+体验包使用 `com.example.studyassistant.journal` 包名和维护者提供的体验签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.07 继续沿用既有体验身份。
 
 ## 使用边界
 

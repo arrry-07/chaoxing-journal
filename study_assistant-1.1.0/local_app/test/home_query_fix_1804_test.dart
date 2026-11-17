@@ -126,13 +126,12 @@ void main() {
     await _pump(tester, store);
 
     expect(_visibleTitles(tester), ['开放性期中考试', '十二月作业', '一月作业']);
-    expect(find.text('11月16日'), findsOneWidget);
+    expect(find.text('11月16日–11月30日'), findsOneWidget);
     expect(find.text('07:06'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-      'home catalog shows submitted homework by default and under type filter',
+  testWidgets('home keeps submitted homework out of default and type filters',
       (tester) async {
     final rows = [
       _work('done-1', '已提交一', DateTime.utc(2026, 11, 1), status: 'submitted'),
@@ -141,7 +140,7 @@ void main() {
     ];
     final store = _Store(rows);
     await _pump(tester, store);
-    expect(_visibleTitles(tester), ['已提交一', '已提交二', '待提交']);
+    expect(_visibleTitles(tester), ['待提交']);
 
     store.homeFilters = const HomeFilters(
       type: AssignmentTypeFilter.homework,
@@ -150,8 +149,8 @@ void main() {
     store.notifyListeners();
     await tester.pumpAndSettle();
 
-    expect(_visibleTitles(tester), ['已提交一', '已提交二', '待提交']);
-    expect(find.text('已提交'), findsNWidgets(2));
+    expect(_visibleTitles(tester), ['待提交']);
+    expect(find.text('已提交'), findsNothing);
   });
 
   testWidgets('not-expired keeps a yearless open exam and excludes completed',
@@ -174,19 +173,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('course filter lists a course that only has historical records',
+  testWidgets('course dropdown omits a course that only has historical records',
       (tester) async {
     final store = _Store([
       _work('done', '历史作业', DateTime.utc(2026, 11, 1), status: 'submitted'),
     ]);
     await _pump(tester, store);
-    expect(find.text('历史作业'), findsOneWidget);
+    expect(find.text('历史作业'), findsNothing);
 
     await tester.tap(find.text('搜索与筛选'));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
 
-    expect(find.text('高等数学'), findsWidgets);
+    expect(find.text('高等数学'), findsNothing);
   });
 }

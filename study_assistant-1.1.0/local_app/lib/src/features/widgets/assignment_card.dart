@@ -150,7 +150,12 @@ class AssignmentCard extends StatelessWidget {
     final clock = hasTime
         ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d))
         : examSchedule?.timeline?.clock ?? '';
-    final showRail = clock.isNotEmpty || (deadlinePending && !a.isExam);
+    // Undated rows keep the same rail so titles stay in one column.
+    final railLabel = clock.isNotEmpty
+        ? clock
+        : bucket == AssignmentDeadlineBucket.confirmedNoDeadline
+            ? '—'
+            : '待定';
     // Measure at the user's text scale: a fixed rail clips times at 2× size.
     final timeMeasure = TextPainter(
         text: const TextSpan(text: '00:00', style: Journal.time),
@@ -178,9 +183,12 @@ class AssignmentCard extends StatelessWidget {
           Text(urgent,
               style: Journal.metadata
                   .copyWith(color: color, fontWeight: FontWeight.w600)),
-        if (a.isExam)
-          for (final line in examLines) Text(line, style: Journal.metadata)
-        else if (showFullDeadline || countdown || !hasTime)
+        if (a.isExam) ...[
+          if (clock.isEmpty)
+            for (final line in examSchedule?.cardTimeLines ?? const <String>[])
+              Text(line, style: Journal.metadata),
+          for (final line in examLines) Text(line, style: Journal.metadata),
+        ] else if (showFullDeadline || countdown || !hasTime)
           Text(deadline, style: Journal.metadata),
       ],
     );
@@ -208,31 +216,32 @@ class AssignmentCard extends StatelessWidget {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (showRail)
-                                SizedBox(
-                                  width: railWidth,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      if (deadlinePending && !a.isExam)
-                                        Padding(
-                                          padding:
-                                              const EdgeInsets.only(top: 4),
-                                          child: SizedBox.square(
-                                            dimension: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              semanticsLabel: '正在确认截止时间',
-                                            ),
+                              SizedBox(
+                                width: railWidth,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (deadlinePending && !a.isExam)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4),
+                                        child: SizedBox.square(
+                                          dimension: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            semanticsLabel: '正在确认截止时间',
                                           ),
-                                        )
-                                      else
-                                        Text(clock, style: Journal.time),
-                                    ],
-                                  ),
+                                        ),
+                                      )
+                                    else
+                                      Text(railLabel,
+                                          style: clock.isEmpty
+                                              ? Journal.time.copyWith(
+                                                  color: Journal.muted)
+                                              : Journal.time),
+                                  ],
                                 ),
-                              if (showRail) const SizedBox(width: 12),
+                              ),
+                              const SizedBox(width: 12),
                               Expanded(
                                   child: Column(
                                       crossAxisAlignment:
@@ -258,16 +267,15 @@ class AssignmentCard extends StatelessWidget {
                           )))))),
       if (onOpenAssignment != null)
         Padding(
-          padding: EdgeInsets.only(
-              left: largeText || !showRail ? 0 : railWidth + 12, bottom: 8),
+          padding:
+              EdgeInsets.only(left: largeText ? 0 : railWidth + 12, bottom: 8),
           child: Wrap(
             alignment: WrapAlignment.spaceBetween,
             crossAxisAlignment: WrapCrossAlignment.center,
             spacing: 8,
             children: [
               Padding(
-                padding: EdgeInsets.only(
-                    left: largeText && showRail ? railWidth + 12 : 0),
+                padding: EdgeInsets.only(left: largeText ? railWidth + 12 : 0),
                 child: ExcludeSemantics(
                     child: InkWell(onTap: onCardTap, child: metadata)),
               ),

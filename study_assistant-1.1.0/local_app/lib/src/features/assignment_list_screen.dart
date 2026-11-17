@@ -280,22 +280,20 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         final catalogAssignments = store.homeCatalogAssignments;
         final examSources = catalogAssignments;
         final displayIndex = store.homeDisplayIndex;
-        final projectedCatalog = AssignmentQuery.projectDisplay(
-            catalogAssignments,
-            index: displayIndex);
         final displayAssignments = AssignmentQuery.currentDisplay(
             catalogAssignments, now,
             index: displayIndex);
         final options = <String, String>{
-          for (final a in projectedCatalog)
+          for (final a in displayAssignments)
             if (a.courseKey case final key?) key: a.courseName
         };
         if (_courseKey != null && !options.containsKey(_courseKey)) {
           options[_courseKey!] = '已选课程（当前无可显示作业）';
         }
-        // The home list always queries the complete visible catalog; filters
-        // only intersect conditions. Recovery views are route-scoped, keep the
-        // current-todo scope and never write saved preferences back.
+        // The home list shows unfinished work only; filters intersect the same
+        // unfinished catalog so all = homework union exam stays true. Completed
+        // and ended history lives in local records and statistics. Recovery
+        // views are route-scoped and never write saved preferences back.
         final items = recoveryScope == null
             ? AssignmentQuery.filterHome(
                 catalogAssignments,
@@ -303,7 +301,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 courseKey: _courseKey,
                 deadline: _deadlineFilter,
                 type: _typeFilter,
-                includeHistorical: true,
+                includeHistorical: false,
                 index: displayIndex,
                 now: now,
               )
@@ -371,6 +369,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               heading =
                   '${day.year == AssignmentQuery.beijing(now).year ? '' : '${day.year}年'}'
                   '${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}';
+            }
+            if (heading == null && recoveryScope == null) {
+              key = 'undated';
+              heading = '无日期与待确认';
             }
             if (heading != null && key != previous) {
               widgets.add(dayHeading(heading, top: widgets.isEmpty ? 8 : 12));
@@ -474,7 +476,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             style: Journal.metadata))),
               if (recoveryScope == null &&
                   _courseKey != null &&
-                  !projectedCatalog.any((a) => a.courseKey == _courseKey))
+                  !displayAssignments.any((a) => a.courseKey == _courseKey))
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 12),
                     child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
@@ -501,7 +503,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               ] else if (store.assignments.isNotEmpty) ...[
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
-                    child: Text('本机有已隐藏、未关注、历史课堂练习或非课业来源的记录，当前首页未显示。')),
+                    child:
+                        Text('本机有已完成、已结束、已隐藏、未关注、历史课堂练习或非课业来源的记录，可在本地记录查看。')),
                 TextButton(
                     onPressed: () => context.push('/records'),
                     child: const Text('查看全部本地记录')),

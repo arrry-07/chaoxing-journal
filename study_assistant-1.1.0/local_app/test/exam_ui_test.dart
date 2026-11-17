@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
@@ -358,22 +359,30 @@ void main() {
 
   testWidgets('calendar places notice at opening rather than ending',
       (tester) async {
+    final today = DateTime.now();
+    var anchor = DateTime(today.year, today.month, today.day + 2);
+    if (anchor.day < today.day ||
+        anchor.add(const Duration(days: 1)).month != anchor.month) {
+      anchor = DateTime(today.year, today.month + 1, 5);
+    }
+    final opening = anchor.add(const Duration(hours: 1));
+    final ending = anchor.add(const Duration(days: 1));
     final store = _Store()
       ..replaceAssignmentsForTest([
         _exam('calendar-notice',
-            notice: true,
-            status: 'unknown',
-            start: _now.add(const Duration(hours: 1)),
-            end: _now.add(const Duration(days: 1))),
+            notice: true, status: 'unknown', start: opening, end: ending),
       ]);
     addTearDown(store.dispose);
     expect(store.visibleAssignments.single.hasExamIdentity, isTrue);
     await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: CalendarScreen(store: store, clock: () => _now))));
+        home:
+            Scaffold(body: CalendarScreen(store: store, clock: () => anchor))));
     await tester.pumpAndSettle();
     expect(find.text('期末考试'), findsOneWidget);
-    expect(find.text('09:00'), findsOneWidget);
-    await tester.tap(find.text('17'));
+    expect(
+        find.text(DateFormat('HH:mm').format(AssignmentQuery.beijing(opening))),
+        findsOneWidget);
+    await tester.tap(find.text('${ending.day}'));
     await tester.pumpAndSettle();
     expect(find.text('期末考试'), findsNothing);
     expect(tester.takeException(), isNull);

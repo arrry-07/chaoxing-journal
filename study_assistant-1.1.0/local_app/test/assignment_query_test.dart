@@ -766,9 +766,7 @@ void main() {
     expect(notice.exam!.startTrusted, isFalse);
   });
 
-  test(
-      'home catalog keeps completed homework for every type while current-todo callers do not',
-      () {
+  test('home unfinished scope matches current-todo callers for every type', () {
     final now = DateTime.utc(2026, 11, 16);
     Assignment homework(String id, String status, DateTime due) => Assignment(
           id: 'cx:work:1:2:$id',
@@ -785,22 +783,22 @@ void main() {
 
     expect(
       AssignmentQuery.filterHome([first, second, pending],
-          includeHistorical: true, now: now),
-      [first, second, pending],
+          includeHistorical: false, now: now),
+      [pending],
     );
     expect(
       AssignmentQuery.filterHome(
         [first, second, pending],
         type: AssignmentTypeFilter.homework,
-        includeHistorical: true,
+        includeHistorical: false,
         now: now,
       ),
-      [first, second, pending],
+      [pending],
     );
     expect(
       AssignmentQuery.filterHome([first, second, pending],
               type: AssignmentTypeFilter.exam,
-              includeHistorical: true,
+              includeHistorical: false,
               now: now)
           .map((assignment) => assignment.id)
           .toSet(),

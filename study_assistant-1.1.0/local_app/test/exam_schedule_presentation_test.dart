@@ -45,9 +45,11 @@ void main() {
     final a = notice('考试时间：11-16 07:06:00 至 11-30 07:06:31');
     final before = a.toJson();
     final stamp = ExamSchedulePresentation.build(a).timeline!;
-    expect(stamp.heading, '11月16日');
+    expect(stamp.heading, '11月16日–11月30日');
     expect(stamp.clock, '07:06');
-    expect(stamp.key, 'notice:11:16');
+    expect(stamp.key, 'range:notice:11:16:notice:11:30');
+    expect(stamp.heading, isNot(contains('年')));
+    expect(stamp.heading, isNot(contains('周')));
     expect(a.toJson(), before);
     expect(a.timelineAt, isNull);
     expect(a.timelineTrusted, isFalse);
@@ -55,7 +57,7 @@ void main() {
   test('year and weekday are shown only from explicit date evidence', () {
     final p = ExamSchedulePresentation.build(
         notice('考试时间：2026-11-16 07:06 至 2026-11-30 07:06'));
-    expect(p.timeline!.heading, '2026年11月16日 周一');
+    expect(p.timeline!.heading, '2026年11月16日 周一–11月30日');
     expect(p.timeline!.clock, '07:06');
     final trusted = ExamSchedulePresentation.build(
         formal(start: DateTime.utc(2026, 11, 16, 0)));

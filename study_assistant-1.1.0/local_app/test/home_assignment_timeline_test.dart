@@ -168,7 +168,8 @@ void main() {
     expect(find.byType(AssignmentCard), findsNWidgets(2));
     expect(find.text('无期限'), findsOneWidget);
     expect(find.text('截止时间待确认'), findsOneWidget);
-    expect(find.text('—'), findsNothing);
+    expect(find.text('—'), findsOneWidget);
+    expect(find.text('无日期与待确认'), findsOneWidget);
   });
 
   testWidgets('home date heading and long title reflow without overlaps',
