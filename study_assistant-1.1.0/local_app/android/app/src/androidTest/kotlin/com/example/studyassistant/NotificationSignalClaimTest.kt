@@ -160,4 +160,84 @@ class NotificationSignalClaimTest {
         assertNull(database.claimNotificationSignal(accountHash, epoch))
         database.clearActiveAccount(other)
     }
+
+    @Test
+    fun rollbackRestoresThePriorAttemptOnlyOnce() {
+        val version = database.recordSignal(
+            accountHash,
+            epoch,
+            "synthetic-rollback",
+            System.currentTimeMillis(),
+        )
+        val before = database.readAccount(accountHash)!!
+        val claim = database.claimNotificationAttempt(accountHash, epoch)!!
+
+        assertEquals(version, claim.version)
+        assertTrue(database.rollbackUnstartedNotificationAttempt(claim))
+        val restored = database.readAccount(accountHash)!!
+        assertEquals(before.attemptedSignalVersion, restored.attemptedSignalVersion)
+        assertEquals(before.lastSignalCheckAt, restored.lastSignalCheckAt)
+        assertNull(restored.claimToken)
+        assertTrue(!database.rollbackUnstartedNotificationAttempt(claim))
+        assertEquals(version, database.claimNotificationSignal(accountHash, epoch))
+    }
+
+    @Test
+    fun rollbackRejectsANewerPendingSignal() {
+        database.recordSignal(
+            accountHash,
+            epoch,
+            "synthetic-rollback-first",
+            System.currentTimeMillis(),
+        )
+        val claim = database.claimNotificationAttempt(accountHash, epoch)!!
+        val newer = database.recordSignal(
+            accountHash,
+            epoch,
+            "synthetic-rollback-second",
+            System.currentTimeMillis() + 1_000L,
+        )
+
+        assertTrue(!database.rollbackUnstartedNotificationAttempt(claim))
+        val state = database.readAccount(accountHash)!!
+        assertEquals(claim.version, state.attemptedSignalVersion)
+        assertEquals(newer, state.pendingSignalVersion)
+        assertEquals(newer, database.claimNotificationSignal(accountHash, epoch))
+    }
+
+    @Test
+    fun rollbackRejectsACompletedClaim() {
+        database.recordSignal(
+            accountHash,
+            epoch,
+            "synthetic-rollback-consumed",
+            System.currentTimeMillis(),
+        )
+        val claim = database.claimNotificationAttempt(accountHash, epoch)!!
+        database.consumeSignal(accountHash, claim.version, epoch)
+
+        assertTrue(!database.rollbackUnstartedNotificationAttempt(claim))
+        assertEquals(
+            claim.version,
+            database.readAccount(accountHash)!!.consumedSignalVersion,
+        )
+    }
+
+    @Test
+    fun accountSwitchInvalidatesTheClaimToken() {
+        database.recordSignal(
+            accountHash,
+            epoch,
+            "synthetic-rollback-switch",
+            System.currentTimeMillis(),
+        )
+        val claim = database.claimNotificationAttempt(accountHash, epoch)!!
+        val other = "instrumentation-claim-rollback-other-${System.nanoTime()}"
+        database.ensureActiveAccount(other)
+        database.switchAccount(accountHash, other)
+
+        assertTrue(!database.rollbackUnstartedNotificationAttempt(claim))
+        assertNull(database.readAccount(accountHash)!!.claimToken)
+        database.clearActiveAccount(other)
+    }
 }

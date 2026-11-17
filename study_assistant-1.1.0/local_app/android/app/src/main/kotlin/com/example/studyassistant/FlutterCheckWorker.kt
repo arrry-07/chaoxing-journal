@@ -3,6 +3,7 @@ package com.example.studyassistant
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import io.flutter.FlutterInjector
@@ -11,6 +12,7 @@ import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugins.GeneratedPluginRegistrant
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -34,6 +36,7 @@ class FlutterCheckWorker(
         val requestedAt = inputData.getLong(KEY_REQUESTED_AT, System.currentTimeMillis())
         val intervalMinutes = inputData.getInt(KEY_INTERVAL_MINUTES, 240)
         var signalVersion = inputData.getLong(KEY_SIGNAL_VERSION, 0L)
+        var claim: NotificationSignalClaim? = null
         val expectedSessionEpoch = inputData.getLong(KEY_SESSION_EPOCH, -1L)
         val database = ReminderDatabase.get(applicationContext)
         val account = database.readAccount(accountHash)
@@ -50,12 +53,32 @@ class FlutterCheckWorker(
             ) {
                 return Result.success()
             }
+            val now = Instant.now()
+            if (!NotificationCheckSchedulerPolicy.canClaimNow(
+                    now,
+                    database.lastSignalCheckAt(accountHash),
+                    ZoneId.systemDefault(),
+                )
+            ) {
+                val queued = BackgroundWorkScheduler.ensureDeferredNotificationSuccessor(
+                    applicationContext,
+                    database,
+                    accountHash,
+                    expectedSessionEpoch,
+                )
+                if (!queued) {
+                    Log.w(TAG, "deferred_notification_successor_not_confirmed")
+                }
+                return Result.success()
+            }
             // Claim before creating a FlutterEngine. Duplicate or stale work
             // exits without networking once this signal was attempted.
-            signalVersion = database.claimNotificationSignal(
+            val claimed = database.claimNotificationAttempt(
                 accountHash,
                 expectedSessionEpoch,
             ) ?: return Result.success()
+            claim = claimed
+            signalVersion = claimed.version
         }
         val startSignalVersion = if (reason == BackgroundWorkScheduler.REASON_DAYTIME) {
             account.pendingSignalVersion
@@ -104,8 +127,9 @@ class FlutterCheckWorker(
                             if (!stopped) workerChannel.invokeMethod("run", payload)
                         }
                         "finished" -> {
-                            workResult.set(call.arguments as? Map<*, *>)
-                            completed.set(true)
+                            if (completed.compareAndSet(false, true)) {
+                                workResult.set(call.arguments as? Map<*, *>)
+                            }
                             result.success(null)
                             latch.countDown()
                         }
@@ -167,14 +191,50 @@ class FlutterCheckWorker(
                     account.sessionEpoch,
                 )
             }
-        } else if (reason == BackgroundWorkScheduler.REASON_NOTIFICATION &&
-            workResult.get()?.get("success") == true
-        ) {
-            database.consumeSignal(
-                accountHash,
-                signalVersion,
-                expectedSessionEpoch,
-            )
+        } else if (reason == BackgroundWorkScheduler.REASON_NOTIFICATION) {
+            val result = workResult.get()
+            val resultSuccess = result?.get("success") == true
+            val skipped = result?.get("skipped") == true
+            val skipReason = result?.get("skipReason") as? String
+            if (resultSuccess) {
+                database.consumeSignal(
+                    accountHash,
+                    signalVersion,
+                    expectedSessionEpoch,
+                )
+            } else if (NotificationAttemptRollbackPolicy.shouldRollback(
+                    received = finished && completed.get(),
+                    stopped = stopped,
+                    success = resultSuccess,
+                    skipped = skipped,
+                    skipReason = skipReason,
+                )
+            ) {
+                val currentClaim = claim
+                if (currentClaim == null ||
+                    currentClaim.sessionEpoch != expectedSessionEpoch
+                ) {
+                    Log.w(TAG, "notification_claim_rollback_rejected")
+                } else {
+                    val successor =
+                        BackgroundWorkScheduler.ensureDeferredNotificationSuccessor(
+                            applicationContext,
+                            database,
+                            accountHash,
+                            expectedSessionEpoch,
+                        )
+                    if (successor) {
+                        if (!database.rollbackUnstartedNotificationAttempt(
+                                currentClaim,
+                            )
+                        ) {
+                            Log.w(TAG, "notification_claim_rollback_not_applied")
+                        }
+                    } else {
+                        Log.w(TAG, "notification_claim_kept_without_successor")
+                    }
+                }
+            }
             BackgroundWorkScheduler.scheduleNotificationFollowUpIfNeeded(
                 applicationContext,
                 database,
@@ -228,6 +288,9 @@ class FlutterCheckWorker(
     }
 
     companion object {
+        private const val TAG = "FlutterCheckWorker"
+        const val SKIP_REASON_OUTSIDE_WINDOW =
+            NotificationAttemptRollbackPolicy.OUTSIDE_WINDOW
         const val CHANNEL = "study_assistant/background_worker"
         const val KEY_REASON = "reason"
         const val KEY_ACCOUNT_HASH = "accountHash"

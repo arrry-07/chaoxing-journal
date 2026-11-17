@@ -5,9 +5,11 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import androidx.annotation.VisibleForTesting
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
+import java.util.UUID
 
 data class ReminderAccountState(
     val accountHash: String,
@@ -35,6 +37,19 @@ data class ReminderAccountState(
     val migrationState: String,
     val baselinedSources: Set<String> =
         if (baselineCompleted) setOf("courseWork") else emptySet(),
+    val claimToken: String? = null,
+)
+
+data class NotificationSignalClaim(
+    val accountHash: String,
+    val sessionEpoch: Long,
+    val version: Long,
+    val token: String,
+    val claimedAt: Long,
+    val priorAttemptedVersion: Long,
+    val priorLastSignalCheckAt: Long?,
+    val priorPendingVersion: Long,
+    val priorConsumedVersion: Long,
 )
 
 data class StoredReminderSnapshot(
@@ -88,8 +103,10 @@ data class StoredReminderEvent(
     val eventKind: String = "deadline",
 )
 
-class ReminderDatabase private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, DATABASE_NAME, null, DATABASE_VERSION) {
+class ReminderDatabase private constructor(
+    context: Context,
+    databaseName: String = DATABASE_NAME,
+) : SQLiteOpenHelper(context.applicationContext, databaseName, null, DATABASE_VERSION) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -114,6 +131,7 @@ class ReminderDatabase private constructor(context: Context) :
                 last_signal_at INTEGER,
                 attempted_signal_version INTEGER NOT NULL DEFAULT 0,
                 last_signal_check_at INTEGER,
+                claim_token TEXT,
                 last_attempt_at INTEGER,
                 last_data_success_at INTEGER,
                 last_full_success_at INTEGER,
@@ -198,6 +216,9 @@ class ReminderDatabase private constructor(context: Context) :
             )
             db.execSQL("ALTER TABLE accounts ADD COLUMN last_signal_check_at INTEGER")
         }
+        if (oldVersion < 5 && newVersion >= 5) {
+            db.execSQL("ALTER TABLE accounts ADD COLUMN claim_token TEXT")
+        }
         if (oldVersion < 2) {
             db.execSQL("ALTER TABLE accounts ADD COLUMN baselined_sources TEXT NOT NULL DEFAULT '[]'")
             db.execSQL("ALTER TABLE snapshots ADD COLUMN in_assignment_scope INTEGER NOT NULL DEFAULT 0")
@@ -233,6 +254,7 @@ class ReminderDatabase private constructor(context: Context) :
             if (switchingAccount != null) {
                 writableDatabase.execSQL(
                     "UPDATE accounts SET session_epoch = session_epoch + 1, active = 0, " +
+                        "claim_token = NULL, " +
                         "updated_at = ? WHERE account_hash = ?",
                     arrayOf<Any?>(now, switchingAccount),
                 )
@@ -241,7 +263,8 @@ class ReminderDatabase private constructor(context: Context) :
             requireAccount(targetHash)
             if (switchingAccount != null) {
                 writableDatabase.execSQL(
-                    "UPDATE accounts SET session_epoch = session_epoch + 1, active = 0",
+                    "UPDATE accounts SET session_epoch = session_epoch + 1, active = 0, " +
+                        "claim_token = NULL",
                 )
             } else {
                 writableDatabase.execSQL("UPDATE accounts SET active = 0")
@@ -262,7 +285,8 @@ class ReminderDatabase private constructor(context: Context) :
             val now = System.currentTimeMillis()
             requireAccount(accountHash)
             writableDatabase.execSQL(
-                "UPDATE accounts SET session_epoch = session_epoch + 1, updated_at = ? " +
+                "UPDATE accounts SET session_epoch = session_epoch + 1, claim_token = NULL, " +
+                    "updated_at = ? " +
                     "WHERE account_hash = ?",
                 arrayOf<Any?>(now, accountHash),
             )
@@ -297,6 +321,7 @@ class ReminderDatabase private constructor(context: Context) :
                     "pending_update = 0, pending_signal_version = 0, " +
                     "consumed_signal_version = 0, last_signal_at = NULL, " +
                     "attempted_signal_version = 0, last_signal_check_at = NULL, " +
+                    "claim_token = NULL, " +
                     "last_attempt_at = NULL, last_data_success_at = NULL, " +
                     "last_full_success_at = NULL, last_failure = NULL, " +
                     "next_check_at = NULL, migration_state = 'legacy_pending', " +
@@ -894,7 +919,18 @@ class ReminderDatabase private constructor(context: Context) :
         accountHash: String,
         sessionEpoch: Long,
         attemptedAt: Long = System.currentTimeMillis(),
-    ): Long? = transaction {
+    ): Long? = claimNotificationAttempt(
+        accountHash,
+        sessionEpoch,
+        attemptedAt,
+    )?.version
+
+    @Synchronized
+    fun claimNotificationAttempt(
+        accountHash: String,
+        sessionEpoch: Long,
+        attemptedAt: Long = System.currentTimeMillis(),
+    ): NotificationSignalClaim? = transaction {
         val account = readAccount(accountHash) ?: return@transaction null
         if (!account.active ||
             !account.listenerEnabled ||
@@ -907,17 +943,68 @@ class ReminderDatabase private constructor(context: Context) :
             account.consumedSignalVersion,
             account.attemptedSignalVersion,
         ) ?: return@transaction null
-        writableDatabase.update(
+        val token = UUID.randomUUID().toString()
+        val updated = writableDatabase.update(
             "accounts",
             ContentValues().apply {
                 put("attempted_signal_version", claimed)
                 put("last_signal_check_at", attemptedAt)
+                put("claim_token", token)
                 put("updated_at", System.currentTimeMillis())
             },
-            "account_hash = ? AND session_epoch = ?",
-            arrayOf(accountHash, sessionEpoch.toString()),
+            "account_hash = ? AND session_epoch = ? AND attempted_signal_version = ? " +
+                "AND pending_signal_version = ? AND consumed_signal_version = ?",
+            arrayOf(
+                accountHash,
+                sessionEpoch.toString(),
+                account.attemptedSignalVersion.toString(),
+                account.pendingSignalVersion.toString(),
+                account.consumedSignalVersion.toString(),
+            ),
         )
-        claimed
+        if (updated != 1) return@transaction null
+        NotificationSignalClaim(
+            accountHash = accountHash,
+            sessionEpoch = sessionEpoch,
+            version = claimed,
+            token = token,
+            claimedAt = attemptedAt,
+            priorAttemptedVersion = account.attemptedSignalVersion,
+            priorLastSignalCheckAt = account.lastSignalCheckAt,
+            priorPendingVersion = account.pendingSignalVersion,
+            priorConsumedVersion = account.consumedSignalVersion,
+        )
+    }
+
+    @Synchronized
+    fun rollbackUnstartedNotificationAttempt(claim: NotificationSignalClaim): Boolean {
+        val values = ContentValues().apply {
+            put("attempted_signal_version", claim.priorAttemptedVersion)
+            if (claim.priorLastSignalCheckAt == null) {
+                putNull("last_signal_check_at")
+            } else {
+                put("last_signal_check_at", claim.priorLastSignalCheckAt)
+            }
+            putNull("claim_token")
+            put("updated_at", System.currentTimeMillis())
+        }
+        val updated = writableDatabase.update(
+            "accounts",
+            values,
+            "account_hash = ? AND session_epoch = ? AND claim_token = ? " +
+                "AND attempted_signal_version = ? AND last_signal_check_at = ? " +
+                "AND pending_signal_version = ? AND consumed_signal_version = ?",
+            arrayOf(
+                claim.accountHash,
+                claim.sessionEpoch.toString(),
+                claim.token,
+                claim.version.toString(),
+                claim.claimedAt.toString(),
+                claim.priorPendingVersion.toString(),
+                claim.priorConsumedVersion.toString(),
+            ),
+        )
+        return updated == 1
     }
 
     @Synchronized
@@ -1051,6 +1138,7 @@ class ReminderDatabase private constructor(context: Context) :
         lastFailure = nullableString("last_failure"),
         nextCheckAt = nullableLong("next_check_at"),
         migrationState = getString(getColumnIndexOrThrow("migration_state")),
+        claimToken = nullableString("claim_token"),
     )
 
     private fun Cursor.toSnapshot() = StoredReminderSnapshot(
@@ -1107,7 +1195,7 @@ class ReminderDatabase private constructor(context: Context) :
         const val STATUS_INVALID = "invalid"
 
         private const val DATABASE_NAME = "assignment_reminders_v1.db"
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 5
 
         @Volatile
         private var instance: ReminderDatabase? = null
@@ -1117,6 +1205,10 @@ class ReminderDatabase private constructor(context: Context) :
                 instance ?: ReminderDatabase(context.applicationContext)
                     .also { instance = it }
             }
+
+        @VisibleForTesting
+        fun openForTest(context: Context, databaseName: String): ReminderDatabase =
+            ReminderDatabase(context.applicationContext, databaseName)
 
         fun parseInstant(value: Any?): Long? {
             val text = value as? String ?: return null

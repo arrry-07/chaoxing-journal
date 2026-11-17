@@ -7,7 +7,6 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -51,7 +50,7 @@ class NotificationWorkSchedulerTest {
     }
 
     @Test
-    fun queuedNotificationSignalIsReplacedWithoutGrowingQueue() {
+    fun queuedNotificationSignalKeepsTheExistingWorkAndClaimsLatest() {
         val epoch = database.readAccount(accountHash)!!.sessionEpoch
         val first = database.recordSignal(
             accountHash,
@@ -81,7 +80,11 @@ class NotificationWorkSchedulerTest {
         )
         val secondWork = liveWork().single()
 
-        assertNotEquals(firstWork.id, secondWork.id)
+        assertEquals(firstWork.id, secondWork.id)
+        assertEquals(
+            second,
+            database.claimNotificationSignal(accountHash, epoch),
+        )
     }
 
     @Test
@@ -131,6 +134,38 @@ class NotificationWorkSchedulerTest {
         )
 
         liveWork()
+    }
+
+    @Test
+    fun deferredSuccessorIsEnqueuedOnceAndReused() {
+        val epoch = database.readAccount(accountHash)!!.sessionEpoch
+        database.recordSignal(
+            accountHash,
+            epoch,
+            "signal-deferred",
+            System.currentTimeMillis(),
+        )
+
+        assertTrue(
+            BackgroundWorkScheduler.ensureDeferredNotificationSuccessor(
+                context,
+                database,
+                accountHash,
+                epoch,
+            ),
+        )
+        val first = liveWork().single()
+        assertTrue(
+            BackgroundWorkScheduler.ensureDeferredNotificationSuccessor(
+                context,
+                database,
+                accountHash,
+                epoch,
+            ),
+        )
+        val second = liveWork().single()
+
+        assertEquals(first.id, second.id)
     }
 
     private fun liveWork(): List<WorkInfo> =

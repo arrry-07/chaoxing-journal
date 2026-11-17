@@ -34,6 +34,68 @@ void main() {
     expect(gateway.reconcileSettings.last, isFalse);
   });
 
+  test('notification signal outside the window reports skip reason', () async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'background_check_enabled_v1': false,
+      'background_check_interval_minutes_v1': 240,
+      'notification_listener_enabled_v1': true,
+      'new_assignment_reminder_enabled_v1': true,
+      'background_check_legacy_migration_v1': true,
+    });
+    final gateway = _FakeGateway();
+    final client = _ClientQueue([[]]);
+    final store = _store(
+      gateway: gateway,
+      client: client,
+      clock: () => DateTime(2026, 11, 17, 0, 30),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final result = await store.runBackgroundAutomaticCheck(
+      BackgroundSyncTrigger.notificationSignal,
+    );
+
+    expect(result.success, false);
+    expect(result.skipped, true);
+    expect(result.skipReason, BackgroundCheckResult.outsideWindowSkipReason);
+    expect(result.nextTargetAt, DateTime(2026, 11, 17, 8));
+    expect(client.calls, 0);
+  });
+
+  test('lease wait crossing midnight preserves outside-window reason',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'background_check_enabled_v1': true,
+      'background_check_interval_minutes_v1': 240,
+      'notification_listener_enabled_v1': true,
+      'new_assignment_reminder_enabled_v1': true,
+      'background_check_legacy_migration_v1': true,
+    });
+    var now = DateTime(2026, 11, 17, 23, 59);
+    final gateway = _FakeGateway()
+      ..onAcquire = () => now = DateTime(2026, 11, 18, 0, 1);
+    final client = _ClientQueue([[]]);
+    final store = _store(
+      gateway: gateway,
+      client: client,
+      clock: () => now,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final result = await store.runBackgroundAutomaticCheck(
+      BackgroundSyncTrigger.notificationSignal,
+    );
+
+    expect(result.skipReason, BackgroundCheckResult.outsideWindowSkipReason);
+    expect(result.success, false);
+    expect(result.skipped, true);
+    expect(client.calls, 0);
+  });
+
   test('store baselines new sources silently and retains formal new reminders',
       () async {
     SharedPreferences.setMockInitialValues({});
@@ -430,6 +492,7 @@ AssignmentStore _store({
   LocalAssignmentRepository? repository,
   SecureSessionStore? session,
   bool manageBackgroundSchedule = true,
+  DateTime Function()? clock,
 }) =>
     AssignmentStore(
       sessionStore: session ?? _MemorySessionStore(),
@@ -443,6 +506,7 @@ AssignmentStore _store({
           ),
       nativeReminderDeliveryEnabled: true,
       manageBackgroundSchedule: manageBackgroundSchedule,
+      clock: clock,
     );
 
 Assignment _assignment(String suffix, DateTime? deadline) => Assignment(
@@ -640,6 +704,7 @@ class _FakeGateway extends BackgroundReminderGateway {
   bool failSwitch = false;
   bool sessionCurrent = true;
   final reconcileSettings = <bool>[];
+  void Function()? onAcquire;
 
   @override
   Future<bool> isAvailable() async => true;
@@ -689,6 +754,7 @@ class _FakeGateway extends BackgroundReminderGateway {
     required DateTime requestedAt,
   }) async {
     syncAcquisitions.add(requestId);
+    onAcquire?.call();
     if (!syncAcquired) {
       return const SyncLeaseResult(
         acquired: false,

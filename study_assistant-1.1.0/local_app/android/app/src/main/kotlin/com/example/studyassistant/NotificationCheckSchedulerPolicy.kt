@@ -1,5 +1,8 @@
 package com.example.studyassistant
 
+import java.time.Instant
+import java.time.ZoneId
+
 internal enum class NotificationCheckWorkState {
     NONE,
     QUEUED,
@@ -9,7 +12,7 @@ internal enum class NotificationCheckWorkState {
 
 internal enum class NotificationCheckAction {
     START,
-    REPLACE,
+    KEEP,
     APPEND_FOLLOW_UP,
     COALESCE,
 }
@@ -18,7 +21,7 @@ internal object NotificationCheckSchedulerPolicy {
     fun action(state: NotificationCheckWorkState): NotificationCheckAction =
         when (state) {
             NotificationCheckWorkState.NONE -> NotificationCheckAction.START
-            NotificationCheckWorkState.QUEUED -> NotificationCheckAction.REPLACE
+            NotificationCheckWorkState.QUEUED -> NotificationCheckAction.KEEP
             NotificationCheckWorkState.RUNNING -> NotificationCheckAction.APPEND_FOLLOW_UP
             else -> NotificationCheckAction.COALESCE
         }
@@ -44,5 +47,33 @@ internal object NotificationCheckSchedulerPolicy {
     fun cooldownAt(lastSignalCheckAt: Long?): Long? =
         lastSignalCheckAt?.plus(NOTIFICATION_COOLDOWN_MILLIS)
 
+    fun isCooldownElapsed(now: Long, lastSignalCheckAt: Long?): Boolean =
+        lastSignalCheckAt == null || now >= lastSignalCheckAt + NOTIFICATION_COOLDOWN_MILLIS
+
+    fun canClaimNow(
+        now: Instant,
+        lastSignalCheckAt: Long?,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): Boolean =
+        NativeReminderPolicy.isInDaytimeWindow(now, zone) &&
+            isCooldownElapsed(now.toEpochMilli(), lastSignalCheckAt)
+
     private const val NOTIFICATION_COOLDOWN_MILLIS = 10 * 60_000L
+}
+
+internal object NotificationAttemptRollbackPolicy {
+    const val OUTSIDE_WINDOW = "outsideWindow"
+
+    fun shouldRollback(
+        received: Boolean,
+        stopped: Boolean,
+        success: Boolean,
+        skipped: Boolean,
+        skipReason: String?,
+    ): Boolean =
+        received &&
+            !stopped &&
+            !success &&
+            skipped &&
+            skipReason == OUTSIDE_WINDOW
 }
