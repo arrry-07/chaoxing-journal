@@ -15,6 +15,8 @@ import 'package:study_assistant_mobile/src/features/reminder_health_screen.dart'
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -26,6 +28,7 @@ const _seedKey = 'qa_notification_daytime_probe_seeded_v1';
 const _oldId = 'cx:work:qa-notify:class:old';
 const _newId = 'cx:work:qa-notify:class:new';
 const _deadlineId = 'cx:work:qa-notify:class:deadline';
+const _manualId = 'qa-notify-manual-20261117';
 
 final _probeKey = GlobalKey<_ProbeState>();
 
@@ -168,7 +171,7 @@ class _ProbeState extends State<_Probe> {
     client.results = [
       [
         _assignment(_oldId, 'QA 基线作业', const Duration(days: 1)),
-        _assignment(_newId, 'QA 新增无截止', null),
+        _assignment(_newId, 'QA 新增作业', const Duration(days: 2)),
         _assignment(
           _deadlineId,
           'QA 新增即将截止',
@@ -197,7 +200,7 @@ class _ProbeState extends State<_Probe> {
     client.results = [
       [
         _assignment(_oldId, 'QA 基线作业', const Duration(days: 1)),
-        _assignment(_newId, 'QA 新增无截止', null),
+        _assignment(_newId, 'QA 新增作业', const Duration(days: 2)),
         _assignment(
           _deadlineId,
           'QA 新增即将截止',
@@ -216,6 +219,28 @@ class _ProbeState extends State<_Probe> {
       intervalMinutes: 240,
     );
     result = 'PASS WorkManager check scheduled for about 15 seconds';
+  }
+
+  Future<void> _seedManualReminder() async {
+    if (!seeded) throw StateError('Run SEED baseline first');
+    final at = DateTime.now().add(
+      const Duration(minutes: 30, seconds: 15),
+    );
+    await notifications.rescheduleManual([
+      ManualEntry(
+        id: _manualId,
+        title: 'QA 个人提醒 ${_manualId.substring(_manualId.length - 4)}',
+        kind: 'todo',
+        at: at,
+        remind: true,
+      ),
+    ]);
+    result = 'PASS manual reminder scheduled in about 15 seconds';
+  }
+
+  Future<void> _cancelManualReminder() async {
+    await notifications.rescheduleManual([]);
+    result = 'PASS manual reminder removed';
   }
 
   void _openAssignments() {
@@ -279,6 +304,14 @@ class _ProbeState extends State<_Probe> {
             onPressed: () => _run(_scheduleWorkSoon),
             child: const Text('6. SCHEDULE WORK IN 15 SEC'),
           ),
+          OutlinedButton(
+            onPressed: () => _run(_seedManualReminder),
+            child: const Text('7. PERSONAL REMINDER IN 15 SEC'),
+          ),
+          OutlinedButton(
+            onPressed: () => _run(_cancelManualReminder),
+            child: const Text('8. CANCEL PERSONAL REMINDER'),
+          ),
         ],
       ),
     );
@@ -329,6 +362,9 @@ class _QueueClient extends ChaoxingLocalClient {
     succeededCourses = 1;
     failedCourses = 0;
     issues = [];
+    sourceResults = const [
+      SyncSourceResult(source: 'courseWork', phase: SyncSourcePhase.success),
+    ];
     lastSyncWarning = null;
     return batch;
   }

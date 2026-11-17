@@ -131,6 +131,7 @@ Future<void> backgroundMain() async {
         'skipped': result.skipped,
         'nextTargetAt': result.nextTargetAt?.millisecondsSinceEpoch,
         'message': result.message,
+        'skipReason': result.skipReason,
       });
     } catch (error) {
       if (!cancelled) {

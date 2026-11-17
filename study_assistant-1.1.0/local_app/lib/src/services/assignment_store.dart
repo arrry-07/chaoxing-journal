@@ -37,12 +37,16 @@ class BackgroundCheckResult {
     required this.skipped,
     required this.nextTargetAt,
     this.message,
+    this.skipReason,
   });
+
+  static const outsideWindowSkipReason = 'outsideWindow';
 
   final bool success;
   final bool skipped;
   final DateTime? nextTargetAt;
   final String? message;
+  final String? skipReason;
 }
 
 class AssignmentStore extends ChangeNotifier {
@@ -69,6 +73,7 @@ class AssignmentStore extends ChangeNotifier {
     bool manageBackgroundSchedule = true,
     this.nativeLeaseOwner,
     this.nativeReminderDeliveryEnabled = false,
+    DateTime Function()? clock,
   })  : repository = repository ??
             LocalAssignmentRepository(
               backgroundReminderGateway: backgroundReminderGateway,
@@ -77,7 +82,10 @@ class AssignmentStore extends ChangeNotifier {
         chaoxingClient = chaoxingClient ?? ChaoxingLocalClient(),
         reminderRuleStore = reminderRuleStore ?? ReminderRuleStore(),
         backgroundReminderGateway = backgroundReminderGateway,
-        _manageBackgroundSchedule = manageBackgroundSchedule;
+        _manageBackgroundSchedule = manageBackgroundSchedule,
+        _clock = clock ?? DateTime.now;
+
+  final DateTime Function() _clock;
 
   final SecureSessionStore sessionStore;
   final LocalNotificationService notificationService;
@@ -1120,9 +1128,12 @@ class AssignmentStore extends ChangeNotifier {
     }
   }
 
-  Future<void>? _syncInFlight;
+  Future<String?>? _syncInFlight;
   int _syncOperation = 0;
   bool _syncCancelled = false;
+  String? _syncSkipReason;
+  int? _syncSkipReasonOperation;
+  int? _syncSkipReasonGeneration;
 
   /// Stopping is explicit: it invalidates the current operation and cancels
   /// transport before the serial cleanup queue, so a cancelled fetch can never
@@ -1143,16 +1154,24 @@ class AssignmentStore extends ChangeNotifier {
   Future<void> syncAssignments() =>
       syncAssignmentsForTrigger(BackgroundSyncTrigger.manual);
 
-  Future<void> syncAssignmentsForTrigger(BackgroundSyncTrigger trigger) {
+  Future<void> syncAssignmentsForTrigger(BackgroundSyncTrigger trigger) async {
+    await _syncForTrigger(trigger);
+  }
+
+  Future<String?> _syncForTrigger(BackgroundSyncTrigger trigger) {
     if (!_authenticated) return Future.value();
     return _syncInFlight ??= _performCoordinatedSync(trigger).whenComplete(() {
       _syncInFlight = null;
     });
   }
 
-  Future<void> _performCoordinatedSync(BackgroundSyncTrigger trigger) async {
+  Future<String?> _performCoordinatedSync(BackgroundSyncTrigger trigger) async {
     final operation = ++_syncOperation;
+    final generation = _generation;
     _syncCancelled = false;
+    _syncSkipReason = null;
+    _syncSkipReasonOperation = null;
+    _syncSkipReasonGeneration = null;
     final accountHash = _accountHash;
     final sessionEpoch = _nativeSessionEpoch;
     String? leaseRequest;
@@ -1175,7 +1194,7 @@ class AssignmentStore extends ChangeNotifier {
       if (!lease.acquired) {
         _backgroundWarning = '另一轮作业检查仍在进行，本次已合并等待';
         notifyListeners();
-        return;
+        return null;
       }
     }
     try {
@@ -1185,11 +1204,15 @@ class AssignmentStore extends ChangeNotifier {
           (lease.lastAttemptAt?.isAfter(leaseRequestedAt) ?? false)) {
         if (lease.lastFullSuccessAt?.isAfter(leaseRequestedAt) ?? false) {
           await _run(_reloadJournal);
-          return;
+          return null;
         }
         _error = '另一轮作业检查未成功，本次合并到现有节奏，不立即重试';
         notifyListeners();
-        return;
+        return null;
+      }
+      if (trigger != BackgroundSyncTrigger.manual &&
+          !DaytimeCheckPolicy.isInWindow(_clock())) {
+        return BackgroundCheckResult.outsideWindowSkipReason;
       }
       await _run(() async {
         if (!_authenticated) return;
@@ -1203,6 +1226,11 @@ class AssignmentStore extends ChangeNotifier {
         }
         await _syncAssignmentsBody(trigger, operation: operation);
       });
+      if (_syncSkipReasonOperation == operation &&
+          _syncSkipReasonGeneration == generation) {
+        return _syncSkipReason;
+      }
+      return null;
     } finally {
       if (_nativeReminderAvailable &&
           accountHash != null &&
@@ -1506,7 +1534,7 @@ class AssignmentStore extends ChangeNotifier {
   Future<BackgroundCheckResult> runBackgroundAutomaticCheck(
     BackgroundSyncTrigger trigger,
   ) async {
-    final now = DateTime.now();
+    final now = _clock();
     if (!_authenticated) {
       return const BackgroundCheckResult(
         success: false,
@@ -1529,7 +1557,7 @@ class AssignmentStore extends ChangeNotifier {
       return BackgroundCheckResult(
         success: false,
         skipped: true,
-        nextTargetAt: _nextBackgroundTarget(now),
+        nextTargetAt: null,
         message: '通知监听已关闭',
       );
     }
@@ -1537,8 +1565,11 @@ class AssignmentStore extends ChangeNotifier {
       return BackgroundCheckResult(
         success: false,
         skipped: true,
-        nextTargetAt: _nextBackgroundTarget(now),
+        nextTargetAt: trigger == BackgroundSyncTrigger.notificationSignal
+            ? _nextNotificationWindowTarget(now)
+            : _nextBackgroundTarget(now),
         message: '当前不在白天检查窗口',
+        skipReason: BackgroundCheckResult.outsideWindowSkipReason,
       );
     }
     if (trigger == BackgroundSyncTrigger.daytime &&
@@ -1554,14 +1585,27 @@ class AssignmentStore extends ChangeNotifier {
         message: '合并到已有检查节奏',
       );
     }
-    await syncAssignmentsForTrigger(trigger);
+    final syncSkipReason = await _syncForTrigger(trigger);
+    if (syncSkipReason == BackgroundCheckResult.outsideWindowSkipReason) {
+      return BackgroundCheckResult(
+        success: false,
+        skipped: true,
+        nextTargetAt: trigger == BackgroundSyncTrigger.notificationSignal
+            ? _nextNotificationWindowTarget(_clock())
+            : _nextBackgroundTarget(_clock()),
+        message: '当前不在白天检查窗口',
+        skipReason: BackgroundCheckResult.outsideWindowSkipReason,
+      );
+    }
     final success = _error == null ||
         syncReport.phase == SyncPhase.success ||
         syncReport.phase == SyncPhase.partial;
     return BackgroundCheckResult(
       success: success && !_loading,
       skipped: false,
-      nextTargetAt: _nextBackgroundTarget(DateTime.now()),
+      nextTargetAt: trigger == BackgroundSyncTrigger.notificationSignal
+          ? _nextNotificationWindowTarget(_clock())
+          : _nextBackgroundTarget(_clock()),
       message: _error,
     );
   }
@@ -1843,9 +1887,12 @@ class AssignmentStore extends ChangeNotifier {
     final generation = _generation;
     final startedAt = _autoSyncRunning && _lastSyncAttemptAt != null
         ? _lastSyncAttemptAt!
-        : DateTime.now();
+        : _clock();
     final automatic = trigger != BackgroundSyncTrigger.manual;
     if (automatic && !DaytimeCheckPolicy.isInWindow(startedAt)) {
+      _syncSkipReason = BackgroundCheckResult.outsideWindowSkipReason;
+      _syncSkipReasonOperation = operation;
+      _syncSkipReasonGeneration = generation;
       await _reconcileBackgroundControls(now: startedAt);
       return;
     }
@@ -1878,7 +1925,7 @@ class AssignmentStore extends ChangeNotifier {
         .toSet();
     List<Assignment> incoming;
     final stopCheck =
-        automatic ? () => !DaytimeCheckPolicy.isInWindow(DateTime.now()) : null;
+        automatic ? () => !DaytimeCheckPolicy.isInWindow(_clock()) : null;
     chaoxingClient.shouldStop = stopCheck;
     final showPreview = trigger == BackgroundSyncTrigger.manual;
     void attachProgress() {
@@ -2130,6 +2177,18 @@ class AssignmentStore extends ChangeNotifier {
       lastAttemptAt: _latestAttemptAt,
       intervalMinutes: _backgroundCheckSettings.intervalMinutes,
     );
+    final backoff = _serverBackoffUntil;
+    if (backoff != null && backoff.isAfter(target)) {
+      target = backoff;
+    }
+    return target;
+  }
+
+  DateTime? _nextNotificationWindowTarget(DateTime now) {
+    if (!_backgroundCheckSettings.notificationListenerEnabled) return null;
+    var target = DaytimeCheckPolicy.isInWindow(now)
+        ? now
+        : DaytimeCheckPolicy.nextWindowStart(now);
     final backoff = _serverBackoffUntil;
     if (backoff != null && backoff.isAfter(target)) {
       target = backoff;

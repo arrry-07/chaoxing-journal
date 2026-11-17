@@ -27,6 +27,10 @@ class ReminderAggregateNotificationTest {
 
     @Before
     fun setUp() {
+        // Android rate-limits rapid app notification posts. Keep this
+        // aggregation suite below that threshold so a later test does not
+        // observe a silently dropped notification.
+        SystemClock.sleep(1_200)
         context = ApplicationProvider.getApplicationContext()
         manager = context.getSystemService(NotificationManager::class.java)
         database = ReminderDatabase.get(context)
@@ -37,10 +41,19 @@ class ReminderAggregateNotificationTest {
         assertTrue("Grant POST_NOTIFICATIONS to the isolated QA app", manager.areNotificationsEnabled())
         // Other tests deliberately disable the production channel. Android
         // remembers that importance even after deleting/recreating a channel.
-        channelId = "synthetic-aggregate-${System.nanoTime()}"
-        manager.createNotificationChannel(NotificationChannel(
-            channelId, "合成聚合提醒", NotificationManager.IMPORTANCE_DEFAULT,
-        ))
+        // Reuse one synthetic channel: creating a fresh channel for every test
+        // can hit the platform's per-app channel-creation rate limit and make
+        // a later notification silently disappear from the active list.
+        channelId = "synthetic-aggregate-tests"
+        val existing = manager.getNotificationChannel(channelId)
+        if (existing == null ||
+            existing.importance < NotificationManager.IMPORTANCE_DEFAULT
+        ) {
+            manager.deleteNotificationChannel(channelId)
+            manager.createNotificationChannel(NotificationChannel(
+                channelId, "合成聚合提醒", NotificationManager.IMPORTANCE_DEFAULT,
+            ))
+        }
     }
 
     @After
@@ -49,7 +62,8 @@ class ReminderAggregateNotificationTest {
             AssignmentNotificationPublisher.cancelForAccount(context, database, accountHash)
             database.clearActiveAccount(accountHash)
         }
-        if (::channelId.isInitialized) manager.deleteNotificationChannel(channelId)
+        // Keep the synthetic channel between tests to avoid the platform
+        // channel-creation rate limit; it is removed with the QA app install.
     }
 
     @Test

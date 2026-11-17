@@ -128,7 +128,7 @@ object BackgroundWorkScheduler {
         if (action == NotificationCheckAction.COALESCE) return
         val policy = when (action) {
             NotificationCheckAction.START -> ExistingWorkPolicy.KEEP
-            NotificationCheckAction.REPLACE -> ExistingWorkPolicy.REPLACE
+            NotificationCheckAction.KEEP -> ExistingWorkPolicy.KEEP
             NotificationCheckAction.APPEND_FOLLOW_UP ->
                 ExistingWorkPolicy.APPEND_OR_REPLACE
             NotificationCheckAction.COALESCE -> return
@@ -140,6 +140,62 @@ object BackgroundWorkScheduler {
         }
         // The persisted signal remains pending and will be picked up by the
         // normal daytime check if WorkManager cannot accept this request.
+    }
+
+    /**
+     * Confirms a delayed successor for this account/session is already queued,
+     * or enqueues one without treating the currently running worker as its own
+     * successor. Returns false when the durable enqueue result is unknown.
+     */
+    @Synchronized
+    fun ensureDeferredNotificationSuccessor(
+        context: Context,
+        database: ReminderDatabase,
+        accountHash: String,
+        expectedSessionEpoch: Long,
+    ): Boolean {
+        val account = database.readAccount(accountHash) ?: return false
+        if (!account.active ||
+            !account.listenerEnabled ||
+            account.sessionEpoch != expectedSessionEpoch
+        ) {
+            return false
+        }
+        val claimable = NotificationCheckSchedulerPolicy.claimableVersion(
+            account.pendingSignalVersion,
+            account.consumedSignalVersion,
+            account.attemptedSignalVersion,
+        ) ?: return true
+        val workManager = WorkManager.getInstance(context)
+        val request = notificationRequest(
+            database,
+            accountHash,
+            account.sessionEpoch,
+            maxOf(account.pendingSignalVersion, claimable),
+        )
+        fun enqueueIfStillNeeded(): Boolean {
+            val policy = when (notificationWorkState(workManager)) {
+                NotificationCheckWorkState.RUNNING_WITH_QUEUED,
+                NotificationCheckWorkState.QUEUED -> return true
+                NotificationCheckWorkState.RUNNING ->
+                    ExistingWorkPolicy.APPEND_OR_REPLACE
+                NotificationCheckWorkState.NONE -> ExistingWorkPolicy.KEEP
+            }
+            return runCatching {
+                workManager.enqueueUniqueWork(
+                    NOTIFICATION_WORK,
+                    policy,
+                    request,
+                ).getResult().get(5, TimeUnit.SECONDS)
+                true
+            }.getOrDefault(false)
+        }
+        return when (notificationWorkState(workManager)) {
+            NotificationCheckWorkState.RUNNING_WITH_QUEUED,
+            NotificationCheckWorkState.QUEUED -> true
+            NotificationCheckWorkState.RUNNING,
+            NotificationCheckWorkState.NONE -> enqueueIfStillNeeded()
+        }
     }
 
     fun scheduleNotificationFollowUpIfNeeded(

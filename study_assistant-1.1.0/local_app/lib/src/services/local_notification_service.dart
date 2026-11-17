@@ -997,10 +997,12 @@ class LocalNotificationService {
     final prefs = await SharedPreferences.getInstance();
     final journal = _readJournal(prefs, category);
     if (journal == null) return;
+    var unresolvedOldIds = <int>{};
     if (journal['version'] == 1) {
       await _verifyLegacyJournalOwnership(category, journal, prefs);
     } else {
-      await _verifyV2JournalOwnership(category, journal, prefs);
+      unresolvedOldIds =
+          await _verifyV2JournalOwnership(category, journal, prefs);
     }
     final phase = journal['phase'] as String;
     final oldIds = journal['oldIds'] as List<int>;
@@ -1015,19 +1017,36 @@ class LocalNotificationService {
       return;
     }
     if (phase == 'committed') {
-      final failures = await _cancelIds(oldIds);
+      final cancellableIds =
+          oldIds.where((id) => !unresolvedOldIds.contains(id)).toList();
+      final failures = await _cancelIds(cancellableIds);
       if (failures.isNotEmpty) {
         lastWarning = '新提醒批次已生效，旧通知清理失败：${failures.join('; ')}';
         throw StateError(lastWarning!);
       }
       await _writeActiveIds(prefs, category, newIds);
+      if (unresolvedOldIds.isNotEmpty) {
+        await _writeJournal(prefs, category, {
+          'version': 2,
+          'category': category,
+          'phase': 'committed',
+          'oldIds': unresolvedOldIds.toList()..sort(),
+          'newIds': newIds,
+        });
+        lastWarning = _appendWarning(
+            lastWarning,
+            '已取消 ${cancellableIds.length} 条可确认的待投递个人提醒；'
+            '系统可见通知完整性未确认，'
+            '${unresolvedOldIds.length} 条旧提醒仍待核对');
+        throw StateError(lastWarning!);
+      }
       await _removeJournal(prefs, category);
       return;
     }
     throw FormatException('未知提醒事务阶段：$phase');
   }
 
-  Future<void> _verifyV2JournalOwnership(
+  Future<Set<int>> _verifyV2JournalOwnership(
     String category,
     Map<String, dynamic> journal,
     SharedPreferences prefs,
@@ -1044,7 +1063,55 @@ class LocalNotificationService {
     }
 
     final pending = await _plugin.pendingNotificationRequests();
-    final active = await _plugin.getActiveNotifications();
+    final List<ActiveNotification> active;
+    try {
+      active = await _plugin.getActiveNotifications();
+    } catch (error) {
+      if (category != 'manual' || journal['phase'] != 'committed') {
+        rethrow;
+      }
+      // Delivered-notification enumeration is unavailable. Only cancel IDs
+      // that the pending list still proves belong to this manual batch via an
+      // explicit p: payload. Anything else stays in the journal for a later
+      // recovery; never infer ownership from an ID alone.
+      final pendingById = <int, String?>{
+        for (final item in pending) item.id: item.payload,
+      };
+      final unresolved = <int>{};
+      for (final id in journal['oldIds'] as List<int>) {
+        if (!pendingById.containsKey(id)) {
+          unresolved.add(id);
+          continue;
+        }
+        final payload = pendingById[id];
+        final owner = _scheduleCategoryForPayload(payload);
+        if (owner == 'manual' && _isValidManualPayload(payload)) {
+          continue;
+        }
+        if (owner != null && owner != category) {
+          throw FormatException('v2 $category 事务 ID 实际属于 $owner 通知类别');
+        }
+        unresolved.add(id);
+      }
+      final oldIdSet = (journal['oldIds'] as List<int>).toSet();
+      for (final item in pending) {
+        if (!transactionIds.contains(item.id)) continue;
+        if (oldIdSet.contains(item.id) && unresolved.contains(item.id)) {
+          continue;
+        }
+        final owner = _scheduleCategoryForPayload(item.payload);
+        if (owner != category) {
+          throw FormatException('v2 $category 事务 ID 缺少可证明的类别归属');
+        }
+      }
+      if (lastWarning?.contains('当前可见通知列表读取失败') != true) {
+        lastWarning = _appendWarning(
+            lastWarning,
+            '当前可见通知列表读取失败；已投递通知的完整性未确认，'
+            '仅处理有明确 p: 归属证据的待投递个人提醒');
+      }
+      return unresolved;
+    }
     void verifyVisible(int id, String? owner) {
       if (!transactionIds.contains(id)) return;
       if (owner == null) {
@@ -1077,6 +1144,7 @@ class LocalNotificationService {
       }
       verifyVisible(id, owner);
     }
+    return const <int>{};
   }
 
   Future<void> _verifyLegacyJournalOwnership(
@@ -1296,6 +1364,14 @@ class LocalNotificationService {
     if (payload?.startsWith('p:') == true) return 'manual';
     if (payload?.startsWith('d:') == true) return 'summary';
     return null;
+  }
+
+  static bool _isValidManualPayload(String? payload) {
+    if (payload == null || !payload.startsWith('p:')) return false;
+    final id = payload.substring(2);
+    return id.isNotEmpty &&
+        id.length <= 100 &&
+        !id.codeUnits.any((unit) => unit < 0x20 || unit == 0x7f);
   }
 
   static String? _scheduleCategoryForChannel(String? channel) =>
