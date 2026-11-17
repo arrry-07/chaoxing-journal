@@ -24,6 +24,7 @@ class UnsavedEditGuard {
     bool Function()? isStale,
     Object Function()? draftRevision,
     bool Function()? blocksNavigation,
+    String? routeScope,
   }) {
     unregister(owner);
     _entries.add(_UnsavedEditEntry(
@@ -33,6 +34,7 @@ class UnsavedEditGuard {
       isStale: isStale,
       draftRevision: draftRevision,
       blocksNavigation: blocksNavigation,
+      routeScope: routeScope,
     ));
   }
 
@@ -55,38 +57,69 @@ class UnsavedEditGuard {
   /// A same-location/no-op request supersedes older queued destinations too.
   void cancelNavigation() => invalidate();
 
-  _UnsavedEditEntry? get _source {
-    for (final entry in _entries.reversed) {
-      if (!entry.isStale()) return entry;
+  _UnsavedEditEntry? _sourceFor({Object? owner, String? routeScope}) {
+    if (owner != null) {
+      for (final entry in _entries.reversed) {
+        if (identical(entry.owner, owner) && !entry.isStale()) return entry;
+      }
+      return null;
     }
-    return null;
+    _UnsavedEditEntry? fallback;
+    for (final entry in _entries.reversed) {
+      if (entry.isStale()) continue;
+      if (routeScope != null &&
+          entry.routeScope != null &&
+          entry.routeScope != routeScope) {
+        continue;
+      }
+      fallback ??= entry;
+      if (entry.hasUnsavedChanges()) return entry;
+    }
+    return fallback;
   }
 
-  bool _matches(_ExitApproval stamp) =>
-      stamp.generation == _generation &&
-      identical(stamp.source, _source) &&
-      (stamp.source == null ||
-          (_entries.contains(stamp.source) &&
-              !stamp.source!.isStale() &&
-              stamp.revision == stamp.source!.revision));
+  bool _matches(
+    _ExitApproval stamp, {
+    Object? owner,
+    String? routeScope,
+  }) {
+    if (stamp.generation != _generation) return false;
+    final current = _sourceFor(owner: owner, routeScope: routeScope);
+    if (stamp.source == null) return current == null;
+    if (!_entries.contains(stamp.source) ||
+        stamp.source!.isStale() ||
+        stamp.revision != stamp.source!.revision) {
+      return false;
+    }
+    if (identical(stamp.source, current)) return true;
+    return routeScope != null &&
+        (stamp.source!.routeScope == null ||
+            stamp.source!.routeScope == routeScope);
+  }
 
-  _ExitApproval _stamp() => _ExitApproval(
-        _generation,
-        _source,
-        _source?.revision,
-      );
+  _ExitApproval _stamp({Object? owner, String? routeScope}) {
+    final source = _sourceFor(owner: owner, routeScope: routeScope);
+    return _ExitApproval(
+      _generation,
+      source,
+      source?.revision,
+    );
+  }
 
   /// Shared precheck and onExit reuse one approval only while [action] settles.
   /// Awaiters compete before invoking any navigation: last valid request wins.
   Future<void> navigate({
+    Object? owner,
     required bool Function() isCurrent,
     required FutureOr<void> Function() action,
   }) async {
     if (!isCurrent()) return;
     final request = ++_request;
-    final stamp = _stamp();
-    if (!await confirmLeave()) return;
-    if (request != _request || !isCurrent() || !_matches(stamp)) return;
+    final stamp = _stamp(owner: owner);
+    if (!await confirmLeave(owner: owner)) return;
+    if (request != _request || !isCurrent() || !_matches(stamp, owner: owner)) {
+      return;
+    }
     _approval = stamp;
     try {
       await action();
@@ -98,20 +131,29 @@ class UnsavedEditGuard {
     }
   }
 
-  Future<bool> confirmLeave() async {
+  Future<bool> confirmLeave({Object? owner, String? routeScope}) async {
     // Saving is a hard block, even when the same draft was just approved.
     for (final entry in _entries.reversed) {
-      if (!entry.isStale() && entry.blocksNavigation()) {
+      if (entry.isStale()) continue;
+      if (owner != null && !identical(entry.owner, owner)) continue;
+      if (routeScope != null &&
+          entry.routeScope != null &&
+          entry.routeScope != routeScope) {
+        continue;
+      }
+      if (entry.blocksNavigation()) {
         await entry.confirmDiscard();
         return false;
       }
     }
-    if (!hasUnsavedChanges) return true;
-    final approval = _approval;
-    if (approval != null && _matches(approval)) return true;
-    final stamp = _stamp();
-    final entry = stamp.source;
+    final entry = _sourceFor(owner: owner, routeScope: routeScope);
     if (entry == null || !entry.hasUnsavedChanges()) return true;
+    final approval = _approval;
+    if (approval != null &&
+        _matches(approval, owner: owner, routeScope: routeScope)) {
+      return true;
+    }
+    final stamp = _ExitApproval(_generation, entry, entry.revision);
     final pending = _pending;
     if (pending != null && pending.stamp.sameAs(stamp)) {
       return pending.result;
@@ -178,6 +220,7 @@ class _UnsavedEditEntry {
     required bool Function()? isStale,
     required Object Function()? draftRevision,
     required bool Function()? blocksNavigation,
+    this.routeScope,
   })  : _isStale = isStale,
         _draftRevision = draftRevision,
         _blocksNavigation = blocksNavigation;
@@ -185,6 +228,7 @@ class _UnsavedEditEntry {
   final Object owner;
   final bool Function() hasUnsavedChanges;
   final UnsavedEditConfirmation confirmDiscard;
+  final String? routeScope;
   final bool Function()? _isStale;
   final Object Function()? _draftRevision;
   final bool Function()? _blocksNavigation;

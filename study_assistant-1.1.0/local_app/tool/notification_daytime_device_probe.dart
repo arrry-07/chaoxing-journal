@@ -12,6 +12,8 @@ import 'package:study_assistant_mobile/src/app/app_deep_links.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/reminder_health_screen.dart';
+import 'package:study_assistant_mobile/src/features/reminder_history_screen.dart';
+import 'package:study_assistant_mobile/src/features/reminder_status_screen.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
@@ -50,8 +52,9 @@ Future<void> main() async {
     ),
     chaoxingClient: client,
     backgroundReminderGateway: gateway,
-    manageBackgroundSchedule: false,
+    manageBackgroundSchedule: true,
     nativeReminderDeliveryEnabled: true,
+    reminderHistoryEnabled: true,
   );
   final prefs = await SharedPreferences.getInstance();
   if (prefs.getBool(_seedKey) == true) {
@@ -226,20 +229,36 @@ class _ProbeState extends State<_Probe> {
     final at = DateTime.now().add(
       const Duration(minutes: 30, seconds: 15),
     );
-    await notifications.rescheduleManual([
-      ManualEntry(
-        id: _manualId,
-        title: 'QA 个人提醒 ${_manualId.substring(_manualId.length - 4)}',
-        kind: 'todo',
-        at: at,
-        remind: true,
+    final saved = await store.saveNotebook(
+      (current) => StudyNotebook(
+        entries: [
+          ...current.entries.where((entry) => entry.id != _manualId),
+          ManualEntry(
+            id: _manualId,
+            title: 'QA 个人提醒 ${_manualId.substring(_manualId.length - 4)}',
+            kind: 'todo',
+            at: at,
+            remind: true,
+          ),
+        ],
+        terms: current.terms,
       ),
-    ]);
+      store.accountEpoch,
+    );
+    if (!saved) throw StateError('Manual reminder was not saved');
     result = 'PASS manual reminder scheduled in about 15 seconds';
   }
 
   Future<void> _cancelManualReminder() async {
-    await notifications.rescheduleManual([]);
+    final saved = await store.saveNotebook(
+      (current) => StudyNotebook(
+        entries:
+            current.entries.where((entry) => entry.id != _manualId).toList(),
+        terms: current.terms,
+      ),
+      store.accountEpoch,
+    );
+    if (!saved) throw StateError('Manual reminder cancellation was not saved');
     result = 'PASS manual reminder removed';
   }
 
@@ -255,6 +274,26 @@ class _ProbeState extends State<_Probe> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ReminderHealthScreen(store: store),
+      ),
+    );
+  }
+
+  void _openHistory() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ReminderHistoryScreen(store: store),
+      ),
+    );
+  }
+
+  void _openManualStatus() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ReminderStatusScreen(
+          store: store,
+          kind: 'manual',
+          id: _manualId,
+        ),
       ),
     );
   }
@@ -299,6 +338,14 @@ class _ProbeState extends State<_Probe> {
           OutlinedButton(
             onPressed: _openHealth,
             child: const Text('OPEN REMINDER HEALTH'),
+          ),
+          OutlinedButton(
+            onPressed: _openHistory,
+            child: const Text('OPEN REMINDER HISTORY'),
+          ),
+          OutlinedButton(
+            onPressed: _openManualStatus,
+            child: const Text('OPEN MANUAL REMINDER STATUS'),
           ),
           OutlinedButton(
             onPressed: () => _run(_scheduleWorkSoon),

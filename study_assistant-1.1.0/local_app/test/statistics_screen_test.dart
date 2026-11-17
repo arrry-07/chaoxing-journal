@@ -142,6 +142,6 @@ void main() {
 
     expect(t.takeException(), isNull);
     expect(find.text('账号考试'), findsOneWidget);
-    expect(find.text('共 2 份作业'), findsOneWidget);
+    expect(find.text('共 2 项课业'), findsOneWidget);
   });
 }

@@ -8,17 +8,42 @@ import java.time.ZonedDateTime
 class NewAssignmentWindowReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val accountHash = intent.getStringExtra(EXTRA_ACCOUNT_HASH) ?: return
-        val database = ReminderDatabase.get(context)
+        val appContext = context.applicationContext ?: context
+        NativeReceiverExecutor.dispatchReceiver(goAsync()) {
+            handleWindow(
+                appContext = appContext,
+                database = ReminderDatabase.get(appContext),
+                accountHash = accountHash,
+            )
+        }
+    }
+
+    internal fun handleWindow(
+        appContext: Context,
+        database: ReminderDatabase,
+        accountHash: String,
+        now: ZonedDateTime = ZonedDateTime.now(),
+    ) {
         val account = database.readAccount(accountHash) ?: return
         if (!account.active || !account.newAssignmentEnabled) return
-        if (ZonedDateTime.now().hour < 8) {
-            AssignmentAlarmScheduler.scheduleNewAssignmentWindow(context, accountHash)
+        if (now.hour < 8) {
+            val windowStart = BackgroundWorkScheduler.nextWindowStart(now)
+            AssignmentAlarmScheduler.scheduleNewAssignmentWindow(appContext, accountHash)
+            AssignmentNotificationPublisher.recordReceiverReason(
+                appContext,
+                database,
+                database.pendingNewEvents(accountHash),
+                "deferred",
+                "outsideWindow",
+                scheduledAtOverride = windowStart,
+            )
             return
         }
         AssignmentNotificationPublisher.publishPendingNewAssignments(
-            context,
+            appContext,
             database,
             accountHash,
+            now.toInstant(),
         )
     }
 

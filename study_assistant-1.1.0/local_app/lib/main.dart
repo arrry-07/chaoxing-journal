@@ -10,6 +10,8 @@ import 'src/features/personal_work_screen.dart';
 import 'src/features/profile_arrangements_screen.dart';
 import 'src/features/profile_records_screen.dart';
 import 'src/features/reminder_health_screen.dart';
+import 'src/features/reminder_history_screen.dart';
+import 'src/features/reminder_status_screen.dart';
 import 'src/features/widgets/update_scope.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -65,6 +67,7 @@ Future<void> main() async {
     notificationService: notificationService,
     widgetSnapshotService: widgetSnapshotService,
     reminderRuleStore: reminderRuleStore,
+    reminderHistoryEnabled: true,
     nativeReminderDeliveryEnabled: true,
   );
 
@@ -95,6 +98,24 @@ Future<void> backgroundMain() async {
   Future<void> run(Map<Object?, Object?> arguments) async {
     await initializeDateFormatting('zh_CN');
     final notificationService = LocalNotificationService();
+    final expectedAccount = arguments['accountHash'] as String?;
+    final expectedEpoch = (arguments['sessionEpoch'] as num?)?.toInt();
+    final claimToken = arguments['claimToken'] as String?;
+    final workerId = arguments['workerId'] as String?;
+    final remoteStart = expectedAccount != null &&
+            expectedEpoch != null &&
+            expectedEpoch > 0 &&
+            claimToken != null &&
+            claimToken.isNotEmpty &&
+            workerId != null &&
+            workerId.isNotEmpty
+        ? NotificationRemoteStartContext(
+            accountHash: expectedAccount,
+            sessionEpoch: expectedEpoch,
+            claimToken: claimToken,
+            workerId: workerId,
+          )
+        : null;
     final store = AssignmentStore(
       sessionStore: SecureSessionStore(),
       notificationService: notificationService,
@@ -102,13 +123,15 @@ Future<void> backgroundMain() async {
       reminderRuleStore: ReminderRuleStore(),
       manageBackgroundSchedule: false,
       nativeLeaseOwner: arguments['leaseOwner'] as String?,
+      notificationRemoteStart: remoteStart,
+      backgroundSignalVersion: (arguments['signalVersion'] as num?)?.toInt(),
+      reminderHistoryEnabled: true,
       nativeReminderDeliveryEnabled: true,
     );
     activeStore = store;
     try {
       await store.restoreSession();
       if (cancelled) return;
-      final expectedAccount = arguments['accountHash'] as String?;
       if (expectedAccount != null && expectedAccount != store.accountHash) {
         await channel.invokeMethod<void>('finished', {
           'success': false,
@@ -132,6 +155,7 @@ Future<void> backgroundMain() async {
         'nextTargetAt': result.nextTargetAt?.millisecondsSinceEpoch,
         'message': result.message,
         'skipReason': result.skipReason,
+        'remoteReadInvoked': result.remoteReadInvoked,
       });
     } catch (error) {
       if (!cancelled) {
@@ -238,7 +262,9 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
       final location = _router.routeInformationProvider.value.uri.path;
       if (location.startsWith('/personal/') ||
           location == '/agenda' ||
-          location == '/reminders') {
+          location == '/reminders' ||
+          location.startsWith('/reminder-history') ||
+          location.startsWith('/reminder-status/')) {
         _router.go('/assignments');
       }
     }
@@ -330,7 +356,8 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
           routes: [
             GoRoute(
                 path: '/agenda',
-                onExit: (_, __) => _leaveGuard.confirmLeave(),
+                onExit: (_, __) =>
+                    _leaveGuard.confirmLeave(routeScope: '/agenda'),
                 builder: (_, __) => ManualAgendaScreen(store: assignmentStore)),
             GoRoute(
                 path: '/terms',
@@ -340,7 +367,8 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                 builder: (_, __) => DailyPlanScreen(store: assignmentStore)),
             GoRoute(
                 path: '/personal/:id',
-                onExit: (_, __) => _leaveGuard.confirmLeave(),
+                onExit: (_, __) =>
+                    _leaveGuard.confirmLeave(routeScope: '/personal'),
                 builder: (_, s) => PersonalWorkScreen(
                     store: assignmentStore,
                     assignmentId: s.pathParameters['id']!)),
@@ -348,6 +376,19 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                 path: '/reminder-health',
                 builder: (_, __) =>
                     ReminderHealthScreen(store: assignmentStore)),
+            GoRoute(
+                path: '/reminder-history',
+                builder: (_, __) =>
+                    ReminderHistoryScreen(store: assignmentStore)),
+            GoRoute(
+              path: '/reminder-status/:kind/:id',
+              builder: (_, state) => ReminderStatusScreen(
+                store: assignmentStore,
+                kind: state.pathParameters['kind']!,
+                id: state.pathParameters['id']!,
+                hasUnsavedEdits: state.uri.queryParameters['unsaved'] == '1',
+              ),
+            ),
             GoRoute(
                 path: '/changes',
                 builder: (_, __) =>
@@ -380,7 +421,8 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             ),
             GoRoute(
               path: '/reminders',
-              onExit: (_, __) => _leaveGuard.confirmLeave(),
+              onExit: (_, __) =>
+                  _leaveGuard.confirmLeave(routeScope: '/reminders'),
               builder: (_, __) => ReminderSettingsScreen(
                 assignmentStore: assignmentStore,
               ),

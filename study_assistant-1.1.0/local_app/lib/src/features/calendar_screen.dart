@@ -26,6 +26,8 @@ class _CalendarScreenState extends State<CalendarScreen>
   late DateTime today;
   late DateTime month;
   DateTime? selected;
+  bool _refreshing = false;
+  String? _refreshMessage;
 
   @override
   void initState() {
@@ -64,6 +66,59 @@ class _CalendarScreenState extends State<CalendarScreen>
         month = DateTime(month.year, month.month + delta);
         selected = DateTime(month.year, month.month);
       });
+
+  Future<void> _refresh() async {
+    if (_refreshing || widget.store.isLoading) return;
+    setState(() {
+      _refreshing = true;
+      _refreshMessage = null;
+    });
+    try {
+      await widget.store.syncAssignments();
+      if (!mounted) return;
+      final completedAt = widget.clock?.call() ?? DateTime.now();
+      final report = widget.store.syncReport;
+      final last = report.lastDataSuccessAt ?? widget.store.lastSyncAt;
+      final formattedTime = DateFormat('HH:mm:ss').format(completedAt);
+      final String message;
+      switch (report.phase) {
+        case SyncPhase.success:
+          if (widget.store.operationError != null) {
+            message = last == null
+                ? '本次刷新失败，且没有可用的本机缓存；请到同步详情重试'
+                : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）';
+          } else if (widget.store.serviceWarnings.isNotEmpty) {
+            message = '本次刷新已完成（$formattedTime），本机提醒或小组件需处理';
+          } else {
+            message = '本次刷新已完成（$formattedTime）';
+          }
+        case SyncPhase.partial:
+          message = '本次刷新部分完成（$formattedTime），部分来源待确认；请查看同步详情';
+        case SyncPhase.cancelled:
+          message = last == null
+              ? '本次刷新已取消，且没有可用的本机缓存；请重试'
+              : '本次刷新已取消，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）';
+        case SyncPhase.idle:
+        case SyncPhase.running:
+        case SyncPhase.failed:
+          message = last == null
+              ? '本次刷新失败，且没有可用的本机缓存；请到同步详情重试'
+              : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）';
+      }
+      setState(() => _refreshMessage = message);
+    } catch (error) {
+      if (!mounted) return;
+      final last = widget.store.lastSyncAt;
+      setState(() {
+        _refreshMessage = last == null
+            ? '本次刷新失败：$error'
+            : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）：$error';
+      });
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: widget.store,
@@ -124,9 +179,32 @@ class _CalendarScreenState extends State<CalendarScreen>
                 const Spacer(),
                 IconButton(
                     tooltip: '刷新',
-                    onPressed: widget.store.syncAssignments,
-                    icon: const Icon(Icons.sync))
+                    onPressed:
+                        _refreshing || widget.store.isLoading ? null : _refresh,
+                    icon: _refreshing || widget.store.isLoading
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.sync))
               ]),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  _refreshing || widget.store.isLoading
+                      ? '正在刷新${widget.store.lastSyncAt == null ? '' : '；上次成功 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'}…'
+                      : _refreshMessage ??
+                          (widget.store.lastSyncAt == null
+                              ? '尚未成功同步；当前仅显示本机已有记录'
+                              : '上次成功同步 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _refreshMessage?.contains('失败') == true
+                        ? Theme.of(context).colorScheme.error
+                        : Journal.muted,
+                  ),
+                ),
+              ),
               Card(
                   margin: EdgeInsets.zero,
                   child: Padding(

@@ -78,4 +78,48 @@ void main() {
     expect(n.cleared, 1);
     expect(s.error, isNull);
   });
+
+  test(
+      'B1: verified hidden privacy skips redundant startup and headless cleanup until re-enabled',
+      () async {
+    SharedPreferences.setMockInitialValues({'notification_details_v1': false});
+    final firstNotifications = Notifications()..fail = false;
+    final firstStore = AssignmentStore(
+      sessionStore: SecureSessionStore(),
+      notificationService: firstNotifications,
+      widgetSnapshotService: Snapshot(),
+    );
+    addTearDown(firstStore.dispose);
+    await firstStore.restoreSession();
+    expect(firstNotifications.cleared, 1);
+
+    // Second cold start with verified hidden state must not wipe schedules again.
+    final secondNotifications = Notifications()..fail = false;
+    final secondStore = AssignmentStore(
+      sessionStore: SecureSessionStore(),
+      notificationService: secondNotifications,
+      widgetSnapshotService: Snapshot(),
+    );
+    addTearDown(secondStore.dispose);
+    await secondStore.restoreSession();
+    expect(secondNotifications.cleared, 0);
+
+    // Headless background worker must not set or repeat startup privacy cleanup.
+    final headlessNotifications = Notifications()..fail = false;
+    final headlessStore = AssignmentStore(
+      sessionStore: SecureSessionStore(),
+      notificationService: headlessNotifications,
+      widgetSnapshotService: Snapshot(),
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(headlessStore.dispose);
+    await headlessStore.restoreSession();
+    expect(headlessStore.notificationPrivacyPending, isFalse);
+
+    // Turning details on and back off triggers cleanup again.
+    await secondStore.saveNotificationDetails(true);
+    secondNotifications.cleared = 0;
+    await secondStore.saveNotificationDetails(false);
+    expect(secondNotifications.cleared, 1);
+  });
 }

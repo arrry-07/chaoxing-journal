@@ -29,30 +29,35 @@ class FlutterCheckWorker(
     @Volatile private var engine: FlutterEngine? = null
     @Volatile private var channel: MethodChannel? = null
     @Volatile private var stopped = false
+    @Volatile private var activeClaim: NotificationSignalClaim? = null
 
     override fun doWork(): Result {
         val reason = inputData.getString(KEY_REASON) ?: return Result.success()
         val accountHash = inputData.getString(KEY_ACCOUNT_HASH) ?: return Result.success()
         val requestedAt = inputData.getLong(KEY_REQUESTED_AT, System.currentTimeMillis())
         val intervalMinutes = inputData.getInt(KEY_INTERVAL_MINUTES, 240)
-        var signalVersion = inputData.getLong(KEY_SIGNAL_VERSION, 0L)
-        var claim: NotificationSignalClaim? = null
         val expectedSessionEpoch = inputData.getLong(KEY_SESSION_EPOCH, -1L)
         val database = ReminderDatabase.get(applicationContext)
         val account = database.readAccount(accountHash)
         if (account == null ||
             !account.active ||
+            expectedSessionEpoch <= 0L ||
+            account.sessionEpoch != expectedSessionEpoch ||
             (reason == BackgroundWorkScheduler.REASON_DAYTIME && !account.backgroundEnabled) ||
             (reason == BackgroundWorkScheduler.REASON_NOTIFICATION && !account.listenerEnabled)
         ) {
+            if (reason == BackgroundWorkScheduler.REASON_DAYTIME) {
+                BackgroundWorkScheduler.reconcileAfterSystemChange(
+                    applicationContext,
+                    database,
+                )
+            }
             return Result.success()
         }
+
+        var signalVersion = inputData.getLong(KEY_SIGNAL_VERSION, 0L)
+        var claim: NotificationSignalClaim? = null
         if (reason == BackgroundWorkScheduler.REASON_NOTIFICATION) {
-            if (expectedSessionEpoch <= 0L ||
-                account.sessionEpoch != expectedSessionEpoch
-            ) {
-                return Result.success()
-            }
             val now = Instant.now()
             if (!NotificationCheckSchedulerPolicy.canClaimNow(
                     now,
@@ -60,14 +65,30 @@ class FlutterCheckWorker(
                     ZoneId.systemDefault(),
                 )
             ) {
+                val existing = database.notificationAttempt(accountHash)
+                    ?.takeIf {
+                        it.ownerWorkId == id.toString() &&
+                            it.sessionEpoch == expectedSessionEpoch
+                    }
                 val queued = BackgroundWorkScheduler.ensureDeferredNotificationSuccessor(
                     applicationContext,
                     database,
                     accountHash,
                     expectedSessionEpoch,
+                    currentWorkId = id.toString(),
+                    claimToPreserve = existing?.toClaim(account.pendingSignalVersion),
                 )
-                if (!queued) {
-                    Log.w(TAG, "deferred_notification_successor_not_confirmed")
+                if (existing != null && queued.confirmed) {
+                    database.releaseNotificationAttempt(
+                        existing.toClaim(account.pendingSignalVersion),
+                    )
+                }
+                if (!queued.confirmed && !queued.notNeeded) {
+                    Log.w(
+                        TAG,
+                        "deferred_notification_successor_not_confirmed:${queued.reasonCode}",
+                    )
+                    return Result.retry()
                 }
                 return Result.success()
             }
@@ -76,8 +97,35 @@ class FlutterCheckWorker(
             val claimed = database.claimNotificationAttempt(
                 accountHash,
                 expectedSessionEpoch,
-            ) ?: return Result.success()
+                ownerWorkId = id.toString(),
+            )
+            if (claimed == null) {
+                val existing = database.notificationAttempt(accountHash)
+                if (existing?.ownerWorkId == id.toString() &&
+                    existing.phase == NotificationAttemptPhase.REMOTE_AUTHORIZED
+                ) {
+                    database.settleNotificationAttempt(
+                        accountHash,
+                        expectedSessionEpoch,
+                        existing.claimToken,
+                        ownerWorkId = id.toString(),
+                    )
+                }
+                val followUp =
+                    BackgroundWorkScheduler.scheduleNotificationFollowUpIfNeeded(
+                        applicationContext,
+                        database,
+                        accountHash,
+                        currentWorkId = id.toString(),
+                    )
+                return if (followUp.state == NotificationEnqueueState.FAILED) {
+                    Result.retry()
+                } else {
+                    Result.success()
+                }
+            }
             claim = claimed
+            activeClaim = claimed
             signalVersion = claimed.version
         }
         val startSignalVersion = if (reason == BackgroundWorkScheduler.REASON_DAYTIME) {
@@ -89,7 +137,7 @@ class FlutterCheckWorker(
         if (reason == BackgroundWorkScheduler.REASON_DAYTIME &&
             ZonedDateTime.now().hour < 8
         ) {
-            scheduleNextDaytime(accountHash, intervalMinutes)
+            scheduleNextDaytime(accountHash, intervalMinutes, expectedSessionEpoch)
             return Result.success()
         }
 
@@ -104,6 +152,8 @@ class FlutterCheckWorker(
             "intervalMinutes" to intervalMinutes,
             "signalVersion" to signalVersion,
             "leaseOwner" to owner,
+            "workerId" to id.toString(),
+            "claimToken" to claim?.token,
         )
 
         mainHandler.post {
@@ -149,10 +199,12 @@ class FlutterCheckWorker(
         }
 
         val finished = latch.await(8, TimeUnit.MINUTES)
-        if (!finished || !completed.get()) {
+        val received = finished && completed.get()
+        if (!received) {
             mainHandler.post {
                 runCatching { channel?.invokeMethod("cancel", null) }
             }
+            claim?.let { settleUnconfirmed(it) }
         }
         if (reason == BackgroundWorkScheduler.REASON_DAYTIME) {
             val currentAccount = database.activeAccount()
@@ -169,6 +221,7 @@ class FlutterCheckWorker(
                     currentAccount.accountHash,
                     target,
                     currentAccount.intervalMinutes,
+                    currentAccount.sessionEpoch,
                 )
                 cleanup()
                 return Result.success()
@@ -183,74 +236,161 @@ class FlutterCheckWorker(
                 accountHash,
                 target,
                 effectiveInterval,
+                expectedSessionEpoch,
             )
-            if (workResult.get()?.get("success") == true && startSignalVersion > 0) {
+            if (workResult.get()?.get("success") == true &&
+                startSignalVersion > 0 &&
+                latest?.sessionEpoch == expectedSessionEpoch
+            ) {
                 database.consumeSignal(
                     accountHash,
                     startSignalVersion,
-                    account.sessionEpoch,
-                )
-            }
-        } else if (reason == BackgroundWorkScheduler.REASON_NOTIFICATION) {
-            val result = workResult.get()
-            val resultSuccess = result?.get("success") == true
-            val skipped = result?.get("skipped") == true
-            val skipReason = result?.get("skipReason") as? String
-            if (resultSuccess) {
-                database.consumeSignal(
-                    accountHash,
-                    signalVersion,
                     expectedSessionEpoch,
                 )
-            } else if (NotificationAttemptRollbackPolicy.shouldRollback(
-                    received = finished && completed.get(),
-                    stopped = stopped,
-                    success = resultSuccess,
-                    skipped = skipped,
-                    skipReason = skipReason,
+            }
+            cleanup()
+            return Result.success()
+        }
+
+        val result = workResult.get()
+        val resultSuccess = result?.get("success") == true
+        val skipped = result?.get("skipped") == true
+        val skipReason = result?.get("skipReason") as? String
+        val remoteReadInvoked = result?.get("remoteReadInvoked") == true
+        if (resultSuccess) {
+            database.consumeSignal(
+                accountHash,
+                signalVersion,
+                expectedSessionEpoch,
+            )
+            val followUp =
+                BackgroundWorkScheduler.scheduleNotificationFollowUpIfNeeded(
+                    applicationContext,
+                    database,
+                    accountHash,
+                    currentWorkId = id.toString(),
                 )
+            cleanup()
+            return if (followUp.state == NotificationEnqueueState.FAILED) {
+                Result.retry()
+            } else {
+                Result.success()
+            }
+        }
+
+        if (NotificationAttemptRollbackPolicy.shouldRollback(
+                received = received,
+                stopped = stopped,
+                success = resultSuccess,
+                skipped = skipped,
+                skipReason = skipReason,
+            )
+        ) {
+            val currentClaim = claim
+            if (currentClaim == null ||
+                currentClaim.sessionEpoch != expectedSessionEpoch
             ) {
-                val currentClaim = claim
-                if (currentClaim == null ||
-                    currentClaim.sessionEpoch != expectedSessionEpoch
-                ) {
-                    Log.w(TAG, "notification_claim_rollback_rejected")
-                } else {
-                    val successor =
-                        BackgroundWorkScheduler.ensureDeferredNotificationSuccessor(
-                            applicationContext,
-                            database,
-                            accountHash,
-                            expectedSessionEpoch,
-                        )
-                    if (successor) {
-                        if (!database.rollbackUnstartedNotificationAttempt(
-                                currentClaim,
-                            )
-                        ) {
-                            Log.w(TAG, "notification_claim_rollback_not_applied")
-                        }
-                    } else {
-                        Log.w(TAG, "notification_claim_kept_without_successor")
+                Log.w(TAG, "notification_claim_rollback_rejected")
+            } else {
+                if (!remoteReadInvoked) {
+                    database.markNotificationAttemptPhase(
+                        accountHash,
+                        expectedSessionEpoch,
+                        currentClaim.token,
+                        NotificationAttemptPhase.WINDOW_DEFERRED,
+                        ownerWorkId = id.toString(),
+                        allowRemoteAuthorizedDowngrade = true,
+                    )
+                }
+                val successor =
+                    BackgroundWorkScheduler.ensureDeferredNotificationSuccessor(
+                        applicationContext,
+                        database,
+                        accountHash,
+                        expectedSessionEpoch,
+                        currentWorkId = id.toString(),
+                        claimToPreserve = currentClaim,
+                    )
+                val released = database.releaseNotificationAttempt(currentClaim)
+                if (!released) {
+                    val latest = database.readAccount(accountHash)
+                    val lingering = database.notificationAttempt(accountHash)
+                    val needsSuccessor = latest != null &&
+                        latest.pendingSignalVersion >
+                        maxOf(latest.consumedSignalVersion, latest.attemptedSignalVersion)
+                    if (latest == null ||
+                        !latest.active ||
+                        lingering?.claimToken != currentClaim.token
+                    ) {
+                        cleanup()
+                        return Result.success()
                     }
+                    if (needsSuccessor &&
+                        successor.state != NotificationEnqueueState.CONFIRMED
+                    ) {
+                        cleanup()
+                        return Result.retry()
+                    }
+                    cleanup()
+                    return Result.success()
+                }
+                cleanup()
+                return if (successor.state == NotificationEnqueueState.FAILED) {
+                    Result.retry()
+                } else {
+                    Result.success()
                 }
             }
+        }
+
+        claim?.let { settleUnconfirmed(it) }
+        val followUp =
             BackgroundWorkScheduler.scheduleNotificationFollowUpIfNeeded(
                 applicationContext,
                 database,
                 accountHash,
+                currentWorkId = id.toString(),
             )
-        }
         cleanup()
-        return Result.success()
+        return if (followUp.state == NotificationEnqueueState.FAILED) {
+            Result.retry()
+        } else {
+            Result.success()
+        }
     }
 
     override fun onStopped() {
         stopped = true
+        activeClaim?.let { settleUnconfirmed(it) }
         mainHandler.post { runCatching { channel?.invokeMethod("cancel", null) } }
         cleanup()
         super.onStopped()
     }
+
+    private fun settleUnconfirmed(claim: NotificationSignalClaim) {
+        runCatching {
+            ReminderDatabase.get(applicationContext).settleNotificationAttempt(
+                claim.accountHash,
+                claim.sessionEpoch,
+                claim.token,
+                ownerWorkId = id.toString(),
+            )
+        }
+    }
+
+    private fun NotificationAttempt.toClaim(pendingVersion: Long) =
+        NotificationSignalClaim(
+            accountHash = accountHash,
+            sessionEpoch = sessionEpoch,
+            version = claimedVersion,
+            token = claimToken,
+            claimedAt = claimedAt,
+            priorAttemptedVersion = priorAttemptedVersion,
+            priorLastSignalCheckAt = priorLastSignalCheckAt,
+            priorPendingVersion = pendingVersion,
+            priorConsumedVersion = priorConsumedVersion,
+            ownerWorkId = ownerWorkId,
+        )
 
     private fun cleanup() {
         val current = engine ?: return
@@ -262,7 +402,11 @@ class FlutterCheckWorker(
         }
     }
 
-    private fun scheduleNextDaytime(accountHash: String, intervalMinutes: Int) {
+    private fun scheduleNextDaytime(
+        accountHash: String,
+        intervalMinutes: Int,
+        sessionEpoch: Long,
+    ) {
         val database = ReminderDatabase.get(applicationContext)
         val effectiveInterval =
             database.readAccount(accountHash)?.intervalMinutes ?: intervalMinutes
@@ -272,6 +416,7 @@ class FlutterCheckWorker(
             accountHash,
             BackgroundWorkScheduler.nextWindowStart(),
             effectiveInterval,
+            sessionEpoch,
         )
     }
 

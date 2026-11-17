@@ -9,6 +9,7 @@ import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -81,6 +82,45 @@ Assignment _assignment(
       status: status,
       lastSyncedAt: DateTime.now(),
     );
+
+class _CalendarRefreshStore extends AssignmentStore {
+  _CalendarRefreshStore(this._onSync)
+      : super(
+          sessionStore: _Session(),
+          notificationService: _Notifications(),
+          widgetSnapshotService: _Snapshot(),
+          manageBackgroundSchedule: false,
+        );
+
+  final Future<void> Function() _onSync;
+  SyncReport nextReport = const SyncReport(phase: SyncPhase.success);
+  List<String> nextServiceWarnings = const [];
+  String? nextError;
+  DateTime? nextLastSync;
+
+  @override
+  bool get isAuthenticated => true;
+
+  @override
+  SyncReport get syncReport => nextReport;
+
+  @override
+  List<String> get serviceWarnings => nextServiceWarnings;
+
+  @override
+  String? get operationError => nextError;
+
+  @override
+  String? get error =>
+      nextError ??
+      (nextServiceWarnings.isEmpty ? null : nextServiceWarnings.join('；'));
+
+  @override
+  DateTime? get lastSyncAt => nextLastSync;
+
+  @override
+  Future<void> syncAssignments({bool complete = false}) => _onSync();
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -298,5 +338,55 @@ void main() {
     expect(store.homeFilters.query, '首页搜索');
     expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'calendar refresh uses completion time and distinguishes partial/warning',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    var now = DateTime(2026, 11, 18, 10, 0, 0);
+    late _CalendarRefreshStore store;
+    var mode = 0;
+    store = _CalendarRefreshStore(() async {
+      now = DateTime(2026, 11, 18, 10, 0, 5);
+      if (mode == 0) {
+        store.nextReport = const SyncReport(phase: SyncPhase.success);
+        store.nextServiceWarnings = const [];
+        store.nextError = null;
+        store.nextLastSync = now;
+      } else if (mode == 1) {
+        store.nextReport = const SyncReport(phase: SyncPhase.partial);
+        store.nextServiceWarnings = const [];
+        store.nextError = '部分课程读取失败';
+        store.nextLastSync = now;
+      } else {
+        store.nextReport = const SyncReport(phase: SyncPhase.success);
+        store.nextServiceWarnings = const ['小组件更新失败'];
+        store.nextError = null;
+        store.nextLastSync = now;
+      }
+    });
+    addTearDown(store.dispose);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: CalendarScreen(store: store, clock: () => now),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('刷新'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('本次刷新已完成（10:00:05）'), findsOneWidget);
+
+    mode = 1;
+    await tester.tap(find.byTooltip('刷新'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('部分完成'), findsOneWidget);
+
+    mode = 2;
+    await tester.tap(find.byTooltip('刷新'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('本机提醒或小组件需处理'), findsOneWidget);
   });
 }

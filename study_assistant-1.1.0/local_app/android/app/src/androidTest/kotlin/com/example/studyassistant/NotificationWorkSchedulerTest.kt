@@ -19,17 +19,18 @@ class NotificationWorkSchedulerTest {
     private lateinit var database: ReminderDatabase
     private lateinit var workManager: WorkManager
     private lateinit var accountHash: String
+    private var epoch = 0L
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         database = ReminderDatabase.get(context)
         workManager = WorkManager.getInstance(context)
-        workManager.cancelUniqueWork(BackgroundWorkScheduler.NOTIFICATION_WORK)
+        workManager.cancelUniqueWork(BackgroundWorkScheduler.LEGACY_NOTIFICATION_WORK)
             .getResult()
             .get(5, TimeUnit.SECONDS)
         accountHash = "instrumentation-signal-${System.nanoTime()}"
-        val epoch = database.ensureActiveAccount(accountHash).sessionEpoch
+        epoch = database.ensureActiveAccount(accountHash).sessionEpoch
         database.updateSettings(
             accountHash = accountHash,
             sessionEpoch = epoch,
@@ -43,7 +44,10 @@ class NotificationWorkSchedulerTest {
 
     @After
     fun tearDown() {
-        workManager.cancelUniqueWork(BackgroundWorkScheduler.NOTIFICATION_WORK)
+        workManager.cancelUniqueWork(workName())
+            .getResult()
+            .get(5, TimeUnit.SECONDS)
+        workManager.cancelUniqueWork(BackgroundWorkScheduler.LEGACY_NOTIFICATION_WORK)
             .getResult()
             .get(5, TimeUnit.SECONDS)
         runCatching { database.clearActiveAccount(accountHash) }
@@ -51,7 +55,6 @@ class NotificationWorkSchedulerTest {
 
     @Test
     fun queuedNotificationSignalKeepsTheExistingWorkAndClaimsLatest() {
-        val epoch = database.readAccount(accountHash)!!.sessionEpoch
         val first = database.recordSignal(
             accountHash,
             epoch,
@@ -89,7 +92,6 @@ class NotificationWorkSchedulerTest {
 
     @Test
     fun attemptedSignalDoesNotScheduleAnotherEngine() {
-        val epoch = database.readAccount(accountHash)!!.sessionEpoch
         val version = database.recordSignal(
             accountHash,
             epoch,
@@ -110,7 +112,6 @@ class NotificationWorkSchedulerTest {
 
     @Test
     fun higherSignalAfterFailedAttemptSchedulesOneSuccessor() {
-        val epoch = database.readAccount(accountHash)!!.sessionEpoch
         val first = database.recordSignal(
             accountHash,
             epoch,
@@ -138,7 +139,6 @@ class NotificationWorkSchedulerTest {
 
     @Test
     fun deferredSuccessorIsEnqueuedOnceAndReused() {
-        val epoch = database.readAccount(accountHash)!!.sessionEpoch
         database.recordSignal(
             accountHash,
             epoch,
@@ -152,7 +152,8 @@ class NotificationWorkSchedulerTest {
                 database,
                 accountHash,
                 epoch,
-            ),
+                currentWorkId = null,
+            ).confirmed,
         )
         val first = liveWork().single()
         assertTrue(
@@ -161,7 +162,8 @@ class NotificationWorkSchedulerTest {
                 database,
                 accountHash,
                 epoch,
-            ),
+                currentWorkId = null,
+            ).confirmed,
         )
         val second = liveWork().single()
 
@@ -173,9 +175,12 @@ class NotificationWorkSchedulerTest {
             assertEquals(1, it.size)
         }
 
+    private fun workName(): String =
+        BackgroundWorkScheduler.notificationWorkName(accountHash, epoch)
+
     private fun liveWorks(): List<WorkInfo> =
         workManager.getWorkInfosForUniqueWork(
-            BackgroundWorkScheduler.NOTIFICATION_WORK,
+            workName(),
         ).get(5, TimeUnit.SECONDS)
             .filter {
                 it.state == WorkInfo.State.ENQUEUED ||

@@ -10,32 +10,72 @@ class AssignmentDeadlineReceiver : BroadcastReceiver() {
         if (intent.action != ACTION_DEADLINE) return
         val eventId = intent.getStringExtra(EXTRA_EVENT_ID) ?: return
         val accountHash = intent.getStringExtra(EXTRA_ACCOUNT_HASH) ?: return
-        val database = ReminderDatabase.get(context)
+        val appContext = context.applicationContext ?: context
+        NativeReceiverExecutor.dispatchReceiver(goAsync()) {
+            handleDeadline(
+                appContext = appContext,
+                database = ReminderDatabase.get(appContext),
+                eventId = eventId,
+                accountHash = accountHash,
+            )
+        }
+    }
+
+    internal fun handleDeadline(
+        appContext: Context,
+        database: ReminderDatabase,
+        eventId: String,
+        accountHash: String,
+        now: ZonedDateTime = ZonedDateTime.now(),
+    ) {
         val event = database.event(eventId) ?: return
         val account = database.readAccount(accountHash) ?: return
-        if (!account.active ||
-            account.sessionEpoch != event.sessionEpoch ||
-            event.status != ReminderDatabase.STATUS_PENDING
-        ) {
+        if (event.status != ReminderDatabase.STATUS_PENDING) return
+        if (!account.active || account.sessionEpoch != event.sessionEpoch) {
+            AssignmentNotificationPublisher.recordReceiverReason(
+                appContext,
+                database,
+                listOf(event),
+                "blocked",
+                "staleSession",
+            )
             return
         }
-        if (ZonedDateTime.now().hour < 8) {
+        if (now.hour < 8) {
+            val windowStart = BackgroundWorkScheduler.nextWindowStart(now)
             val deadline = event.deadlineAt
-            if (deadline != null && deadline > System.currentTimeMillis()) {
-                database.updateEventNotifyAt(
-                    event.eventId,
-                    BackgroundWorkScheduler.nextWindowStart(),
-                )
+            if (deadline != null && deadline > windowStart) {
+                database.updateEventNotifyAt(event.eventId, windowStart)
                 AssignmentAlarmScheduler.scheduleDeadline(
-                    context,
-                    event.copy(notifyAt = BackgroundWorkScheduler.nextWindowStart()),
+                    appContext,
+                    event.copy(notifyAt = windowStart),
+                )
+                AssignmentNotificationPublisher.recordReceiverReason(
+                    appContext,
+                    database,
+                    listOf(event),
+                    "deferred",
+                    "outsideWindow",
+                    scheduledAtOverride = windowStart,
                 )
             } else {
                 database.cancelEvent(event.eventId)
+                AssignmentNotificationPublisher.recordReceiverReason(
+                    appContext,
+                    database,
+                    listOf(event),
+                    "cancelled",
+                    "deadlinePassed",
+                )
             }
             return
         }
-        AssignmentNotificationPublisher.publishDeadline(context, database, event)
+        AssignmentNotificationPublisher.publishDeadline(
+            appContext,
+            database,
+            event,
+            now.toInstant(),
+        )
     }
 
     companion object {

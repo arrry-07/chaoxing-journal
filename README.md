@@ -10,7 +10,7 @@
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
-1.8.09 修复个人提醒在已投递通知查询失败时无法撤销、通知信号跨午夜丢失，以及排队任务被新信号取消的竞态。个人提醒只撤销有明确待投递证据的失效项，无法确认的提醒保留恢复记录并单独报告；通知信号在领取前检查窗口和冷却，先确认延迟后继再回退未开始同步的领取；排队任务使用 KEEP，运行中才追加唯一后继。1.8.08 的考试来源合并、首页未完成目录、逾期置底和现有视觉设计继续成立。
+1.8.10 新增本机提醒记录与单项原因查询，覆盖最近 30 天、每账号最多 500 条，退出登录清理；通知尝试记录、账号/会话作用域队列、跨午夜后继确认和部分消费条件回退一并修复。提醒体检、作业详情和个人日程可查看当前提醒原因与系统排期证据；六项可用性修复包括首页读屏、预览状态对比度、退出清理与备份入口、统计文案、日历刷新反馈和提醒保存说明。1.8.09 的提醒撤销、跨午夜领取和排队竞态修复继续成立。
 
 ## 功能
 
@@ -35,20 +35,20 @@
 
 ## 下载安装
 
-**当前正式包为 1.8.09（76）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**当前公开正式包为 1.8.09（76）（候选版本 1.8.10（77）正在验收与发布门禁中，尚未公开 Release）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.8.09.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.09/chaoxing-journal-1.8.09.apk)。发布说明及校验文件见 [1.8.09 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.09)。
+1. [下载 chaoxing-journal-1.8.09.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.09/chaoxing-journal-1.8.09.apk)。发布说明及校验文件见 [1.8.09 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.09)（1.8.10 正式发布后将切换为 v1.8.10）。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到 1.8.09？</summary>
+<summary>已经安装：如何升级到新版？</summary>
 
-1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版不单独上传 Gitee APK，因此国内镜像仍停留在批量点 1.7.52+59，但 manual 小索引指向 GitHub 1.8.09 正式包，stable 保持 1.8.0。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
+1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；不单独上传新 APK 到 Gitee，因此国内镜像仍停留在批量点 1.7.52+59，当前 Gitee `manual` 小索引指向 GitHub 1.8.09 正式包（1.8.10 正式 Release 发布后自动更新索引），`stable` 保持 1.8.0。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
-正式包使用 `com.example.studyassistant.journal` 包名，是非 debuggable 的 Release 构建，但证书沿用维护者既有的 Android Debug 体验证书（证书主题仍为 Android Debug）；这不是生产或应用商店签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.09 继续沿用既有包名与体验证书。
+正式包使用 `com.example.studyassistant.journal` 包名，是非 debuggable 的 Release 构建，但证书沿用维护者既有的 Android Debug 体验证书（证书主题仍为 Android Debug）；这不是生产或应用商店签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.10 继续沿用既有包名与体验证书。
 
 ## 使用边界
 

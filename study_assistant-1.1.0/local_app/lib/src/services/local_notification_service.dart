@@ -14,6 +14,7 @@ import 'assignment_reminder_planner.dart';
 import 'reminder_rule_store.dart';
 import 'daily_summary.dart';
 import '../models/personal_workspace.dart';
+import '../models/reminder_history.dart';
 import '../models/study_notebook.dart';
 
 typedef NotificationPayloadHandler = void Function(String payload);
@@ -27,6 +28,7 @@ class LocalNotificationService {
 
   final FlutterLocalNotificationsPlugin _plugin;
   String? lastWarning;
+  List<ReminderScheduleOutcome> lastScheduleOutcomes = const [];
   bool showDetails = false;
   static const assignmentChannel = 'assignment_deadlines';
   static const assignmentUpdatesChannel = 'assignment_updates';
@@ -70,6 +72,7 @@ class LocalNotificationService {
   static const _scheduleCategories = ['assignments', 'manual', 'summary'];
   static const _scheduleJournalPrefix = 'notification_schedule_v2_journal_';
   static const _scheduleActivePrefix = 'notification_schedule_v2_active_';
+  static const _summaryEvidenceKey = 'notification_summary_evidence_v1';
 
   /// Privacy tightening must not retain detailed alarms if replacement fails.
   Future<void> cancelPrivateSchedules() async {
@@ -160,6 +163,9 @@ class LocalNotificationService {
             await _writeActiveIds(prefs, category, const []);
           }
           if (journalIsValid) await _removeJournal(prefs, category);
+          if (category == 'summary') {
+            await prefs.remove(_summaryEvidenceKey);
+          }
         }
       } catch (error) {
         lastWarning = '已取消可识别的隐私提醒，但本机恢复记录清理失败：$error';
@@ -272,6 +278,7 @@ class LocalNotificationService {
   String? _pendingPayload;
   Future<void> rescheduleManual(List<ManualEntry> entries) async {
     lastWarning = null;
+    lastScheduleOutcomes = const [];
     await _ensurePluginInitialized();
     final schedules = <(ManualEntry, DateTime)>[];
     final validIds = <String>{};
@@ -320,7 +327,7 @@ class LocalNotificationService {
       }
     }
     try {
-      await _replaceScheduleBatch(
+      final ids = await _replaceScheduleBatch(
         category: 'manual',
         belongs: (payload) => payload?.startsWith('p:') ?? false,
         retainOldPayload: (payload) {
@@ -341,8 +348,39 @@ class LocalNotificationService {
               payload: 'p:${entry.id}');
         },
       );
+      lastScheduleOutcomes = [
+        for (var index = 0; index < schedules.length; index++)
+          ReminderScheduleOutcome(
+            subjectKind: 'manual',
+            subjectId: schedules[index].$1.id,
+            logicalKey:
+                'manual:${schedules[index].$1.id}:${schedules[index].$2.millisecondsSinceEpoch}',
+            category: 'personal',
+            stage: 'scheduled',
+            observedAt: DateTime.now(),
+            scheduledAt: schedules[index].$2,
+            notificationId: ids[index],
+            expectedPayload: 'p:${schedules[index].$1.id}',
+            evidenceState: 'confirmedScheduled',
+          ),
+      ];
     } catch (error) {
       lastWarning = _appendWarning(lastWarning, '个人日程提醒批次未能完成：$error');
+      lastScheduleOutcomes = [
+        for (final (entry, at) in schedules)
+          ReminderScheduleOutcome(
+            subjectKind: 'manual',
+            subjectId: entry.id,
+            logicalKey: 'manual:${entry.id}:${at.millisecondsSinceEpoch}',
+            category: 'personal',
+            stage: 'scheduleFailed',
+            reasonCode: 'scheduleBatchFailed',
+            observedAt: DateTime.now(),
+            scheduledAt: at,
+            expectedPayload: 'p:${entry.id}',
+            evidenceState: 'recoveryPending',
+          ),
+      ];
       rethrow;
     }
   }
@@ -384,6 +422,50 @@ class LocalNotificationService {
         scheduleRecoveryPending: scheduleRecoveryPending);
   }
 
+  Future<PluginScheduleEvidenceSnapshot> readScheduleEvidence() async {
+    await _ensurePluginInitialized();
+    final byId = <int, PluginScheduleEvidence>{};
+    String? error;
+    try {
+      final pending = await _plugin.pendingNotificationRequests();
+      for (final item in pending) {
+        byId[item.id] = PluginScheduleEvidence(
+          id: item.id,
+          payload: item.payload,
+          channelId: null,
+          pending: true,
+          active: false,
+        );
+      }
+    } catch (readError) {
+      error = '待投递提醒读取失败：$readError';
+    }
+    try {
+      final active = await _plugin.getActiveNotifications();
+      for (final item in active) {
+        final id = item.id;
+        if (id == null) continue;
+        final previous = byId[id];
+        byId[id] = PluginScheduleEvidence(
+          id: id,
+          payload: item.payload ?? previous?.payload,
+          channelId: item.channelId ?? previous?.channelId,
+          pending: previous?.pending ?? false,
+          active: true,
+        );
+      }
+    } catch (readError) {
+      error = error == null
+          ? '当前可见提醒读取失败：$readError'
+          : '$error；当前可见提醒读取失败：$readError';
+    }
+    return PluginScheduleEvidenceSnapshot(
+      items: byId.values.toList(),
+      error: error,
+      checkedAt: DateTime.now(),
+    );
+  }
+
   Future<bool> showTestNotification() => _runScheduleMutation(() async {
         // Enqueue before initialization/health awaits so account/privacy cleanup
         // also retires a test notification whose display request is still in flight.
@@ -422,12 +504,15 @@ class LocalNotificationService {
   Future<void> rescheduleSummary(List<Assignment> assignments,
       PersonalWorkspace personal, DateTime? lastSync) async {
     lastWarning = null;
+    lastScheduleOutcomes = const [];
     await _ensurePluginInitialized();
-    final desired =
-        DailySummary.build(assignments, personal, DateTime.now(), lastSync);
+    final now = DateTime.now();
+    final desired = DailySummary.build(assignments, personal, now, lastSync);
     if (desired.isNotEmpty) await _ensureAndroidChannel(summaryChannel);
     try {
-      await _replaceScheduleBatch(
+      final prefs = await SharedPreferences.getInstance();
+      final prior = _readSummaryEvidence(prefs);
+      final ids = await _replaceScheduleBatch(
         category: 'summary',
         belongs: (payload) => payload == 'd:summary',
         schedules: desired,
@@ -448,9 +533,103 @@ class LocalNotificationService {
               payload: 'd:summary');
         },
       );
+      final desiredKeys = <String>{
+        for (final notice in desired)
+          'summary:${notice.at.millisecondsSinceEpoch}',
+      };
+      final observedAt = DateTime.now();
+      final cancellations = <ReminderScheduleOutcome>[
+        for (final prev in prior)
+          if (prev.scheduledAtMs > now.millisecondsSinceEpoch &&
+              !desiredKeys.contains(prev.logicalKey))
+            ReminderScheduleOutcome(
+              subjectKind: 'summary',
+              logicalKey: prev.logicalKey,
+              category: 'summary',
+              stage: 'cancelled',
+              reasonCode: (!personal.summaryEnabled || desired.isEmpty)
+                  ? 'reminderDisabled'
+                  : 'scheduleReplaced',
+              observedAt: observedAt,
+              scheduledAt:
+                  DateTime.fromMillisecondsSinceEpoch(prev.scheduledAtMs),
+              notificationId: prev.notificationId,
+              expectedPayload: 'd:summary',
+              evidenceState: 'removed',
+            ),
+      ];
+      final currentRecords = [
+        for (var index = 0; index < desired.length; index++)
+          {
+            'logicalKey': 'summary:${desired[index].at.millisecondsSinceEpoch}',
+            'scheduledAtMs': desired[index].at.millisecondsSinceEpoch,
+            'notificationId': ids[index],
+          },
+      ];
+      if (currentRecords.isEmpty) {
+        await prefs.remove(_summaryEvidenceKey);
+      } else {
+        await prefs.setString(_summaryEvidenceKey, jsonEncode(currentRecords));
+      }
+      lastScheduleOutcomes = [
+        ...cancellations,
+        for (var index = 0; index < desired.length; index++)
+          ReminderScheduleOutcome(
+            subjectKind: 'summary',
+            logicalKey: 'summary:${desired[index].at.millisecondsSinceEpoch}',
+            category: 'summary',
+            stage: 'scheduled',
+            observedAt: observedAt,
+            scheduledAt: desired[index].at,
+            notificationId: ids[index],
+            expectedPayload: 'd:summary',
+            evidenceState: 'confirmedScheduled',
+          ),
+      ];
     } catch (error) {
       lastWarning = _appendWarning(lastWarning, '每日摘要提醒批次未能完成：$error');
+      lastScheduleOutcomes = [
+        for (final notice in desired)
+          ReminderScheduleOutcome(
+            subjectKind: 'summary',
+            logicalKey: 'summary:${notice.at.millisecondsSinceEpoch}',
+            category: 'summary',
+            stage: 'scheduleFailed',
+            reasonCode: 'scheduleBatchFailed',
+            observedAt: DateTime.now(),
+            scheduledAt: notice.at,
+            expectedPayload: 'd:summary',
+            evidenceState: 'recoveryPending',
+          ),
+      ];
       rethrow;
+    }
+  }
+
+  List<({String logicalKey, int scheduledAtMs, int? notificationId})>
+      _readSummaryEvidence(SharedPreferences prefs) {
+    final raw = prefs.getString(_summaryEvidenceKey);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      final records =
+          <({String logicalKey, int scheduledAtMs, int? notificationId})>[];
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final key = item['logicalKey'] as String?;
+        final scheduledAtMs = (item['scheduledAtMs'] as num?)?.toInt();
+        final notificationId = (item['notificationId'] as num?)?.toInt();
+        if (key == null || key.isEmpty || scheduledAtMs == null) continue;
+        records.add((
+          logicalKey: key,
+          scheduledAtMs: scheduledAtMs,
+          notificationId: notificationId,
+        ));
+      }
+      return records;
+    } catch (_) {
+      return const [];
     }
   }
 
@@ -635,14 +814,14 @@ class LocalNotificationService {
     }
   }
 
-  Future<void> _replaceScheduleBatch({
+  Future<List<int>> _replaceScheduleBatch({
     required String category,
     required bool Function(String?) belongs,
     bool Function(String?)? retainOldPayload,
     required List<Object> schedules,
     required Future<void> Function(int id, Object item) schedule,
   }) async {
-    await _runScheduleMutation(() async {
+    return _runScheduleMutation(() async {
       await _recoverScheduleTransactionLocked(category);
       final prefs = await SharedPreferences.getInstance();
       var pending = await _plugin.pendingNotificationRequests();
@@ -768,7 +947,7 @@ class LocalNotificationService {
         final stagingRaw = jsonEncode(journal);
         if (stateVerified && persisted == committedRaw) {
           await _recoverScheduleTransactionLocked(category);
-          return;
+          return newIds;
         }
         if (!stateVerified || (persisted != stagingRaw && persisted != null)) {
           lastWarning = '提醒提交状态无法核实；新旧提醒和事务记录均予以保留，请重试恢复，勿手动清理通知';
@@ -802,6 +981,7 @@ class LocalNotificationService {
       // Once the committed marker is durable, the new batch is authoritative.
       // A failed old-batch cancellation leaves a committed journal for retry.
       await _recoverScheduleTransactionLocked(category);
+      return newIds;
     });
   }
 

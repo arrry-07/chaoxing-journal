@@ -97,9 +97,9 @@ void main() {
     await s.restoreSession();
     await t
         .pumpWidget(MaterialApp(home: Scaffold(body: ProfileScreen(store: s))));
-    await t.scrollUntilVisible(find.text('退出登录'), 400);
+    await t.scrollUntilVisible(find.text('退出登录并清理本机记录'), 400);
     await t.pumpAndSettle();
-    await t.tap(find.text('退出登录'));
+    await t.tap(find.text('退出登录并清理本机记录'));
     await t.pumpAndSettle();
     expect(find.byType(AlertDialog), findsOneWidget);
     expect(find.textContaining('隐藏状态'), findsOneWidget);
@@ -117,16 +117,16 @@ void main() {
     await s.restoreSession();
     await t
         .pumpWidget(MaterialApp(home: Scaffold(body: ProfileScreen(store: s))));
-    await t.scrollUntilVisible(find.text('退出登录'), 400);
+    await t.scrollUntilVisible(find.text('退出登录并清理本机记录'), 400);
     await t.pumpAndSettle();
-    await t.tap(find.text('退出登录'));
+    await t.tap(find.text('退出登录并清理本机记录'));
     await t.pumpAndSettle();
     expect(find.byType(AlertDialog), findsOneWidget);
-    await t.tap(find.text('确认退出'));
+    await t.tap(find.text('退出并清理本机记录'));
     await t.pumpAndSettle();
     expect(s.isAuthenticated, isTrue);
     expect(find.textContaining('退出未完成'), findsOneWidget);
-    expect(find.text('退出登录'), findsOneWidget);
+    expect(find.text('退出登录并清理本机记录'), findsOneWidget);
   });
 
   testWidgets('failed reminder save preserves selection and allows retry',
@@ -236,9 +236,9 @@ void main() {
         await capture('agreement-${kind.name}');
       }
       await mount(Scaffold(body: ProfileScreen(store: s)));
-      await t.scrollUntilVisible(find.text('退出登录'), 400);
+      await t.scrollUntilVisible(find.text('退出登录并清理本机记录'), 400);
       await t.pumpAndSettle();
-      await t.tap(find.text('退出登录'));
+      await t.tap(find.text('退出登录并清理本机记录'));
       await t.pumpAndSettle();
       await capture('logout-confirmation');
       await t.tap(find.text('取消'));

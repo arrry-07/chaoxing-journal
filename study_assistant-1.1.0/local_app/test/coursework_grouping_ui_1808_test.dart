@@ -102,7 +102,7 @@ void main() {
       MaterialApp(home: StatsScreen(store: store, clock: () => now)),
     );
 
-    expect(find.text('共 2 份作业'), findsOneWidget);
+    expect(find.text('共 2 项课业'), findsOneWidget);
     expect(find.text('提交未知 1 份'), findsOneWidget);
     expect(find.text('待完成 1 份'), findsOneWidget);
   });
