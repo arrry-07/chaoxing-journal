@@ -28,28 +28,74 @@ class _HealthState extends State<ReminderHealthScreen>
   DateTime? healthCheckedAt;
   DateTime? backgroundCheckedAt;
   bool backgroundUnsupported = false;
-  late final int epoch;
+  int _requestToken = 0;
+  String? _accountHash;
+  int _accountEpoch = 0;
+  int _nativeEpoch = 0;
+  int _historyGeneration = 0;
+
+  (String?, int, int, int) _currentIdentity() => (
+        widget.store.accountHash,
+        widget.store.accountEpoch,
+        widget.store.nativeSessionEpoch,
+        widget.store.reminderHistoryGeneration,
+      );
+
   @override
   void initState() {
     super.initState();
-    epoch = widget.store.accountEpoch;
+    final id = _currentIdentity();
+    _accountHash = id.$1;
+    _accountEpoch = id.$2;
+    _nativeEpoch = id.$3;
+    _historyGeneration = id.$4;
     WidgetsBinding.instance.addObserver(this);
-    refresh();
+    widget.store.addListener(_handleStoreChanged);
+    _loadHealth(force: true);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.store.removeListener(_handleStoreChanged);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {
-    if (s == AppLifecycleState.resumed) refresh();
+    if (s == AppLifecycleState.resumed) _loadHealth(force: true);
   }
 
-  Future<void> refresh() async {
-    if (!mounted || busy) return;
+  void _handleStoreChanged() {
+    final next = _currentIdentity();
+    if (next ==
+        (_accountHash, _accountEpoch, _nativeEpoch, _historyGeneration)) {
+      return;
+    }
+    _accountHash = next.$1;
+    _accountEpoch = next.$2;
+    _nativeEpoch = next.$3;
+    _historyGeneration = next.$4;
+    if (!mounted) return;
+    setState(() {
+      health = null;
+      backgroundHealth = null;
+      message = null;
+      healthError = null;
+      backgroundError = null;
+      healthCheckedAt = null;
+      backgroundCheckedAt = null;
+      backgroundUnsupported = false;
+    });
+    _loadHealth(force: true);
+  }
+
+  Future<void> refresh() => _loadHealth(force: false);
+
+  Future<void> _loadHealth({required bool force}) async {
+    if (!mounted || (busy && !force)) return;
+    final token = ++_requestToken;
+    final startIdentity = _currentIdentity();
     setState(() => busy = true);
     ReminderHealth? value;
     String? healthFailure;
@@ -65,7 +111,11 @@ class _HealthState extends State<ReminderHealthScreen>
     } catch (_) {
       nativeFailure = '原生后台提醒状态暂时无法读取，可重试';
     }
-    if (!mounted) return;
+    if (!mounted ||
+        token != _requestToken ||
+        startIdentity != _currentIdentity()) {
+      return;
+    }
     final now = DateTime.now();
     setState(() {
       busy = false;
@@ -169,8 +219,8 @@ class _HealthState extends State<ReminderHealthScreen>
   Future<void> summary(bool enabled, int hour, int minute) async {
     if (busy) return;
     setState(() => busy = true);
-    final ok = await widget.store
-        .savePersonal((w) => w.withSummary(enabled, hour, minute), epoch);
+    final ok = await widget.store.savePersonal(
+        (w) => w.withSummary(enabled, hour, minute), widget.store.accountEpoch);
     if (!mounted) return;
     setState(() {
       busy = false;
@@ -300,14 +350,14 @@ class _HealthState extends State<ReminderHealthScreen>
                 title: const Text('提醒记录与原因'),
                 subtitle: const Text('查看最近安排、延后、提交、撤销和受阻记录'),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () => context.go('/reminder-history'),
+                onTap: () => context.push('/reminder-history'),
               ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('每日摘要提醒状态'),
                 subtitle: const Text('查看摘要规则、系统渠道和最近排期证据'),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () => context.go('/reminder-status/summary/0'),
+                onTap: () => context.push('/reminder-status/summary/0'),
               ),
               ListTile(
                   contentPadding: EdgeInsets.zero,

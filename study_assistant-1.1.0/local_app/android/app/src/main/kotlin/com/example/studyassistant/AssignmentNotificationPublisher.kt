@@ -263,95 +263,132 @@ object AssignmentNotificationPublisher {
             .setContentIntent(click)
     }
 
+    private data class PendingHistoryBatch(
+        val events: List<StoredReminderEvent>,
+        val stage: String,
+        val reasonCode: String? = null,
+        val notificationId: Int? = null,
+        val categoryOverride: String? = null,
+        val useEventNotificationId: Boolean = false,
+    )
+
+    private fun reconcileInvalidatedEventsLocked(
+        context: Context,
+        database: ReminderDatabase,
+        invalidatedEvents: List<StoredReminderEvent>,
+        now: Instant,
+    ): Pair<String?, List<StoredReminderEvent>> {
+        invalidatedEvents.filter { it.type == ReminderDatabase.EVENT_DEADLINE }.forEach {
+            AssignmentAlarmScheduler.cancelDeadline(context, it)
+        }
+        val manager = NotificationManagerCompat.from(context)
+        val warnings = mutableSetOf<String>()
+        val cancelledEvents = invalidatedEvents
+            .filter { it.status == ReminderDatabase.STATUS_PENDING }
+            .toMutableList()
+        for (id in invalidatedEvents.map { it.notificationId }.toSet()) {
+            // Submitted history includes notifications the user has already
+            // dismissed. Only update a notification that is still visible.
+            val active = manager.activeNotifications.firstOrNull { it.id == id } ?: continue
+            if (database.eventsForNotification(id).any {
+                    it.status == ReminderDatabase.STATUS_SUBMITTED &&
+                        database.readAccount(it.accountHash)?.pendingUpdate == true
+                }
+            ) {
+                warnings.add("提醒快照正在恢复，已暂停自动投递")
+                continue
+            }
+            val members = database.submittedNotificationMembers(id, now.toEpochMilli())
+            if (members.isEmpty()) {
+                manager.cancel(id)
+                cancelledEvents.addAll(invalidatedEvents.filter { it.notificationId == id })
+                continue
+            }
+            // Only new-assignment events share a batch notification. Keep
+            // any valid deadline owner if its numeric id happens to collide.
+            if (members.any { it.type != ReminderDatabase.EVENT_NEW }) continue
+            val account = database.readAccount(members.first().accountHash)!!
+            val channelWarning = notificationWarning(context, active.notification.channelId)
+            if (channelWarning != null) {
+                warnings.add(channelWarning)
+                continue
+            }
+            try {
+                val notification = newAssignmentNotification(
+                    context, members, account.showDetails, now, active.notification.channelId,
+                )
+                    .setWhen(active.notification.`when`)
+                    .setSilent(true)
+                    .build()
+                // Preserve both the notification id and SUBMITTED history;
+                // this is a silent content update, not another new event.
+                manager.notify(id, notification)
+            } catch (_: SecurityException) {
+                warnings.add("系统通知权限未开启，提醒内容未能更新")
+            } catch (error: Exception) {
+                warnings.add("通知更新失败：${error.message.orEmpty()}")
+            }
+        }
+        return Pair(
+            warnings.takeIf { it.isNotEmpty() }?.joinToString("；"),
+            cancelledEvents.distinctBy { it.eventId },
+        )
+    }
+
     /** Invalidating one member must not remove its submitted batch siblings. */
     fun reconcileInvalidatedEvents(
         context: Context,
         database: ReminderDatabase,
         invalidatedEvents: List<StoredReminderEvent>,
         now: Instant = Instant.now(),
-    ): String? = synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
-        synchronized(database) {
-            invalidatedEvents.filter { it.type == ReminderDatabase.EVENT_DEADLINE }.forEach {
-                AssignmentAlarmScheduler.cancelDeadline(context, it)
+    ): String? {
+        val (warning, cancelledEvents) = synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
+            synchronized(database) {
+                reconcileInvalidatedEventsLocked(context, database, invalidatedEvents, now)
             }
-            val manager = NotificationManagerCompat.from(context)
-            val warnings = mutableSetOf<String>()
-            for (id in invalidatedEvents.map { it.notificationId }.toSet()) {
-                // Submitted history includes notifications the user has already
-                // dismissed. Only update a notification that is still visible.
-                val active = manager.activeNotifications.firstOrNull { it.id == id } ?: continue
-                if (database.eventsForNotification(id).any {
-                        it.status == ReminderDatabase.STATUS_SUBMITTED &&
-                            database.readAccount(it.accountHash)?.pendingUpdate == true
-                    }
-                ) {
-                    warnings.add("提醒快照正在恢复，已暂停自动投递")
-                    continue
-                }
-                val members = database.submittedNotificationMembers(id, now.toEpochMilli())
-                if (members.isEmpty()) {
-                    manager.cancel(id)
-                    recordObservations(
-                        context,
-                        database,
-                        invalidatedEvents.filter { it.notificationId == id },
-                        "cancelled",
-                        "invalid",
-                        id,
-                        now.toEpochMilli(),
-                    )
-                    continue
-                }
-                // Only new-assignment events share a batch notification. Keep
-                // any valid deadline owner if its numeric id happens to collide.
-                if (members.any { it.type != ReminderDatabase.EVENT_NEW }) continue
-                val account = database.readAccount(members.first().accountHash)!!
-                val channelWarning = notificationWarning(context, active.notification.channelId)
-                if (channelWarning != null) {
-                    warnings.add(channelWarning)
-                    continue
-                }
-                try {
-                    val notification = newAssignmentNotification(
-                        context, members, account.showDetails, now, active.notification.channelId,
-                    )
-                        .setWhen(active.notification.`when`)
-                        .setSilent(true)
-                        .build()
-                    // Preserve both the notification id and SUBMITTED history;
-                    // this is a silent content update, not another new event.
-                    manager.notify(id, notification)
-                } catch (_: SecurityException) {
-                    warnings.add("系统通知权限未开启，提醒内容未能更新")
-                } catch (error: Exception) {
-                    warnings.add("通知更新失败：${error.message.orEmpty()}")
-                }
-            }
-            warnings.takeIf { it.isNotEmpty() }?.joinToString("；")
         }
-    }
-
-    fun cancelForAccount(context: Context, database: ReminderDatabase, accountHash: String) {
-        synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
-            AssignmentAlarmScheduler.cancelNewAssignmentWindow(context, accountHash)
-            val manager = NotificationManagerCompat.from(context)
-            val events = database.cancelAssignmentReminders(accountHash)
+        val historyWarning = if (cancelledEvents.isNotEmpty()) {
             recordObservations(
                 context,
                 database,
-                events,
+                cancelledEvents,
                 "cancelled",
-                "accountChanged",
+                "invalid",
                 null,
-                System.currentTimeMillis(),
+                now.toEpochMilli(),
+                useEventNotificationId = true,
             )
-            events.forEach {
+        } else {
+            null
+        }
+        return listOfNotNull(warning, historyWarning)
+            .distinct()
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString("；")
+    }
+
+    fun cancelForAccount(context: Context, database: ReminderDatabase, accountHash: String) {
+        val events = synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
+            AssignmentAlarmScheduler.cancelNewAssignmentWindow(context, accountHash)
+            val manager = NotificationManagerCompat.from(context)
+            val cancelled = database.cancelAssignmentReminders(accountHash)
+            cancelled.forEach {
                 if (it.type == ReminderDatabase.EVENT_DEADLINE) {
                     AssignmentAlarmScheduler.cancelDeadline(context, it)
                 }
                 manager.cancel(it.notificationId)
             }
+            cancelled
         }
+        recordObservations(
+            context,
+            database,
+            events,
+            "cancelled",
+            "accountChanged",
+            null,
+            System.currentTimeMillis(),
+        )
     }
 
     fun cancelDeliveryForPrivacy(
@@ -359,31 +396,31 @@ object AssignmentNotificationPublisher {
         database: ReminderDatabase,
         accountHash: String,
     ) {
-        synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
+        val events = synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
             AssignmentAlarmScheduler.cancelNewAssignmentWindow(context, accountHash)
             val manager = NotificationManagerCompat.from(context)
-            val events = database.eventsForAccount(accountHash)
+            val activeEvents = database.eventsForAccount(accountHash)
                 .filter {
                     it.status == ReminderDatabase.STATUS_PENDING ||
                         it.status == ReminderDatabase.STATUS_SUBMITTED
                 }
-            recordObservations(
-                context,
-                database,
-                events,
-                "cancelled",
-                "privacyCleanup",
-                null,
-                System.currentTimeMillis(),
-            )
-            events
-                .forEach {
-                    if (it.type == ReminderDatabase.EVENT_DEADLINE) {
-                        AssignmentAlarmScheduler.cancelDeadline(context, it)
-                    }
-                    manager.cancel(it.notificationId)
+            activeEvents.forEach {
+                if (it.type == ReminderDatabase.EVENT_DEADLINE) {
+                    AssignmentAlarmScheduler.cancelDeadline(context, it)
                 }
+                manager.cancel(it.notificationId)
+            }
+            activeEvents
         }
+        recordObservations(
+            context,
+            database,
+            events,
+            "cancelled",
+            "privacyCleanup",
+            null,
+            System.currentTimeMillis(),
+        )
     }
 
     private fun submit(
@@ -396,98 +433,194 @@ object AssignmentNotificationPublisher {
         channelId: String,
         now: Long,
     ): PublishResult {
-        return synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
-            synchronized(database) delivery@ {
+        val (result, pendingHistory) = synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
+            val manager = NotificationManagerCompat.from(context)
+            val initial = synchronized(database) delivery@ {
                 // Plan replacement and submission use the same database monitor.
                 // Recheck after building the notification so a newer unknown or
                 // failed snapshot cannot be overwritten by stale delivery work.
-                val account = database.readAccount(events.first().accountHash)
-                if (account?.pendingUpdate == true) {
-                    return@delivery blocked(
-                        context,
-                        database,
-                        events,
-                        categoryFor(events),
-                        "提醒快照正在恢复，已暂停自动投递",
-                        "snapshotPending",
-                    )
-                }
-                val stale = events.any { event ->
-                    account?.active != true || account.sessionEpoch != event.sessionEpoch ||
-                        (event.type == ReminderDatabase.EVENT_NEW && !account.newAssignmentEnabled) ||
-                        database.event(event.eventId)?.status != ReminderDatabase.STATUS_PENDING ||
-                        database.event(event.eventId)?.sessionEpoch != event.sessionEpoch
-                }
-                if (stale) return@delivery PublishResult(false, null, null)
-                val invalid = events.filter { event ->
-                    database.snapshot(event.accountHash, event.assignmentId)
-                        ?.matchesEvent(event, now) != true
-                }
-                if (invalid.isNotEmpty()) {
-                    invalid.forEach { cancelInvalid(context, database, it, null, now) }
-                    return@delivery PublishResult(false, null, null)
+                validateEventsForSubmitLocked(context, database, events, now)?.let {
+                    return@delivery Pair(it, false)
                 }
                 try {
                     if (!showDetails) {
                         notification.visibility = Notification.VISIBILITY_PRIVATE
                     }
-                    val manager = NotificationManagerCompat.from(context)
                     manager.notify(notificationId, notification)
-                    if (!isActive(manager, notificationId)) {
-                        return@delivery blocked(
-                            context,
-                            database,
-                            events,
-                            categoryFor(events),
-                            "系统未接受通知，请检查通知通道设置",
-                            "notificationNotVisible",
-                        )
+                    if (manager.activeNotifications.any { it.id == notificationId }) {
+                        return@delivery Pair(markSubmittedLocked(database, events, notificationId), false)
                     }
-                    events.forEach {
-                        database.markEventSubmitted(
-                            it.eventId,
-                            notificationId,
-                            it.accountHash,
-                            it.assignmentId,
-                            it.type,
-                        )
-                    }
-                    PublishResult(
-                        true,
-                        notificationId,
-                        null,
-                        recordObservations(
-                            context,
-                            database,
-                            events,
-                            "submitted",
-                            null,
-                            notificationId,
-                            now,
-                        ),
-                    )
+                    Pair(null, true)
                 } catch (error: SecurityException) {
-                    blocked(
-                        context,
-                        database,
-                        events,
-                        categoryFor(events),
-                        "系统通知权限未开启：${error.message.orEmpty()}",
-                        "notificationPermissionOff",
-                    )
+                    Pair(blockedPermissionResult(events, error), false)
                 } catch (error: Exception) {
-                    blocked(
-                        context,
-                        database,
-                        events,
-                        categoryFor(events),
-                        "通知提交失败：${error.message.orEmpty()}",
-                        "notificationFailure",
-                    )
+                    Pair(blockedFailureResult(events, error), false)
+                }
+            }
+            if (!initial.second) {
+                initial.first!!
+            } else {
+                // Release the database monitor before sleeping so background plans or
+                // UI queries do not stall behind notification shade polling.
+                val visible = waitUntilActive(manager, notificationId)
+                synchronized(database) confirm@ {
+                    if (!visible) {
+                        return@confirm Pair(
+                            PublishResult(false, null, "系统未接受通知，请检查通知通道设置"),
+                            PendingHistoryBatch(
+                                events = events,
+                                stage = "blocked",
+                                reasonCode = "notificationNotVisible",
+                                categoryOverride = categoryFor(events),
+                            ),
+                        )
+                    }
+                    validateEventsForSubmitLocked(context, database, events, now)?.let { invalidated ->
+                        manager.cancel(notificationId)
+                        return@confirm invalidated
+                    }
+                    markSubmittedLocked(database, events, notificationId)
                 }
             }
         }
+        val historyWarning = pendingHistory?.let { batch ->
+            recordObservations(
+                context,
+                database,
+                batch.events,
+                batch.stage,
+                batch.reasonCode,
+                batch.notificationId,
+                now,
+                categoryOverride = batch.categoryOverride,
+                useEventNotificationId = batch.useEventNotificationId,
+            )
+        }
+        return result.copy(historyWarning = historyWarning)
     }
+
+    private fun validateEventsForSubmitLocked(
+        context: Context,
+        database: ReminderDatabase,
+        events: List<StoredReminderEvent>,
+        now: Long,
+    ): Pair<PublishResult, PendingHistoryBatch?>? {
+        val account = database.readAccount(events.first().accountHash)
+        if (account?.pendingUpdate == true) {
+            return Pair(
+                PublishResult(false, null, "提醒快照正在恢复，已暂停自动投递"),
+                PendingHistoryBatch(
+                    events = events,
+                    stage = "blocked",
+                    reasonCode = "snapshotPending",
+                    categoryOverride = categoryFor(events),
+                ),
+            )
+        }
+        val stale = events.any { event ->
+            account?.active != true || account.sessionEpoch != event.sessionEpoch ||
+                (event.type == ReminderDatabase.EVENT_NEW && !account.newAssignmentEnabled) ||
+                database.event(event.eventId)?.status != ReminderDatabase.STATUS_PENDING ||
+                database.event(event.eventId)?.sessionEpoch != event.sessionEpoch
+        }
+        if (stale) return Pair(PublishResult(false, null, null), null)
+        val invalid = events.filter { event ->
+            database.snapshot(event.accountHash, event.assignmentId)
+                ?.matchesEvent(event, now) != true
+        }
+        if (invalid.isEmpty()) return null
+        val cancelledInvalid = mutableListOf<StoredReminderEvent>()
+        val repairWarnings = mutableListOf<String>()
+        invalid.forEach { event ->
+            val stored = database.event(event.eventId)
+            if (stored != null && stored.sessionEpoch == event.sessionEpoch &&
+                database.snapshot(stored.accountHash, stored.assignmentId)
+                    ?.matchesEvent(stored, now) != true
+            ) {
+                database.cancelEvent(stored.eventId)
+                cancelledInvalid.add(stored)
+                reconcileInvalidatedEventsLocked(
+                    context,
+                    database,
+                    listOf(stored),
+                    Instant.ofEpochMilli(now),
+                ).first?.let(repairWarnings::add)
+            }
+        }
+        return Pair(
+            PublishResult(
+                false,
+                null,
+                repairWarnings.distinct().takeIf { it.isNotEmpty() }?.joinToString("；"),
+            ),
+            cancelledInvalid.takeIf { it.isNotEmpty() }?.let {
+                PendingHistoryBatch(
+                    events = it,
+                    stage = "cancelled",
+                    reasonCode = "invalid",
+                    useEventNotificationId = true,
+                )
+            },
+        )
+    }
+
+    private fun markSubmittedLocked(
+        database: ReminderDatabase,
+        events: List<StoredReminderEvent>,
+        notificationId: Int,
+    ): Pair<PublishResult, PendingHistoryBatch?> {
+        events.forEach {
+            database.markEventSubmitted(
+                it.eventId,
+                notificationId,
+                it.accountHash,
+                it.assignmentId,
+                it.type,
+            )
+        }
+        return Pair(
+            PublishResult(true, notificationId, null),
+            PendingHistoryBatch(
+                events = events,
+                stage = "submitted",
+                notificationId = notificationId,
+            ),
+        )
+    }
+
+    private fun blockedPermissionResult(
+        events: List<StoredReminderEvent>,
+        error: SecurityException,
+    ) = Pair(
+        PublishResult(
+            false,
+            null,
+            "系统通知权限未开启：${error.message.orEmpty()}",
+        ),
+        PendingHistoryBatch(
+            events = events,
+            stage = "blocked",
+            reasonCode = "notificationPermissionOff",
+            categoryOverride = categoryFor(events),
+        ),
+    )
+
+    private fun blockedFailureResult(
+        events: List<StoredReminderEvent>,
+        error: Exception,
+    ) = Pair(
+        PublishResult(
+            false,
+            null,
+            "通知提交失败：${error.message.orEmpty()}",
+        ),
+        PendingHistoryBatch(
+            events = events,
+            stage = "blocked",
+            reasonCode = "notificationFailure",
+            categoryOverride = categoryFor(events),
+        ),
+    )
 
     private fun notificationWarning(context: Context, channelId: String): String? {
         val channel = context.getSystemService(NotificationManager::class.java)
@@ -500,15 +633,15 @@ object AssignmentNotificationPublisher {
         )
     }
 
-    private fun isActive(
+    private fun waitUntilActive(
         manager: NotificationManagerCompat,
         notificationId: Int,
     ): Boolean {
-        repeat(10) { attempt ->
+        repeat(9) {
+            SystemClock.sleep(50)
             if (manager.activeNotifications.any { it.id == notificationId }) {
                 return true
             }
-            if (attempt < 9) SystemClock.sleep(50)
         }
         return false
     }
@@ -519,37 +652,40 @@ object AssignmentNotificationPublisher {
         event: StoredReminderEvent,
         warning: String?,
         now: Long,
-    ): PublishResult = synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
-        synchronized(database) cancellation@ {
-            val stored = database.event(event.eventId)
-            // A caller can still hold an event from an earlier plan or session.
-            // Cancel only the currently invalid persisted event.
-            if (stored != null && stored.sessionEpoch == event.sessionEpoch &&
-                database.snapshot(stored.accountHash, stored.assignmentId)
-                    ?.matchesEvent(stored, now) != true
-            ) {
-                database.cancelEvent(stored.eventId)
-                val historyWarning = recordObservations(
-                    context,
-                    database,
-                    listOf(stored),
-                    "cancelled",
-                    "invalid",
-                    stored.notificationId,
-                    now,
-                )
-                val repairWarning = reconcileInvalidatedEvents(
-                    context, database, listOf(stored), Instant.ofEpochMilli(now),
-                )
-                return@cancellation PublishResult(
-                    false,
-                    null,
-                    warning ?: repairWarning,
-                    historyWarning,
-                )
+    ): PublishResult {
+        val (resultWarning, cancelled) = synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
+            synchronized(database) cancellation@ {
+                val stored = database.event(event.eventId)
+                // A caller can still hold an event from an earlier plan or session.
+                // Cancel only the currently invalid persisted event.
+                if (stored != null && stored.sessionEpoch == event.sessionEpoch &&
+                    database.snapshot(stored.accountHash, stored.assignmentId)
+                        ?.matchesEvent(stored, now) != true
+                ) {
+                    database.cancelEvent(stored.eventId)
+                    val (repairWarning, _) = reconcileInvalidatedEventsLocked(
+                        context,
+                        database,
+                        listOf(stored),
+                        Instant.ofEpochMilli(now),
+                    )
+                    return@cancellation Pair(warning ?: repairWarning, stored)
+                }
+                Pair(warning, null)
             }
-            PublishResult(false, null, warning)
         }
+        val historyWarning = cancelled?.let {
+            recordObservations(
+                context,
+                database,
+                listOf(it),
+                "cancelled",
+                "invalid",
+                it.notificationId,
+                now,
+            )
+        }
+        return PublishResult(false, null, resultWarning, historyWarning)
     }
 
     private fun blocked(
@@ -609,6 +745,8 @@ object AssignmentNotificationPublisher {
         notificationId: Int?,
         observedAt: Long,
         categoryOverride: String? = null,
+        scheduledAtOverride: Long? = null,
+        useEventNotificationId: Boolean = false,
     ): String? {
         val accountHash = events.firstOrNull()?.accountHash ?: return null
         val observations = events.mapIndexed { index, event ->
@@ -628,8 +766,9 @@ object AssignmentNotificationPublisher {
                 stage = stage,
                 reasonCode = reasonCode,
                 observedAt = observedAt,
-                scheduledAt = event.notifyAt,
-                notificationId = notificationId,
+                scheduledAt = scheduledAtOverride ?: event.notifyAt,
+                notificationId =
+                    if (useEventNotificationId) event.notificationId else notificationId,
                 batchKey = event.batchId,
             )
         }
@@ -641,12 +780,35 @@ object AssignmentNotificationPublisher {
         )
     }
 
+    internal fun recordEventObservations(
+        context: Context,
+        database: ReminderDatabase,
+        events: List<StoredReminderEvent>,
+        stage: String,
+        reasonCode: String?,
+        notificationId: Int?,
+        observedAt: Long,
+        scheduledAtOverride: Long? = null,
+        useEventNotificationId: Boolean = false,
+    ): String? = recordObservations(
+        context,
+        database,
+        events,
+        stage,
+        reasonCode,
+        notificationId,
+        observedAt,
+        scheduledAtOverride = scheduledAtOverride,
+        useEventNotificationId = useEventNotificationId,
+    )
+
     internal fun recordReceiverReason(
         context: Context,
         database: ReminderDatabase,
         events: List<StoredReminderEvent>,
         stage: String,
         reasonCode: String,
+        scheduledAtOverride: Long? = null,
     ): String? = recordObservations(
         context,
         database,
@@ -655,6 +817,7 @@ object AssignmentNotificationPublisher {
         reasonCode,
         null,
         System.currentTimeMillis(),
+        scheduledAtOverride = scheduledAtOverride,
     )
 
     private fun baseBuilder(

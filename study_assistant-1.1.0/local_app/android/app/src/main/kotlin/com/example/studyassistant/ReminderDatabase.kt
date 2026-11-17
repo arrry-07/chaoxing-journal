@@ -134,6 +134,7 @@ data class StoredReminderEvent(
     val status: String,
     val notificationId: Int,
     val eventKind: String = "deadline",
+    val updatedAt: Long = 0L,
 )
 
 data class ReminderHistoryRow(
@@ -282,6 +283,19 @@ class ReminderDatabase private constructor(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2 && newVersion >= 2) {
+            db.execSQL("ALTER TABLE accounts ADD COLUMN baselined_sources TEXT NOT NULL DEFAULT '[]'")
+            db.execSQL("ALTER TABLE snapshots ADD COLUMN in_assignment_scope INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE snapshots ADD COLUMN status TEXT NOT NULL DEFAULT 'unknown'")
+            db.execSQL("UPDATE snapshots SET in_assignment_scope = formal")
+            db.execSQL(
+                "UPDATE accounts SET baselined_sources = '[\"courseWork\"]' " +
+                    "WHERE baseline_completed = 1",
+            )
+            // v1 never persisted personal status. Wait for Dart to rebuild the
+            // snapshot before allowing any restored event to be delivered.
+            db.execSQL("UPDATE accounts SET pending_update = 1, mutation_version = mutation_version + 1")
+        }
         if (oldVersion < 3 && newVersion >= 3) {
             db.execSQL("ALTER TABLE snapshots ADD COLUMN event_kind TEXT NOT NULL DEFAULT 'deadline'")
             db.execSQL("ALTER TABLE events ADD COLUMN event_kind TEXT NOT NULL DEFAULT 'deadline'")
@@ -300,17 +314,6 @@ class ReminderDatabase private constructor(
             createNotificationAttempts(db)
             createReminderHistory(db)
             createReminderScheduleEvidence(db)
-        }
-        if (oldVersion < 2) {
-            db.execSQL("ALTER TABLE accounts ADD COLUMN baselined_sources TEXT NOT NULL DEFAULT '[]'")
-            db.execSQL("ALTER TABLE snapshots ADD COLUMN in_assignment_scope INTEGER NOT NULL DEFAULT 0")
-            db.execSQL("ALTER TABLE snapshots ADD COLUMN status TEXT NOT NULL DEFAULT 'unknown'")
-            db.execSQL("UPDATE snapshots SET in_assignment_scope = formal")
-            db.execSQL("UPDATE accounts SET baselined_sources = '[\"courseWork\"]' " +
-                "WHERE baseline_completed = 1")
-            // v1 never persisted personal status. Wait for Dart to rebuild the
-            // snapshot before allowing any restored event to be delivered.
-            db.execSQL("UPDATE accounts SET pending_update = 1, mutation_version = mutation_version + 1")
         }
     }
 
@@ -426,7 +429,9 @@ class ReminderDatabase private constructor(
             if (switchingAccount != null) {
                 writableDatabase.execSQL(
                     "UPDATE accounts SET session_epoch = session_epoch + 1, active = 0, " +
-                        "claim_token = NULL",
+                        "claim_token = NULL " +
+                        "WHERE account_hash != ?",
+                    arrayOf<Any?>(switchingAccount),
                 )
             } else {
                 writableDatabase.execSQL("UPDATE accounts SET active = 0")
@@ -650,6 +655,7 @@ class ReminderDatabase private constructor(
         val newEvents: List<StoredReminderEvent>,
         val pendingNewCount: Int,
         val pendingDeadlineCount: Int,
+        val scheduledDeadlineEvents: List<StoredReminderEvent> = emptyList(),
     )
 
     @Synchronized
@@ -728,18 +734,32 @@ class ReminderDatabase private constructor(
                 arrayOf(it.eventId),
             )
         }
+        val scheduledDeadlineEvents = mutableListOf<StoredReminderEvent>()
         desiredDeadline.forEach { event ->
             val current = existing.firstOrNull { it.eventId == event.eventId }
             when {
-                current == null -> insertEvent(event, now)
-                current.status == STATUS_PENDING ->
+                current == null -> {
+                    insertEvent(event, now)
+                    scheduledDeadlineEvents.add(event)
+                }
+                current.status == STATUS_PENDING -> {
+                    val scheduleChanged =
+                        current.notifyAt != event.notifyAt ||
+                            current.deadlineAt != event.deadlineAt ||
+                            current.sessionEpoch != sessionEpoch
                     updateEvent(event, sessionEpoch, now)
-                current.status == STATUS_CANCELLED ->
+                    if (scheduleChanged) {
+                        scheduledDeadlineEvents.add(event)
+                    }
+                }
+                current.status == STATUS_CANCELLED -> {
                     // Hiding an assignment cancels its deadline events. When it
                     // becomes eligible again the planner emits the same stable
                     // event id; reactivate it instead of silently dropping the
                     // reminder forever.
                     updateEvent(event, sessionEpoch, now, status = STATUS_PENDING)
+                    scheduledDeadlineEvents.add(event)
+                }
             }
         }
 
@@ -784,6 +804,7 @@ class ReminderDatabase private constructor(
                 .count { it.type == EVENT_NEW && it.status == STATUS_PENDING },
             pendingDeadlineCount = eventsForAccount(accountHash)
                 .count { it.type == EVENT_DEADLINE && it.status == STATUS_PENDING },
+            scheduledDeadlineEvents = scheduledDeadlineEvents,
         )
     }
 
@@ -1088,6 +1109,14 @@ class ReminderDatabase private constructor(
                         arrayOf(accountHash),
                     )
                 }
+            } else if (attempt == null &&
+                account.claimToken != null &&
+                consumed >= account.attemptedSignalVersion
+            ) {
+                writableDatabase.execSQL(
+                    "UPDATE accounts SET claim_token = NULL WHERE account_hash = ?",
+                    arrayOf(accountHash),
+                )
             }
         }
     }
@@ -1738,22 +1767,37 @@ class ReminderDatabase private constructor(
     fun eventsForSubject(
         accountHash: String,
         subjectId: String?,
-    ): List<StoredReminderEvent> = readableDatabase.query(
-        "events",
-        null,
-        if (subjectId == null) {
-            "account_hash = ? AND assignment_id IS NULL"
-        } else {
-            "account_hash = ? AND assignment_id = ?"
-        },
-        if (subjectId == null) arrayOf(accountHash) else arrayOf(accountHash, subjectId),
-        null,
-        null,
-        "updated_at DESC",
-        "50",
-    ).use { cursor ->
-        buildList {
-            while (cursor.moveToNext()) add(cursor.toEvent())
+        sessionEpoch: Long? = null,
+    ): List<StoredReminderEvent> {
+        val selection = buildString {
+            append("account_hash = ?")
+            if (sessionEpoch != null) append(" AND session_epoch = ?")
+            append(
+                if (subjectId == null) {
+                    " AND assignment_id IS NULL"
+                } else {
+                    " AND assignment_id = ?"
+                },
+            )
+        }
+        val arguments = buildList<String> {
+            add(accountHash)
+            if (sessionEpoch != null) add(sessionEpoch.toString())
+            if (subjectId != null) add(subjectId)
+        }.toTypedArray()
+        return readableDatabase.query(
+            "events",
+            null,
+            selection,
+            arguments,
+            null,
+            null,
+            "updated_at DESC",
+            "50",
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(cursor.toEvent())
+            }
         }
     }
 
@@ -1987,6 +2031,7 @@ class ReminderDatabase private constructor(
         status = getString(getColumnIndexOrThrow("status")),
         notificationId = getInt(getColumnIndexOrThrow("notification_id")),
         eventKind = getString(getColumnIndexOrThrow("event_kind")),
+        updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
     )
 
     private fun Cursor.toReminderHistory() = ReminderHistoryRow(

@@ -50,6 +50,7 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
     _leaveGuard = guard;
     _leaveGuard?.register(
       this,
+      routeScope: '/personal',
       hasUnsavedChanges: () => _dirty || _saving,
       draftRevision: () =>
           '$_dirty|${note.text}|${steps.length}|${links.length}|${files.length}|'
@@ -229,9 +230,25 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
       canPop: !_dirty && !_saving,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop || (!_dirty && !_saving)) return;
+        final router = GoRouter.maybeOf(context);
+        final guard = _leaveGuard;
+        if (guard != null) {
+          await guard.navigate(
+            owner: this,
+            isCurrent: () => mounted,
+            action: () {
+              if (!context.mounted) return;
+              if (router != null && router.canPop()) {
+                router.pop();
+              } else {
+                Navigator.of(context).pop();
+              }
+            },
+          );
+          return;
+        }
         final leave = await _requestLeave();
         if (!leave || !context.mounted) return;
-        final router = GoRouter.maybeOf(context);
         if (router != null && router.canPop()) {
           router.pop();
         } else {

@@ -68,6 +68,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     _leaveGuard = guard;
     _leaveGuard?.register(
       this,
+      routeScope: '/reminders',
       hasUnsavedChanges: () => _ruleDirty || _savingRules,
       draftRevision: () => (_offsets.toList()..sort()).join(','),
       blocksNavigation: () => _savingRules,
@@ -145,9 +146,27 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
             return;
           }
           if (!_ruleDirty) return;
+          final router = GoRouter.maybeOf(context);
+          final guard = _leaveGuard;
+          if (guard != null) {
+            await guard.navigate(
+              owner: this,
+              isCurrent: () => mounted,
+              action: () {
+                if (!context.mounted) return;
+                if (router != null && router.canPop()) {
+                  router.pop();
+                } else if (router != null) {
+                  router.go('/profile');
+                } else if (Navigator.of(context).canPop()) {
+                  Navigator.of(context).pop();
+                }
+              },
+            );
+            return;
+          }
           final leave = await _requestLeave();
           if (!leave || !context.mounted) return;
-          final router = GoRouter.maybeOf(context);
           if (router != null && router.canPop()) {
             router.pop();
           } else if (router != null) {

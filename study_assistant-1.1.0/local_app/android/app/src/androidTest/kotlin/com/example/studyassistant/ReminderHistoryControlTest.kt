@@ -194,4 +194,157 @@ class ReminderHistoryControlTest {
             ).historyGeneration == 1L,
         )
     }
+
+    @Test
+    fun finishLogoutClearsPrunedWatermarksInPrefs() {
+        ReminderHistoryStore.enableSession(context, database, accountHash, epoch, 1)
+        val obsContext = ReminderHistoryStore.acquireObservationContext(
+            context,
+            database,
+            accountHash,
+            epoch,
+        )
+        val now = System.currentTimeMillis()
+        for (index in 1..501) {
+            ReminderHistoryStore.appendObservation(
+                context,
+                database,
+                obsContext,
+                ReminderHistoryObservationInput(
+                    observationId = "logout-prune-$index",
+                    ordinal = index,
+                    subjectKind = "assignment",
+                    subjectId = "cx:work:1:2:3",
+                    logicalKey = "logout-prune-$index",
+                    category = "deadline",
+                    stage = "scheduled",
+                    reasonCode = null,
+                    observedAt = now + index,
+                    scheduledAt = now + 60_000L + index,
+                    notificationId = 1,
+                    batchKey = null,
+                ),
+            )
+        }
+        val prefs = context.getSharedPreferences(
+            ReminderHistoryStore.PREFS,
+            Context.MODE_PRIVATE,
+        )
+        assertTrue(prefs.all.keys.any { it.startsWith("pruned_through_") })
+
+        val started = ReminderHistoryStore.beginLogout(context, 1, "logout-prune-req")
+        val token = started["purgeToken"] as String
+        ReminderHistoryStore.finishLogout(context, database, token)
+
+        assertTrue(prefs.all.keys.none { it.startsWith("pruned_through_") })
+    }
+
+    @Test
+    fun inspectSubjectsIncludesAlarmScheduledAndUsesUpdatedAtAsEvidenceTime() {
+        ReminderHistoryStore.enableSession(context, database, accountHash, epoch, 1)
+        val obsContext = ReminderHistoryStore.acquireObservationContext(
+            context,
+            database,
+            accountHash,
+            epoch,
+        )
+        val state = database.loadPlanState(accountHash, epoch)
+        val assignmentId = "cx:work:inspect:subject:1"
+        val now = System.currentTimeMillis()
+        val deadlineAt = now + 3_600_000L
+        val notifyAt = now + 1_800_000L
+        val eventId = "$accountHash|$assignmentId|deadline:$deadlineAt|30"
+        val event = StoredReminderEvent(
+            eventId = eventId,
+            accountHash = accountHash,
+            sessionEpoch = epoch,
+            type = ReminderDatabase.EVENT_DEADLINE,
+            assignmentId = assignmentId,
+            courseName = "探测课程",
+            title = "探测作业",
+            notifyAt = notifyAt,
+            deadlineAt = deadlineAt,
+            offsets = listOf(30),
+            batchId = null,
+            status = ReminderDatabase.STATUS_PENDING,
+            notificationId = ReminderDatabase.stableNotificationId(eventId),
+        )
+        database.applyPlan(
+            accountHash = accountHash,
+            sessionEpoch = epoch,
+            baselineCompleted = true,
+            knownIds = setOf(assignmentId),
+            snapshots = listOf(
+                StoredReminderSnapshot(
+                    accountHash = accountHash,
+                    assignmentId = assignmentId,
+                    sessionEpoch = epoch,
+                    courseName = "探测课程",
+                    title = "探测作业",
+                    deadlineAt = deadlineAt,
+                    deadlineTrusted = true,
+                    deadlineReadFailed = false,
+                    status = "pending",
+                    completed = false,
+                    hidden = false,
+                    followed = true,
+                    formal = true,
+                    inAssignmentScope = true,
+                ),
+            ),
+            events = listOf(event),
+            completedAt = now,
+            failure = null,
+            syncCompleted = true,
+            expectedMutationVersion = state.mutationVersion,
+        )
+        AssignmentAlarmScheduler.scheduleDeadline(context, event)
+        try {
+            @Suppress("UNCHECKED_CAST")
+            val inspected = ReminderHistoryStore.inspectSubjects(
+                context,
+                database,
+                obsContext,
+                listOf("assignment" to assignmentId),
+            )["nativeEvents"] as List<Map<String, Any?>>
+            val row = inspected.single()
+            assertEquals(true, row["alarmScheduled"])
+            val evidenceAt = row["evidenceAt"] as Long
+            assertTrue(evidenceAt != notifyAt)
+            assertTrue(evidenceAt >= now - 5_000L && evidenceAt <= System.currentTimeMillis() + 5_000L)
+
+            AssignmentAlarmScheduler.cancelDeadline(context, event)
+            @Suppress("UNCHECKED_CAST")
+            val afterCancel = ReminderHistoryStore.inspectSubjects(
+                context,
+                database,
+                obsContext,
+                listOf("assignment" to assignmentId),
+            )["nativeEvents"] as List<Map<String, Any?>>
+            assertEquals(false, afterCancel.single()["alarmScheduled"])
+        } finally {
+            AssignmentAlarmScheduler.cancelDeadline(context, event)
+        }
+    }
+
+    @Test
+    fun finishLogoutClearsPurgeRequestId() {
+        val generation = ReminderHistoryStore.enableSession(
+            context,
+            database,
+            accountHash,
+            epoch,
+            1L,
+        )["historyGeneration"] as Long
+        val begin = ReminderHistoryStore.beginLogout(context, generation, "req-clear-id")
+        val token = begin["purgeToken"] as String
+        assertEquals("req-clear-id", ReminderHistoryStore.controlSnapshot(context, accountHash, epoch).purgeRequestId)
+
+        ReminderHistoryStore.finishLogout(context, database, token)
+
+        val after = ReminderHistoryStore.controlSnapshot(context, accountHash, epoch)
+        assertFalse(after.purgePending)
+        assertNull(after.purgeToken)
+        assertNull(after.purgeRequestId)
+    }
 }

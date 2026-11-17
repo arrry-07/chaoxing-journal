@@ -68,6 +68,7 @@ const reminderReasonLabels = <String, String>{
   'notificationUnknown': '系统通知状态未知',
   'notificationNotVisible': '系统未接受或未展示通知',
   'notificationFailure': '通知提交失败',
+  'scheduleReplaced': '提醒时间已调整',
 };
 
 class ReminderHistoryScreen extends StatefulWidget {
@@ -88,15 +89,63 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
   String? _error;
   bool _loading = false;
   bool _loadedOnce = false;
+  int _requestToken = 0;
+  String? _accountHash;
+  int _accountEpoch = 0;
+  int _nativeEpoch = 0;
+  int _historyGeneration = 0;
+
+  (String?, int, int, int) _currentIdentity() => (
+        widget.store.accountHash,
+        widget.store.accountEpoch,
+        widget.store.nativeSessionEpoch,
+        widget.store.reminderHistoryGeneration,
+      );
 
   @override
   void initState() {
     super.initState();
+    final id = _currentIdentity();
+    _accountHash = id.$1;
+    _accountEpoch = id.$2;
+    _nativeEpoch = id.$3;
+    _historyGeneration = id.$4;
+    widget.store.addListener(_handleStoreChanged);
+    _load(reset: true);
+  }
+
+  @override
+  void dispose() {
+    widget.store.removeListener(_handleStoreChanged);
+    super.dispose();
+  }
+
+  void _handleStoreChanged() {
+    final next = _currentIdentity();
+    if (next ==
+        (_accountHash, _accountEpoch, _nativeEpoch, _historyGeneration)) {
+      return;
+    }
+    _accountHash = next.$1;
+    _accountEpoch = next.$2;
+    _nativeEpoch = next.$3;
+    _historyGeneration = next.$4;
+    if (!mounted) return;
+    setState(() {
+      _items = [];
+      _snapshotMaxId = null;
+      _nextBeforeId = null;
+      _checkedAt = null;
+      _error = null;
+      _loadedOnce = false;
+    });
     _load(reset: true);
   }
 
   Future<void> _load({required bool reset}) async {
-    if (_loading) return;
+    if (!reset && _loading) return;
+    final token = ++_requestToken;
+    final startIdentity = _currentIdentity();
     setState(() {
       _loading = true;
       if (reset) _error = null;
@@ -107,7 +156,11 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
         beforeId: reset ? null : _nextBeforeId,
         category: _category,
       );
-      if (!mounted) return;
+      if (!mounted ||
+          token != _requestToken ||
+          startIdentity != _currentIdentity()) {
+        return;
+      }
       final merged = reset ? <ReminderHistoryItem>[] : [..._items];
       for (final item in page.items) {
         final previous = merged.isEmpty ? null : merged.last;
@@ -115,7 +168,8 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
             previous.logicalKey == item.logicalKey &&
             previous.category == item.category &&
             previous.stage == item.stage &&
-            previous.reasonCode == item.reasonCode;
+            previous.reasonCode == item.reasonCode &&
+            previous.scheduledAt == item.scheduledAt;
         if (!same) merged.add(item);
       }
       setState(() {
@@ -127,7 +181,13 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
         _error = null;
       });
     } on ReminderHistoryException catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          token != _requestToken ||
+          startIdentity != _currentIdentity()) {
+        return;
+      }
+      final stale = error.code == 'stale_session' ||
+          error.code == 'stale_history_generation';
       setState(() {
         _error = switch (error.code) {
           'stale_session' => '账号或会话已变化，请返回后重新打开记录',
@@ -135,17 +195,28 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
           'history_unavailable' => '提醒记录当前不可用或仍在清理',
           _ => error.message,
         };
-        _items = reset ? [] : _items;
+        if (stale) {
+          _items = [];
+          _snapshotMaxId = null;
+          _nextBeforeId = null;
+          _checkedAt = null;
+        }
         _loadedOnce = true;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          token != _requestToken ||
+          startIdentity != _currentIdentity()) {
+        return;
+      }
       setState(() {
         _error = '提醒记录读取失败：$error';
         _loadedOnce = true;
       });
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && token == _requestToken) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -201,7 +272,16 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('提醒记录')),
+      appBar: AppBar(
+        title: const Text('提醒记录'),
+        actions: [
+          IconButton(
+            tooltip: '刷新',
+            onPressed: _loading ? null : () => _load(reset: true),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           SingleChildScrollView(
@@ -236,70 +316,108 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
                 ),
               ),
             ),
-          if (_error != null)
+          if (_error != null && _items.isNotEmpty)
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Semantics(
-                liveRegion: true,
-                child: Text(
-                  _error!,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                  TextButton(
+                    onPressed: _loading ? null : () => _load(reset: true),
+                    child: const Text('重试'),
+                  ),
+                ],
               ),
             ),
           Expanded(
             child: !_loadedOnce || (_loading && _items.isEmpty)
                 ? const Center(child: CircularProgressIndicator())
-                : _items.isEmpty
-                    ? const Center(
-                        child: Text('最近 30 天没有符合条件的提醒记录'),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: () => _load(reset: true),
-                        child: ListView.separated(
-                          padding: const EdgeInsets.all(16),
-                          itemCount:
-                              _items.length + (_nextBeforeId == null ? 0 : 1),
-                          separatorBuilder: (_, __) => const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            if (index >= _items.length) {
-                              return Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 12),
-                                child: OutlinedButton(
-                                  onPressed: _loading
-                                      ? null
-                                      : () => _load(reset: false),
-                                  child: Text(_loading ? '正在加载…' : '加载更多'),
+                : _items.isEmpty && _error != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Semantics(
+                                liveRegion: true,
+                                child: Text(
+                                  _error!,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
                                 ),
-                              );
-                            }
-                            final item = _items[index];
-                            final canOpen = item.subjectKind != 'account' &&
-                                (item.subjectId != null ||
-                                    item.subjectKind == 'summary');
-                            return ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: Text(_subjectTitle(item)),
-                              subtitle: Text(
-                                '${DateFormat('yyyy-MM-dd HH:mm:ss').format(item.observedAt.toLocal())}\n${_line(item)}',
                               ),
-                              isThreeLine: true,
-                              trailing: canOpen
-                                  ? const Icon(Icons.chevron_right)
-                                  : null,
-                              onTap: canOpen
-                                  ? () => context.go(
-                                        '/reminder-status/${Uri.encodeComponent(item.subjectKind)}/'
-                                        '${Uri.encodeComponent(item.subjectId ?? '0')}',
-                                      )
-                                  : null,
-                            );
-                          },
+                              const SizedBox(height: 12),
+                              OutlinedButton(
+                                onPressed:
+                                    _loading ? null : () => _load(reset: true),
+                                child: const Text('重试'),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+                      )
+                    : _items.isEmpty
+                        ? const Center(
+                            child: Text('最近 30 天没有符合条件的提醒记录'),
+                          )
+                        : RefreshIndicator(
+                            onRefresh: () => _load(reset: true),
+                            child: ListView.separated(
+                              padding: const EdgeInsets.all(16),
+                              itemCount: _items.length +
+                                  (_nextBeforeId == null ? 0 : 1),
+                              separatorBuilder: (_, __) =>
+                                  const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                if (index >= _items.length) {
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
+                                    child: OutlinedButton(
+                                      onPressed: _loading
+                                          ? null
+                                          : () => _load(reset: false),
+                                      child: Text(_loading ? '正在加载…' : '加载更多'),
+                                    ),
+                                  );
+                                }
+                                final item = _items[index];
+                                final canOpen = item.subjectKind != 'account' &&
+                                    (item.subjectId != null ||
+                                        item.subjectKind == 'summary');
+                                return ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text(_subjectTitle(item)),
+                                  subtitle: Text(
+                                    '${DateFormat('yyyy-MM-dd HH:mm:ss').format(item.observedAt.toLocal())}\n${_line(item)}',
+                                  ),
+                                  isThreeLine: true,
+                                  trailing: canOpen
+                                      ? const Icon(Icons.chevron_right)
+                                      : null,
+                                  onTap: canOpen
+                                      ? () => context.push(
+                                            '/reminder-status/${Uri.encodeComponent(item.subjectKind)}/'
+                                            '${Uri.encodeComponent(item.subjectId ?? '0')}',
+                                          )
+                                      : null,
+                                );
+                              },
+                            ),
+                          ),
           ),
         ],
       ),

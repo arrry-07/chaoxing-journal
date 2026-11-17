@@ -172,10 +172,11 @@ class ReminderNativeSubjectEvidence {
     required this.scheduledAt,
     required this.notificationId,
     required this.evidenceAt,
+    this.alarmScheduled,
   });
 
   final String subjectKind;
-  final String subjectId;
+  final String? subjectId;
   final String eventId;
   final String category;
   final String logicalKey;
@@ -183,6 +184,7 @@ class ReminderNativeSubjectEvidence {
   final DateTime? scheduledAt;
   final int? notificationId;
   final DateTime? evidenceAt;
+  final bool? alarmScheduled;
 }
 
 class ReminderPluginSubjectEvidence {

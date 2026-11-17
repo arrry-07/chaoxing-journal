@@ -499,7 +499,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                 label: Text('复制$_itemLabel链接'),
               ),
               TextButton.icon(
-                onPressed: () => context.go(
+                onPressed: () => context.push(
                   '/reminder-status/assignment/'
                   '${Uri.encodeComponent(assignment.id)}',
                 ),

@@ -124,6 +124,7 @@ Future<void> backgroundMain() async {
       manageBackgroundSchedule: false,
       nativeLeaseOwner: arguments['leaseOwner'] as String?,
       notificationRemoteStart: remoteStart,
+      backgroundSignalVersion: (arguments['signalVersion'] as num?)?.toInt(),
       reminderHistoryEnabled: true,
       nativeReminderDeliveryEnabled: true,
     );
@@ -261,7 +262,9 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
       final location = _router.routeInformationProvider.value.uri.path;
       if (location.startsWith('/personal/') ||
           location == '/agenda' ||
-          location == '/reminders') {
+          location == '/reminders' ||
+          location.startsWith('/reminder-history') ||
+          location.startsWith('/reminder-status/')) {
         _router.go('/assignments');
       }
     }
@@ -353,7 +356,8 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
           routes: [
             GoRoute(
                 path: '/agenda',
-                onExit: (_, __) => _leaveGuard.confirmLeave(),
+                onExit: (_, __) =>
+                    _leaveGuard.confirmLeave(routeScope: '/agenda'),
                 builder: (_, __) => ManualAgendaScreen(store: assignmentStore)),
             GoRoute(
                 path: '/terms',
@@ -363,7 +367,8 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                 builder: (_, __) => DailyPlanScreen(store: assignmentStore)),
             GoRoute(
                 path: '/personal/:id',
-                onExit: (_, __) => _leaveGuard.confirmLeave(),
+                onExit: (_, __) =>
+                    _leaveGuard.confirmLeave(routeScope: '/personal'),
                 builder: (_, s) => PersonalWorkScreen(
                     store: assignmentStore,
                     assignmentId: s.pathParameters['id']!)),
@@ -381,6 +386,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                 store: assignmentStore,
                 kind: state.pathParameters['kind']!,
                 id: state.pathParameters['id']!,
+                hasUnsavedEdits: state.uri.queryParameters['unsaved'] == '1',
               ),
             ),
             GoRoute(
@@ -415,7 +421,8 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             ),
             GoRoute(
               path: '/reminders',
-              onExit: (_, __) => _leaveGuard.confirmLeave(),
+              onExit: (_, __) =>
+                  _leaveGuard.confirmLeave(routeScope: '/reminders'),
               builder: (_, __) => ReminderSettingsScreen(
                 assignmentStore: assignmentStore,
               ),

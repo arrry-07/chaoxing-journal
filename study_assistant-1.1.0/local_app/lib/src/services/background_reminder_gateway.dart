@@ -911,7 +911,7 @@ class BackgroundReminderGateway {
     final logicalKey = value['logicalKey'];
     final state = value['state'];
     if (subjectKind is! String ||
-        subjectId is! String ||
+        (subjectId != null && subjectId is! String) ||
         eventId is! String ||
         category is! String ||
         logicalKey is! String ||
@@ -923,7 +923,7 @@ class BackgroundReminderGateway {
     }
     return ReminderNativeSubjectEvidence(
       subjectKind: subjectKind,
-      subjectId: subjectId,
+      subjectId: subjectId as String?,
       eventId: eventId,
       category: category,
       logicalKey: logicalKey,
@@ -931,6 +931,7 @@ class BackgroundReminderGateway {
       scheduledAt: _optionalDate(value['scheduledAt']),
       notificationId: (value['notificationId'] as num?)?.toInt(),
       evidenceAt: _optionalDate(value['evidenceAt']),
+      alarmScheduled: value['alarmScheduled'] as bool?,
     );
   }
 

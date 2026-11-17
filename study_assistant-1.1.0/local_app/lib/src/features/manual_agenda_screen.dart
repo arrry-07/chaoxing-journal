@@ -5,6 +5,7 @@ import '../app/unsaved_edit_guard.dart';
 import '../models/study_notebook.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
+import 'reminder_status_screen.dart';
 import 'widgets/data_recovery_warning.dart';
 
 String manualTime(DateTime? at) => at == null
@@ -189,6 +190,7 @@ class _EditorState extends State<ManualEntryEditor> {
     _leaveGuard = guard;
     _leaveGuard?.register(
       this,
+      routeScope: '/agenda',
       hasUnsavedChanges: () => _dirty || _saving,
       draftRevision: () =>
           '${title.text}|${course.text}|${location.text}|${note.text}|'
@@ -396,10 +398,25 @@ class _EditorState extends State<ManualEntryEditor> {
                   TextButton.icon(
                     onPressed: busy
                         ? null
-                        : () => context.go(
-                              '/reminder-status/manual/'
-                              '${Uri.encodeComponent(widget.entry!.id)}',
-                            ),
+                        : () {
+                            final router = GoRouter.maybeOf(context);
+                            if (router != null) {
+                              router.push(
+                                '/reminder-status/manual/${Uri.encodeComponent(widget.entry!.id)}?unsaved=${_dirty ? 1 : 0}',
+                              );
+                            } else {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ReminderStatusScreen(
+                                    store: widget.store,
+                                    kind: 'manual',
+                                    id: widget.entry!.id,
+                                    hasUnsavedEdits: _dirty,
+                                  ),
+                                ),
+                              );
+                            }
+                          },
                     icon: const Icon(Icons.notifications_active_outlined),
                     label: const Text('提醒状态'),
                   ),

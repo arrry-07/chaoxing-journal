@@ -13,33 +13,90 @@ class ReminderStatusScreen extends StatefulWidget {
     required this.store,
     required this.kind,
     required this.id,
+    this.hasUnsavedEdits = false,
     this.permissionSettingsService = const PermissionSettingsService(),
   });
 
   final AssignmentStore store;
   final String kind;
   final String id;
+  final bool hasUnsavedEdits;
   final PermissionSettingsService permissionSettingsService;
 
   @override
   State<ReminderStatusScreen> createState() => _ReminderStatusScreenState();
 }
 
-class _ReminderStatusScreenState extends State<ReminderStatusScreen> {
+class _ReminderStatusScreenState extends State<ReminderStatusScreen>
+    with WidgetsBindingObserver {
   ReminderExplanation? _explanation;
   String? _error;
   bool _loading = false;
   bool _retrying = false;
   String? _message;
+  int _requestToken = 0;
+  String? _accountHash;
+  int _accountEpoch = 0;
+  int _nativeEpoch = 0;
+  int _historyGeneration = 0;
+
+  (String?, int, int, int) _currentIdentity() => (
+        widget.store.accountHash,
+        widget.store.accountEpoch,
+        widget.store.nativeSessionEpoch,
+        widget.store.reminderHistoryGeneration,
+      );
 
   @override
   void initState() {
     super.initState();
+    final id = _currentIdentity();
+    _accountHash = id.$1;
+    _accountEpoch = id.$2;
+    _nativeEpoch = id.$3;
+    _historyGeneration = id.$4;
+    WidgetsBinding.instance.addObserver(this);
+    widget.store.addListener(_handleStoreChanged);
     _load();
   }
 
-  Future<void> _load() async {
-    if (_loading) return;
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.store.removeListener(_handleStoreChanged);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _load(force: true);
+    }
+  }
+
+  void _handleStoreChanged() {
+    final next = _currentIdentity();
+    if (next ==
+        (_accountHash, _accountEpoch, _nativeEpoch, _historyGeneration)) {
+      return;
+    }
+    _accountHash = next.$1;
+    _accountEpoch = next.$2;
+    _nativeEpoch = next.$3;
+    _historyGeneration = next.$4;
+    if (!mounted) return;
+    setState(() {
+      _explanation = null;
+      _error = null;
+      _message = null;
+    });
+    _load(force: true);
+  }
+
+  Future<void> _load({bool force = false}) async {
+    if (_loading && !force) return;
+    final token = ++_requestToken;
+    final startIdentity = _currentIdentity();
     setState(() {
       _loading = true;
       _error = null;
@@ -49,16 +106,30 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen> {
         kind: widget.kind,
         id: widget.id,
       );
-      if (!mounted) return;
+      if (!mounted ||
+          token != _requestToken ||
+          startIdentity != _currentIdentity()) {
+        return;
+      }
       setState(() => _explanation = value);
     } on ReminderHistoryException catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          token != _requestToken ||
+          startIdentity != _currentIdentity()) {
+        return;
+      }
       setState(() => _error = error.message);
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          token != _requestToken ||
+          startIdentity != _currentIdentity()) {
+        return;
+      }
       setState(() => _error = '提醒原因暂时无法读取：$error');
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && token == _requestToken) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -103,8 +174,16 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen> {
     try {
       await widget.store.retryReminderRecovery();
       if (!mounted) return;
-      setState(() => _message = '提醒恢复已重新执行，请核对下方状态');
-      await _load();
+      final warnings = <String>{
+        if (widget.store.operationError != null) widget.store.operationError!,
+        ...widget.store.serviceWarnings,
+      }.toList();
+      setState(() {
+        _message = warnings.isEmpty
+            ? '提醒恢复已重新执行，请核对下方状态'
+            : '提醒恢复仍有未完成项：${warnings.join('；')}';
+      });
+      await _load(force: true);
     } catch (error) {
       if (!mounted) return;
       setState(() => _message = '提醒恢复仍未完成：$error');
@@ -117,12 +196,29 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen> {
   Widget build(BuildContext context) {
     final explanation = _explanation;
     return Scaffold(
-      appBar: AppBar(title: const Text('提醒状态')),
+      appBar: AppBar(
+        title: const Text('提醒状态'),
+        actions: [
+          IconButton(
+            tooltip: '刷新',
+            onPressed: _loading ? null : () => _load(force: true),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           if (_loading) const LinearProgressIndicator(),
-          if (_error != null)
+          if (widget.hasUnsavedEdits) ...[
+            const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: Text(
+                '当前展示已保存事项的提醒状态；编辑页中的未保存修改需保存后才会生效。',
+              ),
+            ),
+          ],
+          if (_error != null) ...[
             Semantics(
               liveRegion: true,
               child: Text(
@@ -130,6 +226,14 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ),
+            if (explanation == null) ...[
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: _loading ? null : () => _load(force: true),
+                child: const Text('重新查询'),
+              ),
+            ],
+          ],
           if (explanation != null) ...[
             Text(
               explanation.displayName,
@@ -212,13 +316,19 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen> {
               children: [
                 if (widget.kind == 'assignment')
                   OutlinedButton(
-                    onPressed: () => context.go(
-                      '/assignments/${Uri.encodeComponent(widget.id)}',
-                    ),
+                    onPressed: () async {
+                      await context.push(
+                        '/assignments/${Uri.encodeComponent(widget.id)}',
+                      );
+                      if (mounted) await _load(force: true);
+                    },
                     child: const Text('查看课业详情'),
                   ),
                 OutlinedButton(
-                  onPressed: () => context.go('/reminders'),
+                  onPressed: () async {
+                    await context.push('/reminders');
+                    if (mounted) await _load(force: true);
+                  },
                   child: const Text('打开提醒设置'),
                 ),
                 OutlinedButton(

@@ -391,7 +391,17 @@ object ReminderHistoryStore {
                 database.eventsForSubject(
                     observationContext.accountHash,
                     id,
+                    sessionEpoch = observationContext.sessionEpoch,
                 ).forEach { event ->
+                    val alarmScheduled = when {
+                        event.status != ReminderDatabase.STATUS_PENDING -> false
+                        event.type == ReminderDatabase.EVENT_NEW ->
+                            AssignmentAlarmScheduler.hasNewAssignmentWindowAlarm(
+                                context,
+                                observationContext.accountHash,
+                            )
+                        else -> AssignmentAlarmScheduler.hasDeadlineAlarm(context, event)
+                    }
                     nativeEvents.add(
                         mapOf(
                             "subjectKind" to kind,
@@ -407,7 +417,9 @@ object ReminderHistoryStore {
                             "state" to event.status,
                             "scheduledAt" to event.notifyAt,
                             "notificationId" to event.notificationId,
-                            "evidenceAt" to event.notifyAt,
+                            "alarmScheduled" to alarmScheduled,
+                            "evidenceAt" to
+                                (event.updatedAt.takeIf { it > 0L } ?: event.notifyAt),
                         ),
                     )
                 }
@@ -535,6 +547,10 @@ object ReminderHistoryStore {
             .putBoolean(KEY_PURGE_PENDING, false)
             .putString(KEY_LAST_PURGE_TOKEN, purgeToken)
             .remove(KEY_PURGE_TOKEN)
+            .remove(KEY_PURGE_REQUEST)
+        prefs.all.keys
+            .filter { it.startsWith(KEY_PRUNED_PREFIX) }
+            .forEach(editor::remove)
         if (!editor.commit()) {
             throw ReminderHistoryException(
                 "history_unavailable",

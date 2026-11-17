@@ -72,6 +72,7 @@ class LocalNotificationService {
   static const _scheduleCategories = ['assignments', 'manual', 'summary'];
   static const _scheduleJournalPrefix = 'notification_schedule_v2_journal_';
   static const _scheduleActivePrefix = 'notification_schedule_v2_active_';
+  static const _summaryEvidenceKey = 'notification_summary_evidence_v1';
 
   /// Privacy tightening must not retain detailed alarms if replacement fails.
   Future<void> cancelPrivateSchedules() async {
@@ -162,6 +163,9 @@ class LocalNotificationService {
             await _writeActiveIds(prefs, category, const []);
           }
           if (journalIsValid) await _removeJournal(prefs, category);
+          if (category == 'summary') {
+            await prefs.remove(_summaryEvidenceKey);
+          }
         }
       } catch (error) {
         lastWarning = '已取消可识别的隐私提醒，但本机恢复记录清理失败：$error';
@@ -502,10 +506,12 @@ class LocalNotificationService {
     lastWarning = null;
     lastScheduleOutcomes = const [];
     await _ensurePluginInitialized();
-    final desired =
-        DailySummary.build(assignments, personal, DateTime.now(), lastSync);
+    final now = DateTime.now();
+    final desired = DailySummary.build(assignments, personal, now, lastSync);
     if (desired.isNotEmpty) await _ensureAndroidChannel(summaryChannel);
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final prior = _readSummaryEvidence(prefs);
       final ids = await _replaceScheduleBatch(
         category: 'summary',
         belongs: (payload) => payload == 'd:summary',
@@ -527,14 +533,53 @@ class LocalNotificationService {
               payload: 'd:summary');
         },
       );
+      final desiredKeys = <String>{
+        for (final notice in desired)
+          'summary:${notice.at.millisecondsSinceEpoch}',
+      };
+      final observedAt = DateTime.now();
+      final cancellations = <ReminderScheduleOutcome>[
+        for (final prev in prior)
+          if (prev.scheduledAtMs > now.millisecondsSinceEpoch &&
+              !desiredKeys.contains(prev.logicalKey))
+            ReminderScheduleOutcome(
+              subjectKind: 'summary',
+              logicalKey: prev.logicalKey,
+              category: 'summary',
+              stage: 'cancelled',
+              reasonCode: (!personal.summaryEnabled || desired.isEmpty)
+                  ? 'reminderDisabled'
+                  : 'scheduleReplaced',
+              observedAt: observedAt,
+              scheduledAt:
+                  DateTime.fromMillisecondsSinceEpoch(prev.scheduledAtMs),
+              notificationId: prev.notificationId,
+              expectedPayload: 'd:summary',
+              evidenceState: 'removed',
+            ),
+      ];
+      final currentRecords = [
+        for (var index = 0; index < desired.length; index++)
+          {
+            'logicalKey': 'summary:${desired[index].at.millisecondsSinceEpoch}',
+            'scheduledAtMs': desired[index].at.millisecondsSinceEpoch,
+            'notificationId': ids[index],
+          },
+      ];
+      if (currentRecords.isEmpty) {
+        await prefs.remove(_summaryEvidenceKey);
+      } else {
+        await prefs.setString(_summaryEvidenceKey, jsonEncode(currentRecords));
+      }
       lastScheduleOutcomes = [
+        ...cancellations,
         for (var index = 0; index < desired.length; index++)
           ReminderScheduleOutcome(
             subjectKind: 'summary',
             logicalKey: 'summary:${desired[index].at.millisecondsSinceEpoch}',
             category: 'summary',
             stage: 'scheduled',
-            observedAt: DateTime.now(),
+            observedAt: observedAt,
             scheduledAt: desired[index].at,
             notificationId: ids[index],
             expectedPayload: 'd:summary',
@@ -558,6 +603,33 @@ class LocalNotificationService {
           ),
       ];
       rethrow;
+    }
+  }
+
+  List<({String logicalKey, int scheduledAtMs, int? notificationId})>
+      _readSummaryEvidence(SharedPreferences prefs) {
+    final raw = prefs.getString(_summaryEvidenceKey);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      final records =
+          <({String logicalKey, int scheduledAtMs, int? notificationId})>[];
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final key = item['logicalKey'] as String?;
+        final scheduledAtMs = (item['scheduledAtMs'] as num?)?.toInt();
+        final notificationId = (item['notificationId'] as num?)?.toInt();
+        if (key == null || key.isEmpty || scheduledAtMs == null) continue;
+        records.add((
+          logicalKey: key,
+          scheduledAtMs: scheduledAtMs,
+          notificationId: notificationId,
+        ));
+      }
+      return records;
+    } catch (_) {
+      return const [];
     }
   }
 

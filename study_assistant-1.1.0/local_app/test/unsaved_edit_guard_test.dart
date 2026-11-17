@@ -731,4 +731,63 @@ void main() {
     expect(find.byType(PersonalWorkScreen), findsNothing);
     expect(find.byType(LoginScreen), findsOneWidget);
   });
+
+  testWidgets('H7: dirty editor below clean route still prompts on tab switch',
+      (tester) async {
+    final guard = UnsavedEditGuard();
+    var prompts = 0;
+    final agendaOwner = Object();
+    final settingsOwner = Object();
+    guard.register(
+      agendaOwner,
+      routeScope: '/agenda',
+      hasUnsavedChanges: () => true,
+      confirmDiscard: () async {
+        prompts++;
+        return false;
+      },
+    );
+    guard.register(
+      settingsOwner,
+      routeScope: '/reminders',
+      hasUnsavedChanges: () => false,
+      confirmDiscard: () async => true,
+    );
+
+    // Popping the clean pushed /reminders route over dirty /agenda succeeds.
+    expect(await guard.confirmLeave(routeScope: '/reminders'), isTrue);
+    expect(prompts, 0);
+
+    // Replacing the shell tab prompts for the underlying dirty /agenda editor.
+    var navigated = false;
+    await guard.navigate(
+      isCurrent: () => true,
+      action: () {
+        navigated = true;
+      },
+    );
+    expect(prompts, 1);
+    expect(navigated, isFalse);
+  });
+
+  testWidgets(
+      'M5: system back on dirty reminder settings prompts once without duplicate dialog',
+      (tester) async {
+    await _launchApp(tester, '/reminders');
+    final preset = find.text('提前 1 天');
+    await tester.ensureVisible(preset);
+    await tester.pumpAndSettle();
+    await tester.tap(preset);
+    await tester.pumpAndSettle();
+
+    unawaited(tester.binding.handlePopRoute());
+    await tester.pumpAndSettle();
+
+    expect(find.text('放弃未保存的提醒规则？'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '放弃修改'));
+    await tester.pumpAndSettle();
+
+    // Confirm no second discard dialog is shown by GoRouter onExit after pop.
+    expect(find.text('放弃未保存的提醒规则？'), findsNothing);
+  });
 }

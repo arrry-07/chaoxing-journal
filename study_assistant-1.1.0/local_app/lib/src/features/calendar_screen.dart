@@ -73,19 +73,39 @@ class _CalendarScreenState extends State<CalendarScreen>
       _refreshing = true;
       _refreshMessage = null;
     });
-    final startedAt = DateTime.now();
     try {
       await widget.store.syncAssignments();
       if (!mounted) return;
-      final last = widget.store.lastSyncAt;
-      final failed = widget.store.error != null;
-      setState(() {
-        _refreshMessage = failed
-            ? last == null
+      final completedAt = widget.clock?.call() ?? DateTime.now();
+      final report = widget.store.syncReport;
+      final last = report.lastDataSuccessAt ?? widget.store.lastSyncAt;
+      final formattedTime = DateFormat('HH:mm:ss').format(completedAt);
+      final String message;
+      switch (report.phase) {
+        case SyncPhase.success:
+          if (widget.store.operationError != null) {
+            message = last == null
                 ? '本次刷新失败，且没有可用的本机缓存；请到同步详情重试'
-                : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）'
-            : '本次刷新已完成（${DateFormat('HH:mm:ss').format(startedAt)}）';
-      });
+                : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）';
+          } else if (widget.store.serviceWarnings.isNotEmpty) {
+            message = '本次刷新已完成（$formattedTime），本机提醒或小组件需处理';
+          } else {
+            message = '本次刷新已完成（$formattedTime）';
+          }
+        case SyncPhase.partial:
+          message = '本次刷新部分完成（$formattedTime），部分来源待确认；请查看同步详情';
+        case SyncPhase.cancelled:
+          message = last == null
+              ? '本次刷新已取消，且没有可用的本机缓存；请重试'
+              : '本次刷新已取消，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）';
+        case SyncPhase.idle:
+        case SyncPhase.running:
+        case SyncPhase.failed:
+          message = last == null
+              ? '本次刷新失败，且没有可用的本机缓存；请到同步详情重试'
+              : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）';
+      }
+      setState(() => _refreshMessage = message);
     } catch (error) {
       if (!mounted) return;
       final last = widget.store.lastSyncAt;

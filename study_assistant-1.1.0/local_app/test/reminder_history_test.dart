@@ -337,5 +337,353 @@ void main() {
       expect(result.displayName, '已移除的个人安排');
       expect(result.categories.single.reasonCodes, contains('removed'));
     });
+
+    test('unmatched plugin evidence is unconfirmed instead of planned', () {
+      final at = now.add(const Duration(hours: 2));
+      final evidence = ReminderSubjectEvidence(
+        checkedAt: now,
+        nativeEvents: const [],
+        pluginEvidence: [
+          ReminderPluginSubjectEvidence(
+            subjectKind: 'manual',
+            subjectId: 'manual-1',
+            logicalKey: 'manual:1',
+            category: 'personal',
+            state: 'confirmedScheduled',
+            scheduledAt: at,
+            notificationId: 99,
+            expectedPayload: 'p:manual-1',
+            evidenceAt: now,
+          ),
+        ],
+        queryWarnings: const [],
+        historyGeneration: 1,
+      );
+      final result = ReminderExplanationService.forManual(
+        entry: ManualEntry(
+          id: 'manual-1',
+          title: '待办',
+          kind: 'todo',
+          at: at.add(const Duration(minutes: 30)),
+          remind: true,
+          done: false,
+        ),
+        entryId: 'manual-1',
+        now: now,
+        evidence: evidence,
+        health: const ReminderHealth(
+          notifications: true,
+          manualChannel: ReminderChannelHealth(ReminderChannelStatus.enabled),
+        ),
+        pluginEvidence: PluginScheduleEvidenceSnapshot(
+          items: const [],
+          error: null,
+          checkedAt: now,
+        ),
+        queryWarnings: const [],
+      );
+      final category = result.categories.single;
+      expect(category.status, ReminderExplanationStatus.unconfirmed);
+      expect(category.reasonCodes, contains('scheduleUnconfirmed'));
+    });
+
+    test('native pending deadline evidence confirms reminder', () {
+      final at = now.add(const Duration(hours: 3));
+      final evidence = ReminderSubjectEvidence(
+        checkedAt: now,
+        nativeEvents: [
+          ReminderNativeSubjectEvidence(
+            subjectKind: 'assignment',
+            subjectId: 'cx:work:1:2:3',
+            eventId: 'evt-1',
+            category: 'deadline',
+            logicalKey: 'evt-1',
+            state: 'pending',
+            scheduledAt: at,
+            notificationId: 12,
+            evidenceAt: now,
+          ),
+        ],
+        pluginEvidence: const [],
+        queryWarnings: const [],
+        historyGeneration: 1,
+      );
+      final result = explain(
+        assignment(),
+        health: const ReminderHealth(
+          notifications: true,
+          assignmentChannel:
+              ReminderChannelHealth(ReminderChannelStatus.enabled),
+        ),
+        evidence: evidence,
+      );
+      final deadline =
+          result.categories.firstWhere((item) => item.category == 'deadline');
+      expect(deadline.status, ReminderExplanationStatus.planned);
+      expect(deadline.nextScheduledAt, at);
+    });
+
+    test('native deadline with missing alarm reports scheduleUnconfirmed', () {
+      final at = now.add(const Duration(hours: 3));
+      final evidence = ReminderSubjectEvidence(
+        checkedAt: now,
+        nativeEvents: [
+          ReminderNativeSubjectEvidence(
+            subjectKind: 'assignment',
+            subjectId: 'cx:work:1:2:3',
+            eventId: 'evt-missing-alarm',
+            category: 'deadline',
+            logicalKey: 'evt-missing-alarm',
+            state: 'pending',
+            scheduledAt: at,
+            notificationId: 12,
+            evidenceAt: now,
+            alarmScheduled: false,
+          ),
+        ],
+        pluginEvidence: const [],
+        queryWarnings: const [],
+        historyGeneration: 1,
+      );
+      final result = explain(
+        assignment(),
+        health: const ReminderHealth(
+          notifications: true,
+          assignmentChannel:
+              ReminderChannelHealth(ReminderChannelStatus.enabled),
+        ),
+        evidence: evidence,
+      );
+      final deadline =
+          result.categories.firstWhere((item) => item.category == 'deadline');
+      expect(deadline.status, ReminderExplanationStatus.unconfirmed);
+      expect(deadline.reasonCodes, contains('scheduleUnconfirmed'));
+    });
+
+    test('pending native newAssignment is not masked by alreadyKnown', () {
+      final evidence = ReminderSubjectEvidence(
+        checkedAt: now,
+        nativeEvents: [
+          ReminderNativeSubjectEvidence(
+            subjectKind: 'assignment',
+            subjectId: 'cx:work:1:2:3',
+            eventId: 'evt-new-1',
+            category: 'newAssignment',
+            logicalKey: 'evt-new-1',
+            state: 'pending',
+            scheduledAt: now,
+            notificationId: 13,
+            evidenceAt: now,
+          ),
+        ],
+        pluginEvidence: const [],
+        queryWarnings: const [],
+        historyGeneration: 1,
+      );
+      final result = explain(
+        assignment(),
+        planState: plan(known: const {'cx:work:1:2:3'}),
+        health: const ReminderHealth(
+          notifications: true,
+          assignmentChannel:
+              ReminderChannelHealth(ReminderChannelStatus.enabled),
+        ),
+        evidence: evidence,
+      );
+      final added = result.categories
+          .firstWhere((item) => item.category == 'newAssignment');
+      expect(added.reasonCodes, isNot(contains('alreadyKnown')));
+      expect(added.status, ReminderExplanationStatus.planned);
+    });
+
+    test('assignment without deadline does not emit anchorPassed', () {
+      final noDeadline = Assignment(
+        id: 'cx:work:1:2:no-dl',
+        courseName: '课程',
+        title: '无截止作业',
+        deadlineAt: null,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+        deadlineTrusted: true,
+      );
+      final result = explain(noDeadline);
+      final deadline =
+          result.categories.firstWhere((item) => item.category == 'deadline');
+      expect(deadline.status, ReminderExplanationStatus.ineligible);
+      expect(deadline.reasonCodes, contains('noDeadline'));
+      expect(deadline.reasonCodes, isNot(contains('anchorPassed')));
+    });
+
+    test('H5: newAssignment respects per-source baselinedSources', () {
+      final exam = Assignment(
+        id: 'cx:exam:1:2:100',
+        courseName: '高等数学',
+        title: '期中考试',
+        deadlineAt: now.add(const Duration(days: 2)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+        deadlineTrusted: true,
+        exam: ExamInfo(
+          courseId: '1',
+          clazzId: '2',
+          examId: '100',
+          startAt: now.add(const Duration(days: 2)),
+          startTrusted: true,
+          lifecycle: 'scheduled',
+        ),
+        submitUrl: 'https://example.com/exam/100',
+      );
+      final result = explain(
+        exam,
+        planState: ReminderPlanState(
+          accountHash: 'hash',
+          sessionEpoch: 1,
+          baselineCompleted: true,
+          baselinedSources: const {'courseWork'},
+          knownAssignmentIds: {exam.id},
+          sentNewAssignmentIds: const {},
+          lastAttemptAt: null,
+          lastFullSuccessAt: null,
+          pendingUpdate: false,
+          mutationVersion: 1,
+        ),
+      );
+      final added = result.categories
+          .firstWhere((item) => item.category == 'newAssignment');
+      expect(added.status, ReminderExplanationStatus.ineligible);
+      expect(added.reasonCodes, contains('baselinePending'));
+      expect(added.reasonCodes, isNot(contains('alreadyKnown')));
+    });
+
+    test(
+        'H5: _nextPlanned shifts pre-08:00 trigger to 08:00 and drops >= deadline',
+        () {
+      final atTen = DateTime(2026, 11, 19, 10, 0);
+      final earlyItem = assignment(deadline: atTen);
+      final earlyExplain = ReminderExplanationService.forAssignment(
+        primary: earlyItem,
+        sources: [earlyItem],
+        groupHidden: false,
+        hiddenAssignmentIds: const {},
+        unfollowedCourseKeys: const {},
+        plan: plan(),
+        offsets: const [240], // 06:00 -> shifted to 08:00 < 10:00
+        newReminderEnabled: true,
+        now: DateTime(2026, 11, 19, 2, 0),
+        evidence: null,
+        health: const ReminderHealth(
+          notifications: true,
+          assignmentChannel: ReminderChannelHealth(
+            ReminderChannelStatus.enabled,
+          ),
+        ),
+        pluginEvidence: null,
+        queryWarnings: const [],
+      );
+      final validDeadline = earlyExplain.categories
+          .firstWhere((item) => item.category == 'deadline');
+      expect(validDeadline.nextScheduledAt, DateTime(2026, 11, 19, 8, 0));
+
+      final atSevenThirty = DateTime(2026, 11, 19, 7, 30);
+      final invalidItem = assignment(deadline: atSevenThirty);
+      final expiredShiftExplain = ReminderExplanationService.forAssignment(
+        primary: invalidItem,
+        sources: [invalidItem],
+        groupHidden: false,
+        hiddenAssignmentIds: const {},
+        unfollowedCourseKeys: const {},
+        plan: plan(),
+        offsets: const [60], // 06:30 -> shifted to 08:00 >= 07:30 -> dropped
+        newReminderEnabled: true,
+        now: DateTime(2026, 11, 19, 2, 0),
+        evidence: null,
+        health: const ReminderHealth(
+          notifications: true,
+          assignmentChannel: ReminderChannelHealth(
+            ReminderChannelStatus.enabled,
+          ),
+        ),
+        pluginEvidence: null,
+        queryWarnings: const [],
+      );
+      final droppedDeadline = expiredShiftExplain.categories
+          .firstWhere((item) => item.category == 'deadline');
+      expect(droppedDeadline.status, ReminderExplanationStatus.ineligible);
+      expect(droppedDeadline.reasonCodes, contains('offsetWindowPassed'));
+      expect(droppedDeadline.nextScheduledAt, isNull);
+    });
+
+    test(
+        'H5: pre-08:00 newAssignment shows 08:00 and omits notification settings CTA',
+        () {
+      final preWindowNow = DateTime(2026, 11, 19, 2, 0);
+      final futureItem = assignment(deadline: DateTime(2026, 11, 20, 12, 0));
+      final evidence = ReminderSubjectEvidence(
+        checkedAt: preWindowNow,
+        nativeEvents: [
+          ReminderNativeSubjectEvidence(
+            subjectKind: 'assignment',
+            subjectId: futureItem.id,
+            eventId: 'e-new',
+            logicalKey: 'e-new',
+            category: 'newAssignment',
+            state: 'pending',
+            scheduledAt: preWindowNow,
+            notificationId: 77,
+            evidenceAt: preWindowNow,
+            alarmScheduled: true,
+          ),
+        ],
+        pluginEvidence: const [],
+        queryWarnings: const [],
+        historyGeneration: 1,
+      );
+      final result = ReminderExplanationService.forAssignment(
+        primary: futureItem,
+        sources: [futureItem],
+        groupHidden: false,
+        hiddenAssignmentIds: const {},
+        unfollowedCourseKeys: const {},
+        plan: plan(),
+        offsets: const [30],
+        newReminderEnabled: true,
+        now: preWindowNow,
+        evidence: evidence,
+        health: const ReminderHealth(
+          notifications: true,
+          assignmentUpdatesChannel: ReminderChannelHealth(
+            ReminderChannelStatus.enabled,
+          ),
+        ),
+        pluginEvidence: null,
+        queryWarnings: const [],
+      );
+      final added = result.categories
+          .firstWhere((item) => item.category == 'newAssignment');
+      expect(added.status, ReminderExplanationStatus.deferred);
+      expect(added.reasonCodes, contains('outsideWindow'));
+      expect(added.nextScheduledAt, DateTime(2026, 11, 19, 8, 0));
+      expect(added.actionLabel, isNull);
+    });
+
+    test('H5: untrusted deadline with null date does not emit noDeadline', () {
+      final unknown = Assignment(
+        id: 'cx:work:1:2:unknown-dl',
+        courseName: '课程',
+        title: '截止未知',
+        deadlineAt: null,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+        deadlineTrusted: false,
+      );
+      final result = explain(unknown);
+      final deadline =
+          result.categories.firstWhere((item) => item.category == 'deadline');
+      expect(deadline.reasonCodes, contains('deadlineUnknown'));
+      expect(deadline.reasonCodes, isNot(contains('noDeadline')));
+    });
   });
 }

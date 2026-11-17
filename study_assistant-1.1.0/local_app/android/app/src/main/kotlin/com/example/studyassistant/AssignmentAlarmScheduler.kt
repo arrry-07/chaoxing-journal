@@ -44,6 +44,18 @@ object AssignmentAlarmScheduler {
         pending.cancel()
     }
 
+    fun hasDeadlineAlarm(context: Context, event: StoredReminderEvent): Boolean {
+        val intent = Intent(context, AssignmentDeadlineReceiver::class.java)
+            .setAction(AssignmentDeadlineReceiver.ACTION_DEADLINE)
+            .setData(Uri.parse("studyassistant://deadline/${Uri.encode(event.eventId)}"))
+        return PendingIntent.getBroadcast(
+            context,
+            event.notificationId,
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+        ) != null
+    }
+
     fun scheduleNewAssignmentWindow(context: Context, accountHash: String) {
         val triggerAt = NativeReminderPolicy.nextWindowStart(Instant.now()).toEpochMilli()
         val requestCode = stableRequestCode("new-window:$accountHash")
@@ -72,6 +84,18 @@ object AssignmentAlarmScheduler {
         ) ?: return
         context.getSystemService(AlarmManager::class.java).cancel(pending)
         pending.cancel()
+    }
+
+    fun hasNewAssignmentWindowAlarm(context: Context, accountHash: String): Boolean {
+        val intent = Intent(context, NewAssignmentWindowReceiver::class.java)
+            .setAction(NEW_WINDOW_ACTION)
+            .setData(Uri.parse("studyassistant://new-window/${Uri.encode(accountHash)}"))
+        return PendingIntent.getBroadcast(
+            context,
+            stableRequestCode("new-window:$accountHash"),
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+        ) != null
     }
 
     fun reconcile(context: Context, database: ReminderDatabase) {

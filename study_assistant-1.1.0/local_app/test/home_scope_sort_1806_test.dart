@@ -920,5 +920,29 @@ void main() {
       expect(find.byKey(const ValueKey('current-home-sort')), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets(
+        'home filter/sort toolbar action activates via SemanticsAction.tap',
+        (tester) async {
+      final semanticsHandle = tester.ensureSemantics();
+      try {
+        final store = _ScreenStore()
+          ..replaceAssignmentsForTest([
+            _work('w',
+                course: '课程',
+                title: '作业',
+                due: DateTime.now().add(const Duration(days: 1))),
+          ]);
+        addTearDown(store.dispose);
+        await _pumpScreen(tester, store);
+
+        tester.semantics.tap(find.semantics.byLabel('搜索与筛选'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('应用'), findsOneWidget);
+      } finally {
+        semanticsHandle.dispose();
+      }
+    });
   });
 }
