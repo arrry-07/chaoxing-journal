@@ -2,7 +2,7 @@
 
 安装包与原始发布说明见 [Releases](https://github.com/arrry-07/chaoxing-journal/releases)。1.2.2–1.2.6 曾以本地体验包验证，没有对应公开 Release；不要把历史本地包文件名当成可下载地址。
 
-## 1.8.10（77） — 提醒记录、单项原因与可用性修复（2026-11-18 候选 / 验收中）
+## 1.8.10（77） — 提醒记录、单项原因与可用性修复（2026-11-18 正式发布）
 
 - 新增本机提醒记录与单项原因：最近 30 天、每账号最多 500 条，按账号和历史代次隔离，退出登录清理；记录页支持类别筛选和分页，事项页显示规则原因、下一次计划、系统排期证据和查询时间。提醒体检、作业详情、已保存个人日程和每日摘要增加入口。
 - 原生调度升级到数据库 v6：`notification_attempts` 保存 claim token、WorkSpec、阶段和部分消费边界；通知 attempting、remoteAuthorized、windowDeferred、settled 状态与授权入口覆盖跨午夜、进程消失、旧回调和账号/epoch 轮换。释放条件允许消费水位在 claim 范围内前进，同时保留更高 pending 与 consumed。
@@ -10,7 +10,7 @@
 - 新增 `reminder_history` 与 `reminder_schedule_evidence`：原生发布出口记录 submitted、blocked、cancelled、deferred，插件排期记录 scheduled/recoveryPending/cancelFailed，并通过映射核对系统 pending/active；历史裁剪水位先持久化再删除，重复 observationId 幂等，裁剪后迟到结果返回 expired。
 - 六项可用性修复：首页筛选/排序读屏激活与普通触摸共用闭包；预览状态文字改用 `Journal.ink`；退出入口和确认按钮明确“退出并清理本机记录”，可先进入备份页再返回；统计文案说明已关注课程、账号考试和提交未知口径；日历刷新显示同步中、上次成功和失败保留缓存；提醒设置标明即时保存与需保存区域，体检先给排查步骤并折叠技术信息。
 - 二轮复审加固与隔离回归：补齐广播接收器/通知监听后台异步卸载、通知等待不持数据库锁、冷启动与后台清理幂等、跨账号切换原子回滚、退出告警保留、`ManualEntryEditor` 未保存导航守卫与 `routeScope` 隔离、每日摘要替代/关闭取消历史、提醒原因白天顺延与基线口径，以及日历刷新状态边界。
-- 候选验证：全量 Flutter `1358 passed / 0 skipped / 0 failed`（三时区 `141 passed`）；格式 `238 files / 0 changed`、ASCII `flutter analyze` 无问题、发布元数据 `1.8.10+77`；原生检查、Gradle JVM/编译/lint 与隔离 MuMu API35 仪器测试 `78 tests / 2 skipped / 0 failed` 通过；候选 APK `59,853,610` 字节（SHA-256 `c0f347312e48132a109e76616687db9bfa4c0c6305c9d6ace7a9127c43d37456`）在原 MuMu `127.0.0.1:16448` 保数据覆盖通过，并实机验证个人日程实际通知、点击跳转、历史“已安排/已撤销”与未保存草稿保护。正式 `main` 重建包、Tag、Release 与 Gitee `index` 待发布后更新。
+- 正式发布与验证：全量 Flutter `1358 passed / 0 skipped / 0 failed`（三时区 `141 passed`）；格式 `238 files / 0 changed`、ASCII `flutter analyze` 无问题、发布元数据 `1.8.10+77`；原生检查、Gradle JVM/编译/lint 与隔离 MuMu API35 仪器测试 `78 tests / 2 skipped / 0 failed` 通过；PR #43 / `main` `ce6f42b` / annotated Tag `v1.8.10`（object `6efdaaf9772655d736beb84847071afd88785e8f`）CI 全绿。正式 `main` 重建包 `chaoxing-journal-1.8.10.apk`（`59,853,610` 字节，SHA-256 `79703b5e326f73cf463ed1ecd2926f458b6b617ac3d675232b2d8cbc7fc0fd3c`）在 GitHub Release `449246981` 公开并设为 `latest`，匿名 `curl` 完整回下载、原 MuMu `127.0.0.1:16448` 保数据同哈希覆盖（`firstInstallTime=2026-11-04 19:05:10` 保留，应用内检测“已是最新版本”）、实际个人通知/点击/历史/撤销，以及 Gitee `index`（`44186694471`，`manual=1.8.10+77` 指向 GitHub 主地址且无 `backupApkUrl`，`stable=1.8.0+67`）均核对通过。
 
 ## 1.8.09（76） — 提醒撤销、跨午夜领取与队列竞态修复（2026-11-17 正式发布）
 

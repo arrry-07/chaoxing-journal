@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.8.09](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.09/chaoxing-journal-1.8.09.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.09) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.8.10](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.10/chaoxing-journal-1.8.10.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.10) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
@@ -35,16 +35,16 @@
 
 ## 下载安装
 
-**当前公开正式包为 1.8.09（76）（候选版本 1.8.10（77）正在验收与发布门禁中，尚未公开 Release）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**当前正式包为 1.8.10（77）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.8.09.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.09/chaoxing-journal-1.8.09.apk)。发布说明及校验文件见 [1.8.09 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.09)（1.8.10 正式发布后将切换为 v1.8.10）。
+1. [下载 chaoxing-journal-1.8.10.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.10/chaoxing-journal-1.8.10.apk)。发布说明及校验文件见 [1.8.10 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.10)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到新版？</summary>
+<summary>已经安装：如何升级到 1.8.10？</summary>
 
-1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；不单独上传新 APK 到 Gitee，因此国内镜像仍停留在批量点 1.7.52+59，当前 Gitee `manual` 小索引指向 GitHub 1.8.09 正式包（1.8.10 正式 Release 发布后自动更新索引），`stable` 保持 1.8.0。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
+1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版不单独上传 Gitee APK，因此国内镜像仍停留在批量点 1.7.52+59，但 manual 小索引指向 GitHub 1.8.10 正式包，stable 保持 1.8.0。已安装用户也可用上面的 GitHub 网页链接直接覆盖安装。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
