@@ -10,6 +10,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.time.Instant
+import java.time.ZoneId
 
 @RunWith(AndroidJUnit4::class)
 class NotificationSignalClaimTest {
@@ -198,11 +200,125 @@ class NotificationSignalClaimTest {
             System.currentTimeMillis() + 1_000L,
         )
 
-        assertTrue(!database.rollbackUnstartedNotificationAttempt(claim))
+        assertTrue(database.rollbackUnstartedNotificationAttempt(claim))
         val state = database.readAccount(accountHash)!!
-        assertEquals(claim.version, state.attemptedSignalVersion)
+        assertEquals(claim.priorAttemptedVersion, state.attemptedSignalVersion)
         assertEquals(newer, state.pendingSignalVersion)
         assertEquals(newer, database.claimNotificationSignal(accountHash, epoch))
+    }
+
+    @Test
+    fun releaseKeepsPartiallyAdvancedConsumptionAndNewerPending() {
+        repeat(7) { index ->
+            database.recordSignal(
+                accountHash,
+                epoch,
+                "synthetic-partial-$index",
+                System.currentTimeMillis() + index,
+            )
+        }
+        database.consumeSignal(accountHash, 5, epoch)
+        val claim = database.claimNotificationAttempt(accountHash, epoch)!!
+        assertEquals(7L, claim.version)
+        assertEquals(5L, claim.priorConsumedVersion)
+
+        database.consumeSignal(accountHash, 6, epoch)
+        assertTrue(database.releaseNotificationAttempt(claim))
+        val state = database.readAccount(accountHash)!!
+        assertEquals(6L, state.consumedSignalVersion)
+        assertEquals(7L, state.pendingSignalVersion)
+        assertNull(state.claimToken)
+        assertEquals(7L, database.claimNotificationSignal(accountHash, epoch))
+    }
+
+    @Test
+    fun sameWorkSpecResumesClaimAndAuthorizesOnlyInsideWindow() {
+        database.recordSignal(
+            accountHash,
+            epoch,
+            "synthetic-owner",
+            System.currentTimeMillis(),
+        )
+        val first = database.claimNotificationAttempt(
+            accountHash,
+            epoch,
+            ownerWorkId = "work-1",
+        )!!
+        val resumed = database.claimNotificationAttempt(
+            accountHash,
+            epoch,
+            ownerWorkId = "work-1",
+        )!!
+        assertEquals(first.token, resumed.token)
+        assertEquals(first.claimedAt, resumed.claimedAt)
+
+        val granted = database.authorizeNotificationRemoteStart(
+            accountHash,
+            epoch,
+            first.token,
+            "work-1",
+            now = Instant.parse("2026-11-18T10:00:00Z"),
+            zone = ZoneId.of("UTC"),
+        )
+        assertEquals(NotificationRemoteAuthorization.GRANTED, granted)
+        assertEquals(
+            NotificationRemoteAuthorization.GRANTED,
+            database.authorizeNotificationRemoteStart(
+                accountHash,
+                epoch,
+                first.token,
+                "work-1",
+                now = Instant.parse("2026-11-18T11:00:00Z"),
+                zone = ZoneId.of("UTC"),
+            ),
+        )
+        assertTrue(
+            database.settleNotificationAttempt(
+                accountHash,
+                epoch,
+                first.token,
+                ownerWorkId = "work-1",
+            ),
+        )
+        assertEquals(
+            NotificationRemoteAuthorization.STALE,
+            database.authorizeNotificationRemoteStart(
+                accountHash,
+                epoch,
+                first.token,
+                "work-1",
+                now = Instant.parse("2026-11-18T12:00:00Z"),
+                zone = ZoneId.of("UTC"),
+            ),
+        )
+    }
+
+    @Test
+    fun authorizationOutsideWindowDefersAndReleases() {
+        database.recordSignal(
+            accountHash,
+            epoch,
+            "synthetic-night",
+            System.currentTimeMillis(),
+        )
+        val claim = database.claimNotificationAttempt(
+            accountHash,
+            epoch,
+            ownerWorkId = "work-night",
+        )!!
+        assertEquals(
+            NotificationRemoteAuthorization.OUTSIDE_WINDOW,
+            database.authorizeNotificationRemoteStart(
+                accountHash,
+                epoch,
+                claim.token,
+                "work-night",
+                now = Instant.parse("2026-11-18T00:30:00Z"),
+                zone = ZoneId.of("UTC"),
+            ),
+        )
+        assertTrue(database.releaseNotificationAttempt(claim))
+        assertEquals(claim.version, database.claimNotificationSignal(accountHash, epoch))
     }
 
     @Test

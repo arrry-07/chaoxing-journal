@@ -22,6 +22,18 @@ import 'package:study_assistant_mobile/src/services/background_reminder_gateway.
 import 'package:study_assistant_mobile/src/services/background_check_settings.dart';
 import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.dart';
 
+Future<void> showTechnicalInfo(WidgetTester tester) async {
+  if (find.textContaining('原生作业截止事件').evaluate().isNotEmpty) return;
+  final title = find.text('技术信息');
+  if (title.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(title, 200);
+  }
+  await tester.ensureVisible(title);
+  await tester.pumpAndSettle();
+  await tester.tap(title);
+  await tester.pumpAndSettle();
+}
+
 class InspectableNotifications extends f.Notifications {
   @override
   Future<bool> isLegacyAssignmentMigrationComplete() async => true;
@@ -1093,10 +1105,13 @@ void main() {
         .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
+    await tester.scrollUntilVisible(find.text('截止提醒通知渠道'), 200);
     final deadline =
         tester.widget<ListTile>(find.widgetWithText(ListTile, '截止提醒通知渠道'));
+    await tester.scrollUntilVisible(find.text('每日摘要通知渠道'), 200);
     final summary =
         tester.widget<ListTile>(find.widgetWithText(ListTile, '每日摘要通知渠道'));
+    await tester.scrollUntilVisible(find.text('个人日程通知渠道'), 200);
     final personal =
         tester.widget<ListTile>(find.widgetWithText(ListTile, '个人日程通知渠道'));
     expect((deadline.subtitle as Text).data, '已开启（高重要性）');
@@ -1215,6 +1230,7 @@ void main() {
         tester.widget<ListTile>(find.widgetWithText(ListTile, '学习通通知使用权'));
     expect((listener.subtitle as Text).data, '暂时无法读取，可重试',
         reason: '读取失败不能被显示成“默认关闭”');
+    await showTechnicalInfo(tester);
     await tester.scrollUntilVisible(find.textContaining('原生作业截止事件'), 200);
     expect(find.textContaining('原生作业截止事件：暂时无法读取，可重试'), findsOneWidget);
     expect(find.textContaining('待处理新增作业事件：暂时无法读取，可重试'), findsOneWidget);
@@ -1239,6 +1255,7 @@ void main() {
         .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
+    await showTechnicalInfo(tester);
     await tester.scrollUntilVisible(find.textContaining('原生作业截止事件'), 200);
     expect(find.textContaining('原生作业截止事件：3 条'), findsOneWidget);
 
@@ -1248,10 +1265,13 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
+    await showTechnicalInfo(tester);
     await tester.scrollUntilVisible(
         find.textContaining('原生作业截止事件：3 条（上次结果）'), -200);
     expect(find.textContaining('原生作业截止事件：3 条（上次结果）'), findsOneWidget);
     await tester.scrollUntilVisible(find.textContaining('以下标注“上次结果”'), -200);
+    await tester.scrollUntilVisible(
+        find.textContaining('原生后台提醒状态暂时无法读取，可重试'), -200);
     expect(find.textContaining('原生后台提醒状态暂时无法读取，可重试'), findsOneWidget);
 
     gateway.failInspections = false;
@@ -1261,6 +1281,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
+    await showTechnicalInfo(tester);
     await tester.scrollUntilVisible(find.textContaining('原生作业截止事件'), -200);
     expect(find.textContaining('原生作业截止事件：2 条'), findsOneWidget);
     expect(find.textContaining('原生作业截止事件：2 条（上次结果）'), findsNothing);
@@ -1292,6 +1313,7 @@ void main() {
     final listener =
         tester.widget<ListTile>(find.widgetWithText(ListTile, '学习通通知使用权'));
     expect((listener.subtitle as Text).data, '当前平台不适用');
+    await showTechnicalInfo(tester);
     await tester.scrollUntilVisible(find.textContaining('原生作业截止事件'), 200);
     expect(find.textContaining('原生作业截止事件：当前平台不适用'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -1335,6 +1357,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
+    await showTechnicalInfo(tester);
     await tester.scrollUntilVisible(find.textContaining('已安排摘要'), 200);
     expect(find.textContaining('已安排摘要：0 条'), findsOneWidget);
     expect(find.textContaining('原生作业截止事件：0 条'), findsOneWidget);

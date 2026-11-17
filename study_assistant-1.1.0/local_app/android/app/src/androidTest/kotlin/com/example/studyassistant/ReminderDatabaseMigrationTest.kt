@@ -30,7 +30,7 @@ class ReminderDatabaseMigrationTest {
     }
 
     @Test
-    fun v3ToV5PreservesAccountAndAddsClaimColumns() {
+    fun v3ToV6PreservesAccountAndAddsClaimAndAttemptTables() {
         val name = "migration-v3-${System.nanoTime()}.db"
         names.add(name)
         createDatabase(name, version = 3, includeAttemptColumns = false) { db ->
@@ -45,16 +45,30 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v3")!!
 
-        assertEquals(5, database.readableDatabase.version)
+        assertEquals(6, database.readableDatabase.version)
         assertEquals(3L, account.pendingSignalVersion)
         assertEquals(2L, account.consumedSignalVersion)
         assertEquals(0L, account.attemptedSignalVersion)
         assertNull(account.lastSignalCheckAt)
         assertNull(account.claimToken)
+        assertEquals(
+            0L,
+            database.readableDatabase.rawQuery(
+                "SELECT COUNT(*) FROM notification_attempts",
+                null,
+            ).use { it.moveToFirst(); it.getLong(0) },
+        )
+        assertEquals(
+            0L,
+            database.readableDatabase.rawQuery(
+                "SELECT COUNT(*) FROM reminder_history",
+                null,
+            ).use { it.moveToFirst(); it.getLong(0) },
+        )
     }
 
     @Test
-    fun v4ToV5PreservesAttemptStateAndAddsNullableToken() {
+    fun v4ToV6PreservesAttemptStateAndAddsNullableToken() {
         val name = "migration-v4-${System.nanoTime()}.db"
         names.add(name)
         createDatabase(name, version = 4, includeAttemptColumns = true) { db ->
@@ -71,7 +85,7 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v4")!!
 
-        assertEquals(5, database.readableDatabase.version)
+        assertEquals(6, database.readableDatabase.version)
         assertEquals(8L, account.pendingSignalVersion)
         assertEquals(6L, account.consumedSignalVersion)
         assertEquals(7L, account.attemptedSignalVersion)

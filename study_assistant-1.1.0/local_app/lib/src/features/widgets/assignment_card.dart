@@ -175,7 +175,7 @@ class AssignmentCard extends StatelessWidget {
           Text(
             previewSaving ? '正在保存到本机' : '待保存预览',
             style: Journal.metadata.copyWith(
-              color: Journal.sage,
+              color: Journal.ink,
               fontWeight: FontWeight.w600,
             ),
           ),

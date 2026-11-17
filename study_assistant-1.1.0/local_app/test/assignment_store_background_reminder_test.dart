@@ -64,6 +64,79 @@ void main() {
     expect(client.calls, 0);
   });
 
+  test('notification signal cannot read remotely before native authorization',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'background_check_enabled_v1': true,
+      'background_check_interval_minutes_v1': 240,
+      'notification_listener_enabled_v1': true,
+      'new_assignment_reminder_enabled_v1': true,
+      'background_check_legacy_migration_v1': true,
+    });
+    final gateway = _FakeGateway()
+      ..remoteAuthorization = NotificationRemoteAuthorization.outsideWindow;
+    final client = _ClientQueue([[]]);
+    final store = _store(
+      gateway: gateway,
+      client: client,
+      clock: () => DateTime(2026, 11, 18, 10),
+      remoteStart: const NotificationRemoteStartContext(
+        accountHash: 'unused',
+        sessionEpoch: 1,
+        claimToken: 'claim',
+        workerId: 'work',
+      ),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final result = await store.runBackgroundAutomaticCheck(
+      BackgroundSyncTrigger.notificationSignal,
+    );
+
+    expect(gateway.authorizations, 1);
+    expect(client.calls, 0);
+    expect(result.skipped, isTrue);
+    expect(result.skipReason, BackgroundCheckResult.outsideWindowSkipReason);
+    expect(result.remoteReadInvoked, isFalse);
+  });
+
+  test('granted remote authorization is visible in the sync result', () async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'background_check_enabled_v1': true,
+      'background_check_interval_minutes_v1': 240,
+      'notification_listener_enabled_v1': true,
+      'new_assignment_reminder_enabled_v1': true,
+      'background_check_legacy_migration_v1': true,
+    });
+    final gateway = _FakeGateway()
+      ..remoteAuthorization = NotificationRemoteAuthorization.granted;
+    final client = _ClientQueue([[]]);
+    final store = _store(
+      gateway: gateway,
+      client: client,
+      clock: () => DateTime(2026, 11, 18, 10),
+      remoteStart: const NotificationRemoteStartContext(
+        accountHash: 'unused',
+        sessionEpoch: 1,
+        claimToken: 'claim',
+        workerId: 'work',
+      ),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final result = await store.runBackgroundAutomaticCheck(
+      BackgroundSyncTrigger.notificationSignal,
+    );
+
+    expect(gateway.authorizations, 1);
+    expect(client.calls, 1);
+    expect(result.remoteReadInvoked, isTrue);
+  });
+
   test('lease wait crossing midnight preserves outside-window reason',
       () async {
     SharedPreferences.setMockInitialValues({
@@ -493,6 +566,7 @@ AssignmentStore _store({
   SecureSessionStore? session,
   bool manageBackgroundSchedule = true,
   DateTime Function()? clock,
+  NotificationRemoteStartContext? remoteStart,
 }) =>
     AssignmentStore(
       sessionStore: session ?? _MemorySessionStore(),
@@ -505,6 +579,7 @@ AssignmentStore _store({
             backgroundReminderGateway: gateway,
           ),
       nativeReminderDeliveryEnabled: true,
+      notificationRemoteStart: remoteStart,
       manageBackgroundSchedule: manageBackgroundSchedule,
       clock: clock,
     );
@@ -702,6 +777,9 @@ class _FakeGateway extends BackgroundReminderGateway {
   bool failPrivacy = false;
   bool failClear = false;
   bool failSwitch = false;
+  int authorizations = 0;
+  NotificationRemoteAuthorization remoteAuthorization =
+      NotificationRemoteAuthorization.granted;
   bool sessionCurrent = true;
   final reconcileSettings = <bool>[];
   void Function()? onAcquire;
@@ -715,6 +793,14 @@ class _FakeGateway extends BackgroundReminderGateway {
   @override
   Future<bool> isSessionCurrent(String accountHash, int sessionEpoch) async =>
       sessionCurrent;
+
+  @override
+  Future<NotificationRemoteAuthorization> authorizeNotificationRemoteStart(
+    NotificationRemoteStartContext context,
+  ) async {
+    authorizations++;
+    return remoteAuthorization;
+  }
 
   @override
   Future<int> switchAccount({

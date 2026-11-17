@@ -138,7 +138,7 @@ void main() {
     addTearDown(store.dispose);
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: ProfileScreen(store: store))));
-    final logout = find.widgetWithText(OutlinedButton, '退出登录');
+    final logout = find.widgetWithText(OutlinedButton, '退出登录并清理本机记录');
     await t.scrollUntilVisible(logout, 400);
     // The enclosing profile section can already be built below the viewport.
     // Finish layout and explicitly position the button before a real tap.

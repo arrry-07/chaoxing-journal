@@ -50,14 +50,15 @@ void main() {
   test('partial sync attempt cools down repeated foreground refresh', () async {
     SharedPreferences.setMockInitialValues({});
     final client = _PartialClient();
+    final now = DateTime(2026, 11, 11, 10);
     final store = AssignmentStore(
         sessionStore: _MemorySessionStore(account: 'student'),
         notificationService: _RecordingNotificationService(),
         widgetSnapshotService: _NoopWidgetSnapshotService(),
-        chaoxingClient: client);
+        chaoxingClient: client,
+        clock: () => now);
     addTearDown(store.dispose);
     await store.restoreSession();
-    final now = DateTime(2026, 11, 11, 10);
     await store.runDueAutoSync(now: now);
     expect(store.lastSyncAt, isNull);
     expect(client.calls, 1);
@@ -73,6 +74,7 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       final initialDeadline = DateTime(2026, 5, 7, 8);
       final updatedDeadline = DateTime(2026, 5, 8, 20);
+      var clockNow = DateTime(2026, 5, 7, 10);
       final client = _QueuedChaoxingClient([
         [_assignment(deadlineAt: initialDeadline)],
         [_assignment(deadlineAt: updatedDeadline)],
@@ -86,6 +88,7 @@ void main() {
         notificationService: notificationService,
         widgetSnapshotService: _NoopWidgetSnapshotService(),
         chaoxingClient: client,
+        clock: () => clockNow,
       );
       addTearDown(store.dispose);
       await store.restoreSession();
@@ -98,8 +101,9 @@ void main() {
 
       await store.saveBackgroundCheckIntervalMinutes(360);
       final lastSync = store.lastSyncAt!;
+      clockNow = DateTime(lastSync.year, lastSync.month, lastSync.day + 1, 10);
       final ran = await store.runDueAutoSync(
-        now: DateTime(lastSync.year, lastSync.month, lastSync.day + 1, 10),
+        now: clockNow,
       );
 
       expect(ran, isTrue);

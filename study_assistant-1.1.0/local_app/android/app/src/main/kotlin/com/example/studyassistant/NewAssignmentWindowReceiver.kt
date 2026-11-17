@@ -13,6 +13,13 @@ class NewAssignmentWindowReceiver : BroadcastReceiver() {
         if (!account.active || !account.newAssignmentEnabled) return
         if (ZonedDateTime.now().hour < 8) {
             AssignmentAlarmScheduler.scheduleNewAssignmentWindow(context, accountHash)
+            AssignmentNotificationPublisher.recordReceiverReason(
+                context,
+                database,
+                database.pendingNewEvents(accountHash),
+                "deferred",
+                "outsideWindow",
+            )
             return
         }
         AssignmentNotificationPublisher.publishPendingNewAssignments(

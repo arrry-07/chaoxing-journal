@@ -131,7 +131,7 @@ class _StatsScreenState extends State<StatsScreen> {
             children: [
               const Text('课业统计', style: Journal.section),
               const SizedBox(height: 8),
-              const Text('当前关注课程 · 本机已读取记录', style: Journal.metadata),
+              const Text('统计范围：已关注课程的课业与账号考试', style: Journal.metadata),
               const SizedBox(height: 24),
               if (stats.total == 0)
                 const Padding(
@@ -163,12 +163,12 @@ class _StatsScreenState extends State<StatsScreen> {
                         ]);
                 }),
                 const SizedBox(height: 16),
-                Text('共 ${stats.total} 份作业', style: Journal.metadata),
-                if (stats.unknown > 0) ...[
-                  const SizedBox(height: 4),
-                  const Text('提交未知记录计入总数，请以学习通实际提交结果为准。',
-                      style: Journal.metadata),
-                ],
+                Text('共 ${stats.total} 项课业', style: Journal.metadata),
+                const SizedBox(height: 4),
+                const Text(
+                  '统计依据当前已关注课程的课业和账号考试；已隐藏记录不计入。提交未知计入总数，请以学习通实际提交结果为准。',
+                  style: Journal.metadata,
+                ),
               ],
               const SizedBox(height: 28),
               const Divider(height: 1, color: Journal.rule),

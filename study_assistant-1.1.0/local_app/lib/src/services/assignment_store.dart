@@ -25,11 +25,14 @@ import 'account_identity.dart';
 import 'assignment_reminder_planner.dart';
 import 'background_check_settings.dart';
 import 'background_reminder_gateway.dart';
+import 'daily_summary.dart';
 import 'daytime_check_policy.dart';
 import '../models/assignment_change.dart';
 import '../models/backup_snapshot.dart';
 import '../models/personal_workspace.dart';
+import '../models/reminder_history.dart';
 import '../models/study_notebook.dart';
+import 'reminder_explanation.dart';
 
 class BackgroundCheckResult {
   const BackgroundCheckResult({
@@ -38,6 +41,7 @@ class BackgroundCheckResult {
     required this.nextTargetAt,
     this.message,
     this.skipReason,
+    this.remoteReadInvoked = false,
   });
 
   static const outsideWindowSkipReason = 'outsideWindow';
@@ -47,6 +51,7 @@ class BackgroundCheckResult {
   final DateTime? nextTargetAt;
   final String? message;
   final String? skipReason;
+  final bool remoteReadInvoked;
 }
 
 class AssignmentStore extends ChangeNotifier {
@@ -59,6 +64,9 @@ class AssignmentStore extends ChangeNotifier {
   static const _nativeCleanupAccountsKey = 'native_account_cleanup_pending_v1';
   static const _legacyScheduleCleanupKey =
       'legacy_assignment_schedule_cleanup_v2';
+  static const _historyPurgeRequestKey = 'reminder_history_purge_request_v1';
+  static const _historyPurgeGenerationKey =
+      'reminder_history_purge_generation_v1';
 
   AssignmentStore({
     required this.sessionStore,
@@ -72,6 +80,8 @@ class AssignmentStore extends ChangeNotifier {
     this.backgroundCheckSettingsStore = const BackgroundCheckSettingsStore(),
     bool manageBackgroundSchedule = true,
     this.nativeLeaseOwner,
+    this.notificationRemoteStart,
+    this.reminderHistoryEnabled = false,
     this.nativeReminderDeliveryEnabled = false,
     DateTime Function()? clock,
   })  : repository = repository ??
@@ -97,6 +107,8 @@ class AssignmentStore extends ChangeNotifier {
   final BackgroundCheckSettingsStore backgroundCheckSettingsStore;
   final bool _manageBackgroundSchedule;
   final String? nativeLeaseOwner;
+  final NotificationRemoteStartContext? notificationRemoteStart;
+  final bool reminderHistoryEnabled;
   final bool nativeReminderDeliveryEnabled;
   final changeLog = AssignmentChangeLog();
   PersonalWorkspace personal = PersonalWorkspace();
@@ -135,9 +147,11 @@ class AssignmentStore extends ChangeNotifier {
       final next = update(notebook);
       await repository.saveNotebook(next, account);
       if (_generation != expectedEpoch || !_authenticated) return;
+      final previous = notebook;
       notebook = StudyNotebook.decode(next.encode());
       saved = true;
       await _afterAssignmentsChanged();
+      await _recordManualCancellationOutcomes(previous, notebook);
     });
     return saved;
   }
@@ -340,6 +354,8 @@ class AssignmentStore extends ChangeNotifier {
   final List<Assignment> _assignments = [];
   bool _autoSyncRunning = false;
   bool _nativeReminderAvailable = false;
+  bool _reminderHistoryReady = false;
+  int _reminderHistoryGeneration = 0;
   String? _accountHash;
   int _nativeSessionEpoch = 0;
   DateTime? _serverBackoffUntil;
@@ -726,6 +742,7 @@ class AssignmentStore extends ChangeNotifier {
               await backgroundReminderGateway.ensureActiveAccount(
             _accountHash!,
           );
+          await _prepareReminderHistorySession();
         }
         await repository.activateAccount(_account!, previousAccount: _account);
       }
@@ -986,6 +1003,14 @@ class AssignmentStore extends ChangeNotifier {
       var nativeSwitched = false;
       if (_nativeReminderAvailable) {
         try {
+          if (oldAccountHash != null &&
+              oldAccountHash != newAccountHash &&
+              _nativeSessionEpoch > 0) {
+            await _retireReminderHistoryBeforeLogout(
+              oldAccountHash,
+              _nativeSessionEpoch,
+            );
+          }
           final nativeEpoch = await backgroundReminderGateway.switchAccount(
             previousAccountHash: oldAccountHash ??
                 (oldAccount == null ? null : AccountIdentity.hash(oldAccount)),
@@ -1085,6 +1110,9 @@ class AssignmentStore extends ChangeNotifier {
       _account = normalizedAccount;
       _accountHash = newAccountHash;
       _authenticated = true;
+      if (_nativeReminderAvailable) {
+        await _prepareReminderHistorySession();
+      }
       await _restoreAccountData();
       _chaoxingDisplayName = result.displayName;
       _chaoxingAvatarUrl = result.avatarUrl;
@@ -1131,6 +1159,7 @@ class AssignmentStore extends ChangeNotifier {
   Future<String?>? _syncInFlight;
   int _syncOperation = 0;
   bool _syncCancelled = false;
+  bool _remoteReadInvoked = false;
   String? _syncSkipReason;
   int? _syncSkipReasonOperation;
   int? _syncSkipReasonGeneration;
@@ -1534,6 +1563,15 @@ class AssignmentStore extends ChangeNotifier {
   Future<BackgroundCheckResult> runBackgroundAutomaticCheck(
     BackgroundSyncTrigger trigger,
   ) async {
+    final result = await _runBackgroundAutomaticCheck(trigger);
+    await _recordBackgroundCheckObservation(trigger, result);
+    return result;
+  }
+
+  Future<BackgroundCheckResult> _runBackgroundAutomaticCheck(
+    BackgroundSyncTrigger trigger,
+  ) async {
+    _remoteReadInvoked = false;
     final now = _clock();
     if (!_authenticated) {
       return const BackgroundCheckResult(
@@ -1570,6 +1608,7 @@ class AssignmentStore extends ChangeNotifier {
             : _nextBackgroundTarget(now),
         message: '当前不在白天检查窗口',
         skipReason: BackgroundCheckResult.outsideWindowSkipReason,
+        remoteReadInvoked: _remoteReadInvoked,
       );
     }
     if (trigger == BackgroundSyncTrigger.daytime &&
@@ -1595,6 +1634,7 @@ class AssignmentStore extends ChangeNotifier {
             : _nextBackgroundTarget(_clock()),
         message: '当前不在白天检查窗口',
         skipReason: BackgroundCheckResult.outsideWindowSkipReason,
+        remoteReadInvoked: _remoteReadInvoked,
       );
     }
     final success = _error == null ||
@@ -1607,7 +1647,188 @@ class AssignmentStore extends ChangeNotifier {
           ? _nextNotificationWindowTarget(_clock())
           : _nextBackgroundTarget(_clock()),
       message: _error,
+      remoteReadInvoked: _remoteReadInvoked,
     );
+  }
+
+  Future<void> _recordBackgroundCheckObservation(
+    BackgroundSyncTrigger trigger,
+    BackgroundCheckResult result,
+  ) async {
+    if (!_nativeReminderAvailable || !_reminderHistoryReady) return;
+    final accountHash = _accountHash;
+    final epoch = _nativeSessionEpoch;
+    if (accountHash == null || epoch <= 0) return;
+    try {
+      final context =
+          await backgroundReminderGateway.acquireReminderObservationContext(
+        accountHash: accountHash,
+        sessionEpoch: epoch,
+      );
+      await backgroundReminderGateway.appendReminderObservation(
+        context: context,
+        observation: ReminderObservation(
+          subjectKind: 'account',
+          logicalKey:
+              'background:${trigger.name}:${DateTime.now().millisecondsSinceEpoch}',
+          category: 'backgroundCheck',
+          stage: result.skipped
+              ? 'blocked'
+              : result.success
+                  ? 'scheduled'
+                  : 'unconfirmed',
+          reasonCode: result.skipReason ??
+              (result.success ? null : 'backgroundCheckFailed'),
+          observedAt: DateTime.now(),
+          scheduledAt: result.nextTargetAt,
+        ),
+      );
+    } on ReminderHistoryException catch (error) {
+      _serviceWarnings.add('提醒记录未能写入：${error.message}');
+    } catch (error) {
+      _serviceWarnings.add('提醒记录未能写入：$error');
+    }
+  }
+
+  Future<void> _prepareReminderHistorySession() async {
+    if (!reminderHistoryEnabled) return;
+    final accountHash = _accountHash;
+    final epoch = _nativeSessionEpoch;
+    if (!_nativeReminderAvailable ||
+        !_authenticated ||
+        accountHash == null ||
+        epoch <= 0) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      final control = await backgroundReminderGateway.getReminderHistoryControl(
+        accountHash: accountHash,
+        sessionEpoch: epoch,
+      );
+      var generation = control.historyGeneration;
+      if (control.purgePending) {
+        final token = control.purgeToken;
+        if (token == null) {
+          _reminderHistoryReady = false;
+          _serviceWarnings.add('提醒记录仍在清理，当前记录功能暂不可用');
+          return;
+        }
+        final finished =
+            await backgroundReminderGateway.finishReminderHistoryLogout(token);
+        generation = finished.historyGeneration;
+      }
+      final pendingRequest = prefs.getString(_historyPurgeRequestKey);
+      final pendingGeneration = prefs.getInt(_historyPurgeGenerationKey);
+      if (pendingRequest != null && pendingRequest.isNotEmpty) {
+        final expected = pendingGeneration == null || pendingGeneration <= 0
+            ? generation
+            : pendingGeneration;
+        try {
+          final started =
+              await backgroundReminderGateway.beginReminderHistoryLogout(
+            expectedHistoryGeneration: expected,
+            requestId: pendingRequest,
+            accountHash: accountHash,
+            sessionEpoch: epoch,
+          );
+          final finished = await backgroundReminderGateway
+              .finishReminderHistoryLogout(started.purgeToken);
+          generation = finished.historyGeneration;
+        } on ReminderHistoryException catch (error) {
+          if (error.code != 'stale_history_generation') rethrow;
+          generation =
+              (await backgroundReminderGateway.getReminderHistoryControl(
+            accountHash: accountHash,
+            sessionEpoch: epoch,
+          ))
+                  .historyGeneration;
+        }
+        await prefs.remove(_historyPurgeRequestKey);
+        await prefs.remove(_historyPurgeGenerationKey);
+      }
+      generation = await backgroundReminderGateway.enableReminderHistorySession(
+        accountHash: accountHash,
+        sessionEpoch: epoch,
+        expectedHistoryGeneration: generation,
+      );
+      _reminderHistoryGeneration = generation;
+      _reminderHistoryReady = true;
+    } on ReminderHistoryException catch (error) {
+      _reminderHistoryReady = false;
+      _serviceWarnings.add('提醒记录暂不可用：${error.message}');
+    } catch (error) {
+      _reminderHistoryReady = false;
+      _serviceWarnings.add('提醒记录暂不可用：$error');
+    }
+  }
+
+  Future<void> _retireReminderHistoryBeforeLogout(
+    String accountHash,
+    int sessionEpoch,
+  ) async {
+    if (!reminderHistoryEnabled) return;
+    if (!_nativeReminderAvailable) {
+      await _persistHistoryPurgeIntent();
+      return;
+    }
+    final requestId =
+        'logout-${DateTime.now().microsecondsSinceEpoch}-$_generation';
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      final control = await backgroundReminderGateway.getReminderHistoryControl(
+        accountHash: accountHash,
+        sessionEpoch: sessionEpoch,
+      );
+      var generation = control.historyGeneration;
+      if (control.purgePending && control.purgeToken != null) {
+        final finished = await backgroundReminderGateway
+            .finishReminderHistoryLogout(control.purgeToken!);
+        generation = finished.historyGeneration;
+      } else if (control.purgePending) {
+        await prefs.setString(_historyPurgeRequestKey, requestId);
+        await prefs.setInt(_historyPurgeGenerationKey, generation);
+        return;
+      }
+      final started =
+          await backgroundReminderGateway.beginReminderHistoryLogout(
+        expectedHistoryGeneration: generation,
+        requestId: requestId,
+        accountHash: accountHash,
+        sessionEpoch: sessionEpoch,
+      );
+      await backgroundReminderGateway
+          .finishReminderHistoryLogout(started.purgeToken);
+      _reminderHistoryReady = false;
+      _reminderHistoryGeneration = 0;
+    } catch (error) {
+      await _persistHistoryPurgeIntent(
+        requestId: requestId,
+        generation: _reminderHistoryGeneration,
+      );
+      _reminderHistoryReady = false;
+      _serviceWarnings.add('退出时提醒记录清理未确认：$error');
+    }
+  }
+
+  Future<void> _persistHistoryPurgeIntent({
+    String? requestId,
+    int? generation,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _historyPurgeRequestKey,
+        requestId ??
+            'logout-${DateTime.now().microsecondsSinceEpoch}-$_generation',
+      );
+      await prefs.setInt(
+        _historyPurgeGenerationKey,
+        generation ?? _reminderHistoryGeneration,
+      );
+    } catch (_) {
+      // The logout path already reports the unconfirmed native cleanup.
+    }
   }
 
   Future<void> logout() async {
@@ -1620,6 +1841,10 @@ class AssignmentStore extends ChangeNotifier {
     changes = [];
     final accountHash = _accountHash;
     if (_nativeReminderAvailable && accountHash != null) {
+      await _retireReminderHistoryBeforeLogout(
+        accountHash,
+        _nativeSessionEpoch,
+      );
       try {
         await backgroundReminderGateway.clearActiveAccount(accountHash);
       } catch (error) {
@@ -1759,6 +1984,9 @@ class AssignmentStore extends ChangeNotifier {
               ? '每日摘要未能更新：$detail'
               : '旧摘要未能清理：$detail');
         }
+        await _recordPluginScheduleOutcomes(
+          notificationService.lastScheduleOutcomes,
+        );
         try {
           await notificationService
               .rescheduleManual(_authenticated ? notebook.entries : []);
@@ -1769,6 +1997,9 @@ class AssignmentStore extends ChangeNotifier {
           final detail = notificationService.lastWarning ?? error.toString();
           _serviceWarnings.add('个人日程提醒未能更新或清理：$detail');
         }
+        await _recordPluginScheduleOutcomes(
+          notificationService.lastScheduleOutcomes,
+        );
       }
     }
     if (_manageBackgroundSchedule) {
@@ -1790,6 +2021,247 @@ class AssignmentStore extends ChangeNotifier {
       accountHash: accountHash,
       sessionEpoch: _nativeSessionEpoch,
     );
+  }
+
+  Future<void> _recordPluginScheduleOutcomes(
+    List<ReminderScheduleOutcome> outcomes,
+  ) async {
+    if (!_nativeReminderAvailable ||
+        !_reminderHistoryReady ||
+        outcomes.isEmpty) {
+      return;
+    }
+    final accountHash = _accountHash;
+    final epoch = _nativeSessionEpoch;
+    if (accountHash == null || epoch <= 0) return;
+    try {
+      final context =
+          await backgroundReminderGateway.acquireReminderObservationContext(
+        accountHash: accountHash,
+        sessionEpoch: epoch,
+      );
+      final result =
+          await backgroundReminderGateway.recordReminderScheduleOutcome(
+        context: context,
+        outcomes: outcomes,
+      );
+      if (result.warning != null) {
+        _serviceWarnings.add(result.warning!);
+      }
+    } on ReminderHistoryException catch (error) {
+      _serviceWarnings.add('提醒记录未能写入：${error.message}');
+    } catch (error) {
+      _serviceWarnings.add('提醒记录未能写入：$error');
+    }
+  }
+
+  Future<void> _recordManualCancellationOutcomes(
+    StudyNotebook previous,
+    StudyNotebook current,
+  ) async {
+    if (!_nativeReminderAvailable ||
+        !_reminderHistoryReady ||
+        !_authenticated) {
+      return;
+    }
+    final outcomes = <ReminderScheduleOutcome>[];
+    for (final entry in previous.entries) {
+      final next =
+          current.entries.where((item) => item.id == entry.id).firstOrNull;
+      final stillScheduled = next != null &&
+          !next.done &&
+          next.remind &&
+          next.at != null &&
+          next.at == entry.at &&
+          next.at!
+              .subtract(const Duration(minutes: 30))
+              .isAfter(DateTime.now());
+      if (entry.at == null || stillScheduled) continue;
+      final at = entry.at!.subtract(const Duration(minutes: 30));
+      outcomes.add(ReminderScheduleOutcome(
+        subjectKind: 'manual',
+        subjectId: entry.id,
+        logicalKey: 'manual:${entry.id}:${at.millisecondsSinceEpoch}',
+        category: 'personal',
+        stage: 'cancelled',
+        reasonCode: next == null ? 'removed' : 'scheduleReplaced',
+        observedAt: DateTime.now(),
+        scheduledAt: at,
+        expectedPayload: 'p:${entry.id}',
+        evidenceState: 'removed',
+      ));
+    }
+    await _recordPluginScheduleOutcomes(outcomes);
+  }
+
+  bool get reminderHistoryAvailable => _reminderHistoryReady;
+
+  ReminderObservationContext _historyReadContext() {
+    final accountHash = _accountHash;
+    if (!_nativeReminderAvailable ||
+        !_reminderHistoryReady ||
+        accountHash == null ||
+        _nativeSessionEpoch <= 0 ||
+        _reminderHistoryGeneration <= 0) {
+      throw const ReminderHistoryException(
+        'history_unavailable',
+        '提醒记录当前不可用',
+      );
+    }
+    return ReminderObservationContext(
+      accountHash: accountHash,
+      sessionEpoch: _nativeSessionEpoch,
+      historyGeneration: _reminderHistoryGeneration,
+      operationSequence: 0,
+    );
+  }
+
+  Future<ReminderHistoryPage> loadReminderHistory({
+    int? snapshotMaxId,
+    int? beforeId,
+    String? category,
+    List<ReminderSubjectRef> subjectRefs = const [],
+  }) =>
+      backgroundReminderGateway.listReminderHistory(
+        context: _historyReadContext(),
+        snapshotMaxId: snapshotMaxId,
+        beforeId: beforeId,
+        category: category,
+        subjectRefs: subjectRefs,
+      );
+
+  Future<ReminderSubjectEvidence> inspectReminderSubjects(
+    List<ReminderSubjectRef> refs,
+  ) =>
+      backgroundReminderGateway.inspectReminderSubjects(
+        context: _historyReadContext(),
+        subjectRefs: refs,
+      );
+
+  Future<ReminderExplanation> explainReminder({
+    required String kind,
+    required String id,
+  }) async {
+    final now = DateTime.now();
+    ReminderHealth? health;
+    PluginScheduleEvidenceSnapshot? plugin;
+    try {
+      health = await notificationService.inspectHealth();
+    } catch (_) {}
+    try {
+      plugin = await notificationService.readScheduleEvidence();
+    } catch (_) {}
+    ReminderSubjectEvidence? evidence;
+    final warnings = <String>[];
+    try {
+      final refs = switch (kind) {
+        'assignment' => [
+            for (final source in courseworkGroupFor(id)?.sources ??
+                [if (findAssignment(id) != null) findAssignment(id)!])
+              ReminderSubjectRef('assignment', source.id),
+          ],
+        'manual' => [ReminderSubjectRef('manual', id)],
+        'summary' => const [ReminderSubjectRef('summary', null)],
+        _ => <ReminderSubjectRef>[],
+      };
+      if (refs.isNotEmpty) {
+        evidence = await inspectReminderSubjects(refs);
+      }
+    } on ReminderHistoryException catch (error) {
+      warnings.add(error.message);
+    } catch (error) {
+      warnings.add('提醒证据暂时无法读取：$error');
+    }
+    if (kind == 'assignment') {
+      final group = courseworkGroupFor(id);
+      final primary = group?.primary ?? findAssignment(id);
+      if (primary == null) {
+        return ReminderExplanation(
+          checkedAt: now,
+          subjectKind: kind,
+          subjectId: id,
+          displayName: '事项已不在当前账号的本机记录中',
+          categories: const [
+            ReminderCategoryExplanation(
+              category: 'deadline',
+              status: ReminderExplanationStatus.ineligible,
+              reasonCodes: ['removed'],
+              nextScheduledAt: null,
+              evidenceAt: null,
+              actionLabel: null,
+            ),
+          ],
+          queryWarnings: warnings,
+        );
+      }
+      ReminderPlanState? plan;
+      if (_nativeReminderAvailable && _nativeSessionEpoch > 0) {
+        try {
+          plan = await backgroundReminderGateway.loadPlanState(
+            accountHash: _accountHash!,
+            sessionEpoch: _nativeSessionEpoch,
+          );
+        } catch (error) {
+          warnings.add('提醒规则状态暂时无法读取：$error');
+        }
+      }
+      return ReminderExplanationService.forAssignment(
+        primary: primary,
+        sources: group?.sources ?? [primary],
+        groupHidden: group?.hidden ?? false,
+        hiddenAssignmentIds: _hiddenAssignments.map((item) => item.id).toSet(),
+        unfollowedCourseKeys: _unfollowed,
+        plan: plan,
+        offsets: _reminderOffsetsMinutes,
+        newReminderEnabled:
+            _backgroundCheckSettings.newAssignmentReminderEnabled,
+        now: now,
+        evidence: evidence,
+        health: health,
+        pluginEvidence: plugin,
+        queryWarnings: warnings,
+      );
+    }
+    if (kind == 'manual') {
+      final entry = notebook.entries.where((item) => item.id == id).firstOrNull;
+      return ReminderExplanationService.forManual(
+        entry: entry,
+        entryId: id,
+        now: now,
+        evidence: evidence,
+        health: health,
+        pluginEvidence: plugin,
+        queryWarnings: warnings,
+      );
+    }
+    if (kind == 'summary') {
+      final summaryId = int.tryParse(id);
+      final notices = DailySummary.build(
+        courseAssignments,
+        _authenticated ? personal : PersonalWorkspace(),
+        now,
+        _lastSyncAt,
+      );
+      return ReminderExplanationService.forSummary(
+        personal: _authenticated ? personal : PersonalWorkspace(),
+        summaryId: summaryId,
+        now: now,
+        evidence: evidence,
+        health: health,
+        pluginEvidence: plugin,
+        queryWarnings: warnings,
+        notices: notices,
+      );
+    }
+    throw const ReminderHistoryException(
+      'invalid_history_argument',
+      '未知提醒事项类型',
+    );
+  }
+
+  Future<void> retryReminderRecovery() async {
+    await notificationService.recoverPendingSchedules();
+    await _afterAssignmentsChanged();
   }
 
   Future<void> _maybeMigrateLegacyAssignmentSchedules() async {
@@ -1899,6 +2371,32 @@ class AssignmentStore extends ChangeNotifier {
     if (automatic && (_serverBackoffUntil?.isAfter(startedAt) ?? false)) {
       await _reconcileBackgroundControls(now: startedAt);
       return;
+    }
+    if (trigger == BackgroundSyncTrigger.notificationSignal &&
+        notificationRemoteStart != null) {
+      final authorization =
+          await backgroundReminderGateway.authorizeNotificationRemoteStart(
+        notificationRemoteStart!,
+      );
+      if (authorization == NotificationRemoteAuthorization.outsideWindow) {
+        _syncSkipReason = BackgroundCheckResult.outsideWindowSkipReason;
+        _syncSkipReasonOperation = operation;
+        _syncSkipReasonGeneration = generation;
+        await _reconcileBackgroundControls(now: startedAt);
+        return;
+      }
+      if (authorization != NotificationRemoteAuthorization.granted) {
+        _error = '提醒任务的会话已变化，已跳过本次后台读取';
+        return;
+      }
+      if (!DaytimeCheckPolicy.isInWindow(_clock())) {
+        _syncSkipReason = BackgroundCheckResult.outsideWindowSkipReason;
+        _syncSkipReasonOperation = operation;
+        _syncSkipReasonGeneration = generation;
+        await _reconcileBackgroundControls(now: _clock());
+        return;
+      }
+      _remoteReadInvoked = true;
     }
     final attempted = startedAt;
     _lastSyncAttemptAt = attempted;

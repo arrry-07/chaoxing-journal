@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import '../services/assignment_store.dart';
 import '../services/background_reminder_gateway.dart';
 import '../services/daily_summary.dart';
@@ -195,6 +196,10 @@ class _HealthState extends State<ReminderHealthScreen>
               const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Text('权限开启和已安排不等于一定送达。厂商省电、锁屏设置与应用被强制停止都可能影响提醒。')),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text('先核对：系统通知权限 → 四个通知渠道 → 发送测试通知。'),
+              ),
               if (inspectionError.isNotEmpty)
                 Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -274,6 +279,36 @@ class _HealthState extends State<ReminderHealthScreen>
                             .openNotificationListenerSettingsResult,
                         destination: '通知使用权设置',
                       )),
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text('排查步骤'),
+                childrenPadding: const EdgeInsets.only(bottom: 8),
+                children: const [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '1. 确认系统通知权限和四个通知渠道已开启。\n'
+                      '2. 若使用学习通通知触发核对，授予通知使用权。\n'
+                      '3. 需要准时提醒时开启精确闹钟，并核对电池与后台设置。\n'
+                      '4. 仍不生效时，先点“发送测试通知”，再查看“提醒记录与原因”。',
+                    ),
+                  ),
+                ],
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('提醒记录与原因'),
+                subtitle: const Text('查看最近安排、延后、提交、撤销和受阻记录'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.go('/reminder-history'),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('每日摘要提醒状态'),
+                subtitle: const Text('查看摘要规则、系统渠道和最近排期证据'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.go('/reminder-status/summary/0'),
+              ),
               ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('本应用电池与后台设置'),
@@ -286,26 +321,37 @@ class _HealthState extends State<ReminderHealthScreen>
                         destination: '本应用电池与后台设置',
                         batterySettings: true,
                       )),
-              Text(
-                  '原生作业截止事件：${_nativeText((value) => '${value.pendingDeadlineCount} 条')}\n'
-                  '待处理新增作业事件：${_nativeText((value) => '${value.pendingNewCount} 条')}\n'
-                  '已安排摘要：${_localCount(health?.summaryPending)}\n'
-                  '已安排个人提醒：${_localCount(health?.manualPending)}\n'
-                  '新增提醒基线：$baselineText\n'
-                  '下次后台检查：${backgroundHealth?.nextCheckAt == null ? widget.store.nextBackgroundCheckAt?.toLocal().toString().substring(0, 16) ?? '未安排' : backgroundHealth!.nextCheckAt!.toLocal().toString().substring(0, 16)}${backgroundError != null && backgroundHealth?.nextCheckAt != null ? '（上次结果）' : ''}\n'
-                  '最近完整同步：${widget.store.lastSyncAt?.toLocal().toString().substring(0, 16) ?? '尚无完整同步'}'),
-              if (backgroundHealth?.migrationPending == true)
-                const Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: Text(
-                    '提醒迁移或快照恢复尚未完成，系统已暂停不确定的作业自动投递。',
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(bottom: 8),
+                title: const Text('技术信息'),
+                subtitle: const Text('事件计数、同步时间和最近后台失败'),
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                        '原生作业截止事件：${_nativeText((value) => '${value.pendingDeadlineCount} 条')}\n'
+                        '待处理新增作业事件：${_nativeText((value) => '${value.pendingNewCount} 条')}\n'
+                        '已安排摘要：${_localCount(health?.summaryPending)}\n'
+                        '已安排个人提醒：${_localCount(health?.manualPending)}\n'
+                        '新增提醒基线：$baselineText\n'
+                        '下次后台检查：${backgroundHealth?.nextCheckAt == null ? widget.store.nextBackgroundCheckAt?.toLocal().toString().substring(0, 16) ?? '未安排' : backgroundHealth!.nextCheckAt!.toLocal().toString().substring(0, 16)}${backgroundError != null && backgroundHealth?.nextCheckAt != null ? '（上次结果）' : ''}\n'
+                        '最近完整同步：${widget.store.lastSyncAt?.toLocal().toString().substring(0, 16) ?? '尚无完整同步'}'),
                   ),
-                ),
-              if (backgroundHealth?.lastFailure != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text('最近后台失败：${backgroundHealth!.lastFailure}'),
-                ),
+                  if (backgroundHealth?.migrationPending == true)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        '提醒迁移或快照恢复尚未完成，系统已暂停不确定的作业自动投递。',
+                      ),
+                    ),
+                  if (backgroundHealth?.lastFailure != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text('最近后台失败：${backgroundHealth!.lastFailure}'),
+                    ),
+                ],
+              ),
               const SizedBox(height: 12),
               Wrap(spacing: 12, children: [
                 OutlinedButton(

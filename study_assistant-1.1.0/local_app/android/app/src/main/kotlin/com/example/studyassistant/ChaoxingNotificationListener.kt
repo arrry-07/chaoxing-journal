@@ -3,6 +3,7 @@ package com.example.studyassistant
 import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import java.security.MessageDigest
 
 class ChaoxingNotificationListener : NotificationListenerService() {
@@ -31,12 +32,18 @@ class ChaoxingNotificationListener : NotificationListenerService() {
             )
         }.getOrNull() ?: return
         if (version <= account.pendingSignalVersion) return
-        BackgroundWorkScheduler.scheduleNotificationCheck(
+        val enqueue = BackgroundWorkScheduler.scheduleNotificationCheck(
             this,
             database,
             account.accountHash,
             version,
         )
+        if (enqueue.state == NotificationEnqueueState.FAILED) {
+            Log.w(
+                "ChaoxingNotificationListener",
+                "notification_signal_enqueue_failed:${enqueue.reasonCode}",
+            )
+        }
     }
 
     private fun sha256(value: String): String =

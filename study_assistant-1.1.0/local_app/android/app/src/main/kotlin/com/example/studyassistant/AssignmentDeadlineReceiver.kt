@@ -17,6 +17,13 @@ class AssignmentDeadlineReceiver : BroadcastReceiver() {
             account.sessionEpoch != event.sessionEpoch ||
             event.status != ReminderDatabase.STATUS_PENDING
         ) {
+            AssignmentNotificationPublisher.recordReceiverReason(
+                context,
+                database,
+                listOf(event),
+                "blocked",
+                "staleSession",
+            )
             return
         }
         if (ZonedDateTime.now().hour < 8) {
@@ -30,8 +37,22 @@ class AssignmentDeadlineReceiver : BroadcastReceiver() {
                     context,
                     event.copy(notifyAt = BackgroundWorkScheduler.nextWindowStart()),
                 )
+                AssignmentNotificationPublisher.recordReceiverReason(
+                    context,
+                    database,
+                    listOf(event),
+                    "deferred",
+                    "outsideWindow",
+                )
             } else {
                 database.cancelEvent(event.eventId)
+                AssignmentNotificationPublisher.recordReceiverReason(
+                    context,
+                    database,
+                    listOf(event),
+                    "cancelled",
+                    "deadlinePassed",
+                )
             }
             return
         }

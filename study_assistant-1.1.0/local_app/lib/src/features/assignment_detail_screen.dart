@@ -498,6 +498,14 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                 icon: const Icon(Icons.copy_outlined),
                 label: Text('复制$_itemLabel链接'),
               ),
+              TextButton.icon(
+                onPressed: () => context.go(
+                  '/reminder-status/assignment/'
+                  '${Uri.encodeComponent(assignment.id)}',
+                ),
+                icon: const Icon(Icons.notifications_active_outlined),
+                label: const Text('提醒状态'),
+              ),
             ]),
             const SizedBox(height: 12),
             if (!assignment.isCompleted)

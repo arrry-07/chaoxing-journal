@@ -612,35 +612,37 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       required String label,
       required String message,
       Key? labelKey,
-    }) =>
-        Semantics(
-          button: true,
-          label: message,
-          child: ExcludeSemantics(
-            child: Tooltip(
-              message: message,
-              child: Material(
-                type: MaterialType.transparency,
-                child: InkWell(
-                  onTap: () => _openFilters(options),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 48),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(icon, size: 18, color: actionColor),
-                        const SizedBox(width: 8),
-                        Flexible(
-                            child:
-                                Text(label, key: labelKey, style: textStyle)),
-                      ]),
-                    ),
+    }) {
+      void onTap() => _openFilters(options);
+      return Semantics(
+        button: true,
+        label: message,
+        onTap: onTap,
+        child: ExcludeSemantics(
+          child: Tooltip(
+            message: message,
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                onTap: onTap,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(icon, size: 18, color: actionColor),
+                      const SizedBox(width: 8),
+                      Flexible(
+                          child: Text(label, key: labelKey, style: textStyle)),
+                    ]),
                   ),
                 ),
               ),
             ),
           ),
-        );
+        ),
+      );
+    }
 
     final filterEntry = entry(
       icon: Icons.filter_list,

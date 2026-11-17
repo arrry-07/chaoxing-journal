@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../app/unsaved_edit_guard.dart';
 import '../models/study_notebook.dart';
@@ -391,6 +392,17 @@ class _EditorState extends State<ManualEntryEditor> {
                               remind = v;
                               _dirty = true;
                             })),
+                if (widget.entry != null)
+                  TextButton.icon(
+                    onPressed: busy
+                        ? null
+                        : () => context.go(
+                              '/reminder-status/manual/'
+                              '${Uri.encodeComponent(widget.entry!.id)}',
+                            ),
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    label: const Text('提醒状态'),
+                  ),
                 TextFormField(
                     controller: minutes,
                     enabled: !busy,

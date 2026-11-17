@@ -2,6 +2,15 @@
 
 安装包与原始发布说明见 [Releases](https://github.com/arrry-07/chaoxing-journal/releases)。1.2.2–1.2.6 曾以本地体验包验证，没有对应公开 Release；不要把历史本地包文件名当成可下载地址。
 
+## 1.8.10（77） — 提醒记录、单项原因与可用性修复（2026-11-18 正式发布）
+
+- 新增本机提醒记录与单项原因：最近 30 天、每账号最多 500 条，按账号和历史代次隔离，退出登录清理；记录页支持类别筛选和分页，事项页显示规则原因、下一次计划、系统排期证据和查询时间。提醒体检、作业详情、已保存个人日程和每日摘要增加入口。
+- 原生调度升级到数据库 v6：`notification_attempts` 保存 claim token、WorkSpec、阶段和部分消费边界；通知 attempting、remoteAuthorized、windowDeferred、settled 状态与授权入口覆盖跨午夜、进程消失、旧回调和账号/epoch 轮换。释放条件允许消费水位在 claim 范围内前进，同时保留更高 pending 与 consumed。
+- 通知任务名、tag、状态查询和取消都按账号与 session epoch 作用域；Worker 只接管同一 WorkSpec 的旧 claim，入队结果通过 WorkInfo 确认，失败使用 10 分钟指数退避；后台远端读取必须先通过原生授权，Dart 在授权后再次复核窗口，并返回 `remoteReadInvoked`。
+- 新增 `reminder_history` 与 `reminder_schedule_evidence`：原生发布出口记录 submitted、blocked、cancelled、deferred，插件排期记录 scheduled/recoveryPending/cancelFailed，并通过映射核对系统 pending/active；历史裁剪水位先持久化再删除，重复 observationId 幂等，裁剪后迟到结果返回 expired。
+- 六项可用性修复：首页筛选/排序读屏激活与普通触摸共用闭包；预览状态文字改用 `Journal.ink`；退出入口和确认按钮明确“退出并清理本机记录”，可先进入备份页再返回；统计文案说明已关注课程、账号考试和提交未知口径；日历刷新显示同步中、上次成功和失败保留缓存；提醒设置标明即时保存与需保存区域，体检先给排查步骤并折叠技术信息。
+- 验证：全量 Flutter `1322 passed / 1 skipped`；Dart 分析无问题；隔离 MuMu API35 仪器测试 `64 tests / 2 skipped / 0 failed`；正式包与设备回下载待发布记录补充。
+
 ## 1.8.09（76） — 提醒撤销、跨午夜领取与队列竞态修复（2026-11-17 正式发布）
 
 - 个人提醒 committed journal 在已投递列表查询失败时，只撤销有明确 `p:` payload 的待投递 manual 提醒；无法证明的已投递提醒保留 journal，并分别报告“已取消可确认的待投递提醒”和“系统可见通知完整性未确认”。其他通知类别、旧版 journal 和隐私清理保护不变。

@@ -1,10 +1,13 @@
 package com.example.studyassistant
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.os.Build
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,6 +33,15 @@ class AssignmentNotificationPublisherTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            runCatching {
+                InstrumentationRegistry.getInstrumentation().uiAutomation
+                    .grantRuntimePermission(
+                        context.packageName,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    )
+            }
+        }
         notificationManager = context.getSystemService(NotificationManager::class.java)
         database = ReminderDatabase.get(context)
         accountHash = "instrumentation-disabled-channel-${System.nanoTime()}"

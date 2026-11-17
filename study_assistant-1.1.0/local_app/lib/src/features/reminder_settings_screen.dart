@@ -176,6 +176,16 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                     '保存后会重新安排所有未完成作业的本地通知，自定义提醒支持精确到分钟',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
+                  const SizedBox(height: 8),
+                  const Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text(
+                        '即时保存：通知详情、后台检查、通知监听和新增提醒开关，切换后立即生效。\n'
+                        '需要保存：下方“提醒时间规则”，修改后必须点击“保存提醒规则”。',
+                      ),
+                    ),
+                  ),
                   if (ReminderRuleStore.requiresReview(_offsets.toList())) ...[
                     const SizedBox(height: 12),
                     Card(
@@ -376,6 +386,27 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                     ),
                   ),
                   const SizedBox(height: 16),
+                  Text(
+                    '提醒时间规则（需保存）',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _savingRules
+                        ? '正在提交提醒规则…'
+                        : _ruleDirty
+                            ? '当前有未保存的提醒规则修改'
+                            : '提醒规则已保存',
+                    style: TextStyle(
+                      color: _ruleDirty
+                          ? Theme.of(context).colorScheme.error
+                          : Journal.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),

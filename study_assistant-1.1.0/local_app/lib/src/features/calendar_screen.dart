@@ -26,6 +26,8 @@ class _CalendarScreenState extends State<CalendarScreen>
   late DateTime today;
   late DateTime month;
   DateTime? selected;
+  bool _refreshing = false;
+  String? _refreshMessage;
 
   @override
   void initState() {
@@ -64,6 +66,39 @@ class _CalendarScreenState extends State<CalendarScreen>
         month = DateTime(month.year, month.month + delta);
         selected = DateTime(month.year, month.month);
       });
+
+  Future<void> _refresh() async {
+    if (_refreshing || widget.store.isLoading) return;
+    setState(() {
+      _refreshing = true;
+      _refreshMessage = null;
+    });
+    final startedAt = DateTime.now();
+    try {
+      await widget.store.syncAssignments();
+      if (!mounted) return;
+      final last = widget.store.lastSyncAt;
+      final failed = widget.store.error != null;
+      setState(() {
+        _refreshMessage = failed
+            ? last == null
+                ? '本次刷新失败，且没有可用的本机缓存；请到同步详情重试'
+                : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）'
+            : '本次刷新已完成（${DateFormat('HH:mm:ss').format(startedAt)}）';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      final last = widget.store.lastSyncAt;
+      setState(() {
+        _refreshMessage = last == null
+            ? '本次刷新失败：$error'
+            : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）：$error';
+      });
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: widget.store,
@@ -124,9 +159,32 @@ class _CalendarScreenState extends State<CalendarScreen>
                 const Spacer(),
                 IconButton(
                     tooltip: '刷新',
-                    onPressed: widget.store.syncAssignments,
-                    icon: const Icon(Icons.sync))
+                    onPressed:
+                        _refreshing || widget.store.isLoading ? null : _refresh,
+                    icon: _refreshing || widget.store.isLoading
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.sync))
               ]),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  _refreshing || widget.store.isLoading
+                      ? '正在刷新${widget.store.lastSyncAt == null ? '' : '；上次成功 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'}…'
+                      : _refreshMessage ??
+                          (widget.store.lastSyncAt == null
+                              ? '尚未成功同步；当前仅显示本机已有记录'
+                              : '上次成功同步 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _refreshMessage?.contains('失败') == true
+                        ? Theme.of(context).colorScheme.error
+                        : Journal.muted,
+                  ),
+                ),
+              ),
               Card(
                   margin: EdgeInsets.zero,
                   child: Padding(
