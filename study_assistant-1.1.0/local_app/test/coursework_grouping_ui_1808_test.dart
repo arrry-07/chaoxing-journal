@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/local_records_screen.dart';
+import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
@@ -104,6 +105,18 @@ void main() {
     expect(find.text('共 2 份作业'), findsOneWidget);
     expect(find.text('提交未知 1 份'), findsOneWidget);
     expect(find.text('待完成 1 份'), findsOneWidget);
+  });
+
+  testWidgets('profile summary counts grouped coursework', (tester) async {
+    final store = _store();
+    addTearDown(store.dispose);
+    store.replaceAssignmentsForTest([formal, noticeA, noticeB, work]);
+
+    await tester.pumpWidget(MaterialApp(home: ProfileScreen(store: store)));
+    await tester.scrollUntilVisible(find.text('学习记录'), 300);
+
+    expect(find.text('2 项课业 · 0 条变化'), findsOneWidget);
+    expect(find.textContaining('3 条作业'), findsNothing);
   });
 
   testWidgets('detail page exposes every original source read-only',

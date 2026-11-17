@@ -89,7 +89,7 @@ class ProfileScreen extends StatelessWidget {
                         icon: Icons.inventory_2_outlined,
                         title: '学习记录',
                         subtitle:
-                            '${store.assignments.length} 条作业 · ${store.changes.length} 条变化',
+                            '${store.localRecordGroups.length} 项课业 · ${store.changes.length} 条变化',
                         onTap: () => context.push('/profile/records'),
                       ),
                     ],
