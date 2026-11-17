@@ -24,6 +24,17 @@ class ExamTimelineStamp {
       clock: '${two(time.hour)}:${two(time.minute)}',
     );
   }
+
+  /// Long windows read as a range so an opening date alone cannot look expired.
+  static ExamTimelineStamp _range(ExamWallTime start, ExamWallTime end) {
+    final from = _fromWallTime(start);
+    final endYear = end.year != start.year ? '${end.year}年' : '';
+    return ExamTimelineStamp(
+      key: 'range:${from.key}:${end.year ?? 'notice'}:${end.month}:${end.day}',
+      heading: '${from.heading}–$endYear${end.month}月${end.day}日',
+      clock: from.clock,
+    );
+  }
 }
 
 /// Display-only evidence. These labels never change reminder or calendar trust.
@@ -75,8 +86,31 @@ class ExamSchedulePresentation {
         : ranges.length == 1
             ? ranges.values.single.start
             : null;
-    final timeline =
-        wallStart == null ? null : ExamTimelineStamp._fromWallTime(wallStart);
+    ExamWallTime? wallEnd;
+    if (exam.endTrusted && exam.endAt != null) {
+      final value = AssignmentQuery.beijing(exam.endAt!);
+      wallEnd = ExamWallTime(value.year, value.month, value.day, value.hour,
+          value.minute, value.second);
+    } else if (ranges.length == 1) {
+      wallEnd = ranges.values.single.end;
+    } else if (trustedStart != null &&
+        exam.durationMinutes != null &&
+        exam.durationMinutes! > 0) {
+      final value = AssignmentQuery.beijing(
+          trustedStart.add(Duration(minutes: exam.durationMinutes!)));
+      wallEnd = ExamWallTime(value.year, value.month, value.day, value.hour,
+          value.minute, value.second);
+    }
+    final crossDay = wallStart != null &&
+        wallEnd != null &&
+        (wallEnd.year != wallStart.year ||
+            wallEnd.month != wallStart.month ||
+            wallEnd.day != wallStart.day);
+    final timeline = wallStart == null
+        ? null
+        : crossDay
+            ? ExamTimelineStamp._range(wallStart, wallEnd)
+            : ExamTimelineStamp._fromWallTime(wallStart);
     ExamSchedulePresentation result(
             List<String> card, List<String> detail, String? note) =>
         ExamSchedulePresentation(card, detail, note, timeline: timeline);

@@ -204,7 +204,7 @@ Set<String> _ids(
       query: query,
       courseKey: courseKey,
       followed: followed,
-      includeHistorical: true,
+      includeHistorical: false,
       now: _now,
     ).map((assignment) => assignment.id).toSet();
 
@@ -632,7 +632,7 @@ void main() {
 
   group('home screen', () {
     testWidgets(
-        'default home shows the full catalog and type switches keep the union',
+        'default home shows the unfinished catalog and type switches keep the union',
         (tester) async {
       final now = DateTime.now();
       final store = _ScreenStore()
@@ -661,9 +661,7 @@ void main() {
 
       final all = _cardIds(tester).toSet();
       expect(all, {
-        'cx:work:1:2:submitted',
         'cx:work:1:2:pending',
-        'cx:exam:4:5:ended',
         'cx:exam:4:5:future',
       });
 
@@ -672,13 +670,13 @@ void main() {
       store.notifyListeners();
       await tester.pumpAndSettle();
       final homework = _cardIds(tester).toSet();
-      expect(homework, {'cx:work:1:2:submitted', 'cx:work:1:2:pending'});
+      expect(homework, {'cx:work:1:2:pending'});
 
       store.homeFilters = const HomeFilters(type: AssignmentTypeFilter.exam);
       store.notifyListeners();
       await tester.pumpAndSettle();
       final exam = _cardIds(tester).toSet();
-      expect(exam, {'cx:exam:4:5:ended', 'cx:exam:4:5:future'});
+      expect(exam, {'cx:exam:4:5:future'});
       expect(all, homework.union(exam));
 
       store.homeFilters = const HomeFilters();

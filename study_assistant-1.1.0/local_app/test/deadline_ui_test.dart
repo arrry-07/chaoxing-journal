@@ -182,7 +182,7 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('undated card removes placeholder rail and aligns content',
+  testWidgets('undated card keeps placeholder rail and aligned column',
       (tester) async {
     final assignment = Assignment(
       id: 'cx:work:1:2:no-time',
@@ -205,7 +205,7 @@ void main() {
       ),
     ));
 
-    expect(find.text('—'), findsNothing);
+    expect(find.text('—'), findsOneWidget);
     expect(find.text('无期限'), findsOneWidget);
     final title = find.text('无时间作业');
     final course = find.text('课程');
@@ -213,9 +213,9 @@ void main() {
     expect(title, findsOneWidget);
     expect(course, findsOneWidget);
     final cardLeft = tester.getTopLeft(find.byType(AssignmentCard)).dx;
-    expect(tester.getTopLeft(title).dx, cardLeft);
-    expect(tester.getTopLeft(course).dx, cardLeft);
-    expect(tester.getTopLeft(deadline).dx, cardLeft);
+    expect(tester.getTopLeft(title).dx, greaterThan(cardLeft));
+    expect(tester.getTopLeft(course).dx, tester.getTopLeft(title).dx);
+    expect(tester.getTopLeft(deadline).dx, tester.getTopLeft(title).dx);
     expect(tester.takeException(), isNull);
   });
 

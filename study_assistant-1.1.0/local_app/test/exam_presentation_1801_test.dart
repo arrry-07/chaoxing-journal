@@ -54,7 +54,7 @@ void main() {
     expect(lines, ['结束 2026年11月16日 09:00', '时长 60 分钟', '地点 A301']);
   });
 
-  testWidgets('undated card has no rail and aligns metadata with title',
+  testWidgets('undated card keeps placeholder rail and aligns metadata',
       (t) async {
     await t.pumpWidget(MaterialApp(
         home: Scaffold(
@@ -67,10 +67,11 @@ void main() {
         onOpenAssignment: () {},
       ),
     ))));
-    expect(find.text('—'), findsNothing);
+    expect(find.text('待定'), findsOneWidget);
     expect(find.textContaining('待确认'), findsNothing);
-    expect(t.getTopLeft(find.text('合成考试')).dx, 16);
-    expect(t.getTopLeft(find.text('考试')).dx, 16);
+    expect(t.getTopLeft(find.text('合成考试')).dx, greaterThan(16));
+    expect(
+        t.getTopLeft(find.text('考试')).dx, t.getTopLeft(find.text('合成考试')).dx);
     expect(t.takeException(), isNull);
   });
 

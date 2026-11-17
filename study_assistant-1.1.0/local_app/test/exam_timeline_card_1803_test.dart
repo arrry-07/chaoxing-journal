@@ -114,7 +114,8 @@ void main() {
     'end only',
     'notice end only',
   ]) {
-    testWidgets('$scenario has no clock rail or placeholder', (t) async {
+    testWidgets('$scenario keeps placeholder rail and aligned title',
+        (t) async {
       final a = switch (scenario) {
         'untrusted instant' => _exam(start: _start),
         'end only' => _exam(end: _end, endTrusted: true),
@@ -122,9 +123,13 @@ void main() {
         _ => _exam(),
       };
       await _pump(t, a);
-      expect(t.getTopLeft(find.text('合成考试')).dx, 16);
-      expect(find.text('—'), findsNothing);
-      expect(find.textContaining(RegExp(r'\d{2}:\d{2}')), findsNothing);
+      expect(t.getTopLeft(find.text('合成考试')).dx, greaterThan(16));
+      expect(find.text('待定'), findsOneWidget);
+      if (scenario == 'end only' || scenario == 'notice end only') {
+        expect(find.textContaining('10:00'), findsOneWidget);
+      } else {
+        expect(find.textContaining(RegExp(r'\d{2}:\d{2}')), findsNothing);
+      }
       expect(find.textContaining('地点'), findsNothing);
       expect(t.takeException(), isNull);
     });

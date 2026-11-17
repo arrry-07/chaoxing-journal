@@ -101,7 +101,7 @@ void main() {
     ]);
     addTearDown(store.dispose);
     await _home(tester, store);
-    expect(find.text('11月16日'), findsOneWidget);
+    expect(find.text('11月16日–11月30日'), findsOneWidget);
     expect(find.text('07:06'), findsOneWidget);
     expect(find.textContaining('考试时间：'), findsNothing);
     final cards =
