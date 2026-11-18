@@ -79,65 +79,67 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             routerState.uri.queryParameters['from'];
         final hideTabBar = location.startsWith('/assignments/');
         return Scaffold(
-          body: SafeArea(bottom: hideTabBar, child: widget.child),
-          bottomNavigationBar:
-              Column(mainAxisSize: MainAxisSize.min, children: [
-            AnimatedBuilder(
-                animation: widget.assignmentStore,
-                builder: (context, _) {
-                  final message = widget.assignmentStore.returnCheckMessage;
-                  if (message == null) return const SizedBox.shrink();
-                  final epoch = widget.assignmentStore.accountEpoch;
-                  return TimedReturnCheck(
-                    key: ValueKey((epoch, message)),
-                    message: message,
-                    onDismiss: () {
-                      if (widget.assignmentStore.accountEpoch == epoch &&
-                          widget.assignmentStore.returnCheckMessage ==
-                              message) {
-                        widget.assignmentStore.dismissReturnCheck();
-                      }
+          body: SafeArea(bottom: false, child: widget.child),
+          bottomNavigationBar: SafeArea(
+            top: false,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              AnimatedBuilder(
+                  animation: widget.assignmentStore,
+                  builder: (context, _) {
+                    final message = widget.assignmentStore.returnCheckMessage;
+                    if (message == null) return const SizedBox.shrink();
+                    final epoch = widget.assignmentStore.accountEpoch;
+                    return TimedReturnCheck(
+                      key: ValueKey((epoch, message)),
+                      message: message,
+                      onDismiss: () {
+                        if (widget.assignmentStore.accountEpoch == epoch &&
+                            widget.assignmentStore.returnCheckMessage ==
+                                message) {
+                          widget.assignmentStore.dismissReturnCheck();
+                        }
+                      },
+                    );
+                  }),
+              if (AppUpdateScope.maybeOf(context) case final updates?)
+                UpdateDownloadBanner(controller: updates),
+              if (!hideTabBar)
+                Container(
+                  decoration: const BoxDecoration(
+                    border: Border(top: BorderSide(color: Journal.rule)),
+                  ),
+                  child: NavigationBar(
+                    height: 72,
+                    selectedIndex: _indexFor(location, from: fromParam),
+                    onDestinationSelected: (index) {
+                      unawaited(_selectDestination(index));
                     },
-                  );
-                }),
-            if (AppUpdateScope.maybeOf(context) case final updates?)
-              UpdateDownloadBanner(controller: updates),
-            if (!hideTabBar)
-              Container(
-                decoration: const BoxDecoration(
-                  border: Border(top: BorderSide(color: Journal.rule)),
+                    destinations: const [
+                      NavigationDestination(
+                        icon: Icon(Icons.assignment_outlined),
+                        selectedIcon: Icon(Icons.assignment),
+                        label: '首页',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.calendar_today_outlined),
+                        selectedIcon: Icon(Icons.calendar_today),
+                        label: '日历',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.bar_chart_outlined),
+                        selectedIcon: Icon(Icons.bar_chart),
+                        label: '统计',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.person_outline),
+                        selectedIcon: Icon(Icons.person),
+                        label: '我的',
+                      ),
+                    ],
+                  ),
                 ),
-                child: NavigationBar(
-                  height: 72,
-                  selectedIndex: _indexFor(location, from: fromParam),
-                  onDestinationSelected: (index) {
-                    unawaited(_selectDestination(index));
-                  },
-                  destinations: const [
-                    NavigationDestination(
-                      icon: Icon(Icons.assignment_outlined),
-                      selectedIcon: Icon(Icons.assignment),
-                      label: '首页',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.calendar_today_outlined),
-                      selectedIcon: Icon(Icons.calendar_today),
-                      label: '日历',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.bar_chart_outlined),
-                      selectedIcon: Icon(Icons.bar_chart),
-                      label: '统计',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.person_outline),
-                      selectedIcon: Icon(Icons.person),
-                      label: '我的',
-                    ),
-                  ],
-                ),
-              ),
-          ]),
+            ]),
+          ),
         );
       },
     );

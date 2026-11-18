@@ -29,6 +29,22 @@ void main() {
     return store;
   }
 
+  Future<void> reveal(WidgetTester tester, Finder finder) async {
+    if (finder.evaluate().isEmpty) {
+      await tester.scrollUntilVisible(
+        finder,
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
+    } else {
+      await Scrollable.ensureVisible(
+        tester.element(finder),
+        alignment: 0.5,
+      );
+    }
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('detail renders the deadline in Beijing time', (tester) async {
     await launch(tester);
     expect(find.textContaining('2026年11月5日 08:30'), findsOneWidget);
@@ -53,6 +69,14 @@ void main() {
     expect(requests.every((c) => c.arguments['url'] == _url), isTrue);
     expect(store.item.isCompleted, isFalse);
     expect(find.textContaining('未能打开学习通'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('assignment-open-result')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('assignment-records-result')),
+      findsNothing,
+    );
   });
 
   testWidgets(
@@ -70,13 +94,17 @@ void main() {
   testWidgets('failed hiding retains detail and reports a retryable error',
       (tester) async {
     final store = await launch(tester);
-    await tester.ensureVisible(find.text('在本机隐藏此作业'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('在本机隐藏此作业'));
+    final hide = find.text('在本机隐藏此作业');
+    await reveal(tester, hide);
+    await tester.tap(hide);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.byType(AssignmentDetailScreen), findsOneWidget);
     expect(find.textContaining('隐藏失败'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('assignment-records-result')),
+      findsOneWidget,
+    );
     expect(store.item.isCompleted, isFalse);
   });
 
@@ -121,6 +149,14 @@ void main() {
     expect(find.textContaining('未能启动浏览器'), findsOneWidget);
     expect(find.text('刷新作业信息'), findsOneWidget);
     expect(find.text('复制作业链接'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('assignment-open-result')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('assignment-records-result')),
+      findsNothing,
+    );
   });
 
   testWidgets('invalid cached URL is not passed to browser or clipboard',
@@ -132,22 +168,29 @@ void main() {
       return true;
     });
     await launch(tester, url: 'https://evil.example/work/task?workId=3');
-    final button = tester
-        .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '打开作业网页'));
+    final open = find.widgetWithText(OutlinedButton, '打开作业网页');
+    await reveal(tester, open);
+    final button = tester.widget<OutlinedButton>(open);
     expect(button.onPressed, isNull);
     expect(calls, 0);
     expect(find.textContaining('链接暂不可用'), findsOneWidget);
-    final copy =
-        tester.widget<TextButton>(find.widgetWithText(TextButton, '复制作业链接'));
+    final copyFinder = find.widgetWithText(TextButton, '复制作业链接');
+    await reveal(tester, copyFinder);
+    final copy = tester.widget<TextButton>(copyFinder);
     expect(copy.onPressed, isNull);
   });
 
   testWidgets('manual refresh requests fresh assignment data', (tester) async {
     final store = await launch(tester, url: null);
-    await tester.ensureVisible(find.text('刷新作业信息'));
-    await tester.tap(find.text('刷新作业信息'));
+    final refresh = find.text('刷新作业信息');
+    await reveal(tester, refresh);
+    await tester.tap(refresh);
     await tester.pumpAndSettle();
     expect(store.refreshes, 1);
+    expect(
+      find.byKey(const ValueKey('assignment-records-result')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('copy requires an explicit warning confirmation', (tester) async {
@@ -163,14 +206,19 @@ void main() {
         .instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, null));
     await launch(tester);
-    await tester.ensureVisible(find.text('复制作业链接'));
-    await tester.tap(find.text('复制作业链接'));
+    final copy = find.text('复制作业链接');
+    await reveal(tester, copy);
+    await tester.tap(copy);
     await tester.pumpAndSettle();
     expect(copied, isEmpty);
     expect(find.textContaining('本人设备'), findsOneWidget);
     await tester.tap(find.text('确认复制'));
     await tester.pumpAndSettle();
     expect(copied, [_url]);
+    expect(
+      find.byKey(const ValueKey('assignment-records-result')),
+      findsOneWidget,
+    );
   });
 }
 
