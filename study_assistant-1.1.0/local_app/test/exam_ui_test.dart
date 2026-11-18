@@ -285,7 +285,10 @@ void main() {
     expect(find.text('地点 第一教学楼三楼 A301 多媒体教室'), findsOneWidget);
     expect(find.text('考试 · 未开始 · 待参加'), findsOneWidget);
     expect(find.textContaining('今天截止'), findsNothing);
-    await _tap(tester, '在学习通内查看考试');
+    final openExam = find.byTooltip('在学习通内查看考试');
+    await tester.ensureVisible(openExam);
+    await tester.tap(openExam);
+    await tester.pumpAndSettle();
     expect(opens, 1);
     expect(details, 0);
     await _tap(tester, exam.title);
@@ -314,7 +317,7 @@ void main() {
     expect(find.text('开考时间待确认'), findsNothing);
     expect(find.text('结束时间待确认'), findsNothing);
     expect(find.text('地点 通知未提供实体考场'), findsNothing);
-    expect(find.text('在学习通内查看考试通知'), findsOneWidget);
+    expect(find.byTooltip('在学习通内查看考试通知'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

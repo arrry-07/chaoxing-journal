@@ -59,16 +59,21 @@ void main() {
         )));
         await t.pumpAndSettle();
         expect(t.takeException(), isNull, reason: '$width/$scale');
-        final action = find.text('在学习通内打开作业');
-        final actionButton = find.widgetWithText(TextButton, '在学习通内打开作业');
+        final actionButton =
+            find.byKey(const ValueKey('open-assignment-cx:work:1:2:3'));
+        expect(find.byTooltip('在学习通内打开作业'), findsOneWidget);
         expect(t.getSize(actionButton).height, greaterThanOrEqualTo(48));
+        expect(t.getSize(actionButton).width, greaterThanOrEqualTo(48));
+        if (scale >= 2.0) {
+          expect(find.text('打开作业'), findsOneWidget);
+        }
         final titleRect = t.getRect(find.text(item.title));
         final actionRect = t.getRect(actionButton);
         final timeRect = t.getRect(find.text('15:23'));
         expect(titleRect.overlaps(actionRect), isFalse,
             reason: '$width/$scale');
         expect(titleRect.overlaps(timeRect), isFalse, reason: '$width/$scale');
-        await t.tap(action);
+        await t.tap(actionButton);
         expect(opens, 1);
         expect(details, 0);
         await t.tap(find.text(item.title));
@@ -78,8 +83,9 @@ void main() {
         await t.pumpAndSettle();
         if (width == 390 && scale == 1) {
           expect(
-              (t.getCenter(find.text('待提交')).dy - t.getCenter(action).dy).abs(),
-              lessThan(4));
+              (t.getCenter(find.text('待提交')).dy - t.getCenter(actionButton).dy)
+                  .abs(),
+              lessThan(6));
         }
         if (const bool.fromEnvironment('CAPTURE_UI')) {
           await t.runAsync(() async {

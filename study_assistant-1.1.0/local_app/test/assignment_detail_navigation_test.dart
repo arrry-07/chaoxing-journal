@@ -133,7 +133,7 @@ void main() {
     });
     await launch(tester, url: 'https://evil.example/work/task?workId=3');
     final button = tester
-        .widget<FilledButton>(find.widgetWithText(FilledButton, '打开作业网页'));
+        .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '打开作业网页'));
     expect(button.onPressed, isNull);
     expect(calls, 0);
     expect(find.textContaining('链接暂不可用'), findsOneWidget);

@@ -156,8 +156,9 @@ class _CalendarScreenState extends State<CalendarScreen>
         agenda.sort((a, b) => a.timelineAt!.compareTo(b.timelineAt!));
         final days = DateTime(month.year, month.month + 1, 0).day,
             leading = month.weekday % 7;
-        final large = MediaQuery.textScalerOf(context).scale(14) > 21;
-        final cellHeight = large ? 82.0 : 48.0;
+        final textScaler = MediaQuery.textScalerOf(context);
+        final large = textScaler.scale(14) >= 19.5;
+        final cellHeight = large ? textScaler.scale(48) + 28 : 48.0;
         return ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             children: [
@@ -182,10 +183,13 @@ class _CalendarScreenState extends State<CalendarScreen>
                     onPressed:
                         _refreshing || widget.store.isLoading ? null : _refresh,
                     icon: _refreshing || widget.store.isLoading
-                        ? const SizedBox.square(
-                            dimension: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
+                        ? MediaQuery.disableAnimationsOf(context)
+                            ? const Icon(Icons.hourglass_top_rounded, size: 20)
+                            : const SizedBox.square(
+                                dimension: 20,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
                         : const Icon(Icons.sync))
               ]),
               Padding(
@@ -334,7 +338,10 @@ class _CalendarScreenState extends State<CalendarScreen>
                 AssignmentCard(
                     assignment: a,
                     examSources: courseSources,
+                    displayIndex: widget.store.homeDisplayIndex,
                     now: now,
+                    compact: widget.store.display.compact,
+                    countdown: widget.store.display.countdown,
                     showFullDeadline: false,
                     onTap: () => context
                         .push('/assignments/${Uri.encodeComponent(a.id)}')),

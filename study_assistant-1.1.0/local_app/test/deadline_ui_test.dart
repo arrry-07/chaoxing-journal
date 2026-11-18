@@ -128,7 +128,10 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(find.text('待保存预览'), findsOneWidget);
     expect(
-      tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+      tester
+          .widget<IconButton>(
+              find.byKey(const ValueKey('open-assignment-cx:work:1:2:task')))
+          .onPressed,
       isNull,
     );
 

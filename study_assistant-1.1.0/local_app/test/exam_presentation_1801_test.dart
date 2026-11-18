@@ -70,8 +70,13 @@ void main() {
     expect(find.text('待定'), findsOneWidget);
     expect(find.textContaining('待确认'), findsNothing);
     expect(t.getTopLeft(find.text('合成考试')).dx, greaterThan(16));
-    expect(
-        t.getTopLeft(find.text('考试')).dx, t.getTopLeft(find.text('合成考试')).dx);
+    final pill = find.ancestor(
+      of: find.text('考试'),
+      matching: find.byWidgetPredicate(
+        (w) => w.runtimeType.toString() == 'CourseworkStatusPill',
+      ),
+    );
+    expect(t.getTopLeft(pill).dx, t.getTopLeft(find.text('合成考试')).dx);
     expect(t.takeException(), isNull);
   });
 
