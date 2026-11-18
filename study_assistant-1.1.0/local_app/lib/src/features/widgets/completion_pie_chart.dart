@@ -4,6 +4,20 @@ import 'package:flutter/material.dart';
 import '../../app/journal.dart';
 import '../../services/assignment_statistics.dart';
 
+class CompletionRingSegment {
+  const CompletionRingSegment({
+    required this.index,
+    required this.start,
+    required this.sweep,
+  });
+
+  final int index;
+  final double start;
+  final double sweep;
+
+  Color get color => CompletionPieChart.categoryColors[index];
+}
+
 class CompletionPieChart extends StatelessWidget {
   const CompletionPieChart(
       {super.key, required this.statistics, this.diameter = 176});
@@ -12,24 +26,33 @@ class CompletionPieChart extends StatelessWidget {
   static const ringThickness = 10.0;
   static const trackColor = Journal.rule;
   static final completedColor = Color.lerp(Journal.ink, Journal.sage, .30)!;
-  static const _semanticColors = [
-    Journal.ink,
-    Color(0xFF9A6230),
-    Journal.berry,
-    Journal.muted
-  ];
-  static final legendColors = <Color>[
+  static final categoryColors = <Color>[
     completedColor,
-    for (var i = 1; i < _semanticColors.length; i++)
-      Color.lerp(_semanticColors[i], Journal.paper, .12)!,
+    Color.lerp(Journal.ochre, Journal.paper, .18)!,
+    Color.lerp(Journal.berry, Journal.paper, .18)!,
+    Color.lerp(Journal.muted, Journal.paper, .12)!,
   ];
+  static final legendColors = categoryColors;
   static const labels = ['已完成', '待完成', '已逾期', '提交未知'];
 
   @visibleForTesting
-  static List<double> completedSweeps(List<int> counts) {
+  static List<CompletionRingSegment> segments(List<int> counts) {
     final total = counts.fold(0, (sum, count) => sum + count);
-    if (total == 0 || counts.first <= 0) return const [];
-    return [counts.first / total * math.pi * 2];
+    if (total == 0) return const [];
+    var start = -math.pi / 2;
+    final result = <CompletionRingSegment>[];
+    for (var index = 0; index < counts.length; index++) {
+      final count = counts[index];
+      if (count <= 0) continue;
+      final sweep = count / total * math.pi * 2;
+      result.add(CompletionRingSegment(
+        index: index,
+        start: start,
+        sweep: sweep,
+      ));
+      start += sweep;
+    }
+    return result;
   }
 
   @override
@@ -72,7 +95,6 @@ class CompletionRingPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final total = counts.fold(0, (a, b) => a + b);
     const thickness = CompletionPieChart.ringThickness;
     final center = Offset(size.width / 2, size.height / 2);
     final radius = (math.min(size.width, size.height) - thickness) / 2;
@@ -83,13 +105,13 @@ class CompletionRingPainter extends CustomPainter {
       ..strokeCap = StrokeCap.butt
       ..color = CompletionPieChart.trackColor;
     canvas.drawCircle(center, radius, pen);
-    final sweeps = CompletionPieChart.completedSweeps(counts);
-    if (sweeps.isEmpty) return;
-    pen.color = CompletionPieChart.completedColor;
-    if (counts.first == total) {
-      canvas.drawCircle(center, radius, pen);
-    } else {
-      canvas.drawArc(bounds, -math.pi / 2, sweeps.single, false, pen);
+    for (final segment in CompletionPieChart.segments(counts)) {
+      pen.color = segment.color;
+      if (segment.sweep >= math.pi * 2 - 1e-9) {
+        canvas.drawCircle(center, radius, pen);
+      } else {
+        canvas.drawArc(bounds, segment.start, segment.sweep, false, pen);
+      }
     }
   }
 

@@ -273,6 +273,7 @@ class _StatsScreenState extends State<StatsScreen> {
                 const JournalHeading(
                   '课业统计',
                   eyebrow: 'CAMPUS JOURNAL   /   STATISTICS',
+                  bookTitle: true,
                 ),
                 const SizedBox(height: 4),
                 const Text('统计范围：已关注课程的课业与账号考试', style: Journal.metadata),
@@ -442,22 +443,20 @@ class _StatsScreenState extends State<StatsScreen> {
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  ExcludeSemantics(
-                                    child: SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: Center(
-                                        child: Icon(
-                                          group.courseKey == null
-                                              ? Icons.description_outlined
-                                              : Icons.menu_book_outlined,
-                                          size: 20,
-                                          color: Journal.muted,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
+                                  group.courseKey == null
+                                      ? const SizedBox(
+                                          width: 30,
+                                          height: 30,
+                                          child: Center(
+                                            child: Icon(
+                                              Icons.description_outlined,
+                                              size: 22,
+                                              color: Journal.muted,
+                                            ),
+                                          ),
+                                        )
+                                      : CourseMark(group.name, size: 30),
+                                  const SizedBox(width: 12),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment:
@@ -484,7 +483,12 @@ class _StatsScreenState extends State<StatsScreen> {
                                             if (own.unknown > 0)
                                               Text(
                                                 '提交未知 ${own.unknown} 份',
-                                                style: Journal.metadata,
+                                                style:
+                                                    Journal.metadata.copyWith(
+                                                  color: own.unknown > 0
+                                                      ? Journal.ochre
+                                                      : null,
+                                                ),
                                               ),
                                           ],
                                         ),

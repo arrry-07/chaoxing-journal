@@ -4,12 +4,15 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/main.dart';
+import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -271,6 +274,142 @@ void main() {
     expect(store.homeFilters.query, '完全不匹配');
     expect(store.homeFilters.sortOrder, HomeSortOrder.title);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('calendar keeps counts muted and category color in the agenda',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(420, 900);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final store = _makeStore(_Session());
+    addTearDown(store.dispose);
+    final now = DateTime.utc(2026, 11, 18, 2);
+    store.replaceAssignmentsForTest([
+      _assignment('today',
+          title: '今日课业', deadlineAt: DateTime.utc(2026, 11, 18, 15, 59)),
+      _assignment('pending',
+          title: '时间待确认',
+          deadlineAt: DateTime.utc(2026, 11, 19, 15, 59),
+          trusted: false),
+    ]);
+    store.notebook = StudyNotebook(entries: [
+      ManualEntry(
+        id: 'exam',
+        title: '高数考试',
+        kind: 'exam',
+        at: DateTime.utc(2026, 11, 18, 1),
+      ),
+      ManualEntry(
+        id: 'todo',
+        title: '交材料',
+        kind: 'todo',
+        at: DateTime.utc(2026, 11, 18, 3),
+      ),
+    ]);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(body: CalendarScreen(store: store, clock: () => now)),
+    ));
+    await tester.pumpAndSettle();
+
+    final title = tester.getRect(find.text('课业日历'));
+    final agendaEntry = tester.getRect(find.text('个人待办与考试'));
+    expect(agendaEntry.left, greaterThan(title.right));
+    expect(agendaEntry.center.dy, closeTo(title.center.dy, 2));
+    final agendaHeading = find.text('11月18日 · 议程');
+    expect(agendaHeading.hitTestable(), findsOneWidget);
+
+    final count = tester.widget<Text>(
+      find.byKey(const ValueKey('calendar-count-18')),
+    );
+    expect(count.data, '3');
+    expect(count.style?.color, Journal.muted);
+
+    await tester.scrollUntilVisible(
+      find.text('手动考试 · 高数考试'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    final examTitle = tester.widget<Text>(find.text('手动考试 · 高数考试'));
+    final todoTitle = tester.widget<Text>(find.text('个人待办 · 交材料'));
+    expect(examTitle.style?.color, Journal.slate);
+    expect(todoTitle.style?.color, Journal.ink);
+    final examTile = find.ancestor(
+      of: find.text('手动考试 · 高数考试'),
+      matching: find.byType(ListTile),
+    );
+    final todoTile = find.ancestor(
+      of: find.text('个人待办 · 交材料'),
+      matching: find.byType(ListTile),
+    );
+    expect(
+      tester
+          .widget<Icon>(find.descendant(
+            of: examTile,
+            matching: find.byIcon(Icons.school_outlined),
+          ))
+          .color,
+      Journal.slate,
+    );
+    expect(
+      tester
+          .widget<Icon>(find.descendant(
+            of: todoTile,
+            matching: find.byIcon(Icons.event_note_outlined),
+          ))
+          .color,
+      Journal.ink,
+    );
+
+    await tester.scrollUntilVisible(
+      find.text('截止时间未知（1）'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    final pending = tester.widget<TextButton>(
+      find.ancestor(
+        of: find.text('截止时间未知（1）'),
+        matching: find.byType(TextButton),
+      ),
+    );
+    expect(
+      pending.style?.foregroundColor?.resolve(const <WidgetState>{}),
+      Journal.ochre,
+    );
+  });
+
+  testWidgets('calendar month heading stays on one line at 320dp and 2x text',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 640);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final store = _makeStore(_Session());
+    addTearDown(store.dispose);
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(
+          textScaler: const TextScaler.linear(2),
+        ),
+        child: child!,
+      ),
+      home: Scaffold(
+        body: CalendarScreen(
+          store: store,
+          clock: () => DateTime.utc(2026, 11, 18, 2),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final month = tester.widget<Text>(find.text('2026年11月'));
+    expect(month.maxLines, 1);
+    expect(month.softWrap, isFalse);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('temporaryScopeDoesNotOverwriteSavedPreferences', (tester) async {
