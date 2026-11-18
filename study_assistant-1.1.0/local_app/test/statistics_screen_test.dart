@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -32,6 +33,7 @@ void main() {
   testWidgets(
       'completion ring uses one sage arc and keeps 8/2/1 legend semantics',
       (t) async {
+    final semantics = t.ensureSemantics();
     final now = DateTime.utc(2026, 11, 10, 2);
     final store = AssignmentStore(
         sessionStore: SecureSessionStore(),
@@ -62,6 +64,11 @@ void main() {
     expect(find.text('2 份'), findsOneWidget);
     expect(find.text('1 份'), findsOneWidget);
     expect(find.byIcon(Icons.menu_book_outlined), findsOneWidget);
+    final pendingNode = t.getSemantics(find.bySemanticsLabel('待完成 2 份，18%'));
+    expect(
+      pendingNode.getSemanticsData().hasAction(SemanticsAction.tap),
+      isTrue,
+    );
 
     final painter = t
         .widget<CustomPaint>(find.descendant(
@@ -89,6 +96,7 @@ void main() {
       course.color,
       Color.lerp(Journal.paper, Journal.sheet, .50),
     );
+    semantics.dispose();
   });
 
   testWidgets('legend separates expired from unknown and uses full row width',

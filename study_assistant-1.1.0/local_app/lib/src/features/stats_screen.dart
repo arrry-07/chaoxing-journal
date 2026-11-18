@@ -237,8 +237,14 @@ class _StatsScreenState extends State<StatsScreen> {
                               ],
                             ),
                           );
+                          void open() => _openRecords(
+                                context,
+                                scope: LocalRecordScopeFilter.followedStats,
+                                status: _bucketStatusParams[i],
+                              );
                           return Semantics(
                             button: canTap,
+                            onTap: canTap ? open : null,
                             label:
                                 '$label ${stats.counts[i]} 份，${stats.percentages[i]}%',
                             excludeSemantics: true,
@@ -247,12 +253,7 @@ class _StatsScreenState extends State<StatsScreen> {
                                     type: MaterialType.transparency,
                                     child: InkWell(
                                       borderRadius: BorderRadius.circular(8),
-                                      onTap: () => _openRecords(
-                                        context,
-                                        scope: LocalRecordScopeFilter
-                                            .followedStats,
-                                        status: _bucketStatusParams[i],
-                                      ),
+                                      onTap: open,
                                       child: row,
                                     ),
                                   )
