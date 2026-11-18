@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -21,6 +22,23 @@ class CalendarScreen extends StatefulWidget {
 
 class _CalendarScreenState extends State<CalendarScreen>
     with WidgetsBindingObserver {
+  static const _dateStyle = TextStyle(
+    fontFamily: Journal.bodyFamily,
+    fontFamilyFallback: Journal.bodyFallback,
+    fontSize: 14,
+    height: 1.4,
+  );
+  static const _countStyle = TextStyle(
+    fontFamily: Journal.bodyFamily,
+    fontFamilyFallback: Journal.bodyFallback,
+    fontSize: 11,
+    height: 1.4,
+    color: Journal.muted,
+  );
+  static const _cellBorderWidth = 1.0;
+  static const _cellVerticalPadding = 2.0;
+  static const _cellSlack = 1.0;
+
   Timer? _clock;
   late DateTime _now;
   late DateTime today;
@@ -157,10 +175,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         final days = DateTime(month.year, month.month + 1, 0).day,
             leading = month.weekday % 7;
         final textScaler = MediaQuery.textScalerOf(context);
-        final large = textScaler.scale(14) >= 19.5;
-        final cellHeight = large
-            ? (textScaler.scale(14) + textScaler.scale(11)) * 1.4 + 12
-            : 48.0;
+        final cellHeight = _calendarCellHeight(context, textScaler);
         return ListView(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
             children: [
@@ -239,23 +254,43 @@ class _CalendarScreenState extends State<CalendarScreen>
                             DateFormat('yyyy年M月').format(month),
                             maxLines: 1,
                             softWrap: false,
+                            overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
                             style: Journal.section,
                           );
-                          if (!large) {
-                            return Row(children: [
-                              previous,
-                              Expanded(child: label),
-                              next,
-                            ]);
-                          }
-                          return Column(children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [previous, next],
-                            ),
-                            label,
-                          ]);
+                          return LayoutBuilder(builder: (context, constraints) {
+                            final painter = TextPainter(
+                              text: TextSpan(
+                                text: DateFormat('yyyy年M月').format(month),
+                                style: Journal.section,
+                              ),
+                              textDirection: Directionality.of(context),
+                              textScaler: textScaler,
+                            )..layout();
+                            final labelWidth = painter.width;
+                            painter.dispose();
+                            if (labelWidth + 96 <= constraints.maxWidth) {
+                              return Row(
+                                key: const ValueKey('calendar-month-inline'),
+                                children: [
+                                  previous,
+                                  Expanded(child: label),
+                                  next,
+                                ],
+                              );
+                            }
+                            return Column(
+                              key: const ValueKey('calendar-month-stacked'),
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [previous, next],
+                                ),
+                                label,
+                              ],
+                            );
+                          });
                         }),
                         Row(children: [
                           for (final label in [
@@ -304,7 +339,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     .length;
                                 return Semantics(
                                     label:
-                                        '${month.month}月$day日，${items.length - unknown - exams}份待交，$unknown份待确认，$exams项考试或考试通知，$personalCount项个人安排',
+                                        '${month.month}月$day日${date == today ? '，今天' : ''}，${items.length - unknown - exams}份待交，$unknown份待确认，$exams项考试或考试通知，$personalCount项个人安排',
                                     selected: selected == date,
                                     button: true,
                                     onTap: () =>
@@ -316,6 +351,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                                         borderRadius: BorderRadius.circular(8),
                                         child: Container(
                                             height: cellHeight,
+                                            padding: const EdgeInsets.symmetric(
+                                                vertical: _cellVerticalPadding),
                                             decoration: BoxDecoration(
                                                 color: selected == date
                                                     ? Journal.sage
@@ -330,21 +367,27 @@ class _CalendarScreenState extends State<CalendarScreen>
                                                 mainAxisAlignment:
                                                     MainAxisAlignment.center,
                                                 children: [
-                                                  Text('$day',
-                                                      style: const TextStyle(
-                                                          fontSize: 14,
-                                                          height: 1.4)),
+                                                  FittedBox(
+                                                    fit: BoxFit.scaleDown,
+                                                    child: Text(
+                                                      '$day',
+                                                      maxLines: 1,
+                                                      softWrap: false,
+                                                      style: _dateStyle,
+                                                    ),
+                                                  ),
                                                   if (items.isNotEmpty ||
                                                       personalCount > 0)
-                                                    Text(
-                                                        '${items.length + personalCount}',
-                                                        key: ValueKey(
-                                                            'calendar-count-$day'),
-                                                        style: const TextStyle(
-                                                            fontSize: 11,
-                                                            height: 1.4,
-                                                            color:
-                                                                Journal.muted))
+                                                    FittedBox(
+                                                      fit: BoxFit.scaleDown,
+                                                      child: Text(
+                                                          '${items.length + personalCount}',
+                                                          key: ValueKey(
+                                                              'calendar-count-$day'),
+                                                          maxLines: 1,
+                                                          softWrap: false,
+                                                          style: _countStyle),
+                                                    )
                                                 ]))));
                               }))
                           ]),
@@ -431,4 +474,13 @@ class _CalendarScreenState extends State<CalendarScreen>
       Uri(path: '/assignments', queryParameters: {
         AssignmentRecoveryScope.queryParameter: scope.queryValue,
       }).toString();
+
+  double _calendarCellHeight(BuildContext context, TextScaler textScaler) {
+    double lineHeight(TextStyle style) =>
+        textScaler.scale(style.fontSize!) * style.height!;
+
+    final content = lineHeight(_dateStyle) + lineHeight(_countStyle);
+    final chrome = 2 * (_cellBorderWidth + _cellVerticalPadding) + _cellSlack;
+    return math.max(48.0, content + chrome);
+  }
 }

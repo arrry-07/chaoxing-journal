@@ -116,7 +116,7 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.byType(DropdownButtonFormField<String>));
     await t.pumpAndSettle();
-    await t.tap(find.text('同名课程（2班）').last);
+    await t.tap(find.byKey(const ValueKey('course-option-1:2')));
     await t.pumpAndSettle();
     await t.ensureVisible(find.text('应用'));
     await t.pumpAndSettle();

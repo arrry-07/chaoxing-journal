@@ -11,6 +11,7 @@ import '../models/personal_workspace.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
 import '../services/exam_schedule_presentation.dart';
+import '../services/home_course_filter.dart';
 import '../services/home_sync_presentation.dart';
 import '../services/assignment_web_link.dart';
 import '../services/external_link_service.dart';
@@ -283,13 +284,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         final displayAssignments = AssignmentQuery.currentDisplay(
             catalogAssignments, now,
             index: displayIndex);
-        final options = <String, String>{
-          for (final a in displayAssignments)
-            if (a.courseKey case final key?) key: a.courseName
-        };
-        if (_courseKey != null && !options.containsKey(_courseKey)) {
-          options[_courseKey!] = '已选课程（当前无可显示作业）';
-        }
+        final options = buildHomeCourseFilterOptions(
+          assignments: displayAssignments,
+          catalog: store.courses,
+          records: [
+            for (final group in store.localRecordGroups) ...group.sources,
+          ],
+          selectedCourseKey: _courseKey,
+        );
         // The home list shows unfinished work only; filters intersect the same
         // unfinished catalog so all = homework union exam stays true. Completed
         // and ended history lives in local records and statistics. Recovery
@@ -682,36 +684,55 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         ),
       );
 
-  Widget _activeFilterSummaryBar(Map<String, String> options) {
+  Widget _activeFilterSummaryBar(List<HomeCourseFilterOption> options) {
     final epoch = store.accountEpoch;
     final account = store.account;
-    Widget removableTag(String text, VoidCallback onRemove) => Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: onRemove,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: Journal.sage,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: Text(
-                      text,
-                      style: Journal.metadata.copyWith(
-                        fontSize: 12,
-                        color: Journal.ink,
-                        fontWeight: FontWeight.w600,
-                      ),
+    Widget removableTag(String text, VoidCallback onRemove) => Semantics(
+          container: true,
+          button: true,
+          label: '移除筛选：$text',
+          onTap: onRemove,
+          excludeSemantics: true,
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: onRemove,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: 1,
+                  heightFactor: 1,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Journal.sage,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            text,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Journal.metadata.copyWith(
+                              fontSize: 12,
+                              color: Journal.ink,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.close_rounded,
+                            size: 14, color: Journal.ink),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.close_rounded, size: 14, color: Journal.ink),
-                ],
+                ),
               ),
             ),
           ),
@@ -769,7 +790,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           ),
         if (_courseKey != null)
           removableTag(
-            '课程：${options[_courseKey!] ?? "已选课程"}',
+            '课程：${options.where((option) => option.courseKey == _courseKey).firstOrNull?.label ?? "已选课程"}',
             () => _saveFilters(
               HomeFilters(
                 query: _query,
@@ -785,8 +806,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         TextButton(
           style: TextButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            minimumSize: const Size(44, 32),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            minimumSize: const Size(48, 48),
+            tapTargetSize: MaterialTapTargetSize.padded,
             foregroundColor: Journal.muted,
           ),
           onPressed: () => _saveFilters(
@@ -903,8 +924,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         _ => '时间近到远',
       };
 
-  Widget _homeActions(BuildContext context, Map<String, String> options,
-      bool filtersActive, HomeSortOrder sortOrder) {
+  Widget _homeActions(
+      BuildContext context,
+      List<HomeCourseFilterOption> options,
+      bool filtersActive,
+      HomeSortOrder sortOrder) {
     final actionColor = Theme.of(context).colorScheme.primary;
     final filterStyle = Journal.metadata.copyWith(
       color: actionColor,
@@ -1086,7 +1110,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     if (!saved) feedback('搜索、筛选与排序未能保存，请重试；原偏好已保留');
   }
 
-  Future<void> _openFilters(Map<String, String> courseOptions) async {
+  Future<void> _openFilters(List<HomeCourseFilterOption> courseOptions) async {
     final openingEpoch = store.accountEpoch;
     final openingAccount = store.account;
     final controller = TextEditingController(text: _query);
@@ -1171,17 +1195,34 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   key: ValueKey(
                       'course-${store.accountEpoch}-${courseKey ?? "all"}'),
                   isExpanded: true,
+                  itemHeight: null,
                   decoration: const InputDecoration(labelText: '课程筛选'),
+                  selectedItemBuilder: (context) => [
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('全部课程'),
+                    ),
+                    for (final option in courseOptions)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          option.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Journal.metadata.copyWith(
+                            fontSize: 14,
+                            color: Journal.ink,
+                          ),
+                        ),
+                      ),
+                  ],
                   items: [
                     const DropdownMenuItem(value: '', child: Text('全部课程')),
-                    for (final entry in courseOptions.entries)
+                    for (final option in courseOptions)
                       DropdownMenuItem(
-                        value: entry.key,
-                        child: Text(
-                          '${entry.value}${courseOptions.values.where((v) => v == entry.value).length > 1 ? '（${courseOptions.keys.toList().indexOf(entry.key) + 1}班）' : ''}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        key: ValueKey('course-option-${option.courseKey}'),
+                        value: option.courseKey,
+                        child: _CourseOptionLabel(option: option),
                       ),
                   ],
                   onChanged: (value) => setSheetState(
@@ -1284,4 +1325,37 @@ class _HomeFilterSelection {
   final AssignmentDeadlineFilter deadline;
   final AssignmentTypeFilter type;
   final HomeSortOrder sortOrder;
+}
+
+class _CourseOptionLabel extends StatelessWidget {
+  const _CourseOptionLabel({required this.option});
+
+  final HomeCourseFilterOption option;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            option.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Journal.metadata.copyWith(
+              fontSize: 14,
+              color: Journal.ink,
+            ),
+          ),
+          if (option.showClass)
+            Text(
+              option.classLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Journal.metadata.copyWith(
+                fontSize: 12,
+                color: Journal.muted,
+              ),
+            ),
+        ],
+      );
 }
