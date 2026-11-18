@@ -92,6 +92,15 @@ class ProfileScreen extends StatelessWidget {
                             '${store.localRecordGroups.length} 项课业 · ${store.changes.length} 条变化',
                         onTap: () => context.push('/profile/records'),
                       ),
+                      _SettingsTile(
+                        icon: Icons.library_books_outlined,
+                        title: '课程通知与章节',
+                        subtitle: store.courseNotices.items.isEmpty &&
+                                store.courseChapters.byCourse.isEmpty
+                            ? '手动查看课程通知与章节任务点进度'
+                            : '未读通知 ${store.unreadCourseNoticeCount} 条 · 待完成小节 ${store.pendingChapterSectionCount} 处',
+                        onTap: () => context.push('/course-hub'),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),

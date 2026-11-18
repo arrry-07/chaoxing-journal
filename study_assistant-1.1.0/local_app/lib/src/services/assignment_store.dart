@@ -4,14 +4,20 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../app/app_version.dart';
+import '../local/chaoxing_api_parser.dart';
 import '../local/chaoxing_assignment_parser.dart';
 import '../local/chaoxing_local_client.dart';
+import '../local/chaoxing_sync_diagnostics_exporter.dart';
 import '../local/local_assignment_repository.dart';
 import '../models/assignment.dart';
 import '../models/assignment_sync_progress.dart';
+import '../models/course_chapter_progress.dart';
+import '../models/course_notice.dart';
 import '../models/sync_report.dart';
 import '../models/course.dart';
 import 'assignment_query.dart';
@@ -118,6 +124,25 @@ class AssignmentStore extends ChangeNotifier {
   PersonalWorkspace personal = PersonalWorkspace();
   StudyNotebook notebook = StudyNotebook();
   HomeFilters homeFilters = const HomeFilters();
+  CourseNoticeCollection _courseNotices = CourseNoticeCollection();
+  CourseChapterCatalog _courseChapters = CourseChapterCatalog();
+  bool _isChapterSyncing = false;
+  String? _chapterSyncProgressText;
+
+  CourseNoticeCollection get courseNotices => _courseNotices;
+  int get unreadCourseNoticeCount => _courseNotices.unreadCount;
+  CourseChapterCatalog get courseChapters => _courseChapters;
+  int get pendingChapterSectionCount => _courseChapters.totalPendingSections;
+  bool get isChapterSyncing => _isChapterSyncing;
+  String? get chapterSyncProgressText => _chapterSyncProgressText;
+
+  String exportSanitizedSyncDiagnostics() =>
+      ChaoxingSyncDiagnosticsExporter.exportJson(
+        appVersion: AppVersion.display,
+        report: syncReport,
+        phaseElapsedMs: chaoxingClient.diagnostics.phaseElapsedMs,
+        requestTimings: chaoxingClient.requestTimings,
+      );
 
   Future<bool> saveHomeFilters(HomeFilters next, int expectedEpoch) async {
     final account = _account;
@@ -186,6 +211,329 @@ class AssignmentStore extends ChangeNotifier {
       await _afterAssignmentsChanged();
     });
     return saved;
+  }
+
+  Future<bool> markNoticeLocalRead(String noticeId, {bool read = true}) async {
+    final account = _account;
+    final epoch = _generation;
+    var saved = false;
+    await _run(() async {
+      if (account == null ||
+          !_authenticated ||
+          _generation != epoch ||
+          account != _account) {
+        return;
+      }
+      final next = _courseNotices.markLocalRead(noticeId, read: read);
+      await repository.saveCourseNotices(next, account);
+      if (_generation != epoch || !_authenticated || account != _account) {
+        return;
+      }
+      _courseNotices = next;
+      saved = true;
+    });
+    return saved;
+  }
+
+  Future<bool> markAllNoticesLocalRead() async {
+    final account = _account;
+    final epoch = _generation;
+    var saved = false;
+    await _run(() async {
+      if (account == null ||
+          !_authenticated ||
+          _generation != epoch ||
+          account != _account) {
+        return;
+      }
+      final next = _courseNotices.markAllLocalRead();
+      await repository.saveCourseNotices(next, account);
+      if (_generation != epoch || !_authenticated || account != _account) {
+        return;
+      }
+      _courseNotices = next;
+      saved = true;
+    });
+    return saved;
+  }
+
+  Future<bool> syncCourseChapters({String? courseKey}) async {
+    final account = _account;
+    final epoch = _generation;
+    if (account == null || !_authenticated) return false;
+    var succeeded = false;
+    await _run(() async {
+      if (_generation != epoch ||
+          !_authenticated ||
+          account != _account ||
+          _disposed) {
+        return;
+      }
+      _syncCancelled = false;
+      _isChapterSyncing = true;
+      _chapterSyncProgressText = '正在准备读取章节进度…';
+      notifyListeners();
+      try {
+        final targets = <ChaoxingCourseRef>[];
+        final clientByKey = {
+          for (final c in chaoxingClient.courses)
+            '${c.courseId}:${c.clazzId}': c,
+        };
+        if (courseKey != null) {
+          final match = clientByKey[courseKey] ??
+              _courses
+                  .where((c) => c.key == courseKey)
+                  .map((c) => ChaoxingCourseRef(
+                      courseId: c.courseId,
+                      clazzId: c.clazzId,
+                      courseName: c.name))
+                  .firstOrNull;
+          if (match != null) targets.add(match);
+        } else {
+          final followed =
+              _courses.where((c) => follows(c.key)).toList(growable: false);
+          for (final c in followed) {
+            targets.add(clientByKey[c.key] ??
+                ChaoxingCourseRef(
+                    courseId: c.courseId,
+                    clazzId: c.clazzId,
+                    courseName: c.name));
+          }
+        }
+        if (targets.isEmpty) {
+          _error = courseKey != null ? '未找到目标课程，请先同步课程列表' : '当前没有已关注的课程';
+          return;
+        }
+        if (chaoxingClient.needsSessionInitialization) {
+          await _refreshChaoxingSession();
+        }
+        var updatedCount = 0;
+        String? firstIssue;
+        for (var i = 0; i < targets.length; i++) {
+          if (_syncCancelled ||
+              _generation != epoch ||
+              !_authenticated ||
+              account != _account ||
+              _disposed) {
+            break;
+          }
+          final target = targets[i];
+          _chapterSyncProgressText =
+              '正在读取 ${target.courseName}（${i + 1}/${targets.length}）';
+          notifyListeners();
+          try {
+            CourseChapterSnapshot snapshot;
+            try {
+              snapshot = await chaoxingClient.fetchCourseChapters(target);
+            } on ChaoxingAuthenticationException {
+              if (_syncCancelled ||
+                  _generation != epoch ||
+                  !_authenticated ||
+                  _disposed) {
+                break;
+              }
+              await _refreshChaoxingSession();
+              if (_syncCancelled ||
+                  _generation != epoch ||
+                  !_authenticated ||
+                  _disposed) {
+                break;
+              }
+              snapshot = await chaoxingClient.fetchCourseChapters(target);
+            }
+            if (_syncCancelled ||
+                _generation != epoch ||
+                account != _account ||
+                _disposed) {
+              break;
+            }
+            final merged = _courseChapters.upsertCourse(snapshot);
+            await repository.saveCourseChapters(merged, account);
+            if (_generation != epoch || _disposed) break;
+            _courseChapters = merged;
+            updatedCount++;
+            notifyListeners();
+          } on SyncReadException catch (e) {
+            if (e.issue.kind == SyncIssueKind.cancelled) {
+              _error = '已取消读取章节进度';
+              break;
+            }
+            firstIssue ??= e.issue.message;
+          } catch (e) {
+            firstIssue ??= '${target.courseName} 章节进度读取失败：$e';
+          }
+        }
+        succeeded = updatedCount > 0 && firstIssue == null && !_syncCancelled;
+        if (_syncCancelled) {
+          _error = updatedCount > 0
+              ? '已取消读取，已保存前 $updatedCount 门课的章节进度'
+              : '已取消读取章节进度';
+        } else if (firstIssue != null) {
+          _error = updatedCount > 0
+              ? '已更新 $updatedCount 门课章节进度；$firstIssue'
+              : firstIssue;
+        }
+      } finally {
+        _isChapterSyncing = false;
+        _chapterSyncProgressText = null;
+      }
+    });
+    return succeeded;
+  }
+
+  Future<ManualEntry?> createReminderFromNotice(
+    CourseNotice notice, {
+    required DateTime remindAt,
+    int expectedEpoch = -1,
+  }) async {
+    final epoch = expectedEpoch >= 0 ? expectedEpoch : _generation;
+    final account = _account;
+    ManualEntry? created;
+    await _run(() async {
+      if (account == null ||
+          !_authenticated ||
+          _generation != epoch ||
+          account != _account) {
+        return;
+      }
+      final existing = notice.linkedManualEntryId == null
+          ? null
+          : notebook.entries
+              .where((e) => e.id == notice.linkedManualEntryId)
+              .firstOrNull;
+      if (existing != null) {
+        created = existing;
+        return;
+      }
+      if (notebook.entries.length >= 500) {
+        _error = '个人待办已达 500 条上限，请清理后再添加到日程';
+        return;
+      }
+      final baseId = 'notice-${notice.id.substring(10, 24)}';
+      var candidateId = baseId;
+      var suffix = 1;
+      while (notebook.entries.any((e) => e.id == candidateId)) {
+        candidateId = '$baseId-${suffix++}';
+      }
+      final rawTitle = '[课程通知] ${notice.title}';
+      final entryTitle =
+          rawTitle.length > 200 ? rawTitle.substring(0, 200) : rawTitle;
+      final entryCourse = notice.courseName == '通知中心' ? '' : notice.courseName;
+      final entryNote = notice.summary.length > 500
+          ? notice.summary.substring(0, 500)
+          : notice.summary;
+      final entry = ManualEntry(
+        id: candidateId,
+        title: entryTitle,
+        kind: 'todo',
+        course: entryCourse.length > 200
+            ? entryCourse.substring(0, 200)
+            : entryCourse,
+        note: entryNote,
+        at: remindAt.toUtc(),
+        remind: true,
+      );
+      final nextNotebook = notebook.withEntries([...notebook.entries, entry]);
+      await repository.saveNotebook(nextNotebook, account);
+      if (_generation != epoch || !_authenticated) return;
+      final previous = notebook;
+      notebook = StudyNotebook.decode(nextNotebook.encode());
+      final manualSucceeded = await _afterAssignmentsChanged();
+      await _recordManualCancellationOutcomes(
+        previous,
+        notebook,
+        rescheduleSucceeded: manualSucceeded,
+      );
+      final nextNotices = _courseNotices.bindManualEntry(notice.id, entry.id);
+      await repository.saveCourseNotices(nextNotices, account);
+      if (_generation == epoch && _authenticated) {
+        _courseNotices = nextNotices;
+      }
+      created = entry;
+    });
+    return created;
+  }
+
+  Future<ManualEntry?> createTodoFromChapterNode(
+    CourseChapterSnapshot snapshot,
+    ChapterNode node, {
+    DateTime? remindAt,
+    int minutes = 30,
+    int expectedEpoch = -1,
+  }) async {
+    final epoch = expectedEpoch >= 0 ? expectedEpoch : _generation;
+    final account = _account;
+    ManualEntry? created;
+    await _run(() async {
+      if (account == null ||
+          !_authenticated ||
+          _generation != epoch ||
+          account != _account) {
+        return;
+      }
+      final existing = node.linkedManualEntryId == null
+          ? null
+          : notebook.entries
+              .where((e) => e.id == node.linkedManualEntryId)
+              .firstOrNull;
+      if (existing != null) {
+        created = existing;
+        return;
+      }
+      if (notebook.entries.length >= 500) {
+        _error = '个人待办已达 500 条上限，请清理后再添加';
+        return;
+      }
+      final digest = sha256
+          .convert(utf8.encode(node.sectionId))
+          .toString()
+          .substring(0, 14);
+      var candidateId = 'chap-$digest';
+      var suffix = 1;
+      while (notebook.entries.any((e) => e.id == candidateId)) {
+        candidateId = 'chap-$digest-${suffix++}';
+      }
+      final rawTitle = '[章节任务点] ${node.code} ${node.title}';
+      final entryTitle =
+          rawTitle.length > 200 ? rawTitle.substring(0, 200) : rawTitle;
+      final entryNote = node.state == ChapterTaskState.pendingPoints
+          ? '待完成任务点：${node.pendingPoints} 个'
+          : '';
+      final entry = ManualEntry(
+        id: candidateId,
+        title: entryTitle,
+        kind: 'todo',
+        course: snapshot.courseName.length > 200
+            ? snapshot.courseName.substring(0, 200)
+            : snapshot.courseName,
+        note: entryNote,
+        at: remindAt?.toUtc(),
+        remind: remindAt != null,
+        minutes: minutes.clamp(0, 1440),
+      );
+      final nextNotebook = notebook.withEntries([...notebook.entries, entry]);
+      await repository.saveNotebook(nextNotebook, account);
+      if (_generation != epoch || !_authenticated) return;
+      final previous = notebook;
+      notebook = StudyNotebook.decode(nextNotebook.encode());
+      final manualSucceeded = await _afterAssignmentsChanged();
+      await _recordManualCancellationOutcomes(
+        previous,
+        notebook,
+        rescheduleSucceeded: manualSucceeded,
+      );
+      final nextCatalog = _courseChapters.bindManualEntry(
+        snapshot.courseKey,
+        node.sectionId,
+        entry.id,
+      );
+      await repository.saveCourseChapters(nextCatalog, account);
+      if (_generation == epoch && _authenticated) {
+        _courseChapters = nextCatalog;
+      }
+      created = entry;
+    });
+    return created;
   }
 
   List<AssignmentChange> changes = [];
@@ -804,6 +1152,10 @@ class AssignmentStore extends ChangeNotifier {
     homeFilters = const HomeFilters();
     notebook = StudyNotebook();
     personal = PersonalWorkspace();
+    _courseNotices = CourseNoticeCollection();
+    _courseChapters = CourseChapterCatalog();
+    _isChapterSyncing = false;
+    _chapterSyncProgressText = null;
     changes = [];
     _assignments.clear();
     _hiddenAssignments = [];
@@ -995,6 +1347,12 @@ class AssignmentStore extends ChangeNotifier {
     await stage('个人待办与学期归档', () async {
       notebook = await repository.loadNotebook();
     });
+    await stage('课程通知', () async {
+      _courseNotices = await repository.loadCourseNotices();
+    });
+    await stage('章节进度', () async {
+      _courseChapters = await repository.loadCourseChapters();
+    });
     await stage('作业记录', () async {
       await _reloadJournal();
     });
@@ -1145,6 +1503,8 @@ class AssignmentStore extends ChangeNotifier {
           _hiddenAssignments = [];
           _courses = [];
           _unfollowed.clear();
+          _courseNotices = CourseNoticeCollection();
+          _courseChapters = CourseChapterCatalog();
           _invalidateHomeDisplayIndex();
           try {
             await sessionStore.clear();
@@ -1966,6 +2326,10 @@ class AssignmentStore extends ChangeNotifier {
       homeFilters = const HomeFilters();
       personal = PersonalWorkspace();
       notebook = StudyNotebook();
+      _courseNotices = CourseNoticeCollection();
+      _courseChapters = CourseChapterCatalog();
+      _isChapterSyncing = false;
+      _chapterSyncProgressText = null;
       _agreementAccepted = false;
       _needsProfileRecovery = false;
       _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
@@ -2619,7 +2983,8 @@ class AssignmentStore extends ChangeNotifier {
     final stopCheck =
         automatic ? () => !DaytimeCheckPolicy.isInWindow(_clock()) : null;
     chaoxingClient.shouldStop = stopCheck;
-    final showPreview = trigger == BackgroundSyncTrigger.manual;
+    final manualSync = trigger == BackgroundSyncTrigger.manual;
+    final showPreview = manualSync;
     void attachProgress() {
       chaoxingClient.onProgress = showPreview
           ? (progress) => _handleHomeProgress(generation, progress)
@@ -2637,14 +3002,20 @@ class AssignmentStore extends ChangeNotifier {
     }
 
     try {
-      incoming = await chaoxingClient.fetchAssignments();
+      incoming = await chaoxingClient.fetchAssignmentsWithOptions(
+        collectCourseNotices: manualSync,
+        enableTaskEngineProbe: manualSync,
+      );
     } on ChaoxingAuthenticationException {
       _needsProfileRecovery = false;
       chaoxingClient.onProgress = null;
       _clearHomePreview(notify: true);
       await _refreshChaoxingSession();
       attachProgress();
-      incoming = await chaoxingClient.fetchAssignments();
+      incoming = await chaoxingClient.fetchAssignmentsWithOptions(
+        collectCourseNotices: manualSync,
+        enableTaskEngineProbe: manualSync,
+      );
     } on SyncReadException catch (error) {
       if (error.issue.kind == SyncIssueKind.cancelled) {
         throw const SyncCancelledException();
@@ -2725,6 +3096,25 @@ class AssignmentStore extends ChangeNotifier {
         prefs, 'sync_data_at', dataSuccessAt.toUtc().toIso8601String());
     final timestampMirrorFailed = !attemptMirrorSaved || !dataMirrorSaved;
     final reportIssues = List<SyncIssue>.of(chaoxingClient.issues);
+    if (manualSync &&
+        chaoxingClient.sourceResults.any((s) =>
+            s.source == 'courseNotice' && s.phase != SyncSourcePhase.failed)) {
+      final account = _account;
+      if (account != null && generation == _generation && !_disposed) {
+        try {
+          final mergedNotices =
+              _courseNotices.mergeIncoming(chaoxingClient.lastFetchedNotices);
+          await repository.saveCourseNotices(mergedNotices, account);
+          if (generation == _generation && !_disposed) {
+            _courseNotices = mergedNotices;
+          }
+        } catch (error) {
+          reportIssues.add(SyncIssue(
+              SyncIssueKind.storage, '作业已保存，但课程通知缓存未能更新：$error',
+              stage: 'persistence'));
+        }
+      }
+    }
     if (repository.identityConflictCount > 0) {
       reportIssues.add(const SyncIssue(
           SyncIssueKind.partial, '部分旧记录存在重复关联，已暂停其提醒，请查看本地记录',

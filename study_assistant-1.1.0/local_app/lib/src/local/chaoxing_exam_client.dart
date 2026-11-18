@@ -17,6 +17,7 @@ String _examFailureMessage(String source, Object error) {
     'accountExamSchema' => '账号考试列表页面结构无法识别',
     'accountExamRepeated' => '账号考试列表分页出现重复记录',
     'accountExamIncomplete' => '账号考试列表分页数量不完整',
+    'accountExamRowSkippedNoId' => '部分历史账号考试缺少唯一标识，已跳过未识别行',
     'examNoticeSchema' => '考试通知列表结构无法识别',
     'examNoticeRepeated' => '考试通知分页游标重复',
     'examNoticeLimit' => '考试通知分页超过安全上限',
@@ -37,7 +38,9 @@ extension _ExamCollection on ChaoxingLocalClient {
       const {'exam', 'examAccount', 'examNotice'}.contains(s.source) &&
       (s.phase == SyncSourcePhase.success || s.recordCount > 0));
   Future<List<Assignment>> _fetchExams(List<ChaoxingCourseRef> refs,
-      {required int generation, bool includeAccount = true}) async {
+      {required int generation,
+      bool includeAccount = true,
+      bool collectCourseNotices = false}) async {
     if (!enableExams) return const [];
     final rows = <Assignment>[];
     bool current() {
@@ -73,11 +76,12 @@ extension _ExamCollection on ChaoxingLocalClient {
               error is SyncReadException ? error.issue.httpStatus : null));
     }
 
-    SyncSourceResult report(String source, int success, int failed,
-            List<Assignment> observed) =>
+    SyncSourceResult report(
+            String source, int success, int failed, List<Assignment> observed,
+            {List<String> extraReasons = const []}) =>
         SyncSourceResult(
             source: source,
-            phase: failed == 0
+            phase: failed == 0 && extraReasons.isEmpty
                 ? SyncSourcePhase.success
                 : success > 0 || observed.isNotEmpty
                     ? SyncSourcePhase.partial
@@ -88,9 +92,12 @@ extension _ExamCollection on ChaoxingLocalClient {
             unconfirmedCount: observed
                 .where((a) => a.status == 'unknown' || !a.timelineTrusted)
                 .length,
-            reasonCodes:
-                failed == 0 ? const [] : const ['listOrMetadataUnavailable']);
+            reasonCodes: {
+              if (failed > 0) 'listOrMetadataUnavailable',
+              ...extraReasons,
+            }.toList());
     var succeeded = 0, failed = 0;
+    final examExtraReasons = <String>{};
     SyncIssueKind? blocked;
     for (final course in refs) {
       if (!current()) return const [];
@@ -152,7 +159,15 @@ extension _ExamCollection on ChaoxingLocalClient {
           if (!current()) return const [];
           final html = middle?.data?.toString() ?? '';
           final enc = ChaoxingAssignmentParser.hiddenValue(html, 'examEnc');
+          final workEnc = ChaoxingAssignmentParser.hiddenValue(html, 'workEnc');
           if (enc == null || enc.isEmpty) {
+            // A course with a valid work entry and empty phone exam list
+            // simply does not enable the exam module; treat it as 0 exams.
+            if (observed.isEmpty && workEnc != null && workEnc.isNotEmpty) {
+              succeeded++;
+              rows.addAll(observed);
+              continue;
+            }
             throw StateError('examCredentialMissing');
           }
           final pcRows = <Assignment>[];
@@ -221,6 +236,9 @@ extension _ExamCollection on ChaoxingLocalClient {
         succeeded++;
       } catch (error) {
         if (!current()) return const [];
+        if (observed.isNotEmpty) {
+          examExtraReasons.add('examPcSupplementUnavailable');
+        }
         failure('exam', error, courseKey: courseKey);
         failed++;
         final kind = error is SyncReadException
@@ -239,10 +257,15 @@ extension _ExamCollection on ChaoxingLocalClient {
       rows.addAll(observed);
     }
     if (!current()) return const [];
-    sourceResults = [...sourceResults, report('exam', succeeded, failed, rows)];
+    sourceResults = [
+      ...sourceResults,
+      report('exam', succeeded, failed, rows,
+          extraReasons: examExtraReasons.toList()),
+    ];
     if (includeAccount) {
       final accountRows = <Assignment>[];
       var accountFailed = false;
+      var accountSkippedNoId = 0;
       try {
         int? total;
         final ids = <String>{};
@@ -265,10 +288,13 @@ extension _ExamCollection on ChaoxingLocalClient {
             throw StateError('accountExamRepeated');
           }
           accountRows.addAll(parsed.rows);
-          if (accountRows.length >= total) break;
-          if (parsed.rows.isEmpty) throw StateError('accountExamIncomplete');
+          accountSkippedNoId += parsed.skippedWithoutId;
+          if (accountRows.length + accountSkippedNoId >= total) break;
+          if (parsed.rows.isEmpty && parsed.skippedWithoutId == 0) {
+            throw StateError('accountExamIncomplete');
+          }
         }
-        if (accountRows.length != total) {
+        if (accountRows.length + accountSkippedNoId != total) {
           throw StateError('accountExamIncomplete');
         }
       } catch (error) {
@@ -279,11 +305,21 @@ extension _ExamCollection on ChaoxingLocalClient {
       rows.addAll(accountRows);
       sourceResults = [
         ...sourceResults,
-        report('examAccount', accountFailed ? 0 : 1, accountFailed ? 1 : 0,
-            accountRows)
+        report(
+          'examAccount',
+          accountFailed ? 0 : 1,
+          accountFailed ? 1 : 0,
+          accountRows,
+          extraReasons: accountSkippedNoId > 0
+              ? const ['accountExamRowSkippedNoId']
+              : const [],
+        ),
       ];
       final notices = <Assignment>[];
+      final courseNotices = <CourseNotice>[];
+      final courseNoticeIds = <String>{};
       var noticeFailed = false;
+      var courseNoticeFailed = false;
       try {
         final cursors = <String>{}, ids = <String>{};
         var cursor = '', done = false;
@@ -311,11 +347,22 @@ extension _ExamCollection on ChaoxingLocalClient {
                 'filterTags': ''
               });
           if (!current()) return const [];
-          final parsed =
-              ChaoxingExamParser.notices(_decodeJsonPayload(response?.data));
+          final decodedPayload = _decodeJsonPayload(response?.data);
+          final parsed = ChaoxingExamParser.notices(decodedPayload);
           if (parsed == null) throw StateError('examNoticeSchema');
           for (final a in parsed.rows) {
             if (ids.add(a.id)) notices.add(a);
+          }
+          if (collectCourseNotices && page < 5) {
+            final parsedCourseNotices =
+                ChaoxingNoticeParser.parsePage(decodedPayload, courses: refs);
+            if (parsedCourseNotices == null) {
+              courseNoticeFailed = true;
+            } else {
+              for (final item in parsedCourseNotices.rows) {
+                if (courseNoticeIds.add(item.id)) courseNotices.add(item);
+              }
+            }
           }
           if (parsed.cursor == null) {
             done = true;
@@ -331,12 +378,33 @@ extension _ExamCollection on ChaoxingLocalClient {
         if (!current()) return const [];
         failure('examNotice', error);
         noticeFailed = true;
+        if (collectCourseNotices) courseNoticeFailed = true;
       }
       rows.addAll(notices);
+      if (collectCourseNotices) {
+        _lastFetchedNotices = List.unmodifiable(courseNotices);
+      }
       sourceResults = [
         ...sourceResults,
         report(
-            'examNotice', noticeFailed ? 0 : 1, noticeFailed ? 1 : 0, notices)
+            'examNotice', noticeFailed ? 0 : 1, noticeFailed ? 1 : 0, notices),
+        if (collectCourseNotices)
+          SyncSourceResult(
+            source: 'courseNotice',
+            phase: courseNoticeFailed
+                ? (courseNotices.isNotEmpty
+                    ? SyncSourcePhase.partial
+                    : SyncSourcePhase.failed)
+                : SyncSourcePhase.success,
+            succeededCourses: courseNoticeFailed ? 0 : 1,
+            failedCourses: courseNoticeFailed ? 1 : 0,
+            recordCount: courseNotices.length,
+            unconfirmedCount:
+                courseNotices.where((n) => !n.publishedTrusted).length,
+            reasonCodes: courseNoticeFailed
+                ? const ['listOrMetadataUnavailable']
+                : const [],
+          ),
       ];
     }
     if (!current()) return const [];

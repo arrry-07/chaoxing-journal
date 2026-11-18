@@ -199,7 +199,16 @@ class ChaoxingExamParser {
     }
     final totalMatch =
         RegExp(r'Math\.ceil\(\s*(\d+)\s*/\s*9\s*\)').firstMatch(html);
-    if (totalMatch == null) return null;
+    if (totalMatch == null) {
+      final hasEmptyHint = RegExp(r'暂无内容|暂无考试').hasMatch(text(html));
+      final hasLookLi = RegExp(r'<li\b[^>]*class=["\x27][^"\x27]*\blookLi\b',
+              caseSensitive: false)
+          .hasMatch(html);
+      if (hasEmptyHint && !hasLookLi) {
+        return (rows: <Assignment>[], total: 0, skipped: 0, observed: 0);
+      }
+      return null;
+    }
     final total = int.parse(totalMatch[1]!);
     final rows = <Assignment>[];
     var skipped = 0;
@@ -265,32 +274,52 @@ class ChaoxingExamParser {
     return (rows: rows, total: total, skipped: skipped, observed: observed);
   }
 
-  static ({List<Assignment> rows, int total})? account(String html,
+  static ({List<Assignment> rows, int total, int skippedWithoutId})? account(
+      String html,
       {DateTime? now}) {
     if (!RegExp(r'class=["\x27][^"\x27]*dataTable').hasMatch(html) ||
         !text(html).contains('作答状态')) {
       return null;
     }
+    final dataRows =
+        RegExp(r'<tr\b([^>]*)>(.*?)</tr>', dotAll: true, caseSensitive: false)
+            .allMatches(html)
+            .where((row) =>
+                (attr(row[1]!, 'class') ?? '').split(' ').contains('dataTr'))
+            .toList();
     final count =
         RegExp(r'Math\.ceil\(\s*(\d+)\s*/\s*12\s*\)').firstMatch(html);
-    if (count == null) return null;
+    if (count == null) {
+      if (dataRows.isEmpty) {
+        return (rows: <Assignment>[], total: 0, skippedWithoutId: 0);
+      }
+      return null;
+    }
     final total = int.parse(count[1]!);
     final rows = <Assignment>[];
-    for (final row in RegExp(r'<tr\b([^>]*)>(.*?)</tr>',
-            dotAll: true, caseSensitive: false)
-        .allMatches(html)) {
-      if (!(attr(row[1]!, 'class') ?? '').split(' ').contains('dataTr')) {
-        continue;
-      }
+    var skippedWithoutId = 0;
+    for (final row in dataRows) {
       final cells =
           RegExp(r'<td\b[^>]*>(.*?)</td>', dotAll: true, caseSensitive: false)
               .allMatches(row[2]!)
               .map((m) => text(m[1]!))
               .toList();
-      // A display ordinal is not an exam identity. Unsupported rows fail visibly.
-      final id = attr(row[1]!, 'data-examid');
-      if (id == null || !RegExp(r'^\d+$').hasMatch(id) || cells.length < 9) {
+      if (cells.length < 8) {
         return null;
+      }
+      // A display ordinal is not an exam identity. Try explicit official IDs,
+      // otherwise skip the unidentifiable historical row rather than guessing.
+      var id = attr(row[1]!, 'data-examid');
+      if (id == null || !RegExp(r'^\d+$').hasMatch(id)) {
+        final explicitId = RegExp(
+                r'(?:[?&]|data-)(?:examId|testPaperId)\s*=\s*["\x27]?(\d+)\b',
+                caseSensitive: false)
+            .firstMatch(row[2]!);
+        id = explicitId?[1];
+      }
+      if (id == null || !RegExp(r'^\d+$').hasMatch(id)) {
+        skippedWithoutId++;
+        continue;
       }
       final ts = times(cells[2]);
       rows.add(make(
@@ -303,8 +332,8 @@ class ChaoxingExamParser {
           duration: int.tryParse(cells[3]),
           now: now));
     }
-    if (rows.isEmpty && total != 0) return null;
-    return (rows: rows, total: total);
+    if (rows.isEmpty && skippedWithoutId == 0 && total != 0) return null;
+    return (rows: rows, total: total, skippedWithoutId: skippedWithoutId);
   }
 
   static ({List<Assignment> rows, String? cursor})? notices(dynamic payload,

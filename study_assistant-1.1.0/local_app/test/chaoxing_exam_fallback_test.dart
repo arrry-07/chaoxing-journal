@@ -1,0 +1,265 @@
+import 'package:dio/dio.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_exam_parser.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
+
+const _course =
+    ChaoxingCourseRef(courseId: '7', clazzId: '11', courseName: '合成课程');
+
+const _phoneEmpty =
+    '<div class="ybox"><p class="blankTips">您好，本课程下暂未收到考试</p></div>';
+
+String _phoneRow(String state, {String id = '99'}) =>
+    '<table class="listTable"><tr data="/exam/phone/task-exam?courseId=7&amp;classId=11&amp;taskrefId=$id"><td>合成考试</td><td>不得保留成绩</td><td>$state</td><td></td></tr></table><script>var havemore=false;</script>';
+
+const _accountEmptyNoScript =
+    '<table class="dataTable"><tr><th>考试名称</th><th>作答状态</th></tr></table>';
+
+void main() {
+  test(
+      'empty phone exam list with valid workEnc and missing examEnc succeeds without false error',
+      () async {
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        dynamic body = '';
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                {'courseId': '7', 'clazzId': '11', 'courseName': '合成课程'}
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            body = '<input id="workEnc" value="synthetic-work">';
+          case '/mooc2/work/list':
+            body = '<div>暂无作业</div>';
+          case '/v2/apis/active/student/activelist':
+            body = {
+              'result': 1,
+              'data': {'activeList': []}
+            };
+          case '/phone/moocAnalysis/examList':
+            body = _phoneEmpty;
+          case '/exam-ans/exam/test/examcode/examlist':
+            body = _accountEmptyNoScript;
+          case '/pc/notice/getNoticeList':
+            body = {'status': true};
+          default:
+            throw StateError('unexpected ${o.uri.path}');
+        }
+        h.resolve(Response(requestOptions: o, data: body, statusCode: 200));
+      }));
+
+    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final rows = await client.fetchAssignments();
+
+    expect(rows, isEmpty);
+    expect(
+      client.issues.where((issue) => issue.stage == 'exam'),
+      isEmpty,
+    );
+    expect(
+      client.sourceResults.singleWhere((s) => s.source == 'exam').phase,
+      SyncSourcePhase.success,
+    );
+    expect(
+      client.sourceResults.singleWhere((s) => s.source == 'examAccount').phase,
+      SyncSourcePhase.success,
+    );
+  });
+
+  test(
+      'missing examEnc when phone exam list has items retains phone exam and marks examPcSupplementUnavailable',
+      () async {
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        dynamic body = '';
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                {'courseId': '7', 'clazzId': '11', 'courseName': '合成课程'}
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            body = '<input id="workEnc" value="synthetic-work">';
+          case '/mooc2/work/list':
+            body = '<div>暂无作业</div>';
+          case '/v2/apis/active/student/activelist':
+            body = {
+              'result': 1,
+              'data': {'activeList': []}
+            };
+          case '/phone/moocAnalysis/examList':
+            body = _phoneRow('未开始');
+          case '/exam-ans/exam/test/examcode/examlist':
+            body = _accountEmptyNoScript;
+          case '/pc/notice/getNoticeList':
+            body = {'status': true};
+          default:
+            throw StateError('unexpected ${o.uri.path}');
+        }
+        h.resolve(Response(requestOptions: o, data: body, statusCode: 200));
+      }));
+
+    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final rows = await client.fetchAssignments();
+
+    expect(rows.where((a) => a.isExam && !a.exam!.noticeOnly), hasLength(1));
+    final examSource =
+        client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(examSource.phase, SyncSourcePhase.partial);
+    expect(examSource.reasonCodes, contains('examPcSupplementUnavailable'));
+  });
+
+  test('coursePc accepts valid empty page without Math.ceil pagination script',
+      () {
+    const html =
+        '<input id="courseId" value="7"><input id="classId" value="11"><div>暂无考试</div>';
+    final parsed = ChaoxingExamParser.coursePc(html, _course);
+    expect(parsed, isNotNull);
+    expect(parsed!.rows, isEmpty);
+    expect(parsed.total, 0);
+  });
+
+  test(
+      'account parser handles empty table, 8-column rows, inline examId, and skips rows missing IDs without fabricating',
+      () {
+    final empty = ChaoxingExamParser.account(_accountEmptyNoScript);
+    expect(empty, isNotNull);
+    expect(empty!.rows, isEmpty);
+    expect(empty.total, 0);
+    expect(empty.skippedWithoutId, 0);
+
+    const mixedHtml = '''
+<table class="dataTable">
+  <tr><th>序号</th><th>考试名称</th><th>时间</th><th>时长</th><th>考试状态</th><th>作答状态</th><th>分数</th><th>方式</th></tr>
+  <tr class="dataTr" data-examid="501">
+    <td>1</td><td>线上期中</td><td>2030-05-01 09:00 至 2030-05-01 11:00</td><td>120</td><td>未开始</td><td>未开始</td><td>--</td><td>线上</td>
+  </tr>
+  <tr class="dataTr">
+    <td>2</td><td>内联标识考试</td><td>2030-05-02 09:00 至 2030-05-02 10:00</td><td>60</td><td>未开始</td><td>未作答</td><td>--</td><td><a href="/exam/go?examId=8801">进入</a></td>
+  </tr>
+  <tr class="dataTr">
+    <td>3</td><td>无标识历史行</td><td>2024-01-01 09:00 至 2024-01-01 11:00</td><td>120</td><td>已结束</td><td>已完成</td><td>90</td><td>归档</td>
+  </tr>
+</table>
+<script>page.showPage(0/12+1,Math.ceil(3/12));</script>
+''';
+
+    final parsed = ChaoxingExamParser.account(mixedHtml);
+    expect(parsed, isNotNull);
+    expect(parsed!.total, 3);
+    expect(parsed.skippedWithoutId, 1);
+    expect(parsed.rows.map((e) => e.exam!.examId).toList(), ['501', '8801']);
+    expect(parsed.rows.any((e) => e.exam!.examId == '3'), isFalse);
+  });
+
+  test(
+      'client marks examAccount partial with accountExamRowSkippedNoId when rows lack IDs',
+      () async {
+    const accountHtml = '''
+<table class="dataTable">
+  <tr><th>序号</th><th>考试名称</th><th>时间</th><th>时长</th><th>考试状态</th><th>作答状态</th><th>分数</th><th>方式</th></tr>
+  <tr class="dataTr">
+    <td>1</td><td>无标识历史行</td><td>2024-01-01 09:00 至 2024-01-01 11:00</td><td>120</td><td>已结束</td><td>已完成</td><td>90</td><td>归档</td>
+  </tr>
+</table>
+<script>page.showPage(0/12+1,Math.ceil(1/12));</script>
+''';
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        dynamic body = '';
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {'courses': []};
+          case '/exam-ans/exam/test/examcode/examlist':
+            body = accountHtml;
+          case '/pc/notice/getNoticeList':
+            body = {'status': true};
+          default:
+            throw StateError('unexpected ${o.uri.path}');
+        }
+        h.resolve(Response(requestOptions: o, data: body, statusCode: 200));
+      }));
+
+    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    await client.fetchAssignments();
+
+    final source =
+        client.sourceResults.singleWhere((s) => s.source == 'examAccount');
+    expect(source.phase, SyncSourcePhase.partial);
+    expect(source.reasonCodes, contains('accountExamRowSkippedNoId'));
+  });
+
+  test(
+      'task engine probe is opt-in via fetchAssignmentsWithOptions and non-blocking on single-course error',
+      () async {
+    final paths = <String>[];
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        paths.add(o.uri.path);
+        dynamic body = '';
+        var status = 200;
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                {'courseId': '7', 'clazzId': '11', 'courseName': '课程A'},
+                {'courseId': '8', 'clazzId': '12', 'courseName': '课程B'},
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            body = '<input id="workEnc" value="synthetic-work">';
+          case '/mooc2/work/list':
+            body = '<div>暂无作业</div>';
+          case '/v2/apis/active/student/activelist':
+            body = {
+              'result': 1,
+              'data': {'activeList': []}
+            };
+          case '/phone/moocAnalysis/examList':
+            body = _phoneEmpty;
+          case '/exam-ans/exam/test/examcode/examlist':
+            body = _accountEmptyNoScript;
+          case '/pc/notice/getNoticeList':
+            body = {'status': true};
+          case '/v2/apis/active/getData':
+            if (o.queryParameters['courseId'] == '7') {
+              body = {
+                'result': 1,
+                'data': [
+                  {'planCount': 3, 'planFinishCount': 1}
+                ]
+              };
+            } else {
+              status = 500;
+              body = 'error';
+            }
+          default:
+            throw StateError('unexpected ${o.uri.path}');
+        }
+        h.resolve(Response(requestOptions: o, data: body, statusCode: status));
+      }));
+
+    final defaultClient = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    await defaultClient.fetchAssignments();
+    expect(paths, isNot(contains('/v2/apis/active/getData')));
+
+    paths.clear();
+    final manualClient = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    await manualClient.fetchAssignmentsWithOptions(
+      collectCourseNotices: true,
+      enableTaskEngineProbe: true,
+    );
+    expect(paths, contains('/v2/apis/active/getData'));
+    final probe = manualClient.sourceResults
+        .singleWhere((s) => s.source == 'taskEnginePlan');
+    expect(probe.phase, SyncSourcePhase.partial);
+    expect(probe.recordCount, 3);
+    expect(probe.unconfirmedCount, 2);
+    expect(probe.reasonCodes, contains('unfinishedPlanDetected'));
+  });
+}

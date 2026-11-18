@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'assignment.dart';
 import 'course.dart';
+import 'course_chapter_progress.dart';
+import 'course_notice.dart';
 import 'personal_workspace.dart';
 import 'reminder_rule_limits.dart';
 import 'study_notebook.dart';
@@ -20,7 +22,9 @@ class BackupSnapshot {
       this.autoSyncIntervalMinutes,
       this.personal,
       this.notebook,
-      Map<String, String> courseTaskKeys)
+      Map<String, String> courseTaskKeys,
+      this.notices,
+      this.chapters)
       : records = List.unmodifiable(records),
         hidden = Set.unmodifiable(hidden),
         courses = List.unmodifiable(courses),
@@ -40,6 +44,8 @@ class BackupSnapshot {
   final PersonalWorkspace personal;
   final StudyNotebook notebook;
   final Map<String, String> courseTaskKeys;
+  final CourseNoticeCollection notices;
+  final CourseChapterCatalog chapters;
   static String ownerFor(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
 
@@ -72,37 +78,50 @@ class BackupSnapshot {
       record.copyWith(id: key, clearSubmitUrl: true).courseTaskKey == key &&
       (record.courseTaskKey == null || record.courseTaskKey == key);
 
+  bool get _usesSchema6 =>
+      notices.items.isNotEmpty || chapters.byCourse.isNotEmpty;
+
   factory BackupSnapshot.create(
-          {required String owner,
-          required DateTime createdAt,
-          required List<Assignment> records,
-          required Set<String> hidden,
-          required List<CourseRef> courses,
-          required Set<String> unfollowed,
-          required List<int> reminderOffsets,
-          required int autoSyncIntervalMinutes,
-          Map<String, String> courseTaskKeys = const {},
-          PersonalWorkspace? personal,
-          StudyNotebook? notebook}) =>
-      BackupSnapshot.decode(jsonEncode({
-        'schema': 5,
-        'notebook': (notebook ?? StudyNotebook()).toJson(),
-        'personal': (personal ?? PersonalWorkspace()).toJson(portable: true),
-        'owner': owner,
-        'createdAt': createdAt.toUtc().toIso8601String(),
-        'records':
-            records.map((a) => _record(a, courseTaskKeys[a.id])).toList(),
-        'hidden': hidden.toList(),
-        'courses': courses.map((c) => c.toJson()).toList(),
-        'unfollowed': unfollowed.toList(),
-        'reminderOffsets': reminderOffsets,
-        'autoSyncIntervalMinutes': autoSyncIntervalMinutes,
-      }));
+      {required String owner,
+      required DateTime createdAt,
+      required List<Assignment> records,
+      required Set<String> hidden,
+      required List<CourseRef> courses,
+      required Set<String> unfollowed,
+      required List<int> reminderOffsets,
+      required int autoSyncIntervalMinutes,
+      Map<String, String> courseTaskKeys = const {},
+      PersonalWorkspace? personal,
+      StudyNotebook? notebook,
+      CourseNoticeCollection? notices,
+      CourseChapterCatalog? chapters}) {
+    final effectiveNotices = notices ?? CourseNoticeCollection();
+    final effectiveChapters = chapters ?? CourseChapterCatalog();
+    final schema6 = effectiveNotices.items.isNotEmpty ||
+        effectiveChapters.byCourse.isNotEmpty;
+    return BackupSnapshot.decode(jsonEncode({
+      'schema': schema6 ? 6 : 5,
+      'notebook': (notebook ?? StudyNotebook()).toJson(),
+      'personal': (personal ?? PersonalWorkspace()).toJson(portable: true),
+      if (schema6) 'notices': effectiveNotices.toJson(portable: true),
+      if (schema6) 'chapters': effectiveChapters.toJson(portable: true),
+      'owner': owner,
+      'createdAt': createdAt.toUtc().toIso8601String(),
+      'records': records.map((a) => _record(a, courseTaskKeys[a.id])).toList(),
+      'hidden': hidden.toList(),
+      'courses': courses.map((c) => c.toJson()).toList(),
+      'unfollowed': unfollowed.toList(),
+      'reminderOffsets': reminderOffsets,
+      'autoSyncIntervalMinutes': autoSyncIntervalMinutes,
+    }));
+  }
 
   String encode() => jsonEncode({
-        'schema': 5,
+        'schema': _usesSchema6 ? 6 : 5,
         'notebook': notebook.toJson(),
         'personal': personal.toJson(portable: true),
+        if (_usesSchema6) 'notices': notices.toJson(portable: true),
+        if (_usesSchema6) 'chapters': chapters.toJson(portable: true),
         'owner': owner,
         'createdAt': createdAt.toUtc().toIso8601String(),
         'records':
@@ -160,10 +179,12 @@ class BackupSnapshot {
     }
     final decoded = jsonDecode(plaintext);
     final version = decoded is Map ? decoded['schema'] : null;
-    if (version is! int || !{1, 2, 3, 4, 5}.contains(version)) _bad();
+    if (version is! int || !{1, 2, 3, 4, 5, 6}.contains(version)) _bad();
     final j = _map(decoded, {
       if (version >= 2) 'personal',
       if (version >= 3) 'notebook',
+      if (version >= 6) 'notices',
+      if (version >= 6) 'chapters',
       'schema',
       'owner',
       'createdAt',
@@ -272,6 +293,33 @@ class BackupSnapshot {
     }
     final interval = j['autoSyncIntervalMinutes'];
     if (interval is! int || interval < 0 || interval > 1440) _bad();
+    final decodedNotebook = version < 3
+        ? StudyNotebook()
+        : StudyNotebook.decode(jsonEncode(j['notebook']));
+    final validEntryIds = {for (final e in decodedNotebook.entries) e.id};
+    final decodedNotices = version < 6
+        ? CourseNoticeCollection()
+        : CourseNoticeCollection.fromJson(j['notices']);
+    final cleanNotices = CourseNoticeCollection(items: [
+      for (final n in decodedNotices.items)
+        n.linkedManualEntryId != null &&
+                !validEntryIds.contains(n.linkedManualEntryId)
+            ? n.copyWith(clearLinkedManualEntryId: true)
+            : n,
+    ]);
+    final decodedChapters = version < 6
+        ? CourseChapterCatalog()
+        : CourseChapterCatalog.fromJson(j['chapters']);
+    final cleanChapters = CourseChapterCatalog(byCourse: {
+      for (final e in decodedChapters.byCourse.entries)
+        e.key: e.value.copyWith(nodes: [
+          for (final node in e.value.nodes)
+            node.linkedManualEntryId != null &&
+                    !validEntryIds.contains(node.linkedManualEntryId)
+                ? node.copyWith(clearLinkedManualEntryId: true)
+                : node,
+        ]),
+    });
     return BackupSnapshot._(
         owner,
         _date(j['createdAt']),
@@ -284,10 +332,10 @@ class BackupSnapshot {
         version == 1
             ? PersonalWorkspace()
             : PersonalWorkspace.fromJson(j['personal']),
-        version < 3
-            ? StudyNotebook()
-            : StudyNotebook.decode(jsonEncode(j['notebook'])),
-        courseTaskKeys);
+        decodedNotebook,
+        courseTaskKeys,
+        cleanNotices,
+        cleanChapters);
   }
 
   static ExamInfo? _exam(dynamic value) {

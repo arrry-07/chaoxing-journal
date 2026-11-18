@@ -173,7 +173,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         location.startsWith('/agenda') ||
         location.startsWith('/terms') ||
         location.startsWith('/plan') ||
-        location.startsWith('/personal')) {
+        location.startsWith('/personal') ||
+        location.startsWith('/course-hub')) {
       return 3;
     }
     return 0;
