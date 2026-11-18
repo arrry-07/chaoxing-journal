@@ -2,12 +2,13 @@
 
 安装包与原始发布说明见 [Releases](https://github.com/arrry-07/chaoxing-journal/releases)。1.2.2–1.2.6 曾以本地体验包验证，没有对应公开 Release；不要把历史本地包文件名当成可下载地址。
 
-## 1.8.12（79） — 课程通知、章节进度与同步取证加固（2026-11-18）
+## 1.8.12（79） — 课程通知、章节进度与同步取证加固（2026-11-18 正式发布）
 
 - 考试结构失败修复与同步取证加固（`FB-003` / `P0`）：手机端考试列表确认无考试且课程中间页已返回 `workEnc` 但缺 `examEnc` 时不再误报 `examCredentialMissing`；手机端已取得考试记录而 PC 端补充页失败时保留手机记录并标记 `examPcSupplementUnavailable`；账号考试页支持合法空表无分页脚本、兼容 8+ 列与行内 `examId`/`testPaperId`，无稳定唯一 ID 的历史行计数跳过（`accountExamRowSkippedNoId`）而不以表格序号伪造 `examId`。前台手动完整同步非阻断只读探测 `getData` 任务引擎计划计数（`taskEnginePlan`），「同步学习通」页面新增零个人标识、零课程名、零正文的脱敏同步诊断 JSON 复制按钮。
 - 学习通课程通知中心（`P2/9b`）：仅在前台手动完整同步时双路复用 `getNoticeList` 前 5 页响应（零额外网络请求），严格按 `'0'`/`'1'` 识别 `platformUnread` 并独立维护本机已读状态（`localRead`，绝不回写冒充平台已读），剥离正文内嵌 URL 签名查询串并仅提取四位年份北京时间事件时间；支持一键转为带 `[课程通知]` 前缀的本地提醒日程与 `AlarmManager` 闹钟，后台 `WorkManager` 检查显式跳过通用通知采集与计划探测。
 - 学习通章节任务点进度（`P2/9a`）：复用课程中间页 `enc` / `openc` 按需在前台手动读取 `studentcourse` 章节树与任务点完成统计（区分已完成、N 个待完成、暂未开放、无任务点及未提供总计），纯只读展示（不提供自动学习或代完成），支持一键创建 `[章节任务点]` 待办与本地提醒。
 - 仓储隔离、备份 Schema v6 与二级手账页面：按账号隔离存储 `course_notices_v1`（300 条 / 2 MiB 上限）与 `course_chapters_v1`（200 课 / 4 MiB 上限）并纳入恢复副本与退出清理；加密备份在无通知与章节数据时维持导出 `schema: 5`（兼容旧客户端），存在通知或章节缓存时升级导出 `schema: 6` 并完整兼容 `schema 1–6` 恢复与悬空日程引用清理；仅在「我的 → 学习与同步」新增 `/course-hub` 二级手账页面（底栏停留「我的」），首页、日历及既有视觉布局保持不变。
+- 正式发布与验证：PR `#45`（`44242422430` / `44242456226`）、`main` `496a81836cb03418555f7a8d17a192f8415b1697`（`44243881603`）与 annotated Tag `v1.8.12`（object `ba772b16e7d19be09847bb14d4050a1d0ac111ee`，`44243934754`）CI 全绿；本地全量 Flutter `1389 passed / 0 skipped / 0 failed`（含容量基准）、三时区 11 套件各 `104 passed / 0 failed`、格式 253 文件 0 改动、ASCII `flutter analyze` 无问题、元数据 `1.8.12+79`、原生与分发脚本检查（BackupCrypto 41 / 策略升级 53 / AI 学生 8 / 考试 28 / Gitee 35+10 / PowerShell 69）、Gradle JVM `62/62`、`:app:compileDebugAndroidTestKotlin` 与 `:app:lintDebug`（0 errors / 22 warnings）通过。正式 `main` 重建包 `chaoxing-journal-1.8.12.apk`（`60,513,634` 字节，SHA-256 `d2f18f87c6ed374752eec8ece7b814a1537f5fa12832652d22fc35afd1d502b4`，ARM64/x86_64、非 debuggable、16 KiB 对齐、v2 原证书 `d36a5715...`、ZIP 472 条目 CRC 通过）于 GitHub Release `449566975` 公开并设为 `latest`；草稿与匿名 `curl` 完整回下载、候选包（`40b1a495...`）在原 MuMu `127.0.0.1:16448` 的真实账号联调（课程考试 2/账号考试 0/考试通知 3/课程通知 10/计划探测 2·1 待确认、诊断复制与 7 门课章节进度解析），以及正式包同哈希保数据覆盖（`firstInstallTime=2026-11-04 19:05:10` 保留，回拉 `base.apk` 同哈希 `d2f18f87...`，「我的 → 检查更新」显示“已是最新版本 / 当前版本 1.8.12 (79) / 当前已是最新版本”）均通过。Gitee `gitee-release-sync.yml` run `44245576056` 已于第 1 次尝试提交 `84d94a09`（`2026-11-18T05:38:08Z`），实测公开 `update-manual.json`（HTTP 200）已更新为 `1.8.12+79`（指向 GitHub 主地址且无 `backupApkUrl`）、`update-stable.json`（HTTP 200）保持 `1.8.0+67`（未上传 Gitee APK 镜像），但工作流 attempt 1 与 attempt 2 在末尾回读校验 `update-stable.json` 时遇 `HTTP 504` 超时呈 `failure`，不声称该工作流绿灯。
 
 ## 1.8.11（78） — 本地记录查询、统计下钻与多尺寸手账小组件（2026-11-18 正式发布）
 
