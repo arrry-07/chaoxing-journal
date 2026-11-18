@@ -3,6 +3,7 @@ import 'dart:async';
 import 'src/services/app_update_controller.dart';
 import 'src/features/assignment_changes_screen.dart';
 import 'src/features/backup_screen.dart';
+import 'src/features/course_study_hub_screen.dart';
 import 'src/features/daily_plan_screen.dart';
 import 'src/features/manual_agenda_screen.dart';
 import 'src/features/term_archives_screen.dart';
@@ -454,6 +455,14 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             GoRoute(
               path: '/profile/records',
               builder: (_, __) => ProfileRecordsScreen(store: assignmentStore),
+            ),
+            GoRoute(
+              path: '/course-hub',
+              builder: (_, state) => CourseStudyHubScreen(
+                store: assignmentStore,
+                initialTab: state.uri.queryParameters['tab'],
+                initialCourseKey: state.uri.queryParameters['courseKey'],
+              ),
             ),
           ],
         ),

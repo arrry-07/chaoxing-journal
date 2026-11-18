@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/assignment.dart';
 import '../models/course.dart';
+import '../models/course_chapter_progress.dart';
+import '../models/course_notice.dart';
 import '../models/backup_snapshot.dart';
 import '../models/personal_workspace.dart';
 import '../models/study_notebook.dart';
@@ -52,6 +54,8 @@ class LocalAssignmentRepository {
   static const _personalKey = 'personal_workspace_v1';
   static const _notebookKey = 'notebook_v1';
   static const _homeFiltersKey = 'home_filters_v1';
+  static const _noticesKey = 'course_notices_v1';
+  static const _chaptersKey = 'course_chapters_v1';
   static const _maxAdditionalRecoveryBackups = 3;
   static const _maxRecoveryValueBytes = 4 * 1024 * 1024;
   static const _recoveryWriteFailedWarning =
@@ -85,6 +89,8 @@ class LocalAssignmentRepository {
     _personalKey,
     _notebookKey,
     _homeFiltersKey,
+    _noticesKey,
+    _chaptersKey,
     '${_key}_recovery_backup',
     '${_key}_recovery_backups',
     'course_refs_recovery_backup',
@@ -92,6 +98,10 @@ class LocalAssignmentRepository {
     '${_personalKey}_recovery_backups',
     '${_notebookKey}_recovery_backup',
     '${_notebookKey}_recovery_backups',
+    '${_noticesKey}_recovery_backup',
+    '${_noticesKey}_recovery_backups',
+    '${_chaptersKey}_recovery_backup',
+    '${_chaptersKey}_recovery_backups',
   ];
 
   static String _owner(String account) =>
@@ -165,6 +175,59 @@ class LocalAssignmentRepository {
         final raw = value.encode();
         PersonalWorkspace.decode(raw);
         await _require(p.setString(_personalKey, raw));
+      });
+
+  Future<CourseNoticeCollection> loadCourseNotices() => _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        return _readProtected(
+          p,
+          _noticesKey,
+          CourseNoticeCollection.decode,
+          CourseNoticeCollection.new,
+          '部分课程通知缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新同步获取。',
+        );
+      });
+
+  Future<void> saveCourseNotices(
+          CourseNoticeCollection value, String account) =>
+      _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        _checkOwner(p, account);
+        await _protectExisting(
+          p,
+          _noticesKey,
+          CourseNoticeCollection.decode,
+          '部分课程通知缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新同步获取。',
+        );
+        final raw = value.encode();
+        CourseNoticeCollection.decode(raw);
+        await _writeVerified(p, _noticesKey, raw, '课程通知保存失败');
+      });
+
+  Future<CourseChapterCatalog> loadCourseChapters() => _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        return _readProtected(
+          p,
+          _chaptersKey,
+          CourseChapterCatalog.decode,
+          CourseChapterCatalog.new,
+          '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
+        );
+      });
+
+  Future<void> saveCourseChapters(CourseChapterCatalog value, String account) =>
+      _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        _checkOwner(p, account);
+        await _protectExisting(
+          p,
+          _chaptersKey,
+          CourseChapterCatalog.decode,
+          '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
+        );
+        final raw = value.encode();
+        CourseChapterCatalog.decode(raw);
+        await _writeVerified(p, _chaptersKey, raw, '章节进度保存失败');
       });
 
   Future<T> _readProtected<T>(
@@ -255,6 +318,20 @@ class LocalAssignmentRepository {
               PersonalWorkspace.decode,
               PersonalWorkspace.new,
               '部分个人计划与记录无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
+            ),
+            notices: await _readProtected(
+              prefs,
+              _noticesKey,
+              CourseNoticeCollection.decode,
+              CourseNoticeCollection.new,
+              '部分课程通知缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新同步获取。',
+            ),
+            chapters: await _readProtected(
+              prefs,
+              _chaptersKey,
+              CourseChapterCatalog.decode,
+              CourseChapterCatalog.new,
+              '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
             ));
         if (recoveryWarning != null) {
           throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
@@ -360,6 +437,34 @@ class LocalAssignmentRepository {
           final notebookRaw = notebook.encode();
           StudyNotebook.decode(notebookRaw);
           await _require(prefs.setString(_notebookKey, notebookRaw));
+          final validEntryIds = {for (final e in notebook.entries) e.id};
+          if (validated.notices.items.isNotEmpty) {
+            final notices = (await _readProtected(
+              prefs,
+              _noticesKey,
+              CourseNoticeCollection.decode,
+              CourseNoticeCollection.new,
+              '部分课程通知缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新同步获取。',
+            ))
+                .mergeImported(validated.notices, validEntryIds: validEntryIds);
+            final noticesRaw = notices.encode();
+            CourseNoticeCollection.decode(noticesRaw);
+            await _require(prefs.setString(_noticesKey, noticesRaw));
+          }
+          if (validated.chapters.byCourse.isNotEmpty) {
+            final chapters = (await _readProtected(
+              prefs,
+              _chaptersKey,
+              CourseChapterCatalog.decode,
+              CourseChapterCatalog.new,
+              '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
+            ))
+                .mergeImported(validated.chapters,
+                    validEntryIds: validEntryIds);
+            final chaptersRaw = chapters.encode();
+            CourseChapterCatalog.decode(chaptersRaw);
+            await _require(prefs.setString(_chaptersKey, chaptersRaw));
+          }
           await _require(prefs.remove(_switchKey));
           return true;
         } catch (_) {

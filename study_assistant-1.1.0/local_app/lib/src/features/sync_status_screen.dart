@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/sync_report.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -88,6 +89,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                     'formalWork': '正式作业',
                     'classroomTasks': '课堂任务',
                     'exams': '考试与通知',
+                    'taskEnginePlan': '课程任务计划探测',
                   };
                   return ExpansionTile(
                     title: const Text('本机同步阶段采样'),
@@ -195,6 +197,8 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                                 'exam': '课程考试',
                                 'examAccount': '账号考试',
                                 'examNotice': '考试通知',
+                                'courseNotice': '课程通知',
+                                'taskEnginePlan': '课程任务计划探测',
                                 'groupHistory': '课程群补充',
                               }[source.source] ??
                               '其他来源'),
@@ -203,8 +207,21 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                             SyncSourcePhase.partial => '部分信息待重试',
                             SyncSourcePhase.failed => '读取失败',
                             SyncSourcePhase.notEnabled => '尚未启用',
-                          }} · ${source.recordCount} 条 · ${source.unconfirmedCount} 条待确认')),
+                          }} · ${source.recordCount} 条 · ${source.unconfirmedCount} 条待确认'
+                              '${source.reasonCodes.isEmpty ? '' : '\n原因：${source.reasonCodes.map(_reasonLabel).join('、')}'}')),
                   ]),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final report = store.exportSanitizedSyncDiagnostics();
+                    await Clipboard.setData(ClipboardData(text: report));
+                    if (context.mounted) {
+                      _showMessage('已复制脱敏诊断摘要（不含账号与课程隐私）');
+                    }
+                  },
+                  icon: const Icon(Icons.copy_all_outlined),
+                  label: const Text('复制脱敏同步诊断摘要'),
+                ),
                 if (store.syncReport.issues.isNotEmpty) ...[
                   Builder(builder: (context) {
                     final groups = groupSyncIssues(store.syncReport.issues);
@@ -297,6 +314,15 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       },
     );
   }
+
+  String _reasonLabel(String code) => switch (code) {
+        'examPcSupplementUnavailable' => '部分课程 PC 考试补充时间未取得，已保留手机端记录',
+        'accountExamRowSkippedNoId' => '部分历史账号考试缺少唯一标识已跳过',
+        'unfinishedPlanDetected' => '存在待核对课程补充任务计划',
+        'listOrMetadataUnavailable' => '列表或元数据暂不可用',
+        'identityConflict' => '存在重复关联待核对',
+        _ => code,
+      };
 
   void _showMessage(String message) {
     ScaffoldMessenger.of(

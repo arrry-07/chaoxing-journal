@@ -8,12 +8,16 @@ import 'package:flutter/services.dart';
 
 import '../models/assignment.dart';
 import '../models/assignment_sync_progress.dart';
+import '../models/course_chapter_progress.dart';
+import '../models/course_notice.dart';
 import '../models/sync_report.dart';
 import 'chaoxing_api_parser.dart';
 import 'chaoxing_assignment_parser.dart';
+import 'chaoxing_chapter_parser.dart';
 import 'chaoxing_classroom_parser.dart';
 import 'chaoxing_exam_parser.dart';
 import 'chaoxing_exam_visibility.dart';
+import 'chaoxing_notice_parser.dart';
 
 part 'chaoxing_exam_client.dart';
 
@@ -76,6 +80,11 @@ class ChaoxingLocalClient {
   final bool enableClassroomTasks;
   final bool enableExams;
   List<SyncSourceResult> sourceResults = const [];
+  List<CourseNotice> _lastFetchedNotices = const [];
+  List<CourseNotice> get lastFetchedNotices =>
+      List.unmodifiable(_lastFetchedNotices);
+  bool _collectCourseNoticesInNextSync = false;
+  bool _enableTaskEngineProbeInNextSync = false;
   final Future<void> Function(Duration) _wait;
   CancelToken? _activeRequestToken;
   bool _stopRequested = false;
@@ -168,6 +177,8 @@ class ChaoxingLocalClient {
         path.endsWith('/examList')) {
       return '课程考试';
     }
+    if (path.contains('/mycourse/studentcourse')) return '章节进度';
+    if (path.contains('/v2/apis/active/getData')) return '任务引擎探测';
     return '其他';
   }
 
@@ -532,7 +543,26 @@ class ChaoxingLocalClient {
     }
   }
 
+  Future<List<Assignment>> fetchAssignmentsWithOptions({
+    bool collectCourseNotices = false,
+    bool enableTaskEngineProbe = false,
+  }) async {
+    _collectCourseNoticesInNextSync = collectCourseNotices;
+    _enableTaskEngineProbeInNextSync = enableTaskEngineProbe;
+    try {
+      return await fetchAssignments();
+    } finally {
+      _collectCourseNoticesInNextSync = false;
+      _enableTaskEngineProbeInNextSync = false;
+    }
+  }
+
   Future<List<Assignment>> fetchAssignments() async {
+    final collectNotices = _collectCourseNoticesInNextSync;
+    final enableProbe = _enableTaskEngineProbeInNextSync;
+    _collectCourseNoticesInNextSync = false;
+    _enableTaskEngineProbeInNextSync = false;
+    _lastFetchedNotices = const [];
     _startRequestToken();
     final generation = _sessionGeneration;
     final syncWatch = Stopwatch()..start();
@@ -692,11 +722,21 @@ class ChaoxingLocalClient {
         problems.add('部分课堂任务信息尚未读取');
       }
       final examWatch = Stopwatch()..start();
-      final exams = await _fetchExams(courses, generation: generation);
+      final exams = await _fetchExams(
+        courses,
+        generation: generation,
+        collectCourseNotices: collectNotices,
+      );
       _recordPhase('exams', examWatch);
       if (generation != _sessionGeneration) return const [];
       assignments.addAll(exams);
       recognized = recognized || _hasExamObservation;
+      if (enableProbe && enableClassroomTasks && courses.isNotEmpty) {
+        final probeWatch = Stopwatch()..start();
+        await _probeTaskEnginePlans(courses, generation: generation);
+        _recordPhase('taskEnginePlan', probeWatch);
+        if (generation != _sessionGeneration) return const [];
+      }
       if (sourceResults.any((s) =>
           const {'exam', 'examAccount', 'examNotice'}.contains(s.source) &&
           s.phase != SyncSourcePhase.success)) {
@@ -721,6 +761,194 @@ class ChaoxingLocalClient {
       if (generation == _sessionGeneration) {
         _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
       }
+    }
+  }
+
+  Future<void> _probeTaskEnginePlans(
+    List<ChaoxingCourseRef> refs, {
+    required int generation,
+  }) async {
+    var succeeded = 0;
+    var failed = 0;
+    var planCountTotal = 0;
+    var unfinishedCount = 0;
+    final reasons = <String>{};
+    for (final course in refs) {
+      if (_stopRequested) {
+        throw const SyncReadException(
+            SyncIssue(SyncIssueKind.cancelled, '本次同步已取消', stage: 'request'));
+      }
+      if (generation != _sessionGeneration) return;
+      try {
+        final response = await _safeGet<dynamic>(
+          'https://mobilelearn.chaoxing.com/v2/apis/active/getData',
+          queryParameters: {
+            'courseId': course.courseId,
+            'classId': course.clazzId,
+            'DB_STRATEGY': 'DEFAULT',
+          },
+          requestKind: '任务引擎探测',
+        );
+        if (generation != _sessionGeneration) return;
+        final decoded = _decodeJsonPayload(response?.data);
+        final data = decoded is Map ? decoded['data'] : null;
+        if (decoded is! Map || (decoded['result'] != 1 && data == null)) {
+          failed++;
+          reasons.add('probeSchemaUnavailable');
+          continue;
+        }
+        var coursePlans = 0;
+        var courseFinished = 0;
+        if (data is List) {
+          for (final entry in data) {
+            if (entry is! Map) continue;
+            final total = int.tryParse('${entry['planCount'] ?? 0}') ?? 0;
+            final done = int.tryParse('${entry['planFinishCount'] ?? 0}') ?? 0;
+            if (total > 0) {
+              coursePlans += total;
+              courseFinished += done.clamp(0, total);
+            }
+          }
+        } else if (data is Map) {
+          final total = int.tryParse('${data['planCount'] ?? 0}') ?? 0;
+          final done = int.tryParse('${data['planFinishCount'] ?? 0}') ?? 0;
+          if (total > 0) {
+            coursePlans += total;
+            courseFinished += done.clamp(0, total);
+          }
+        }
+        planCountTotal += coursePlans;
+        unfinishedCount += (coursePlans - courseFinished).clamp(0, coursePlans);
+        succeeded++;
+      } on ChaoxingAuthenticationException {
+        rethrow;
+      } on SyncReadException catch (e) {
+        if (e.issue.kind == SyncIssueKind.cancelled) rethrow;
+        failed++;
+        reasons.add(e.issue.kind.name);
+        if (const {
+          SyncIssueKind.authExpired,
+          SyncIssueKind.verificationRequired,
+          SyncIssueKind.rateLimited,
+        }.contains(e.issue.kind)) {
+          break;
+        }
+      } catch (_) {
+        failed++;
+        reasons.add('probeUnexpectedError');
+      }
+    }
+    if (generation != _sessionGeneration) return;
+    if (unfinishedCount > 0) {
+      reasons.add('unfinishedPlanDetected');
+    }
+    sourceResults = [
+      ...sourceResults,
+      SyncSourceResult(
+        source: 'taskEnginePlan',
+        phase: failed == 0
+            ? SyncSourcePhase.success
+            : succeeded > 0
+                ? SyncSourcePhase.partial
+                : SyncSourcePhase.failed,
+        succeededCourses: succeeded,
+        failedCourses: failed,
+        recordCount: planCountTotal,
+        unconfirmedCount: unfinishedCount,
+        reasonCodes: reasons.toList(),
+      ),
+    ];
+  }
+
+  Future<CourseChapterSnapshot> fetchCourseChapters(
+    ChaoxingCourseRef course,
+  ) async {
+    _startRequestToken();
+    final generation = _sessionGeneration;
+    final courseKey = '${course.courseId}:${course.clazzId}';
+    final middleUri = Uri.https(
+      'mooc1.chaoxing.com',
+      '/visit/stucoursemiddle',
+      {
+        'courseid': course.courseId,
+        'clazzid': course.clazzId,
+        'ismooc2': '1',
+        'v': '2',
+        if (course.cpi != null && course.cpi!.isNotEmpty) 'cpi': course.cpi!,
+      },
+    );
+    final middleResp = await _courseGet(
+      middleUri,
+      generation: generation,
+      requestKind: '课程入口',
+    );
+    if (generation != _sessionGeneration || _stopRequested) {
+      throw const SyncReadException(
+        SyncIssue(SyncIssueKind.cancelled, '已取消读取章节进度', stage: 'chapters'),
+      );
+    }
+    final middleHtml = middleResp?.data?.toString() ?? '';
+    final enc = ChaoxingAssignmentParser.hiddenValue(middleHtml, 'enc');
+    final openc = ChaoxingAssignmentParser.hiddenValue(middleHtml, 'openc');
+    final pageCpi = ChaoxingAssignmentParser.hiddenValue(middleHtml, 'cpi');
+    if (enc == null || enc.isEmpty) {
+      throw SyncReadException(SyncIssue(
+        SyncIssueKind.schemaChanged,
+        '${course.courseName} 未提供章节读取凭证',
+        stage: 'chapters',
+        courseKey: courseKey,
+      ));
+    }
+    final cpi =
+        (pageCpi != null && pageCpi.isNotEmpty) ? pageCpi : (course.cpi ?? '');
+    final chapterUri = Uri.https(
+      'mooc2-ans.chaoxing.com',
+      '/mooc2-ans/mycourse/studentcourse',
+      {
+        'courseid': course.courseId,
+        'clazzid': course.clazzId,
+        if (cpi.isNotEmpty) 'cpi': cpi,
+        'enc': enc,
+        if (openc != null && openc.isNotEmpty) 'openc': openc,
+        'fromMiddle': '1',
+        'ut': 's',
+        't': '${DateTime.now().millisecondsSinceEpoch}',
+      },
+    );
+    final response = await _safeGet<dynamic>(
+      chapterUri.toString(),
+      headers: {'User-Agent': courseUserAgent},
+      requestKind: '章节进度',
+    );
+    if (generation != _sessionGeneration || _stopRequested) {
+      throw const SyncReadException(
+        SyncIssue(SyncIssueKind.cancelled, '已取消读取章节进度', stage: 'chapters'),
+      );
+    }
+    try {
+      final snapshot = ChaoxingChapterParser.parse(
+        response?.data?.toString() ?? '',
+        course,
+      );
+      if (snapshot == null) {
+        throw SyncReadException(SyncIssue(
+          SyncIssueKind.schemaChanged,
+          '${course.courseName} 章节目录结构无法识别',
+          stage: 'chapters',
+          courseKey: courseKey,
+        ));
+      }
+      return snapshot;
+    } on StateError catch (e) {
+      if (e.message == 'chapterAccessDenied') {
+        throw SyncReadException(SyncIssue(
+          SyncIssueKind.forbidden,
+          '${course.courseName} 章节页暂不允许访问（签名校验未通过）',
+          stage: 'chapters',
+          courseKey: courseKey,
+        ));
+      }
+      rethrow;
     }
   }
 
