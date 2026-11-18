@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/features/local_records_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/completion_pie_chart.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_statistics.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
+import 'package:study_assistant_mobile/src/services/local_record_query.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
+import 'review_core_remediation_test.dart' as f;
 
 Assignment work(int id, String status, {DateTime? due}) => Assignment(
     id: 'cx:work:1:${id.isEven ? 2 : 3}:$id',
@@ -143,5 +150,129 @@ void main() {
     expect(t.takeException(), isNull);
     expect(find.text('账号考试'), findsOneWidget);
     expect(find.text('共 2 项课业'), findsOneWidget);
+  });
+
+  testWidgets(
+      'stats range switching and interactive drill-down preserve HomeFilters and keep stats tab highlighted',
+      (t) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final now = DateTime.utc(2026, 11, 10, 2); // Beijing 10:00
+    final store = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final initialFilters = const HomeFilters(
+      deadline: AssignmentDeadlineFilter.overdue,
+      type: AssignmentTypeFilter.exam,
+      query: '保留首页搜索',
+    );
+    expect(
+      await store.saveHomeFilters(initialFilters, store.accountEpoch),
+      isTrue,
+    );
+
+    final nearPending =
+        work(1, 'pending', due: now.add(const Duration(days: 2)));
+    final laterPending =
+        work(2, 'pending', due: now.add(const Duration(days: 20)));
+    final undatedPending = work(3, 'pending', due: null);
+    final accExam = Assignment(
+      id: 'cx:exam:account:account:9001',
+      source: AssignmentSource.exam,
+      courseName: '账号考试',
+      title: '账号级测试考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: '9001',
+        startAt: now.add(const Duration(days: 3)),
+        startTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    store.replaceAssignmentsForTest(
+      [nearPending, laterPending, undatedPending, accExam],
+    );
+
+    final router = GoRouter(
+      initialLocation: '/stats',
+      routes: [
+        ShellRoute(
+          builder: (_, __, child) => AppShell(
+            assignmentStore: store,
+            child: child,
+          ),
+          routes: [
+            GoRoute(
+              path: '/stats',
+              builder: (_, __) => StatsScreen(store: store, clock: () => now),
+            ),
+            GoRoute(
+              path: '/records',
+              builder: (_, state) => LocalRecordsScreen(
+                store: store,
+                initialFilter: LocalRecordFilterSpec.fromQueryParameters(
+                  state.uri.queryParameters,
+                ),
+                clock: () => now,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await t.pumpWidget(
+      MaterialApp.router(
+        theme: StudyAssistantTheme.light,
+        routerConfig: router,
+      ),
+    );
+    await t.pumpAndSettle();
+
+    expect(find.text('共 4 项课业'), findsOneWidget);
+
+    // Switch to 未来 7 天: includes nearPending + accExam, excludes undatedPending.
+    await t.tap(find.text('未来 7 天'));
+    await t.pumpAndSettle();
+    expect(find.text('共 2 项课业'), findsOneWidget);
+    expect(find.text('不含 1 项无确定时间课业（切回“全部”可查看）'), findsOneWidget);
+
+    // Drill down via pie legend ('待完成')
+    await t.tap(find.text('待完成'));
+    await t.pumpAndSettle();
+    expect(find.byType(LocalRecordsScreen), findsOneWidget);
+    expect(find.text('2 条记录'), findsOneWidget);
+    final nav = t.widget<NavigationBar>(find.byType(NavigationBar));
+    expect(nav.selectedIndex, 2);
+
+    // Back to StatsScreen cleanly
+    await t.tap(find.byTooltip('返回'));
+    await t.pumpAndSettle();
+    expect(find.byType(StatsScreen), findsOneWidget);
+
+    // Switch to 未来 30 天 and drill down via 账号考试 card
+    await t.tap(find.text('未来 30 天'));
+    await t.pumpAndSettle();
+    expect(find.text('共 3 项课业'), findsOneWidget);
+
+    await t.scrollUntilVisible(find.text('账号考试'), 200);
+    await t.tap(find.text('账号考试'));
+    await t.pumpAndSettle();
+    expect(find.byType(LocalRecordsScreen), findsOneWidget);
+    expect(find.text('1 条记录'), findsOneWidget);
+    expect(find.text('账号级测试考试'), findsOneWidget);
+
+    // Verify HomeFilters were untouched.
+    expect(store.homeFilters.deadline, initialFilters.deadline);
+    expect(store.homeFilters.type, initialFilters.type);
+    expect(store.homeFilters.query, initialFilters.query);
   });
 }

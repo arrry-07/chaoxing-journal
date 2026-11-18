@@ -38,6 +38,7 @@ import 'src/features/widgets/update_dialog.dart';
 import 'src/services/assignment_store.dart';
 import 'src/services/background_reminder_gateway.dart';
 import 'src/services/local_notification_service.dart';
+import 'src/services/local_record_query.dart';
 import 'src/services/reminder_rule_store.dart';
 import 'src/services/secure_session_store.dart';
 import 'src/services/widget_snapshot_service.dart';
@@ -430,8 +431,14 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             GoRoute(
                 path: '/help', builder: (_, __) => const HelpFeedbackScreen()),
             GoRoute(
-                path: '/records',
-                builder: (_, __) => LocalRecordsScreen(store: assignmentStore)),
+              path: '/records',
+              builder: (_, state) => LocalRecordsScreen(
+                store: assignmentStore,
+                initialFilter: LocalRecordFilterSpec.fromQueryParameters(
+                  state.uri.queryParameters,
+                ),
+              ),
+            ),
             GoRoute(
                 path: '/courses',
                 builder: (_, __) => CourseListScreen(store: assignmentStore)),

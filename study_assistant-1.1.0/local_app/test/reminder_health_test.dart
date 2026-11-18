@@ -26,7 +26,11 @@ Future<void> showTechnicalInfo(WidgetTester tester) async {
   if (find.textContaining('原生作业截止事件').evaluate().isNotEmpty) return;
   final title = find.text('技术信息');
   if (title.evaluate().isEmpty) {
-    await tester.scrollUntilVisible(title, 200);
+    try {
+      await tester.scrollUntilVisible(title, 200);
+    } on StateError {
+      await tester.scrollUntilVisible(title, -200);
+    }
   }
   await tester.ensureVisible(title);
   await tester.pumpAndSettle();
@@ -1261,6 +1265,8 @@ void main() {
 
     gateway.failInspections = true;
     await tester.scrollUntilVisible(find.text('重新体检'), 200);
+    await tester.ensureVisible(find.widgetWithText(OutlinedButton, '重新体检'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('重新体检'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
@@ -1277,6 +1283,8 @@ void main() {
     gateway.failInspections = false;
     gateway.nextHealth = nativeHealth(pendingDeadlineCount: 2);
     await tester.scrollUntilVisible(find.text('重新体检'), 200);
+    await tester.ensureVisible(find.widgetWithText(OutlinedButton, '重新体检'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('重新体检'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
@@ -1353,6 +1361,8 @@ void main() {
 
     notifications.fail = false;
     await tester.scrollUntilVisible(find.text('重新体检'), 200);
+    await tester.ensureVisible(find.widgetWithText(OutlinedButton, '重新体检'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('重新体检'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
@@ -2990,6 +3000,57 @@ void main() {
     expect(active, hasLength(1));
     expect(active.values.single['payload'], contains('concurrent-second'));
     expect(await service.hasPendingScheduleRecovery(), isFalse);
+  });
+
+  testWidgets(
+      'health overview summarizes normal state and tucks recovery status into technical info while surfacing pending recovery',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final healthyStore = f.makeStore(
+      f.Session(),
+      notifications: CountingHealthNotifications(),
+    );
+    addTearDown(healthyStore.dispose);
+    await healthyStore.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(home: ReminderHealthScreen(store: healthyStore)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('先确认提醒能到达'), findsOneWidget);
+    expect(find.text('基础通知权限与渠道已开启'), findsOneWidget);
+    expect(find.text('没有待恢复的调度事务'), findsNothing);
+
+    await showTechnicalInfo(tester);
+    await tester.scrollUntilVisible(
+      find.textContaining('没有待恢复的调度事务'),
+      200,
+    );
+    expect(find.textContaining('没有待恢复的调度事务'), findsOneWidget);
+
+    final pendingStore = f.makeStore(
+      f.Session(),
+      notifications: PendingRecoveryNotifications(),
+    );
+    addTearDown(pendingStore.dispose);
+    await pendingStore.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReminderHealthScreen(
+          key: ValueKey(pendingStore),
+          store: pendingStore,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('有 1 项提醒设置或事务需关注'), findsOneWidget);
+    expect(find.text('提醒批次恢复状态'), findsOneWidget);
+    expect(find.textContaining('有未完成的调度事务'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
   });
 }
 

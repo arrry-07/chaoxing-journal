@@ -221,7 +221,8 @@ class AssignmentNotificationPublisherTest {
         ReminderHistoryStore.enableSession(context, database, accountHash, epoch, 1)
 
         val zone = ZoneId.of("Asia/Shanghai")
-        val earlyNow = ZonedDateTime.of(2026, 11, 18, 3, 0, 0, 0, zone)
+        val earlyNow = ZonedDateTime.now(zone).plusDays(7)
+            .withHour(3).withMinute(0).withSecond(0).withNano(0)
         val deadlineAt = earlyNow.plusHours(12).toInstant().toEpochMilli()
         val deadlineAssignmentId = "cx:work:bridge:plan:deadline"
         val newAssignmentId = "cx:work:bridge:plan:new"
@@ -354,7 +355,7 @@ class AssignmentNotificationPublisherTest {
             assertEquals(1, deadlineScheduled.size)
             assertEquals(deadlineEvent.notificationId, deadlineScheduled.single()["notificationId"])
 
-            val expectedWindowStart = ZonedDateTime.of(2026, 11, 18, 8, 0, 0, 0, zone)
+            val expectedWindowStart = earlyNow.withHour(8).withMinute(0).withSecond(0).withNano(0)
                 .toInstant()
                 .toEpochMilli()
             val deferredNew = items.single {
@@ -616,7 +617,8 @@ class AssignmentNotificationPublisherTest {
 
             val state = database.loadPlanState(accountHash, event.sessionEpoch)
             val snapshot = database.snapshot(accountHash, event.assignmentId)!!
-            val now = ZonedDateTime.of(2026, 11, 18, 10, 0, 0, 0, ZoneId.of("Asia/Shanghai"))
+            val now = ZonedDateTime.now(ZoneId.of("Asia/Shanghai"))
+                .withHour(10).withMinute(0).withSecond(0).withNano(0)
             BackgroundReminderBridge.applyPlanAndRecord(
                 appContext = context,
                 database = database,
@@ -668,13 +670,14 @@ class AssignmentNotificationPublisherTest {
             operationSequence = 1L,
         )
         val zone = ZoneId.of("Asia/Shanghai")
-        val preWindowNow = ZonedDateTime.of(2026, 11, 18, 2, 0, 0, 0, zone)
+        val futureDay = ZonedDateTime.now(zone).plusDays(7)
+        val preWindowNow = futureDay.withHour(2).withMinute(0).withSecond(0).withNano(0)
         val windowStart = BackgroundWorkScheduler.nextWindowStart(preWindowNow)
 
-        val beforeWindowDeadlineAt = ZonedDateTime.of(2026, 11, 18, 6, 0, 0, 0, zone)
+        val beforeWindowDeadlineAt = futureDay.withHour(6).withMinute(0).withSecond(0).withNano(0)
             .toInstant()
             .toEpochMilli()
-        val futureDeadlineAt = ZonedDateTime.of(2026, 11, 18, 12, 0, 0, 0, zone)
+        val futureDeadlineAt = futureDay.withHour(12).withMinute(0).withSecond(0).withNano(0)
             .toInstant()
             .toEpochMilli()
 
