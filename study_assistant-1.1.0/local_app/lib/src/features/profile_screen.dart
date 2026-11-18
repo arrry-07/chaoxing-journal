@@ -47,7 +47,7 @@ class ProfileScreen extends StatelessWidget {
                 children: [
                   Card(
                     key: const ValueKey('profile-group-courses'),
-                    color: Journal.sage,
+                    color: Color.lerp(Journal.sheet, Journal.sage, .35),
                     clipBehavior: Clip.antiAlias,
                     child: IconTheme.merge(
                       data: const IconThemeData(color: Journal.ink),
@@ -198,14 +198,21 @@ class ProfileScreen extends StatelessWidget {
                           : () => _confirmLogout(context),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Journal.berry,
-                        side: const BorderSide(color: Journal.berry),
-                        backgroundColor: Journal.berryBg,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        side: const BorderSide(color: Journal.berryBorder),
+                        backgroundColor:
+                            Color.lerp(Journal.sheet, Journal.berryBg, .25),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: const Text('退出登录并清理本机记录'),
+                      child: const Text(
+                        '退出登录并清理本机记录',
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 28),
@@ -430,21 +437,25 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final foreground = Color.lerp(Journal.ink, accentColor, .50)!;
     return Card(
       clipBehavior: Clip.antiAlias,
       child: IconTheme.merge(
-        data: IconThemeData(color: accentColor),
+        data: IconThemeData(color: foreground),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
               key: ValueKey('profile-group-$title'),
               width: double.infinity,
-              color: headerColor,
+              color: Color.lerp(Journal.sheet, headerColor, .35),
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
               child: Text(
                 title,
-                style: Journal.entryTitle.copyWith(color: accentColor),
+                style: Journal.section.copyWith(
+                  color: foreground,
+                  fontSize: 17,
+                ),
               ),
             ),
             for (var i = 0; i < children.length; i += 1) ...[
@@ -482,7 +493,7 @@ class _SettingsTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       leading: Icon(icon, color: IconTheme.of(context).color, size: 22),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      title: Text(title, style: Journal.entryTitle),
       subtitle: subtitle == null ? null : Text(subtitle!),
       subtitleTextStyle: compactSubtitle
           ? Theme.of(context).textTheme.bodySmall?.copyWith(

@@ -226,12 +226,12 @@ class StudyAssistantTheme {
       colorScheme: baseScheme,
       scaffoldBackgroundColor: Journal.paper,
       useMaterial3: true,
-      fontFamily: Journal.uiSansFamily,
-      fontFamilyFallback: Journal.uiSansFallback,
+      fontFamily: Journal.bodyFamily,
+      fontFamilyFallback: Journal.bodyFallback,
       dividerColor: Journal.rule,
       textTheme: Typography.material2021().black.apply(
-            fontFamily: Journal.uiSansFamily,
-            fontFamilyFallback: Journal.uiSansFallback,
+            fontFamily: Journal.bodyFamily,
+            fontFamilyFallback: Journal.bodyFallback,
             bodyColor: Journal.ink,
             displayColor: Journal.ink,
           ),
@@ -324,7 +324,8 @@ class StudyAssistantTheme {
                   : Journal.muted,
             )),
         labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
-              fontFamily: Journal.uiSansFamily,
+              fontFamily: Journal.bodyFamily,
+              fontFamilyFallback: Journal.bodyFallback,
               fontSize: 12,
               fontWeight: FontWeight.w600,
               color: states.contains(WidgetState.selected)

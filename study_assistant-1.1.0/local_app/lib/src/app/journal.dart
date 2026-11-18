@@ -21,14 +21,9 @@ class Journal {
   static const slateBg = Color(0xFFEBF1F6);
   static const slateBorder = Color(0xFFC5D6E6);
 
-  // LXGW WenKai Screen ships weight 400 only. Keep it for poetic book/section
-  // headings at true w400, and route dense scannable UI copy to system sans so
-  // high-stroke Chinese glyphs never suffer synthetic faux-bold smudging.
   static const bodyFamily = 'LXGW WenKai Screen';
   static const titleFamily = bodyFamily;
-  static const uiSansFamily = 'sans-serif';
-  static const bodyFallback = [bodyFamily];
-  static const uiSansFallback = ['sans-serif'];
+  static const bodyFallback = ['sans-serif'];
 
   static const display = TextStyle(
     fontFamily: titleFamily,
@@ -47,33 +42,33 @@ class Journal {
     color: muted,
   );
   static const section = TextStyle(
-    fontFamily: uiSansFamily,
-    fontFamilyFallback: uiSansFallback,
+    fontFamily: bodyFamily,
+    fontFamilyFallback: bodyFallback,
     fontSize: 20,
     color: ink,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w400,
     height: 1.38,
   );
   static const entryTitle = TextStyle(
-    fontFamily: uiSansFamily,
-    fontFamilyFallback: uiSansFallback,
+    fontFamily: bodyFamily,
+    fontFamilyFallback: bodyFallback,
     fontSize: 16,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w400,
     height: 1.38,
     color: ink,
   );
   static const metadata = TextStyle(
-    fontFamily: uiSansFamily,
-    fontFamilyFallback: uiSansFallback,
+    fontFamily: bodyFamily,
+    fontFamilyFallback: bodyFallback,
     fontSize: 13.5,
     height: 1.45,
     color: muted,
   );
   static const time = TextStyle(
-    fontFamily: uiSansFamily,
-    fontFamilyFallback: uiSansFallback,
+    fontFamily: bodyFamily,
+    fontFamilyFallback: bodyFallback,
     fontSize: 15,
-    fontWeight: FontWeight.w700,
+    fontWeight: FontWeight.w400,
     height: 1.3,
     fontFeatures: [FontFeature.tabularFigures()],
     color: ink,
@@ -118,7 +113,8 @@ class JournalHeading extends StatelessWidget {
               eyebrow,
               style: const TextStyle(
                 color: Journal.muted,
-                fontFamily: Journal.uiSansFamily,
+                fontFamily: Journal.bodyFamily,
+                fontFamilyFallback: Journal.bodyFallback,
                 fontSize: 11.5,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 1.4,

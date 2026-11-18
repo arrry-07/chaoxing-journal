@@ -158,15 +158,25 @@ class _CalendarScreenState extends State<CalendarScreen>
             leading = month.weekday % 7;
         final textScaler = MediaQuery.textScalerOf(context);
         final large = textScaler.scale(14) >= 19.5;
-        final cellHeight = large ? textScaler.scale(48) + 28 : 48.0;
+        final cellHeight = large
+            ? (textScaler.scale(14) + textScaler.scale(11)) * 1.4 + 12
+            : 48.0;
         return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
             children: [
-              const Text('课业日历', style: Journal.display),
-              TextButton.icon(
-                  onPressed: () => context.push('/agenda'),
-                  icon: const Icon(Icons.event_note_outlined),
-                  label: const Text('个人待办与考试')),
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  const Text('课业日历', style: Journal.display),
+                  TextButton.icon(
+                    onPressed: () => context.push('/agenda'),
+                    icon: const Icon(Icons.event_note_outlined),
+                    label: const Text('个人待办与考试'),
+                  ),
+                ],
+              ),
               Row(children: [
                 TextButton(
                     onPressed: () => setState(() {
@@ -264,7 +274,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                             fontSize: 13,
                                             color: Journal.muted))))
                         ]),
-                        const SizedBox(height: 4),
+                        const Divider(height: 9, indent: 8, endIndent: 8),
                         for (var row = 0;
                             row < (leading + days + 6) ~/ 7;
                             row++)
@@ -322,7 +332,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                                                 children: [
                                                   Text('$day',
                                                       style: const TextStyle(
-                                                          fontSize: 14)),
+                                                          fontSize: 14,
+                                                          height: 1.4)),
                                                   if (items.isNotEmpty ||
                                                       personalCount > 0)
                                                     Text(
@@ -331,24 +342,26 @@ class _CalendarScreenState extends State<CalendarScreen>
                                                             'calendar-count-$day'),
                                                         style: const TextStyle(
                                                             fontSize: 11,
+                                                            height: 1.4,
                                                             color:
                                                                 Journal.muted))
                                                 ]))));
                               }))
                           ]),
                       ]))),
-              const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text('日期下方数字为作业、任务、考试及个人安排合计；考试按开考日，其余按截止日，均为北京时间',
-                      style: TextStyle(fontSize: 12, color: Journal.muted))),
-              Text(
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                child: Text(
                   selected == null
                       ? '本月议程'
-                      : DateFormat('M月d日').format(selected!),
-                  style: Journal.section),
+                      : '${DateFormat('M月d日').format(selected!)} · 议程',
+                  style: Journal.section,
+                ),
+              ),
+              const Divider(height: 1),
               if (agenda.isEmpty && manualAgenda.isEmpty)
                 Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                     child:
                         Text(widget.store.syncReport.phase == SyncPhase.failed
                             ? '本次读取失败，请到同步详情重试'
@@ -385,6 +398,11 @@ class _CalendarScreenState extends State<CalendarScreen>
                     onTap: () => context.push('/agenda'),
                   );
                 }),
+              const Padding(
+                padding: EdgeInsets.only(top: 10),
+                child: Text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。',
+                    style: TextStyle(fontSize: 12, color: Journal.muted)),
+              ),
               if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
                 const Divider(height: 24),
                 const Text('待核对课业', style: Journal.section),

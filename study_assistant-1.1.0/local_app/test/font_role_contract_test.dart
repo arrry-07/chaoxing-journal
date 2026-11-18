@@ -56,7 +56,7 @@ bool _wrongRole({
     return style.fontFamily != Journal.bodyFamily ||
         style.fontWeight != FontWeight.w400;
   }
-  return style.fontFamily != Journal.uiSansFamily;
+  return style.fontFamily != Journal.bodyFamily;
 }
 
 void main() {
@@ -117,7 +117,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       _renderedStyle(tester, find.text('统计范围：已关注课程的课业与账号考试')).fontFamily,
-      Journal.uiSansFamily,
+      Journal.bodyFamily,
     );
 
     await tester.pumpWidget(MaterialApp(
@@ -129,7 +129,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       _renderedStyle(tester, find.text('个人待办与考试')).fontFamily,
-      Journal.uiSansFamily,
+      Journal.bodyFamily,
     );
 
     await tester.pumpWidget(MaterialApp(
@@ -139,11 +139,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       _renderedStyle(tester, find.text('设置')).fontFamily,
-      Journal.uiSansFamily,
+      Journal.bodyFamily,
     );
   });
 
-  testWidgets('settings, form, dialog and bottom navigation use UI sans',
+  testWidgets('settings, form, dialog and bottom navigation use WenKai',
       (tester) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     tester.view.physicalSize = const Size(420, 900);
@@ -161,7 +161,7 @@ void main() {
     for (final label in ['首页显示', '紧凑密度']) {
       expect(
         _renderedStyle(tester, find.text(label)).fontFamily,
-        Journal.uiSansFamily,
+        Journal.bodyFamily,
         reason: label,
       );
     }
@@ -174,7 +174,7 @@ void main() {
     final inputs = tester.widgetList<EditableText>(find.byType(EditableText));
     expect(inputs, isNotEmpty);
     for (final input in inputs) {
-      expect(input.style.fontFamily, Journal.uiSansFamily);
+      expect(input.style.fontFamily, Journal.bodyFamily);
     }
 
     await tester.pumpWidget(MaterialApp(
@@ -194,7 +194,7 @@ void main() {
     expect(find.byType(AboutDialog), findsOneWidget);
     expect(
       _renderedStyle(tester, find.text('学习通课业手记')).fontFamily,
-      Journal.uiSansFamily,
+      Journal.bodyFamily,
     );
 
     final router = GoRouter(
@@ -221,20 +221,26 @@ void main() {
     for (final label in ['首页', '日历', '统计', '我的']) {
       expect(
         _renderedStyle(tester, find.text(label)).fontFamily,
-        Journal.uiSansFamily,
+        Journal.bodyFamily,
         reason: 'bottom navigation $label',
       );
     }
   });
 
-  testWidgets('font role contract rejects swapped title and body fonts',
+  testWidgets('font role contract rejects bold headlines and sans body text',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: StudyAssistantTheme.light,
       home: const Scaffold(
         body: Column(children: [
-          Text('错误标题', style: Journal.metadata),
-          Text('错误正文', style: Journal.display),
+          Text(
+            '错误标题',
+            style: TextStyle(
+              fontFamily: Journal.bodyFamily,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          Text('错误正文', style: TextStyle(fontFamily: 'sans-serif')),
         ]),
       ),
     ));

@@ -58,7 +58,7 @@ void main() {
 
     final courses = tester
         .widget<Card>(find.byKey(const ValueKey('profile-group-courses')));
-    expect(courses.color, Journal.sage);
+    expect(courses.color, Color.lerp(Journal.sheet, Journal.sage, .35));
     expect(
       tester.widget<Icon>(find.byIcon(Icons.school_outlined)).color,
       Journal.ink,
@@ -75,18 +75,19 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       final titleText = tester.widget<Text>(find.text(title));
-      expect(titleText.style?.fontFamily, Journal.uiSansFamily);
-      expect(titleText.style?.color, accent);
+      final foreground = Color.lerp(Journal.ink, accent, .50);
+      expect(titleText.style?.fontFamily, Journal.bodyFamily);
+      expect(titleText.style?.color, foreground);
       final headerBox = tester
           .widget<Container>(find.byKey(ValueKey('profile-group-$title')));
-      expect(headerBox.color, header);
+      expect(headerBox.color, Color.lerp(Journal.sheet, header, .35));
       if (title == '数据与安全') {
         final healthIcon = find.byIcon(Icons.health_and_safety_outlined);
-        expect(tester.widget<Icon>(healthIcon).color, Journal.ochre);
+        expect(tester.widget<Icon>(healthIcon).color, foreground);
       }
       if (title == '关于与更新') {
         final updateIcon = find.byIcon(Icons.system_update_alt);
-        expect(tester.widget<Icon>(updateIcon).color, Journal.slate);
+        expect(tester.widget<Icon>(updateIcon).color, foreground);
       }
     }
 
@@ -522,7 +523,7 @@ void main() {
           expect((tile.subtitle! as Text).data, entry.value.$1);
           expect(tile.subtitleTextStyle?.fontSize, 12);
           expect(tile.subtitleTextStyle?.color, Journal.muted);
-          expect((tile.title! as Text).style?.fontWeight, FontWeight.w700);
+          expect((tile.title! as Text).style, Journal.entryTitle);
           expect(tester.takeException(), isNull);
           await tester.tap(row);
           await tester.pumpAndSettle();

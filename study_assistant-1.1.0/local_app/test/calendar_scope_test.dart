@@ -285,13 +285,13 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     final store = _makeStore(_Session());
     addTearDown(store.dispose);
-    final now = DateTime(2026, 11, 18, 10);
+    final now = DateTime.utc(2026, 11, 18, 2);
     store.replaceAssignmentsForTest([
       _assignment('today',
-          title: '今日课业', deadlineAt: DateTime(2026, 11, 18, 23, 59)),
+          title: '今日课业', deadlineAt: DateTime.utc(2026, 11, 18, 15, 59)),
       _assignment('pending',
           title: '时间待确认',
-          deadlineAt: DateTime(2026, 11, 19, 23, 59),
+          deadlineAt: DateTime.utc(2026, 11, 19, 15, 59),
           trusted: false),
     ]);
     store.notebook = StudyNotebook(entries: [
@@ -299,13 +299,13 @@ void main() {
         id: 'exam',
         title: '高数考试',
         kind: 'exam',
-        at: DateTime(2026, 11, 18, 9),
+        at: DateTime.utc(2026, 11, 18, 1),
       ),
       ManualEntry(
         id: 'todo',
         title: '交材料',
         kind: 'todo',
-        at: DateTime(2026, 11, 18, 11),
+        at: DateTime.utc(2026, 11, 18, 3),
       ),
     ]);
 
@@ -314,6 +314,13 @@ void main() {
       home: Scaffold(body: CalendarScreen(store: store, clock: () => now)),
     ));
     await tester.pumpAndSettle();
+
+    final title = tester.getRect(find.text('课业日历'));
+    final agendaEntry = tester.getRect(find.text('个人待办与考试'));
+    expect(agendaEntry.left, greaterThan(title.right));
+    expect(agendaEntry.center.dy, closeTo(title.center.dy, 2));
+    final agendaHeading = find.text('11月18日 · 议程');
+    expect(agendaHeading.hitTestable(), findsOneWidget);
 
     final count = tester.widget<Text>(
       find.byKey(const ValueKey('calendar-count-18')),
@@ -394,7 +401,7 @@ void main() {
       home: Scaffold(
         body: CalendarScreen(
           store: store,
-          clock: () => DateTime(2026, 11, 18, 10),
+          clock: () => DateTime.utc(2026, 11, 18, 2),
         ),
       ),
     ));

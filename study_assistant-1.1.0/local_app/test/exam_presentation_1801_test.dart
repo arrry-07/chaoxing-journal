@@ -154,7 +154,10 @@ void main() {
     expect(t.widget<OutlinedButton>(logout).onPressed, isNotNull);
     final style = t.widget<OutlinedButton>(logout).style!;
     expect(style.foregroundColor!.resolve({}), Journal.berry);
-    expect(style.backgroundColor!.resolve({}), Journal.berryBg);
+    expect(
+      style.backgroundColor!.resolve({}),
+      Color.lerp(Journal.sheet, Journal.berryBg, .25),
+    );
     await t.tap(logout);
     await t.pumpAndSettle();
     expect(find.text('退出并清理本机记录？'), findsOneWidget);
