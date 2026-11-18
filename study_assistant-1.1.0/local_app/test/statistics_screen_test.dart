@@ -31,7 +31,7 @@ Assignment work(int id, String status, {DateTime? due}) => Assignment(
 
 void main() {
   testWidgets(
-      'completion ring uses one sage arc and keeps 8/2/1 legend semantics',
+      'completion ring uses ordered category arcs and keeps 8/2/1 semantics',
       (t) async {
     final semantics = t.ensureSemantics();
     final now = DateTime.utc(2026, 11, 10, 2);
@@ -63,7 +63,8 @@ void main() {
     expect(find.text('8 份'), findsOneWidget);
     expect(find.text('2 份'), findsOneWidget);
     expect(find.text('1 份'), findsOneWidget);
-    expect(find.byIcon(Icons.menu_book_outlined), findsOneWidget);
+    final courseMark = t.widget<CourseMark>(find.byType(CourseMark));
+    expect(courseMark.size, 30);
     final pendingNode = t.getSemantics(find.bySemanticsLabel('待完成 2 份，18%'));
     expect(
       pendingNode.getSemanticsData().hasAction(SemanticsAction.tap),
@@ -77,11 +78,38 @@ void main() {
         ))
         .painter as CompletionRingPainter;
     expect(painter.counts, [8, 2, 1, 0]);
+    final segments = CompletionPieChart.segments(painter.counts);
+    expect(segments.map((segment) => segment.index), [0, 1, 2]);
+    expect(segments[0].start, closeTo(-math.pi / 2, 1e-9));
+    expect(segments[0].sweep, closeTo(8 / 11 * math.pi * 2, 1e-9));
     expect(
-      CompletionPieChart.completedSweeps(painter.counts).single,
-      closeTo(8 / 11 * math.pi * 2, 1e-9),
+      segments[1].start,
+      closeTo(-math.pi / 2 + 8 / 11 * math.pi * 2, 1e-9),
     );
-    expect(CompletionPieChart.completedSweeps(painter.counts), hasLength(1));
+    expect(segments[1].sweep, closeTo(2 / 11 * math.pi * 2, 1e-9));
+    expect(
+      segments[2].start,
+      closeTo(-math.pi / 2 + 10 / 11 * math.pi * 2, 1e-9),
+    );
+    expect(segments[2].sweep, closeTo(1 / 11 * math.pi * 2, 1e-9));
+    expect(segments.map((segment) => segment.color), [
+      CompletionPieChart.categoryColors[0],
+      CompletionPieChart.categoryColors[1],
+      CompletionPieChart.categoryColors[2],
+    ]);
+    expect(
+      CompletionPieChart.categoryColors[1],
+      Color.lerp(Journal.ochre, Journal.paper, .18),
+    );
+    expect(
+      CompletionPieChart.categoryColors[2],
+      Color.lerp(Journal.berry, Journal.paper, .18),
+    );
+    expect(
+      CompletionPieChart.categoryColors[3],
+      Color.lerp(Journal.muted, Journal.paper, .12),
+    );
+    expect(CompletionPieChart.legendColors, CompletionPieChart.categoryColors);
     expect(CompletionPieChart.ringThickness, 10);
 
     final overview =
@@ -118,6 +146,10 @@ void main() {
     expect(find.text('待完成'), findsOneWidget);
     expect(find.text('已逾期'), findsOneWidget);
     expect(find.text('提交未知'), findsOneWidget);
+    expect(
+      t.widget<Text>(find.text('提交未知 1 份')).style?.color,
+      Journal.ochre,
+    );
     expect(
         find.descendant(
             of: find.byType(CompletionPieChart), matching: find.text('25%')),
@@ -172,10 +204,14 @@ void main() {
                 statistics: AssignmentStatistics([work(0, 'unknown')])))));
     expect(find.text('0%'), findsNothing);
     expect(find.text('待确认'), findsOneWidget);
-    expect(CompletionPieChart.completedSweeps([0, 0, 0, 1]), isEmpty);
+    final segment = CompletionPieChart.segments([0, 0, 0, 1]).single;
+    expect(segment.index, 3);
+    expect(segment.start, closeTo(-math.pi / 2, 1e-9));
+    expect(segment.sweep, closeTo(math.pi * 2, 1e-9));
+    expect(segment.color, CompletionPieChart.categoryColors[3]);
   });
 
-  testWidgets('zero completion draws only the track while keeping a real 0%',
+  testWidgets('zero completion draws unfinished categories and keeps real 0%',
       (t) async {
     final stats = AssignmentStatistics([
       work(0, 'pending'),
@@ -186,7 +222,17 @@ void main() {
       home: Scaffold(body: CompletionPieChart(statistics: stats)),
     ));
     expect(find.text('0%'), findsOneWidget);
-    expect(CompletionPieChart.completedSweeps([0, 2, 1, 0]), isEmpty);
+    final segments = CompletionPieChart.segments([0, 2, 1, 0]);
+    expect(segments.map((segment) => segment.index), [1, 2]);
+    expect(segments[0].sweep, closeTo(2 / 3 * math.pi * 2, 1e-9));
+    expect(segments[1].sweep, closeTo(1 / 3 * math.pi * 2, 1e-9));
+  });
+
+  test('ring segments skip zero counts and preserve tiny true proportions', () {
+    expect(CompletionPieChart.segments([0, 0, 0, 0]), isEmpty);
+    final tiny = CompletionPieChart.segments([999, 1, 0, 0]);
+    expect(tiny.map((segment) => segment.index), [0, 1]);
+    expect(tiny[1].sweep, closeTo(math.pi * 2 / 1000, 1e-9));
   });
 
   testWidgets('empty statistics keep the original empty card and no chart',
@@ -223,9 +269,9 @@ void main() {
         find.descendant(
             of: find.byType(CompletionPieChart), matching: find.text('100%')),
         findsOneWidget);
-    expect(CompletionPieChart.completedSweeps([1, 0, 0, 0]), [
-      closeTo(math.pi * 2, 1e-9),
-    ]);
+    final segment = CompletionPieChart.segments([1, 0, 0, 0]).single;
+    expect(segment.index, 0);
+    expect(segment.sweep, closeTo(math.pi * 2, 1e-9));
     expect(find.text('当前没有待处理的课程'), findsOneWidget);
   });
 

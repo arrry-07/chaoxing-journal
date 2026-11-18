@@ -162,7 +162,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         return ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             children: [
-              const Text('课业日历', style: Journal.section),
+              const Text('课业日历', style: Journal.display),
               TextButton.icon(
                   onPressed: () => context.push('/agenda'),
                   icon: const Icon(Icons.event_note_outlined),
@@ -214,20 +214,39 @@ class _CalendarScreenState extends State<CalendarScreen>
                   child: Padding(
                       padding: const EdgeInsets.all(4),
                       child: Column(children: [
-                        Row(children: [
-                          IconButton(
-                              tooltip: '上个月',
-                              onPressed: () => move(-1),
-                              icon: const Icon(Icons.chevron_left)),
-                          Expanded(
-                              child: Text(DateFormat('yyyy年M月').format(month),
-                                  textAlign: TextAlign.center,
-                                  style: Journal.section)),
-                          IconButton(
-                              tooltip: '下个月',
-                              onPressed: () => move(1),
-                              icon: const Icon(Icons.chevron_right))
-                        ]),
+                        Builder(builder: (context) {
+                          final previous = IconButton(
+                            tooltip: '上个月',
+                            onPressed: () => move(-1),
+                            icon: const Icon(Icons.chevron_left),
+                          );
+                          final next = IconButton(
+                            tooltip: '下个月',
+                            onPressed: () => move(1),
+                            icon: const Icon(Icons.chevron_right),
+                          );
+                          final label = Text(
+                            DateFormat('yyyy年M月').format(month),
+                            maxLines: 1,
+                            softWrap: false,
+                            textAlign: TextAlign.center,
+                            style: Journal.section,
+                          );
+                          if (!large) {
+                            return Row(children: [
+                              previous,
+                              Expanded(child: label),
+                              next,
+                            ]);
+                          }
+                          return Column(children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [previous, next],
+                            ),
+                            label,
+                          ]);
+                        }),
                         Row(children: [
                           for (final label in [
                             '日',
@@ -308,10 +327,12 @@ class _CalendarScreenState extends State<CalendarScreen>
                                                       personalCount > 0)
                                                     Text(
                                                         '${items.length + personalCount}',
+                                                        key: ValueKey(
+                                                            'calendar-count-$day'),
                                                         style: const TextStyle(
                                                             fontSize: 11,
                                                             color:
-                                                                Journal.berry))
+                                                                Journal.muted))
                                                 ]))));
                               }))
                           ]),
@@ -346,15 +367,24 @@ class _CalendarScreenState extends State<CalendarScreen>
                     onTap: () => context
                         .push('/assignments/${Uri.encodeComponent(a.id)}')),
               for (final e in manualAgenda)
-                ListTile(
+                Builder(builder: (context) {
+                  final exam = e.kind == 'exam';
+                  final accent = exam ? Journal.slate : Journal.ink;
+                  final label = exam ? '手动考试' : '个人待办';
+                  return ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(e.kind == 'exam'
-                        ? Icons.school_outlined
-                        : Icons.event_note_outlined),
+                    leading: Icon(
+                      exam ? Icons.school_outlined : Icons.event_note_outlined,
+                      color: accent,
+                    ),
                     title: Text(
-                        '${e.kind == 'exam' ? '手动考试' : '个人待办'} · ${e.title}'),
+                      '$label · ${e.title}',
+                      style: Journal.entryTitle.copyWith(color: accent),
+                    ),
                     subtitle: Text(manualTime(e.at)),
-                    onTap: () => context.push('/agenda')),
+                    onTap: () => context.push('/agenda'),
+                  );
+                }),
               if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
                 const Divider(height: 24),
                 const Text('待核对课业', style: Journal.section),
@@ -368,6 +398,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                 if (pendingDeadlineCount > 0)
                   TextButton.icon(
                       key: const ValueKey('calendar-deadline-pending-scope'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Journal.ochre,
+                      ),
                       onPressed: () => context.go(_recoveryLocation(
                           AssignmentRecoveryScope.deadlinePending)),
                       icon: const Icon(Icons.help_outline),
