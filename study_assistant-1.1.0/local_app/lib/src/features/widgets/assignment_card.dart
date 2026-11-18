@@ -264,9 +264,12 @@ class AssignmentCard extends StatelessWidget {
 
       if (largeText) {
         return Semantics(
+          container: true,
           button: true,
           enabled: enabled,
           label: openTooltip,
+          onTap: enabled ? onOpenAssignment : null,
+          excludeSemantics: true,
           child: Tooltip(
             message: openTooltip,
             child: OutlinedButton.icon(
@@ -298,9 +301,11 @@ class AssignmentCard extends StatelessWidget {
       }
 
       return Semantics(
+        container: true,
         button: true,
         enabled: enabled,
         label: openTooltip,
+        onTap: enabled ? onOpenAssignment : null,
         excludeSemantics: true,
         child: IconButton(
           key: ValueKey('open-assignment-${a.id}'),
@@ -381,7 +386,7 @@ class AssignmentCard extends StatelessWidget {
                 button: onCardTap != null,
                 onTap: onCardTap,
                 label:
-                    '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${a.isExam ? '$examSemantics${a.exam!.startTrusted || a.exam!.endTrusted ? '，北京时间' : ''}' : hasTime ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}' : deadline}',
+                    '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${a.isExam ? '$examSemantics${a.exam!.startTrusted || a.exam!.endTrusted ? '，北京时间' : ''}' : hasTime ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}${countdown ? '，${DisplayPreferences.remaining(d, now)}' : ''}' : deadline}',
                 excludeSemantics: true,
                 child: Material(
                   type: MaterialType.transparency,

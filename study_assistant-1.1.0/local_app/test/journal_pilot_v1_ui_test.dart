@@ -278,8 +278,8 @@ void main() {
     await tester.tap(dropdown);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.textContaining('（1班）'), findsWidgets);
-    expect(find.textContaining('（2班）'), findsWidgets);
+    expect(find.textContaining('班级 classA'), findsWidgets);
+    expect(find.textContaining('班级 classB'), findsWidgets);
   });
 }
 
