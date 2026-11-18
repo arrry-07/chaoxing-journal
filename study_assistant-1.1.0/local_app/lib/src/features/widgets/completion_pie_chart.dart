@@ -9,13 +9,28 @@ class CompletionPieChart extends StatelessWidget {
       {super.key, required this.statistics, this.diameter = 176});
   final AssignmentStatistics statistics;
   final double diameter;
-  static const colors = [
+  static const ringThickness = 10.0;
+  static const trackColor = Journal.rule;
+  static final completedColor = Color.lerp(Journal.ink, Journal.sage, .30)!;
+  static const _semanticColors = [
     Journal.ink,
     Color(0xFF9A6230),
     Journal.berry,
     Journal.muted
   ];
+  static final legendColors = <Color>[
+    completedColor,
+    for (var i = 1; i < _semanticColors.length; i++)
+      Color.lerp(_semanticColors[i], Journal.paper, .12)!,
+  ];
   static const labels = ['已完成', '待完成', '已逾期', '提交未知'];
+
+  @visibleForTesting
+  static List<double> completedSweeps(List<int> counts) {
+    final total = counts.fold(0, (sum, count) => sum + count);
+    if (total == 0 || counts.first <= 0) return const [];
+    return [counts.first / total * math.pi * 2];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +48,7 @@ class CompletionPieChart extends StatelessWidget {
         child: SizedBox.square(
           dimension: scaledDiameter,
           child: CustomPaint(
-            painter: _Ring(statistics.counts),
+            painter: CompletionRingPainter(statistics.counts),
             child: Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Text(uncertain ? '待确认' : '${statistics.percentages[0]}%',
@@ -50,33 +65,35 @@ class CompletionPieChart extends StatelessWidget {
   }
 }
 
-class _Ring extends CustomPainter {
-  _Ring(this.counts);
+@visibleForTesting
+class CompletionRingPainter extends CustomPainter {
+  CompletionRingPainter(this.counts);
   final List<int> counts;
+
   @override
   void paint(Canvas canvas, Size size) {
     final total = counts.fold(0, (a, b) => a + b);
-    const thickness = 17.0;
+    const thickness = CompletionPieChart.ringThickness;
     final center = Offset(size.width / 2, size.height / 2);
     final radius = (math.min(size.width, size.height) - thickness) / 2;
     final bounds = Rect.fromCircle(center: center, radius: radius);
     final pen = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = thickness;
-    if (total == 0) {
-      canvas.drawCircle(center, radius, pen..color = Journal.rule);
-      return;
-    }
-    var start = -math.pi / 2;
-    for (var i = 0; i < counts.length; i++) {
-      if (counts[i] == 0) continue;
-      final sweep = counts[i] / total * math.pi * 2;
-      canvas.drawArc(bounds, start, sweep, false,
-          pen..color = CompletionPieChart.colors[i]);
-      start += sweep;
+      ..strokeWidth = thickness
+      ..strokeCap = StrokeCap.butt
+      ..color = CompletionPieChart.trackColor;
+    canvas.drawCircle(center, radius, pen);
+    final sweeps = CompletionPieChart.completedSweeps(counts);
+    if (sweeps.isEmpty) return;
+    pen.color = CompletionPieChart.completedColor;
+    if (counts.first == total) {
+      canvas.drawCircle(center, radius, pen);
+    } else {
+      canvas.drawArc(bounds, -math.pi / 2, sweeps.single, false, pen);
     }
   }
 
   @override
-  bool shouldRepaint(covariant _Ring old) => !listEquals(counts, old.counts);
+  bool shouldRepaint(covariant CompletionRingPainter old) =>
+      !listEquals(counts, old.counts);
 }

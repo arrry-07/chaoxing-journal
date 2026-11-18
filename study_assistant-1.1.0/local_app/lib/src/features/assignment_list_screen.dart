@@ -351,8 +351,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 context.push('/assignments/${Uri.encodeComponent(a.id)}'));
         List<Widget> timeline(List<Assignment> list) {
           String? previous;
+          var overdueTierAnnounced = false;
+          final todayDay = AssignmentQuery.dayKey(now);
           final widgets = <Widget>[];
           for (final a in list) {
+            final bucket = AssignmentQuery.timelineBucketAt(a, now);
+            final isOverdue = bucket == AssignmentDeadlineBucket.overdue;
+            var isTodayGroup = false;
             String? key;
             String? heading;
             if (a.isExam) {
@@ -361,10 +366,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   .timeline;
               key = stamp?.key;
               heading = stamp?.heading;
+              if (!isOverdue &&
+                  a.timelineAt != null &&
+                  AssignmentQuery.dayKey(a.timelineAt!) == todayDay) {
+                isTodayGroup = true;
+              }
             } else if (a.timelineAt != null &&
                 a.timelineTrusted &&
                 !a.deadlineReadFailed) {
               final day = AssignmentQuery.dayKey(a.timelineAt!);
+              isTodayGroup = !isOverdue && day == todayDay;
               key = '${day.year}:${day.month}:${day.day}';
               heading =
                   '${day.year == AssignmentQuery.beijing(now).year ? '' : '${day.year}年'}'
@@ -374,11 +385,30 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               key = 'undated';
               heading = '无日期与待确认';
             }
-            if (heading != null && key != previous) {
-              widgets.add(dayHeading(heading, top: widgets.isEmpty ? 8 : 12));
+            final effectiveKey = isOverdue ? 'overdue:$key' : key;
+            if (heading != null && effectiveKey != previous) {
+              String? tierBadge;
+              var tone = _DayHeadingTone.normal;
+              if (isOverdue) {
+                tone = _DayHeadingTone.overdue;
+                if (!overdueTierAnnounced && recoveryScope == null) {
+                  tierBadge = '已逾期置底';
+                  overdueTierAnnounced = true;
+                }
+              } else if (key == 'undated') {
+                tone = _DayHeadingTone.undated;
+              } else if (isTodayGroup) {
+                tone = _DayHeadingTone.today;
+                tierBadge = '今天';
+              }
+              widgets.add(dayHeading(
+                heading,
+                top: widgets.isEmpty ? 10 : 14,
+                tone: tone,
+                badge: tierBadge,
+              ));
             }
-            // Reset after an undated row so a later dated item gets its header.
-            previous = key;
+            previous = effectiveKey;
             final row = card(a);
             widgets.add(widgets.isEmpty
                 ? Padding(padding: const EdgeInsets.only(top: 8), child: row)
@@ -387,153 +417,441 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           return widgets;
         }
 
+        final reduceMotion = MediaQuery.disableAnimationsOf(context);
+        final syncAction = sync.action == HomeSyncAction.login ||
+                sync.action == HomeSyncAction.verify
+            ? sync.action
+            : HomeSyncAction.retry;
+
+        // Scrolling must never trigger an implicit remote sync; keep explicit
+        // refresh on the header button only.
         return ListView(
-            key: PageStorageKey(recoveryScope == null
-                ? 'home-list'
-                : 'home-recovery-${recoveryScope.queryValue}'),
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-            children: [
-              Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    const Text('课业手记', style: Journal.display),
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      if (plans.isEmpty)
-                        IconButton(
-                            key: const ValueKey('home-plan-entry'),
-                            tooltip: '今日计划',
-                            constraints: const BoxConstraints(
-                                minWidth: 48, minHeight: 48),
-                            onPressed: () => context.push('/plan'),
-                            icon: const Icon(Icons.checklist)),
+          key: PageStorageKey(recoveryScope == null
+              ? 'home-list'
+              : 'home-recovery-${recoveryScope.queryValue}'),
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 32),
+          children: [
+            Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  const Text('课业手记', style: Journal.display),
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (plans.isEmpty)
                       IconButton(
-                          tooltip: '刷新作业',
-                          onPressed: busy
-                              ? null
-                              : () => refresh(
-                                  sync.action == HomeSyncAction.login ||
-                                          sync.action == HomeSyncAction.verify
-                                      ? sync.action
-                                      : HomeSyncAction.retry),
-                          icon: busy
-                              ? const SizedBox.square(
-                                  dimension: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: Journal.ink))
-                              : const Icon(Icons.sync_rounded)),
-                      IconButton(
-                          tooltip: '同步详情',
-                          onPressed: () => context.push('/sync'),
-                          icon: const Icon(Icons.more_horiz_rounded)),
-                    ]),
+                          key: const ValueKey('home-plan-entry'),
+                          tooltip: '今日计划',
+                          constraints:
+                              const BoxConstraints(minWidth: 48, minHeight: 48),
+                          onPressed: () => context.push('/plan'),
+                          icon: const Icon(Icons.checklist_rounded)),
+                    IconButton(
+                        tooltip: '刷新作业',
+                        onPressed: busy ? null : () => refresh(syncAction),
+                        icon: busy
+                            ? reduceMotion
+                                ? const Icon(Icons.hourglass_top_rounded,
+                                    size: 20, color: Journal.ink)
+                                : const SizedBox.square(
+                                    dimension: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2, color: Journal.ink))
+                            : const Icon(Icons.sync_rounded)),
+                    IconButton(
+                        tooltip: '同步详情',
+                        onPressed: () => context.push('/sync'),
+                        icon: const Icon(Icons.more_horiz_rounded)),
                   ]),
+                ]),
+            const SizedBox(height: 8),
+            if (recoveryScope != null) ...[
+              _recoveryHeader(context, recoveryScope, items.length),
               const SizedBox(height: 12),
-              if (recoveryScope != null) ...[
-                _recoveryHeader(context, recoveryScope, items.length),
-                const SizedBox(height: 12),
-              ],
-              if (plans.isNotEmpty)
-                Material(
+            ],
+            if (plans.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Journal.sage.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Material(
                     type: MaterialType.transparency,
                     child: InkWell(
-                        key: const ValueKey('home-plan-summary'),
-                        onTap: () => context.push('/plan'),
-                        child: ConstrainedBox(
-                            constraints: const BoxConstraints(minHeight: 48),
-                            child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 8),
-                                child: Row(children: [
-                                  const Icon(Icons.checklist),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                      child: Text(
-                                          '今日计划 · 已完成${plans.where((p) => p.done).length}/${plans.length}')),
-                                  const Icon(Icons.chevron_right),
-                                ]))))),
-              Semantics(
-                liveRegion: true,
-                label: statusText,
-                child: Row(children: [
-                  const Icon(Icons.schedule, size: 16, color: Journal.muted),
-                  const SizedBox(width: 6),
-                  Expanded(
-                      child: ExcludeSemantics(
-                          child: Text(statusText, style: Journal.metadata))),
-                ]),
-              ),
-              if (recoveryScope == null) ...[
-                const SizedBox(height: 4),
-                _homeActions(context, options, filtersActive, sortOrder),
-              ],
-              if (busy)
-                Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Semantics(
-                        liveRegion: true,
-                        child: Text(_syncProgressLabel(store),
-                            style: Journal.metadata))),
-              if (recoveryScope == null &&
-                  _courseKey != null &&
-                  !displayAssignments.any((a) => a.courseKey == _courseKey))
-                const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
-                        style: Journal.metadata)),
-              if (sortedItems.isNotEmpty) ...[
-                ...timeline(sortedItems),
-              ] else if (recoveryScope != null) ...[
-                const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    child: Text('当前范围没有课业', style: Journal.metadata)),
-              ] else if (filtersActive &&
-                  (displayAssignments.isNotEmpty ||
-                      store.assignments.isNotEmpty)) ...[
-                const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    child: Text('没有符合搜索、类型或期限条件的记录')),
-                TextButton(
-                    onPressed: () => _saveFilters(
-                          HomeFilters(sortOrder: _sortOrder),
-                          store.accountEpoch,
-                          store.account,
+                      key: const ValueKey('home-plan-summary'),
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => context.push('/plan'),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 48),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          child: Row(children: [
+                            const Icon(Icons.checklist_rounded,
+                                size: 18, color: Journal.ink),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '今日计划 · 已完成${plans.where((p) => p.done).length}/${plans.length}',
+                                style: Journal.metadata.copyWith(
+                                  color: Journal.ink,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right_rounded,
+                                color: Journal.muted),
+                          ]),
                         ),
-                    child: const Text('清除搜索与筛选条件')),
-              ] else if (store.assignments.isNotEmpty) ...[
-                const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    child:
-                        Text('本机有已完成、已结束、已隐藏、未关注、历史课堂练习或非课业来源的记录，可在本地记录查看。')),
-                TextButton(
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            Semantics(
+              liveRegion: true,
+              label: statusText,
+              child: Row(children: [
+                Icon(
+                  store.syncReport.phase == SyncPhase.failed
+                      ? Icons.error_outline_rounded
+                      : store.syncReport.phase == SyncPhase.partial
+                          ? Icons.info_outline_rounded
+                          : Icons.schedule_rounded,
+                  size: 15,
+                  color: store.syncReport.phase == SyncPhase.failed
+                      ? Journal.berry
+                      : store.syncReport.phase == SyncPhase.partial
+                          ? Journal.ochre
+                          : Journal.muted,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                    child: ExcludeSemantics(
+                        child: Text(statusText, style: Journal.metadata))),
+              ]),
+            ),
+            if (recoveryScope == null) ...[
+              const SizedBox(height: 8),
+              _homeActions(context, options, filtersActive, sortOrder),
+              AnimatedSize(
+                duration: JournalLayout.motionDuration(context),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: filtersActive
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: _activeFilterSummaryBar(options),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+            if (busy)
+              Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: reduceMotion
+                          ? Container(height: 3, color: Journal.sageBorder)
+                          : const LinearProgressIndicator(
+                              minHeight: 3,
+                              backgroundColor: Journal.parchment,
+                              color: Journal.ink,
+                            ),
+                    ),
+                    const SizedBox(height: 6),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _syncProgressLabel(store),
+                        style: Journal.metadata.copyWith(color: Journal.ink),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (recoveryScope == null &&
+                _courseKey != null &&
+                !displayAssignments.any((a) => a.courseKey == _courseKey))
+              const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
+                      style: Journal.metadata)),
+            if (sortedItems.isNotEmpty) ...[
+              ...timeline(sortedItems),
+            ] else if (recoveryScope != null) ...[
+              _emptyStateCard(
+                icon: Icons.event_available_outlined,
+                message: '当前范围没有课业',
+              ),
+            ] else if (filtersActive &&
+                (displayAssignments.isNotEmpty ||
+                    store.assignments.isNotEmpty)) ...[
+              _emptyStateCard(
+                icon: Icons.filter_alt_off_outlined,
+                message: '没有符合搜索、类型或期限条件的记录',
+                actions: [
+                  FilledButton.tonal(
+                    onPressed: () => _saveFilters(
+                      HomeFilters(sortOrder: _sortOrder),
+                      store.accountEpoch,
+                      store.account,
+                    ),
+                    child: const Text('清除搜索与筛选条件'),
+                  ),
+                ],
+              ),
+            ] else if (store.assignments.isNotEmpty) ...[
+              _emptyStateCard(
+                icon: Icons.inventory_2_outlined,
+                message: '本机有已完成、已结束、已隐藏、未关注、历史课堂练习或非课业来源的记录，可在本地记录查看。',
+                actions: [
+                  FilledButton.tonal(
                     onPressed: () => context.push('/records'),
-                    child: const Text('查看全部本地记录')),
-                TextButton(
+                    child: const Text('查看全部本地记录'),
+                  ),
+                  OutlinedButton(
                     onPressed: () => context.push('/courses'),
-                    child: const Text('管理课程')),
-              ] else
-                Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 24),
-                    child: Text(store.isLoading ||
-                            store.syncReport.phase == SyncPhase.running
-                        ? '正在读取课程与作业，请稍候。'
-                        : store.syncReport.phase == SyncPhase.success
-                            ? '暂无待办，已读取的作业、任务与考试会显示在这里。'
-                            : store.syncReport.phase == SyncPhase.failed
-                                ? '本次尚未取得作业，请点击右上角刷新继续。'
-                                : '点击右上角刷新，开始整理这本课业手记。')),
-            ]);
+                    child: const Text('管理课程'),
+                  ),
+                ],
+              ),
+            ] else
+              _emptyStateCard(
+                icon: busy
+                    ? Icons.hourglass_top_rounded
+                    : store.syncReport.phase == SyncPhase.success
+                        ? Icons.task_alt_rounded
+                        : Icons.menu_book_rounded,
+                message: store.isLoading ||
+                        store.syncReport.phase == SyncPhase.running
+                    ? '正在读取课程与作业，请稍候。'
+                    : store.syncReport.phase == SyncPhase.success
+                        ? '暂无待办，已读取的作业、任务与考试会显示在这里。'
+                        : store.syncReport.phase == SyncPhase.failed
+                            ? '本次尚未取得作业，请点击右上角刷新继续。'
+                            : '点击右上角刷新，开始整理这本课业手记。',
+              ),
+          ],
+        );
       });
 
-  Widget dayHeading(String label, {double top = 12}) => Padding(
-      padding: EdgeInsets.only(top: top, bottom: 4),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(label,
-            style: Journal.metadata.copyWith(
-                color: Journal.ink, fontSize: 16, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 8),
-        const Divider(height: 1),
-      ]));
+  Widget _emptyStateCard({
+    required IconData icon,
+    required String message,
+    List<Widget> actions = const [],
+  }) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 36),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: const BoxDecoration(
+                color: Journal.parchment,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, size: 22, color: Journal.muted),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Journal.metadata.copyWith(
+                color: Journal.ink,
+                fontSize: 14.5,
+              ),
+            ),
+            if (actions.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 10,
+                runSpacing: 8,
+                children: actions,
+              ),
+            ],
+          ],
+        ),
+      );
+
+  Widget _activeFilterSummaryBar(Map<String, String> options) {
+    final epoch = store.accountEpoch;
+    final account = store.account;
+    Widget removableTag(String text, VoidCallback onRemove) => Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: onRemove,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: Journal.sage,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      text,
+                      style: Journal.metadata.copyWith(
+                        fontSize: 12,
+                        color: Journal.ink,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.close_rounded, size: 14, color: Journal.ink),
+                ],
+              ),
+            ),
+          ),
+        );
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (_query.trim().isNotEmpty)
+          removableTag(
+            '关键词：${_query.trim()}',
+            () => _saveFilters(
+              HomeFilters(
+                query: '',
+                courseKey: _courseKey,
+                deadline: _deadlineFilter,
+                type: _typeFilter,
+                sortOrder: _sortOrder,
+              ),
+              epoch,
+              account,
+            ),
+          ),
+        if (_typeFilter != AssignmentTypeFilter.all)
+          removableTag(
+            '类型：${_typeFilter.label}',
+            () => _saveFilters(
+              HomeFilters(
+                query: _query,
+                courseKey: _courseKey,
+                deadline: _deadlineFilter,
+                type: AssignmentTypeFilter.all,
+                sortOrder: _sortOrder,
+              ),
+              epoch,
+              account,
+            ),
+          ),
+        if (_deadlineFilter != AssignmentDeadlineFilter.all)
+          removableTag(
+            '期限：${_deadlineLabel(_deadlineFilter)}',
+            () => _saveFilters(
+              HomeFilters(
+                query: _query,
+                courseKey: _courseKey,
+                deadline: AssignmentDeadlineFilter.all,
+                type: _typeFilter,
+                sortOrder: _sortOrder,
+              ),
+              epoch,
+              account,
+            ),
+          ),
+        if (_courseKey != null)
+          removableTag(
+            '课程：${options[_courseKey!] ?? "已选课程"}',
+            () => _saveFilters(
+              HomeFilters(
+                query: _query,
+                courseKey: null,
+                deadline: _deadlineFilter,
+                type: _typeFilter,
+                sortOrder: _sortOrder,
+              ),
+              epoch,
+              account,
+            ),
+          ),
+        TextButton(
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            minimumSize: const Size(44, 32),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            foregroundColor: Journal.muted,
+          ),
+          onPressed: () => _saveFilters(
+            HomeFilters(sortOrder: _sortOrder),
+            epoch,
+            account,
+          ),
+          child: const Text('重置条件'),
+        ),
+      ],
+    );
+  }
+
+  Widget dayHeading(
+    String label, {
+    double top = 12,
+    _DayHeadingTone tone = _DayHeadingTone.normal,
+    String? badge,
+  }) {
+    final textColor = switch (tone) {
+      _DayHeadingTone.overdue => Journal.berry,
+      _DayHeadingTone.undated => Journal.ochre,
+      _DayHeadingTone.today => Journal.ink,
+      _DayHeadingTone.normal => Journal.muted,
+    };
+    return Padding(
+      padding: EdgeInsets.only(top: top + 6, bottom: 2),
+      child: Row(
+        children: [
+          Flexible(
+            child: Text(
+              label,
+              style: Journal.dayHeading.copyWith(
+                color: textColor,
+                fontSize: 14.5,
+              ),
+            ),
+          ),
+          if (badge != null) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: tone == _DayHeadingTone.overdue
+                    ? Journal.berryBg
+                    : Journal.sage,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                badge,
+                style: Journal.metadata.copyWith(
+                  fontSize: 11,
+                  height: 1.2,
+                  fontWeight: FontWeight.w600,
+                  color: tone == _DayHeadingTone.overdue
+                      ? Journal.berry
+                      : Journal.ink,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _recoveryHeader(
           BuildContext context, AssignmentRecoveryScope scope, int count) =>
@@ -588,13 +906,20 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   Widget _homeActions(BuildContext context, Map<String, String> options,
       bool filtersActive, HomeSortOrder sortOrder) {
     final actionColor = Theme.of(context).colorScheme.primary;
-    final textStyle = Journal.metadata.copyWith(color: actionColor);
+    final filterStyle = Journal.metadata.copyWith(
+      color: actionColor,
+      fontWeight: FontWeight.w500,
+    );
+    final sortStyle = Journal.metadata.copyWith(
+      color: Journal.muted,
+      fontWeight: FontWeight.w500,
+    );
     final scaler = MediaQuery.textScalerOf(context);
     final filterLabel = filtersActive ? '已筛选' : '搜索与筛选';
     final sortLabel = _shortSortLabel(sortOrder);
-    double labelWidth(String text) {
+    double labelWidth(String text, TextStyle style) {
       final painter = TextPainter(
-        text: TextSpan(text: text, style: textStyle),
+        text: TextSpan(text: text, style: style),
         textScaler: scaler,
         textDirection: TextDirection.ltr,
       )..layout();
@@ -603,16 +928,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       return width;
     }
 
-    const entryHorizontalPadding = 8.0;
-    final filterWidth =
-        18 + 8 + labelWidth(filterLabel) + entryHorizontalPadding;
-    final sortWidth = 18 + 8 + labelWidth(sortLabel) + entryHorizontalPadding;
-    Widget entry({
-      required IconData icon,
-      required String label,
-      required String message,
-      Key? labelKey,
-    }) {
+    final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 28;
+    final sortWidth = 16 + 6 + labelWidth(sortLabel, sortStyle) + 16;
+
+    Widget buildFilterPill({bool fullWidth = false}) {
+      final message = filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选';
       void onTap() => _openFilters(options);
       return Semantics(
         button: true,
@@ -624,16 +944,80 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             child: Material(
               type: MaterialType.transparency,
               child: InkWell(
+                borderRadius: BorderRadius.circular(22),
+                onTap: onTap,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: 48,
+                    minWidth: fullWidth ? double.infinity : 0,
+                  ),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: fullWidth ? null : 1,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: filtersActive ? Journal.sage : Journal.parchment,
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      child: Row(
+                        mainAxisSize:
+                            fullWidth ? MainAxisSize.max : MainAxisSize.min,
+                        children: [
+                          Icon(
+                            filtersActive
+                                ? Icons.tune_rounded
+                                : Icons.search_rounded,
+                            size: 17,
+                            color: actionColor,
+                          ),
+                          const SizedBox(width: 7),
+                          Flexible(
+                            child: Text(filterLabel, style: filterStyle),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget buildSortButton({double horizontalPad = 6}) {
+      final message = '当前排序：$sortLabel，打开搜索、筛选与排序';
+      void onTap() => _openFilters(options);
+      return Semantics(
+        button: true,
+        label: message,
+        onTap: onTap,
+        child: ExcludeSemantics(
+          child: Tooltip(
+            message: message,
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
                 onTap: onTap,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 48),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    padding: EdgeInsets.symmetric(horizontal: horizontalPad),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(icon, size: 18, color: actionColor),
-                      const SizedBox(width: 8),
+                      const Icon(Icons.swap_vert_rounded,
+                          size: 17, color: Journal.muted),
+                      const SizedBox(width: 7),
                       Flexible(
-                          child: Text(label, key: labelKey, style: textStyle)),
+                        child: Text(
+                          sortLabel,
+                          key: const ValueKey('current-home-sort'),
+                          style: sortStyle,
+                        ),
+                      ),
                     ]),
                   ),
                 ),
@@ -644,24 +1028,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       );
     }
 
-    final filterEntry = entry(
-      icon: Icons.filter_list,
-      label: filterLabel,
-      message: filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选',
-    );
-    final sortEntry = entry(
-      icon: Icons.sort,
-      label: sortLabel,
-      message: '当前排序：$sortLabel，打开搜索、筛选与排序',
-      labelKey: const ValueKey('current-home-sort'),
-    );
     return LayoutBuilder(builder: (context, constraints) {
-      if (filterWidth + sortWidth + 16 <= constraints.maxWidth) {
-        return Row(children: [filterEntry, const Spacer(), sortEntry]);
+      if (filterWidth + sortWidth + 12 <= constraints.maxWidth) {
+        return Row(children: [
+          Flexible(child: buildFilterPill(fullWidth: true)),
+          const SizedBox(width: 12),
+          buildSortButton(),
+        ]);
       }
       return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [filterEntry, sortEntry]);
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          buildFilterPill(),
+          buildSortButton(horizontalPad: 14),
+        ],
+      );
     });
   }
 
@@ -716,18 +1097,30 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     var sortOrder = _sortOrder;
     final selection = await showModalBottomSheet<_HomeFilterSelection>(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) => Padding(
           padding: EdgeInsets.fromLTRB(
-              20, 20, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
+              20, 16, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('搜索、筛选与排序', style: Theme.of(context).textTheme.titleLarge),
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(
+                      color: Journal.ruleStrong,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Text('搜索、筛选与排序', style: Journal.section),
                 const SizedBox(height: 16),
                 TextField(
                   controller: controller,
@@ -741,6 +1134,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ),
                 const SizedBox(height: 16),
                 Text('类型', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -755,6 +1149,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   ],
                 ),
                 const SizedBox(height: 16),
+                Text('期限', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -780,10 +1176,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     const DropdownMenuItem(value: '', child: Text('全部课程')),
                     for (final entry in courseOptions.entries)
                       DropdownMenuItem(
-                          value: entry.key,
-                          child: Text(
-                              '${entry.value}${courseOptions.values.where((v) => v == entry.value).length > 1 ? '（${courseOptions.keys.toList().indexOf(entry.key) + 1}班）' : ''}',
-                              overflow: TextOverflow.ellipsis))
+                        value: entry.key,
+                        child: Text(
+                          '${entry.value}${courseOptions.values.where((v) => v == entry.value).length > 1 ? '（${courseOptions.keys.toList().indexOf(entry.key) + 1}班）' : ''}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                   ],
                   onChanged: (value) => setSheetState(
                       () => courseKey = value == '' ? null : value),
@@ -811,37 +1210,39 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
-                OverflowBar(
-                    spacing: 8,
-                    overflowSpacing: 8,
-                    overflowAlignment: OverflowBarAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => setSheetState(() {
-                          query = '';
-                          courseKey = null;
-                          deadline = AssignmentDeadlineFilter.all;
-                          type = AssignmentTypeFilter.all;
-                          controller.clear();
-                        }),
-                        child: const Text('清空筛选'),
-                      ),
-                      TextButton(
-                          onPressed: () => Navigator.pop(sheetContext),
-                          child: const Text('取消')),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(
-                            sheetContext,
-                            _HomeFilterSelection(
-                                query: query,
-                                courseKey: courseKey,
-                                deadline: deadline,
-                                type: type,
-                                sortOrder: sortOrder)),
-                        child: const Text('应用'),
-                      ),
-                    ]),
+                const SizedBox(height: 16),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    TextButton(
+                      onPressed: () => setSheetState(() {
+                        query = '';
+                        courseKey = null;
+                        deadline = AssignmentDeadlineFilter.all;
+                        type = AssignmentTypeFilter.all;
+                        controller.clear();
+                      }),
+                      child: const Text('清空筛选'),
+                    ),
+                    TextButton(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        child: const Text('取消')),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(
+                          sheetContext,
+                          _HomeFilterSelection(
+                              query: query,
+                              courseKey: courseKey,
+                              deadline: deadline,
+                              type: type,
+                              sortOrder: sortOrder)),
+                      child: const Text('应用'),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -866,6 +1267,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         openingAccount);
   }
 }
+
+enum _DayHeadingTone { normal, today, undated, overdue }
 
 class _HomeFilterSelection {
   const _HomeFilterSelection({

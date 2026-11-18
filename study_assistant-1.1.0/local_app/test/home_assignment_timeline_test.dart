@@ -208,7 +208,7 @@ void main() {
         expect(tester.takeException(), isNull, reason: '$width/$scale');
         expect(find.text(_heading(due)), findsOneWidget);
 
-        final action = find.widgetWithText(TextButton, '在学习通内打开作业');
+        final action = find.byTooltip('在学习通内打开作业');
         await tester.scrollUntilVisible(
           action,
           180,

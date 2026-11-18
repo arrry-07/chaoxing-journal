@@ -5,6 +5,7 @@ import '../../app/journal.dart';
 import '../../models/assignment.dart';
 import '../../services/assignment_query.dart';
 import '../../services/exam_schedule_presentation.dart';
+import 'coursework_status_pill.dart';
 
 class AssignmentCard extends StatelessWidget {
   const AssignmentCard(
@@ -81,6 +82,18 @@ class AssignmentCard extends StatelessWidget {
     ];
   }
 
+  CourseworkPillTone _stateTone(Assignment a, AssignmentDeadlineBucket bucket) {
+    if (a.isExam) return CourseworkPillTone.exam;
+    if (a.isCompleted) return CourseworkPillTone.completed;
+    if (bucket == AssignmentDeadlineBucket.unconfirmed ||
+        a.status == 'unknown' ||
+        !a.deadlineTrusted ||
+        a.deadlineReadFailed) {
+      return CourseworkPillTone.unconfirmed;
+    }
+    return CourseworkPillTone.neutral;
+  }
+
   @override
   Widget build(BuildContext context) {
     final a = assignment, d = a.timelineAt;
@@ -118,8 +131,6 @@ class AssignmentCard extends StatelessWidget {
               '地点 ${a.exam!.location.trim()}',
           ]
         : const <String>[];
-    // Keep the complete schedule available to screen readers and details,
-    // while the visual card follows the assignment timeline layout.
     final examSemantics = [
       ...?examSchedule?.detailTimeLines,
       if (examSchedule?.verificationNote != null)
@@ -144,161 +155,310 @@ class AssignmentCard extends StatelessWidget {
                         : countdown
                             ? DisplayPreferences.remaining(d, now)
                             : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}';
-    final color = urgent != null ? Journal.berry : Journal.ink;
     final hasTime =
         d != null && a.timelineTrusted && (a.isExam || !a.deadlineReadFailed);
     final clock = hasTime
         ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d))
         : examSchedule?.timeline?.clock ?? '';
-    // Undated rows keep the same rail so titles stay in one column.
     final railLabel = clock.isNotEmpty
         ? clock
         : bucket == AssignmentDeadlineBucket.confirmedNoDeadline
             ? '—'
             : '待定';
-    // Measure at the user's text scale: a fixed rail clips times at 2× size.
     final timeMeasure = TextPainter(
         text: const TextSpan(text: '00:00', style: Journal.time),
         textDirection: Directionality.of(context),
         textScaler: MediaQuery.textScalerOf(context))
       ..layout();
     final railWidth = timeMeasure.width.ceilToDouble() + 4;
-    final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
+    final largeText = JournalLayout.isLargeText(context);
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     timeMeasure.dispose();
-    final metadata = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (state.isNotEmpty)
-          Text(state, style: Journal.metadata.copyWith(color: Journal.ink)),
-        if (previewOnly)
-          Text(
-            previewSaving ? '正在保存到本机' : '待保存预览',
-            style: Journal.metadata.copyWith(
-              color: Journal.ink,
-              fontWeight: FontWeight.w600,
+
+    final stateTone = _stateTone(a, bucket);
+    final hasSpecialStatePill = stateTone != CourseworkPillTone.neutral;
+    final railTextColor = urgent != null && today
+        ? Journal.berry
+        : clock.isEmpty
+            ? (railLabel == '待定' ? Journal.ochre : Journal.muted)
+            : (overdue ? Journal.muted : Journal.ink.withValues(alpha: 0.88));
+
+    final highlightPills = <Widget>[
+      if (state.isNotEmpty && hasSpecialStatePill)
+        CourseworkStatusPill(
+          label: state,
+          tone: stateTone,
+        ),
+      if (previewOnly)
+        CourseworkStatusPill(
+          label: previewSaving ? '正在保存到本机' : '待保存预览',
+          tone: CourseworkPillTone.unconfirmed,
+          icon: Icons.sync_rounded,
+        ),
+      if (urgent != null)
+        CourseworkStatusPill(
+          label: urgent,
+          tone: overdue
+              ? CourseworkPillTone.overdue
+              : CourseworkPillTone.urgentToday,
+        ),
+    ];
+
+    final extraLines = <Widget>[
+      if (a.isExam) ...[
+        if (clock.isEmpty)
+          for (final line in examSchedule?.cardTimeLines ?? const <String>[])
+            Text(line, style: Journal.metadata),
+        for (final line in examLines) Text(line, style: Journal.metadata),
+      ] else if (showFullDeadline || countdown || !hasTime)
+        Text(
+          deadline,
+          style: !hasTime && railLabel == '待定'
+              ? Journal.metadata.copyWith(
+                  color: Journal.ochre,
+                  fontWeight: FontWeight.w600,
+                )
+              : Journal.metadata,
+        ),
+    ];
+
+    final hasCourse = a.courseName.trim().isNotEmpty;
+    final hasTitle = a.title.trim().isNotEmpty;
+    final showPlainInlineState = state.isNotEmpty && !hasSpecialStatePill;
+
+    final onCardTap = previewOnly ? null : onTap;
+    final openTooltip = previewOnly
+        ? '保存后可打开'
+        : opening
+            ? '正在打开…'
+            : a.isExam
+                ? a.exam!.noticeOnly
+                    ? '在学习通内查看考试通知'
+                    : '在学习通内查看考试'
+                : '在学习通内打开作业';
+    final shortOpenLabel = previewOnly
+        ? '待保存'
+        : opening
+            ? '正在打开…'
+            : a.isExam
+                ? '查看考试'
+                : '打开作业';
+
+    Widget buildLaunchControl() {
+      final enabled = !previewOnly && !opening && onOpenAssignment != null;
+      final iconWidget = opening && !reduceMotion
+          ? const SizedBox.square(
+              dimension: 15,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Journal.ink,
+              ),
+            )
+          : Icon(
+              opening ? Icons.hourglass_top_rounded : Icons.open_in_new_rounded,
+              size: 18,
+              color: enabled
+                  ? Journal.muted.withValues(alpha: 0.9)
+                  : Journal.muted.withValues(alpha: 0.45),
+            );
+
+      if (largeText) {
+        return Semantics(
+          button: true,
+          enabled: enabled,
+          label: openTooltip,
+          child: Tooltip(
+            message: openTooltip,
+            child: OutlinedButton.icon(
+              key: ValueKey('open-assignment-${a.id}'),
+              onPressed: enabled ? onOpenAssignment : null,
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(48, 48),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                backgroundColor: Journal.parchment,
+                side: BorderSide.none,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              icon: iconWidget,
+              label: ExcludeSemantics(
+                child: Text(
+                  shortOpenLabel,
+                  style: Journal.metadata.copyWith(
+                    color: enabled ? Journal.ink : Journal.muted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
             ),
           ),
-        if (urgent != null)
-          Text(urgent,
-              style: Journal.metadata
-                  .copyWith(color: color, fontWeight: FontWeight.w600)),
-        if (a.isExam) ...[
-          if (clock.isEmpty)
-            for (final line in examSchedule?.cardTimeLines ?? const <String>[])
-              Text(line, style: Journal.metadata),
-          for (final line in examLines) Text(line, style: Journal.metadata),
-        ] else if (showFullDeadline || countdown || !hasTime)
-          Text(deadline, style: Journal.metadata),
-      ],
-    );
-    final onCardTap = previewOnly ? null : onTap;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Semantics(
-          button: onCardTap != null,
-          onTap: onCardTap,
-          label:
-              '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${a.isExam ? '$examSemantics${a.exam!.startTrusted || a.exam!.endTrusted ? '，北京时间' : ''}' : hasTime ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}' : deadline}',
-          excludeSemantics: true,
-          child: SizedBox(
-              width: double.infinity,
-              child: Material(
-                  type: MaterialType.transparency,
-                  child: InkWell(
-                      onTap: onCardTap,
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                          padding: EdgeInsets.only(
-                              top: compact ? 4 : 12,
-                              bottom: onOpenAssignment == null
-                                  ? (compact ? 4 : 12)
-                                  : 0),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                width: railWidth,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (deadlinePending && !a.isExam)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: SizedBox.square(
-                                          dimension: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            semanticsLabel: '正在确认截止时间',
-                                          ),
-                                        ),
-                                      )
-                                    else
-                                      Text(railLabel,
-                                          style: clock.isEmpty
-                                              ? Journal.time.copyWith(
-                                                  color: Journal.muted)
-                                              : Journal.time),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                    if (a.title.trim().isNotEmpty)
-                                      Text(a.title.trim(),
-                                          style: Journal.entryTitle),
-                                    if (a.courseName.trim().isNotEmpty) ...[
-                                      if (a.title.trim().isNotEmpty)
-                                        const SizedBox(height: 4),
-                                      Text(a.courseName.trim(),
-                                          style: a.title.trim().isEmpty
-                                              ? Journal.entryTitle
-                                              : Journal.metadata),
-                                    ],
-                                    if (onOpenAssignment == null) ...[
-                                      const SizedBox(height: 4),
-                                      metadata,
-                                    ],
-                                  ])),
-                            ],
-                          )))))),
-      if (onOpenAssignment != null)
-        Padding(
-          padding:
-              EdgeInsets.only(left: largeText ? 0 : railWidth + 12, bottom: 8),
-          child: Wrap(
-            alignment: WrapAlignment.spaceBetween,
+        );
+      }
+
+      return Semantics(
+        button: true,
+        enabled: enabled,
+        label: openTooltip,
+        excludeSemantics: true,
+        child: IconButton(
+          key: ValueKey('open-assignment-${a.id}'),
+          tooltip: openTooltip,
+          onPressed: enabled ? onOpenAssignment : null,
+          constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+          padding: EdgeInsets.zero,
+          icon: iconWidget,
+        ),
+      );
+    }
+
+    final verticalPad = compact ? 9.0 : 13.0;
+    const railGap = 14.0;
+    final contentLeftInset = railWidth + railGap;
+
+    final bodyColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (hasTitle)
+          Text(
+            a.title.trim(),
+            maxLines: largeText ? null : 2,
+            overflow: largeText ? null : TextOverflow.ellipsis,
+            style: overdue
+                ? Journal.entryTitle.copyWith(color: const Color(0xFF36453E))
+                : Journal.entryTitle,
+          )
+        else if (hasCourse)
+          Text(a.courseName.trim(), style: Journal.entryTitle),
+        if ((hasTitle && hasCourse) || showPlainInlineState) ...[
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 5,
+            runSpacing: 3,
             crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
             children: [
-              Padding(
-                padding: EdgeInsets.only(left: largeText ? railWidth + 12 : 0),
-                child: ExcludeSemantics(
-                    child: InkWell(onTap: onCardTap, child: metadata)),
-              ),
-              TextButton.icon(
-                onPressed: previewOnly || opening ? null : onOpenAssignment,
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: const Size(48, 48),
+              if (hasTitle && hasCourse)
+                Text(a.courseName.trim(), style: Journal.metadata),
+              if (hasTitle && hasCourse && showPlainInlineState)
+                Text(
+                  '·',
+                  style: Journal.metadata.copyWith(
+                    color: Journal.muted.withValues(alpha: 0.65),
+                  ),
                 ),
-                icon: const Icon(Icons.launch, size: 18),
-                label: Text(previewOnly
-                    ? '保存后可打开'
-                    : opening
-                        ? '正在打开…'
-                        : a.isExam
-                            ? a.exam!.noticeOnly
-                                ? '在学习通内查看考试通知'
-                                : '在学习通内查看考试'
-                            : '在学习通内打开作业'),
-              ),
+              if (showPlainInlineState) Text(state, style: Journal.metadata),
+              if (highlightPills.isNotEmpty && !hasSpecialStatePill)
+                ...highlightPills,
             ],
           ),
+        ],
+        if (highlightPills.isNotEmpty &&
+            (hasSpecialStatePill || (!hasCourse && !showPlainInlineState))) ...[
+          const SizedBox(height: 5),
+          Wrap(
+            spacing: 6,
+            runSpacing: 5,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: highlightPills,
+          ),
+        ],
+        if (extraLines.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          ...extraLines,
+        ],
+      ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Semantics(
+                button: onCardTap != null,
+                onTap: onCardTap,
+                label:
+                    '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${a.isExam ? '$examSemantics${a.exam!.startTrusted || a.exam!.endTrusted ? '，北京时间' : ''}' : hasTime ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}' : deadline}',
+                excludeSemantics: true,
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: InkWell(
+                    onTap: onCardTap,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: verticalPad),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            width: railWidth,
+                            child: deadlinePending && !a.isExam
+                                ? Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: reduceMotion
+                                        ? const Icon(
+                                            Icons.hourglass_top_rounded,
+                                            size: 16,
+                                            color: Journal.ochre,
+                                            semanticLabel: '正在确认截止时间',
+                                          )
+                                        : const SizedBox.square(
+                                            dimension: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Journal.ochre,
+                                              semanticsLabel: '正在确认截止时间',
+                                            ),
+                                          ),
+                                  )
+                                : Text(
+                                    railLabel,
+                                    style: Journal.time.copyWith(
+                                      color: railTextColor,
+                                      fontWeight: clock.isEmpty
+                                          ? FontWeight.w500
+                                          : FontWeight.w600,
+                                      fontSize: clock.isEmpty
+                                          ? 14
+                                          : Journal.time.fontSize,
+                                    ),
+                                  ),
+                          ),
+                          const SizedBox(width: railGap),
+                          Expanded(child: bodyColumn),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (onOpenAssignment != null && !largeText) ...[
+              const SizedBox(width: 4),
+              buildLaunchControl(),
+            ],
+          ],
         ),
-    ]);
+        if (onOpenAssignment != null && largeText)
+          Padding(
+            padding: EdgeInsets.only(left: contentLeftInset, bottom: 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: buildLaunchControl(),
+            ),
+          ),
+        Padding(
+          padding: EdgeInsets.only(left: contentLeftInset),
+          child: const Divider(
+            height: 1,
+            thickness: 0.8,
+            color: Journal.rule,
+          ),
+        ),
+      ],
+    );
   }
 }

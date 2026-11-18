@@ -229,13 +229,13 @@ void main() {
         await t.pumpAndSettle();
       }
       expect(t.takeException(), isNull, reason: '$scene $width $scale');
-      // Inspect the effective rendered spans, not just ThemeData: Material
-      // controls, overlays and editable fields must all use the bundled face.
+      // Inspect effective rendered spans: Direction A intentionally pairs
+      // WenKai display/day headings with crisp UI sans-serif body/controls.
       void checkFont(InlineSpan span, [String? inherited]) {
         if (span is! TextSpan) return;
         final family = span.style?.fontFamily ?? inherited;
         if (RegExp(r'[A-Za-z0-9\u4e00-\u9fff]').hasMatch(span.text ?? '')) {
-          expect(family, Journal.bodyFamily,
+          expect(family, anyOf(Journal.bodyFamily, Journal.uiSansFamily),
               reason: '$scene $width $scale: ${span.text}');
         }
         for (final child in span.children ?? <InlineSpan>[]) {
@@ -247,7 +247,8 @@ void main() {
         checkFont((e.widget as RichText).text);
       }
       for (final e in find.byType(EditableText).evaluate()) {
-        expect((e.widget as EditableText).style.fontFamily, Journal.bodyFamily,
+        expect((e.widget as EditableText).style.fontFamily,
+            anyOf(Journal.bodyFamily, Journal.uiSansFamily),
             reason: '$scene input font');
       }
       if (scene == 'mixed' && scale == 1) {
