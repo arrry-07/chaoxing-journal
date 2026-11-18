@@ -473,9 +473,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 padding: const EdgeInsets.only(bottom: 8),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: Journal.sage.withValues(alpha: 0.65),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Journal.sageBorder),
+                    color: Journal.sage.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Material(
                     type: MaterialType.transparency,
@@ -647,50 +646,39 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     List<Widget> actions = const [],
   }) =>
       Padding(
-        padding: const EdgeInsets.only(top: 16),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: Journal.sheet,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Journal.rule),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: Journal.parchment,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Journal.rule),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(icon, size: 22, color: Journal.ink),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  message,
-                  textAlign: TextAlign.center,
-                  style: Journal.metadata.copyWith(
-                    color: Journal.ink,
-                    fontSize: 14.5,
-                  ),
-                ),
-                if (actions.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    spacing: 10,
-                    runSpacing: 8,
-                    children: actions,
-                  ),
-                ],
-              ],
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 36),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: const BoxDecoration(
+                color: Journal.parchment,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, size: 22, color: Journal.muted),
             ),
-          ),
+            const SizedBox(height: 14),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Journal.metadata.copyWith(
+                color: Journal.ink,
+                fontSize: 14.5,
+              ),
+            ),
+            if (actions.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 10,
+                runSpacing: 8,
+                children: actions,
+              ),
+            ],
+          ],
         ),
       );
 
@@ -700,13 +688,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     Widget removableTag(String text, VoidCallback onRemove) => Material(
           type: MaterialType.transparency,
           child: InkWell(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(16),
             onTap: onRemove,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: Journal.ink,
-                borderRadius: BorderRadius.circular(8),
+                color: Journal.sage,
+                borderRadius: BorderRadius.circular(16),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -716,110 +704,99 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       text,
                       style: Journal.metadata.copyWith(
                         fontSize: 12,
-                        color: Journal.sheet,
+                        color: Journal.ink,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                   const SizedBox(width: 4),
-                  const Icon(Icons.close_rounded,
-                      size: 14, color: Journal.sheet),
+                  const Icon(Icons.close_rounded, size: 14, color: Journal.ink),
                 ],
               ),
             ),
           ),
         );
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Journal.parchment,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Journal.rule),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            if (_query.trim().isNotEmpty)
-              removableTag(
-                '关键词：${_query.trim()}',
-                () => _saveFilters(
-                  HomeFilters(
-                    query: '',
-                    courseKey: _courseKey,
-                    deadline: _deadlineFilter,
-                    type: _typeFilter,
-                    sortOrder: _sortOrder,
-                  ),
-                  epoch,
-                  account,
-                ),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (_query.trim().isNotEmpty)
+          removableTag(
+            '关键词：${_query.trim()}',
+            () => _saveFilters(
+              HomeFilters(
+                query: '',
+                courseKey: _courseKey,
+                deadline: _deadlineFilter,
+                type: _typeFilter,
+                sortOrder: _sortOrder,
               ),
-            if (_typeFilter != AssignmentTypeFilter.all)
-              removableTag(
-                '类型：${_typeFilter.label}',
-                () => _saveFilters(
-                  HomeFilters(
-                    query: _query,
-                    courseKey: _courseKey,
-                    deadline: _deadlineFilter,
-                    type: AssignmentTypeFilter.all,
-                    sortOrder: _sortOrder,
-                  ),
-                  epoch,
-                  account,
-                ),
-              ),
-            if (_deadlineFilter != AssignmentDeadlineFilter.all)
-              removableTag(
-                '期限：${_deadlineLabel(_deadlineFilter)}',
-                () => _saveFilters(
-                  HomeFilters(
-                    query: _query,
-                    courseKey: _courseKey,
-                    deadline: AssignmentDeadlineFilter.all,
-                    type: _typeFilter,
-                    sortOrder: _sortOrder,
-                  ),
-                  epoch,
-                  account,
-                ),
-              ),
-            if (_courseKey != null)
-              removableTag(
-                '课程：${options[_courseKey!] ?? "已选课程"}',
-                () => _saveFilters(
-                  HomeFilters(
-                    query: _query,
-                    courseKey: null,
-                    deadline: _deadlineFilter,
-                    type: _typeFilter,
-                    sortOrder: _sortOrder,
-                  ),
-                  epoch,
-                  account,
-                ),
-              ),
-            TextButton(
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                minimumSize: const Size(44, 32),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                foregroundColor: Journal.berry,
-              ),
-              onPressed: () => _saveFilters(
-                HomeFilters(sortOrder: _sortOrder),
-                epoch,
-                account,
-              ),
-              child: const Text('重置条件'),
+              epoch,
+              account,
             ),
-          ],
+          ),
+        if (_typeFilter != AssignmentTypeFilter.all)
+          removableTag(
+            '类型：${_typeFilter.label}',
+            () => _saveFilters(
+              HomeFilters(
+                query: _query,
+                courseKey: _courseKey,
+                deadline: _deadlineFilter,
+                type: AssignmentTypeFilter.all,
+                sortOrder: _sortOrder,
+              ),
+              epoch,
+              account,
+            ),
+          ),
+        if (_deadlineFilter != AssignmentDeadlineFilter.all)
+          removableTag(
+            '期限：${_deadlineLabel(_deadlineFilter)}',
+            () => _saveFilters(
+              HomeFilters(
+                query: _query,
+                courseKey: _courseKey,
+                deadline: AssignmentDeadlineFilter.all,
+                type: _typeFilter,
+                sortOrder: _sortOrder,
+              ),
+              epoch,
+              account,
+            ),
+          ),
+        if (_courseKey != null)
+          removableTag(
+            '课程：${options[_courseKey!] ?? "已选课程"}',
+            () => _saveFilters(
+              HomeFilters(
+                query: _query,
+                courseKey: null,
+                deadline: _deadlineFilter,
+                type: _typeFilter,
+                sortOrder: _sortOrder,
+              ),
+              epoch,
+              account,
+            ),
+          ),
+        TextButton(
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            minimumSize: const Size(44, 32),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            foregroundColor: Journal.muted,
+          ),
+          onPressed: () => _saveFilters(
+            HomeFilters(sortOrder: _sortOrder),
+            epoch,
+            account,
+          ),
+          child: const Text('重置条件'),
         ),
-      ),
+      ],
     );
   }
 
@@ -835,20 +812,17 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       _DayHeadingTone.today => Journal.ink,
       _DayHeadingTone.normal => Journal.muted,
     };
-    final lineColor = switch (tone) {
-      _DayHeadingTone.overdue => Journal.berryBorder,
-      _DayHeadingTone.undated => Journal.ochreBorder,
-      _DayHeadingTone.today => Journal.sageBorder,
-      _DayHeadingTone.normal => Journal.rule,
-    };
     return Padding(
-      padding: EdgeInsets.only(top: top, bottom: 6),
+      padding: EdgeInsets.only(top: top + 6, bottom: 2),
       child: Row(
         children: [
           Flexible(
             child: Text(
               label,
-              style: Journal.dayHeading.copyWith(color: textColor),
+              style: Journal.dayHeading.copyWith(
+                color: textColor,
+                fontSize: 14.5,
+              ),
             ),
           ),
           if (badge != null) ...[
@@ -859,12 +833,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 color: tone == _DayHeadingTone.overdue
                     ? Journal.berryBg
                     : Journal.sage,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color: tone == _DayHeadingTone.overdue
-                      ? Journal.berryBorder
-                      : Journal.sageBorder,
-                ),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 badge,
@@ -879,8 +848,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               ),
             ),
           ],
-          const SizedBox(width: 10),
-          Expanded(child: Container(height: 1, color: lineColor)),
         ],
       ),
     );
@@ -939,16 +906,20 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   Widget _homeActions(BuildContext context, Map<String, String> options,
       bool filtersActive, HomeSortOrder sortOrder) {
     final actionColor = Theme.of(context).colorScheme.primary;
-    final textStyle = Journal.metadata.copyWith(
+    final filterStyle = Journal.metadata.copyWith(
       color: actionColor,
-      fontWeight: FontWeight.w600,
+      fontWeight: FontWeight.w500,
+    );
+    final sortStyle = Journal.metadata.copyWith(
+      color: Journal.muted,
+      fontWeight: FontWeight.w500,
     );
     final scaler = MediaQuery.textScalerOf(context);
     final filterLabel = filtersActive ? '已筛选' : '搜索与筛选';
     final sortLabel = _shortSortLabel(sortOrder);
-    double labelWidth(String text) {
+    double labelWidth(String text, TextStyle style) {
       final painter = TextPainter(
-        text: TextSpan(text: text, style: textStyle),
+        text: TextSpan(text: text, style: style),
         textScaler: scaler,
         textDirection: TextDirection.ltr,
       )..layout();
@@ -957,17 +928,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       return width;
     }
 
-    const entryHorizontalPadding = 20.0;
-    final filterWidth =
-        18 + 8 + labelWidth(filterLabel) + entryHorizontalPadding;
-    final sortWidth = 18 + 8 + labelWidth(sortLabel) + entryHorizontalPadding;
-    Widget entry({
-      required IconData icon,
-      required String label,
-      required String message,
-      Key? labelKey,
-      bool expandHitWidth = false,
-    }) {
+    final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 28;
+    final sortWidth = 16 + 6 + labelWidth(sortLabel, sortStyle) + 16;
+
+    Widget buildFilterPill({bool fullWidth = false}) {
+      final message = filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选';
       void onTap() => _openFilters(options);
       return Semantics(
         button: true,
@@ -979,20 +944,80 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             child: Material(
               type: MaterialType.transparency,
               child: InkWell(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(22),
                 onTap: onTap,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
                     minHeight: 48,
-                    minWidth: expandHitWidth ? double.infinity : 0,
+                    minWidth: fullWidth ? double.infinity : 0,
                   ),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: fullWidth ? null : 1,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: filtersActive ? Journal.sage : Journal.parchment,
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      child: Row(
+                        mainAxisSize:
+                            fullWidth ? MainAxisSize.max : MainAxisSize.min,
+                        children: [
+                          Icon(
+                            filtersActive
+                                ? Icons.tune_rounded
+                                : Icons.search_rounded,
+                            size: 17,
+                            color: actionColor,
+                          ),
+                          const SizedBox(width: 7),
+                          Flexible(
+                            child: Text(filterLabel, style: filterStyle),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget buildSortButton({double horizontalPad = 6}) {
+      final message = '当前排序：$sortLabel，打开搜索、筛选与排序';
+      void onTap() => _openFilters(options);
+      return Semantics(
+        button: true,
+        label: message,
+        onTap: onTap,
+        child: ExcludeSemantics(
+          child: Tooltip(
+            message: message,
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: onTap,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    padding: EdgeInsets.symmetric(horizontal: horizontalPad),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(icon, size: 18, color: actionColor),
-                      const SizedBox(width: 8),
+                      const Icon(Icons.swap_vert_rounded,
+                          size: 17, color: Journal.muted),
+                      const SizedBox(width: 7),
                       Flexible(
-                          child: Text(label, key: labelKey, style: textStyle)),
+                        child: Text(
+                          sortLabel,
+                          key: const ValueKey('current-home-sort'),
+                          style: sortStyle,
+                        ),
+                      ),
                     ]),
                   ),
                 ),
@@ -1003,58 +1028,22 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       );
     }
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Journal.sheet,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: filtersActive ? Journal.ink : Journal.ruleStrong,
-        ),
-      ),
-      child: LayoutBuilder(builder: (context, constraints) {
-        if (filterWidth + sortWidth + 24 <= constraints.maxWidth) {
-          final filterEntry = entry(
-            icon: filtersActive ? Icons.tune_rounded : Icons.search_rounded,
-            label: filterLabel,
-            message: filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选',
-          );
-          final sortEntry = entry(
-            icon: Icons.swap_vert_rounded,
-            label: sortLabel,
-            message: '当前排序：$sortLabel，打开搜索、筛选与排序',
-            labelKey: const ValueKey('current-home-sort'),
-          );
-          return Row(children: [
-            Expanded(
-                child:
-                    Align(alignment: Alignment.centerLeft, child: filterEntry)),
-            Container(width: 1, height: 24, color: Journal.rule),
-            sortEntry,
-          ]);
-        }
-        final filterEntry = entry(
-          icon: filtersActive ? Icons.tune_rounded : Icons.search_rounded,
-          label: filterLabel,
-          message: filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选',
-          expandHitWidth: true,
-        );
-        final sortEntry = entry(
-          icon: Icons.swap_vert_rounded,
-          label: sortLabel,
-          message: '当前排序：$sortLabel，打开搜索、筛选与排序',
-          labelKey: const ValueKey('current-home-sort'),
-          expandHitWidth: true,
-        );
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            filterEntry,
-            const Divider(height: 1, color: Journal.rule),
-            sortEntry,
-          ],
-        );
-      }),
-    );
+    return LayoutBuilder(builder: (context, constraints) {
+      if (filterWidth + sortWidth + 12 <= constraints.maxWidth) {
+        return Row(children: [
+          Flexible(child: buildFilterPill(fullWidth: true)),
+          const SizedBox(width: 12),
+          buildSortButton(),
+        ]);
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          buildFilterPill(),
+          buildSortButton(horizontalPad: 14),
+        ],
+      );
+    });
   }
 
   String _sortLabel(HomeSortOrder order) => switch (order) {

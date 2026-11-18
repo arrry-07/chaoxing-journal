@@ -248,16 +248,16 @@ class StudyAssistantTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Journal.rule),
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: Journal.rule, width: 0.8),
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: Journal.sheet,
+        backgroundColor: Journal.parchment,
         selectedColor: Journal.sage,
         checkmarkColor: Journal.ink,
-        side: const BorderSide(color: Journal.ruleStrong),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        side: BorderSide.none,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         labelStyle: Journal.metadata.copyWith(
           color: Journal.ink,
           fontWeight: FontWeight.w500,
@@ -266,7 +266,8 @@ class StudyAssistantTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: Journal.ink,
-          side: const BorderSide(color: Journal.ruleStrong),
+          backgroundColor: Journal.parchment,
+          side: BorderSide.none,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -276,6 +277,7 @@ class StudyAssistantTheme {
         style: FilledButton.styleFrom(
           backgroundColor: Journal.ink,
           foregroundColor: Journal.sheet,
+          elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -286,15 +288,15 @@ class StudyAssistantTheme {
         fillColor: Journal.sheet,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Journal.ruleStrong),
+          borderSide: const BorderSide(color: Journal.rule),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Journal.ruleStrong),
+          borderSide: const BorderSide(color: Journal.rule),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Journal.ink, width: 1.5),
+          borderSide: const BorderSide(color: Journal.ink, width: 1.2),
         ),
       ),
       bottomSheetTheme: const BottomSheetThemeData(

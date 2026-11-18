@@ -417,95 +417,154 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
             assignment.deadlineLabel,
         ];
 
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: const Size(48, 44),
+        return Material(
+          color: Journal.paper,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(48, 44),
+                  ),
+                  onPressed: () => context.canPop()
+                      ? context.pop()
+                      : context.go('/assignments'),
+                  icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                  label: const Text('返回'),
                 ),
-                onPressed: () => context.canPop()
-                    ? context.pop()
-                    : context.go('/assignments'),
-                icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                label: const Text('返回'),
               ),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                if (urgentLabel != null)
-                  CourseworkStatusPill(
-                    label: urgentLabel,
-                    tone: overdue
-                        ? CourseworkPillTone.overdue
-                        : CourseworkPillTone.urgentToday,
-                  ),
-                if (statusLabel.isNotEmpty)
-                  CourseworkStatusPill(
-                    label: statusLabel,
-                    tone: statusTone,
-                  ),
-                if (assignment.courseName.trim().isNotEmpty &&
-                    assignment.title.trim().isNotEmpty)
-                  Text(
-                    assignment.courseName.trim(),
-                    style: Journal.metadata.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: Journal.muted,
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (assignment.courseName.trim().isNotEmpty &&
+                      assignment.title.trim().isNotEmpty)
+                    Text(
+                      assignment.courseName.trim(),
+                      style: Journal.metadata.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: Journal.muted,
+                      ),
                     ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            if (assignment.title.trim().isNotEmpty)
-              Text(
-                assignment.title.trim(),
-                style: Journal.section.copyWith(
-                  fontSize: 22,
-                  height: 1.36,
-                  fontWeight: FontWeight.w700,
-                ),
-              )
-            else if (assignment.courseName.trim().isNotEmpty)
-              Text(
-                assignment.courseName.trim(),
-                style: Journal.section,
-              ),
-            const SizedBox(height: 16),
-            if (_actionMessage != null) ...[
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Journal.sage.withValues(alpha: 0.65),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Journal.sageBorder),
-                ),
-                child: Semantics(
-                  liveRegion: true,
-                  child: Text(
-                    _actionMessage!,
-                    style: Journal.metadata.copyWith(
-                      color: Journal.ink,
-                      fontWeight: FontWeight.w600,
+                  if (statusLabel.isNotEmpty &&
+                      statusTone == CourseworkPillTone.neutral) ...[
+                    if (assignment.courseName.trim().isNotEmpty &&
+                        assignment.title.trim().isNotEmpty)
+                      Text('·', style: Journal.metadata),
+                    Text(statusLabel, style: Journal.metadata),
+                  ],
+                  if (statusLabel.isNotEmpty &&
+                      statusTone != CourseworkPillTone.neutral)
+                    CourseworkStatusPill(
+                      label: statusLabel,
+                      tone: statusTone,
                     ),
-                  ),
-                ),
+                  if (urgentLabel != null)
+                    CourseworkStatusPill(
+                      label: urgentLabel,
+                      tone: overdue
+                          ? CourseworkPillTone.overdue
+                          : CourseworkPillTone.urgentToday,
+                    ),
+                ],
               ),
+              const SizedBox(height: 10),
+              if (assignment.title.trim().isNotEmpty)
+                Text(
+                  assignment.title.trim(),
+                  style: Journal.section.copyWith(
+                    fontSize: 22,
+                    height: 1.36,
+                    fontWeight: FontWeight.w700,
+                  ),
+                )
+              else if (assignment.courseName.trim().isNotEmpty)
+                Text(
+                  assignment.courseName.trim(),
+                  style: Journal.section,
+                ),
               const SizedBox(height: 12),
-            ],
-            if (isHidden) ...[
-              Card(
-                color: Journal.parchment,
-                child: Padding(
+              if (exam == null || examLines.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Icon(
+                          Icons.schedule_rounded,
+                          size: 18,
+                          color: overdue ? Journal.berry : Journal.muted,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          assignment.isExam
+                              ? '${examLines.join('\n')}${hasExamTime ? '\n（北京时间）' : ''}'
+                              : assignment.deadlineAt == null
+                                  ? assignment.deadlineLabel
+                                  : '${!assignment.deadlineTrusted || assignment.deadlineReadFailed ? '历史截止（未核实） ' : ''}${DateFormat('yyyy年M月d日 HH:mm', 'zh_CN').format(AssignmentQuery.beijing(assignment.deadlineAt!))}（北京时间）',
+                          style: Journal.metadata.copyWith(
+                            color: Journal.ink,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (verificationNotes.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: Journal.ochreBg,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (var i = 0; i < verificationNotes.length; i++) ...[
+                        if (i > 0) const SizedBox(height: 4),
+                        Text(
+                          verificationNotes[i],
+                          style: Journal.metadata.copyWith(
+                            color: Journal.ochre,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+              if (unverifiedTimes.isNotEmpty)
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  title: const Text('未核实的时间记录'),
+                  children: [
+                    for (final line in unverifiedTimes) Text(line),
+                    const Text('时间记录尚未核实，仅供参考，不作为当前考试安排。以上时间均为北京时间。'),
+                  ],
+                ),
+              if (isHidden) ...[
+                const SizedBox(height: 12),
+                Container(
                   padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Journal.parchment,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -540,145 +599,45 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (exam == null || examLines.isNotEmpty)
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            Icons.event_available_rounded,
-                            size: 20,
-                            color: overdue ? Journal.berry : Journal.ink,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              assignment.isExam
-                                  ? '${examLines.join('\n')}${hasExamTime ? '\n（北京时间）' : ''}'
-                                  : assignment.deadlineAt == null
-                                      ? assignment.deadlineLabel
-                                      : '${!assignment.deadlineTrusted || assignment.deadlineReadFailed ? '历史截止（未核实） ' : ''}${DateFormat('yyyy年M月d日 HH:mm', 'zh_CN').format(AssignmentQuery.beijing(assignment.deadlineAt!))}（北京时间）',
-                              style: Journal.metadata.copyWith(
-                                color: Journal.ink,
-                                fontSize: 14.5,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    if (verificationNotes.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Journal.ochreBg,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Journal.ochreBorder),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            for (var i = 0;
-                                i < verificationNotes.length;
-                                i++) ...[
-                              if (i > 0) const SizedBox(height: 4),
-                              Text(
-                                verificationNotes[i],
-                                style: Journal.metadata.copyWith(
-                                  color: Journal.ochre,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ],
-                    if (unverifiedTimes.isNotEmpty)
-                      ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        title: const Text('未核实的时间记录'),
-                        children: [
-                          for (final line in unverifiedTimes) Text(line),
-                          const Text('时间记录尚未核实，仅供参考，不作为当前考试安排。以上时间均为北京时间。'),
-                        ],
-                      ),
-                    if (showRequirements) ...[
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Divider(height: 1, color: Journal.rule),
-                      ),
-                      Text(
-                        cleanRequirements,
-                        style: Journal.metadata.copyWith(
-                          color: Journal.ink,
-                          fontSize: 14,
-                          height: 1.55,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                child: Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        minimumSize: const Size(48, 44),
-                      ),
-                      onPressed: () => context.push(
-                          '/personal/${Uri.encodeComponent(widget.assignmentId)}'),
-                      icon: const Icon(Icons.edit_note_rounded, size: 20),
-                      label: const Text('个人清单与备注'),
+              ],
+              if (showRequirements) ...[
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Journal.sheet,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    cleanRequirements,
+                    style: Journal.metadata.copyWith(
+                      color: Journal.ink,
+                      fontSize: 14.5,
+                      height: 1.6,
                     ),
-                    if (!isHidden)
-                      TextButton.icon(
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: const Size(48, 44),
-                        ),
-                        onPressed: () => context.push('/plan'),
-                        icon: const Icon(Icons.checklist_rounded, size: 18),
-                        label: const Text('安排每日计划'),
-                      ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-            if (sources.length > 1) ...[
-              const SizedBox(height: 12),
-              Card(
-                child: ExpansionTile(
+              ],
+              if (sources.length > 1) ...[
+                const SizedBox(height: 10),
+                ExpansionTile(
                   key: const ValueKey('assignment-source-records'),
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 4),
                   childrenPadding: const EdgeInsets.only(bottom: 8),
-                  title: Text('来源记录 · ${sources.length} 条'),
+                  title: Text(
+                    '来源记录 · ${sources.length} 条',
+                    style: Journal.metadata.copyWith(
+                      color: Journal.ink,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   children: [
                     for (final source in sources)
                       ListTile(
                         dense: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 4),
                         title: Text(
                           '${_sourceType(source)} · ${source.statusLabel}',
                         ),
@@ -692,117 +651,153 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                       ),
                   ],
                 ),
+              ],
+              const SizedBox(height: 22),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                ),
+                onPressed: _opening || _hiding || _currentUrl == null
+                    ? null
+                    : _openAssignment,
+                icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                label: Text(_opening
+                    ? '正在打开…'
+                    : assignment.isExam
+                        ? '在学习通内查看$_itemLabel'
+                        : '在学习通内打开作业'),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(46),
+                  backgroundColor: Journal.parchment,
+                  side: BorderSide.none,
+                ),
+                onPressed: _opening || _hiding || _currentUrl == null
+                    ? null
+                    : _openWeb,
+                icon: const Icon(Icons.open_in_browser_rounded, size: 18),
+                label: Text(_opening ? '正在请求浏览器…' : '打开$_itemLabel网页'),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '将在学习通内打开$_itemLabel网页；也可主动选择浏览器打开，可能需要另行登录。返回后可刷新核对提交状态。',
+                style: Journal.metadata.copyWith(fontSize: 12.5),
+              ),
+              if (_currentUrl == null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '$_itemLabel链接暂不可用，请刷新信息；尚未开放时请稍后重试。',
+                  style: Journal.metadata.copyWith(
+                    color: Journal.ochre,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+              if (_actionMessage != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: Journal.sage.withValues(alpha: 0.65),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      _actionMessage!,
+                      style: Journal.metadata.copyWith(
+                        color: Journal.ink,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 18),
+                child: Divider(height: 1, thickness: 0.8, color: Journal.rule),
+              ),
+              Wrap(
+                spacing: 12,
+                runSpacing: 6,
+                children: [
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(48, 44),
+                    ),
+                    onPressed: () => context.push(
+                        '/personal/${Uri.encodeComponent(widget.assignmentId)}'),
+                    icon: const Icon(Icons.edit_note_rounded, size: 20),
+                    label: const Text('个人清单与备注'),
+                  ),
+                  if (!isHidden)
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(48, 44),
+                      ),
+                      onPressed: () => context.push('/plan'),
+                      icon: const Icon(Icons.checklist_rounded, size: 18),
+                      label: const Text('安排每日计划'),
+                    ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(48, 44),
+                    ),
+                    onPressed: () => context.push(
+                      '/reminder-status/assignment/'
+                      '${Uri.encodeComponent(assignment.id)}',
+                    ),
+                    icon: const Icon(Icons.notifications_active_outlined,
+                        size: 18),
+                    label: const Text('提醒状态'),
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(48, 44),
+                    ),
+                    onPressed: _refreshing || widget.store.isLoading || _hiding
+                        ? null
+                        : _refresh,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: Text(_refreshing ? '正在刷新…' : '刷新$_itemLabel信息'),
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(48, 44),
+                    ),
+                    onPressed:
+                        _currentUrl == null || _hiding ? null : _copyLink,
+                    icon: const Icon(Icons.copy_outlined, size: 17),
+                    label: Text('复制$_itemLabel链接'),
+                  ),
+                  if (!isHidden && !assignment.isCompleted)
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(48, 44),
+                        foregroundColor: Journal.berry,
+                      ),
+                      onPressed:
+                          _hiding || _opening || _refreshing ? null : _hide,
+                      icon: const Icon(Icons.visibility_off_outlined, size: 18),
+                      label: Text(
+                        sources.length > 1
+                            ? '在本机隐藏此$_itemLabel（${sources.length} 条来源）'
+                            : '在本机隐藏此$_itemLabel',
+                      ),
+                    ),
+                ],
               ),
             ],
-            const SizedBox(height: 18),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: Journal.parchment,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Journal.rule),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                      onPressed: _opening || _hiding || _currentUrl == null
-                          ? null
-                          : _openAssignment,
-                      icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                      label: Text(_opening
-                          ? '正在打开…'
-                          : assignment.isExam
-                              ? '在学习通内查看$_itemLabel'
-                              : '在学习通内打开作业'),
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(46),
-                        backgroundColor: Journal.sheet,
-                      ),
-                      onPressed: _opening || _hiding || _currentUrl == null
-                          ? null
-                          : _openWeb,
-                      icon: const Icon(Icons.open_in_browser_rounded, size: 18),
-                      label: Text(_opening ? '正在请求浏览器…' : '打开$_itemLabel网页'),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      '将在学习通内打开$_itemLabel网页；也可主动选择浏览器打开，可能需要另行登录。返回后可刷新核对提交状态。',
-                      style: Journal.metadata.copyWith(fontSize: 12.5),
-                    ),
-                    if (_currentUrl == null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        '$_itemLabel链接暂不可用，请刷新信息；尚未开放时请稍后重试。',
-                        style: Journal.metadata.copyWith(
-                          color: Journal.ochre,
-                          fontSize: 12.5,
-                        ),
-                      ),
-                    ],
-                    const Padding(
-                      padding: EdgeInsets.only(top: 10, bottom: 4),
-                      child: Divider(height: 1, color: Journal.rule),
-                    ),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      alignment: WrapAlignment.spaceBetween,
-                      children: [
-                        TextButton.icon(
-                          onPressed:
-                              _refreshing || widget.store.isLoading || _hiding
-                                  ? null
-                                  : _refresh,
-                          icon: const Icon(Icons.refresh_rounded, size: 18),
-                          label:
-                              Text(_refreshing ? '正在刷新…' : '刷新$_itemLabel信息'),
-                        ),
-                        TextButton.icon(
-                          onPressed:
-                              _currentUrl == null || _hiding ? null : _copyLink,
-                          icon: const Icon(Icons.copy_outlined, size: 17),
-                          label: Text('复制$_itemLabel链接'),
-                        ),
-                        TextButton.icon(
-                          onPressed: () => context.push(
-                            '/reminder-status/assignment/'
-                            '${Uri.encodeComponent(assignment.id)}',
-                          ),
-                          icon: const Icon(Icons.notifications_active_outlined,
-                              size: 18),
-                          label: const Text('提醒状态'),
-                        ),
-                        if (!isHidden && !assignment.isCompleted)
-                          TextButton.icon(
-                            style: TextButton.styleFrom(
-                              foregroundColor: Journal.berry,
-                            ),
-                            onPressed: _hiding || _opening || _refreshing
-                                ? null
-                                : _hide,
-                            icon: const Icon(Icons.visibility_off_outlined,
-                                size: 18),
-                            label: Text(
-                              sources.length > 1
-                                  ? '在本机隐藏此$_itemLabel（${sources.length} 条来源）'
-                                  : '在本机隐藏此$_itemLabel',
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+          ),
         );
       },
     );

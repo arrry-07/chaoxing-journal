@@ -82,10 +82,7 @@ void main() {
         expect(details, 2);
         await t.pumpAndSettle();
         if (width == 390 && scale == 1) {
-          expect(
-              (t.getCenter(find.text('待提交')).dy - t.getCenter(actionButton).dy)
-                  .abs(),
-              lessThan(6));
+          expect(actionRect.left, greaterThanOrEqualTo(titleRect.right));
         }
         if (const bool.fromEnvironment('CAPTURE_UI')) {
           await t.runAsync(() async {

@@ -9,13 +9,13 @@ class Journal {
   static const muted = Color(0xFF53645A);
   static const sage = Color(0xFFDFE8D8);
   static const sageBorder = Color(0xFFCAD8C3);
-  static const rule = Color(0xFFD6D8C9);
-  static const ruleStrong = Color(0xFFC4C8B4);
+  static const rule = Color(0xFFE4E2D5);
+  static const ruleStrong = Color(0xFFD6D5C7);
   static const berry = Color(0xFF813E53);
-  static const berryBg = Color(0xFFFBE9ED);
+  static const berryBg = Color(0xFFF6E4E9);
   static const berryBorder = Color(0xFFE5B8C2);
   static const ochre = Color(0xFF85530E);
-  static const ochreBg = Color(0xFFFDF3DF);
+  static const ochreBg = Color(0xFFFAF0D7);
   static const ochreBorder = Color(0xFFE8CE9D);
   static const slate = Color(0xFF244B6B);
   static const slateBg = Color(0xFFEBF1F6);
