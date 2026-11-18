@@ -37,7 +37,7 @@ class ProfileRecordsScreen extends StatelessWidget {
                     title: '已隐藏作业',
                     subtitle:
                         '${store.hiddenCourseworkGroups.length} 项，可恢复到作业清单',
-                    onTap: () => _showHiddenAssignments(context),
+                    onTap: () => context.push('/records?status=hidden'),
                   ),
                   ProfileMenuTile(
                     icon: Icons.history,
@@ -51,54 +51,4 @@ class ProfileRecordsScreen extends StatelessWidget {
           ),
         ),
       );
-
-  void _showHiddenAssignments(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.7,
-        child: AnimatedBuilder(
-          animation: store,
-          builder: (context, _) => Column(
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('已隐藏作业'),
-              ),
-              if (store.error != null)
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(store.error!),
-                ),
-              Expanded(
-                child: store.hiddenCourseworkGroups.isEmpty
-                    ? const Center(child: Text('暂无隐藏作业'))
-                    : ListView.builder(
-                        itemCount: store.hiddenCourseworkGroups.length,
-                        itemBuilder: (context, index) {
-                          final group = store.hiddenCourseworkGroups[index];
-                          return ListTile(
-                            title: Text(group.primary.title),
-                            subtitle: Text(
-                              '${group.primary.courseName} · ${group.sourceLabel}',
-                            ),
-                            trailing: TextButton(
-                              onPressed: store.isLoading
-                                  ? null
-                                  : () => store.setCourseworkGroupHidden(
-                                      group, false),
-                              child: const Text('恢复'),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }

@@ -58,24 +58,113 @@ class _DailyPlanState extends State<DailyPlanScreen> {
       setState(() => message = '没有可添加的作业，请先同步，或查看其他日期。');
       return;
     }
+    final now = DateTime.now();
     final id = await showModalBottomSheet<String>(
-        context: context,
-        isScrollControlled: true,
-        builder: (c) => SafeArea(
-            child: SizedBox(
-                height: MediaQuery.sizeOf(c).height * 0.65,
-                child: Column(children: [
-                  const Padding(
-                      padding: EdgeInsets.all(16), child: Text('选择准备完成的作业')),
-                  Expanded(
-                      child: ListView(children: [
-                    for (final a in candidates)
-                      ListTile(
-                          title: Text(a.title),
-                          subtitle: Text(a.courseName),
-                          onTap: () => Navigator.pop(c, a.id))
-                  ]))
-                ]))));
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Journal.paper,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (c) => SizedBox(
+        height: MediaQuery.sizeOf(c).height * 0.65,
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Journal.rule,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text('选择准备完成的作业', style: Journal.section),
+                  ),
+                  IconButton(
+                    tooltip: '关闭',
+                    onPressed: () => Navigator.pop(c),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: Journal.rule),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  for (final a in candidates)
+                    Builder(
+                      builder: (context) {
+                        final overdue = a.isOverdueAt(now);
+                        final deadlineText = a.deadlineAt != null &&
+                                a.deadlineTrusted &&
+                                !a.deadlineReadFailed
+                            ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(a.deadlineAt!))}'
+                            : a.deadlineLabel;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Card(
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () => Navigator.pop(c, a.id),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    CourseMark(a.courseName, size: 30),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            a.title,
+                                            style: Journal.entryTitle,
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            a.courseName,
+                                            style: Journal.metadata,
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            overdue
+                                                ? '$deadlineText · 已逾期'
+                                                : deadlineText,
+                                            style: Journal.metadata.copyWith(
+                                              color: overdue
+                                                  ? Journal.berry
+                                                  : Journal.muted,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
     if (!mounted || id == null) return;
     await minutes(id);
   }

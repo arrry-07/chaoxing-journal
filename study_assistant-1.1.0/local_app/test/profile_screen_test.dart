@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/course_list_screen.dart';
+import 'package:study_assistant_mobile/src/features/local_records_screen.dart';
 import 'package:study_assistant_mobile/src/features/open_source_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_records_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
@@ -19,6 +20,7 @@ import 'package:study_assistant_mobile/src/services/app_update_service.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/external_link_service.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
+import 'package:study_assistant_mobile/src/services/local_record_query.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
@@ -63,6 +65,15 @@ void main() {
       GoRoute(
         path: '/profile/records',
         builder: (_, __) => ProfileRecordsScreen(store: store),
+      ),
+      GoRoute(
+        path: '/records',
+        builder: (_, state) => LocalRecordsScreen(
+          store: store,
+          initialFilter: LocalRecordFilterSpec.fromQueryParameters(
+            state.uri.queryParameters,
+          ),
+        ),
       ),
     ]);
     addTearDown(router.dispose);

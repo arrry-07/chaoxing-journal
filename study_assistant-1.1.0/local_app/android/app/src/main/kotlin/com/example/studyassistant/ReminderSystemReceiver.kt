@@ -18,6 +18,7 @@ class ReminderSystemReceiver : BroadcastReceiver() {
                 Intent.ACTION_TIME_CHANGED -> {
                     AssignmentAlarmScheduler.rescheduleForTimeZoneChange(appContext, database)
                     BackgroundWorkScheduler.reconcileAfterSystemChange(appContext, database)
+                    AssignmentWidgetProvider.refreshAll(appContext)
                 }
                 Intent.ACTION_BOOT_COMPLETED,
                 Intent.ACTION_USER_UNLOCKED,
@@ -26,6 +27,7 @@ class ReminderSystemReceiver : BroadcastReceiver() {
                 "com.htc.intent.action.QUICKBOOT_POWERON" -> {
                     AssignmentAlarmScheduler.reconcile(appContext, database)
                     BackgroundWorkScheduler.reconcileAfterSystemChange(appContext, database)
+                    AssignmentWidgetProvider.refreshAll(appContext)
                 }
             }
         }

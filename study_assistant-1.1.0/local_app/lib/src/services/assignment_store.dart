@@ -552,9 +552,13 @@ class AssignmentStore extends ChangeNotifier {
         }
         display = next;
         try {
-          await widgetSnapshotService.saveAssignments(display.forWidget(
-              _authenticated ? courseAssignments : <Assignment>[],
-              DateTime.now()));
+          await widgetSnapshotService.saveAssignmentsForContext(
+            display.forWidget(
+                _authenticated ? courseAssignments : <Assignment>[],
+                DateTime.now()),
+            authenticated: _authenticated,
+            range: next.widgetRange,
+          );
         } catch (_) {
           throw StateError('显示设置已保存，小组件更新失败，请稍后刷新');
         }
@@ -723,6 +727,20 @@ class AssignmentStore extends ChangeNotifier {
 
   Assignment? findAssignment(String assignmentId) {
     for (final assignment in _assignments) {
+      if (assignment.id == assignmentId) {
+        return assignment;
+      }
+    }
+    return null;
+  }
+
+  /// Resolves either visible or hidden assignments on the current account,
+  /// allowing read-only detail inspection and restore without exposing hidden
+  /// records to [findAssignment] notification or visit callers.
+  Assignment? findAnyAssignment(String assignmentId) {
+    final visible = findAssignment(assignmentId);
+    if (visible != null) return visible;
+    for (final assignment in _hiddenAssignments) {
       if (assignment.id == assignmentId) {
         return assignment;
       }
@@ -1060,7 +1078,11 @@ class AssignmentStore extends ChangeNotifier {
           // Full privacy cleanup also removes delivered notifications that
           // are no longer pending and have no v2 active-ID manifest.
           await _cancelPrivateNotifications();
-          await widgetSnapshotService.saveAssignments([]);
+          await widgetSnapshotService.saveAssignmentsForContext(
+            const [],
+            authenticated: false,
+            range: display.widgetRange,
+          );
         }
         await repository.activateAccount(normalizedAccount,
             previousAccount: oldAccount);
@@ -2080,12 +2102,26 @@ class AssignmentStore extends ChangeNotifier {
         );
       }
     }
+    final widgetItems = display.forWidget(scoped, DateTime.now());
     if (_manageBackgroundSchedule) {
       try {
-        await widgetSnapshotService
-            .saveAssignments(display.forWidget(scoped, DateTime.now()));
+        await widgetSnapshotService.saveAssignmentsForContext(
+          widgetItems,
+          authenticated: _authenticated,
+          range: display.widgetRange,
+        );
       } catch (_) {
         _serviceWarnings.add('作业已保存在本机，小组件更新失败，请稍后刷新');
+      }
+    } else if (_authenticated && !_privacyCleanupPending) {
+      try {
+        await widgetSnapshotService.saveAssignmentsForContext(
+          widgetItems,
+          authenticated: true,
+          range: display.widgetRange,
+        );
+      } catch (error) {
+        debugPrint('[WidgetSnapshot] background_refresh_skipped: $error');
       }
     }
     return manualRescheduleSucceeded;

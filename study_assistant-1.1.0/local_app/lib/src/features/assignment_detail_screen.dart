@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../models/assignment.dart';
+import '../services/assignment_grouping.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
 import '../services/exam_schedule_presentation.dart';
@@ -64,7 +65,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   }
 
   String get _itemLabel {
-    final assignment = widget.store.findAssignment(widget.assignmentId);
+    final assignment = widget.store.findAnyAssignment(widget.assignmentId);
     return assignment?.isExam == true
         ? assignment!.exam!.noticeOnly
             ? '考试通知'
@@ -75,7 +76,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   }
 
   String? get _currentUrl {
-    final assignment = widget.store.findAssignment(widget.assignmentId);
+    final assignment = widget.store.findAnyAssignment(widget.assignmentId);
     return assignment == null
         ? null
         : AssignmentWebLink.validatedUrl(assignment);
@@ -180,7 +181,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
       _hiding = true;
       _actionMessage = null;
     });
-    final original = widget.store.findAssignment(widget.assignmentId);
+    final original = widget.store.findAnyAssignment(widget.assignmentId);
     final group =
         original == null ? null : widget.store.courseworkGroupFor(original.id);
     final sources =
@@ -194,12 +195,33 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     }
     if (!mounted) return;
     if (hidden) {
-      context.go('/assignments');
+      GoRouter.maybeOf(context)?.go('/assignments');
       return;
     }
     setState(() {
       _hiding = false;
       _actionMessage = '隐藏失败，请稍后重试；整组来源均未作为完成结果提交。';
+    });
+  }
+
+  Future<void> _restore(CourseworkGroup? group, Assignment original) async {
+    if (_hiding) return;
+    setState(() {
+      _hiding = true;
+      _actionMessage = null;
+    });
+    var restored = false;
+    try {
+      restored = group != null
+          ? await widget.store.setCourseworkGroupHidden(group, false)
+          : await widget.store.setAssignmentsHidden([original.id], false);
+    } catch (_) {
+      restored = false;
+    }
+    if (!mounted) return;
+    setState(() {
+      _hiding = false;
+      _actionMessage = restored ? '已恢复到课业清单' : '恢复失败，请稍后重试。';
     });
   }
 
@@ -255,12 +277,29 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     return AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
-        final original = widget.store.findAssignment(widget.assignmentId);
+        final original = widget.store.findAnyAssignment(widget.assignmentId);
+        final sourceGroup = original == null
+            ? null
+            : widget.store.courseworkGroupFor(original.id);
+        final isHidden = sourceGroup?.hidden == true;
+        final courseSources = widget.store.courseAssignments;
+        final projectionRecords = original == null
+            ? courseSources
+            : <Assignment>[
+                ...courseSources,
+                if (sourceGroup != null)
+                  for (final src in sourceGroup.sources)
+                    if (!courseSources.any((item) => item.id == src.id))
+                      src
+                    else if (!courseSources
+                        .any((item) => item.id == original.id))
+                      original,
+              ];
         // Use the same display projection as the list; actions above keep
         // resolving the original ID so supplementation cannot rewrite records.
         final assignment = original == null
             ? null
-            : AssignmentQuery.projectDisplay(widget.store.courseAssignments)
+            : AssignmentQuery.projectDisplay(projectionRecords)
                     .where((a) => a.id == original.id)
                     .firstOrNull ??
                 original;
@@ -289,12 +328,11 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
         }
 
         final exam = assignment.isExam ? assignment.exam : null;
-        final sourceGroup = widget.store.courseworkGroupFor(assignment.id);
         final sources = sourceGroup?.sources ?? <Assignment>[assignment];
         final schedule = exam == null
             ? null
             : ExamSchedulePresentation.build(assignment,
-                records: widget.store.courseAssignments);
+                records: projectionRecords);
         final examLines = exam == null
             ? const <String>[]
             : <String>[
@@ -358,6 +396,31 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     color: Journal.ink),
               ),
             const SizedBox(height: 16),
+            if (isHidden) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Icon(
+                        Icons.visibility_off_outlined,
+                        color: Journal.muted,
+                        size: 20,
+                      ),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '当前课业已在本机隐藏，不参与首页、日历、统计、小组件与提醒',
+                          style: Journal.metadata,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             if (exam == null || examLines.isNotEmpty)
               Card(
                 child: Padding(
@@ -453,10 +516,11 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     '/personal/${Uri.encodeComponent(widget.assignmentId)}'),
                 icon: const Icon(Icons.edit_note),
                 label: const Text('个人清单与备注')),
-            TextButton.icon(
-                onPressed: () => context.push('/plan'),
-                icon: const Icon(Icons.checklist),
-                label: const Text('安排每日计划')),
+            if (!isHidden)
+              TextButton.icon(
+                  onPressed: () => context.push('/plan'),
+                  icon: const Icon(Icons.checklist),
+                  label: const Text('安排每日计划')),
             FilledButton.icon(
               onPressed: _opening || _hiding || _currentUrl == null
                   ? null
@@ -508,7 +572,15 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
               ),
             ]),
             const SizedBox(height: 12),
-            if (!assignment.isCompleted)
+            if (isHidden)
+              OutlinedButton.icon(
+                onPressed: _hiding || _opening || _refreshing
+                    ? null
+                    : () => _restore(sourceGroup, original!),
+                icon: const Icon(Icons.visibility_outlined),
+                label: const Text('恢复到课业清单'),
+              )
+            else if (!assignment.isCompleted)
               TextButton.icon(
                 onPressed: _hiding || _opening || _refreshing ? null : _hide,
                 icon: const Icon(Icons.visibility_off_outlined),

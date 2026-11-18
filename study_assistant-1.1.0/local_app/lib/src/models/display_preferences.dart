@@ -30,8 +30,8 @@ class DisplayPreferences {
     final display = AssignmentQuery.currentDisplay(items, now);
     if (widgetRange == WidgetRange.all) return display;
     final today = AssignmentQuery.dayKey(now);
-    final end =
-        today.add(Duration(days: widgetRange == WidgetRange.today ? 1 : 7));
+    final days = widgetRange == WidgetRange.today ? 1 : 7;
+    final end = DateTime(today.year, today.month, today.day + days);
     return display
         .where((a) =>
             AssignmentQuery.timelineBucketAt(a, now) ==

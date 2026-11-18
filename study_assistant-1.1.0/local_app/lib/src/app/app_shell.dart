@@ -66,7 +66,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final location = GoRouterState.of(context).matchedLocation;
+    final routerState = GoRouterState.of(context);
+    final location = routerState.matchedLocation;
+    final fromParam = routerState.uri.queryParameters['from'];
     return Scaffold(
       body: SafeArea(bottom: false, child: widget.child),
       bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -91,7 +93,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           UpdateDownloadBanner(controller: updates),
         NavigationBar(
           height: 76,
-          selectedIndex: _indexFor(location),
+          selectedIndex: _indexFor(location, from: fromParam),
           onDestinationSelected: (index) {
             unawaited(_selectDestination(index));
           },
@@ -148,11 +150,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     await guard.navigate(isCurrent: () => mounted, action: go);
   }
 
-  int _indexFor(String location) {
+  int _indexFor(String location, {String? from}) {
     if (location.startsWith('/calendar')) {
       return 1;
     }
-    if (location.startsWith('/stats')) {
+    if (location.startsWith('/stats') ||
+        (location.startsWith('/records') && from == 'stats')) {
       return 2;
     }
     if (location.startsWith('/profile') ||
