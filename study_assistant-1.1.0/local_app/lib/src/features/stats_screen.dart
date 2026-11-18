@@ -36,6 +36,10 @@ class StatsScreen extends StatefulWidget {
 }
 
 class _StatsScreenState extends State<StatsScreen> {
+  static final _overviewCardColor =
+      Color.lerp(Journal.paper, Journal.sheet, .70)!;
+  static final _courseCardColor =
+      Color.lerp(Journal.paper, Journal.sheet, .50)!;
   static const _bucketStatusParams = [
     'completed',
     'pending',
@@ -46,6 +50,24 @@ class _StatsScreenState extends State<StatsScreen> {
   Timer? _clock;
   late DateTime _now;
   StatsTimeRange _range = StatsTimeRange.all;
+
+  Widget _statsCard({
+    Key? key,
+    required Color color,
+    required Widget child,
+  }) =>
+      Card(
+        key: key,
+        color: color,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: Journal.rule, width: 0.8),
+        ),
+        child: child,
+      );
 
   @override
   void initState() {
@@ -161,7 +183,7 @@ class _StatsScreenState extends State<StatsScreen> {
                                     width: 9,
                                     height: 9,
                                     decoration: BoxDecoration(
-                                      color: CompletionPieChart.colors[i],
+                                      color: CompletionPieChart.legendColors[i],
                                       shape: BoxShape.circle,
                                     ),
                                   ),
@@ -278,7 +300,9 @@ class _StatsScreenState extends State<StatsScreen> {
                 ],
                 const SizedBox(height: 8),
                 if (stats.total == 0)
-                  Card(
+                  _statsCard(
+                    key: const ValueKey('stats-empty-card'),
+                    color: _overviewCardColor,
                     child: Padding(
                       padding: const EdgeInsets.all(14),
                       child: Column(
@@ -297,7 +321,9 @@ class _StatsScreenState extends State<StatsScreen> {
                     ),
                   )
                 else
-                  Card(
+                  _statsCard(
+                    key: const ValueKey('stats-overview-card'),
+                    color: _overviewCardColor,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
@@ -368,8 +394,10 @@ class _StatsScreenState extends State<StatsScreen> {
                 const Text('各课程待处理', style: Journal.section),
                 const SizedBox(height: 6),
                 if (!records.any((a) => !a.isCompleted))
-                  const Card(
-                    child: Padding(
+                  _statsCard(
+                    key: const ValueKey('stats-course-empty'),
+                    color: _overviewCardColor,
+                    child: const Padding(
                       padding: EdgeInsets.all(14),
                       child: Text('当前没有待处理的课程', style: Journal.metadata),
                     ),
@@ -392,7 +420,11 @@ class _StatsScreenState extends State<StatsScreen> {
                           '${group.name}${same.length > 1 ? ' · 分组${same.indexOf(group) + 1}' : ''}';
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 6),
-                        child: Card(
+                        child: _statsCard(
+                          key: ValueKey(
+                            'stats-course-${group.courseKey ?? group.scope.name}',
+                          ),
+                          color: _courseCardColor,
                           child: InkWell(
                             borderRadius: BorderRadius.circular(12),
                             onTap: () => _openRecords(
@@ -409,8 +441,22 @@ class _StatsScreenState extends State<StatsScreen> {
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  CourseMark(group.name, size: 30),
-                                  const SizedBox(width: 12),
+                                  ExcludeSemantics(
+                                    child: SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: Center(
+                                        child: Icon(
+                                          group.courseKey == null
+                                              ? Icons.description_outlined
+                                              : Icons.menu_book_outlined,
+                                          size: 20,
+                                          color: Journal.muted,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment:
