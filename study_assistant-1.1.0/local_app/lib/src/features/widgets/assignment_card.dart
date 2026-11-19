@@ -137,21 +137,28 @@ class AssignmentCard extends StatelessWidget {
         examSchedule!.verificationNote!,
       ...examLines,
     ].join('，');
+    final startText = a.availableFromAt != null
+        ? '开始 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(a.availableFromAt!))}'
+        : (a.availableFromText?.trim().isNotEmpty == true
+            ? '开始 ${a.availableFromText!.trim()}'
+            : null);
+    String withStart(String value) =>
+        startText == null ? value : '$startText · $value';
     final deadline = deadlinePending
         ? '正在确认截止时间'
         : a.deadlineReadFailed
             ? d == null
-                ? a.deadlineLabel
+                ? withStart('截止时间待确认')
                 : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))} · ${a.deadlineLabel}'
             : bucket == AssignmentDeadlineBucket.unconfirmed &&
                     d == null &&
                     a.deadlineTrusted &&
                     !a.deadlineReadFailed
-                ? '截止信息待确认'
+                ? withStart('截止信息待确认')
                 : !a.deadlineTrusted
-                    ? a.deadlineLabel
+                    ? withStart(a.deadlineLabel)
                     : d == null
-                        ? '无期限'
+                        ? withStart('无截止日期')
                         : countdown
                             ? DisplayPreferences.remaining(d, now)
                             : '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(d))}';
@@ -457,6 +464,10 @@ class AssignmentCard extends StatelessWidget {
               child: buildLaunchControl(),
             ),
           ),
+        SizedBox(
+          key: ValueKey('assignment-card-gap-${a.id}'),
+          height: 4,
+        ),
         Padding(
           padding: EdgeInsets.only(left: contentLeftInset),
           child: const Divider(

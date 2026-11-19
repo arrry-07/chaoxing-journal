@@ -347,6 +347,8 @@ class ChaoxingLocalClient {
   bool get canHydrateProfile => _loginPayload != null;
   List<SyncIssue> issues = [];
   int succeededCourses = 0, failedCourses = 0;
+  int detailUnconfirmedCount = 0;
+  final Set<String> _detailUnconfirmedCourseKeys = <String>{};
   Future<ChaoxingLoginResult> loadProfile() async {
     final generation = _sessionGeneration;
     final p = await _fetchProfile(_loginPayload, const _ChaoxingProfile());
@@ -380,6 +382,8 @@ class ChaoxingLocalClient {
     sourceResults = const [];
     succeededCourses = 0;
     failedCourses = 0;
+    detailUnconfirmedCount = 0;
+    _detailUnconfirmedCourseKeys.clear();
     _verificationTarget = null;
     _courseVerificationProbe = null;
     _v3FormalApiConfirmed = false;
@@ -582,6 +586,8 @@ class ChaoxingLocalClient {
     hasCourseResponse = false;
     succeededCourses = 0;
     failedCourses = 0;
+    detailUnconfirmedCount = 0;
+    _detailUnconfirmedCourseKeys.clear();
     try {
       final courseListWatch = Stopwatch()..start();
       final mcode =
@@ -620,12 +626,14 @@ class ChaoxingLocalClient {
         problems.add('部分课程无法识别');
       }
       final assignments = <Assignment>[];
-      final attemptedFormalCourses = <String>{};
+      final formalFailedCourseKeys = <String>{};
       var recognized = courses.isEmpty;
       final formalWatch = Stopwatch()..start();
       for (final course in courses) {
         if (shouldStop?.call() == true) {
-          failedCourses += courses.length - succeededCourses;
+          formalFailedCourseKeys.addAll(courses
+              .skip(courses.indexOf(course))
+              .map((c) => '${c.courseId}:${c.clazzId}'));
           const issue = SyncIssue(
             SyncIssueKind.partial,
             '检查窗口已结束，已停止后续课程请求',
@@ -636,7 +644,6 @@ class ChaoxingLocalClient {
           break;
         }
         List<Assignment>? work;
-        attemptedFormalCourses.add('${course.courseId}:${course.clazzId}');
         final watch = Stopwatch()..start();
         SyncIssue? failure;
         try {
@@ -656,7 +663,7 @@ class ChaoxingLocalClient {
         final label = '${course.courseName}（班级 ${course.clazzId}）';
         if (work == null) {
           _syncCourseEntries?.clear();
-          failedCourses++;
+          formalFailedCourseKeys.add('${course.courseId}:${course.clazzId}');
           final issue = SyncIssue(failure?.kind ?? SyncIssueKind.schemaChanged,
               '$label ${failure?.message ?? '作业页签名或列表无法识别'}',
               elapsedMs: watch.elapsedMilliseconds,
@@ -669,7 +676,9 @@ class ChaoxingLocalClient {
           issues.add(issue);
           problems.add(issue.message);
           if (issue.kind == SyncIssueKind.verificationRequired) {
-            failedCourses = courses.length - succeededCourses;
+            formalFailedCourseKeys.addAll(courses
+                .skip(courses.indexOf(course))
+                .map((c) => '${c.courseId}:${c.clazzId}'));
             break;
           }
         } else {
@@ -677,7 +686,6 @@ class ChaoxingLocalClient {
           succeededCourses++;
           assignments.addAll(work);
           if (work.any((a) => a.deadlineReadFailed)) {
-            failedCourses++;
             issues.add(SyncIssue(SyncIssueKind.partial, '$label 部分截止时间尚未确认',
                 courseKey: '${course.courseId}:${course.clazzId}',
                 stage: 'detail',
@@ -691,24 +699,23 @@ class ChaoxingLocalClient {
             issues.add(SyncIssue(
                 _deadlineReadsBlockedBy!, '本次读取已暂停，另有 $unread 门课程尚未更新',
                 stage: 'workList'));
+            for (final remaining in courses.skip(courses.indexOf(course) + 1)) {
+              formalFailedCourseKeys
+                  .add('${remaining.courseId}:${remaining.clazzId}');
+            }
           }
-          failedCourses = courses.length - succeededCourses + 1;
           break;
         }
       }
       _recordPhase('formalWork', formalWatch);
+      failedCourses = formalFailedCourseKeys.length;
       sourceResults = [
         _formalSourceResult(assignments, succeededCourses, failedCourses)
       ];
-      final formalFailureKeys = {
-        for (final issue in issues)
-          if (issue.courseKey != null) issue.courseKey!,
-        for (final course in courses)
-          if (!attemptedFormalCourses
-              .contains('${course.courseId}:${course.clazzId}'))
-            '${course.courseId}:${course.clazzId}',
-      };
       final classroomWatch = Stopwatch()..start();
+      if (enableClassroomTasks) {
+        progress?.setStage(AssignmentSyncStage.classroomTasks);
+      }
       final classroom = await _fetchClassroomTasks(courses,
           generation: generation,
           unreadCourses: raw.length - courses.length,
@@ -717,13 +724,16 @@ class ChaoxingLocalClient {
       if (generation != _sessionGeneration) return const [];
       assignments.addAll(classroom.rows);
       recognized = recognized || classroom.recognized;
-      if (enableClassroomTasks) {
-        failedCourses = raw.length -
-            courses.length +
-            {...formalFailureKeys, ...classroom.failedCourseKeys}.length;
-      }
+      final failedCourseKeys = {
+        ...formalFailedCourseKeys,
+        if (enableClassroomTasks) ...classroom.failedCourseKeys,
+      };
+      failedCourses = raw.length - courses.length + failedCourseKeys.length;
       if (classroom.failedCourses > 0) {
         problems.add('部分课堂任务信息尚未读取');
+      }
+      if (enableExams) {
+        progress?.setStage(AssignmentSyncStage.exams);
       }
       final examWatch = Stopwatch()..start();
       final exams = await _fetchExams(
@@ -747,9 +757,17 @@ class ChaoxingLocalClient {
         problems.add('部分考试或通知来源尚未读取');
       }
       if (problems.isNotEmpty) {
-        lastSyncWarning = failedCourses == 0
-            ? '课程作业已更新，部分考试或通知信息尚未确认，请查看读取来源后重试'
-            : '已更新 $succeededCourses 门课程，$failedCourses 门待重试';
+        final examProblem = sourceResults.any((source) =>
+            const {'exam', 'examAccount', 'examNotice'}
+                .contains(source.source) &&
+            source.phase != SyncSourcePhase.success);
+        lastSyncWarning = failedCourses > 0
+            ? '已更新 $succeededCourses 门课程，$failedCourses 门待重试'
+            : detailUnconfirmedCount > 0 && examProblem
+                ? '作业列表已更新，部分截止时间待确认；部分考试信息未更新'
+                : detailUnconfirmedCount > 0
+                    ? '作业列表已更新，部分截止时间待确认'
+                    : '作业记录已更新，部分考试或通知信息尚未确认，请查看读取来源后重试';
       }
       if (!recognized) {
         final issue = issues.isNotEmpty
@@ -973,7 +991,8 @@ class ChaoxingLocalClient {
                   a.status == 'unknown' ||
                   !a.deadlineTrusted ||
                   a.deadlineReadFailed)
-              .length);
+              .length,
+          detailUnconfirmedCount: detailUnconfirmedCount);
 
   /// Enumerate the server course activity list independently of formal work.
   /// A task detail failure remains unknown, cancelling stale pending reminders.
@@ -1353,7 +1372,11 @@ class ChaoxingLocalClient {
     var startTimes = starts;
     var startTimesRequested = false;
     progress?.beginDetails(rows);
-    for (final item in rows) {
+    for (var item in rows) {
+      final anchoredStart = startTimes[item.id];
+      if (item.availableFromAt == null && anchoredStart != null) {
+        item = item.copyWith(availableFromAt: anchoredStart);
+      }
       final prior = previousAssignments[item.id];
       final completedDeadlineKnown =
           item.deadlineAt != null && item.deadlineTrusted;
@@ -1402,7 +1425,9 @@ class ChaoxingLocalClient {
             );
           });
           evidence = detail.evidence;
-          if (evidence.missingYear &&
+          if ((evidence.missingYear ||
+                  (evidence.availableFromAt == null &&
+                      evidence.availableFromText != null)) &&
               startTimes[item.id] == null &&
               readStartTimes != null) {
             // Signed HTML lists omit absolute starts. Read the formal API only
@@ -1418,6 +1443,8 @@ class ChaoxingLocalClient {
               }
             }
             if (startTimes[item.id] != null) {
+              item = item.copyWith(
+                  availableFromAt: item.availableFromAt ?? startTimes[item.id]);
               evidence = _measureParse(
                   '作业详情',
                   () => ChaoxingAssignmentParser.readDetailDeadline(detail.body,
@@ -1441,6 +1468,7 @@ class ChaoxingLocalClient {
                         : '作业详情未提供可识别的截止信息',
                 stage: 'detail',
                 courseKey: item.courseKey,
+                assignmentId: item.id,
                 httpStatus: response?.statusCode,
                 elapsedMs: watch.elapsedMilliseconds);
           }
@@ -1451,6 +1479,7 @@ class ChaoxingLocalClient {
           failure = SyncIssue(SyncIssueKind.authExpired, '作业详情登录已失效，请重新登录',
               stage: 'detail',
               courseKey: item.courseKey,
+              assignmentId: item.id,
               elapsedMs: watch.elapsedMilliseconds);
         } on SyncReadException catch (e) {
           if (e.issue.kind == SyncIssueKind.cancelled) rethrow;
@@ -1461,6 +1490,7 @@ class ChaoxingLocalClient {
           failure = SyncIssue(e.issue.kind, e.issue.message,
               stage: 'detail',
               courseKey: item.courseKey,
+              assignmentId: item.id,
               httpStatus: e.issue.httpStatus,
               retryAfter: e.issue.retryAfter,
               retryAfterSeconds: e.issue.retryAfterSeconds,
@@ -1471,6 +1501,12 @@ class ChaoxingLocalClient {
           }
         }
       }
+      if (evidence.deadlineAt == null && !evidence.noLimit) {
+        detailUnconfirmedCount++;
+        if (item.courseKey != null) {
+          _detailUnconfirmedCourseKeys.add(item.courseKey!);
+        }
+      }
       if (failure != null) issues.add(failure);
       final resolved = item.copyWith(
           deadlineAt: evidence.deadlineAt,
@@ -1479,7 +1515,9 @@ class ChaoxingLocalClient {
           deadlineReadFailed: evidence.deadlineAt == null && !evidence.noLimit,
           deadlineRawText: evidence.missingYear
               ? '${evidence.rawText}（年份待确认）'
-              : evidence.rawText);
+              : evidence.rawText,
+          availableFromAt: evidence.availableFromAt ?? startTimes[item.id],
+          availableFromText: evidence.availableFromText);
       result.add(resolved);
       progress?.resolve(item.id, resolved);
     }
@@ -2558,6 +2596,7 @@ class _SyncProgressTracker {
   final void Function(AssignmentSyncProgress) onProgress;
   final Map<String, Assignment> assignments = {};
   final Set<String> pendingDetailIds = {};
+  final Set<String> _unconfirmedIds = {};
   final Map<String, Set<String>> _courseRowIds = {};
   AssignmentSyncStage stage = AssignmentSyncStage.courses;
   int resolvedCount = 0;
@@ -2575,7 +2614,9 @@ class _SyncProgressTracker {
         (_courseRowIds[courseKey] ??= <String>{}).add(assignment.id);
       }
     }
-    stage = AssignmentSyncStage.workLists;
+    if (stage == AssignmentSyncStage.courses) {
+      stage = AssignmentSyncStage.workLists;
+    }
     _emit();
   }
 
@@ -2590,6 +2631,7 @@ class _SyncProgressTracker {
     for (final id in ids) {
       assignments.remove(id);
       pendingDetailIds.remove(id);
+      _unconfirmedIds.remove(id);
     }
     _emit();
   }
@@ -2620,6 +2662,11 @@ class _SyncProgressTracker {
   void resolve(String id, Assignment assignment) {
     assignments[id] = assignment;
     pendingDetailIds.remove(id);
+    if (assignment.deadlineReadFailed) {
+      _unconfirmedIds.add(id);
+    } else {
+      _unconfirmedIds.remove(id);
+    }
     resolvedCount++;
     _emit();
   }
@@ -2642,6 +2689,7 @@ class _SyncProgressTracker {
       pendingDetailIds: pendingDetailIds,
       resolvedCount: resolvedCount,
       attemptedCount: attemptedCount,
+      unconfirmedCount: _unconfirmedIds.length,
     ));
   }
 }

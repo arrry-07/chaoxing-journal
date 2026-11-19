@@ -419,7 +419,10 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             ),
             GoRoute(
               path: '/sync',
-              builder: (_, __) => SyncStatusScreen(store: assignmentStore),
+              builder: (_, state) => SyncStatusScreen(
+                store: assignmentStore,
+                expandIssues: state.uri.queryParameters['expand'] == 'issues',
+              ),
             ),
             GoRoute(
               path: '/reminders',

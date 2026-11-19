@@ -120,7 +120,8 @@ void main() {
       _expectUnconfirmed(work);
       expect(work.id, 'cx:work:7:11:9');
       expect(h.client.succeededCourses, 1);
-      expect(h.client.failedCourses, greaterThan(0));
+      expect(h.client.failedCourses, 0);
+      expect(h.client.detailUnconfirmedCount, greaterThan(0));
       expect(
           h.client.issues.any((i) =>
               i.kind == SyncIssueKind.schemaChanged && i.stage == 'detail'),
@@ -153,7 +154,8 @@ void main() {
       expect(h.client.issues.any((i) => i.kind == kind && i.stage == 'detail'),
           isTrue);
       expect(h.client.succeededCourses, 1);
-      expect(h.client.failedCourses, greaterThan(0));
+      expect(h.client.failedCourses, 0);
+      expect(h.client.detailUnconfirmedCount, greaterThan(0));
       expect(h.client.lastSyncWarning, isNotNull);
       if (status == 401) {
         expect(h.metadataReads, 1);

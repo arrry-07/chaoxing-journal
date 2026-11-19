@@ -754,7 +754,7 @@ void main() {
       addTearDown(store.dispose);
       await _pumpScreen(tester, store);
 
-      const statusText = '部分课程未更新 · 显示上次记录';
+      const statusText = '部分课程作业未更新 · 显示上次记录';
       expect(find.text(statusText), findsOneWidget);
       expect(find.text('上次记录'), findsNothing);
       final statusSemantics = tester.widget<Semantics>(find.byWidgetPredicate(

@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 
 class ClassroomFixture {
@@ -309,6 +310,18 @@ void main() {
     expect(await future, isEmpty);
     expect(c.sourceResults, isEmpty);
     expect(c.issues, isEmpty);
+  });
+  test('progress announces the classroom stage before its gated detail',
+      () async {
+    final f = ClassroomFixture()..gate = Completer<void>();
+    final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
+    final stages = <AssignmentSyncStage>[];
+    c.onProgress = (progress) => stages.add(progress.stage);
+    final future = c.fetchAssignments();
+    await f.started.future;
+    expect(stages, contains(AssignmentSyncStage.classroomTasks));
+    f.gate!.complete();
+    await future;
   });
   test('explicit cancellation is never a valid empty source', () async {
     final f = ClassroomFixture()..gate = Completer<void>();

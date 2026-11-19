@@ -414,7 +414,7 @@ void main() {
       f.sample('shared').copyWith(clearDeadlineAt: true, deadlineTrusted: true)
     ]);
     await openPlanner(tester, store);
-    expect(find.textContaining('未设置截止时间'), findsOneWidget);
+    expect(find.textContaining('无截止日期'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('planning-generate')));
     await tester.pumpAndSettle();
     expect(find.text('自动纳入'), findsNothing);

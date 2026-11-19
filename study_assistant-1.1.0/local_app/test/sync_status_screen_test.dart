@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/sync_status_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
@@ -120,6 +121,44 @@ void main() {
 
     expect(store.backgroundCheckEnabled, isFalse);
     expect(find.textContaining('已关闭；手动刷新'), findsOneWidget);
+  });
+
+  testWidgets('issue query opens grouped details immediately', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    store.syncReport = const SyncReport(
+      phase: SyncPhase.partial,
+      issues: [
+        SyncIssue(
+          SyncIssueKind.schemaChanged,
+          '作业详情未识别',
+          stage: 'detail',
+          courseKey: '1:2',
+        ),
+      ],
+    );
+    final router = GoRouter(initialLocation: '/sync?expand=issues', routes: [
+      GoRoute(
+        path: '/sync',
+        builder: (_, state) => SyncStatusScreen(
+          store: store,
+          expandIssues: state.uri.queryParameters['expand'] == 'issues',
+        ),
+      ),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+
+    expect(find.text('问题明细（1 组，共 1 条）'), findsOneWidget);
+    expect(find.textContaining('作业详情未识别'), findsOneWidget);
+    expect(find.textContaining('涉及：课程信息待刷新'), findsOneWidget);
   });
 }
 

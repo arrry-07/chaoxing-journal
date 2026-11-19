@@ -357,6 +357,29 @@ void main() {
       'https://photo.chaoxing.com/p/402733611_160',
     );
   });
+
+  test('first login skips task-engine probing while manual refresh keeps it',
+      () async {
+    final client = _LoginProbeClient();
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      chaoxingClient: client,
+    );
+    addTearDown(store.dispose);
+
+    await store.loginChaoxing(
+      account: 'student',
+      password: 'password',
+      agreementAccepted: true,
+    );
+    await pumpEventQueue();
+    expect(client.lastEnableTaskEngineProbe, isFalse);
+
+    await store.syncAssignments();
+    expect(client.lastEnableTaskEngineProbe, isTrue);
+  });
 }
 
 class _LoginOnlyChaoxingClient extends ChaoxingLocalClient {
@@ -404,6 +427,26 @@ class _RefreshingChaoxingClient extends ChaoxingLocalClient {
         lastSyncedAt: DateTime.now(),
       ),
     ];
+  }
+}
+
+class _LoginProbeClient extends ChaoxingLocalClient {
+  bool? lastEnableTaskEngineProbe;
+
+  @override
+  Future<ChaoxingLoginResult> login({
+    required String account,
+    required String password,
+  }) async =>
+      const ChaoxingLoginResult(success: true);
+
+  @override
+  Future<List<Assignment>> fetchAssignmentsWithOptions({
+    bool collectCourseNotices = false,
+    bool enableTaskEngineProbe = false,
+  }) async {
+    lastEnableTaskEngineProbe = enableTaskEngineProbe;
+    return const [];
   }
 }
 

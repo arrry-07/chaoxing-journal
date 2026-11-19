@@ -10,9 +10,14 @@ import '../services/assignment_store.dart';
 import '../services/sync_issue_presentation.dart';
 
 class SyncStatusScreen extends StatefulWidget {
-  const SyncStatusScreen({super.key, required this.store});
+  const SyncStatusScreen({
+    super.key,
+    required this.store,
+    this.expandIssues = false,
+  });
 
   final AssignmentStore store;
+  final bool expandIssues;
 
   @override
   State<SyncStatusScreen> createState() => _SyncStatusScreenState();
@@ -77,6 +82,16 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                     ),
                   ),
                 ),
+                if (store.syncReport.failedCourses > 0 && lastSyncAt != null)
+                  Card(
+                    key: const ValueKey('sync-cached-record-status'),
+                    child: ListTile(
+                      leading: const Icon(Icons.history_rounded),
+                      title: const Text('当前保留上次完整同步记录'),
+                      subtitle: Text(
+                          '完整读取时间：${DateFormat('M月d日 HH:mm', 'zh_CN').format(lastSyncAt)}'),
+                    ),
+                  ),
                 if (store.chaoxingClient.requestTimings.isNotEmpty)
                   ExpansionTile(
                       title: const Text('本机临时请求采样'),
@@ -254,6 +269,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
 
                     return ExpansionTile(
                         key: const ValueKey('sync-issue-groups'),
+                        initiallyExpanded: widget.expandIssues,
                         title: Text(
                             '问题明细（${groups.length} 组，共 ${store.syncReport.issues.length} 条）'),
                         children: [

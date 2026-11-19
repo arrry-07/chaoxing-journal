@@ -60,7 +60,7 @@ DateTime _chinaTime(DateTime now, int dayOffset, int hour) {
 
 String _heading(DateTime instant) {
   final day = instant.toUtc().add(const Duration(hours: 8));
-  return '${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}';
+  return '${day.year}年${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}';
 }
 
 void main() {
@@ -133,8 +133,9 @@ void main() {
       final headings = tester
           .widgetList<Text>(find.byWidgetPredicate((widget) =>
               widget is Text &&
-              RegExp(r'^\d+月\d+日 周[一二三四五六日]$').hasMatch(widget.data ?? '')))
-          .map((text) => text.data)
+              RegExp(r'^\d{4}年\d+月\d+日 周[一二三四五六日]$').hasMatch(
+                  widget.data ?? widget.textSpan?.toPlainText() ?? '')))
+          .map((text) => text.data ?? text.textSpan?.toPlainText())
           .toList();
       expect(headings, entry.value.$2, reason: entry.key.name);
     }
@@ -161,12 +162,13 @@ void main() {
     expect(
       find.byWidgetPredicate((widget) =>
           widget is Text &&
-          RegExp(r'^\d+月\d+日 周[一二三四五六日]$').hasMatch(widget.data ?? '')),
+          RegExp(r'^\d{4}年\d+月\d+日 周[一二三四五六日]$')
+              .hasMatch(widget.data ?? widget.textSpan?.toPlainText() ?? '')),
       findsNothing,
     );
     expect(find.text('未设置截止时间'), findsNothing);
     expect(find.byType(AssignmentCard), findsNWidgets(2));
-    expect(find.text('无期限'), findsOneWidget);
+    expect(find.text('无截止日期'), findsWidgets);
     expect(find.text('截止时间待确认'), findsOneWidget);
     expect(find.text('—'), findsOneWidget);
     expect(find.text('无日期与待确认'), findsOneWidget);
@@ -222,5 +224,31 @@ void main() {
         );
       }
     }
+  });
+
+  testWidgets('date heading shows the year and emphasizes month and day',
+      (tester) async {
+    final now = DateTime.now();
+    final due = _chinaTime(now, 1, 14);
+    final store = _Store()
+      ..replaceAssignmentsForTest([
+        _work('heading', title: '日期标题样式', course: '课程', due: due),
+      ]);
+    addTearDown(store.dispose);
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: AssignmentListScreen(store: store))),
+    );
+    final heading = tester.widget<Text>(find.text(_heading(due)));
+    final plain = heading.data ?? heading.textSpan?.toPlainText() ?? '';
+    expect(
+        plain, contains('${due.toUtc().add(const Duration(hours: 8)).year}年'));
+    final spans = (heading.textSpan as TextSpan?)?.children;
+    expect(spans, isNotNull);
+    expect(
+      spans!.whereType<TextSpan>().any((span) =>
+          span.text?.contains('月') == true &&
+          span.style?.fontWeight == FontWeight.w700),
+      isTrue,
+    );
   });
 }

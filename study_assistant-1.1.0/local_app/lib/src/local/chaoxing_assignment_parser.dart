@@ -3,11 +3,15 @@ import '../models/assignment.dart';
 class DeadlineEvidence {
   const DeadlineEvidence(
       {this.deadlineAt,
+      this.availableFromAt,
+      this.availableFromText,
       this.rawText,
       this.noLimit = false,
       this.notOpen = false,
       this.missingYear = false});
   final DateTime? deadlineAt;
+  final DateTime? availableFromAt;
+  final String? availableFromText;
   final String? rawText;
   final bool noLimit, missingYear, notOpen;
 }
@@ -427,31 +431,69 @@ class ChaoxingAssignmentParser {
     final period = RegExp(
             '(?:作答时间|答题时间|作业时间)\\s*[:：]?\\s*($token)\\s*(?:至|~|～|—|--)\\s*($token|不限|无截止时间|长期有效)')
         .firstMatch(text);
+    final labeledStart =
+        RegExp('(?:作答开始时间|答题开始时间|作业开始时间|考试开始时间|开始时间|开放时间)\\s*[:：]?\\s*($token)')
+            .firstMatch(text);
     String? raw;
     String? start;
     if (period != null) {
       raw = period[2];
       start = period[1];
     }
+    start ??= labeledStart?[1];
+    DateTime? availableFrom;
+    if (start != null) {
+      if (RegExp(r'^20\d{2}[-/年]').hasMatch(start)) {
+        availableFrom =
+            _parseChinaTime(start.replaceAll('：', ':'), now ?? DateTime.now());
+      } else if (startedAt != null) {
+        final absoluteStart = startedAt.toUtc().add(const Duration(hours: 8));
+        final visibleStart = _parseChinaTime(
+            '${absoluteStart.year}-$start', now ?? DateTime.now());
+        if (visibleStart != null &&
+            visibleStart.toUtc().millisecondsSinceEpoch ~/ 60000 ==
+                startedAt.toUtc().millisecondsSinceEpoch ~/ 60000) {
+          availableFrom = startedAt;
+        }
+      }
+    } else if (startedAt != null) {
+      availableFrom = startedAt;
+    }
     raw ??= RegExp(
             '(?:作答截止时间|提交截止时间|答题结束时间|截止时间|截止日期|结束时间)\\s*[:：]?\\s*($token|不限|无截止时间|长期有效)')
         .firstMatch(text)?[1];
     if (raw == null &&
         RegExp(r'(?:作答时间|答题时间)\s*[:：]?\s*(?:不限|无截止时间|长期有效)').hasMatch(text)) {
-      return const DeadlineEvidence(noLimit: true, rawText: '不限');
+      return DeadlineEvidence(
+          noLimit: true,
+          rawText: '不限',
+          availableFromAt: availableFrom,
+          availableFromText: start);
     }
     if (raw == null) {
       return text.contains('未开始') || text.contains('尚未开放')
-          ? const DeadlineEvidence(notOpen: true, rawText: '尚未开放')
-          : const DeadlineEvidence();
+          ? DeadlineEvidence(
+              notOpen: true,
+              rawText: '尚未开放',
+              availableFromAt: availableFrom,
+              availableFromText: start)
+          : DeadlineEvidence(
+              availableFromAt: availableFrom, availableFromText: start);
     }
     if (const ['不限', '无截止时间', '长期有效'].contains(raw)) {
-      return DeadlineEvidence(noLimit: true, rawText: raw);
+      return DeadlineEvidence(
+          noLimit: true,
+          rawText: raw,
+          availableFromAt: availableFrom,
+          availableFromText: start);
     }
     final parts = RegExp(
             r'^(?:(20\d{2})[-/年])?(\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?$')
         .firstMatch(raw);
-    if (parts == null) return const DeadlineEvidence();
+    if (parts == null) {
+      return DeadlineEvidence(
+          availableFromAt: availableFrom, availableFromText: start);
+    }
     var year = int.tryParse(parts[1] ?? '');
     if (year == null && start != null) {
       DateTime? matchedStart;
@@ -481,12 +523,20 @@ class ChaoxingAssignmentParser {
         }
       }
     }
-    if (year == null) return DeadlineEvidence(rawText: raw, missingYear: true);
+    if (year == null) {
+      return DeadlineEvidence(
+          rawText: raw,
+          missingYear: true,
+          availableFromAt: availableFrom,
+          availableFromText: start);
+    }
     final normalized =
         '$year-${parts[2]}-${parts[3]} ${parts[4]}:${parts[5]}:${parts[6] ?? '00'}';
     return DeadlineEvidence(
         deadlineAt: _parseChinaTime(normalized, now ?? DateTime.now()),
-        rawText: raw);
+        rawText: raw,
+        availableFromAt: availableFrom,
+        availableFromText: start);
   }
 
   static int? _firstInt(String text, RegExp pattern) {

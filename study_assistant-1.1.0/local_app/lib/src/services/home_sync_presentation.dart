@@ -27,9 +27,6 @@ class HomeSyncPresentation {
           hasCache ? '正在更新…' : '正在读取作业…', HomeSyncAction.none);
     }
     if (report.phase == SyncPhase.failed || report.phase == SyncPhase.partial) {
-      final detailOnly = report.phase == SyncPhase.partial &&
-          report.issues.isNotEmpty &&
-          report.issues.every((i) => i.stage == 'detail');
       final action =
           report.issues.any((i) => i.kind == SyncIssueKind.authExpired)
               ? HomeSyncAction.login
@@ -37,16 +34,76 @@ class HomeSyncPresentation {
                       .any((i) => i.kind == SyncIssueKind.verificationRequired)
                   ? HomeSyncAction.verify
                   : HomeSyncAction.retry;
+      bool sourceFailed(String name) => report.sourceResults.any((source) =>
+          source.source == name &&
+          const {SyncSourcePhase.partial, SyncSourcePhase.failed}
+              .contains(source.phase));
+      final hasWorkListFailure = sourceFailed('courseWork') ||
+          (report.sourceResults.isEmpty &&
+              report.issues.any((issue) =>
+                  issue.stage != 'detail' &&
+                  issue.stage != 'persistence' &&
+                  !issue.stage.startsWith('exam')));
+      final hasExamFailure = report.sourceResults.any((source) =>
+          const {'exam', 'examAccount', 'examNotice'}.contains(source.source) &&
+          const {SyncSourcePhase.partial, SyncSourcePhase.failed}
+              .contains(source.phase));
+      final hasClassroomFailure = report.sourceResults.any((source) =>
+          source.source.startsWith('classroomActivity:') &&
+          const {SyncSourcePhase.partial, SyncSourcePhase.failed}
+              .contains(source.phase));
+      final hasDetailFailure =
+          report.issues.any((issue) => issue.stage == 'detail') ||
+              report.sourceResults
+                  .any((source) => source.detailUnconfirmedCount > 0);
+      final hasStorageFailure = report.issues.any((issue) =>
+          issue.kind == SyncIssueKind.storage || issue.stage == 'persistence');
+      final knownSources = {
+        'courseWork',
+        'exam',
+        'examAccount',
+        'examNotice',
+      };
+      final hasOtherSourceFailure = report.sourceResults.any((source) =>
+          const {SyncSourcePhase.partial, SyncSourcePhase.failed}
+              .contains(source.phase) &&
+          !knownSources.contains(source.source) &&
+          !source.source.startsWith('classroomActivity:'));
+      final categories = [
+        hasWorkListFailure,
+        hasDetailFailure,
+        hasExamFailure,
+        hasClassroomFailure,
+        hasStorageFailure,
+        hasOtherSourceFailure,
+      ].where((value) => value).length;
+      final updatedButNeedsAttention = hasStorageFailure &&
+          categories == 1 &&
+          report.issues.any((issue) => issue.stage == 'persistence');
+      final showCached = hasCache &&
+          (hasWorkListFailure ||
+              hasExamFailure ||
+              hasClassroomFailure ||
+              hasOtherSourceFailure);
+      final partialSummary = updatedButNeedsAttention
+          ? '作业数据已保存，但同步状态记录需要处理'
+          : categories > 1
+              ? '部分课业信息未更新'
+              : hasDetailFailure
+                  ? '部分截止时间待确认'
+                  : hasExamFailure
+                      ? '部分考试信息未更新'
+                      : hasClassroomFailure
+                          ? '部分课堂任务未更新'
+                          : '部分课程作业未更新';
       return HomeSyncPresentation(
           report.phase == SyncPhase.partial
-              ? detailOnly
-                  ? '部分截止时间待确认'
-                  : '部分课程未更新'
+              ? partialSummary
               : hasCache
                   ? '更新失败'
                   : '暂时无法读取作业',
           action,
-          showCached: hasCache && !detailOnly);
+          showCached: report.phase == SyncPhase.failed ? hasCache : showCached);
     }
     if (serviceWarning) {
       return const HomeSyncPresentation(

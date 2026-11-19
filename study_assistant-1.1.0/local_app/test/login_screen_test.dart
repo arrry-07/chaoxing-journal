@@ -215,6 +215,50 @@ void main() {
     }
     semantics.dispose();
   });
+
+  testWidgets('agreement copy and links share the visible text baseline',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await (FontLoader(Journal.bodyFamily)
+          ..addFont(rootBundle.load('assets/type/LXGWWenKaiScreen.ttf')))
+        .load();
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: LoginScreen(store: store),
+    ));
+    await tester.scrollUntilVisible(find.text('我已阅读并同意'), 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.pump();
+
+    final body = find.text('我已阅读并同意');
+    final service = find.text('《服务协议》');
+    final privacy = find.text('《隐私协议》');
+    final bodyRect = tester.getRect(body);
+    final serviceRect = tester.getRect(service);
+    if (serviceRect.top < bodyRect.bottom) {
+      expect(
+        (tester.getCenter(service).dy - tester.getCenter(body).dy).abs(),
+        lessThan(0.5),
+      );
+    }
+    final privacyRect = tester.getRect(privacy);
+    if (privacyRect.top < bodyRect.bottom) {
+      expect(
+        (tester.getCenter(privacy).dy - tester.getCenter(body).dy).abs(),
+        lessThan(0.5),
+      );
+    }
+  });
 }
 
 class _MemorySessionStore extends SecureSessionStore {}

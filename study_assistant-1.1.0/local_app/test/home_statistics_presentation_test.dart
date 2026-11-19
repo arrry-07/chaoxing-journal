@@ -141,4 +141,100 @@ void main() {
     expect(presentation.summary, '更新失败');
     expect(presentation.showCached, isTrue);
   });
+
+  test('partial sync summary follows the actual failing source', () {
+    final now = DateTime.utc(2026, 11, 19);
+    HomeSyncPresentation present(
+      List<SyncIssue> issues, {
+      List<SyncSourceResult> sources = const [],
+    }) =>
+        HomeSyncPresentation.from(
+          SyncReport(
+            phase: SyncPhase.partial,
+            issues: issues,
+            sourceResults: sources,
+          ),
+          loading: false,
+          hasCache: true,
+          now: now,
+        );
+
+    final detail = present(
+      const [
+        SyncIssue(
+          SyncIssueKind.schemaChanged,
+          '作业详情未提供截止信息',
+          stage: 'detail',
+        ),
+      ],
+      sources: const [
+        SyncSourceResult(
+          source: 'courseWork',
+          phase: SyncSourcePhase.success,
+          succeededCourses: 40,
+          detailUnconfirmedCount: 1,
+        ),
+      ],
+    );
+    expect(detail.summary, '部分截止时间待确认');
+    expect(detail.showCached, isFalse);
+
+    final work = present(
+      const [],
+      sources: const [
+        SyncSourceResult(
+          source: 'courseWork',
+          phase: SyncSourcePhase.partial,
+          succeededCourses: 39,
+          failedCourses: 1,
+        ),
+      ],
+    );
+    expect(work.summary, '部分课程作业未更新');
+    expect(work.showCached, isTrue);
+
+    final exam = present(
+      const [],
+      sources: const [
+        SyncSourceResult(
+          source: 'courseWork',
+          phase: SyncSourcePhase.success,
+          succeededCourses: 40,
+        ),
+        SyncSourceResult(
+          source: 'exam',
+          phase: SyncSourcePhase.partial,
+          failedCourses: 1,
+        ),
+      ],
+    );
+    expect(exam.summary, '部分考试信息未更新');
+    expect(exam.showCached, isTrue);
+
+    final multiple = present(
+      const [
+        SyncIssue(
+          SyncIssueKind.partial,
+          '部分截止时间尚未确认',
+          stage: 'detail',
+        ),
+      ],
+      sources: const [
+        SyncSourceResult(
+          source: 'courseWork',
+          phase: SyncSourcePhase.partial,
+          succeededCourses: 39,
+          failedCourses: 1,
+          detailUnconfirmedCount: 2,
+        ),
+        SyncSourceResult(
+          source: 'classroomActivity:42',
+          phase: SyncSourcePhase.partial,
+          failedCourses: 1,
+        ),
+      ],
+    );
+    expect(multiple.summary, '部分课业信息未更新');
+    expect(multiple.showCached, isTrue);
+  });
 }

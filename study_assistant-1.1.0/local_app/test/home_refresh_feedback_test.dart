@@ -52,7 +52,10 @@ void main() {
           builder: (_, __) => Scaffold(body: AssignmentListScreen(store: s))),
       GoRoute(
           path: '/sync',
-          builder: (_, __) => const Scaffold(body: Text('同步详情页面'))),
+          builder: (_, state) => Scaffold(
+              body: Text(state.uri.queryParameters['expand'] == 'issues'
+                  ? '同步详情问题明细'
+                  : '同步详情页面'))),
     ]);
     addTearDown(s.dispose);
     addTearDown(router.dispose);
@@ -106,7 +109,7 @@ void main() {
     expect(find.text('上次的作业记录'), findsOneWidget);
     await t.tap(find.text('查看详情'));
     await t.pumpAndSettle();
-    expect(find.text('同步详情页面'), findsOneWidget);
+    expect(find.text('同步详情问题明细'), findsOneWidget);
   });
 
   testWidgets('partial refresh is not reported as complete success', (t) async {
@@ -120,6 +123,26 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('已更新 3 门课程，2 门待重试'), findsOneWidget);
     expect(find.text('作业已更新'), findsNothing);
+  });
+
+  testWidgets('partial status row opens the issue details', (t) async {
+    final s = _Store(
+        result: const SyncReport(
+      phase: SyncPhase.partial,
+      issues: [
+        SyncIssue(SyncIssueKind.schemaChanged, '作业详情未识别', stage: 'detail')
+      ],
+    ));
+    await show(t, s);
+    await t.tap(find.byTooltip('刷新作业'));
+    await t.pump();
+    s.gate.complete();
+    await t.pumpAndSettle();
+
+    expect(find.text('部分截止时间待确认'), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('home-sync-status')));
+    await t.pumpAndSettle();
+    expect(find.text('同步详情问题明细'), findsOneWidget);
   });
 
   testWidgets('unexpected failure clears busy feedback and allows retry',

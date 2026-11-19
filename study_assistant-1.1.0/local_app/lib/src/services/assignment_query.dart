@@ -235,6 +235,66 @@ class AssignmentQuery {
     return DateTime(d.year, d.month, d.day);
   }
 
+  static DateTime _beijingInstant(int year, int month, int day) =>
+      DateTime.utc(year, month, day).subtract(const Duration(hours: 8));
+
+  /// The active teaching term starts at Beijing midnight on March 1 or
+  /// September 1. This is a local absolute instant so it can be compared with
+  /// trusted server times without relying on the device's calendar zone.
+  static DateTime semesterStartAt(DateTime now) {
+    final local = beijing(now);
+    final start = local.month >= 9
+        ? _beijingInstant(local.year, 9, 1)
+        : local.month >= 3
+            ? _beijingInstant(local.year, 3, 1)
+            : _beijingInstant(local.year - 1, 9, 1);
+    return start.toLocal();
+  }
+
+  /// Raw records remain in the local journal. This only decides whether an
+  /// observation still belongs to the active teaching term.
+  static bool isArchivedPastTerm(Assignment assignment, DateTime now) {
+    if (assignment.isCompleted) return false;
+    final termStart = semesterStartAt(now);
+    if (assignment.isExam) {
+      final exam = assignment.exam;
+      if (exam == null || exam.lifecycle == 'inProgress') return false;
+      if (exam.endTrusted && exam.endAt != null) {
+        if (exam.endAt!.isAfter(now)) return false;
+        return exam.endAt!.isBefore(termStart);
+      }
+      if (!exam.startTrusted || exam.startAt == null) return false;
+      if (exam.startAt!.isAfter(now)) return false;
+      final duration = exam.durationMinutes;
+      if (duration != null && duration > 0) {
+        final expectedEnd = exam.startAt!.add(Duration(minutes: duration));
+        if (!expectedEnd.isBefore(termStart)) return false;
+      }
+      return exam.startAt!.isBefore(termStart);
+    }
+    if (assignment.deadlineReadFailed || !assignment.deadlineTrusted) {
+      return false;
+    }
+    final deadline = assignment.deadlineAt;
+    final anchors = [assignment.publishedAt, assignment.availableFromAt]
+        .whereType<DateTime>()
+        .toList();
+    anchors.sort();
+    final latestAnchor = anchors.isEmpty ? null : anchors.last;
+    if (deadline == null) {
+      return latestAnchor != null && latestAnchor.isBefore(termStart);
+    }
+    if (!deadline.isBefore(termStart)) return false;
+    final published = assignment.publishedAt;
+    final recentStart = now.subtract(const Duration(days: 30));
+    if (published != null &&
+        !published.isBefore(recentStart) &&
+        !published.isAfter(now)) {
+      return false;
+    }
+    return latestAnchor == null || latestAnchor.isBefore(termStart);
+  }
+
   // An empty followed set means all courses; exclusions are applied by the store.
   static List<Assignment> scope(
           List<Assignment> records, Set<String> followed) =>
@@ -479,6 +539,7 @@ class AssignmentQuery {
           .where((a) =>
               !a.isCompleted &&
               !isExamEnded(a, now) &&
+              !isArchivedPastTerm(a, now) &&
               !isArchivedClassroomPractice(a, now))
           .toList();
 
@@ -542,6 +603,7 @@ class AssignmentQuery {
 
   static bool isCalendarDated(Assignment assignment, DateTime now) {
     if ((!assignment.isExam && assignment.isCompleted) ||
+        isArchivedPastTerm(assignment, now) ||
         !assignment.timelineTrusted ||
         assignment.timelineAt == null) {
       return false;
@@ -587,6 +649,7 @@ class AssignmentQuery {
             : scope(records, followed);
     return projectDisplay(sourceRecords, index: index).where((a) {
       if (isArchivedClassroomPractice(a, now)) return false;
+      if (isArchivedPastTerm(a, now)) return false;
       final historical = a.isCompleted || (a.isExam && isExamEnded(a, now));
       if ((!includeHistorical && historical) ||
           !matchesType(a, type) ||

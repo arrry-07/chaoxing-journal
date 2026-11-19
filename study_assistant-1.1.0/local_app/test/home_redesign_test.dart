@@ -265,7 +265,8 @@ void main() {
     expect(
         find.byWidgetPredicate((widget) =>
             widget is Text &&
-            RegExp(r'^\d+月\d+日 周[一二三四五六日]$').hasMatch(widget.data ?? '')),
+            RegExp(r'^\d{4}年\d+月\d+日 周[一二三四五六日]$')
+                .hasMatch(widget.data ?? widget.textSpan?.toPlainText() ?? '')),
         findsNWidgets(3));
 
     await t.tap(find.text('搜索与筛选'));

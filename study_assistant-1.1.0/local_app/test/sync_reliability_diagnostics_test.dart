@@ -615,8 +615,14 @@ void main() {
     expect(rows.first.deadlineReadFailed, isFalse);
     expect(rows.last.deadlineReadFailed, isTrue);
     expect(client.succeededCourses, 2);
-    expect(client.failedCourses, 2);
-    expect(client.lastSyncWarning, contains('2 门待重试'));
+    expect(client.failedCourses, 1);
+    expect(client.detailUnconfirmedCount, 1);
+    expect(client.lastSyncWarning, contains('1 门待重试'));
+    final formal = client.sourceResults
+        .singleWhere((source) => source.source == 'courseWork');
+    expect(formal.phase, SyncSourcePhase.partial);
+    expect(formal.failedCourses, 1);
+    expect(formal.detailUnconfirmedCount, 1);
     expect(
         requests.where((r) => r.uri.path == '/mooc-ans/work/api/task').length,
         3);

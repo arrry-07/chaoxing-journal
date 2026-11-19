@@ -55,4 +55,23 @@ void main() {
       expect(e.noLimit, isFalse);
     }
   });
+  test('details keep a trustworthy start independently from the deadline', () {
+    final startOnly =
+        ChaoxingAssignmentParser.readDetailDeadline('开始时间：2026-11-17 00:00');
+    expect(startOnly.availableFromAt!.toUtc(), DateTime.utc(2026, 11, 16, 16));
+    expect(startOnly.availableFromText, '2026-11-17 00:00');
+    expect(startOnly.deadlineAt, isNull);
+    expect(startOnly.noLimit, isFalse);
+
+    final unlimited = ChaoxingAssignmentParser.readDetailDeadline(
+        '开始时间：2026-11-17 00:00\n作答时间：不限');
+    expect(unlimited.availableFromAt!.toUtc(), DateTime.utc(2026, 11, 16, 16));
+    expect(unlimited.noLimit, isTrue);
+
+    final yearless = ChaoxingAssignmentParser.readDetailDeadline(
+        '作业尚未开放\n开始时间：11月17日 00:00');
+    expect(yearless.availableFromAt, isNull);
+    expect(yearless.availableFromText, '11月17日 00:00');
+    expect(yearless.notOpen, isTrue);
+  });
 }

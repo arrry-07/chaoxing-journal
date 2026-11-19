@@ -42,6 +42,7 @@ enum AssignmentRecoveryScope {
   /// Retained historical dates remain visible here even though the trusted
   /// calendar grid excludes them.
   bool matches(Assignment assignment, DateTime now) {
+    if (AssignmentQuery.isArchivedPastTerm(assignment, now)) return false;
     if (assignment.isExam) {
       return this == examUnknown &&
           !AssignmentQuery.isExamEnded(assignment, now) &&
@@ -167,7 +168,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   textColor: Journal.sheet,
                   onPressed: () {
                     _feedback.dismiss();
-                    if (mounted) context.push('/sync');
+                    if (mounted) context.push('/sync?expand=issues');
                   },
                 )
               : null,
@@ -382,9 +383,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final day = AssignmentQuery.dayKey(a.timelineAt!);
               isTodayGroup = !isOverdue && day == todayDay;
               key = '${day.year}:${day.month}:${day.day}';
-              heading =
-                  '${day.year == AssignmentQuery.beijing(now).year ? '' : '${day.year}年'}'
-                  '${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}';
+              heading = '${day.year}年${day.month}月${day.day}日 '
+                  '周${'一二三四五六日'[day.weekday - 1]}';
             }
             if (heading == null && recoveryScope == null) {
               key = 'undated';
@@ -514,28 +514,46 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   ),
                 ),
               ),
-            Semantics(
-              liveRegion: true,
-              label: statusText,
-              child: Row(children: [
-                Icon(
-                  store.syncReport.phase == SyncPhase.failed
-                      ? Icons.error_outline_rounded
-                      : store.syncReport.phase == SyncPhase.partial
-                          ? Icons.info_outline_rounded
-                          : Icons.schedule_rounded,
-                  size: 15,
-                  color: store.syncReport.phase == SyncPhase.failed
-                      ? Journal.berry
-                      : store.syncReport.phase == SyncPhase.partial
-                          ? Journal.ochre
-                          : Journal.muted,
+            Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                key: const ValueKey('home-sync-status'),
+                onTap: sync.action == HomeSyncAction.none
+                    ? null
+                    : () => context.push('/sync?expand=issues'),
+                borderRadius: BorderRadius.circular(8),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Semantics(
+                    liveRegion: true,
+                    button: sync.action != HomeSyncAction.none,
+                    label: statusText,
+                    child: Row(children: [
+                      Icon(
+                        store.syncReport.phase == SyncPhase.failed
+                            ? Icons.error_outline_rounded
+                            : store.syncReport.phase == SyncPhase.partial
+                                ? Icons.info_outline_rounded
+                                : Icons.schedule_rounded,
+                        size: 15,
+                        color: store.syncReport.phase == SyncPhase.failed
+                            ? Journal.berry
+                            : store.syncReport.phase == SyncPhase.partial
+                                ? Journal.ochre
+                                : Journal.muted,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                          child: ExcludeSemantics(
+                              child:
+                                  Text(statusText, style: Journal.metadata))),
+                      if (sync.action != HomeSyncAction.none)
+                        const Icon(Icons.chevron_right_rounded,
+                            size: 18, color: Journal.muted),
+                    ]),
+                  ),
                 ),
-                const SizedBox(width: 6),
-                Expanded(
-                    child: ExcludeSemantics(
-                        child: Text(statusText, style: Journal.metadata))),
-              ]),
+              ),
             ),
             if (recoveryScope == null) ...[
               const SizedBox(height: 8),
@@ -836,18 +854,37 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       _DayHeadingTone.today => Journal.ink,
       _DayHeadingTone.normal => Journal.muted,
     };
+    final baseStyle = Journal.dayHeading.copyWith(
+      color: textColor,
+      fontSize: 14.5,
+    );
+    final date = RegExp(r'^(\d{4}年)?(\d{1,2}月\d{1,2}日)(.*)$').firstMatch(label);
+    final Widget labelWidget = date == null
+        ? Text(label, style: baseStyle)
+        : Text.rich(
+            TextSpan(children: [
+              if (date[1] != null)
+                TextSpan(
+                  text: date[1],
+                  style: baseStyle.copyWith(fontWeight: FontWeight.w500),
+                ),
+              TextSpan(
+                text: date[2],
+                style: baseStyle.copyWith(fontWeight: FontWeight.w700),
+              ),
+              TextSpan(
+                text: date[3],
+                style: baseStyle.copyWith(fontWeight: FontWeight.w400),
+              ),
+            ]),
+            style: baseStyle,
+          );
     return Padding(
       padding: EdgeInsets.only(top: top + 6, bottom: 2),
       child: Row(
         children: [
           Flexible(
-            child: Text(
-              label,
-              style: Journal.dayHeading.copyWith(
-                color: textColor,
-                fontSize: 14.5,
-              ),
-            ),
+            child: labelWidget,
           ),
           if (badge != null) ...[
             const SizedBox(width: 8),

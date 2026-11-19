@@ -110,6 +110,55 @@ void main() {
     expect(stored.deadlineRawText, '2026-11-20 18:00');
   });
 
+  test('start evidence round-trips and survives a failed deadline refresh',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = LocalAssignmentRepository();
+    final published = DateTime.utc(2026, 11, 2, 3);
+    final available = DateTime.utc(2026, 11, 16, 16);
+    final deadline = DateTime.utc(2026, 11, 20, 10);
+    final first = Assignment(
+      id: 'cx:work:course:class:start',
+      courseName: '信息安全技术',
+      title: '第二次讨论作业',
+      deadlineAt: deadline,
+      publishedAt: published,
+      availableFromAt: available,
+      availableFromText: '2026-11-17 00:00',
+      requirementsText: '',
+      status: 'pending',
+      deadlineTrusted: true,
+      deadlineRawText: '2026-11-20 18:00',
+      lastSyncedAt: DateTime.utc(2026, 11, 16, 8),
+    );
+    await repository.mergeAndSave([first]);
+    await repository.mergeAndSave([
+      first.copyWith(
+        deadlineReadFailed: true,
+        deadlineTrusted: false,
+        clearDeadlineAt: true,
+        lastSyncedAt: DateTime.utc(2026, 11, 16, 9),
+      )
+    ]);
+
+    final stored = (await repository.loadJournal())
+        .singleWhere((item) => item.id == first.id);
+    expect(stored.deadlineAt!.toUtc(), deadline);
+    expect(stored.publishedAt!.toUtc(), published);
+    expect(stored.availableFromAt!.toUtc(), available);
+    expect(stored.availableFromText, '2026-11-17 00:00');
+
+    final json = stored.toJson();
+    expect(json['publishedAt'], published.toIso8601String());
+    expect(json['availableFromAt'], available.toIso8601String());
+    final restored = Assignment.fromJson({
+      ...json,
+      'publishedAt': '2026-11-02 11:00',
+    });
+    expect(restored.publishedAt, isNull);
+    expect(restored.availableFromAt!.toUtc(), available);
+  });
+
   test(
     'mergeAssignments keeps unfinished peer review and filters completed peer review',
     () {

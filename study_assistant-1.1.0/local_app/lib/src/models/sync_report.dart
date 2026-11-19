@@ -10,10 +10,15 @@ class SyncSourceResult {
       this.failedCourses = 0,
       this.recordCount = 0,
       this.unconfirmedCount = 0,
+      this.detailUnconfirmedCount = 0,
       this.reasonCodes = const []});
   final String source;
   final SyncSourcePhase phase;
-  final int succeededCourses, failedCourses, recordCount, unconfirmedCount;
+  final int succeededCourses,
+      failedCourses,
+      recordCount,
+      unconfirmedCount,
+      detailUnconfirmedCount;
   final List<String> reasonCodes;
   SyncSourceResult withIdentityConflict() => SyncSourceResult(
       source: source,
@@ -22,6 +27,7 @@ class SyncSourceResult {
       failedCourses: failedCourses,
       recordCount: recordCount,
       unconfirmedCount: unconfirmedCount,
+      detailUnconfirmedCount: detailUnconfirmedCount,
       reasonCodes: {...reasonCodes, 'identityConflict'}.toList());
   Map<String, dynamic> toJson() => {
         'source': source,
@@ -30,6 +36,7 @@ class SyncSourceResult {
         'failedCourses': failedCourses,
         'recordCount': recordCount,
         'unconfirmedCount': unconfirmedCount,
+        'detailUnconfirmedCount': detailUnconfirmedCount,
         'reasonCodes': reasonCodes
       };
   factory SyncSourceResult.fromJson(Map<String, dynamic> j) => SyncSourceResult(
@@ -39,6 +46,7 @@ class SyncSourceResult {
       failedCourses: j['failedCourses'] as int? ?? 0,
       recordCount: j['recordCount'] as int? ?? 0,
       unconfirmedCount: j['unconfirmedCount'] as int? ?? 0,
+      detailUnconfirmedCount: j['detailUnconfirmedCount'] as int? ?? 0,
       reasonCodes: List<String>.from(j['reasonCodes'] as List? ?? const []));
 }
 
@@ -61,6 +69,7 @@ enum SyncIssueKind {
 class SyncIssue {
   const SyncIssue(this.kind, this.message,
       {this.courseKey,
+      this.assignmentId,
       this.elapsedMs,
       this.httpStatus,
       this.retryAfter,
@@ -70,6 +79,7 @@ class SyncIssue {
   final SyncIssueKind kind;
   final String message, stage;
   final String? courseKey;
+  final String? assignmentId;
   final int? elapsedMs, httpStatus, retryAfterSeconds;
 
   /// Raw Retry-After header value when the server supplied one.
@@ -86,6 +96,7 @@ class SyncIssue {
         'message': message,
         'stage': stage,
         if (courseKey != null) 'courseKey': courseKey,
+        if (assignmentId != null) 'assignmentId': assignmentId,
         if (elapsedMs != null) 'elapsedMs': elapsedMs,
         if (httpStatus != null) 'httpStatus': httpStatus,
         if (retryAfter != null) 'retryAfter': retryAfter,
@@ -97,6 +108,7 @@ class SyncIssue {
       json['message'] as String,
       stage: json['stage'] as String? ?? 'courses',
       courseKey: json['courseKey'] as String?,
+      assignmentId: json['assignmentId'] as String?,
       elapsedMs: json['elapsedMs'] as int?,
       httpStatus: json['httpStatus'] as int?,
       retryAfter: json['retryAfter'] as String?,
@@ -178,7 +190,21 @@ class SyncReport {
                 issue.kind == SyncIssueKind.storage &&
                 issue.stage == 'persistence')
             ? '作业数据已保存，但同步状态记录需要处理'
-            : '已更新 $succeededCourses 门课程，$failedCourses 门待重试',
+            : failedCourses == 0 &&
+                    sourceResults
+                        .any((source) => source.detailUnconfirmedCount > 0) &&
+                    sourceResults.every((source) =>
+                        !const {'exam', 'examAccount', 'examNotice'}
+                            .contains(source.source) ||
+                        source.phase == SyncSourcePhase.success)
+                ? '作业列表已更新，部分截止时间待确认'
+                : failedCourses == 0 &&
+                        sourceResults.any((source) =>
+                            const {'exam', 'examAccount', 'examNotice'}
+                                .contains(source.source) &&
+                            source.phase != SyncSourcePhase.success)
+                    ? '作业记录已更新，部分考试信息未更新'
+                    : '已更新 $succeededCourses 门课程，$failedCourses 门待重试',
         SyncPhase.failed => '本次未能读取作业',
         SyncPhase.cancelled => '本次同步已取消',
         SyncPhase.success => '作业记录已更新',

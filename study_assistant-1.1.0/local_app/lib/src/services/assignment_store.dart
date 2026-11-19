@@ -996,7 +996,8 @@ class AssignmentStore extends ChangeNotifier {
         progress.pendingDetailIds.isEmpty &&
         progress.resolvedCount >= progress.attemptedCount;
     final firstState = _homeSyncProgress == null;
-    if (firstBatch || finalDetails || firstState) {
+    final stageChanged = _homeSyncProgress?.stage != progress.stage;
+    if (firstBatch || finalDetails || firstState || stageChanged) {
       _publishHomeProgress(progress);
       return;
     }
@@ -1031,6 +1032,7 @@ class AssignmentStore extends ChangeNotifier {
       pendingDetailIds: const {},
       resolvedCount: progress.resolvedCount,
       attemptedCount: progress.attemptedCount,
+      unconfirmedCount: progress.unconfirmedCount,
     ));
   }
 
@@ -1546,7 +1548,10 @@ class AssignmentStore extends ChangeNotifier {
     });
     _loginRunning = false;
     if (loginSucceeded && _authenticated && generation == _generation) {
-      unawaited(syncAssignments());
+      unawaited(syncAssignmentsForTrigger(
+        BackgroundSyncTrigger.manual,
+        skipTaskEngineProbe: true,
+      ));
       unawaited(_hydrateProfile(generation));
     }
   }
@@ -1606,18 +1611,30 @@ class AssignmentStore extends ChangeNotifier {
   Future<void> syncAssignments() =>
       syncAssignmentsForTrigger(BackgroundSyncTrigger.manual);
 
-  Future<void> syncAssignmentsForTrigger(BackgroundSyncTrigger trigger) async {
-    await _syncForTrigger(trigger);
+  Future<void> syncAssignmentsForTrigger(
+    BackgroundSyncTrigger trigger, {
+    bool skipTaskEngineProbe = false,
+  }) async {
+    await _syncForTrigger(trigger, skipTaskEngineProbe: skipTaskEngineProbe);
   }
 
-  Future<String?> _syncForTrigger(BackgroundSyncTrigger trigger) {
+  Future<String?> _syncForTrigger(
+    BackgroundSyncTrigger trigger, {
+    bool skipTaskEngineProbe = false,
+  }) {
     if (!_authenticated) return Future.value();
-    return _syncInFlight ??= _performCoordinatedSync(trigger).whenComplete(() {
+    return _syncInFlight ??= _performCoordinatedSync(
+      trigger,
+      skipTaskEngineProbe: skipTaskEngineProbe,
+    ).whenComplete(() {
       _syncInFlight = null;
     });
   }
 
-  Future<String?> _performCoordinatedSync(BackgroundSyncTrigger trigger) async {
+  Future<String?> _performCoordinatedSync(
+    BackgroundSyncTrigger trigger, {
+    bool skipTaskEngineProbe = false,
+  }) async {
     final operation = ++_syncOperation;
     final generation = _generation;
     _syncCancelled = false;
@@ -1676,7 +1693,11 @@ class AssignmentStore extends ChangeNotifier {
             )) {
           return;
         }
-        await _syncAssignmentsBody(trigger, operation: operation);
+        await _syncAssignmentsBody(
+          trigger,
+          operation: operation,
+          skipTaskEngineProbe: skipTaskEngineProbe,
+        );
       });
       if (_syncSkipReasonOperation == operation &&
           _syncSkipReasonGeneration == generation) {
@@ -2913,7 +2934,7 @@ class AssignmentStore extends ChangeNotifier {
   bool _needsProfileRecovery = false;
 
   Future<void> _syncAssignmentsBody(BackgroundSyncTrigger trigger,
-      {required int operation}) async {
+      {required int operation, bool skipTaskEngineProbe = false}) async {
     final generation = _generation;
     final startedAt = _autoSyncRunning && _lastSyncAttemptAt != null
         ? _lastSyncAttemptAt!
@@ -3004,7 +3025,7 @@ class AssignmentStore extends ChangeNotifier {
     try {
       incoming = await chaoxingClient.fetchAssignmentsWithOptions(
         collectCourseNotices: manualSync,
-        enableTaskEngineProbe: manualSync,
+        enableTaskEngineProbe: manualSync && !skipTaskEngineProbe,
       );
     } on ChaoxingAuthenticationException {
       _needsProfileRecovery = false;
@@ -3014,7 +3035,7 @@ class AssignmentStore extends ChangeNotifier {
       attachProgress();
       incoming = await chaoxingClient.fetchAssignmentsWithOptions(
         collectCourseNotices: manualSync,
-        enableTaskEngineProbe: manualSync,
+        enableTaskEngineProbe: manualSync && !skipTaskEngineProbe,
       );
     } on SyncReadException catch (error) {
       if (error.issue.kind == SyncIssueKind.cancelled) {

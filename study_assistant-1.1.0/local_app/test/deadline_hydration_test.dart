@@ -75,6 +75,7 @@ void main() {
     final work = await c.fetchAssignments();
     expect(work, hasLength(2));
     expect(calls, 1);
+    expect(c.failedCourses, 1);
     expect(
         c.issues.any(
             (i) => i.stage == 'detail' && i.kind == SyncIssueKind.authExpired),
@@ -101,12 +102,13 @@ void main() {
         courseCount: 2);
     final work = await c.fetchAssignments();
     expect(work, hasLength(1));
+    expect(c.failedCourses, 1);
     final summary = HomeSyncPresentation.from(
         SyncReport(phase: SyncPhase.partial, issues: c.issues),
         loading: false,
         hasCache: true,
         now: DateTime.now());
-    expect(summary.summary, '部分课程未更新');
+    expect(summary.summary, '部分课业信息未更新');
     expect(summary.action, HomeSyncAction.verify);
     expect(c.issues.any((i) => i.stage == 'workList'), isTrue);
   });
@@ -137,6 +139,12 @@ void main() {
     expect(work.single.deadlineAt, isNull);
     expect(work.single.deadlineLabel, '尚未开放，截止时间待确认');
     expect(c.issues.first.message, contains('尚未开放'));
+    expect(c.issues.first.assignmentId, 'cx:work:1:2:1');
+    expect(c.failedCourses, 0);
+    final formal = c.sourceResults.singleWhere((s) => s.source == 'courseWork');
+    expect(formal.phase, SyncSourcePhase.success);
+    expect(formal.failedCourses, 0);
+    expect(formal.detailUnconfirmedCount, 1);
     final summary = HomeSyncPresentation.from(
         SyncReport(phase: SyncPhase.partial, issues: c.issues),
         loading: false,
@@ -251,6 +259,7 @@ void main() {
     final known = work.singleWhere((item) => item.id.endsWith(':1'));
     final completed = work.singleWhere((item) => item.id.endsWith(':2'));
     expect(known.deadlineAt!.toUtc(), DateTime.utc(2026, 11, 5));
+    expect(known.availableFromAt!.toUtc(), DateTime.utc(2024, 10, 27));
     expect(completed.isCompleted, isTrue);
     expect(completed.deadlineAt!.toUtc(), DateTime.utc(2024, 10, 30, 10));
     expect(completed.deadlineTrusted, isTrue);
@@ -340,5 +349,39 @@ void main() {
     );
     expect(
         AssignmentQuery.home(work, DateTime(2024), {}).uncertain, hasLength(1));
+  });
+  test('start-only detail keeps the start without inventing a deadline',
+      () async {
+    final c = client(
+        [row(1)],
+        (o, h) => h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: '作业尚未开放\n开始时间：10-27 08:00')));
+    final work = await c.fetchAssignments();
+    final a = work.single;
+    expect(a.availableFromAt!.toUtc(), DateTime.utc(2024, 10, 27));
+    expect(a.availableFromText, '10-27 08:00');
+    expect(a.deadlineAt, isNull);
+    expect(a.deadlineTrusted, isFalse);
+    expect(a.deadlineReadFailed, isTrue);
+    expect(c.issues.first.message, contains('尚未开放'));
+  });
+  test('explicit unlimited detail keeps the start and exits retry state',
+      () async {
+    final c = client(
+        [row(1)],
+        (o, h) => h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: '开始时间：2024-10-27 08:00\n截止时间：不限')));
+    final a = (await c.fetchAssignments()).single;
+    expect(a.availableFromAt!.toUtc(), DateTime.utc(2024, 10, 27));
+    expect(a.availableFromText, '2024-10-27 08:00');
+    expect(a.deadlineAt, isNull);
+    expect(a.deadlineTrusted, isTrue);
+    expect(a.deadlineReadFailed, isFalse);
+    expect(a.deadlineLabel, '无截止日期');
+    expect(c.issues, isEmpty);
   });
 }

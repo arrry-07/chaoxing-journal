@@ -406,7 +406,7 @@ void main() {
     final records = [
       a('cx:work:1:2:1', 1, 'pending'),
       a('cx:work:1:3:1', 45, 'returned'),
-      a('cx:work:1:2:2', -200, 'pending'),
+      a('cx:work:1:2:2', -20, 'pending'),
       a('cx:work:1:2:3', 2, 'unknown'),
       a('cx:activity:1:2:4', 1, 'pending'),
       a('cx:work:1:2:5', 1, 'submitted')

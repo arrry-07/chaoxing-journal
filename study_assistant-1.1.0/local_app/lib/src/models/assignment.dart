@@ -34,6 +34,9 @@ class Assignment {
     this.deadlineReadFailed = false,
     this.deadlineTrusted = true,
     this.deadlineRawText,
+    this.publishedAt,
+    this.availableFromAt,
+    this.availableFromText,
     this.activityType,
     this.aiPracticePublishUuid,
     this.persistedCourseTaskKey,
@@ -215,6 +218,9 @@ class Assignment {
   final bool deadlineReadFailed;
   final bool deadlineTrusted;
   final String? deadlineRawText;
+  final DateTime? publishedAt;
+  final DateTime? availableFromAt;
+  final String? availableFromText;
   final String id;
   final String courseName;
   final String title;
@@ -248,6 +254,9 @@ class Assignment {
           (rawDeadline == null || hasExplicitTimeZone(rawDeadline)) &&
           !(json['deadlineAt'] == null && json['deadlineRawText'] == '0'),
       deadlineRawText: json['deadlineRawText'] as String?,
+      publishedAt: _optionalUtc(json['publishedAt']),
+      availableFromAt: _optionalUtc(json['availableFromAt']),
+      availableFromText: json['availableFromText'] as String?,
       id: json['id'] as String,
       courseName: json['courseName'] as String,
       title: json['title'] as String,
@@ -281,6 +290,11 @@ class Assignment {
         'deadlineTrusted': deadlineTrusted,
         if (deadlineRawText != null) 'deadlineRawText': deadlineRawText,
         if (deadlineReadFailed) 'deadlineReadFailed': true,
+        if (publishedAt != null)
+          'publishedAt': publishedAt!.toUtc().toIso8601String(),
+        if (availableFromAt != null)
+          'availableFromAt': availableFromAt!.toUtc().toIso8601String(),
+        if (availableFromText != null) 'availableFromText': availableFromText,
         'courseName': courseName,
         'title': title,
         'deadlineAt': deadlineAt?.toUtc().toIso8601String(),
@@ -293,6 +307,11 @@ class Assignment {
 
   static bool hasExplicitTimeZone(String value) =>
       RegExp(r'(?:[zZ]|[+-]\d{2}:?\d{2})$').hasMatch(value);
+
+  static DateTime? _optionalUtc(dynamic value) {
+    if (value is! String || !hasExplicitTimeZone(value)) return null;
+    return DateTime.tryParse(value)?.toLocal();
+  }
 
   Assignment copyWith({
     AssignmentSource? source,
@@ -314,7 +333,13 @@ class Assignment {
     bool? deadlineReadFailed,
     bool? deadlineTrusted,
     String? deadlineRawText,
+    DateTime? publishedAt,
+    DateTime? availableFromAt,
+    String? availableFromText,
     bool clearDeadlineRawText = false,
+    bool clearPublishedAt = false,
+    bool clearAvailableFromAt = false,
+    bool clearAvailableFromText = false,
     bool clearSubmitUrl = false,
     bool clearCompletedAt = false,
     bool clearDeadlineAt = false,
@@ -333,6 +358,12 @@ class Assignment {
       deadlineTrusted: deadlineTrusted ?? this.deadlineTrusted,
       deadlineRawText:
           clearDeadlineRawText ? null : deadlineRawText ?? this.deadlineRawText,
+      publishedAt: clearPublishedAt ? null : publishedAt ?? this.publishedAt,
+      availableFromAt:
+          clearAvailableFromAt ? null : availableFromAt ?? this.availableFromAt,
+      availableFromText: clearAvailableFromText
+          ? null
+          : availableFromText ?? this.availableFromText,
       deadlineReadFailed: deadlineReadFailed ?? this.deadlineReadFailed,
       courseName: courseName ?? this.courseName,
       title: title ?? this.title,
@@ -386,7 +417,7 @@ class Assignment {
     if (deadlineReadFailed) {
       return deadlineAt == null ? '截止时间读取失败，请查看同步详情' : '截止时间为上次读取记录';
     }
-    return deadlineTrusted ? '未设置截止时间' : '截止时间待确认';
+    return deadlineTrusted ? '无截止日期' : '截止时间待确认';
   }
 
   String get statusLabel => isExam && !isCompleted
