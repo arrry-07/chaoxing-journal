@@ -76,6 +76,40 @@ void main() {
     expect(afterReload, isEmpty);
   });
 
+  test('FB-006 submitted null deadline keeps the last trusted deadline',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = LocalAssignmentRepository();
+    final trusted = DateTime.parse('2026-11-20T10:00:00.000Z');
+    final first = Assignment(
+      id: 'cx:work:course:class:submitted',
+      courseName: '大学英语',
+      title: '已提交作业',
+      deadlineAt: trusted,
+      requirementsText: '',
+      status: 'submitted',
+      deadlineTrusted: true,
+      deadlineRawText: '2026-11-20 18:00',
+      lastSyncedAt: DateTime.parse('2026-11-16T08:00:00.000Z'),
+    );
+    final refreshed = first.copyWith(
+      deadlineTrusted: false,
+      clearDeadlineAt: true,
+      clearDeadlineRawText: true,
+      lastSyncedAt: DateTime.parse('2026-11-16T09:00:00.000Z'),
+    );
+
+    await repository.mergeAndSave([first]);
+    await repository.mergeAndSave([refreshed]);
+
+    final stored = (await repository.loadJournal())
+        .singleWhere((item) => item.id == first.id);
+    expect(stored.status, 'submitted');
+    expect(stored.deadlineAt!.toUtc(), trusted);
+    expect(stored.deadlineTrusted, isTrue);
+    expect(stored.deadlineRawText, '2026-11-20 18:00');
+  });
+
   test(
     'mergeAssignments keeps unfinished peer review and filters completed peer review',
     () {
@@ -199,5 +233,80 @@ void main() {
     expect(afterComplete, isEmpty);
     expect(afterRefresh, isEmpty);
     expect(await repository.loadAssignments(), isEmpty);
+  });
+
+  test('batch hide and restore updates every group source atomically',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = LocalAssignmentRepository();
+    final first = Assignment(
+      id: 'cx:exam:1:2:3',
+      source: AssignmentSource.exam,
+      exam: const ExamInfo(examId: '3', courseId: '1', clazzId: '2'),
+      courseName: '高等数学',
+      title: '期末考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: DateTime.parse('2026-11-16T08:00:00.000Z'),
+    );
+    final second = Assignment(
+      id: 'cx:examNotice:inbox:notice',
+      source: AssignmentSource.exam,
+      exam: const ExamInfo(
+        examId: 'notice',
+        relatedExamId: '3',
+        courseId: '1',
+        clazzId: '2',
+        noticeOnly: true,
+      ),
+      courseName: '高等数学',
+      title: '考试通知',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'unknown',
+      lastSyncedAt: DateTime.parse('2026-11-16T08:01:00.000Z'),
+    );
+
+    await repository.mergeAndSave([first, second]);
+    await repository.updateCompletionMany([first.id, second.id], true);
+
+    expect(await repository.loadAssignments(), isEmpty);
+    expect(
+      (await repository.loadHiddenAssignments()).map((item) => item.id).toSet(),
+      {first.id, second.id},
+    );
+
+    await repository.updateCompletionMany([first.id, second.id], false);
+    expect(
+      (await repository.loadAssignments()).map((item) => item.id).toSet(),
+      {first.id, second.id},
+    );
+  });
+
+  test('batch hide rejects a stale account/session before writing', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = LocalAssignmentRepository();
+    final assignment = Assignment(
+      id: 'cx:work:1:2:stale',
+      courseName: '大学英语',
+      title: '旧会话作业',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: DateTime.parse('2026-11-16T08:00:00.000Z'),
+    );
+    await repository.mergeAndSave([assignment]);
+
+    await expectLater(
+      repository.updateCompletionMany(
+        [assignment.id],
+        true,
+        canCommit: () async => false,
+      ),
+      throwsStateError,
+    );
+    expect(await repository.loadHiddenAssignments(), isEmpty);
+    expect((await repository.loadAssignments()).single.id, assignment.id);
   });
 }

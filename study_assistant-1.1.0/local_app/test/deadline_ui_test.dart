@@ -38,7 +38,8 @@ void main() {
         lastSyncedAt: DateTime.now());
     store.replaceAssignmentsForTest([
       work,
-      work.copyWith(id: 'cx:work:1:2:submitted', status: 'submitted')
+      work.copyWith(
+          id: 'cx:work:1:2:submitted', title: '已提交综合实验报告', status: 'submitted')
     ]);
     Future<void> show(Widget page) async {
       await t.pumpWidget(MaterialApp(
@@ -61,8 +62,9 @@ void main() {
     expect(find.textContaining('已退回'), findsOneWidget);
     expect(t.takeException(), isNull);
     await show(CalendarScreen(store: store));
-    await t.scrollUntilVisible(find.text('所选范围没有已知截止作业'), 180,
+    await t.scrollUntilVisible(find.text('所选范围没有已知日期的课业'), 180,
         scrollable: find.byType(Scrollable).first);
+    expect(find.text('所选范围没有已知日期的课业'), findsOneWidget);
     expect(find.text(title), findsNothing);
     expect(t.takeException(), isNull);
     await show(StatsScreen(store: store));
@@ -126,7 +128,10 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(find.text('待保存预览'), findsOneWidget);
     expect(
-      tester.widget<TextButton>(find.byType(TextButton)).onPressed,
+      tester
+          .widget<IconButton>(
+              find.byKey(const ValueKey('open-assignment-cx:work:1:2:task')))
+          .onPressed,
       isNull,
     );
 
@@ -180,7 +185,7 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('card keeps the original placeholder time rail without a time',
+  testWidgets('undated card keeps placeholder rail and aligned column',
       (tester) async {
     final assignment = Assignment(
       id: 'cx:work:1:2:no-time',
@@ -205,6 +210,16 @@ void main() {
 
     expect(find.text('—'), findsOneWidget);
     expect(find.text('无期限'), findsOneWidget);
+    final title = find.text('无时间作业');
+    final course = find.text('课程');
+    final deadline = find.text('无期限');
+    expect(title, findsOneWidget);
+    expect(course, findsOneWidget);
+    final cardLeft = tester.getTopLeft(find.byType(AssignmentCard)).dx;
+    expect(tester.getTopLeft(title).dx, greaterThan(cardLeft));
+    expect(tester.getTopLeft(course).dx, tester.getTopLeft(title).dx);
+    expect(tester.getTopLeft(deadline).dx, tester.getTopLeft(title).dx);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('card marks the exact deadline instant as overdue',

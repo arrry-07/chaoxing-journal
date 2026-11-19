@@ -3,6 +3,7 @@ package com.example.studyassistant
 import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import java.security.MessageDigest
 
 class ChaoxingNotificationListener : NotificationListenerService() {
@@ -18,25 +19,35 @@ class ChaoxingNotificationListener : NotificationListenerService() {
             )
         ) return
 
-        val database = ReminderDatabase.get(this)
-        val account = database.activeAccount() ?: return
-        if (!account.active || !account.listenerEnabled) return
+        val appContext = applicationContext ?: this
         val signalKey = sha256(posted.key)
-        val version = runCatching {
-            database.recordSignal(
+        val postTime = posted.postTime
+        NativeReceiverExecutor.executeAsync {
+            val database = ReminderDatabase.get(appContext)
+            val account = database.activeAccount() ?: return@executeAsync
+            if (!account.active || !account.listenerEnabled) return@executeAsync
+            val version = runCatching {
+                database.recordSignal(
+                    account.accountHash,
+                    account.sessionEpoch,
+                    signalKey,
+                    postTime,
+                )
+            }.getOrNull() ?: return@executeAsync
+            if (version <= account.pendingSignalVersion) return@executeAsync
+            val enqueue = BackgroundWorkScheduler.scheduleNotificationCheck(
+                appContext,
+                database,
                 account.accountHash,
-                account.sessionEpoch,
-                signalKey,
-                posted.postTime,
+                version,
             )
-        }.getOrNull() ?: return
-        if (version <= account.pendingSignalVersion) return
-        BackgroundWorkScheduler.scheduleNotificationCheck(
-            this,
-            database,
-            account.accountHash,
-            version,
-        )
+            if (enqueue.state == NotificationEnqueueState.FAILED) {
+                Log.w(
+                    "ChaoxingNotificationListener",
+                    "notification_signal_enqueue_failed:${enqueue.reasonCode}",
+                )
+            }
+        }
     }
 
     private fun sha256(value: String): String =

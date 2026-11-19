@@ -9,6 +9,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
+import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -18,6 +19,25 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+  });
+
+  test('login keeps a specific platform refusal and leaves credentials unsaved',
+      () async {
+    final session = _MemorySessionStore();
+    final store = AssignmentStore(
+      sessionStore: session,
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      chaoxingClient: _RefusedLoginClient(),
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.loginChaoxing(
+        account: 'synthetic', password: 'synthetic', agreementAccepted: true);
+    expect(store.isAuthenticated, isFalse);
+    expect(store.error, '登录失败，请完成安全验证');
+    expect(session.account, isNull);
+    expect(session.password, isNull);
   });
 
   test('authentication returns while homework remains blocked', () async {
@@ -75,6 +95,72 @@ void main() {
     expect(store.isHomeAssignmentPreviewOnly('cx:work:1:2:1'), isFalse);
     expect(store.isHomeDeadlinePending('cx:work:1:2:2'), isFalse);
     expect(store.assignments, hasLength(2));
+  });
+  test('preview catalog keeps completed history and the type union', () async {
+    final client = _PreviewSyncClient();
+    final session = _MemorySessionStore()
+      ..account = 'student'
+      ..password = 'p';
+    final store = AssignmentStore(
+      sessionStore: session,
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      chaoxingClient: client,
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final submitted = Assignment(
+      id: 'cx:work:1:2:9',
+      courseName: '高等数学',
+      title: '已提交作业',
+      deadlineAt: DateTime.now().subtract(const Duration(days: 30)),
+      requirementsText: '',
+      status: 'submitted',
+      completedAt: DateTime.now().subtract(const Duration(days: 30)),
+      lastSyncedAt: DateTime.now(),
+    );
+    await store.repository.mergeAndSave([submitted], completeSync: false);
+    await store.refreshAssignments();
+    expect(store.homeCatalogAssignments.map((row) => row.id),
+        contains(submitted.id));
+
+    Set<String> ids(AssignmentTypeFilter type) => AssignmentQuery.filterHome(
+          store.homeCatalogAssignments,
+          type: type,
+          includeHistorical: true,
+          now: DateTime.now(),
+        ).map((row) => row.id).toSet();
+
+    final syncing = store.syncAssignments();
+    await client.rowsPublished.future;
+    expect(store.homeDisplayAssignments.any((row) => row.id == submitted.id),
+        isFalse);
+    var all = ids(AssignmentTypeFilter.all);
+    expect(all, contains(submitted.id));
+    expect(
+        all,
+        ids(AssignmentTypeFilter.homework)
+            .union(ids(AssignmentTypeFilter.exam)));
+
+    client.firstDetailPublished.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    all = ids(AssignmentTypeFilter.all);
+    expect(all, contains(submitted.id));
+    expect(
+        all,
+        ids(AssignmentTypeFilter.homework)
+            .union(ids(AssignmentTypeFilter.exam)));
+
+    client.finishFetch.complete();
+    await syncing;
+    all = ids(AssignmentTypeFilter.all);
+    expect(all, {submitted.id, 'cx:work:1:2:1', 'cx:work:1:2:2'});
+    expect(
+        all,
+        ids(AssignmentTypeFilter.homework)
+            .union(ids(AssignmentTypeFilter.exam)));
+    expect(store.assignments, hasLength(3));
   });
   test('failed journal save removes the preview and keeps old persisted data',
       () async {
@@ -319,6 +405,13 @@ class _RefreshingChaoxingClient extends ChaoxingLocalClient {
       ),
     ];
   }
+}
+
+class _RefusedLoginClient extends ChaoxingLocalClient {
+  @override
+  Future<ChaoxingLoginResult> login(
+          {required String account, required String password}) async =>
+      const ChaoxingLoginResult(success: false, message: '登录失败，请完成安全验证');
 }
 
 class _MemorySessionStore extends SecureSessionStore {

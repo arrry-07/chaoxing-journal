@@ -4,51 +4,88 @@ import 'package:flutter/material.dart';
 class Journal {
   static const paper = Color(0xFFF7F5EC);
   static const sheet = Color(0xFFFFFDF5);
+  static const parchment = Color(0xFFEFECE0);
   static const ink = Color(0xFF243E34);
   static const muted = Color(0xFF53645A);
   static const sage = Color(0xFFDFE8D8);
-  static const rule = Color(0xFFD6D8C9);
+  static const sageBorder = Color(0xFFCAD8C3);
+  static const rule = Color(0xFFE4E2D5);
+  static const ruleStrong = Color(0xFFD6D5C7);
   static const berry = Color(0xFF813E53);
+  static const berryBg = Color(0xFFF6E4E9);
+  static const berryBorder = Color(0xFFE5B8C2);
+  static const ochre = Color(0xFF85530E);
+  static const ochreBg = Color(0xFFFAF0D7);
+  static const ochreBorder = Color(0xFFE8CE9D);
+  static const slate = Color(0xFF244B6B);
+  static const slateBg = Color(0xFFEBF1F6);
+  static const slateBorder = Color(0xFFC5D6E6);
+
   static const bodyFamily = 'LXGW WenKai Screen';
   static const titleFamily = bodyFamily;
-  // One bundled handwriting face covers Chinese, Latin and numerals so native
-  // controls and custom text share the same journal voice offline.
-  static const bodyFallback = [bodyFamily];
+  static const bodyFallback = ['sans-serif'];
+
   static const display = TextStyle(
     fontFamily: titleFamily,
     fontFamilyFallback: bodyFallback,
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: FontWeight.w400,
-    height: 1.3,
+    height: 1.25,
     color: ink,
+  );
+  static const dayHeading = TextStyle(
+    fontFamily: titleFamily,
+    fontFamilyFallback: bodyFallback,
+    fontSize: 14,
+    fontWeight: FontWeight.w400,
+    height: 1.35,
+    color: muted,
   );
   static const section = TextStyle(
     fontFamily: bodyFamily,
+    fontFamilyFallback: bodyFallback,
     fontSize: 20,
     color: ink,
-    fontWeight: FontWeight.w600,
-    height: 1.4,
+    fontWeight: FontWeight.w400,
+    height: 1.38,
   );
   static const entryTitle = TextStyle(
     fontFamily: bodyFamily,
-    fontSize: 17,
-    fontWeight: FontWeight.w600,
-    height: 1.4,
+    fontFamilyFallback: bodyFallback,
+    fontSize: 16,
+    fontWeight: FontWeight.w400,
+    height: 1.38,
     color: ink,
   );
   static const metadata = TextStyle(
     fontFamily: bodyFamily,
-    fontSize: 14,
+    fontFamilyFallback: bodyFallback,
+    fontSize: 13.5,
     height: 1.45,
     color: muted,
   );
   static const time = TextStyle(
     fontFamily: bodyFamily,
-    fontSize: 16,
-    height: 1.5,
+    fontFamilyFallback: bodyFallback,
+    fontSize: 15,
+    fontWeight: FontWeight.w400,
+    height: 1.3,
     fontFeatures: [FontFeature.tabularFigures()],
     color: ink,
   );
+}
+
+class JournalLayout {
+  const JournalLayout._();
+
+  static bool isLargeText(BuildContext context) =>
+      MediaQuery.textScalerOf(context).scale(14) >= 19.5;
+
+  static Duration motionDuration(
+    BuildContext context, [
+    Duration normal = const Duration(milliseconds: 180),
+  ]) =>
+      MediaQuery.disableAnimationsOf(context) ? Duration.zero : normal;
 }
 
 class JournalHeading extends StatelessWidget {
@@ -64,34 +101,48 @@ class JournalHeading extends StatelessWidget {
   final Widget? trailing;
   final double trailingWidth;
   @override
-  Widget build(BuildContext context) => Stack(children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding:
-                  EdgeInsets.only(right: trailing == null ? 0 : trailingWidth),
-              child: Text(
-                eyebrow,
-                style: const TextStyle(
-                  color: Journal.muted,
-                  fontFamily: Journal.bodyFamily,
-                  fontSize: 12,
-                  letterSpacing: 1.6,
-                ),
+  Widget build(BuildContext context) {
+    final rightPad = trailing == null ? 0.0 : trailingWidth;
+    return Stack(children: [
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.only(right: rightPad),
+            child: Text(
+              eyebrow,
+              style: const TextStyle(
+                color: Journal.muted,
+                fontFamily: Journal.bodyFamily,
+                fontFamilyFallback: Journal.bodyFallback,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.4,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: EdgeInsets.only(right: rightPad),
+            child: Text(
               title,
               style: bookTitle
                   ? Journal.display
-                  : Journal.section.copyWith(fontSize: 28),
+                  : const TextStyle(
+                      fontFamily: Journal.titleFamily,
+                      fontFamilyFallback: Journal.bodyFallback,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w400,
+                      height: 1.28,
+                      color: Journal.ink,
+                    ),
             ),
-          ],
-        ),
-        if (trailing != null) Positioned(top: 0, right: 0, child: trailing!),
-      ]);
+          ),
+        ],
+      ),
+      if (trailing != null) Positioned(top: 0, right: 0, child: trailing!),
+    ]);
+  }
 }
 
 // Draw small margin illustrations in the same pen, keyed to the subject.

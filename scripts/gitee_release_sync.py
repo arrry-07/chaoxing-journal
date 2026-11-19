@@ -55,8 +55,10 @@ MAX_JSON_BYTES = 2 * 1024 * 1024
 GITEE_UPLOAD_TIMEOUT_SECONDS = 600
 USER_AGENT = "chaoxing-journal-gitee-sync/1.0"
 VERSION_FILE_PATH = "study_assistant-1.1.0/local_app/pubspec.yaml"
-TAG_PATTERN = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
-RAW_VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+# Project patch labels include 01-09. Preserve that spelling in Tags/URLs,
+# compare their integer value, and keep malformed padded versions rejected.
+TAG_PATTERN = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0[1-9]|0|[1-9]\d*)$")
+RAW_VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0[1-9]|0|[1-9]\d*)$")
 
 
 class SyncError(RuntimeError):
@@ -86,7 +88,7 @@ class GiteeRelease:
 def version_tuple(value: str) -> tuple[int, int, int]:
     match = RAW_VERSION_PATTERN.fullmatch(value)
     if match is None:
-        raise ValueError("Version must contain exactly three canonical numbers.")
+        raise ValueError("Version must contain major.minor.patch; patch may use 01-09.")
     return tuple(int(part) for part in match.groups())
 
 

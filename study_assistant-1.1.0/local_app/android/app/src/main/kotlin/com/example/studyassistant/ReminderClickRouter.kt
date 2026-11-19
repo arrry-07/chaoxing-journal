@@ -34,7 +34,8 @@ object ReminderClickRouter {
         val validAssignment = accountMatches &&
             assignment != null &&
             database.snapshot(account, assignment)?.let {
-                it.formal && !it.hidden && it.followed
+                it.inAssignmentScope && !it.hidden && it.followed &&
+                    it.sessionEpoch == current?.sessionEpoch
             } == true
         if (validAssignment) {
             return ReminderClickDecision(

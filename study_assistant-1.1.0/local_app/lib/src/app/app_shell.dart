@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../services/assignment_store.dart';
 import 'journal.dart';
 import 'unsaved_edit_guard.dart';
+import 'transient_feedback.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -65,62 +66,82 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final location = GoRouterState.of(context).matchedLocation;
-    return Scaffold(
-      body: SafeArea(bottom: false, child: widget.child),
-      bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
-        AnimatedBuilder(
-            animation: widget.assignmentStore,
-            builder: (context, _) {
-              final message = widget.assignmentStore.returnCheckMessage;
-              if (message == null) return const SizedBox.shrink();
-              return Material(
-                  color: Theme.of(context).colorScheme.secondaryContainer,
-                  child: Padding(
-                      padding: const EdgeInsets.only(left: 16),
-                      child: Row(children: [
-                        Expanded(
-                            child: Semantics(
-                                liveRegion: true, child: Text(message))),
-                        IconButton(
-                            tooltip: '关闭核对提示',
-                            onPressed:
-                                widget.assignmentStore.dismissReturnCheck,
-                            icon: const Icon(Icons.close)),
-                      ])));
-            }),
-        if (AppUpdateScope.maybeOf(context) case final updates?)
-          UpdateDownloadBanner(controller: updates),
-        NavigationBar(
-          height: 76,
-          selectedIndex: _indexFor(location),
-          onDestinationSelected: (index) {
-            unawaited(_selectDestination(index));
-          },
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.assignment_outlined),
-              selectedIcon: Icon(Icons.assignment),
-              label: '作业',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.calendar_today_outlined),
-              selectedIcon: Icon(Icons.calendar_today),
-              label: '日历',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.bar_chart_outlined),
-              selectedIcon: Icon(Icons.bar_chart),
-              label: '统计',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.person_outline),
-              selectedIcon: Icon(Icons.person),
-              label: '我的',
-            ),
-          ],
-        ),
-      ]),
+    final router = GoRouter.of(context);
+    return ListenableBuilder(
+      listenable: router.routeInformationProvider,
+      builder: (context, _) {
+        final routerState = GoRouterState.of(context);
+        final configUri = router.routeInformationProvider.value.uri;
+        final location = configUri.path.isNotEmpty
+            ? configUri.path
+            : routerState.matchedLocation;
+        final fromParam = configUri.queryParameters['from'] ??
+            routerState.uri.queryParameters['from'];
+        final hideTabBar = location.startsWith('/assignments/');
+        return Scaffold(
+          body: SafeArea(bottom: false, child: widget.child),
+          bottomNavigationBar: SafeArea(
+            top: false,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              AnimatedBuilder(
+                  animation: widget.assignmentStore,
+                  builder: (context, _) {
+                    final message = widget.assignmentStore.returnCheckMessage;
+                    if (message == null) return const SizedBox.shrink();
+                    final epoch = widget.assignmentStore.accountEpoch;
+                    return TimedReturnCheck(
+                      key: ValueKey((epoch, message)),
+                      message: message,
+                      onDismiss: () {
+                        if (widget.assignmentStore.accountEpoch == epoch &&
+                            widget.assignmentStore.returnCheckMessage ==
+                                message) {
+                          widget.assignmentStore.dismissReturnCheck();
+                        }
+                      },
+                    );
+                  }),
+              if (AppUpdateScope.maybeOf(context) case final updates?)
+                UpdateDownloadBanner(controller: updates),
+              if (!hideTabBar)
+                Container(
+                  decoration: const BoxDecoration(
+                    border: Border(top: BorderSide(color: Journal.rule)),
+                  ),
+                  child: NavigationBar(
+                    height: 72,
+                    selectedIndex: _indexFor(location, from: fromParam),
+                    onDestinationSelected: (index) {
+                      unawaited(_selectDestination(index));
+                    },
+                    destinations: const [
+                      NavigationDestination(
+                        icon: Icon(Icons.assignment_outlined),
+                        selectedIcon: Icon(Icons.assignment),
+                        label: '首页',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.calendar_today_outlined),
+                        selectedIcon: Icon(Icons.calendar_today),
+                        label: '日历',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.bar_chart_outlined),
+                        selectedIcon: Icon(Icons.bar_chart),
+                        label: '统计',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.person_outline),
+                        selectedIcon: Icon(Icons.person),
+                        label: '我的',
+                      ),
+                    ],
+                  ),
+                ),
+            ]),
+          ),
+        );
+      },
     );
   }
 
@@ -150,11 +171,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     await guard.navigate(isCurrent: () => mounted, action: go);
   }
 
-  int _indexFor(String location) {
+  int _indexFor(String location, {String? from}) {
     if (location.startsWith('/calendar')) {
       return 1;
     }
-    if (location.startsWith('/stats')) {
+    if (location.startsWith('/stats') ||
+        (location.startsWith('/records') && from == 'stats')) {
       return 2;
     }
     if (location.startsWith('/profile') ||
@@ -166,10 +188,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         location.startsWith('/changes') ||
         location.startsWith('/backup') ||
         location.startsWith('/reminder-health') ||
+        location.startsWith('/reminder-history') ||
+        location.startsWith('/reminder-status/manual') ||
+        location.startsWith('/reminder-status/summary') ||
         location.startsWith('/agenda') ||
         location.startsWith('/terms') ||
         location.startsWith('/plan') ||
-        location.startsWith('/personal')) {
+        location.startsWith('/personal') ||
+        location.startsWith('/course-hub')) {
       return 3;
     }
     return 0;
@@ -178,14 +204,26 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
 class StudyAssistantTheme {
   static ThemeData get light {
+    final baseScheme = ColorScheme.fromSeed(
+      seedColor: Journal.ink,
+      brightness: Brightness.light,
+      surface: Journal.paper,
+      primary: Journal.ink,
+      secondary: Journal.berry,
+    ).copyWith(
+      onPrimary: Journal.sheet,
+      secondaryContainer: Journal.sage,
+      onSecondaryContainer: Journal.ink,
+      error: Journal.berry,
+      onError: Journal.sheet,
+      errorContainer: Journal.berryBg,
+      onErrorContainer: Journal.berry,
+      outline: Journal.ruleStrong,
+      outlineVariant: Journal.rule,
+      surfaceContainerHighest: Journal.parchment,
+    );
     return ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: Journal.ink,
-        brightness: Brightness.light,
-        surface: Journal.paper,
-        primary: Journal.ink,
-        secondary: Journal.berry,
-      ),
+      colorScheme: baseScheme,
       scaffoldBackgroundColor: Journal.paper,
       useMaterial3: true,
       fontFamily: Journal.bodyFamily,
@@ -200,17 +238,51 @@ class StudyAssistantTheme {
       appBarTheme: const AppBarTheme(
         centerTitle: false,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         backgroundColor: Journal.paper,
         foregroundColor: Journal.ink,
         titleTextStyle: Journal.section,
       ),
       cardTheme: CardThemeData(
         color: Journal.sheet,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Journal.rule),
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: Journal.rule, width: 0.8),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: Journal.parchment,
+        selectedColor: Journal.sage,
+        checkmarkColor: Journal.ink,
+        side: BorderSide.none,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        labelStyle: Journal.metadata.copyWith(
+          color: Journal.ink,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Journal.ink,
+          backgroundColor: Journal.parchment,
+          side: BorderSide.none,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: Journal.ink,
+          foregroundColor: Journal.sheet,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -218,11 +290,33 @@ class StudyAssistantTheme {
         fillColor: Journal.sheet,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
+          borderSide: const BorderSide(color: Journal.rule),
         ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Journal.rule),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Journal.ink, width: 1.2),
+        ),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: Journal.paper,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Journal.ink,
+        contentTextStyle: Journal.metadata.copyWith(color: Journal.sheet),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: Journal.sheet,
+        surfaceTintColor: Colors.transparent,
         indicatorColor: Journal.sage,
         iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
               color: states.contains(WidgetState.selected)
@@ -231,6 +325,7 @@ class StudyAssistantTheme {
             )),
         labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
               fontFamily: Journal.bodyFamily,
+              fontFamilyFallback: Journal.bodyFallback,
               fontSize: 12,
               fontWeight: FontWeight.w600,
               color: states.contains(WidgetState.selected)
@@ -240,6 +335,7 @@ class StudyAssistantTheme {
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: Journal.sheet,
+        surfaceTintColor: Colors.transparent,
         titleTextStyle: Journal.section,
         contentTextStyle: Journal.metadata.copyWith(color: Journal.ink),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),

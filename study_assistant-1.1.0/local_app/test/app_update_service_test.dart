@@ -257,6 +257,166 @@ void main() {
     );
     expect(await dir.list().toList(), isEmpty);
   });
+  test('an APK redirect chain may use another HTTPS CDN', () async {
+    final bytes = Uint8List.fromList([0x50, 0x4b, 3, 4, 1]);
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        handler.resolve(Response<ResponseBody>(
+          requestOptions: options,
+          statusCode: 200,
+          data: ResponseBody(Stream.value(bytes), 200),
+          redirects: [
+            RedirectRecord(
+              302,
+              'GET',
+              Uri.parse('https://cdn.example.org/journal.apk'),
+            ),
+          ],
+        ));
+      }));
+    final dir = await Directory.systemTemp.createTemp('journal-cdn-');
+    addTearDown(() => dir.delete(recursive: true));
+
+    final file = await AppUpdateService(dio: dio).downloadApk(
+      AppUpdateInfo(
+        versionName: '1.7.3',
+        releaseUrl: 'https://example.org/release',
+        apkName: 'journal.apk',
+        apkDownloadUrl: 'https://primary.example.org/journal.apk',
+        releaseNotes: '',
+        apkSize: bytes.length,
+        sha256Hash: sha256.convert(bytes).toString(),
+      ),
+      targetDirectory: dir.path,
+    );
+    expect(await file.readAsBytes(), bytes);
+  });
+  for (final status in [408, 410, 429, 500, 503]) {
+    test('primary HTTP $status may fall through to a backup source', () async {
+      final bytes = Uint8List.fromList([0x50, 0x4b, 3, 4, 1]);
+      final requests = <String>[];
+      final dio = Dio()
+        ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+          requests.add(options.uri.host);
+          if (options.uri.host == 'primary.example.org') {
+            handler.resolve(Response<ResponseBody>(
+              requestOptions: options,
+              statusCode: status,
+              data: ResponseBody(Stream.value(Uint8List(0)), status),
+            ));
+          } else {
+            handler.resolve(Response<ResponseBody>(
+              requestOptions: options,
+              statusCode: 200,
+              data: ResponseBody(Stream.value(bytes), 200),
+            ));
+          }
+        }));
+      final dir = await Directory.systemTemp.createTemp('journal-status-');
+      addTearDown(() => dir.delete(recursive: true));
+
+      final file = await AppUpdateService(dio: dio).downloadApk(
+        AppUpdateInfo(
+          versionName: '1.7.3',
+          releaseUrl: 'https://example.org/release',
+          apkName: 'journal.apk',
+          apkDownloadUrl: 'https://primary.example.org/journal.apk',
+          backupApkUrls: const ['https://backup.example.org/journal.apk'],
+          releaseNotes: '',
+          apkSize: bytes.length,
+          sha256Hash: sha256.convert(bytes).toString(),
+        ),
+        targetDirectory: dir.path,
+      );
+      expect(requests, ['primary.example.org', 'backup.example.org']);
+      expect(await file.readAsBytes(), bytes);
+    });
+  }
+  for (final status in [401, 403]) {
+    test('primary HTTP $status must not fall through to a backup source',
+        () async {
+      final requests = <String>[];
+      final dio = Dio()
+        ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+          requests.add(options.uri.host);
+          handler.resolve(Response<ResponseBody>(
+            requestOptions: options,
+            statusCode: status,
+            data: ResponseBody(Stream.value(Uint8List(0)), status),
+          ));
+        }));
+      final dir = await Directory.systemTemp.createTemp('journal-auth-');
+      addTearDown(() => dir.delete(recursive: true));
+
+      await expectLater(
+        AppUpdateService(dio: dio).downloadApk(
+          AppUpdateInfo(
+            versionName: '1.7.3',
+            releaseUrl: 'https://example.org/release',
+            apkName: 'journal.apk',
+            apkDownloadUrl: 'https://primary.example.org/journal.apk',
+            backupApkUrls: const ['https://backup.example.org/journal.apk'],
+            releaseNotes: '',
+            apkSize: 5,
+            sha256Hash: 'a' * 64,
+          ),
+          targetDirectory: dir.path,
+        ),
+        throwsA(isA<ApkSourceUnavailableException>()),
+      );
+      expect(requests, ['primary.example.org']);
+      expect(await dir.list().toList(), isEmpty);
+    });
+  }
+  test('a backup source still has to pass redirect validation', () async {
+    final bytes = Uint8List.fromList([0x50, 0x4b, 3, 4, 1]);
+    final requests = <String>[];
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        requests.add(options.uri.host);
+        if (options.uri.host == 'primary.example.org') {
+          handler.resolve(Response<ResponseBody>(
+            requestOptions: options,
+            statusCode: 404,
+            data: ResponseBody(Stream.value(Uint8List(0)), 404),
+          ));
+          return;
+        }
+        handler.resolve(Response<ResponseBody>(
+          requestOptions: options,
+          statusCode: 200,
+          data: ResponseBody(Stream.value(bytes), 200),
+          redirects: [
+            RedirectRecord(
+              302,
+              'GET',
+              Uri.parse('http://mirror.example.org/journal.apk'),
+            ),
+          ],
+        ));
+      }));
+    final dir = await Directory.systemTemp.createTemp('journal-backup-cdn-');
+    addTearDown(() => dir.delete(recursive: true));
+
+    await expectLater(
+      AppUpdateService(dio: dio).downloadApk(
+        AppUpdateInfo(
+          versionName: '1.7.3',
+          releaseUrl: 'https://example.org/release',
+          apkName: 'journal.apk',
+          apkDownloadUrl: 'https://primary.example.org/journal.apk',
+          backupApkUrls: const ['https://backup.example.org/journal.apk'],
+          releaseNotes: '',
+          apkSize: bytes.length,
+          sha256Hash: sha256.convert(bytes).toString(),
+        ),
+        targetDirectory: dir.path,
+      ),
+      throwsStateError,
+    );
+    expect(requests, ['primary.example.org', 'backup.example.org']);
+    expect(await dir.list().toList(), isEmpty);
+  });
 
   test('backup bytes still have to match the manifest digest', () async {
     final expectedBytes = Uint8List.fromList([0x50, 0x4b, 3, 4, 1]);

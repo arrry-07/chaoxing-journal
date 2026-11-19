@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_classroom_parser.dart';
 
 void main() {
   test('parses backclazzdata course list', () {
@@ -39,7 +40,7 @@ void main() {
             {
               'id': 333,
               'nameOne': '章节作业',
-              'activeType': 47,
+              'activeType': 42,
               'status': 1,
               'endTime': '2026-05-07 08:00:00',
             },
@@ -66,8 +67,9 @@ void main() {
     expect(assignments.first.id, 'cx:activity:111:222:333');
     expect(assignments.first.title, '章节作业');
     expect(assignments.first.courseName, '大学英语');
-    expect(assignments.first.deadlineAt, DateTime(2026, 5, 7, 8));
-    expect(assignments.first.submitUrl, contains('courseid=111'));
+    expect(assignments.first.deadlineAt, isNull);
+    expect(assignments.first.deadlineTrusted, isFalse);
+    expect(assignments.first.submitUrl, isNull);
   });
 
   test('parses active list exams into assignment items', () {
@@ -113,7 +115,7 @@ void main() {
   });
 
   test(
-    'emits submitted peer review to clear cached pending work',
+    'list status labels cannot establish personal submission',
     () {
       final assignments = ChaoxingApiParser.parseActivityAssignments(
         {
@@ -122,7 +124,7 @@ void main() {
               {
                 'id': 555,
                 'nameOne': '互评作业',
-                'activeType': 47,
+                'activeType': 42,
                 'status': 2,
                 'statusName': '已互评',
                 'endTime': '2026-05-07 08:00:00',
@@ -130,7 +132,7 @@ void main() {
               {
                 'id': 556,
                 'nameOne': '互评作业',
-                'activeType': 47,
+                'activeType': 42,
                 'status': 1,
                 'statusName': '未完成',
                 'endTime': '2026-05-08 08:00:00',
@@ -149,9 +151,7 @@ void main() {
 
       expect(assignments, hasLength(2));
       expect(assignments.first.id, 'cx:activity:111:222:555');
-      expect(assignments.first.isCompleted, isTrue);
-      expect(assignments.where((a) => !a.isCompleted).single.id,
-          'cx:activity:111:222:556');
+      expect(assignments.every((a) => a.status == 'unknown'), isTrue);
     },
   );
 
@@ -163,7 +163,7 @@ void main() {
             {
               'id': 888,
               'nameOne': '章节作业',
-              'activeType': 47,
+              'activeType': 42,
               'status': 2,
               'endTime': '2026-05-07 08:00:00',
             },
@@ -191,7 +191,7 @@ void main() {
             {
               'id': 889,
               'nameOne': '互评作业',
-              'activeType': 47,
+              'activeType': 42,
               'status': 1,
               'description': '请在截止前完成互评',
               'endTime': '2026-05-07 08:00:00',
@@ -219,7 +219,7 @@ void main() {
             {
               'id': 890,
               'nameOne': '章节作业',
-              'activeType': 47,
+              'activeType': 42,
               'status': 1,
               'endTime': '2026-06-01T15:59:10.900Z',
             },
@@ -234,7 +234,9 @@ void main() {
       now: DateTime(2026, 5, 5, 8),
     );
 
-    final deadline = assignments.single.deadlineAt!;
+    expect(assignments.single.deadlineAt, isNull);
+    final deadline =
+        ChaoxingClassroomParser.absoluteTime('2026-06-01T15:59:10.900Z')!;
     expect(deadline.isUtc, isFalse);
     expect(deadline.toUtc(), DateTime.utc(2026, 6, 1, 15, 59, 10, 900));
   });
@@ -248,7 +250,7 @@ void main() {
           {
             'id': 892,
             'nameOne': '凌晨截止作业',
-            'activeType': 47,
+            'activeType': 42,
             'endTime': '2026-06-02T00:15:10.900+08:00',
           },
         ],
@@ -258,7 +260,9 @@ void main() {
       now: DateTime.utc(2026, 5, 5),
     );
 
-    final deadline = assignments.single.deadlineAt!;
+    expect(assignments.single.deadlineAt, isNull);
+    final deadline =
+        ChaoxingClassroomParser.absoluteTime('2026-06-02T00:15:10.900+08:00')!;
     expect(deadline.isUtc, isFalse);
     expect(deadline.toUtc(), DateTime.utc(2026, 6, 1, 16, 15, 10, 900));
   });

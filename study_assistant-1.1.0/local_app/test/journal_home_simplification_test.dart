@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
@@ -40,7 +41,7 @@ void main() {
     expect(s.calls, 1);
   });
   testWidgets(
-      'home prioritizes upcoming and shows all expired without headings',
+      'home sorts chronologically while recommendation remains upcoming',
       (t) async {
     final now = DateTime.now();
     final s = _Store()
@@ -77,8 +78,10 @@ void main() {
             .assignment
             .title,
         '下一份作业');
+    expect(AssignmentQuery.nextActionable(s.courseAssignments, now: now)?.title,
+        '下一份作业');
     final list = find.byType(Scrollable).first;
-    for (var i = 0; i < 5; i++) {
+    for (var i = 4; i >= 0; i--) {
       await t.scrollUntilVisible(find.text('过去作业$i'), 200, scrollable: list);
       expect(find.text('过去作业$i'), findsOneWidget);
     }

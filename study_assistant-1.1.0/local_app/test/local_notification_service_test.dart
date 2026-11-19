@@ -4,6 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 
 void main() {
+  test('exam start reminder text never describes a deadline', () {
+    expect(
+        LocalNotificationService.formatDeadlineRemainingText(90,
+            examStart: true),
+        '还剩 1 小时 30 分钟开考');
+    expect(
+        LocalNotificationService.formatDeadlineRemainingText(30,
+            examStart: true),
+        '还剩 30 分钟开考');
+  });
   test('formats deadline remaining text with days hours and minutes', () {
     expect(
       LocalNotificationService.formatDeadlineRemainingText(5945),

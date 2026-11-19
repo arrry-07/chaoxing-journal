@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/assignment.dart';
 import '../models/course.dart';
+import '../models/course_chapter_progress.dart';
+import '../models/course_notice.dart';
 import '../models/backup_snapshot.dart';
 import '../models/personal_workspace.dart';
 import '../models/study_notebook.dart';
@@ -41,10 +43,19 @@ class LocalAssignmentRepository {
   final BackgroundReminderGateway _backgroundReminderGateway;
   final String _writeOwner;
   bool crossEngineLockEnabled = false;
+  int _identityConflictCount = 0;
+  Set<String> _identityConflictSources = {};
+
+  /// Ambiguous identities retained by the most recent successful merge.
+  int get identityConflictCount => _identityConflictCount;
+  Set<String> get identityConflictSources =>
+      Set.unmodifiable(_identityConflictSources);
   static const _key = 'chaoxing_journal_v2';
   static const _personalKey = 'personal_workspace_v1';
   static const _notebookKey = 'notebook_v1';
   static const _homeFiltersKey = 'home_filters_v1';
+  static const _noticesKey = 'course_notices_v1';
+  static const _chaptersKey = 'course_chapters_v1';
   static const _maxAdditionalRecoveryBackups = 3;
   static const _maxRecoveryValueBytes = 4 * 1024 * 1024;
   static const _recoveryWriteFailedWarning =
@@ -78,6 +89,8 @@ class LocalAssignmentRepository {
     _personalKey,
     _notebookKey,
     _homeFiltersKey,
+    _noticesKey,
+    _chaptersKey,
     '${_key}_recovery_backup',
     '${_key}_recovery_backups',
     'course_refs_recovery_backup',
@@ -85,6 +98,10 @@ class LocalAssignmentRepository {
     '${_personalKey}_recovery_backups',
     '${_notebookKey}_recovery_backup',
     '${_notebookKey}_recovery_backups',
+    '${_noticesKey}_recovery_backup',
+    '${_noticesKey}_recovery_backups',
+    '${_chaptersKey}_recovery_backup',
+    '${_chaptersKey}_recovery_backups',
   ];
 
   static String _owner(String account) =>
@@ -160,6 +177,59 @@ class LocalAssignmentRepository {
         await _require(p.setString(_personalKey, raw));
       });
 
+  Future<CourseNoticeCollection> loadCourseNotices() => _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        return _readProtected(
+          p,
+          _noticesKey,
+          CourseNoticeCollection.decode,
+          CourseNoticeCollection.new,
+          '部分课程通知缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新同步获取。',
+        );
+      });
+
+  Future<void> saveCourseNotices(
+          CourseNoticeCollection value, String account) =>
+      _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        _checkOwner(p, account);
+        await _protectExisting(
+          p,
+          _noticesKey,
+          CourseNoticeCollection.decode,
+          '部分课程通知缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新同步获取。',
+        );
+        final raw = value.encode();
+        CourseNoticeCollection.decode(raw);
+        await _writeVerified(p, _noticesKey, raw, '课程通知保存失败');
+      });
+
+  Future<CourseChapterCatalog> loadCourseChapters() => _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        return _readProtected(
+          p,
+          _chaptersKey,
+          CourseChapterCatalog.decode,
+          CourseChapterCatalog.new,
+          '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
+        );
+      });
+
+  Future<void> saveCourseChapters(CourseChapterCatalog value, String account) =>
+      _serialized(() async {
+        final p = await SharedPreferences.getInstance();
+        _checkOwner(p, account);
+        await _protectExisting(
+          p,
+          _chaptersKey,
+          CourseChapterCatalog.decode,
+          '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
+        );
+        final raw = value.encode();
+        CourseChapterCatalog.decode(raw);
+        await _writeVerified(p, _chaptersKey, raw, '章节进度保存失败');
+      });
+
   Future<T> _readProtected<T>(
     SharedPreferences prefs,
     String key,
@@ -226,6 +296,7 @@ class LocalAssignmentRepository {
             owner: _owner(account),
             createdAt: DateTime.now(),
             records: state.byId.values.toList(),
+            courseTaskKeys: state.courseTaskKeys,
             hidden: state.hidden.intersection(state.byId.keys.toSet()),
             courses: await _loadCourses(account: account),
             unfollowed:
@@ -247,6 +318,20 @@ class LocalAssignmentRepository {
               PersonalWorkspace.decode,
               PersonalWorkspace.new,
               '部分个人计划与记录无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
+            ),
+            notices: await _readProtected(
+              prefs,
+              _noticesKey,
+              CourseNoticeCollection.decode,
+              CourseNoticeCollection.new,
+              '部分课程通知缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新同步获取。',
+            ),
+            chapters: await _readProtected(
+              prefs,
+              _chaptersKey,
+              CourseChapterCatalog.decode,
+              CourseChapterCatalog.new,
+              '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
             ));
         if (recoveryWarning != null) {
           throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
@@ -269,6 +354,9 @@ class LocalAssignmentRepository {
           state.byId[a.id] = Assignment(
               id: a.id,
               source: a.source,
+              exam: a.exam,
+              activityType: a.activityType,
+              availability: a.availability,
               courseName: a.courseName,
               title: a.title,
               deadlineAt: a.deadlineAt,
@@ -279,6 +367,8 @@ class LocalAssignmentRepository {
               lastSyncedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
               deadlineTrusted: false,
               deadlineRawText: '备份记录，待同步确认');
+          final taskKey = validated.courseTaskKeys[a.id];
+          if (taskKey != null) state.courseTaskKeys[a.id] = taskKey;
           if (validated.hidden.contains(a.id)) state.hidden.add(a.id);
         }
         final courses = {
@@ -347,6 +437,34 @@ class LocalAssignmentRepository {
           final notebookRaw = notebook.encode();
           StudyNotebook.decode(notebookRaw);
           await _require(prefs.setString(_notebookKey, notebookRaw));
+          final validEntryIds = {for (final e in notebook.entries) e.id};
+          if (validated.notices.items.isNotEmpty) {
+            final notices = (await _readProtected(
+              prefs,
+              _noticesKey,
+              CourseNoticeCollection.decode,
+              CourseNoticeCollection.new,
+              '部分课程通知缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新同步获取。',
+            ))
+                .mergeImported(validated.notices, validEntryIds: validEntryIds);
+            final noticesRaw = notices.encode();
+            CourseNoticeCollection.decode(noticesRaw);
+            await _require(prefs.setString(_noticesKey, noticesRaw));
+          }
+          if (validated.chapters.byCourse.isNotEmpty) {
+            final chapters = (await _readProtected(
+              prefs,
+              _chaptersKey,
+              CourseChapterCatalog.decode,
+              CourseChapterCatalog.new,
+              '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
+            ))
+                .mergeImported(validated.chapters,
+                    validEntryIds: validEntryIds);
+            final chaptersRaw = chapters.encode();
+            CourseChapterCatalog.decode(chaptersRaw);
+            await _require(prefs.setString(_chaptersKey, chaptersRaw));
+          }
           await _require(prefs.remove(_switchKey));
           return true;
         } catch (_) {
@@ -604,8 +722,12 @@ class LocalAssignmentRepository {
         }
         final state = await _read();
         state.merge(incoming);
-        if (completeSync) state.lastSync = DateTime.now();
+        if (completeSync && state.identityConflictCount == 0) {
+          state.lastSync = DateTime.now();
+        }
         await _save(state);
+        _identityConflictCount = state.identityConflictCount;
+        _identityConflictSources = {...state.identityConflictSources};
         return state.pending;
       });
 
@@ -621,12 +743,36 @@ class LocalAssignmentRepository {
         return state.pending;
       });
 
+  /// Applies one hide/restore operation to every source in a coursework group.
+  /// The optional commit gate runs inside the serialized write transaction so
+  /// an account/session change cannot partially hide a stale group.
+  Future<List<Assignment>> updateCompletionMany(
+    Iterable<String> ids,
+    bool hidden, {
+    Future<bool> Function()? canCommit,
+  }) =>
+      _serialized(() async {
+        if (canCommit != null && !await canCommit()) {
+          throw StateError('账号会话已变化，旧隐藏结果已拒绝提交');
+        }
+        final state = await _read();
+        final existing = ids.where(state.byId.containsKey).toSet();
+        if (hidden) {
+          state.hidden.addAll(existing);
+        } else {
+          state.hidden.removeAll(existing);
+        }
+        await _save(state);
+        return state.pending;
+      });
+
   static List<Assignment> mergeAssignments(
       List<Assignment> existing, List<Assignment> incoming,
-      {Set<String> hiddenCompletedIds = const {}}) {
+      {Set<String> hiddenCompletedIds = const {},
+      bool includeCompleted = false}) {
     final state = _Journal(existing, {...hiddenCompletedIds}, null);
     state.merge(incoming);
-    return state.pending;
+    return includeCompleted ? state.journal : state.pending;
   }
 
   Future<void> clear() => _serialized(() async {
@@ -660,13 +806,17 @@ class LocalAssignmentRepository {
     if (encoded != null) {
       try {
         final decoded = jsonDecode(encoded) as Map<String, dynamic>;
-        if (decoded['schemaVersion'] != null && decoded['schemaVersion'] != 1) {
+        final version = decoded['schemaVersion'];
+        if (version != null && (version is! int || !{1, 2}.contains(version))) {
           throw StateError('本机记录来自较新版本，请升级应用后重试');
         }
         final records = decoded['records'] as List;
-        final valid = await _readRecords(records, prefs, encoded);
+        final courseTaskKeys = <String, String>{};
+        final valid = await _readRecords(records, prefs, encoded,
+            courseTaskKeys: courseTaskKeys);
         return _Journal(valid, Set<String>.from(decoded['hidden'] as List),
-            DateTime.tryParse(decoded['lastSync'] as String? ?? '')?.toLocal());
+            DateTime.tryParse(decoded['lastSync'] as String? ?? '')?.toLocal(),
+            courseTaskKeys: courseTaskKeys);
       } on FormatException {
         await _backupDamaged(prefs, encoded);
         return _Journal([], {}, null);
@@ -717,11 +867,22 @@ class LocalAssignmentRepository {
   }
 
   Future<List<Assignment>> _readRecords(
-      List records, SharedPreferences prefs, String raw) async {
+      List records, SharedPreferences prefs, String raw,
+      {Map<String, String>? courseTaskKeys}) async {
     final valid = <Assignment>[];
     for (final record in records) {
       try {
-        valid.add(Assignment.fromJson(record as Map<String, dynamic>));
+        final value = record as Map<String, dynamic>;
+        final assignment = Assignment.fromJson(value);
+        final key = value['courseTaskKey'];
+        if (key != null) {
+          if (BackupSnapshot.isValidCourseTaskKey(assignment, key)) {
+            courseTaskKeys?[assignment.id] = key as String;
+          } else {
+            await _backupDamaged(prefs, raw);
+          }
+        }
+        valid.add(assignment);
       } on FormatException {
         await _backupDamaged(prefs, raw);
       } on TypeError {
@@ -796,21 +957,38 @@ class LocalAssignmentRepository {
 }
 
 class _Journal {
-  _Journal(List<Assignment> records, this.hidden, this.lastSync)
+  _Journal(List<Assignment> records, this.hidden, this.lastSync,
+      {Map<String, String> courseTaskKeys = const {}})
       : byId = {
           // The UI reads the full journal, so migrate legacy completion labels
           // into status instead of filtering them only from the pending getter.
           for (final a in records)
             a.id:
                 _oldCompletedPeerReview(a) ? a.copyWith(status: 'submitted') : a
+        },
+        courseTaskKeys = {
+          ...courseTaskKeys,
+          for (final a in records)
+            if (a.source == AssignmentSource.classroomActivity &&
+                a.courseTaskKey != null)
+              a.id: a.courseTaskKey!,
         };
   final Map<String, Assignment> byId;
+  final Map<String, String> courseTaskKeys;
   final Set<String> hidden;
   DateTime? lastSync;
+  int identityConflictCount = 0;
+  final identityConflictSources = <String>{};
 
   Map<String, dynamic> toJson() => {
-        'schemaVersion': 1,
-        'records': byId.values.map((a) => a.toJson()).toList(),
+        'schemaVersion': 2,
+        'records': byId.values
+            .map((a) => {
+                  ...a.toJson(),
+                  if (courseTaskKeys[a.id] != null)
+                    'courseTaskKey': courseTaskKeys[a.id],
+                })
+            .toList(),
         'hidden': hidden.toList()..sort(),
         'lastSync': lastSync?.toUtc().toIso8601String(),
       };
@@ -823,11 +1001,21 @@ class _Journal {
 
   // Only old parsed peer-review rows used a combined label in place of status.
   static bool _oldCompletedPeerReview(Assignment a) =>
+      !_isTypedClassroomTask(a) &&
       a.status == 'pending' &&
       RegExp(r'^互评作业\s+(已互评|已完成|已提交|已评价|评价完成|互评完成)$')
           .hasMatch(a.requirementsText.trim());
 
+  static bool _isTypedClassroomTask(Assignment a) =>
+      a.source == AssignmentSource.classroomActivity &&
+      const {35, 42, 77}.contains(a.activityType);
+
   static String? _workKey(Assignment a) {
+    // A classroom task may carry a work URL, but activeId is not workId.
+    if (a.source == AssignmentSource.classroomActivity &&
+        a.activityType != null) {
+      return null;
+    }
     if (a.id.startsWith('cx:work:')) return a.id;
     final uri = Uri.tryParse(a.submitUrl ?? '');
     if (uri == null || !uri.host.endsWith('.chaoxing.com')) return null;
@@ -840,6 +1028,10 @@ class _Journal {
   }
 
   static String? _activityKey(Assignment a) {
+    if (a.source == AssignmentSource.classroomActivity &&
+        a.courseTaskKey != null) {
+      return a.courseTaskKey;
+    }
     final uri = Uri.tryParse(a.submitUrl ?? '');
     if (uri == null || !uri.host.endsWith('.chaoxing.com')) return null;
     final q = uri.queryParameters.map((k, v) => MapEntry(k.toLowerCase(), v));
@@ -850,23 +1042,156 @@ class _Journal {
     return 'cx:${a.id.startsWith('cx:exam:') ? 'exam' : 'activity'}:$course:$clazz:$active';
   }
 
+  static String? _classroomTaskKey(Assignment a) {
+    if (a.activityType != null &&
+        !const {35, 42, 77}.contains(a.activityType)) {
+      return null;
+    }
+    if (a.source == AssignmentSource.legacyUnknown) {
+      // Older rows may predate source classification. Only a model-validated
+      // activity identity can upgrade them, never a title or work-ID suffix.
+      return a
+          .copyWith(source: AssignmentSource.classroomActivity)
+          .courseTaskKey;
+    }
+    return a.source == AssignmentSource.classroomActivity
+        ? _activityKey(a)
+        : null;
+  }
+
+  void _mergeClassroomTask(Assignment item) {
+    final key = item.courseTaskKey!;
+    item = item.copyWith(persistedCourseTaskKey: key);
+    final matches = byId.values
+        .where((a) => (_classroomTaskKey(a) ?? courseTaskKeys[a.id]) == key)
+        .toList();
+    final incompatible = matches.any(
+        (a) => a.activityType != null && a.activityType != item.activityType);
+    Assignment? prior;
+    if (matches.length > 1 || incompatible) {
+      // Never choose one alias and delete the others. Their IDs may each own
+      // personal notes, attachment references and daily-plan entries.
+      identityConflictCount++;
+      identityConflictSources.add(item.reminderSourceKey!);
+      for (final alias in matches) {
+        if (alias.id == item.id) continue;
+        byId[alias.id] = alias.copyWith(
+            status: 'unknown',
+            availability: AssignmentAvailability.unknown,
+            clearCompletedAt: true);
+      }
+      prior = byId[item.id];
+      if (prior != null &&
+          ((_classroomTaskKey(prior) ?? courseTaskKeys[prior.id]) != key ||
+              (prior.activityType != null &&
+                  prior.activityType != item.activityType))) {
+        return;
+      }
+    } else if (matches.isNotEmpty) {
+      prior = matches.single;
+    } else if (byId.containsKey(item.id)) {
+      // A reused storage ID with another business identity is also ambiguous.
+      identityConflictCount++;
+      identityConflictSources.add(item.reminderSourceKey!);
+      return;
+    }
+    if (prior != null) {
+      if (item.lastSyncedAt.isBefore(prior.lastSyncedAt)) return;
+      item = item.copyWith(
+          id: prior.id,
+          submitUrl: item.submitUrl ?? prior.submitUrl,
+          aiPracticePublishUuid: item.submitUrl == null
+              ? prior.aiPracticePublishUuid
+              : item.aiPracticePublishUuid);
+      // An opaque legacy ID depends on its verified activity URL. A work URL
+      // or a URL for another activity must not change that retained identity.
+      if (item.submitUrl != null && item.linkedActivityKey != key) {
+        item = item.copyWith(
+            submitUrl: prior.submitUrl,
+            aiPracticePublishUuid: prior.aiPracticePublishUuid,
+            clearAiPracticePublishUuid: prior.aiPracticePublishUuid == null,
+            clearSubmitUrl: prior.submitUrl == null);
+      }
+      item = _preserveFailedDeadline(item, prior);
+    }
+    // Personal activity evidence can reopen a task. Unknown is also the
+    // current observation, so a previous completedAt must not imply completion.
+    if (!item.isCompleted) item = item.copyWith(clearCompletedAt: true);
+    byId[item.id] = item;
+    courseTaskKeys[item.id] = key;
+  }
+
+  static Assignment _preserveFailedDeadline(Assignment item, Assignment prior) {
+    // Completed work sometimes stops exposing its deadline in a refreshed
+    // list. That absence is not evidence that the previous time was wrong.
+    final preserveCompleted = item.isCompleted &&
+        !item.deadlineTrusted &&
+        prior.deadlineTrusted &&
+        prior.deadlineAt != null;
+    if (!item.deadlineReadFailed && !preserveCompleted) return item;
+    return item.copyWith(
+        deadlineAt: prior.deadlineAt,
+        deadlineTrusted: prior.deadlineTrusted,
+        deadlineRawText: prior.deadlineRawText,
+        clearDeadlineRawText: prior.deadlineRawText == null,
+        clearDeadlineAt: prior.deadlineAt == null);
+  }
+
   void merge(List<Assignment> incoming) {
     final oldIds = <String, List<String>>{};
     for (final a in byId.values) {
+      if (_isTypedClassroomTask(a)) continue;
       for (final key in {_workKey(a), _activityKey(a)}) {
         if (key != null) (oldIds[key] ??= []).add(a.id);
       }
     }
     for (var item in incoming) {
+      if (item.hasExamIdentity) {
+        final prior = byId[item.id];
+        if (prior == null || !item.lastSyncedAt.isBefore(prior.lastSyncedAt)) {
+          if (prior?.hasExamIdentity == true) {
+            final info = item.exam!.retainingHistoricalTimes(prior!.exam!);
+            item = item.copyWith(
+                exam: info,
+                deadlineAt: info.endAt,
+                deadlineTrusted: info.endTrusted,
+                clearDeadlineAt: info.endAt == null);
+          }
+          byId[item.id] =
+              item.isCompleted ? item : item.copyWith(clearCompletedAt: true);
+        }
+        continue;
+      }
+      if (item.isSupportedClassroomTask) {
+        _mergeClassroomTask(item);
+        continue;
+      }
+      // Generic activity observations cannot replace typed personal evidence,
+      // even when an earlier upgrade retained an opaque journal ID.
+      final classroomKey = _classroomTaskKey(item);
+      if (classroomKey != null &&
+          byId.values.any((a) =>
+              _isTypedClassroomTask(a) &&
+              (_classroomTaskKey(a) ?? courseTaskKeys[a.id]) == classroomKey)) {
+        continue;
+      }
       final key = _workKey(item) ?? _activityKey(item) ?? item.id;
       var prior = byId[key];
+      if (prior != null && _isTypedClassroomTask(prior)) continue;
       final aliases = <String>{
         ...oldIds.remove(key) ?? const <String>[],
         ...oldIds.remove(_activityKey(item)) ?? const <String>[]
-      };
+      }..removeWhere(
+          (id) => byId[id] != null && _isTypedClassroomTask(byId[id]!));
+      final candidates = {if (prior != null) key, ...aliases};
+      if (candidates.length > 1) {
+        identityConflictCount++;
+        aliases.clear();
+      }
       for (final alias in aliases) {
         if (alias == key) continue;
         final old = byId.remove(alias);
+        courseTaskKeys.remove(alias);
         prior ??= old;
         if (hidden.remove(alias)) hidden.add(key);
       }
@@ -876,12 +1201,7 @@ class _Journal {
           byId[key] = prior.copyWith(id: key);
           continue;
         }
-        if (item.deadlineReadFailed) {
-          item = item.copyWith(
-              deadlineAt: prior.deadlineAt,
-              deadlineTrusted: prior.deadlineTrusted,
-              clearDeadlineAt: prior.deadlineAt == null);
-        }
+        item = _preserveFailedDeadline(item, prior);
         // An ambiguous response cannot undo a verified submission. Reopening
         // requires the student's explicit returned / redo state.
         if (prior.isCompleted &&

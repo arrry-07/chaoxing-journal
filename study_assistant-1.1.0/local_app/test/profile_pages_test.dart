@@ -23,6 +23,11 @@ class _Session extends SecureSessionStore {
   Future<String?> readChaoxingAvatarUrl() async => null;
 }
 
+class _LoggedInSession extends _Session {
+  @override
+  Future<String?> readChaoxingAccount() async => 'student';
+}
+
 class _Notification extends LocalNotificationService {
   @override
   Future<void> cancelPrivateSchedules() async {}
@@ -130,10 +135,11 @@ void main() {
       (t) async {
     SharedPreferences.setMockInitialValues({});
     final s = AssignmentStore(
-        sessionStore: _Session(),
+        sessionStore: _LoggedInSession(),
         notificationService: _Notification(),
         widgetSnapshotService: _Widget());
     addTearDown(s.dispose);
+    await s.restoreSession();
     Assignment a(String id, String title) => Assignment(
         id: id,
         courseName: '课',

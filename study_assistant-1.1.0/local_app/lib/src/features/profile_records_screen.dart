@@ -29,14 +29,15 @@ class ProfileRecordsScreen extends StatelessWidget {
                   ProfileMenuTile(
                     icon: Icons.storage_outlined,
                     title: '本地记录',
-                    subtitle: '${store.assignments.length} 条作业记录保存在本机',
+                    subtitle: '${store.localRecordGroups.length} 项课业记录保存在本机',
                     onTap: () => context.push('/records'),
                   ),
                   ProfileMenuTile(
                     icon: Icons.visibility_off_outlined,
                     title: '已隐藏作业',
-                    subtitle: '${store.hiddenAssignments.length} 条，可恢复到作业清单',
-                    onTap: () => _showHiddenAssignments(context),
+                    subtitle:
+                        '${store.hiddenCourseworkGroups.length} 项，可恢复到作业清单',
+                    onTap: () => context.push('/records?status=hidden'),
                   ),
                   ProfileMenuTile(
                     icon: Icons.history,
@@ -50,52 +51,4 @@ class ProfileRecordsScreen extends StatelessWidget {
           ),
         ),
       );
-
-  void _showHiddenAssignments(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.7,
-        child: AnimatedBuilder(
-          animation: store,
-          builder: (context, _) => Column(
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('已隐藏作业'),
-              ),
-              if (store.error != null)
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(store.error!),
-                ),
-              Expanded(
-                child: store.hiddenAssignments.isEmpty
-                    ? const Center(child: Text('暂无隐藏作业'))
-                    : ListView.builder(
-                        itemCount: store.hiddenAssignments.length,
-                        itemBuilder: (context, index) {
-                          final item = store.hiddenAssignments[index];
-                          return ListTile(
-                            title: Text(item.title),
-                            subtitle: Text(item.courseName),
-                            trailing: TextButton(
-                              onPressed: store.isLoading
-                                  ? null
-                                  : () =>
-                                      store.updateCompletion(item.id, false),
-                              child: const Text('恢复'),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }

@@ -63,7 +63,7 @@ jobs:
         run: |
           for timezone in Asia/Shanghai America/Los_Angeles; do
             echo "Testing deadlines in $timezone"
-            TZ="$timezone" flutter test --no-pub test/journal_flow_test.dart test/chaoxing_api_parser_test.dart test/review_core_remediation_test.dart test/assignment_detail_navigation_test.dart
+            TZ="$timezone" flutter test --no-pub test/journal_flow_test.dart test/chaoxing_api_parser_test.dart test/review_core_remediation_test.dart test/assignment_detail_navigation_test.dart test/signed_deadline_anchor_test.dart test/assignment_query_test.dart test/home_scope_sort_1806_test.dart
           done
       - name: Build Android debug APK
         run: flutter build apk --debug --no-pub --target-platform android-arm64,android-x64

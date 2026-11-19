@@ -21,10 +21,7 @@ class ProfileMenuCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
               child: Text(
                 title,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w900),
+                style: Journal.entryTitle,
               ),
             ),
             for (var index = 0; index < children.length; index++) ...[

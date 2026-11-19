@@ -46,14 +46,20 @@ class ProfileScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Card(
-                    child: _SettingsTile(
-                      icon: Icons.school_outlined,
-                      title: '我的课程',
-                      subtitle: store.courses.isEmpty
-                          ? '暂无课程，前往查看与同步'
-                          : '已同步 ${store.courses.length} 门课程',
-                      compactSubtitle: true,
-                      onTap: () => context.push('/courses'),
+                    key: const ValueKey('profile-group-courses'),
+                    color: Color.lerp(Journal.sheet, Journal.sage, .35),
+                    clipBehavior: Clip.antiAlias,
+                    child: IconTheme.merge(
+                      data: const IconThemeData(color: Journal.ink),
+                      child: _SettingsTile(
+                        icon: Icons.school_outlined,
+                        title: '我的课程',
+                        subtitle: store.courses.isEmpty
+                            ? '暂无课程，前往查看与同步'
+                            : '已同步 ${store.courses.length} 门课程',
+                        compactSubtitle: true,
+                        onTap: () => context.push('/courses'),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -63,6 +69,8 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   _SettingsCard(
                     title: '学习与同步',
+                    accentColor: Journal.ink,
+                    headerColor: Journal.sage,
                     children: [
                       _SettingsTile(
                         icon: Icons.sync,
@@ -89,14 +97,25 @@ class ProfileScreen extends StatelessWidget {
                         icon: Icons.inventory_2_outlined,
                         title: '学习记录',
                         subtitle:
-                            '${store.assignments.length} 条作业 · ${store.changes.length} 条变化',
+                            '${store.localRecordGroups.length} 项课业 · ${store.changes.length} 条变化',
                         onTap: () => context.push('/profile/records'),
+                      ),
+                      _SettingsTile(
+                        icon: Icons.library_books_outlined,
+                        title: '课程通知与章节',
+                        subtitle: store.courseNotices.items.isEmpty &&
+                                store.courseChapters.byCourse.isEmpty
+                            ? '手动查看课程通知与章节任务点进度'
+                            : '未读通知 ${store.unreadCourseNoticeCount} 条 · 待完成小节 ${store.pendingChapterSectionCount} 处',
+                        onTap: () => context.push('/course-hub'),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   _SettingsCard(
                     title: '数据与安全',
+                    accentColor: Journal.ochre,
+                    headerColor: Journal.ochreBg,
                     children: [
                       _SettingsTile(
                         icon: Icons.health_and_safety_outlined,
@@ -122,6 +141,8 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   _SettingsCard(
                     title: '关于与更新',
+                    accentColor: Journal.slate,
+                    headerColor: Journal.slateBg,
                     children: [
                       _SettingsTile(
                         icon: Icons.help_outline,
@@ -176,15 +197,22 @@ class ProfileScreen extends StatelessWidget {
                           ? null
                           : () => _confirmLogout(context),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.error,
-                        side: const BorderSide(color: Color(0xFFFFE0E0)),
-                        backgroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        foregroundColor: Journal.berry,
+                        side: const BorderSide(color: Journal.berryBorder),
+                        backgroundColor:
+                            Color.lerp(Journal.sheet, Journal.berryBg, .25),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: const Text('退出登录'),
+                      child: const Text(
+                        '退出登录并清理本机记录',
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 28),
@@ -198,28 +226,40 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Future<void> _confirmLogout(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
+    final action = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('退出并清理本机记录？'),
         content: const SingleChildScrollView(
           child: Text(
-            '退出将清除本机保存的账号密码、课程作业、隐藏状态、课程关注、个人计划与备注清单、文件关联、提醒与摘要设置、同步记录、仓库损坏备份和账号切换备份（含其他账号），并清理作业通知与小组件。自动同步间隔会保留。\n\n学习通服务器上的课程作业不会删除。需要重新登录后同步；个人记录请先加密备份，本地文件关联需重新选择。',
+            '退出将清除本机保存的账号密码、课程作业、隐藏状态、课程关注、个人计划与备注清单、文件关联、提醒与摘要设置、同步记录、仓库损坏备份和账号切换备份（含其他账号），并清理作业通知与小组件。自动同步间隔会保留。\n\n学习通服务器上的课程作业不会删除。需要重新登录后同步；个人记录请先加密备份，本地文件关联需重新选择。建议先导出加密备份。',
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () => Navigator.pop(dialogContext, 'backup'),
+            child: const Text('先备份'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'cancel'),
             child: const Text('取消'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('确认退出'),
+            onPressed: () => Navigator.pop(dialogContext, 'logout'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Journal.berry,
+              foregroundColor: Journal.sheet,
+            ),
+            child: const Text('退出并清理本机记录'),
           ),
         ],
       ),
     );
-    if (confirmed != true || !context.mounted) return;
+    if (action == 'backup' && context.mounted) {
+      await context.push('/backup');
+      return;
+    }
+    if (action != 'logout' || !context.mounted) return;
     try {
       await store.logout();
       if (!context.mounted) return;
@@ -299,6 +339,7 @@ class _ProfileHeader extends StatelessWidget {
                 child: JournalHeading(
                   '我的手帐',
                   eyebrow: 'CAMPUS JOURNAL   /   04',
+                  bookTitle: true,
                 ),
               ),
               IconButton(
@@ -382,32 +423,48 @@ Map<String, String>? _profileAvatarHeaders(String? avatarUrl) {
 }
 
 class _SettingsCard extends StatelessWidget {
-  const _SettingsCard({required this.title, required this.children});
+  const _SettingsCard({
+    required this.title,
+    required this.accentColor,
+    required this.headerColor,
+    required this.children,
+  });
 
   final String title;
+  final Color accentColor;
+  final Color headerColor;
   final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
+    final foreground = Color.lerp(Journal.ink, accentColor, .50)!;
     return Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+      clipBehavior: Clip.antiAlias,
+      child: IconTheme.merge(
+        data: IconThemeData(color: foreground),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              key: ValueKey('profile-group-$title'),
+              width: double.infinity,
+              color: Color.lerp(Journal.sheet, headerColor, .35),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+              child: Text(
+                title,
+                style: Journal.section.copyWith(
+                  color: foreground,
+                  fontSize: 17,
+                ),
+              ),
             ),
-          ),
-          for (var i = 0; i < children.length; i += 1) ...[
-            children[i],
-            if (i != children.length - 1)
-              const Divider(height: 1, indent: 56, endIndent: 16),
+            for (var i = 0; i < children.length; i += 1) ...[
+              children[i],
+              if (i != children.length - 1)
+                const Divider(height: 1, indent: 56, endIndent: 16),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -435,8 +492,8 @@ class _SettingsTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(icon, color: Journal.ink, size: 22),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      leading: Icon(icon, color: IconTheme.of(context).color, size: 22),
+      title: Text(title, style: Journal.entryTitle),
       subtitle: subtitle == null ? null : Text(subtitle!),
       subtitleTextStyle: compactSubtitle
           ? Theme.of(context).textTheme.bodySmall?.copyWith(

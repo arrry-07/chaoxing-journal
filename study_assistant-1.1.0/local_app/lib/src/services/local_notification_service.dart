@@ -10,9 +10,11 @@ import 'package:timezone/data/latest.dart' as timezone_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../models/assignment.dart';
+import 'assignment_reminder_planner.dart';
 import 'reminder_rule_store.dart';
 import 'daily_summary.dart';
 import '../models/personal_workspace.dart';
+import '../models/reminder_history.dart';
 import '../models/study_notebook.dart';
 
 typedef NotificationPayloadHandler = void Function(String payload);
@@ -26,6 +28,7 @@ class LocalNotificationService {
 
   final FlutterLocalNotificationsPlugin _plugin;
   String? lastWarning;
+  List<ReminderScheduleOutcome> lastScheduleOutcomes = const [];
   bool showDetails = false;
   static const assignmentChannel = 'assignment_deadlines';
   static const assignmentUpdatesChannel = 'assignment_updates';
@@ -69,6 +72,7 @@ class LocalNotificationService {
   static const _scheduleCategories = ['assignments', 'manual', 'summary'];
   static const _scheduleJournalPrefix = 'notification_schedule_v2_journal_';
   static const _scheduleActivePrefix = 'notification_schedule_v2_active_';
+  static const _summaryEvidenceKey = 'notification_summary_evidence_v1';
 
   /// Privacy tightening must not retain detailed alarms if replacement fails.
   Future<void> cancelPrivateSchedules() async {
@@ -159,6 +163,9 @@ class LocalNotificationService {
             await _writeActiveIds(prefs, category, const []);
           }
           if (journalIsValid) await _removeJournal(prefs, category);
+          if (category == 'summary') {
+            await prefs.remove(_summaryEvidenceKey);
+          }
         }
       } catch (error) {
         lastWarning = '已取消可识别的隐私提醒，但本机恢复记录清理失败：$error';
@@ -271,8 +278,10 @@ class LocalNotificationService {
   String? _pendingPayload;
   Future<void> rescheduleManual(List<ManualEntry> entries) async {
     lastWarning = null;
+    lastScheduleOutcomes = const [];
     await _ensurePluginInitialized();
     final schedules = <(ManualEntry, DateTime)>[];
+    final validIds = <String>{};
     final seen = <String>{};
     var reminderWindowMissed = false;
     for (final e in entries.where((e) => !e.done && e.remind && e.at != null)) {
@@ -284,6 +293,7 @@ class LocalNotificationService {
       if (!seen.add(e.id)) {
         throw StateError('个人提醒存在重复标识，请修改后重试');
       }
+      validIds.add(e.id);
       schedules.add((e, at));
     }
     if (reminderWindowMissed) {
@@ -317,9 +327,13 @@ class LocalNotificationService {
       }
     }
     try {
-      await _replaceScheduleBatch(
+      final ids = await _replaceScheduleBatch(
         category: 'manual',
         belongs: (payload) => payload?.startsWith('p:') ?? false,
+        retainOldPayload: (payload) {
+          if (payload == null || !payload.startsWith('p:')) return false;
+          return validIds.contains(payload.substring(2));
+        },
         schedules: schedules,
         schedule: (id, item) {
           final (entry, at) = item as (ManualEntry, DateTime);
@@ -334,8 +348,39 @@ class LocalNotificationService {
               payload: 'p:${entry.id}');
         },
       );
+      lastScheduleOutcomes = [
+        for (var index = 0; index < schedules.length; index++)
+          ReminderScheduleOutcome(
+            subjectKind: 'manual',
+            subjectId: schedules[index].$1.id,
+            logicalKey:
+                'manual:${schedules[index].$1.id}:${schedules[index].$2.millisecondsSinceEpoch}',
+            category: 'personal',
+            stage: 'scheduled',
+            observedAt: DateTime.now(),
+            scheduledAt: schedules[index].$2,
+            notificationId: ids[index],
+            expectedPayload: 'p:${schedules[index].$1.id}',
+            evidenceState: 'confirmedScheduled',
+          ),
+      ];
     } catch (error) {
       lastWarning = _appendWarning(lastWarning, '个人日程提醒批次未能完成：$error');
+      lastScheduleOutcomes = [
+        for (final (entry, at) in schedules)
+          ReminderScheduleOutcome(
+            subjectKind: 'manual',
+            subjectId: entry.id,
+            logicalKey: 'manual:${entry.id}:${at.millisecondsSinceEpoch}',
+            category: 'personal',
+            stage: 'scheduleFailed',
+            reasonCode: 'scheduleBatchFailed',
+            observedAt: DateTime.now(),
+            scheduledAt: at,
+            expectedPayload: 'p:${entry.id}',
+            evidenceState: 'recoveryPending',
+          ),
+      ];
       rethrow;
     }
   }
@@ -377,6 +422,50 @@ class LocalNotificationService {
         scheduleRecoveryPending: scheduleRecoveryPending);
   }
 
+  Future<PluginScheduleEvidenceSnapshot> readScheduleEvidence() async {
+    await _ensurePluginInitialized();
+    final byId = <int, PluginScheduleEvidence>{};
+    String? error;
+    try {
+      final pending = await _plugin.pendingNotificationRequests();
+      for (final item in pending) {
+        byId[item.id] = PluginScheduleEvidence(
+          id: item.id,
+          payload: item.payload,
+          channelId: null,
+          pending: true,
+          active: false,
+        );
+      }
+    } catch (readError) {
+      error = '待投递提醒读取失败：$readError';
+    }
+    try {
+      final active = await _plugin.getActiveNotifications();
+      for (final item in active) {
+        final id = item.id;
+        if (id == null) continue;
+        final previous = byId[id];
+        byId[id] = PluginScheduleEvidence(
+          id: id,
+          payload: item.payload ?? previous?.payload,
+          channelId: item.channelId ?? previous?.channelId,
+          pending: previous?.pending ?? false,
+          active: true,
+        );
+      }
+    } catch (readError) {
+      error = error == null
+          ? '当前可见提醒读取失败：$readError'
+          : '$error；当前可见提醒读取失败：$readError';
+    }
+    return PluginScheduleEvidenceSnapshot(
+      items: byId.values.toList(),
+      error: error,
+      checkedAt: DateTime.now(),
+    );
+  }
+
   Future<bool> showTestNotification() => _runScheduleMutation(() async {
         // Enqueue before initialization/health awaits so account/privacy cleanup
         // also retires a test notification whose display request is still in flight.
@@ -415,12 +504,15 @@ class LocalNotificationService {
   Future<void> rescheduleSummary(List<Assignment> assignments,
       PersonalWorkspace personal, DateTime? lastSync) async {
     lastWarning = null;
+    lastScheduleOutcomes = const [];
     await _ensurePluginInitialized();
-    final desired =
-        DailySummary.build(assignments, personal, DateTime.now(), lastSync);
+    final now = DateTime.now();
+    final desired = DailySummary.build(assignments, personal, now, lastSync);
     if (desired.isNotEmpty) await _ensureAndroidChannel(summaryChannel);
     try {
-      await _replaceScheduleBatch(
+      final prefs = await SharedPreferences.getInstance();
+      final prior = _readSummaryEvidence(prefs);
+      final ids = await _replaceScheduleBatch(
         category: 'summary',
         belongs: (payload) => payload == 'd:summary',
         schedules: desired,
@@ -441,13 +533,108 @@ class LocalNotificationService {
               payload: 'd:summary');
         },
       );
+      final desiredKeys = <String>{
+        for (final notice in desired)
+          'summary:${notice.at.millisecondsSinceEpoch}',
+      };
+      final observedAt = DateTime.now();
+      final cancellations = <ReminderScheduleOutcome>[
+        for (final prev in prior)
+          if (prev.scheduledAtMs > now.millisecondsSinceEpoch &&
+              !desiredKeys.contains(prev.logicalKey))
+            ReminderScheduleOutcome(
+              subjectKind: 'summary',
+              logicalKey: prev.logicalKey,
+              category: 'summary',
+              stage: 'cancelled',
+              reasonCode: (!personal.summaryEnabled || desired.isEmpty)
+                  ? 'reminderDisabled'
+                  : 'scheduleReplaced',
+              observedAt: observedAt,
+              scheduledAt:
+                  DateTime.fromMillisecondsSinceEpoch(prev.scheduledAtMs),
+              notificationId: prev.notificationId,
+              expectedPayload: 'd:summary',
+              evidenceState: 'removed',
+            ),
+      ];
+      final currentRecords = [
+        for (var index = 0; index < desired.length; index++)
+          {
+            'logicalKey': 'summary:${desired[index].at.millisecondsSinceEpoch}',
+            'scheduledAtMs': desired[index].at.millisecondsSinceEpoch,
+            'notificationId': ids[index],
+          },
+      ];
+      if (currentRecords.isEmpty) {
+        await prefs.remove(_summaryEvidenceKey);
+      } else {
+        await prefs.setString(_summaryEvidenceKey, jsonEncode(currentRecords));
+      }
+      lastScheduleOutcomes = [
+        ...cancellations,
+        for (var index = 0; index < desired.length; index++)
+          ReminderScheduleOutcome(
+            subjectKind: 'summary',
+            logicalKey: 'summary:${desired[index].at.millisecondsSinceEpoch}',
+            category: 'summary',
+            stage: 'scheduled',
+            observedAt: observedAt,
+            scheduledAt: desired[index].at,
+            notificationId: ids[index],
+            expectedPayload: 'd:summary',
+            evidenceState: 'confirmedScheduled',
+          ),
+      ];
     } catch (error) {
       lastWarning = _appendWarning(lastWarning, '每日摘要提醒批次未能完成：$error');
+      lastScheduleOutcomes = [
+        for (final notice in desired)
+          ReminderScheduleOutcome(
+            subjectKind: 'summary',
+            logicalKey: 'summary:${notice.at.millisecondsSinceEpoch}',
+            category: 'summary',
+            stage: 'scheduleFailed',
+            reasonCode: 'scheduleBatchFailed',
+            observedAt: DateTime.now(),
+            scheduledAt: notice.at,
+            expectedPayload: 'd:summary',
+            evidenceState: 'recoveryPending',
+          ),
+      ];
       rethrow;
     }
   }
 
-  static String formatDeadlineRemainingText(int offsetMinutes) {
+  List<({String logicalKey, int scheduledAtMs, int? notificationId})>
+      _readSummaryEvidence(SharedPreferences prefs) {
+    final raw = prefs.getString(_summaryEvidenceKey);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      final records =
+          <({String logicalKey, int scheduledAtMs, int? notificationId})>[];
+      for (final item in decoded) {
+        if (item is! Map) continue;
+        final key = item['logicalKey'] as String?;
+        final scheduledAtMs = (item['scheduledAtMs'] as num?)?.toInt();
+        final notificationId = (item['notificationId'] as num?)?.toInt();
+        if (key == null || key.isEmpty || scheduledAtMs == null) continue;
+        records.add((
+          logicalKey: key,
+          scheduledAtMs: scheduledAtMs,
+          notificationId: notificationId,
+        ));
+      }
+      return records;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static String formatDeadlineRemainingText(int offsetMinutes,
+      {bool examStart = false}) {
     final safeMinutes = offsetMinutes < 0 ? 0 : offsetMinutes;
     final days = safeMinutes ~/ 1440;
     final hours = (safeMinutes % 1440) ~/ 60;
@@ -457,7 +644,7 @@ class LocalNotificationService {
       if (hours > 0) '$hours 小时',
       if (minutes > 0 || (days == 0 && hours == 0)) '$minutes 分钟',
     ];
-    return '还剩 ${parts.join(' ')}截止';
+    return '还剩 ${parts.join(' ')}${examStart ? '开考' : '截止'}';
   }
 
   void setPayloadHandler(NotificationPayloadHandler? onPayload) {
@@ -627,22 +814,69 @@ class LocalNotificationService {
     }
   }
 
-  Future<void> _replaceScheduleBatch({
+  Future<List<int>> _replaceScheduleBatch({
     required String category,
     required bool Function(String?) belongs,
+    bool Function(String?)? retainOldPayload,
     required List<Object> schedules,
     required Future<void> Function(int id, Object item) schedule,
   }) async {
-    await _runScheduleMutation(() async {
+    return _runScheduleMutation(() async {
       await _recoverScheduleTransactionLocked(category);
       final prefs = await SharedPreferences.getInstance();
-      final pending = await _plugin.pendingNotificationRequests();
-      final oldIds = <int>{
+      var pending = await _plugin.pendingNotificationRequests();
+      var oldIds = <int>{
         ..._readActiveIds(prefs, category),
         ...pending
             .where((item) => belongs(item.payload))
             .map((item) => item.id),
       };
+      if (retainOldPayload != null) {
+        final staleIds = <int>{
+          for (final item in pending)
+            if (belongs(item.payload) && !retainOldPayload(item.payload))
+              item.id,
+        };
+        // Delivered notifications usually omit payload on Android. Only an
+        // explicit p: payload is safe evidence for mapping an ID to an entry.
+        try {
+          final visible = await _plugin.getActiveNotifications();
+          for (final item in visible) {
+            final id = item.id;
+            if (id == null ||
+                !belongs(item.payload) ||
+                retainOldPayload(item.payload)) {
+              continue;
+            }
+            staleIds.add(id);
+            oldIds.add(id);
+          }
+        } catch (_) {
+          // Pending requests still cover future reminders. An unreadable
+          // delivered-notification list must not block that cleanup.
+        }
+        if (staleIds.isNotEmpty) {
+          final retained = oldIds.difference(staleIds);
+          await _writeJournal(prefs, category, {
+            'version': 2,
+            'category': category,
+            'phase': 'committed',
+            'oldIds': staleIds.toList()..sort(),
+            'newIds': retained.toList()..sort(),
+          });
+          // Persist the cleanup decision before cancelling. Recovery either
+          // finishes the cancellation or leaves the committed journal for a
+          // later health/startup retry.
+          await _recoverScheduleTransactionLocked(category);
+          pending = await _plugin.pendingNotificationRequests();
+          oldIds = <int>{
+            ..._readActiveIds(prefs, category),
+            ...pending
+                .where((item) => belongs(item.payload))
+                .map((item) => item.id),
+          };
+        }
+      }
       final reserved = <int>{...pending.map((item) => item.id)};
       for (final otherCategory in _scheduleCategories) {
         try {
@@ -713,7 +947,7 @@ class LocalNotificationService {
         final stagingRaw = jsonEncode(journal);
         if (stateVerified && persisted == committedRaw) {
           await _recoverScheduleTransactionLocked(category);
-          return;
+          return newIds;
         }
         if (!stateVerified || (persisted != stagingRaw && persisted != null)) {
           lastWarning = '提醒提交状态无法核实；新旧提醒和事务记录均予以保留，请重试恢复，勿手动清理通知';
@@ -747,6 +981,7 @@ class LocalNotificationService {
       // Once the committed marker is durable, the new batch is authoritative.
       // A failed old-batch cancellation leaves a committed journal for retry.
       await _recoverScheduleTransactionLocked(category);
+      return newIds;
     });
   }
 
@@ -942,10 +1177,12 @@ class LocalNotificationService {
     final prefs = await SharedPreferences.getInstance();
     final journal = _readJournal(prefs, category);
     if (journal == null) return;
+    var unresolvedOldIds = <int>{};
     if (journal['version'] == 1) {
       await _verifyLegacyJournalOwnership(category, journal, prefs);
     } else {
-      await _verifyV2JournalOwnership(category, journal, prefs);
+      unresolvedOldIds =
+          await _verifyV2JournalOwnership(category, journal, prefs);
     }
     final phase = journal['phase'] as String;
     final oldIds = journal['oldIds'] as List<int>;
@@ -960,19 +1197,36 @@ class LocalNotificationService {
       return;
     }
     if (phase == 'committed') {
-      final failures = await _cancelIds(oldIds);
+      final cancellableIds =
+          oldIds.where((id) => !unresolvedOldIds.contains(id)).toList();
+      final failures = await _cancelIds(cancellableIds);
       if (failures.isNotEmpty) {
         lastWarning = '新提醒批次已生效，旧通知清理失败：${failures.join('; ')}';
         throw StateError(lastWarning!);
       }
       await _writeActiveIds(prefs, category, newIds);
+      if (unresolvedOldIds.isNotEmpty) {
+        await _writeJournal(prefs, category, {
+          'version': 2,
+          'category': category,
+          'phase': 'committed',
+          'oldIds': unresolvedOldIds.toList()..sort(),
+          'newIds': newIds,
+        });
+        lastWarning = _appendWarning(
+            lastWarning,
+            '已取消 ${cancellableIds.length} 条可确认的待投递个人提醒；'
+            '系统可见通知完整性未确认，'
+            '${unresolvedOldIds.length} 条旧提醒仍待核对');
+        throw StateError(lastWarning!);
+      }
       await _removeJournal(prefs, category);
       return;
     }
     throw FormatException('未知提醒事务阶段：$phase');
   }
 
-  Future<void> _verifyV2JournalOwnership(
+  Future<Set<int>> _verifyV2JournalOwnership(
     String category,
     Map<String, dynamic> journal,
     SharedPreferences prefs,
@@ -989,7 +1243,55 @@ class LocalNotificationService {
     }
 
     final pending = await _plugin.pendingNotificationRequests();
-    final active = await _plugin.getActiveNotifications();
+    final List<ActiveNotification> active;
+    try {
+      active = await _plugin.getActiveNotifications();
+    } catch (error) {
+      if (category != 'manual' || journal['phase'] != 'committed') {
+        rethrow;
+      }
+      // Delivered-notification enumeration is unavailable. Only cancel IDs
+      // that the pending list still proves belong to this manual batch via an
+      // explicit p: payload. Anything else stays in the journal for a later
+      // recovery; never infer ownership from an ID alone.
+      final pendingById = <int, String?>{
+        for (final item in pending) item.id: item.payload,
+      };
+      final unresolved = <int>{};
+      for (final id in journal['oldIds'] as List<int>) {
+        if (!pendingById.containsKey(id)) {
+          unresolved.add(id);
+          continue;
+        }
+        final payload = pendingById[id];
+        final owner = _scheduleCategoryForPayload(payload);
+        if (owner == 'manual' && _isValidManualPayload(payload)) {
+          continue;
+        }
+        if (owner != null && owner != category) {
+          throw FormatException('v2 $category 事务 ID 实际属于 $owner 通知类别');
+        }
+        unresolved.add(id);
+      }
+      final oldIdSet = (journal['oldIds'] as List<int>).toSet();
+      for (final item in pending) {
+        if (!transactionIds.contains(item.id)) continue;
+        if (oldIdSet.contains(item.id) && unresolved.contains(item.id)) {
+          continue;
+        }
+        final owner = _scheduleCategoryForPayload(item.payload);
+        if (owner != category) {
+          throw FormatException('v2 $category 事务 ID 缺少可证明的类别归属');
+        }
+      }
+      if (lastWarning?.contains('当前可见通知列表读取失败') != true) {
+        lastWarning = _appendWarning(
+            lastWarning,
+            '当前可见通知列表读取失败；已投递通知的完整性未确认，'
+            '仅处理有明确 p: 归属证据的待投递个人提醒');
+      }
+      return unresolved;
+    }
     void verifyVisible(int id, String? owner) {
       if (!transactionIds.contains(id)) return;
       if (owner == null) {
@@ -1022,6 +1324,7 @@ class LocalNotificationService {
       }
       verifyVisible(id, owner);
     }
+    return const <int>{};
   }
 
   Future<void> _verifyLegacyJournalOwnership(
@@ -1106,7 +1409,13 @@ class LocalNotificationService {
     }
 
     final oldIds = ids(decoded['oldIds']);
-    final newIds = ids(decoded['newIds'], transactional: true);
+    // Staging always allocates fresh transactional IDs. A committed cleanup
+    // may retain still-valid legacy manual IDs in newIds; category ownership
+    // is still verified below before any cancellation.
+    final newIds = ids(
+      decoded['newIds'],
+      transactional: decoded['phase'] == 'staging',
+    );
     if (oldIds.toSet().intersection(newIds.toSet()).isNotEmpty) {
       throw const FormatException('提醒事务新旧 ID 重叠');
     }
@@ -1237,6 +1546,14 @@ class LocalNotificationService {
     return null;
   }
 
+  static bool _isValidManualPayload(String? payload) {
+    if (payload == null || !payload.startsWith('p:')) return false;
+    final id = payload.substring(2);
+    return id.isNotEmpty &&
+        id.length <= 100 &&
+        !id.codeUnits.any((unit) => unit < 0x20 || unit == 0x7f);
+  }
+
   static String? _scheduleCategoryForChannel(String? channel) =>
       switch (channel) {
         assignmentChannel => 'assignments',
@@ -1331,10 +1648,12 @@ class LocalNotificationService {
       final seen = <String>{};
       final now = DateTime.now();
       for (final assignment in assignments.where((item) =>
-          item.deadlineBucketAt(now) ==
-          AssignmentDeadlineBucket.notExpiredWithDeadline)) {
+          AssignmentReminderSnapshot(
+                  assignment: item, hidden: false, followed: true)
+              .eligibleAt(now))) {
         for (final offset in offsets) {
-          final at = assignment.deadlineAt?.subtract(Duration(minutes: offset));
+          final at =
+              assignment.reminderAnchorAt?.subtract(Duration(minutes: offset));
           if (at == null || !at.isAfter(now)) continue;
           if (!seen.add('${assignment.id}:$offset')) {
             throw StateError('作业提醒存在重复标识，请重新同步后重试');
@@ -1365,17 +1684,20 @@ class LocalNotificationService {
     int offset,
     int notificationId,
   ) async {
-    final notifyAt = assignment.deadlineAt?.subtract(Duration(minutes: offset));
+    final notifyAt =
+        assignment.reminderAnchorAt?.subtract(Duration(minutes: offset));
     if (notifyAt == null || notifyAt.difference(DateTime.now()).isNegative) {
       return;
     }
     await _zonedSchedule(
       id: notificationId,
       channelId: assignmentChannel,
-      title: '作业即将截止',
+      title: assignment.isExam ? '考试即将开考' : '作业即将截止',
       body: showDetails
-          ? '${assignment.courseName} · ${assignment.title}，${formatDeadlineRemainingText(offset)}'
-          : '有作业即将截止，请打开课业手记查看',
+          ? '${assignment.courseName} · ${assignment.title}，${formatDeadlineRemainingText(offset, examStart: assignment.isExam)}'
+          : assignment.isExam
+              ? '有考试即将开考，请打开课业手记查看'
+              : '有作业即将截止，请打开课业手记查看',
       notifyAt: notifyAt,
       payload:
           'a:studyassistant:///assignments/${Uri.encodeComponent(assignment.id)}',

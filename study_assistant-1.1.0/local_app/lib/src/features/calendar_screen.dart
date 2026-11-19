@@ -1,10 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../app/journal.dart';
-import '../models/assignment.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
@@ -20,16 +20,37 @@ class CalendarScreen extends StatefulWidget {
   State<CalendarScreen> createState() => _CalendarScreenState();
 }
 
-class _CalendarScreenState extends State<CalendarScreen> {
+class _CalendarScreenState extends State<CalendarScreen>
+    with WidgetsBindingObserver {
+  static const _dateStyle = TextStyle(
+    fontFamily: Journal.bodyFamily,
+    fontFamilyFallback: Journal.bodyFallback,
+    fontSize: 14,
+    height: 1.4,
+  );
+  static const _countStyle = TextStyle(
+    fontFamily: Journal.bodyFamily,
+    fontFamilyFallback: Journal.bodyFallback,
+    fontSize: 11,
+    height: 1.4,
+    color: Journal.muted,
+  );
+  static const _cellBorderWidth = 1.0;
+  static const _cellVerticalPadding = 2.0;
+  static const _cellSlack = 1.0;
+
   Timer? _clock;
   late DateTime _now;
   late DateTime today;
   late DateTime month;
   DateTime? selected;
+  bool _refreshing = false;
+  String? _refreshMessage;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _now = widget.clock?.call() ?? DateTime.now();
     today = AssignmentQuery.dayKey(_now);
     month = DateTime(today.year, today.month);
@@ -45,20 +66,84 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _clock?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    setState(() {
+      _now = widget.clock?.call() ?? DateTime.now();
+      today = AssignmentQuery.dayKey(_now);
+    });
   }
 
   void move(int delta) => setState(() {
         month = DateTime(month.year, month.month + delta);
         selected = DateTime(month.year, month.month);
       });
+
+  Future<void> _refresh() async {
+    if (_refreshing || widget.store.isLoading) return;
+    setState(() {
+      _refreshing = true;
+      _refreshMessage = null;
+    });
+    try {
+      await widget.store.syncAssignments();
+      if (!mounted) return;
+      final completedAt = widget.clock?.call() ?? DateTime.now();
+      final report = widget.store.syncReport;
+      final last = report.lastDataSuccessAt ?? widget.store.lastSyncAt;
+      final formattedTime = DateFormat('HH:mm:ss').format(completedAt);
+      final String message;
+      switch (report.phase) {
+        case SyncPhase.success:
+          if (widget.store.operationError != null) {
+            message = last == null
+                ? '本次刷新失败，且没有可用的本机缓存；请到同步详情重试'
+                : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）';
+          } else if (widget.store.serviceWarnings.isNotEmpty) {
+            message = '本次刷新已完成（$formattedTime），本机提醒或小组件需处理';
+          } else {
+            message = '本次刷新已完成（$formattedTime）';
+          }
+        case SyncPhase.partial:
+          message = '本次刷新部分完成（$formattedTime），部分来源待确认；请查看同步详情';
+        case SyncPhase.cancelled:
+          message = last == null
+              ? '本次刷新已取消，且没有可用的本机缓存；请重试'
+              : '本次刷新已取消，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）';
+        case SyncPhase.idle:
+        case SyncPhase.running:
+        case SyncPhase.failed:
+          message = last == null
+              ? '本次刷新失败，且没有可用的本机缓存；请到同步详情重试'
+              : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）';
+      }
+      setState(() => _refreshMessage = message);
+    } catch (error) {
+      if (!mounted) return;
+      final last = widget.store.lastSyncAt;
+      setState(() {
+        _refreshMessage = last == null
+            ? '本次刷新失败：$error'
+            : '本次刷新失败，已保留上次成功数据（${DateFormat('M月d日 HH:mm').format(last.toLocal())}）：$error';
+      });
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
         final now = _now;
-        final all = widget.store.visibleAssignments;
+        final courseSources = widget.store.courseAssignments;
+        final all = AssignmentQuery.projectDisplay(courseSources);
         final manual = widget.store.notebook.entries
             .where((e) => !e.done && e.at != null)
             .toList();
@@ -69,12 +154,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
               : d == selected;
         }).toList()
           ..sort((a, b) => a.at!.compareTo(b.at!));
-        final dated = all.where((assignment) {
-          final bucket = assignment.deadlineBucketAt(now);
-          return (bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
-                  bucket == AssignmentDeadlineBucket.overdue) &&
-              assignment.deadlineAt != null;
-        }).toList();
+        final dated = all
+            .where((assignment) =>
+                AssignmentQuery.isCalendarDated(assignment, now))
+            .toList();
         final noDeadlineCount = all
             .where((a) => AssignmentRecoveryScope.noDeadline.matches(a, now))
             .length;
@@ -84,23 +167,31 @@ class _CalendarScreenState extends State<CalendarScreen> {
             .length;
         final agenda = selected == null
             ? dated.where((a) {
-                final d = AssignmentQuery.dayKey(a.deadlineAt!);
+                final d = AssignmentQuery.dayKey(a.timelineAt!);
                 return d.year == month.year && d.month == month.month;
               }).toList()
             : AssignmentQuery.forDay(all, selected!, {}, now: now);
-        agenda.sort((a, b) => a.deadlineAt!.compareTo(b.deadlineAt!));
+        agenda.sort((a, b) => a.timelineAt!.compareTo(b.timelineAt!));
         final days = DateTime(month.year, month.month + 1, 0).day,
             leading = month.weekday % 7;
-        final large = MediaQuery.textScalerOf(context).scale(14) > 21;
-        final cellHeight = large ? 82.0 : 48.0;
+        final textScaler = MediaQuery.textScalerOf(context);
+        final cellHeight = _calendarCellHeight(context, textScaler);
         return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
             children: [
-              const Text('截止日历', style: Journal.section),
-              TextButton.icon(
-                  onPressed: () => context.push('/agenda'),
-                  icon: const Icon(Icons.event_note_outlined),
-                  label: const Text('个人待办与考试')),
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  const Text('课业日历', style: Journal.display),
+                  TextButton.icon(
+                    onPressed: () => context.push('/agenda'),
+                    icon: const Icon(Icons.event_note_outlined),
+                    label: const Text('个人待办与考试'),
+                  ),
+                ],
+              ),
               Row(children: [
                 TextButton(
                     onPressed: () => setState(() {
@@ -114,28 +205,93 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 const Spacer(),
                 IconButton(
                     tooltip: '刷新',
-                    onPressed: widget.store.syncAssignments,
-                    icon: const Icon(Icons.sync))
+                    onPressed:
+                        _refreshing || widget.store.isLoading ? null : _refresh,
+                    icon: _refreshing || widget.store.isLoading
+                        ? MediaQuery.disableAnimationsOf(context)
+                            ? const Icon(Icons.hourglass_top_rounded, size: 20)
+                            : const SizedBox.square(
+                                dimension: 20,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                        : const Icon(Icons.sync))
               ]),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  _refreshing || widget.store.isLoading
+                      ? '正在刷新${widget.store.lastSyncAt == null ? '' : '；上次成功 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'}…'
+                      : _refreshMessage ??
+                          (widget.store.lastSyncAt == null
+                              ? '尚未成功同步；当前仅显示本机已有记录'
+                              : '上次成功同步 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _refreshMessage?.contains('失败') == true
+                        ? Theme.of(context).colorScheme.error
+                        : Journal.muted,
+                  ),
+                ),
+              ),
               Card(
                   margin: EdgeInsets.zero,
                   child: Padding(
                       padding: const EdgeInsets.all(4),
                       child: Column(children: [
-                        Row(children: [
-                          IconButton(
-                              tooltip: '上个月',
-                              onPressed: () => move(-1),
-                              icon: const Icon(Icons.chevron_left)),
-                          Expanded(
-                              child: Text(DateFormat('yyyy年M月').format(month),
-                                  textAlign: TextAlign.center,
-                                  style: Journal.section)),
-                          IconButton(
-                              tooltip: '下个月',
-                              onPressed: () => move(1),
-                              icon: const Icon(Icons.chevron_right))
-                        ]),
+                        Builder(builder: (context) {
+                          final previous = IconButton(
+                            tooltip: '上个月',
+                            onPressed: () => move(-1),
+                            icon: const Icon(Icons.chevron_left),
+                          );
+                          final next = IconButton(
+                            tooltip: '下个月',
+                            onPressed: () => move(1),
+                            icon: const Icon(Icons.chevron_right),
+                          );
+                          final label = Text(
+                            DateFormat('yyyy年M月').format(month),
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: Journal.section,
+                          );
+                          return LayoutBuilder(builder: (context, constraints) {
+                            final painter = TextPainter(
+                              text: TextSpan(
+                                text: DateFormat('yyyy年M月').format(month),
+                                style: Journal.section,
+                              ),
+                              textDirection: Directionality.of(context),
+                              textScaler: textScaler,
+                            )..layout();
+                            final labelWidth = painter.width;
+                            painter.dispose();
+                            if (labelWidth + 96 <= constraints.maxWidth) {
+                              return Row(
+                                key: const ValueKey('calendar-month-inline'),
+                                children: [
+                                  previous,
+                                  Expanded(child: label),
+                                  next,
+                                ],
+                              );
+                            }
+                            return Column(
+                              key: const ValueKey('calendar-month-stacked'),
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [previous, next],
+                                ),
+                                label,
+                              ],
+                            );
+                          });
+                        }),
                         Row(children: [
                           for (final label in [
                             '日',
@@ -153,7 +309,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                             fontSize: 13,
                                             color: Journal.muted))))
                         ]),
-                        const SizedBox(height: 4),
+                        const Divider(height: 9, indent: 8, endIndent: 8),
                         for (var row = 0;
                             row < (leading + days + 6) ~/ 7;
                             row++)
@@ -172,15 +328,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                         {},
                                         now: now);
                                 final unknown = items
-                                    .where((a) => !a.isPendingConfirmed)
+                                    .where((a) =>
+                                        !a.isExam && !a.isPendingConfirmed)
                                     .length;
+                                final exams =
+                                    items.where((a) => a.isExam).length;
                                 final personalCount = manual
                                     .where((e) =>
                                         AssignmentQuery.dayKey(e.at!) == date)
                                     .length;
                                 return Semantics(
                                     label:
-                                        '${month.month}月$day日，${items.length - unknown}份待交，$unknown份待确认，$personalCount项个人安排',
+                                        '${month.month}月$day日${date == today ? '，今天' : ''}，${items.length - unknown - exams}份待交，$unknown份待确认，$exams项考试或考试通知，$personalCount项个人安排',
                                     selected: selected == date,
                                     button: true,
                                     onTap: () =>
@@ -192,6 +351,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                         borderRadius: BorderRadius.circular(8),
                                         child: Container(
                                             height: cellHeight,
+                                            padding: const EdgeInsets.symmetric(
+                                                vertical: _cellVerticalPadding),
                                             decoration: BoxDecoration(
                                                 color: selected == date
                                                     ? Journal.sage
@@ -206,59 +367,88 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                                 mainAxisAlignment:
                                                     MainAxisAlignment.center,
                                                 children: [
-                                                  Text('$day',
-                                                      style: const TextStyle(
-                                                          fontSize: 14)),
+                                                  FittedBox(
+                                                    fit: BoxFit.scaleDown,
+                                                    child: Text(
+                                                      '$day',
+                                                      maxLines: 1,
+                                                      softWrap: false,
+                                                      style: _dateStyle,
+                                                    ),
+                                                  ),
                                                   if (items.isNotEmpty ||
                                                       personalCount > 0)
-                                                    Text(
-                                                        '${items.length + personalCount}',
-                                                        style: const TextStyle(
-                                                            fontSize: 11,
-                                                            color:
-                                                                Journal.berry))
+                                                    FittedBox(
+                                                      fit: BoxFit.scaleDown,
+                                                      child: Text(
+                                                          '${items.length + personalCount}',
+                                                          key: ValueKey(
+                                                              'calendar-count-$day'),
+                                                          maxLines: 1,
+                                                          softWrap: false,
+                                                          style: _countStyle),
+                                                    )
                                                 ]))));
                               }))
                           ]),
                       ]))),
-              const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text('日期下方数字为作业与未完成个人安排的合计，均按北京时间',
-                      style: TextStyle(fontSize: 12, color: Journal.muted))),
-              Text(
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                child: Text(
                   selected == null
                       ? '本月议程'
-                      : DateFormat('M月d日').format(selected!),
-                  style: Journal.section),
+                      : '${DateFormat('M月d日').format(selected!)} · 议程',
+                  style: Journal.section,
+                ),
+              ),
+              const Divider(height: 1),
               if (agenda.isEmpty && manualAgenda.isEmpty)
                 Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                     child:
                         Text(widget.store.syncReport.phase == SyncPhase.failed
                             ? '本次读取失败，请到同步详情重试'
                             : widget.store.lastSyncAt == null && all.isEmpty
                                 ? '尚未获取作业，请先同步'
-                                : '所选范围没有已知截止作业')),
+                                : '所选范围没有已知日期的课业')),
               for (final a in agenda)
                 AssignmentCard(
                     assignment: a,
+                    examSources: courseSources,
+                    displayIndex: widget.store.homeDisplayIndex,
                     now: now,
+                    compact: widget.store.display.compact,
+                    countdown: widget.store.display.countdown,
                     showFullDeadline: false,
                     onTap: () => context
                         .push('/assignments/${Uri.encodeComponent(a.id)}')),
               for (final e in manualAgenda)
-                ListTile(
+                Builder(builder: (context) {
+                  final exam = e.kind == 'exam';
+                  final accent = exam ? Journal.slate : Journal.ink;
+                  final label = exam ? '手动考试' : '个人待办';
+                  return ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(e.kind == 'exam'
-                        ? Icons.school_outlined
-                        : Icons.event_note_outlined),
+                    leading: Icon(
+                      exam ? Icons.school_outlined : Icons.event_note_outlined,
+                      color: accent,
+                    ),
                     title: Text(
-                        '${e.kind == 'exam' ? '手动考试' : '个人待办'} · ${e.title}'),
+                      '$label · ${e.title}',
+                      style: Journal.entryTitle.copyWith(color: accent),
+                    ),
                     subtitle: Text(manualTime(e.at)),
-                    onTap: () => context.push('/agenda')),
+                    onTap: () => context.push('/agenda'),
+                  );
+                }),
+              const Padding(
+                padding: EdgeInsets.only(top: 10),
+                child: Text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。',
+                    style: TextStyle(fontSize: 12, color: Journal.muted)),
+              ),
               if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
                 const Divider(height: 24),
-                const Text('待核对作业', style: Journal.section),
+                const Text('待核对课业', style: Journal.section),
                 if (noDeadlineCount > 0)
                   TextButton.icon(
                       key: const ValueKey('calendar-no-deadline-scope'),
@@ -269,10 +459,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 if (pendingDeadlineCount > 0)
                   TextButton.icon(
                       key: const ValueKey('calendar-deadline-pending-scope'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Journal.ochre,
+                      ),
                       onPressed: () => context.go(_recoveryLocation(
                           AssignmentRecoveryScope.deadlinePending)),
                       icon: const Icon(Icons.help_outline),
-                      label: Text('截止待确认（$pendingDeadlineCount）')),
+                      label: Text('截止时间未知（$pendingDeadlineCount）')),
               ],
             ]);
       });
@@ -281,4 +474,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
       Uri(path: '/assignments', queryParameters: {
         AssignmentRecoveryScope.queryParameter: scope.queryValue,
       }).toString();
+
+  double _calendarCellHeight(BuildContext context, TextScaler textScaler) {
+    double lineHeight(TextStyle style) =>
+        textScaler.scale(style.fontSize!) * style.height!;
+
+    final content = lineHeight(_dateStyle) + lineHeight(_countStyle);
+    final chrome = 2 * (_cellBorderWidth + _cellVerticalPadding) + _cellSlack;
+    return math.max(48.0, content + chrome);
+  }
 }

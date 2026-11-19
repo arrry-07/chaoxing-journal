@@ -1,3 +1,4 @@
+// Formal-source fixtures intentionally isolate the existing formal request flow.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -135,6 +136,8 @@ void main() {
     }, requests);
     final waits = <Duration>[];
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -188,6 +191,8 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -225,6 +230,8 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -268,6 +275,8 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -311,6 +320,8 @@ void main() {
         }
       }, requests);
       final client = ChaoxingLocalClient(
+        enableExams: false,
+        enableClassroomTasks: false,
         dio: dio,
         wait: (delay) async => waits.add(delay),
       );
@@ -353,6 +364,8 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -399,6 +412,8 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -434,6 +449,8 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -484,6 +501,8 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -534,6 +553,8 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -581,6 +602,8 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );
@@ -627,7 +650,9 @@ void main() {
       ],
     ], 2, requests);
 
-    final rows = await ChaoxingLocalClient(dio: dio).fetchAssignments();
+    final rows = await ChaoxingLocalClient(
+            enableExams: false, enableClassroomTasks: false, dio: dio)
+        .fetchAssignments();
 
     expect(rows, hasLength(2));
     final workPages = requests
@@ -646,7 +671,11 @@ void main() {
       ],
       [],
     ], 2, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableExams: false,
+        enableClassroomTasks: false,
+        dio: dio,
+        wait: (_) async {});
 
     await expectLater(
       client.fetchAssignments(),
@@ -671,7 +700,11 @@ void main() {
         _workRow(1),
       ],
     ], 2, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableExams: false,
+        enableClassroomTasks: false,
+        dio: dio,
+        wait: (_) async {});
 
     await expectLater(
       client.fetchAssignments(),
@@ -697,7 +730,11 @@ void main() {
       ],
       [],
     ], 3, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableExams: false,
+        enableClassroomTasks: false,
+        dio: dio,
+        wait: (_) async {});
 
     await expectLater(
       client.fetchAssignments(),
@@ -743,7 +780,11 @@ void main() {
           throw StateError('unexpected endpoint ${request.uri.path}');
       }
     }, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableExams: false,
+        enableClassroomTasks: false,
+        dio: dio,
+        wait: (_) async {});
 
     final rows = await client.fetchAssignments();
 
@@ -757,6 +798,13 @@ void main() {
     expect(workList.p50HttpMs, greaterThanOrEqualTo(20));
     expect(workList.maxHttpMs, greaterThanOrEqualTo(20));
     expect(client.diagnostics.fullSyncElapsedMs, greaterThanOrEqualTo(25));
+    expect(client.diagnostics.phaseElapsedMs.keys,
+        containsAll(['courseList', 'formalWork', 'classroomTasks', 'exams']));
+    expect(client.diagnostics.phaseElapsedMs['formalWork'],
+        greaterThanOrEqualTo(20));
+    expect(
+        client.diagnostics.phaseElapsedMs.values.every((value) => value >= 0),
+        isTrue);
     expect(client.requestTimings['作业列表']!.elapsedMs,
         greaterThanOrEqualTo(workList.averageHttpMs));
   });
@@ -794,7 +842,11 @@ void main() {
           throw StateError('unexpected endpoint ${request.uri.path}');
       }
     }, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableExams: false,
+        enableClassroomTasks: false,
+        dio: dio,
+        wait: (_) async {});
 
     final rows = await client.fetchAssignments();
     expect(rows.single.title, title);
@@ -834,7 +886,11 @@ void main() {
           throw StateError('unexpected endpoint ${request.uri.path}');
       }
     }, requests);
-    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final client = ChaoxingLocalClient(
+        enableExams: false,
+        enableClassroomTasks: false,
+        dio: dio,
+        wait: (_) async {});
 
     await client.fetchAssignments();
     expect(client.diagnostics.requests, isNotEmpty);
@@ -867,6 +923,8 @@ void main() {
       }
     }, requests);
     final client = ChaoxingLocalClient(
+      enableExams: false,
+      enableClassroomTasks: false,
       dio: dio,
       wait: (delay) async => waits.add(delay),
     );

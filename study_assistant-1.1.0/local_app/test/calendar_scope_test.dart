@@ -4,11 +4,15 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/main.dart';
+import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -81,6 +85,45 @@ Assignment _assignment(
       status: status,
       lastSyncedAt: DateTime.now(),
     );
+
+class _CalendarRefreshStore extends AssignmentStore {
+  _CalendarRefreshStore(this._onSync)
+      : super(
+          sessionStore: _Session(),
+          notificationService: _Notifications(),
+          widgetSnapshotService: _Snapshot(),
+          manageBackgroundSchedule: false,
+        );
+
+  final Future<void> Function() _onSync;
+  SyncReport nextReport = const SyncReport(phase: SyncPhase.success);
+  List<String> nextServiceWarnings = const [];
+  String? nextError;
+  DateTime? nextLastSync;
+
+  @override
+  bool get isAuthenticated => true;
+
+  @override
+  SyncReport get syncReport => nextReport;
+
+  @override
+  List<String> get serviceWarnings => nextServiceWarnings;
+
+  @override
+  String? get operationError => nextError;
+
+  @override
+  String? get error =>
+      nextError ??
+      (nextServiceWarnings.isEmpty ? null : nextServiceWarnings.join('；'));
+
+  @override
+  DateTime? get lastSyncAt => nextLastSync;
+
+  @override
+  Future<void> syncAssignments({bool complete = false}) => _onSync();
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -164,12 +207,12 @@ void main() {
     await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: CalendarScreen(store: store))));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('截止待确认（6）'), 200,
+    await tester.scrollUntilVisible(find.text('截止时间未知（6）'), 200,
         scrollable: find.byType(Scrollable).first);
 
-    expect(find.text('待核对作业'), findsOneWidget);
+    expect(find.text('待核对课业'), findsOneWidget);
     expect(find.text('无截止日期（1）'), findsOneWidget);
-    expect(find.text('截止待确认（6）'), findsOneWidget);
+    expect(find.text('截止时间未知（6）'), findsOneWidget);
     expect(find.text('保留但不可信的日期'), findsNothing);
     expect(find.text('读取失败后保留的日期'), findsNothing);
     expect(find.text('状态未知但有日期'), findsNothing);
@@ -207,30 +250,166 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(CalendarScreen), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('截止待确认（1）'), 200,
+    await tester.scrollUntilVisible(find.text('截止时间未知（1）'), 200,
         scrollable: find.byType(Scrollable).first);
-    await tester.ensureVisible(find.text('截止待确认（1）'));
+    await tester.ensureVisible(find.text('截止时间未知（1）'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('截止待确认（1）'));
+    await tester.tap(find.text('截止时间未知（1）'));
     await tester.pumpAndSettle();
 
     expect(find.byType(AssignmentListScreen), findsOneWidget);
-    expect(find.text('临时范围 · 截止待确认'), findsOneWidget);
+    expect(find.text('截止时间未知'), findsOneWidget);
     expect(find.textContaining('共 1 项'), findsOneWidget);
     expect(find.text('被首页筛选隐藏的待确认作业'), findsOneWidget);
-    expect(find.text('退出临时范围'), findsOneWidget);
+    expect(find.text('返回全部'), findsOneWidget);
     expect(store.homeFilters.query, '完全不匹配');
     expect(store.homeFilters.courseKey, 'other:key');
     expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
     expect(store.homeFilters.sortOrder, HomeSortOrder.title);
 
-    await tester.tap(find.text('退出临时范围'));
+    await tester.tap(find.text('返回全部'));
     await tester.pumpAndSettle();
-    expect(find.text('临时范围 · 截止待确认'), findsNothing);
-    expect(find.text('没有符合搜索或期限条件的作业'), findsOneWidget);
+    expect(find.text('截止时间未知'), findsNothing);
+    expect(find.text('没有符合搜索、类型或期限条件的记录'), findsOneWidget);
     expect(store.homeFilters.query, '完全不匹配');
     expect(store.homeFilters.sortOrder, HomeSortOrder.title);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('calendar keeps counts muted and category color in the agenda',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(420, 900);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final store = _makeStore(_Session());
+    addTearDown(store.dispose);
+    final now = DateTime.utc(2026, 11, 18, 2);
+    store.replaceAssignmentsForTest([
+      _assignment('today',
+          title: '今日课业', deadlineAt: DateTime.utc(2026, 11, 18, 15, 59)),
+      _assignment('pending',
+          title: '时间待确认',
+          deadlineAt: DateTime.utc(2026, 11, 19, 15, 59),
+          trusted: false),
+    ]);
+    store.notebook = StudyNotebook(entries: [
+      ManualEntry(
+        id: 'exam',
+        title: '高数考试',
+        kind: 'exam',
+        at: DateTime.utc(2026, 11, 18, 1),
+      ),
+      ManualEntry(
+        id: 'todo',
+        title: '交材料',
+        kind: 'todo',
+        at: DateTime.utc(2026, 11, 18, 3),
+      ),
+    ]);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(body: CalendarScreen(store: store, clock: () => now)),
+    ));
+    await tester.pumpAndSettle();
+
+    final title = tester.getRect(find.text('课业日历'));
+    final agendaEntry = tester.getRect(find.text('个人待办与考试'));
+    expect(agendaEntry.left, greaterThan(title.right));
+    expect(agendaEntry.center.dy, closeTo(title.center.dy, 2));
+    final agendaHeading = find.text('11月18日 · 议程');
+    expect(agendaHeading.hitTestable(), findsOneWidget);
+
+    final count = tester.widget<Text>(
+      find.byKey(const ValueKey('calendar-count-18')),
+    );
+    expect(count.data, '3');
+    expect(count.style?.color, Journal.muted);
+
+    await tester.scrollUntilVisible(
+      find.text('手动考试 · 高数考试'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    final examTitle = tester.widget<Text>(find.text('手动考试 · 高数考试'));
+    final todoTitle = tester.widget<Text>(find.text('个人待办 · 交材料'));
+    expect(examTitle.style?.color, Journal.slate);
+    expect(todoTitle.style?.color, Journal.ink);
+    final examTile = find.ancestor(
+      of: find.text('手动考试 · 高数考试'),
+      matching: find.byType(ListTile),
+    );
+    final todoTile = find.ancestor(
+      of: find.text('个人待办 · 交材料'),
+      matching: find.byType(ListTile),
+    );
+    expect(
+      tester
+          .widget<Icon>(find.descendant(
+            of: examTile,
+            matching: find.byIcon(Icons.school_outlined),
+          ))
+          .color,
+      Journal.slate,
+    );
+    expect(
+      tester
+          .widget<Icon>(find.descendant(
+            of: todoTile,
+            matching: find.byIcon(Icons.event_note_outlined),
+          ))
+          .color,
+      Journal.ink,
+    );
+
+    await tester.scrollUntilVisible(
+      find.text('截止时间未知（1）'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    final pending = tester.widget<TextButton>(
+      find.ancestor(
+        of: find.text('截止时间未知（1）'),
+        matching: find.byType(TextButton),
+      ),
+    );
+    expect(
+      pending.style?.foregroundColor?.resolve(const <WidgetState>{}),
+      Journal.ochre,
+    );
+  });
+
+  testWidgets('calendar month heading stays on one line at 320dp and 2x text',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 640);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final store = _makeStore(_Session());
+    addTearDown(store.dispose);
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(
+          textScaler: const TextScaler.linear(2),
+        ),
+        child: child!,
+      ),
+      home: Scaffold(
+        body: CalendarScreen(
+          store: store,
+          clock: () => DateTime.utc(2026, 11, 18, 2),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final month = tester.widget<Text>(find.text('2026年11月'));
+    expect(month.maxLines, 1);
+    expect(month.softWrap, isFalse);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('temporaryScopeDoesNotOverwriteSavedPreferences', (tester) async {
@@ -274,7 +453,7 @@ void main() {
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
     await tester.pumpAndSettle();
 
-    expect(find.text('临时范围 · 截止待确认'), findsOneWidget);
+    expect(find.text('截止时间未知'), findsOneWidget);
     expect(find.textContaining('共 1 项'), findsOneWidget);
     expect(find.text('待确认作业'), findsOneWidget);
     expect(find.text('已筛选'), findsNothing);
@@ -291,12 +470,62 @@ void main() {
     expect(persisted.deadline, AssignmentDeadlineFilter.notExpired);
     expect(persisted.sortOrder, HomeSortOrder.deadlineDesc);
 
-    await tester.tap(find.text('退出临时范围'));
+    await tester.tap(find.text('返回全部'));
     await tester.pumpAndSettle();
-    expect(find.text('临时范围 · 截止待确认'), findsNothing);
-    expect(find.text('没有符合搜索或期限条件的作业'), findsOneWidget);
+    expect(find.text('截止时间未知'), findsNothing);
+    expect(find.text('没有符合搜索、类型或期限条件的记录'), findsOneWidget);
     expect(store.homeFilters.query, '首页搜索');
     expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'calendar refresh uses completion time and distinguishes partial/warning',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    var now = DateTime(2026, 11, 18, 10, 0, 0);
+    late _CalendarRefreshStore store;
+    var mode = 0;
+    store = _CalendarRefreshStore(() async {
+      now = DateTime(2026, 11, 18, 10, 0, 5);
+      if (mode == 0) {
+        store.nextReport = const SyncReport(phase: SyncPhase.success);
+        store.nextServiceWarnings = const [];
+        store.nextError = null;
+        store.nextLastSync = now;
+      } else if (mode == 1) {
+        store.nextReport = const SyncReport(phase: SyncPhase.partial);
+        store.nextServiceWarnings = const [];
+        store.nextError = '部分课程读取失败';
+        store.nextLastSync = now;
+      } else {
+        store.nextReport = const SyncReport(phase: SyncPhase.success);
+        store.nextServiceWarnings = const ['小组件更新失败'];
+        store.nextError = null;
+        store.nextLastSync = now;
+      }
+    });
+    addTearDown(store.dispose);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: CalendarScreen(store: store, clock: () => now),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('刷新'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('本次刷新已完成（10:00:05）'), findsOneWidget);
+
+    mode = 1;
+    await tester.tap(find.byTooltip('刷新'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('部分完成'), findsOneWidget);
+
+    mode = 2;
+    await tester.tap(find.byTooltip('刷新'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('本机提醒或小组件需处理'), findsOneWidget);
   });
 }

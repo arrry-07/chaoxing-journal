@@ -23,6 +23,62 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
+  test('source baselines round trip with plan state and apply payload',
+      () async {
+    Map? applied;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'loadPlanState') {
+        return {
+          'baselineCompleted': true,
+          'baselinedSources': ['courseWork', 'classroomActivity:35']
+        };
+      }
+      applied = call.arguments as Map;
+      return {'scheduledDeadlineCount': 0, 'pendingNewCount': 0};
+    });
+    const gateway = BackgroundReminderGateway();
+    final state =
+        await gateway.loadPlanState(accountHash: 'hash', sessionEpoch: 1);
+    expect(state.baselinedSources, {'courseWork', 'classroomActivity:35'});
+    await gateway.applyPlan(
+        accountHash: 'hash',
+        sessionEpoch: 1,
+        plan: AssignmentReminderPlan(
+            snapshots: [],
+            newEvents: [],
+            deadlineEvents: [],
+            knownAssignmentIds: {},
+            baselineCompleted: true,
+            baselinedSources: state.baselinedSources),
+        completedAt: DateTime(2026, 11, 15),
+        failure: null,
+        syncCompleted: true,
+        expectedMutationVersion: 0);
+    expect(
+        applied!['baselinedSources'], unorderedEquals(state.baselinedSources));
+  });
+
+  test('legacy native state maps baseline to course work only', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            channel, (call) async => {'baselineCompleted': true});
+    final state = await const BackgroundReminderGateway()
+        .loadPlanState(accountHash: 'hash', sessionEpoch: 1);
+    expect(state.baselinedSources, {'courseWork'});
+  });
+
+  test('explicit empty native source baseline stays empty', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            channel,
+            (call) async =>
+                {'baselineCompleted': true, 'baselinedSources': []});
+    final state = await const BackgroundReminderGateway()
+        .loadPlanState(accountHash: 'hash', sessionEpoch: 1);
+    expect(state.baselinedSources, isEmpty);
+  });
+
   test('strictVoidAllowsSuccessfulNullReply', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async => null);
@@ -45,6 +101,30 @@ void main() {
       enabled: false,
       intervalMinutes: 240,
     );
+  });
+
+  test('background restore can mirror settings without reconciling schedules',
+      () async {
+    Map<Object?, Object?>? arguments;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      arguments = call.arguments as Map<Object?, Object?>;
+      return null;
+    });
+    await const BackgroundReminderGateway().updateSettings(
+      'hash',
+      1,
+      const BackgroundCheckSettings(
+        enabled: true,
+        intervalMinutes: 240,
+        notificationListenerEnabled: true,
+        newAssignmentReminderEnabled: true,
+        migratedFromLegacy: false,
+      ),
+      showDetails: false,
+      reconcileSchedules: false,
+    );
+    expect(arguments?['reconcileSchedules'], isFalse);
   });
 
   test('criticalControlsNeverSwallowNativeFailures', () async {

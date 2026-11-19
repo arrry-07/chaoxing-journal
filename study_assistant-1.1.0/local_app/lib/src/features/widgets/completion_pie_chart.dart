@@ -4,18 +4,56 @@ import 'package:flutter/material.dart';
 import '../../app/journal.dart';
 import '../../services/assignment_statistics.dart';
 
+class CompletionRingSegment {
+  const CompletionRingSegment({
+    required this.index,
+    required this.start,
+    required this.sweep,
+  });
+
+  final int index;
+  final double start;
+  final double sweep;
+
+  Color get color => CompletionPieChart.categoryColors[index];
+}
+
 class CompletionPieChart extends StatelessWidget {
   const CompletionPieChart(
       {super.key, required this.statistics, this.diameter = 176});
   final AssignmentStatistics statistics;
   final double diameter;
-  static const colors = [
-    Journal.ink,
-    Color(0xFF9A6230),
-    Journal.berry,
-    Journal.muted
+  static const ringThickness = 10.0;
+  static const trackColor = Journal.rule;
+  static final completedColor = Color.lerp(Journal.ink, Journal.sage, .30)!;
+  static final categoryColors = <Color>[
+    completedColor,
+    Color.lerp(Journal.ochre, Journal.paper, .18)!,
+    Color.lerp(Journal.berry, Journal.paper, .18)!,
+    Color.lerp(Journal.muted, Journal.paper, .12)!,
   ];
+  static final legendColors = categoryColors;
   static const labels = ['已完成', '待完成', '已逾期', '提交未知'];
+
+  @visibleForTesting
+  static List<CompletionRingSegment> segments(List<int> counts) {
+    final total = counts.fold(0, (sum, count) => sum + count);
+    if (total == 0) return const [];
+    var start = -math.pi / 2;
+    final result = <CompletionRingSegment>[];
+    for (var index = 0; index < counts.length; index++) {
+      final count = counts[index];
+      if (count <= 0) continue;
+      final sweep = count / total * math.pi * 2;
+      result.add(CompletionRingSegment(
+        index: index,
+        start: start,
+        sweep: sweep,
+      ));
+      start += sweep;
+    }
+    return result;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +71,7 @@ class CompletionPieChart extends StatelessWidget {
         child: SizedBox.square(
           dimension: scaledDiameter,
           child: CustomPaint(
-            painter: _Ring(statistics.counts),
+            painter: CompletionRingPainter(statistics.counts),
             child: Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Text(uncertain ? '待确认' : '${statistics.percentages[0]}%',
@@ -50,33 +88,34 @@ class CompletionPieChart extends StatelessWidget {
   }
 }
 
-class _Ring extends CustomPainter {
-  _Ring(this.counts);
+@visibleForTesting
+class CompletionRingPainter extends CustomPainter {
+  CompletionRingPainter(this.counts);
   final List<int> counts;
+
   @override
   void paint(Canvas canvas, Size size) {
-    final total = counts.fold(0, (a, b) => a + b);
-    const thickness = 17.0;
+    const thickness = CompletionPieChart.ringThickness;
     final center = Offset(size.width / 2, size.height / 2);
     final radius = (math.min(size.width, size.height) - thickness) / 2;
     final bounds = Rect.fromCircle(center: center, radius: radius);
     final pen = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = thickness;
-    if (total == 0) {
-      canvas.drawCircle(center, radius, pen..color = Journal.rule);
-      return;
-    }
-    var start = -math.pi / 2;
-    for (var i = 0; i < counts.length; i++) {
-      if (counts[i] == 0) continue;
-      final sweep = counts[i] / total * math.pi * 2;
-      canvas.drawArc(bounds, start, sweep, false,
-          pen..color = CompletionPieChart.colors[i]);
-      start += sweep;
+      ..strokeWidth = thickness
+      ..strokeCap = StrokeCap.butt
+      ..color = CompletionPieChart.trackColor;
+    canvas.drawCircle(center, radius, pen);
+    for (final segment in CompletionPieChart.segments(counts)) {
+      pen.color = segment.color;
+      if (segment.sweep >= math.pi * 2 - 1e-9) {
+        canvas.drawCircle(center, radius, pen);
+      } else {
+        canvas.drawArc(bounds, segment.start, segment.sweep, false, pen);
+      }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _Ring old) => !listEquals(counts, old.counts);
+  bool shouldRepaint(covariant CompletionRingPainter old) =>
+      !listEquals(counts, old.counts);
 }

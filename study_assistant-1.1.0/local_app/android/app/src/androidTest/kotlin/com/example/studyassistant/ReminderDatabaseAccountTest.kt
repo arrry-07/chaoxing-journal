@@ -47,7 +47,7 @@ class ReminderDatabaseAccountTest {
                     courseName = "合成课程",
                     title = "合成待发作业",
                     deadlineAt = null,
-                    deadlineTrusted = false,
+                    deadlineTrusted = true,
                     deadlineReadFailed = false,
                     status = "pending",
                     completed = false,
@@ -206,5 +206,24 @@ class ReminderDatabaseAccountTest {
         }
         assertEquals("再次改名", renamed.courseName)
         assertEquals("再次更名作业", renamed.title)
+    }
+
+    @Test
+    fun switchAccountIncrementsPreviousAndTargetEpochsOnce() {
+        val otherAccount = "instrumentation-other-${System.nanoTime()}"
+        try {
+            val prevBefore = database.ensureActiveAccount(accountHash)
+            val targetBefore = database.ensureActiveAccount(otherAccount)
+
+            val switched = database.switchAccount(accountHash, otherAccount)
+
+            val prevAfter = database.readAccount(accountHash)!!
+            assertEquals(prevBefore.sessionEpoch + 1L, prevAfter.sessionEpoch)
+            assertEquals(targetBefore.sessionEpoch + 1L, switched.sessionEpoch)
+            assertTrue(switched.active)
+            assertTrue(!prevAfter.active)
+        } finally {
+            runCatching { database.clearActiveAccount(otherAccount) }
+        }
     }
 }

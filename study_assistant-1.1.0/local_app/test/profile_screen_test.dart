@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/course_list_screen.dart';
+import 'package:study_assistant_mobile/src/features/local_records_screen.dart';
 import 'package:study_assistant_mobile/src/features/open_source_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_records_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
@@ -19,6 +20,7 @@ import 'package:study_assistant_mobile/src/services/app_update_service.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/external_link_service.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
+import 'package:study_assistant_mobile/src/services/local_record_query.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
@@ -35,6 +37,87 @@ void main() {
     await t.scrollUntilVisible(find.text('GitHub 源码'), 400);
     expect(find.byTooltip('打开链接'), findsOneWidget);
   });
+
+  testWidgets('profile uses tinted groups and berry destructive actions',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    tester.view.physicalSize = const Size(420, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(body: ProfileScreen(store: store)),
+    ));
+
+    final courses = tester
+        .widget<Card>(find.byKey(const ValueKey('profile-group-courses')));
+    expect(courses.color, Color.lerp(Journal.sheet, Journal.sage, .35));
+    expect(
+      tester.widget<Icon>(find.byIcon(Icons.school_outlined)).color,
+      Journal.ink,
+    );
+
+    for (final (title, accent, header) in [
+      ('学习与同步', Journal.ink, Journal.sage),
+      ('数据与安全', Journal.ochre, Journal.ochreBg),
+      ('关于与更新', Journal.slate, Journal.slateBg),
+    ]) {
+      await tester.scrollUntilVisible(
+        find.text(title),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
+      final titleText = tester.widget<Text>(find.text(title));
+      final foreground = Color.lerp(Journal.ink, accent, .50);
+      expect(titleText.style?.fontFamily, Journal.bodyFamily);
+      expect(titleText.style?.color, foreground);
+      final headerBox = tester
+          .widget<Container>(find.byKey(ValueKey('profile-group-$title')));
+      expect(headerBox.color, Color.lerp(Journal.sheet, header, .35));
+      if (title == '数据与安全') {
+        final healthIcon = find.byIcon(Icons.health_and_safety_outlined);
+        expect(tester.widget<Icon>(healthIcon).color, foreground);
+      }
+      if (title == '关于与更新') {
+        final updateIcon = find.byIcon(Icons.system_update_alt);
+        expect(tester.widget<Icon>(updateIcon).color, foreground);
+      }
+    }
+
+    await tester.scrollUntilVisible(
+      find.text('退出登录并清理本机记录'),
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.ensureVisible(find.text('退出登录并清理本机记录'));
+    await tester.pumpAndSettle();
+    final logout = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, '退出登录并清理本机记录'),
+    );
+    expect(
+      logout.style?.foregroundColor?.resolve(const <WidgetState>{}),
+      Journal.berry,
+    );
+    await tester.tap(find.text('退出登录并清理本机记录'));
+    await tester.pumpAndSettle();
+    final dangerous = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, '退出并清理本机记录'),
+    );
+    expect(
+      dangerous.style?.backgroundColor?.resolve(const <WidgetState>{}),
+      Journal.berry,
+    );
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('hidden assignments can be restored from profile',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -43,6 +126,7 @@ void main() {
         notificationService: _NoopNotificationService(),
         widgetSnapshotService: _NoopWidgetSnapshotService());
     addTearDown(store.dispose);
+    await store.restoreSession();
     await store.repository.mergeAndSave([
       Assignment(
           id: 'cx:work:1:2:hidden-1',
@@ -62,6 +146,15 @@ void main() {
       GoRoute(
         path: '/profile/records',
         builder: (_, __) => ProfileRecordsScreen(store: store),
+      ),
+      GoRoute(
+        path: '/records',
+        builder: (_, state) => LocalRecordsScreen(
+          store: store,
+          initialFilter: LocalRecordFilterSpec.fromQueryParameters(
+            state.uri.queryParameters,
+          ),
+        ),
       ),
     ]);
     addTearDown(router.dispose);
@@ -430,7 +523,7 @@ void main() {
           expect((tile.subtitle! as Text).data, entry.value.$1);
           expect(tile.subtitleTextStyle?.fontSize, 12);
           expect(tile.subtitleTextStyle?.color, Journal.muted);
-          expect((tile.title! as Text).style?.fontWeight, FontWeight.w700);
+          expect((tile.title! as Text).style, Journal.entryTitle);
           expect(tester.takeException(), isNull);
           await tester.tap(row);
           await tester.pumpAndSettle();

@@ -19,6 +19,33 @@ public final class NativePoliciesTest {
     String encoded = new java.net.URI(wrapped).getRawQuery().split("url=", 2)[1].split("&title=", 2)[0];
     if (!java.net.URLDecoder.decode(encoded, "UTF-8").equals(signed)) throw new AssertionError("Signed URL changed");
     checks += 2;
+    for (String path : new String[]{
+        "/page/renwuNew/stu/taskDetailStuForAnswer_new",
+        "/page/renwuNew/stu/taskDetailStuAndAnsDetail_new",
+        "/page/renwu/stu/taskDetailStuForAnswer",
+        "/page/renwu/stu/taskDetailStuAndAnsDetail",
+        "/page/renwuNew/notGroup/taskDetailStuForAnswerNotGroup_new",
+        "/page/renwuNew/notGroup/taskDetailStuAndAnsDetailNotGroup_new",
+        "/page/renwu/notGroup/taskDetailStuForAnswerNotGroup",
+        "/page/renwu/notGroup/taskDetailStuAndAnsDetailNotGroup",
+        "/page/quiz/stu/answerQuestion2"}) {
+      String task = "https://mobilelearn.chaoxing.com" + path +
+          "?courseId=7&classId=11&activeId=35&fid=0&enc=synthetic%2Bsignature";
+      String link = com.example.studyassistant.ChaoxingAssignmentLink.build(task);
+      if (link == null) throw new AssertionError("Classroom task rejected: " + path);
+      String raw = new java.net.URI(link).getRawQuery().split("url=", 2)[1].split("&title=", 2)[0];
+      if (!java.net.URLDecoder.decode(raw, "UTF-8").equals(task)) throw new AssertionError("Task URL changed");
+      checks++;
+    }
+    String classroom = "https://mobilelearn.chaoxing.com/page/quiz/stu/answerQuestion2?courseId=7&classId=11&activeId=42";
+    for (String bad : new String[]{classroom.replace("&activeId=42", ""),
+        classroom + "&activeId=other", classroom + "&clazzId=other",
+        classroom.replace("courseId=7", "courseId="),
+        classroom.replace("mobilelearn.chaoxing.com", "evil.example"),
+        classroom.replace("/page/quiz/stu/answerQuestion2", "/widget/pcpick/stu/index")}) {
+      if (com.example.studyassistant.ChaoxingAssignmentLink.build(bad) != null) throw new AssertionError("Unsafe classroom URI accepted");
+      checks++;
+    }
     for (String bad : new String[]{"https://evil.example/work/task?workId=3", "https://chaoxing.com.evil.example/work/task?workId=3", "https://chaoxing.com/login", signed + "#fragment", signed.replace("https:", "http:")}) {
       if (com.example.studyassistant.ChaoxingAssignmentLink.build(bad) != null) throw new AssertionError("Unsafe app URI");
       checks++;

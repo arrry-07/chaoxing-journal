@@ -28,6 +28,38 @@ Assignment _sortRecord(
     );
 
 void main() {
+  test(
+      'next recommendation selects trusted future pending independently of sorting',
+      () {
+    final now = DateTime.utc(2026, 11, 16);
+    final expired = _sortRecord('old',
+        courseName: 'A',
+        title: 'old',
+        deadlineAt: now.subtract(const Duration(days: 1)));
+    final unknown = _sortRecord('unknown',
+        courseName: 'A',
+        title: 'unknown',
+        status: 'unknown',
+        deadlineAt: now.add(const Duration(minutes: 1)));
+    final failed = _sortRecord('failed',
+        courseName: 'A',
+        title: 'failed',
+        failed: true,
+        deadlineAt: now.add(const Duration(minutes: 2)));
+    final next = _sortRecord('next',
+        courseName: 'A',
+        title: 'next',
+        deadlineAt: now.add(const Duration(hours: 1)));
+    final records = [expired, unknown, failed, next];
+    expect(
+        AssignmentQuery.sortHome(records, HomeSortOrder.deadlineAsc, now: now)
+            .first,
+        unknown);
+    expect(AssignmentQuery.nextActionable(records, now: now), next);
+    expect(AssignmentQuery.nextActionable([expired, unknown, failed], now: now),
+        isNull);
+  });
+
   test('sortHome supports all orders without mutating the source list', () {
     final now = DateTime.utc(2026, 11, 12, 2);
     final alpha = _sortRecord(
@@ -84,11 +116,11 @@ void main() {
             records),
         isFalse);
     expect(ids(HomeSortOrder.deadlineAsc),
-        ['Bravo', 'alpha', 'echo', 'charlie', 'delta']);
+        ['Bravo', 'alpha', 'charlie', 'delta', 'echo']);
     expect(ids(HomeSortOrder.deadlineDesc),
-        ['alpha', 'Bravo', 'echo', 'charlie', 'delta']);
+        ['alpha', 'Bravo', 'charlie', 'delta', 'echo']);
     expect(ids(HomeSortOrder.courseName),
-        ['Bravo', 'alpha', 'echo', 'charlie', 'delta']);
+        ['Bravo', 'alpha', 'charlie', 'delta', 'echo']);
     expect(ids(HomeSortOrder.title),
         ['alpha', 'Bravo', 'echo', 'charlie', 'delta']);
   });
@@ -155,7 +187,7 @@ void main() {
     expect(grouped[2].id, endsWith(':id-z'));
   });
 
-  test('deadline order keeps bucket priority when direction changes', () {
+  test('FB-005 overdue stays after actionable and undated rows both ways', () {
     final now = DateTime.utc(2026, 11, 12, 2);
     final near = _sortRecord(
       'near',
@@ -210,15 +242,16 @@ void main() {
 
     expect(
       titles(HomeSortOrder.deadlineAsc),
-      ['近期', '较远', '无截止', '待确认', '早逾期', '晚逾期'],
+      ['近期', '较远', '待确认', '无截止', '早逾期', '晚逾期'],
     );
     expect(
       titles(HomeSortOrder.deadlineDesc),
-      ['较远', '近期', '无截止', '待确认', '晚逾期', '早逾期'],
+      ['较远', '近期', '待确认', '无截止', '晚逾期', '早逾期'],
     );
   });
 
-  test('name order puts actionable work before pending and overdue buckets',
+  test(
+      'course order groups alphabetically while legacy title order retains buckets',
       () {
     final now = DateTime.utc(2026, 11, 12, 2);
     final actionable = _sortRecord(
@@ -254,7 +287,7 @@ void main() {
 
     expect(
       titles(HomeSortOrder.courseName),
-      ['Albatross', 'Zulu', 'Alpha', 'Beta'],
+      ['Albatross', 'Alpha', 'Beta', 'Zulu'],
     );
     expect(
       titles(HomeSortOrder.title),
@@ -599,5 +632,397 @@ void main() {
     expect(ids(AssignmentDeadlineFilter.overdue), ['late']);
     expect(ids(AssignmentDeadlineFilter.uncertain), ['unknown', 'failed']);
     expect(ids(AssignmentDeadlineFilter.noDeadline), ['none']);
+  });
+
+  test('yearless exam display time participates in both chronological sorts',
+      () {
+    final now = DateTime.utc(2026, 11, 16);
+    final formalExam = Assignment(
+      id: 'cx:exam:1:2:3',
+      source: AssignmentSource.exam,
+      courseName: '大学英语',
+      title: '开放性期中考试',
+      deadlineAt: null,
+      requirementsText: '以官方考试列表为准',
+      status: 'unknown',
+      lastSyncedAt: now,
+      exam: const ExamInfo(
+        examId: '3',
+        courseId: '1',
+        clazzId: '2',
+      ),
+    );
+    final notice = Assignment(
+      id: 'cx:examNotice:inbox:n',
+      source: AssignmentSource.exam,
+      courseName: '大学英语',
+      title: '开放性期中考试',
+      deadlineAt: null,
+      requirementsText: '考试时间：11-16 07:06:00 至 11-30 07:06:31',
+      status: 'unknown',
+      lastSyncedAt: now,
+      exam: const ExamInfo(
+        examId: 'n',
+        relatedExamId: '3',
+        courseId: '1',
+        clazzId: '2',
+        noticeOnly: true,
+        durationMinutes: 60,
+      ),
+    );
+    final december = _sortRecord('dec',
+        courseName: 'A', title: '十二月作业', deadlineAt: DateTime.utc(2026, 12, 2));
+    final january = _sortRecord('jan',
+        courseName: 'B', title: '一月作业', deadlineAt: DateTime.utc(2027, 1, 30));
+    final sources = [january, notice, december, formalExam];
+
+    expect(
+      AssignmentQuery.sortHome(
+        [january, formalExam, december],
+        HomeSortOrder.deadlineAsc,
+        now: now,
+        sourceRecords: sources,
+      ).map((assignment) => assignment.title),
+      ['开放性期中考试', '十二月作业', '一月作业'],
+    );
+    expect(
+      AssignmentQuery.sortHome(
+        [january, formalExam, december],
+        HomeSortOrder.deadlineDesc,
+        now: now,
+        sourceRecords: sources,
+      ).map((assignment) => assignment.title),
+      ['一月作业', '十二月作业', '开放性期中考试'],
+    );
+    expect(formalExam.exam!.startAt, isNull);
+    expect(formalExam.exam!.startTrusted, isFalse);
+  });
+
+  test('course sort uses display time inside the same course', () {
+    final now = DateTime.utc(2026, 11, 16);
+    final notice = Assignment(
+      id: 'cx:examNotice:inbox:course-sort',
+      source: AssignmentSource.exam,
+      courseName: '大学英语',
+      title: '英语考试',
+      deadlineAt: null,
+      requirementsText: '考试时间：11-16 07:06 至 11-30 07:06',
+      status: 'unknown',
+      lastSyncedAt: now,
+      exam: const ExamInfo(
+        examId: 'course-sort',
+        noticeOnly: true,
+      ),
+    );
+    final laterSameCourse = _sortRecord(
+      'later-same',
+      courseName: '大学英语',
+      title: '英语十二月作业',
+      deadlineAt: DateTime.utc(2026, 12, 2),
+    );
+    final otherCourse = _sortRecord(
+      'other',
+      courseName: '高等数学',
+      title: '数学作业',
+      deadlineAt: DateTime.utc(2026, 11, 18),
+    );
+
+    expect(
+      AssignmentQuery.sortHome(
+        [otherCourse, laterSameCourse, notice],
+        HomeSortOrder.courseName,
+        now: now,
+      ).map((assignment) => assignment.title),
+      ['英语考试', '英语十二月作业', '数学作业'],
+    );
+  });
+
+  test('explicit notice year is preserved when display order is projected', () {
+    final now = DateTime.utc(2026, 11, 16);
+    final notice = Assignment(
+      id: 'cx:examNotice:inbox:future-year',
+      source: AssignmentSource.exam,
+      courseName: '合成课程',
+      title: '明年考试',
+      deadlineAt: null,
+      requirementsText: '考试时间：2027-01-05 07:06 至 2027-01-05 08:06',
+      status: 'unknown',
+      lastSyncedAt: now,
+      exam: const ExamInfo(
+        examId: 'future-year',
+        noticeOnly: true,
+      ),
+    );
+
+    expect(
+      AssignmentQuery.displayTimelineAt(
+        notice,
+        records: [notice],
+        now: now,
+      ),
+      DateTime.utc(2027, 1, 4, 23, 6),
+    );
+    expect(notice.exam!.startAt, isNull);
+    expect(notice.exam!.startTrusted, isFalse);
+  });
+
+  test('home unfinished scope matches current-todo callers for every type', () {
+    final now = DateTime.utc(2026, 11, 16);
+    Assignment homework(String id, String status, DateTime due) => Assignment(
+          id: 'cx:work:1:2:$id',
+          courseName: '高等数学',
+          title: '作业$id',
+          deadlineAt: due,
+          requirementsText: '',
+          status: status,
+          lastSyncedAt: now,
+        );
+    final first = homework('1', 'submitted', DateTime.utc(2026, 11, 1));
+    final second = homework('2', 'submitted', DateTime.utc(2026, 11, 2));
+    final pending = homework('3', 'pending', DateTime.utc(2026, 11, 20));
+
+    expect(
+      AssignmentQuery.filterHome([first, second, pending],
+          includeHistorical: false, now: now),
+      [pending],
+    );
+    expect(
+      AssignmentQuery.filterHome(
+        [first, second, pending],
+        type: AssignmentTypeFilter.homework,
+        includeHistorical: false,
+        now: now,
+      ),
+      [pending],
+    );
+    expect(
+      AssignmentQuery.filterHome([first, second, pending],
+              type: AssignmentTypeFilter.exam,
+              includeHistorical: false,
+              now: now)
+          .map((assignment) => assignment.id)
+          .toSet(),
+      isEmpty,
+    );
+    expect(
+      AssignmentQuery.currentDisplay([first, second, pending], now),
+      [pending],
+    );
+  });
+
+  test('yearless exam remains in not-expired until its projected end', () {
+    final now = DateTime.utc(2026, 11, 16);
+    final notice = Assignment(
+      id: 'cx:examNotice:inbox:active',
+      source: AssignmentSource.exam,
+      courseName: '大学英语',
+      title: '开放性期中考试',
+      deadlineAt: null,
+      requirementsText: '考试时间：11-16 07:06:00 至 11-30 07:06:31',
+      status: 'unknown',
+      lastSyncedAt: now,
+      exam: const ExamInfo(
+        examId: 'active',
+        noticeOnly: true,
+        durationMinutes: 60,
+      ),
+    );
+    final pendingHomework = _sortRecord(
+      'pending',
+      courseName: '课程',
+      title: '未截止作业',
+      deadlineAt: DateTime.utc(2026, 12, 5),
+    );
+    final completedHomework = _sortRecord(
+      'done',
+      courseName: '课程',
+      title: '已完成作业',
+      deadlineAt: DateTime.utc(2026, 11, 21),
+      status: 'submitted',
+    );
+    final rows = [notice, completedHomework, pendingHomework];
+
+    expect(
+      AssignmentQuery.filterHome(
+        rows,
+        deadline: AssignmentDeadlineFilter.notExpired,
+        includeHistorical: true,
+        now: now,
+      ).map((assignment) => assignment.title),
+      ['开放性期中考试', '未截止作业'],
+    );
+    expect(
+      AssignmentQuery.filterHome(
+        rows,
+        deadline: AssignmentDeadlineFilter.notExpired,
+        includeHistorical: true,
+        now: DateTime.utc(2026, 12, 1),
+      ).map((assignment) => assignment.title),
+      ['未截止作业'],
+    );
+  });
+
+  test('yearless leap day cannot be projected into a non-leap current year',
+      () {
+    final now = DateTime.utc(2026, 2, 1);
+    final notice = Assignment(
+      id: 'cx:examNotice:inbox:leap',
+      source: AssignmentSource.exam,
+      courseName: '合成课程',
+      title: '闰日考试',
+      deadlineAt: null,
+      requirementsText: '考试时间：2-29 08:00 至 3-01 09:00',
+      status: 'unknown',
+      lastSyncedAt: now,
+      exam: const ExamInfo(
+        examId: 'leap',
+        noticeOnly: true,
+      ),
+    );
+
+    expect(
+      AssignmentQuery.displayTimelineAt(notice, records: [notice], now: now),
+      isNull,
+    );
+    expect(
+      AssignmentQuery.filterHome(
+        [notice],
+        deadline: AssignmentDeadlineFilter.notExpired,
+        includeHistorical: true,
+        now: now,
+      ),
+      isEmpty,
+    );
+    expect(notice.exam!.startAt, isNull);
+    expect(notice.exam!.startTrusted, isFalse);
+  });
+
+  test('conflicting notice durations cannot create a display timeline', () {
+    final now = DateTime.utc(2026, 11, 16);
+    final formal = Assignment(
+      id: 'cx:exam:1:2:3',
+      source: AssignmentSource.exam,
+      courseName: '合成课程',
+      title: '时长冲突考试',
+      deadlineAt: null,
+      requirementsText: '以官方列表为准',
+      status: 'unknown',
+      lastSyncedAt: now,
+      exam: const ExamInfo(
+        examId: '3',
+        courseId: '1',
+        clazzId: '2',
+      ),
+    );
+    Assignment notice(String id, int duration) => Assignment(
+          id: 'cx:examNotice:inbox:$id',
+          source: AssignmentSource.exam,
+          courseName: '合成课程',
+          title: '时长冲突考试',
+          deadlineAt: null,
+          requirementsText: '考试时间：11-20 07:06 至 11-20 08:06',
+          status: 'unknown',
+          lastSyncedAt: now,
+          exam: ExamInfo(
+            examId: id,
+            relatedExamId: '3',
+            courseId: '1',
+            clazzId: '2',
+            noticeOnly: true,
+            durationMinutes: duration,
+          ),
+        );
+    final later = _sortRecord(
+      'later',
+      courseName: '课程',
+      title: '后续作业',
+      deadlineAt: DateTime.utc(2026, 12, 1),
+    );
+    final sources = [later, formal, notice('n1', 60), notice('n2', 90)];
+
+    expect(
+      AssignmentQuery.displayTimelineAt(formal, records: sources, now: now),
+      isNull,
+    );
+    expect(
+      AssignmentQuery.sortHome(
+        [formal, later],
+        HomeSortOrder.deadlineAsc,
+        now: now,
+        sourceRecords: sources,
+      ),
+      [later, formal],
+    );
+    expect(
+      AssignmentQuery.filterHome(
+        sources,
+        deadline: AssignmentDeadlineFilter.notExpired,
+        includeHistorical: true,
+        now: now,
+      ),
+      [later],
+    );
+  });
+
+  test('conflicting notice ranges cannot create a display timeline', () {
+    final now = DateTime.utc(2026, 11, 16);
+    final formal = Assignment(
+      id: 'cx:exam:1:2:4',
+      source: AssignmentSource.exam,
+      courseName: '合成课程',
+      title: '时间冲突考试',
+      deadlineAt: null,
+      requirementsText: '以官方列表为准',
+      status: 'unknown',
+      lastSyncedAt: now,
+      exam: const ExamInfo(
+        examId: '4',
+        courseId: '1',
+        clazzId: '2',
+      ),
+    );
+    Assignment notice(String id, String range) => Assignment(
+          id: 'cx:examNotice:inbox:$id',
+          source: AssignmentSource.exam,
+          courseName: '合成课程',
+          title: '时间冲突考试',
+          deadlineAt: null,
+          requirementsText: '考试时间：$range',
+          status: 'unknown',
+          lastSyncedAt: now,
+          exam: ExamInfo(
+            examId: id,
+            relatedExamId: '4',
+            courseId: '1',
+            clazzId: '2',
+            noticeOnly: true,
+          ),
+        );
+    final later = _sortRecord(
+      'later',
+      courseName: '课程',
+      title: '后续作业',
+      deadlineAt: DateTime.utc(2026, 12, 1),
+    );
+    final sources = [
+      later,
+      formal,
+      notice('n1', '11-20 07:06 至 11-20 08:06'),
+      notice('n2', '11-21 07:06 至 11-21 08:06'),
+    ];
+
+    expect(
+      AssignmentQuery.displayTimelineAt(formal, records: sources, now: now),
+      isNull,
+    );
+    expect(
+      AssignmentQuery.sortHome(
+        [formal, later],
+        HomeSortOrder.deadlineAsc,
+        now: now,
+        sourceRecords: sources,
+      ),
+      [later, formal],
+    );
   });
 }

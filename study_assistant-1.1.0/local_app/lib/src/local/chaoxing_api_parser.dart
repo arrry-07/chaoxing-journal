@@ -1,4 +1,5 @@
 import '../models/assignment.dart';
+import 'chaoxing_classroom_parser.dart';
 
 class ChaoxingCourseRef {
   const ChaoxingCourseRef({
@@ -79,58 +80,19 @@ class ChaoxingApiParser {
     ChaoxingCourseRef course, {
     DateTime? now,
   }) {
-    final parsedAt = now ?? DateTime.now();
     final root = _asMap(payload);
-    if (root == null) {
-      return [];
-    }
-
-    final data = _asMap(root['data']) ?? root;
-    final activities = _asList(data['activeList']) ??
-        _asList(data['list']) ??
-        _asList(data['activities']) ??
-        const [];
-    final assignments = <Assignment>[];
-    for (final item in activities) {
-      final activity = _asMap(item);
-      if (activity == null || !_looksLikeHomework(activity)) {
-        continue;
-      }
-      final id = _stringValue(
-        activity['id'] ?? activity['activeId'] ?? activity['aid'],
-      );
-      final title = _stringValue(
-        activity['nameOne'] ??
-            activity['name'] ??
-            activity['title'] ??
-            activity['activeName'],
-      );
-      final deadline = _deadlineFrom(activity);
-      if (id == null || title == null || title.isEmpty) {
-        continue;
-      }
-
-      assignments.add(
-        Assignment(
-          id: 'cx:activity:${course.courseId}:${course.clazzId}:$id',
-          courseName: course.courseName,
-          title: title,
-          deadlineAt: deadline,
-          requirementsText: _stringValue(
-                activity['description'] ??
-                    activity['content'] ??
-                    activity['remark'],
-              ) ??
-              title,
-          status: _personalStatus(activity),
-          submitUrl: _activityUrl(course, id),
-          lastSyncedAt: parsedAt,
-        ),
-      );
-    }
-    return assignments;
+    final data = _asMap(root?['data']) ?? root;
+    final rows = _asList(data?['activeList']) ?? const [];
+    return [
+      for (final type in [35, 42, 77])
+        ...ChaoxingClassroomParser.parseActivities(rows,
+            courseId: course.courseId,
+            clazzId: course.clazzId,
+            courseName: course.courseName,
+            activityType: type,
+            now: now),
+    ];
   }
-
   // ---------- Exam parsing ----------
 
   static List<Assignment> parseActivityExamAssignments(
@@ -251,29 +213,6 @@ class ChaoxingApiParser {
   }
 
   // ---------- Shared ----------
-
-  static bool _looksLikeHomework(Map<String, dynamic> activity) {
-    final type = _stringValue(
-      activity['activeType'] ?? activity['type'] ?? activity['activeTypeName'],
-    );
-    final name = _stringValue(
-          activity['nameOne'] ??
-              activity['name'] ??
-              activity['title'] ??
-              activity['activeName'],
-        ) ??
-        '';
-    // Don't classify exam-type activities as homework
-    if (_looksLikeExam(activity)) {
-      return false;
-    }
-    if (name.contains('作业') ||
-        name.contains('测验') ||
-        name.toLowerCase().contains('homework')) {
-      return true;
-    }
-    return const {'6', '42', '43', '44', '45', '46', '47'}.contains(type);
-  }
 
   static DateTime? _deadlineFrom(Map<String, dynamic> activity) {
     final raw = _stringValue(

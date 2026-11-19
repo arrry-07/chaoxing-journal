@@ -1,5 +1,47 @@
 enum SyncPhase { idle, running, success, partial, failed, cancelled }
 
+enum SyncSourcePhase { success, partial, failed, notEnabled }
+
+class SyncSourceResult {
+  const SyncSourceResult(
+      {required this.source,
+      required this.phase,
+      this.succeededCourses = 0,
+      this.failedCourses = 0,
+      this.recordCount = 0,
+      this.unconfirmedCount = 0,
+      this.reasonCodes = const []});
+  final String source;
+  final SyncSourcePhase phase;
+  final int succeededCourses, failedCourses, recordCount, unconfirmedCount;
+  final List<String> reasonCodes;
+  SyncSourceResult withIdentityConflict() => SyncSourceResult(
+      source: source,
+      phase: phase == SyncSourcePhase.success ? SyncSourcePhase.partial : phase,
+      succeededCourses: succeededCourses,
+      failedCourses: failedCourses,
+      recordCount: recordCount,
+      unconfirmedCount: unconfirmedCount,
+      reasonCodes: {...reasonCodes, 'identityConflict'}.toList());
+  Map<String, dynamic> toJson() => {
+        'source': source,
+        'phase': phase.name,
+        'succeededCourses': succeededCourses,
+        'failedCourses': failedCourses,
+        'recordCount': recordCount,
+        'unconfirmedCount': unconfirmedCount,
+        'reasonCodes': reasonCodes
+      };
+  factory SyncSourceResult.fromJson(Map<String, dynamic> j) => SyncSourceResult(
+      source: j['source'] as String,
+      phase: SyncSourcePhase.values.byName(j['phase'] as String),
+      succeededCourses: j['succeededCourses'] as int? ?? 0,
+      failedCourses: j['failedCourses'] as int? ?? 0,
+      recordCount: j['recordCount'] as int? ?? 0,
+      unconfirmedCount: j['unconfirmedCount'] as int? ?? 0,
+      reasonCodes: List<String>.from(j['reasonCodes'] as List? ?? const []));
+}
+
 enum SyncIssueKind {
   network,
   authExpired,
@@ -70,11 +112,13 @@ class SyncReport {
       this.lastFullSuccessAt,
       this.succeededCourses = 0,
       this.failedCourses = 0,
-      this.issues = const []});
+      this.issues = const [],
+      this.sourceResults = const []});
   final SyncPhase phase;
   final DateTime? attemptedAt, lastDataSuccessAt, lastFullSuccessAt;
   final int succeededCourses, failedCourses;
   final List<SyncIssue> issues;
+  final List<SyncSourceResult> sourceResults;
 
   SyncReport copyWith({
     SyncPhase? phase,
@@ -84,6 +128,7 @@ class SyncReport {
     int? succeededCourses,
     int? failedCourses,
     List<SyncIssue>? issues,
+    List<SyncSourceResult>? sourceResults,
   }) =>
       SyncReport(
         phase: phase ?? this.phase,
@@ -93,6 +138,7 @@ class SyncReport {
         succeededCourses: succeededCourses ?? this.succeededCourses,
         failedCourses: failedCourses ?? this.failedCourses,
         issues: issues ?? this.issues,
+        sourceResults: sourceResults ?? this.sourceResults,
       );
 
   Map<String, dynamic> toJson() => {
@@ -103,6 +149,7 @@ class SyncReport {
         'succeededCourses': succeededCourses,
         'failedCourses': failedCourses,
         'issues': issues.map((i) => i.toJson()).toList(),
+        'sourceResults': sourceResults.map((s) => s.toJson()).toList(),
       };
   factory SyncReport.fromJson(Map<String, dynamic> json) {
     final phase = SyncPhase.values.byName(json['phase'] as String);
@@ -116,6 +163,9 @@ class SyncReport {
         lastFullSuccessAt: time('lastFullSuccessAt'),
         succeededCourses: json['succeededCourses'] as int? ?? 0,
         failedCourses: json['failedCourses'] as int? ?? 0,
+        sourceResults: (json['sourceResults'] as List? ?? const [])
+            .map((s) => SyncSourceResult.fromJson(s as Map<String, dynamic>))
+            .toList(),
         issues: interrupted
             ? const [SyncIssue(SyncIssueKind.network, '上次同步未完成，请重新读取作业')]
             : (json['issues'] as List? ?? [])
@@ -214,13 +264,19 @@ class SyncRequestDiagnostics {
 }
 
 class SyncDiagnostics {
-  const SyncDiagnostics({this.fullSyncElapsedMs, this.requests = const {}});
+  const SyncDiagnostics({
+    this.fullSyncElapsedMs,
+    this.phaseElapsedMs = const {},
+    this.requests = const {},
+  });
 
   final int? fullSyncElapsedMs;
+  final Map<String, int> phaseElapsedMs;
   final Map<String, SyncRequestDiagnostics> requests;
 
   Map<String, dynamic> toJson() => {
         'fullSyncElapsedMs': fullSyncElapsedMs,
+        'phaseElapsedMs': phaseElapsedMs,
         'requests': {
           for (final entry in requests.entries) entry.key: entry.value.toJson()
         },

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/sync_report.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../app/journal.dart';
 
 import '../services/assignment_store.dart';
+import '../services/sync_issue_presentation.dart';
 
 class SyncStatusScreen extends StatefulWidget {
   const SyncStatusScreen({super.key, required this.store});
@@ -78,6 +80,29 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                               subtitle: Text(
                                   '${e.value.count}次 · 累计${e.value.elapsedMs}毫秒 · 网络/HTTP失败${e.value.httpFailures}次')),
                       ]),
+                Builder(builder: (context) {
+                  final phases =
+                      store.chaoxingClient.diagnostics.phaseElapsedMs;
+                  if (phases.isEmpty) return const SizedBox.shrink();
+                  const labels = {
+                    'courseList': '课程索引',
+                    'formalWork': '正式作业',
+                    'classroomTasks': '课堂任务',
+                    'exams': '考试与通知',
+                    'taskEnginePlan': '课程任务计划探测',
+                  };
+                  return ExpansionTile(
+                    title: const Text('本机同步阶段采样'),
+                    subtitle: const Text('仅本次客户端采集阶段，不含保存、提醒重排和界面耗时'),
+                    children: [
+                      for (final entry in phases.entries)
+                        ListTile(
+                          title: Text(labels[entry.key] ?? entry.key),
+                          trailing: Text('${entry.value} 毫秒'),
+                        ),
+                    ],
+                  );
+                }),
                 if (store.syncReport.attemptedAt != null)
                   Text(
                       '最后尝试：${DateFormat('M月d日 HH:mm').format(store.syncReport.attemptedAt!)}'),
@@ -160,16 +185,111 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                             },
                       icon: const Icon(Icons.verified_user_outlined),
                       label: const Text('完成安全验证')),
-                if (store.syncReport.issues.isNotEmpty)
-                  ExpansionTile(
-                      title: Text('问题明细（${store.syncReport.issues.length}）'),
-                      children: [
-                        for (final issue in store.syncReport.issues)
-                          ListTile(
-                              title: Text(issue.message),
-                              subtitle:
-                                  Text('${issue.stage} · ${issue.kind.name}'))
-                      ]),
+                if (store.syncReport.sourceResults.isNotEmpty)
+                  ExpansionTile(title: const Text('读取来源'), children: [
+                    for (final source in store.syncReport.sourceResults)
+                      ListTile(
+                          title: Text(const {
+                                'courseWork': '正式作业',
+                                'classroomActivity:35': '个人与分组任务',
+                                'classroomActivity:42': '随堂练习',
+                                'classroomActivity:77': 'AI 实践',
+                                'exam': '课程考试',
+                                'examAccount': '账号考试',
+                                'examNotice': '考试通知',
+                                'courseNotice': '课程通知',
+                                'taskEnginePlan': '课程任务计划探测',
+                                'groupHistory': '课程群补充',
+                              }[source.source] ??
+                              '其他来源'),
+                          subtitle: Text('${switch (source.phase) {
+                            SyncSourcePhase.success => '读取完成',
+                            SyncSourcePhase.partial => '部分信息待重试',
+                            SyncSourcePhase.failed => '读取失败',
+                            SyncSourcePhase.notEnabled => '尚未启用',
+                          }} · ${source.recordCount} 条 · ${source.unconfirmedCount} 条待确认'
+                              '${source.reasonCodes.isEmpty ? '' : '\n原因：${source.reasonCodes.map(_reasonLabel).join('、')}'}')),
+                  ]),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final report = store.exportSanitizedSyncDiagnostics();
+                    await Clipboard.setData(ClipboardData(text: report));
+                    if (context.mounted) {
+                      _showMessage('已复制脱敏诊断摘要（不含账号与课程隐私）');
+                    }
+                  },
+                  icon: const Icon(Icons.copy_all_outlined),
+                  label: const Text('复制脱敏同步诊断摘要'),
+                ),
+                if (store.syncReport.issues.isNotEmpty) ...[
+                  Builder(builder: (context) {
+                    final groups = groupSyncIssues(store.syncReport.issues);
+                    final names = {
+                      for (final assignment in store.courseAssignments)
+                        if (assignment.courseKey case final key?)
+                          key: assignment.courseName,
+                    };
+                    String courseLabel(SyncIssue issue) {
+                      final key = issue.courseKey;
+                      if (key == null) return '来源级问题';
+                      return names[key] ?? '课程信息待刷新';
+                    }
+
+                    return ExpansionTile(
+                        key: const ValueKey('sync-issue-groups'),
+                        title: Text(
+                            '问题明细（${groups.length} 组，共 ${store.syncReport.issues.length} 条）'),
+                        children: [
+                          for (var groupIndex = 0;
+                              groupIndex < groups.length;
+                              groupIndex++)
+                            Builder(builder: (context) {
+                              final group = groups[groupIndex];
+                              final courses = group.issues
+                                  .map(courseLabel)
+                                  .toSet()
+                                  .toList();
+                              final courseSummary = courses.length > 3
+                                  ? '${courses.take(3).join('、')} 等 ${courses.length} 项'
+                                  : courses.join('、');
+                              return ExpansionTile(
+                                  key: ValueKey('sync-issue-group-$groupIndex'),
+                                  title: Text(group.message),
+                                  subtitle: Text(
+                                      '${syncIssueStageLabel(group.stage)} · '
+                                      '${syncIssueKindLabel(group.kind)} · '
+                                      '${group.count} 条\n涉及：$courseSummary'),
+                                  children: [
+                                    ListTile(
+                                      title: Text(
+                                          '下一步：${syncIssueNextAction(group.kind)}'),
+                                    ),
+                                    ExpansionTile(
+                                      key: ValueKey(
+                                          'sync-issue-raw-$groupIndex'),
+                                      title: Text(
+                                          '查看原始条目（${group.issues.length}）'),
+                                      children: [
+                                        for (final issue in group.issues)
+                                          ListTile(
+                                            title: Text(
+                                                '${courseLabel(issue)} · '
+                                                '${syncIssueKindLabel(issue.kind)}'),
+                                            subtitle: Text(
+                                                '${syncIssueStageLabel(issue.stage)} · '
+                                                '${issue.kind.name}'
+                                                '${issue.httpStatus == null ? '' : ' · HTTP ${issue.httpStatus}'}'
+                                                '${issue.elapsedMs == null ? '' : ' · ${issue.elapsedMs}ms'}'),
+                                          ),
+                                      ],
+                                    ),
+                                  ]);
+                            }),
+                        ]);
+                  }),
+                  const SizedBox(height: 12),
+                ],
                 if (store.error != null) ...[
                   const SizedBox(height: 12),
                   Card(
@@ -194,6 +314,15 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       },
     );
   }
+
+  String _reasonLabel(String code) => switch (code) {
+        'examPcSupplementUnavailable' => '部分课程 PC 考试补充时间未取得，已保留手机端记录',
+        'accountExamRowSkippedNoId' => '部分历史账号考试缺少唯一标识已跳过',
+        'unfinishedPlanDetected' => '存在待核对课程补充任务计划',
+        'listOrMetadataUnavailable' => '列表或元数据暂不可用',
+        'identityConflict' => '存在重复关联待核对',
+        _ => code,
+      };
 
   void _showMessage(String message) {
     ScaffoldMessenger.of(

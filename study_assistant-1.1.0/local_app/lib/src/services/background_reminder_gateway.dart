@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import '../models/reminder_history.dart';
 import 'assignment_reminder_planner.dart';
 import 'background_check_settings.dart';
 
@@ -24,6 +25,26 @@ enum BackgroundSyncTrigger {
   daytime,
   notificationSignal,
   foregroundDue,
+}
+
+enum NotificationRemoteAuthorization {
+  granted,
+  outsideWindow,
+  stale,
+}
+
+class NotificationRemoteStartContext {
+  const NotificationRemoteStartContext({
+    required this.accountHash,
+    required this.sessionEpoch,
+    required this.claimToken,
+    required this.workerId,
+  });
+
+  final String accountHash;
+  final int sessionEpoch;
+  final String claimToken;
+  final String workerId;
 }
 
 class SyncLeaseResult {
@@ -51,11 +72,14 @@ class ReminderPlanState {
     required this.lastFullSuccessAt,
     required this.pendingUpdate,
     required this.mutationVersion,
-  });
+    Set<String>? baselinedSources,
+  }) : baselinedSources = baselinedSources ??
+            (baselineCompleted ? const {'courseWork'} : const {});
 
   final String accountHash;
   final int sessionEpoch;
   final bool baselineCompleted;
+  final Set<String> baselinedSources;
   final Set<String> knownAssignmentIds;
   final Set<String> sentNewAssignmentIds;
   final DateTime? lastAttemptAt;
@@ -172,12 +196,14 @@ class BackgroundReminderGateway {
     int sessionEpoch,
     BackgroundCheckSettings settings, {
     required bool showDetails,
+    bool reconcileSchedules = true,
   }) async {
     await _invokeStrictVoid('updateSettings', {
       'accountHash': accountHash,
       'sessionEpoch': sessionEpoch,
       ...settings.toJson(),
       'showDetails': showDetails,
+      'reconcileSchedules': reconcileSchedules,
     });
   }
 
@@ -305,6 +331,9 @@ class BackgroundReminderGateway {
       accountHash: accountHash,
       sessionEpoch: sessionEpoch,
       baselineCompleted: value['baselineCompleted'] == true,
+      baselinedSources: value.containsKey('baselinedSources')
+          ? _strings(value['baselinedSources'])
+          : null,
       knownAssignmentIds: _strings(value['knownAssignmentIds']),
       sentNewAssignmentIds: _strings(value['sentNewAssignmentIds']),
       lastAttemptAt: _date(value['lastAttemptAt']),
@@ -324,6 +353,282 @@ class BackgroundReminderGateway {
     });
   }
 
+  Future<NotificationRemoteAuthorization> authorizeNotificationRemoteStart(
+    NotificationRemoteStartContext context,
+  ) async {
+    final value = await _invokeStrict<String>(
+      'authorizeNotificationRemoteStart',
+      {
+        'accountHash': context.accountHash,
+        'sessionEpoch': context.sessionEpoch,
+        'claimToken': context.claimToken,
+        'workerId': context.workerId,
+      },
+    );
+    return switch (value) {
+      'granted' => NotificationRemoteAuthorization.granted,
+      'outsideWindow' => NotificationRemoteAuthorization.outsideWindow,
+      'stale' => NotificationRemoteAuthorization.stale,
+      _ => throw const BackgroundReminderGatewayException(
+          'authorizeNotificationRemoteStart', '原生授权结果无效'),
+    };
+  }
+
+  Future<ReminderHistoryControl> getReminderHistoryControl({
+    String? accountHash,
+    int? sessionEpoch,
+  }) async {
+    final value = await _invokeHistory<Map<Object?, Object?>>(
+      'getReminderHistoryControl',
+      {
+        if (accountHash != null) 'accountHash': accountHash,
+        if (sessionEpoch != null) 'sessionEpoch': sessionEpoch,
+      },
+    );
+    final generation = _requiredNonNegativeInt(
+      value['historyGeneration'],
+      'historyGeneration',
+    );
+    final recording = value['recordingEnabled'];
+    final ownerMatches = value['ownerMatches'];
+    final purgePending = value['purgePending'];
+    if (recording is! bool || ownerMatches is! bool || purgePending is! bool) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '原生提醒历史控制结果不完整',
+      );
+    }
+    return ReminderHistoryControl(
+      historyGeneration: generation,
+      recordingEnabled: recording,
+      ownerMatches: ownerMatches,
+      purgePending: purgePending,
+      purgeToken: value['purgeToken'] as String?,
+    );
+  }
+
+  Future<ReminderObservationContext> acquireReminderObservationContext({
+    required String accountHash,
+    required int sessionEpoch,
+  }) async {
+    final value = await _invokeHistory<Map<Object?, Object?>>(
+      'acquireReminderObservationContext',
+      {'accountHash': accountHash, 'sessionEpoch': sessionEpoch},
+    );
+    return _readObservationContext(value);
+  }
+
+  Future<String> appendReminderObservation({
+    required ReminderObservationContext context,
+    required ReminderObservation observation,
+  }) async {
+    final value = await _invokeHistory<String>(
+      'appendReminderObservation',
+      {
+        'context': context.toJson(),
+        'observation': observation.toJson(),
+      },
+    );
+    if (!const {'inserted', 'duplicate', 'expired', 'stale', 'unavailable'}
+        .contains(value)) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '原生提醒记录写入结果无效',
+      );
+    }
+    return value;
+  }
+
+  Future<ReminderScheduleOutcomeResult> recordReminderScheduleOutcome({
+    required ReminderObservationContext context,
+    required List<ReminderScheduleOutcome> outcomes,
+  }) async {
+    final value = await _invokeHistory<Map<Object?, Object?>>(
+      'recordReminderScheduleOutcome',
+      {
+        'context': context.toJson(),
+        'outcomes': outcomes.map((item) => item.toJson()).toList(),
+      },
+    );
+    int read(String key) => _requiredNonNegativeInt(value[key], key);
+    return ReminderScheduleOutcomeResult(
+      evidenceUpdated: read('evidenceUpdated'),
+      evidenceIgnored: read('evidenceIgnored'),
+      inserted: read('inserted'),
+      duplicate: read('duplicate'),
+      expired: read('expired'),
+      warning: value['warning'] as String?,
+    );
+  }
+
+  Future<ReminderHistoryPage> listReminderHistory({
+    required ReminderObservationContext context,
+    int? snapshotMaxId,
+    int? beforeId,
+    String? category,
+    List<ReminderSubjectRef> subjectRefs = const [],
+  }) async {
+    if ((snapshotMaxId != null && snapshotMaxId <= 0) ||
+        (beforeId != null && beforeId <= 0)) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '提醒记录游标必须为正整数',
+      );
+    }
+    final value = await _invokeHistory<Map<Object?, Object?>>(
+      'listReminderHistory',
+      {
+        'context': context.toJson(),
+        if (snapshotMaxId != null) 'snapshotMaxId': snapshotMaxId,
+        if (beforeId != null) 'beforeId': beforeId,
+        if (category != null) 'category': category,
+        if (subjectRefs.isNotEmpty)
+          'subjectRefs': subjectRefs
+              .map((item) => {
+                    'kind': item.kind,
+                    if (item.id != null) 'id': item.id,
+                  })
+              .toList(),
+      },
+    );
+    final items = value['items'];
+    if (items is! List) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '原生提醒记录列表无效',
+      );
+    }
+    return ReminderHistoryPage(
+      items: items
+          .whereType<Map<Object?, Object?>>()
+          .map(_readHistoryItem)
+          .toList(),
+      snapshotMaxId:
+          _requiredNonNegativeInt(value['snapshotMaxId'], 'snapshotMaxId'),
+      nextBeforeId: (value['nextBeforeId'] as num?)?.toInt(),
+      checkedAt: _requiredDate(value['checkedAt'], 'checkedAt'),
+      historyGeneration: _requiredNonNegativeInt(
+          value['historyGeneration'], 'historyGeneration'),
+    );
+  }
+
+  Future<ReminderSubjectEvidence> inspectReminderSubjects({
+    required ReminderObservationContext context,
+    required List<ReminderSubjectRef> subjectRefs,
+  }) async {
+    final value = await _invokeHistory<Map<Object?, Object?>>(
+      'inspectReminderSubjects',
+      {
+        'context': context.toJson(),
+        'subjectRefs': subjectRefs
+            .map((item) => {
+                  'kind': item.kind,
+                  if (item.id != null) 'id': item.id,
+                })
+            .toList(),
+      },
+    );
+    final native = value['nativeEvents'];
+    final plugin = value['pluginEvidence'];
+    if (native is! List || plugin is! List) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '原生提醒证据结果无效',
+      );
+    }
+    return ReminderSubjectEvidence(
+      checkedAt: _requiredDate(value['checkedAt'], 'checkedAt'),
+      nativeEvents: native
+          .whereType<Map<Object?, Object?>>()
+          .map(_readNativeEvidence)
+          .toList(),
+      pluginEvidence: plugin
+          .whereType<Map<Object?, Object?>>()
+          .map(_readPluginEvidence)
+          .toList(),
+      queryWarnings:
+          (value['queryWarnings'] as List?)?.whereType<String>().toList() ??
+              const [],
+      historyGeneration: _requiredNonNegativeInt(
+          value['historyGeneration'], 'historyGeneration'),
+    );
+  }
+
+  Future<ReminderHistoryLogoutStart> beginReminderHistoryLogout({
+    required int expectedHistoryGeneration,
+    required String requestId,
+    required String accountHash,
+    required int sessionEpoch,
+  }) async {
+    final value = await _invokeHistory<Map<Object?, Object?>>(
+      'beginReminderHistoryLogout',
+      {
+        'expectedHistoryGeneration': expectedHistoryGeneration,
+        'requestId': requestId,
+        'accountHash': accountHash,
+        'sessionEpoch': sessionEpoch,
+      },
+    );
+    final token = value['purgeToken'];
+    final state = value['state'];
+    if (state != 'pending' || token is! String || token.isEmpty) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '原生提醒历史退出结果无效',
+      );
+    }
+    return ReminderHistoryLogoutStart(
+      historyGeneration: _requiredNonNegativeInt(
+          value['historyGeneration'], 'historyGeneration'),
+      purgeToken: token,
+    );
+  }
+
+  Future<ReminderHistoryLogoutFinish> finishReminderHistoryLogout(
+    String purgeToken,
+  ) async {
+    final value = await _invokeHistory<Map<Object?, Object?>>(
+      'finishReminderHistoryLogout',
+      {'purgeToken': purgeToken},
+    );
+    if (value['cleared'] != true) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '原生提醒历史清理结果无效',
+      );
+    }
+    return ReminderHistoryLogoutFinish(
+      cleared: true,
+      historyGeneration: _requiredNonNegativeInt(
+          value['historyGeneration'], 'historyGeneration'),
+    );
+  }
+
+  Future<int> enableReminderHistorySession({
+    required String accountHash,
+    required int sessionEpoch,
+    required int expectedHistoryGeneration,
+  }) async {
+    final value = await _invokeHistory<Map<Object?, Object?>>(
+      'enableReminderHistorySession',
+      {
+        'accountHash': accountHash,
+        'sessionEpoch': sessionEpoch,
+        'expectedHistoryGeneration': expectedHistoryGeneration,
+      },
+    );
+    if (value['recordingEnabled'] != true) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '原生提醒历史启用结果无效',
+      );
+    }
+    return _requiredNonNegativeInt(
+      value['historyGeneration'],
+      'historyGeneration',
+    );
+  }
+
   Future<ReminderPlanApplyResult> applyPlan({
     required String accountHash,
     required int sessionEpoch,
@@ -341,6 +646,7 @@ class BackgroundReminderGateway {
       'syncCompleted': syncCompleted,
       'expectedMutationVersion': expectedMutationVersion,
       'baselineCompleted': plan.baselineCompleted,
+      'baselinedSources': plan.baselinedSources.toList(),
       'knownAssignmentIds': plan.knownAssignmentIds.toList(),
       'snapshots': plan.snapshotJson,
       'events': plan.eventJson,
@@ -507,6 +813,187 @@ class BackgroundReminderGateway {
       // fallback remains responsible for reminders.
       return null;
     }
+  }
+
+  Future<T> _invokeHistory<T>(
+    String method,
+    Map<String, Object?> arguments,
+  ) async {
+    try {
+      final value = await _channel
+          .invokeMethod<T>(method, arguments)
+          .timeout(operationTimeout);
+      if (value == null) {
+        throw ReminderHistoryException(
+          'history_unavailable',
+          '原生提醒历史通道未返回结果（$method）',
+        );
+      }
+      return value;
+    } on ReminderHistoryException {
+      rethrow;
+    } on MissingPluginException catch (error) {
+      throw ReminderHistoryException('history_unavailable', '$error');
+    } on PlatformException catch (error) {
+      throw ReminderHistoryException(
+        error.code,
+        error.message ?? error.code,
+      );
+    } on TimeoutException catch (error) {
+      throw ReminderHistoryException('history_unavailable', '$error');
+    } catch (error) {
+      throw ReminderHistoryException('history_unavailable', '$error');
+    }
+  }
+
+  static ReminderObservationContext _readObservationContext(
+    Map<Object?, Object?> value,
+  ) {
+    final accountHash = value['accountHash'];
+    if (accountHash is! String || accountHash.isEmpty) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '提醒记录上下文缺少账号',
+      );
+    }
+    return ReminderObservationContext(
+      accountHash: accountHash,
+      sessionEpoch:
+          _requiredNonNegativeInt(value['sessionEpoch'], 'sessionEpoch'),
+      historyGeneration: _requiredNonNegativeInt(
+          value['historyGeneration'], 'historyGeneration'),
+      operationSequence: _requiredNonNegativeInt(
+          value['operationSequence'], 'operationSequence'),
+    );
+  }
+
+  static ReminderHistoryItem _readHistoryItem(Map<Object?, Object?> value) {
+    final category = value['category'];
+    final stage = value['stage'];
+    final subjectKind = value['subjectKind'];
+    final logicalKey = value['logicalKey'];
+    final observationId = value['observationId'];
+    if (category is! String ||
+        stage is! String ||
+        subjectKind is! String ||
+        logicalKey is! String ||
+        observationId is! String) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '提醒记录条目字段无效',
+      );
+    }
+    return ReminderHistoryItem(
+      id: _requiredNonNegativeInt(value['id'], 'id'),
+      observationId: observationId,
+      operationSequence: _requiredNonNegativeInt(
+          value['operationSequence'], 'operationSequence'),
+      subjectKind: subjectKind,
+      subjectId: value['subjectId'] as String?,
+      logicalKey: logicalKey,
+      category: category,
+      stage: stage,
+      reasonCode: value['reasonCode'] as String?,
+      observedAt: _requiredDate(value['observedAt'], 'observedAt'),
+      scheduledAt: _optionalDate(value['scheduledAt']),
+      notificationId: (value['notificationId'] as num?)?.toInt(),
+      batchKey: value['batchKey'] as String?,
+    );
+  }
+
+  static ReminderNativeSubjectEvidence _readNativeEvidence(
+    Map<Object?, Object?> value,
+  ) {
+    final subjectKind = value['subjectKind'];
+    final subjectId = value['subjectId'];
+    final eventId = value['eventId'];
+    final category = value['category'];
+    final logicalKey = value['logicalKey'];
+    final state = value['state'];
+    if (subjectKind is! String ||
+        (subjectId != null && subjectId is! String) ||
+        eventId is! String ||
+        category is! String ||
+        logicalKey is! String ||
+        state is! String) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '原生提醒证据字段无效',
+      );
+    }
+    return ReminderNativeSubjectEvidence(
+      subjectKind: subjectKind,
+      subjectId: subjectId as String?,
+      eventId: eventId,
+      category: category,
+      logicalKey: logicalKey,
+      state: state,
+      scheduledAt: _optionalDate(value['scheduledAt']),
+      notificationId: (value['notificationId'] as num?)?.toInt(),
+      evidenceAt: _optionalDate(value['evidenceAt']),
+      alarmScheduled: value['alarmScheduled'] as bool?,
+    );
+  }
+
+  static ReminderPluginSubjectEvidence _readPluginEvidence(
+    Map<Object?, Object?> value,
+  ) {
+    final subjectKind = value['subjectKind'];
+    final subjectId = value['subjectId'];
+    final logicalKey = value['logicalKey'];
+    final category = value['category'];
+    final state = value['state'];
+    if (subjectKind is! String ||
+        logicalKey is! String ||
+        category is! String ||
+        state is! String) {
+      throw const ReminderHistoryException(
+        'invalid_history_argument',
+        '插件提醒证据字段无效',
+      );
+    }
+    return ReminderPluginSubjectEvidence(
+      subjectKind: subjectKind,
+      subjectId: subjectId is String ? subjectId : '',
+      logicalKey: logicalKey,
+      category: category,
+      state: state,
+      scheduledAt: _optionalDate(value['scheduledAt']),
+      notificationId: (value['notificationId'] as num?)?.toInt(),
+      expectedPayload: value['expectedPayload'] as String?,
+      evidenceAt: _optionalDate(value['evidenceAt']),
+    );
+  }
+
+  static int _requiredNonNegativeInt(Object? value, String field) {
+    if (value is int && value >= 0) return value;
+    if (value is num && value >= 0) return value.toInt();
+    throw ReminderHistoryException(
+      'invalid_history_argument',
+      '提醒记录字段 $field 无效',
+    );
+  }
+
+  static DateTime _requiredDate(Object? value, String field) {
+    final date = _optionalDate(value);
+    if (date == null) {
+      throw ReminderHistoryException(
+        'invalid_history_argument',
+        '提醒记录时间 $field 无效',
+      );
+    }
+    return date;
+  }
+
+  static DateTime? _optionalDate(Object? value) {
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt(), isUtc: true)
+          .toLocal();
+    }
+    if (value is String) {
+      return DateTime.tryParse(value)?.toLocal();
+    }
+    return null;
   }
 
   static Set<String> _strings(Object? value) =>

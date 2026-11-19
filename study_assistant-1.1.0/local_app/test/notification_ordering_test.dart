@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -38,7 +39,7 @@ void main() {
   late bool migrationCompleted;
   late List<Map<Object?, Object?>> migrationCalls;
   Completer<void>? showing, release;
-  late bool failShow, failCancel;
+  late bool failShow, failCancel, failActive;
   setUp(() {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     FlutterLocalNotificationsPlatform.instance =
@@ -52,7 +53,7 @@ void main() {
     migrationCompleted = true;
     migrationCalls = [];
     showing = release = null;
-    failShow = failCancel = false;
+    failShow = failCancel = failActive = false;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(migrationChannel, (call) async {
       if (call.method != 'retireLegacyAssignments') return null;
@@ -105,6 +106,9 @@ void main() {
         case 'pendingNotificationRequests':
           return pending.toList();
         case 'getActiveNotifications':
+          if (failActive) {
+            throw PlatformException(code: 'synthetic-active-failure');
+          }
           return active.toList();
         case 'zonedSchedule':
           final args = call.arguments as Map;
@@ -238,6 +242,99 @@ void main() {
     expect(active, isEmpty);
     expect(pending, isEmpty);
     expect(await service.hasPendingScheduleRecovery(), false);
+  });
+  test('active query failure still cancels provable pending manual reminders',
+      () async {
+    final service = LocalNotificationService();
+    ManualEntry entry(String id) => ManualEntry(
+        id: id,
+        title: id,
+        kind: 'todo',
+        at: DateTime.now().add(const Duration(hours: 1)),
+        remind: true);
+    await service.rescheduleManual([entry('qa-delete'), entry('qa-keep')]);
+    final deleteId = pending
+        .firstWhere((item) => item['payload'] == 'p:qa-delete')['id'] as int;
+
+    failActive = true;
+    await service.rescheduleManual([entry('qa-keep')]);
+
+    expect(pending.any((item) => item['id'] == deleteId), false);
+    expect(pending.where((item) => item['payload'] == 'p:qa-keep').length, 1);
+    expect(service.lastWarning, contains('完整性未确认'));
+    failActive = false;
+    expect(await service.hasPendingScheduleRecovery(), false);
+  });
+  test(
+      'active query failure keeps journal for delivered manual reminder without payload',
+      () async {
+    final service = LocalNotificationService();
+    ManualEntry entry(String id) => ManualEntry(
+        id: id,
+        title: id,
+        kind: 'todo',
+        at: DateTime.now().add(const Duration(hours: 1)),
+        remind: true);
+    await service.rescheduleManual([entry('qa-delete'), entry('qa-delivered')]);
+    final deleteId = pending
+        .firstWhere((item) => item['payload'] == 'p:qa-delete')['id'] as int;
+    final deliveredId = pending
+        .firstWhere((item) => item['payload'] == 'p:qa-delivered')['id'] as int;
+    pending.removeWhere((item) => item['id'] == deliveredId);
+    active.add(
+        {'id': deliveredId, 'channelId': 'personal_schedule', 'tag': null});
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        'notification_schedule_v2_journal_manual',
+        jsonEncode({
+          'version': 2,
+          'category': 'manual',
+          'phase': 'committed',
+          'oldIds': [deleteId, deliveredId],
+          'newIds': <int>[],
+        }));
+
+    failActive = true;
+    await expectLater(service.rescheduleManual([]), throwsStateError);
+
+    expect(pending.any((item) => item['id'] == deleteId), false);
+    expect(active.single['id'], deliveredId);
+    expect(await service.hasPendingScheduleRecovery(), true);
+    expect(service.lastWarning, contains('1 条旧提醒仍待核对'));
+    final journal =
+        jsonDecode(prefs.getString('notification_schedule_v2_journal_manual')!)
+            as Map;
+    expect(journal['oldIds'], [deliveredId]);
+  });
+  test('active query failure does not cancel an invalid p payload', () async {
+    final service = LocalNotificationService();
+    await service.rescheduleManual([
+      ManualEntry(
+          id: 'qa-invalid',
+          title: 'QA',
+          kind: 'todo',
+          at: DateTime.now().add(const Duration(hours: 1)),
+          remind: true)
+    ]);
+    final id = pending.single['id'] as int;
+    pending.single['payload'] = 'p:';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        'notification_schedule_v2_journal_manual',
+        jsonEncode({
+          'version': 2,
+          'category': 'manual',
+          'phase': 'committed',
+          'oldIds': [id],
+          'newIds': <int>[],
+        }));
+
+    failActive = true;
+    await expectLater(service.rescheduleManual([]), throwsStateError);
+
+    expect(pending.single['id'], id);
+    expect(await service.hasPendingScheduleRecovery(), true);
+    expect(service.lastWarning, contains('1 条旧提醒仍待核对'));
   });
   for (final category in ['assignments', 'summary']) {
     test('retiring delivered $category uses native channel ownership',

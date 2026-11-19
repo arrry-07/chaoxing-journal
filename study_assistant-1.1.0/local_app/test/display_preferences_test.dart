@@ -33,6 +33,45 @@ AssignmentStore store() => AssignmentStore(
     notificationService: LocalNotificationService(),
     widgetSnapshotService: _Widgets());
 void main() {
+  test('widget ranges use trusted exam timeline rather than work deadline', () {
+    final now = DateTime.utc(2026, 11, 16, 2);
+    Assignment exam(String id, DateTime start,
+            {String lifecycle = 'scheduled', bool trusted = true}) =>
+        Assignment(
+            id: 'cx:exam:1:2:$id',
+            source: AssignmentSource.exam,
+            title: id,
+            courseName: '课程',
+            deadlineAt: null,
+            requirementsText: '',
+            status: 'pending',
+            lastSyncedAt: now,
+            exam: ExamInfo(
+                examId: id,
+                courseId: '1',
+                clazzId: '2',
+                lifecycle: lifecycle,
+                startAt: start,
+                startTrusted: trusted));
+    final today = exam('1', now.add(const Duration(hours: 1)));
+    final tomorrow = exam('2', now.add(const Duration(days: 1)));
+    final ended =
+        exam('3', now.add(const Duration(days: 1)), lifecycle: 'ended');
+    final unknown =
+        exam('4', now.add(const Duration(hours: 1)), trusted: false);
+    final rows = [today, tomorrow, ended, unknown];
+    expect(
+        const DisplayPreferences(widgetRange: WidgetRange.today)
+            .forWidget(rows, now),
+        [today]);
+    expect(
+        const DisplayPreferences(widgetRange: WidgetRange.week)
+            .forWidget(rows, now),
+        [today, tomorrow]);
+    expect(const DisplayPreferences().forWidget(rows, now),
+        [today, tomorrow, unknown]);
+  });
+
   testWidgets('settings save and restore without publishing logged-out records',
       (t) async {
     SharedPreferences.setMockInitialValues({});
@@ -77,7 +116,7 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.byType(DropdownButtonFormField<String>));
     await t.pumpAndSettle();
-    await t.tap(find.text('同名课程（2班）').last);
+    await t.tap(find.byKey(const ValueKey('course-option-1:2')));
     await t.pumpAndSettle();
     await t.ensureVisible(find.text('应用'));
     await t.pumpAndSettle();

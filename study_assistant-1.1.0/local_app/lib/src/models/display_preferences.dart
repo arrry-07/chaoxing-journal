@@ -27,15 +27,20 @@ class DisplayPreferences {
     }
   }
   List<Assignment> forWidget(List<Assignment> items, DateTime now) {
-    if (widgetRange == WidgetRange.all) return items;
+    final display = AssignmentQuery.currentDisplay(items, now);
+    if (widgetRange == WidgetRange.all) return display;
     final today = AssignmentQuery.dayKey(now);
-    final end =
-        today.add(Duration(days: widgetRange == WidgetRange.today ? 1 : 7));
-    return items
+    final days = widgetRange == WidgetRange.today ? 1 : 7;
+    final end = DateTime(today.year, today.month, today.day + days);
+    return display
         .where((a) =>
-            a.deadlineBucketAt(now) ==
+            AssignmentQuery.timelineBucketAt(a, now) ==
                 AssignmentDeadlineBucket.notExpiredWithDeadline &&
-            AssignmentQuery.dayKey(a.deadlineAt!).isBefore(end))
+            a.timelineAt != null &&
+            a.timelineTrusted &&
+            (a.isExam || !a.deadlineReadFailed) &&
+            !AssignmentQuery.dayKey(a.timelineAt!).isBefore(today) &&
+            AssignmentQuery.dayKey(a.timelineAt!).isBefore(end))
         .toList();
   }
 

@@ -1,6 +1,7 @@
 import 'dart:ui' show SemanticsAction;
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:flutter/material.dart';
+import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
@@ -45,6 +46,10 @@ void main() {
             .hasAction(SemanticsAction.tap),
         isTrue);
     expect(find.textContaining('近期截止'), findsNothing);
+    expect(
+        AssignmentQuery.nextActionable(s.courseAssignments, now: DateTime.now())
+            ?.title,
+        '近期待交题');
     expect(
         t
             .widget<AssignmentCard>(find.byType(AssignmentCard).first)

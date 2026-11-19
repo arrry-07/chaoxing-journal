@@ -38,6 +38,15 @@ def artifact(
 
 
 class VersionSelectionTests(unittest.TestCase):
+    def test_two_digit_patch_keeps_tag_and_stable_identity(self) -> None:
+        stable = artifact("1.8.0", 67)
+        patch = artifact("1.8.01", 68)
+        self.assertEqual(sync.version_tuple(patch.version_name), (1, 8, 1))
+        self.assertEqual(sync.tag_tuple(patch.tag), (1, 8, 1))
+        self.assertEqual(sync.version_from_tag(patch.tag), "1.8.01")
+        self.assertIs(sync.choose_manual_release([stable, patch]), patch)
+        self.assertIs(sync.choose_stable_release(stable, patch), stable)
+
     def test_manual_selects_highest_version_then_code(self) -> None:
         releases = [
             artifact("1.7.4", 56),
@@ -781,6 +790,14 @@ def candidate_github_url(release: sync.ReleaseArtifact) -> str:
 
 
 class SafetyTests(unittest.TestCase):
+    def test_two_digit_patch_is_narrowly_supported(self) -> None:
+        for patch in ("01", "09"):
+            self.assertTrue(sync.is_managed_tag("v1.8." + patch))
+        for patch in ("00", "001", "052", "01-beta"):
+            self.assertFalse(sync.is_managed_tag("v1.8." + patch))
+            with self.assertRaises(ValueError):
+                sync.version_tuple("1.8." + patch)
+
     def test_unknown_or_prerelease_versions_are_rejected(self) -> None:
         for tag in ("release-1.7.52", "v1.7-beta", "v1.7.052"):
             with self.subTest(tag=tag):

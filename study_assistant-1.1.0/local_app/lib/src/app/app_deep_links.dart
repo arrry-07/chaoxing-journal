@@ -1,6 +1,30 @@
 class AppDeepLinks {
   static const scheme = 'studyassistant';
 
+  static bool isOwnedNotificationUri(Uri uri) =>
+      normalizeIncomingLocation(uri) != null &&
+      uri.hasAuthority &&
+      (uri.host == 'assignments' ||
+          uri.path.isEmpty ||
+          uri.path == '/' ||
+          uri.pathSegments.first == 'assignments');
+
+  /// Notification payloads are not arbitrary app routes. In particular a
+  /// digest has no assignment ID and must never open a detail page.
+  static String notificationLocation(String payload,
+      {required bool Function(String id) containsAssignment}) {
+    if (payload.startsWith('p:')) return '/agenda';
+    if (payload == 'd:summary' || payload == 't:notification-test') {
+      return '/assignments';
+    }
+    final raw = payload.startsWith('a:') ? payload.substring(2) : payload;
+    final uri = Uri.tryParse(raw);
+    final location = uri == null ? null : normalizeIncomingLocation(uri);
+    if (location == null || location == '/assignments') return '/assignments';
+    final id = Uri.parse(location).pathSegments.last;
+    return containsAssignment(id) ? location : '/assignments';
+  }
+
   static String assignmentUri(String assignmentId) {
     return '$scheme://${assignmentLocation(assignmentId)}';
   }

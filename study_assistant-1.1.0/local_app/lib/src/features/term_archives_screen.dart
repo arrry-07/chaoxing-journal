@@ -61,7 +61,7 @@ class _ArchivesState extends State<TermArchivesScreen> {
                   rows: [
                     ...widget.store.assignments,
                     ...widget.store.hiddenAssignments
-                  ].where((a) => a.isFormal).toList(),
+                  ].where((a) => a.hasCourseTaskIdentity).toList(),
                   personal: widget.store.personal,
                   entries: n.entries)
             ]),

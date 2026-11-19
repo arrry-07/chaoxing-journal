@@ -1,23 +1,39 @@
 import '../models/assignment.dart';
 
+enum AssignmentStatBucket { completed, pending, expired, unknown }
+
 class AssignmentStatistics {
+  static AssignmentStatBucket classify(
+    Assignment a,
+    DateTime referenceTime,
+  ) {
+    switch (a.deadlineBucketAt(referenceTime)) {
+      case AssignmentDeadlineBucket.completed:
+        return AssignmentStatBucket.completed;
+      case AssignmentDeadlineBucket.overdue:
+        return AssignmentStatBucket.expired;
+      case AssignmentDeadlineBucket.notExpiredWithDeadline:
+      case AssignmentDeadlineBucket.confirmedNoDeadline:
+        return AssignmentStatBucket.pending;
+      case AssignmentDeadlineBucket.unconfirmed:
+        return a.isPendingConfirmed
+            ? AssignmentStatBucket.pending
+            : AssignmentStatBucket.unknown;
+    }
+  }
+
   AssignmentStatistics(Iterable<Assignment> records, {DateTime? now}) {
     final referenceTime = now ?? DateTime.now();
     for (final a in records) {
-      switch (a.deadlineBucketAt(referenceTime)) {
-        case AssignmentDeadlineBucket.completed:
+      switch (classify(a, referenceTime)) {
+        case AssignmentStatBucket.completed:
           completed++;
-        case AssignmentDeadlineBucket.overdue:
+        case AssignmentStatBucket.expired:
           expired++;
-        case AssignmentDeadlineBucket.notExpiredWithDeadline:
-        case AssignmentDeadlineBucket.confirmedNoDeadline:
+        case AssignmentStatBucket.pending:
           pending++;
-        case AssignmentDeadlineBucket.unconfirmed:
-          if (a.isPendingConfirmed) {
-            pending++;
-          } else {
-            unknown++;
-          }
+        case AssignmentStatBucket.unknown:
+          unknown++;
       }
     }
   }

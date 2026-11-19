@@ -24,25 +24,60 @@ enum HomeSortOrder {
   title,
 }
 
+enum AssignmentTypeFilter {
+  all('全部'),
+  homework('作业'),
+  task('任务'),
+  exam('考试'),
+  examNotice('考试通知');
+
+  const AssignmentTypeFilter(this.label);
+  final String label;
+}
+
+const homeTypeFilterChoices = [
+  AssignmentTypeFilter.all,
+  AssignmentTypeFilter.homework,
+  AssignmentTypeFilter.exam
+];
+const homeSortOrderChoices = [
+  HomeSortOrder.deadlineAsc,
+  HomeSortOrder.deadlineDesc,
+  HomeSortOrder.courseName
+];
+HomeSortOrder normalizedHomeSort(HomeSortOrder order) =>
+    order == HomeSortOrder.grouped || order == HomeSortOrder.title
+        ? HomeSortOrder.deadlineAsc
+        : order;
+AssignmentTypeFilter normalizedHomeType(AssignmentTypeFilter type) =>
+    switch (type) {
+      AssignmentTypeFilter.task => AssignmentTypeFilter.homework,
+      AssignmentTypeFilter.examNotice => AssignmentTypeFilter.exam,
+      _ => type,
+    };
+
 /// UI preferences only; relative deadlines are evaluated against the current time.
 class HomeFilters {
   const HomeFilters({
     this.query = '',
     this.courseKey,
     this.deadline = AssignmentDeadlineFilter.all,
-    this.sortOrder = HomeSortOrder.grouped,
+    this.sortOrder = HomeSortOrder.deadlineAsc,
+    this.type = AssignmentTypeFilter.all,
   });
 
   final String query;
   final String? courseKey;
   final AssignmentDeadlineFilter deadline;
   final HomeSortOrder sortOrder;
+  final AssignmentTypeFilter type;
 
   String encode() => jsonEncode({
         'query': query.trim(),
         'courseKey': courseKey,
         'deadline': deadline.name,
         'sortOrder': sortOrder.name,
+        'type': type.name,
       });
 
   factory HomeFilters.decode(String? raw) {
@@ -75,7 +110,11 @@ class HomeFilters {
           query: (value['query'] as String).trim(),
           courseKey: value['courseKey'] == '' ? null : value['courseKey'],
           deadline: deadline,
-          sortOrder: sortOrder);
+          type: normalizedHomeType(AssignmentTypeFilter.values
+                  .where((type) => type.name == value['type'])
+                  .firstOrNull ??
+              AssignmentTypeFilter.all),
+          sortOrder: normalizedHomeSort(sortOrder));
     } catch (_) {
       return const HomeFilters();
     }

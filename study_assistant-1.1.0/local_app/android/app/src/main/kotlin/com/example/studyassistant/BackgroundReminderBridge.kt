@@ -62,14 +62,24 @@ object BackgroundReminderBridge {
                     "ping" -> result.success(true)
                     "ensureActiveAccount" -> {
                         val accountHash = call.requiredString("accountHash")
+                        BackgroundWorkScheduler.retireLegacyWork(appContext)
                         result.success(database.ensureActiveAccount(accountHash).sessionEpoch)
                     }
-                    "switchAccount" -> {
+                    "switchAccount" -> tasks.execute(result) { reply ->
                         val previous = call.argument<String>("previousAccountHash")
                         val target = call.requiredString("accountHash")
                         val switchingAccount =
                             !previous.isNullOrBlank() && previous != target
+                        val targetBefore =
+                            if (switchingAccount) database.readAccount(target) else null
                         if (switchingAccount) {
+                            database.readAccount(previous!!)?.let { previousState ->
+                                BackgroundWorkScheduler.cancelAllForAccount(
+                                    appContext,
+                                    previous,
+                                    previousState.sessionEpoch,
+                                )
+                            }
                             AssignmentNotificationPublisher.cancelForAccount(
                                 appContext,
                                 database,
@@ -78,32 +88,65 @@ object BackgroundReminderBridge {
                         }
                         val state = database.switchAccount(previous, target)
                         if (switchingAccount) {
+                            if (targetBefore != null &&
+                                targetBefore.sessionEpoch != state.sessionEpoch
+                            ) {
+                                BackgroundWorkScheduler.cancelAllForAccount(
+                                    appContext,
+                                    target,
+                                    targetBefore.sessionEpoch,
+                                )
+                            }
+                            BackgroundWorkScheduler.cancelAllForAccount(
+                                appContext,
+                                target,
+                                state.sessionEpoch,
+                            )
                             AssignmentNotificationPublisher.cancelForAccount(
                                 appContext,
                                 database,
                                 target,
                             )
                         }
-                        result.success(state.sessionEpoch)
+                        reply.success(state.sessionEpoch)
                     }
-                    "rotateSessionEpoch" -> {
+                    "rotateSessionEpoch" -> tasks.execute(result) { reply ->
                         val accountHash = call.requiredString("accountHash")
+                        database.readAccount(accountHash)?.let { previous ->
+                            BackgroundWorkScheduler.cancelAllForAccount(
+                                appContext,
+                                accountHash,
+                                previous.sessionEpoch,
+                            )
+                        }
                         AssignmentNotificationPublisher.cancelForAccount(
                             appContext,
                             database,
                             accountHash,
                         )
-                        result.success(database.rotateSessionEpoch(accountHash))
+                        val epoch = database.rotateSessionEpoch(accountHash)
+                        BackgroundWorkScheduler.cancelAllForAccount(
+                            appContext,
+                            accountHash,
+                            epoch,
+                        )
+                        reply.success(epoch)
                     }
-                    "clearActiveAccount" -> {
+                    "clearActiveAccount" -> tasks.execute(result) { reply ->
                         val accountHash = call.requiredString("accountHash")
-                        BackgroundWorkScheduler.cancelAllForAccount(appContext)
+                        database.readAccount(accountHash)?.let { previous ->
+                            BackgroundWorkScheduler.cancelAllForAccount(
+                                appContext,
+                                accountHash,
+                                previous.sessionEpoch,
+                            )
+                        } ?: BackgroundWorkScheduler.retireLegacyWork(appContext)
                         AssignmentNotificationPublisher.cancelForAccount(
                             appContext,
                             database,
                             accountHash,
                         )
-                        result.success(database.clearActiveAccount(accountHash))
+                        reply.success(database.clearActiveAccount(accountHash))
                     }
                     "isSessionCurrent" -> result.success(
                         database.isSessionCurrent(
@@ -132,18 +175,48 @@ object BackgroundReminderBridge {
                                     showDetails =
                                         call.argument<Boolean>("showDetails") == true,
                                 )
-                                BackgroundWorkScheduler.reconcileDaytime(
-                                    appContext,
-                                    database,
-                                    state.nextCheckAt,
-                                    state.backgroundEnabled,
-                                    state.intervalMinutes,
-                                )
-                                BackgroundWorkScheduler.reconcileNotification(
-                                    appContext,
-                                    database,
-                                    accountHash = state.accountHash,
-                                )
+                                val reconcileSchedules =
+                                    call.argument<Boolean>("reconcileSchedules") != false
+                                if (reconcileSchedules) {
+                                    BackgroundWorkScheduler.reconcileDaytime(
+                                        appContext,
+                                        database,
+                                        state.nextCheckAt,
+                                        state.backgroundEnabled,
+                                        state.intervalMinutes,
+                                        state.accountHash,
+                                        state.sessionEpoch,
+                                    )
+                                    BackgroundWorkScheduler.reconcileNotification(
+                                        appContext,
+                                        database,
+                                        accountHash = state.accountHash,
+                                        expectedSessionEpoch = state.sessionEpoch,
+                                    )
+                                } else {
+                                    // A restored background engine only mirrors
+                                    // settings. Disabled features still retire
+                                    // work that is no longer permitted.
+                                    if (!state.backgroundEnabled) {
+                                        BackgroundWorkScheduler.reconcileDaytime(
+                                            appContext,
+                                            database,
+                                            state.nextCheckAt,
+                                            false,
+                                            state.intervalMinutes,
+                                            state.accountHash,
+                                            state.sessionEpoch,
+                                        )
+                                    }
+                                    if (!state.listenerEnabled) {
+                                        BackgroundWorkScheduler.reconcileNotification(
+                                            appContext,
+                                            database,
+                                            accountHash = state.accountHash,
+                                            expectedSessionEpoch = state.sessionEpoch,
+                                        )
+                                    }
+                                }
                             }.onSuccess {
                                 mainHandler.post { result.success(null) }
                             }.onFailure {
@@ -252,6 +325,22 @@ object BackgroundReminderBridge {
                         )
                         result.success(null)
                     }
+                    "authorizeNotificationRemoteStart" -> {
+                        val authorization = database.authorizeNotificationRemoteStart(
+                            accountHash = call.requiredString("accountHash"),
+                            sessionEpoch = call.requiredLong("sessionEpoch"),
+                            claimToken = call.requiredString("claimToken"),
+                            ownerWorkId = call.requiredString("workerId"),
+                        )
+                        result.success(
+                            when (authorization) {
+                                NotificationRemoteAuthorization.GRANTED -> "granted"
+                                NotificationRemoteAuthorization.OUTSIDE_WINDOW ->
+                                    "outsideWindow"
+                                NotificationRemoteAuthorization.STALE -> "stale"
+                            },
+                        )
+                    }
                     "loadPlanState" -> {
                         val state = database.loadPlanState(
                             call.requiredString("accountHash"),
@@ -260,6 +349,7 @@ object BackgroundReminderBridge {
                         result.success(
                             mapOf(
                                 "baselineCompleted" to state.baselineCompleted,
+                                "baselinedSources" to state.baselinedSources.toList(),
                                 "knownAssignmentIds" to state.knownAssignmentIds.toList(),
                                 "sentNewAssignmentIds" to state.sentNewAssignmentIds.toList(),
                                 "lastAttemptAt" to state.lastAttemptAt?.toIsoUtc(),
@@ -288,50 +378,27 @@ object BackgroundReminderBridge {
                                     it,
                                 )
                             }
-                        val application = database.applyPlan(
-                            accountHash = accountHash,
-                            sessionEpoch = sessionEpoch,
-                            baselineCompleted = call.argument<Boolean>("baselineCompleted") == true,
-                            knownIds = stringSet(call.argument("knownAssignmentIds")),
-                            snapshots = snapshots,
-                            events = events,
-                            completedAt = ReminderDatabase.parseInstant(
-                                call.argument("completedAt"),
-                            ) ?: System.currentTimeMillis(),
-                            failure = call.argument<String>("failure"),
-                            syncCompleted = call.argument<Boolean>("syncCompleted") == true,
-                            expectedMutationVersion =
-                                call.requiredLong("expectedMutationVersion"),
-                        )
-                        application.invalidatedEvents.forEach {
-                            AssignmentAlarmScheduler.cancelDeadline(appContext, it)
-                            NotificationManagerCompat.from(appContext).cancel(it.notificationId)
-                        }
-                        application.desiredDeadlineEvents.forEach {
-                            AssignmentAlarmScheduler.scheduleDeadline(appContext, it)
-                        }
-                        var warning: String? = null
-                        val now = ZonedDateTime.now()
-                        if (now.hour >= 8) {
-                            val published = AssignmentNotificationPublisher.publishPendingNewAssignments(
-                                appContext,
-                                database,
-                                accountHash,
-                                now.toInstant(),
-                            )
-                            warning = published.warning
-                        } else if (application.pendingNewCount > 0) {
-                            AssignmentAlarmScheduler.scheduleNewAssignmentWindow(
-                                appContext,
-                                accountHash,
-                            )
-                        }
                         reply.success(
-                            mapOf(
-                                "scheduledDeadlineCount" to
-                                    application.desiredDeadlineEvents.size,
-                                "pendingNewCount" to application.pendingNewCount,
-                                "warning" to warning,
+                            applyPlanAndRecord(
+                                appContext = appContext,
+                                database = database,
+                                accountHash = accountHash,
+                                sessionEpoch = sessionEpoch,
+                                baselineCompleted =
+                                    call.argument<Boolean>("baselineCompleted") == true,
+                                knownIds = stringSet(call.argument("knownAssignmentIds")),
+                                snapshots = snapshots,
+                                events = events,
+                                completedAt = ReminderDatabase.parseInstant(
+                                    call.argument("completedAt"),
+                                ) ?: System.currentTimeMillis(),
+                                failure = call.argument<String>("failure"),
+                                syncCompleted =
+                                    call.argument<Boolean>("syncCompleted") == true,
+                                expectedMutationVersion =
+                                    call.requiredLong("expectedMutationVersion"),
+                                baselinedSources =
+                                    call.argument<List<String>>("baselinedSources")?.toSet(),
                             ),
                         )
                     }
@@ -375,21 +442,21 @@ object BackgroundReminderBridge {
                             ),
                         )
                     }
-                    "cancelAssignmentReminders" -> {
+                    "cancelAssignmentReminders" -> tasks.execute(result) { reply ->
                         AssignmentNotificationPublisher.cancelForAccount(
                             appContext,
                             database,
                             call.requiredString("accountHash"),
                         )
-                        result.success(null)
+                        reply.success(null)
                     }
-                    "cancelAssignmentDeliveryKeepEvents" -> {
+                    "cancelAssignmentDeliveryKeepEvents" -> tasks.execute(result) { reply ->
                         AssignmentNotificationPublisher.cancelDeliveryForPrivacy(
                             appContext,
                             database,
                             call.requiredString("accountHash"),
                         )
-                        result.success(null)
+                        reply.success(null)
                     }
                     "consumeNotificationSignal" -> {
                         database.consumeSignal(
@@ -398,12 +465,250 @@ object BackgroundReminderBridge {
                         )
                         result.success(null)
                     }
+                    "getReminderHistoryControl" -> tasks.execute(result) { reply ->
+                        val snapshot = ReminderHistoryStore.controlSnapshot(
+                            appContext,
+                            call.argument<String>("accountHash"),
+                            call.argument<Number>("sessionEpoch")?.toLong(),
+                        )
+                        reply.success(
+                            mapOf(
+                                "historyGeneration" to snapshot.historyGeneration,
+                                "recordingEnabled" to snapshot.recordingEnabled,
+                                "ownerMatches" to snapshot.ownerMatches,
+                                "purgePending" to snapshot.purgePending,
+                                "purgeToken" to snapshot.purgeToken,
+                            ),
+                        )
+                    }
+                    "acquireReminderObservationContext" -> tasks.execute(result) { reply ->
+                        val context = ReminderHistoryStore.acquireObservationContext(
+                            appContext,
+                            database,
+                            call.requiredString("accountHash"),
+                            call.requiredLong("sessionEpoch"),
+                        )
+                        reply.success(context.toBridgeMap())
+                    }
+                    "appendReminderObservation" -> tasks.execute(result) { reply ->
+                        val context = call.requiredObservationContext()
+                        val observation = call.requiredObservation()
+                        reply.success(
+                            ReminderHistoryStore.appendObservation(
+                                appContext,
+                                database,
+                                context,
+                                observation,
+                            ),
+                        )
+                    }
+                    "recordReminderScheduleOutcome" -> tasks.execute(result) { reply ->
+                        val context = call.requiredObservationContext()
+                        val outcomes = jsonObjectList(call.argument("outcomes")).map {
+                            ReminderScheduleOutcomeInput(
+                                subjectKind = it.getString("subjectKind"),
+                                subjectId = it.optString("subjectId")
+                                    .takeIf { value -> value.isNotBlank() },
+                                logicalKey = it.getString("logicalKey"),
+                                category = it.getString("category"),
+                                stage = it.getString("stage"),
+                                reasonCode = it.optString("reasonCode")
+                                    .takeIf { value -> value.isNotBlank() },
+                                observedAt = ReminderDatabase.parseInstant(
+                                    it.opt("observedAt"),
+                                ),
+                                scheduledAt = ReminderDatabase.parseInstant(
+                                    it.opt("scheduledAt"),
+                                ),
+                                notificationId = if (it.has("notificationId") &&
+                                    !it.isNull("notificationId")
+                                ) {
+                                    it.getInt("notificationId")
+                                } else {
+                                    null
+                                },
+                                expectedPayload = it.optString("expectedPayload")
+                                    .takeIf { value -> value.isNotBlank() },
+                                evidenceState = it.optString("evidenceState")
+                                    .takeIf { value -> value.isNotBlank() },
+                                batchKey = it.optString("batchKey")
+                                    .takeIf { value -> value.isNotBlank() },
+                            )
+                        }
+                        reply.success(
+                            ReminderHistoryStore.recordScheduleOutcome(
+                                appContext,
+                                database,
+                                context,
+                                outcomes,
+                            ),
+                        )
+                    }
+                    "listReminderHistory" -> tasks.execute(result) { reply ->
+                        val context = call.requiredObservationContext()
+                        reply.success(
+                            ReminderHistoryStore.listHistory(
+                                appContext,
+                                database,
+                                context,
+                                snapshotMaxId = call.argument<Number>("snapshotMaxId")
+                                    ?.toLong(),
+                                beforeId = call.argument<Number>("beforeId")?.toLong(),
+                                category = call.argument<String>("category"),
+                                subjectRefs = call.subjectRefPairs(),
+                            ),
+                        )
+                    }
+                    "inspectReminderSubjects" -> tasks.execute(result) { reply ->
+                        val context = call.requiredObservationContext()
+                        val refs = jsonObjectList(call.argument("subjectRefs")).map {
+                            it.getString("kind") to
+                                it.optString("id").takeIf { value -> value.isNotBlank() }
+                        }
+                        reply.success(
+                            ReminderHistoryStore.inspectSubjects(
+                                appContext,
+                                database,
+                                context,
+                                refs,
+                            ),
+                        )
+                    }
+                    "beginReminderHistoryLogout" -> tasks.execute(result) { reply ->
+                        reply.success(
+                            ReminderHistoryStore.beginLogout(
+                                appContext,
+                                call.requiredLong("expectedHistoryGeneration"),
+                                call.requiredString("requestId"),
+                            ),
+                        )
+                    }
+                    "finishReminderHistoryLogout" -> tasks.execute(result) { reply ->
+                        reply.success(
+                            ReminderHistoryStore.finishLogout(
+                                appContext,
+                                database,
+                                call.requiredString("purgeToken"),
+                            ),
+                        )
+                    }
+                    "enableReminderHistorySession" -> tasks.execute(result) { reply ->
+                        reply.success(
+                            ReminderHistoryStore.enableSession(
+                                appContext,
+                                database,
+                                call.requiredString("accountHash"),
+                                call.requiredLong("sessionEpoch"),
+                                call.requiredLong("expectedHistoryGeneration"),
+                            ),
+                        )
+                    }
                     else -> result.notImplemented()
                 }
+            } catch (error: ReminderHistoryException) {
+                result.error(error.code, error.message, null)
             } catch (error: Exception) {
                 result.error("background_reminder_error", error.message, null)
             }
         }
+    }
+
+    internal fun applyPlanAndRecord(
+        appContext: Context,
+        database: ReminderDatabase,
+        accountHash: String,
+        sessionEpoch: Long,
+        baselineCompleted: Boolean,
+        knownIds: Set<String>,
+        snapshots: List<StoredReminderSnapshot>,
+        events: List<StoredReminderEvent>,
+        completedAt: Long,
+        failure: String?,
+        syncCompleted: Boolean,
+        expectedMutationVersion: Long,
+        baselinedSources: Set<String>?,
+        now: ZonedDateTime = ZonedDateTime.now(),
+    ): Map<String, Any?> {
+        val application = database.applyPlan(
+            accountHash = accountHash,
+            sessionEpoch = sessionEpoch,
+            baselineCompleted = baselineCompleted,
+            knownIds = knownIds,
+            snapshots = snapshots,
+            events = events,
+            completedAt = completedAt,
+            failure = failure,
+            syncCompleted = syncCompleted,
+            expectedMutationVersion = expectedMutationVersion,
+            baselinedSources = baselinedSources,
+        )
+        val warnings = mutableListOf<String>()
+        AssignmentNotificationPublisher.reconcileInvalidatedEvents(
+            appContext,
+            database,
+            application.invalidatedEvents,
+            now.toInstant(),
+        )?.let(warnings::add)
+        val missingAlarmEvents = application.desiredDeadlineEvents.filter { event ->
+            !AssignmentAlarmScheduler.hasDeadlineAlarm(appContext, event)
+        }
+        application.desiredDeadlineEvents.forEach {
+            AssignmentAlarmScheduler.scheduleDeadline(appContext, it)
+        }
+        val scheduledEvents = (application.scheduledDeadlineEvents + missingAlarmEvents)
+            .distinctBy { it.eventId }
+        val observedAtMillis = now.toInstant().toEpochMilli()
+        if (scheduledEvents.isNotEmpty()) {
+            AssignmentNotificationPublisher.recordEventObservations(
+                context = appContext,
+                database = database,
+                events = scheduledEvents,
+                stage = "scheduled",
+                reasonCode = null,
+                notificationId = null,
+                observedAt = observedAtMillis,
+                useEventNotificationId = true,
+            )?.let(warnings::add)
+        }
+        if (application.pendingNewCount == 0) {
+            AssignmentAlarmScheduler.cancelNewAssignmentWindow(appContext, accountHash)
+        }
+        if (now.hour >= 8) {
+            val published = AssignmentNotificationPublisher.publishPendingNewAssignments(
+                appContext,
+                database,
+                accountHash,
+                now.toInstant(),
+            )
+            published.warning?.let(warnings::add)
+            published.historyWarning?.let(warnings::add)
+        } else if (application.pendingNewCount > 0) {
+            AssignmentAlarmScheduler.scheduleNewAssignmentWindow(
+                appContext,
+                accountHash,
+            )
+            if (application.newEvents.isNotEmpty()) {
+                val windowStart = NativeReminderPolicy
+                    .nextWindowStart(now.toInstant(), now.zone)
+                    .toEpochMilli()
+                AssignmentNotificationPublisher.recordEventObservations(
+                    context = appContext,
+                    database = database,
+                    events = application.newEvents,
+                    stage = "deferred",
+                    reasonCode = "outsideWindow",
+                    notificationId = null,
+                    observedAt = observedAtMillis,
+                    scheduledAtOverride = windowStart,
+                )?.let(warnings::add)
+            }
+        }
+        val warning = warnings.distinct().takeIf { it.isNotEmpty() }?.joinToString("；")
+        return mapOf(
+            "scheduledDeadlineCount" to application.desiredDeadlineEvents.size,
+            "pendingNewCount" to application.pendingNewCount,
+            "warning" to warning,
+        )
     }
 
     private fun io.flutter.plugin.common.MethodCall.requiredString(key: String): String =
@@ -427,6 +732,63 @@ object BackgroundReminderBridge {
 
     private fun io.flutter.plugin.common.MethodCall.requiredLong(key: String): Long =
         (argument<Number>(key) ?: throw IllegalArgumentException("缺少参数 $key")).toLong()
+
+    private fun io.flutter.plugin.common.MethodCall.requiredObservationContext():
+        ReminderObservationContext {
+        val value = argument<Map<*, *>>("context")
+            ?: throw IllegalArgumentException("缺少参数 context")
+        fun requiredString(key: String): String =
+            (value[key] as? String)?.takeIf { it.isNotBlank() }
+                ?: throw IllegalArgumentException("缺少参数 context.$key")
+        fun requiredLong(key: String): Long =
+            (value[key] as? Number)?.toLong()
+                ?: throw IllegalArgumentException("缺少参数 context.$key")
+        return ReminderObservationContext(
+            accountHash = requiredString("accountHash"),
+            sessionEpoch = requiredLong("sessionEpoch"),
+            historyGeneration = requiredLong("historyGeneration"),
+            operationSequence = requiredLong("operationSequence"),
+        )
+    }
+
+    private fun io.flutter.plugin.common.MethodCall.requiredObservation():
+        ReminderHistoryObservationInput {
+        val value = argument<Map<*, *>>("observation")
+            ?: throw IllegalArgumentException("缺少参数 observation")
+        fun requiredString(key: String): String =
+            (value[key] as? String)?.takeIf { it.isNotBlank() }
+                ?: throw IllegalArgumentException("缺少参数 observation.$key")
+        fun optionalString(key: String): String? =
+            (value[key] as? String)?.takeIf { it.isNotBlank() }
+        return ReminderHistoryObservationInput(
+            observationId = optionalString("observationId"),
+            ordinal = (value["ordinal"] as? Number)?.toInt() ?: 0,
+            subjectKind = requiredString("subjectKind"),
+            subjectId = optionalString("subjectId"),
+            logicalKey = requiredString("logicalKey"),
+            category = requiredString("category"),
+            stage = requiredString("stage"),
+            reasonCode = optionalString("reasonCode"),
+            observedAt = ReminderDatabase.parseInstant(value["observedAt"]),
+            scheduledAt = ReminderDatabase.parseInstant(value["scheduledAt"]),
+            notificationId = (value["notificationId"] as? Number)?.toInt(),
+            batchKey = optionalString("batchKey"),
+        )
+    }
+
+    private fun io.flutter.plugin.common.MethodCall.subjectRefPairs():
+        List<Pair<String, String?>> = jsonObjectList(argument("subjectRefs")).map {
+            val kind = it.getString("kind")
+            val id = it.optString("id").takeIf { value -> value.isNotBlank() }
+            kind to id
+        }
+
+    private fun ReminderObservationContext.toBridgeMap() = mapOf(
+        "accountHash" to accountHash,
+        "sessionEpoch" to sessionEpoch,
+        "historyGeneration" to historyGeneration,
+        "operationSequence" to operationSequence,
+    )
 
     private fun jsonObjectList(value: Any?): List<JSONObject> {
         val list = value as? List<*> ?: return emptyList()

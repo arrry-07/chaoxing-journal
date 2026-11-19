@@ -9,6 +9,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/main.dart';
 import 'package:study_assistant_mobile/src/app/unsaved_edit_guard.dart';
+import 'package:study_assistant_mobile/src/app/app_deep_links.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
@@ -502,6 +503,78 @@ void main() {
     expect(find.byType(CalendarScreen), findsOneWidget);
   });
 
+  testWidgets(
+      'notification rechecks record removed by same-account sync during confirmation',
+      (tester) async {
+    final notifications = _CapturingNotifications();
+    final store = await _launchApp(tester, _personalLocation,
+        notifications: notifications);
+    final target = f.sample('removed-while-confirming');
+    await store.repository.mergeAndSave([f.sample('shared'), target]);
+    await store.refreshAssignments();
+    final epoch = store.accountEpoch;
+    expect(store.findAssignment(target.id), isNotNull);
+    await tester.enterText(find.byType(TextField).first, '删除目标期间保留草稿');
+    notifications.handler!('a:${AppDeepLinks.assignmentUri(target.id)}');
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    // Replace the persisted snapshot while keeping the editor's source record
+    // and the same session. This exercises a disappearing target, not logout.
+    await store.repository.clear();
+    await store.repository.activateAccount('A');
+    await store.repository.mergeAndSave([f.sample('shared')]);
+    await store.refreshAssignments();
+    expect(store.accountEpoch, epoch);
+    expect(store.findAssignment(target.id), isNull);
+    expect(find.byType(PersonalWorkScreen), findsOneWidget);
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    await tester.tap(find.text('放弃修改'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AssignmentDetailScreen), findsNothing);
+    expect(find.byType(AssignmentListScreen), findsOneWidget);
+    expect(find.text('通知对应的课业暂不可用，已返回课业列表'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'two real assignment notifications preserve draft guard and latest detail',
+      (tester) async {
+    final notifications = _CapturingNotifications();
+    final store = await _launchApp(tester, _personalLocation,
+        notifications: notifications);
+    final first = f.sample('shared');
+    final second = f.sample('notification-second');
+    await store.repository.mergeAndSave([first, second]);
+    await store.refreshAssignments();
+    expect(store.findAssignment(first.id), isNotNull);
+    expect(store.findAssignment(second.id), isNotNull);
+    await tester.enterText(find.byType(TextField).first, '通知竞争中的未保存草稿');
+    final router = GoRouter.of(tester.element(find.byType(PersonalWorkScreen)));
+    final destinations = <String>[];
+    void record() =>
+        destinations.add(router.routeInformationProvider.value.uri.path);
+    router.routeInformationProvider.addListener(record);
+    addTearDown(() => router.routeInformationProvider.removeListener(record));
+    notifications.handler!('a:${AppDeepLinks.assignmentUri(first.id)}');
+    notifications.handler!('a:${AppDeepLinks.assignmentUri(second.id)}');
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    expect(destinations, isEmpty,
+        reason: 'unapproved notifications cannot leave editor');
+    expect(find.byType(PersonalWorkScreen), findsOneWidget);
+    await tester.tap(find.text('放弃修改'));
+    await tester.pumpAndSettle();
+    expect(destinations, [AppDeepLinks.assignmentLocation(second.id)]);
+    expect(find.byType(AssignmentDetailScreen), findsOneWidget);
+    expect(
+        tester
+            .widget<AssignmentDetailScreen>(find.byType(AssignmentDetailScreen))
+            .assignmentId,
+        second.id);
+    expect(find.byType(AssignmentListScreen), findsNothing,
+        reason: 'real fixture must reach detail, not missing-record fallback');
+  });
+
   for (final switchAccount in [false, true]) {
     testWidgets(
         'pending dialog invalidated by ${switchAccount ? 'account switch' : 'logout'}',
@@ -657,5 +730,64 @@ void main() {
     expect(find.text('放弃未保存的修改？'), findsNothing);
     expect(find.byType(PersonalWorkScreen), findsNothing);
     expect(find.byType(LoginScreen), findsOneWidget);
+  });
+
+  testWidgets('H7: dirty editor below clean route still prompts on tab switch',
+      (tester) async {
+    final guard = UnsavedEditGuard();
+    var prompts = 0;
+    final agendaOwner = Object();
+    final settingsOwner = Object();
+    guard.register(
+      agendaOwner,
+      routeScope: '/agenda',
+      hasUnsavedChanges: () => true,
+      confirmDiscard: () async {
+        prompts++;
+        return false;
+      },
+    );
+    guard.register(
+      settingsOwner,
+      routeScope: '/reminders',
+      hasUnsavedChanges: () => false,
+      confirmDiscard: () async => true,
+    );
+
+    // Popping the clean pushed /reminders route over dirty /agenda succeeds.
+    expect(await guard.confirmLeave(routeScope: '/reminders'), isTrue);
+    expect(prompts, 0);
+
+    // Replacing the shell tab prompts for the underlying dirty /agenda editor.
+    var navigated = false;
+    await guard.navigate(
+      isCurrent: () => true,
+      action: () {
+        navigated = true;
+      },
+    );
+    expect(prompts, 1);
+    expect(navigated, isFalse);
+  });
+
+  testWidgets(
+      'M5: system back on dirty reminder settings prompts once without duplicate dialog',
+      (tester) async {
+    await _launchApp(tester, '/reminders');
+    final preset = find.text('提前 1 天');
+    await tester.ensureVisible(preset);
+    await tester.pumpAndSettle();
+    await tester.tap(preset);
+    await tester.pumpAndSettle();
+
+    unawaited(tester.binding.handlePopRoute());
+    await tester.pumpAndSettle();
+
+    expect(find.text('放弃未保存的提醒规则？'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '放弃修改'));
+    await tester.pumpAndSettle();
+
+    // Confirm no second discard dialog is shown by GoRouter onExit after pop.
+    expect(find.text('放弃未保存的提醒规则？'), findsNothing);
   });
 }

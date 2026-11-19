@@ -3,6 +3,7 @@ import 'dart:async';
 import 'src/services/app_update_controller.dart';
 import 'src/features/assignment_changes_screen.dart';
 import 'src/features/backup_screen.dart';
+import 'src/features/course_study_hub_screen.dart';
 import 'src/features/daily_plan_screen.dart';
 import 'src/features/manual_agenda_screen.dart';
 import 'src/features/term_archives_screen.dart';
@@ -10,6 +11,8 @@ import 'src/features/personal_work_screen.dart';
 import 'src/features/profile_arrangements_screen.dart';
 import 'src/features/profile_records_screen.dart';
 import 'src/features/reminder_health_screen.dart';
+import 'src/features/reminder_history_screen.dart';
+import 'src/features/reminder_status_screen.dart';
 import 'src/features/widgets/update_scope.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -22,6 +25,7 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'src/app/app_deep_links.dart';
 import 'src/app/app_shell.dart';
+import 'src/app/transient_feedback.dart';
 import 'src/app/unsaved_edit_guard.dart';
 import 'src/features/assignment_detail_screen.dart';
 import 'src/features/assignment_list_screen.dart';
@@ -35,6 +39,7 @@ import 'src/features/widgets/update_dialog.dart';
 import 'src/services/assignment_store.dart';
 import 'src/services/background_reminder_gateway.dart';
 import 'src/services/local_notification_service.dart';
+import 'src/services/local_record_query.dart';
 import 'src/services/reminder_rule_store.dart';
 import 'src/services/secure_session_store.dart';
 import 'src/services/widget_snapshot_service.dart';
@@ -64,16 +69,25 @@ Future<void> main() async {
     notificationService: notificationService,
     widgetSnapshotService: widgetSnapshotService,
     reminderRuleStore: reminderRuleStore,
+    reminderHistoryEnabled: true,
     nativeReminderDeliveryEnabled: true,
   );
 
   await notificationService.initializeSafely();
-  await assignmentStore.restoreSession();
+  await launchRestoredApp(assignmentStore, () {
+    runApp(StudyAssistantApp(
+      assignmentStore: assignmentStore,
+      notificationService: notificationService,
+    ));
+  });
+}
 
-  runApp(StudyAssistantApp(
-    assignmentStore: assignmentStore,
-    notificationService: notificationService,
-  ));
+/// Notification navigation must not observe an empty, unrestored snapshot.
+/// Keep this ordering shared by production startup and its gated regression.
+Future<void> launchRestoredApp(
+    AssignmentStore store, VoidCallback launch) async {
+  await store.restoreSession();
+  launch();
 }
 
 @pragma('vm:entry-point')
@@ -86,6 +100,24 @@ Future<void> backgroundMain() async {
   Future<void> run(Map<Object?, Object?> arguments) async {
     await initializeDateFormatting('zh_CN');
     final notificationService = LocalNotificationService();
+    final expectedAccount = arguments['accountHash'] as String?;
+    final expectedEpoch = (arguments['sessionEpoch'] as num?)?.toInt();
+    final claimToken = arguments['claimToken'] as String?;
+    final workerId = arguments['workerId'] as String?;
+    final remoteStart = expectedAccount != null &&
+            expectedEpoch != null &&
+            expectedEpoch > 0 &&
+            claimToken != null &&
+            claimToken.isNotEmpty &&
+            workerId != null &&
+            workerId.isNotEmpty
+        ? NotificationRemoteStartContext(
+            accountHash: expectedAccount,
+            sessionEpoch: expectedEpoch,
+            claimToken: claimToken,
+            workerId: workerId,
+          )
+        : null;
     final store = AssignmentStore(
       sessionStore: SecureSessionStore(),
       notificationService: notificationService,
@@ -93,13 +125,15 @@ Future<void> backgroundMain() async {
       reminderRuleStore: ReminderRuleStore(),
       manageBackgroundSchedule: false,
       nativeLeaseOwner: arguments['leaseOwner'] as String?,
+      notificationRemoteStart: remoteStart,
+      backgroundSignalVersion: (arguments['signalVersion'] as num?)?.toInt(),
+      reminderHistoryEnabled: true,
       nativeReminderDeliveryEnabled: true,
     );
     activeStore = store;
     try {
       await store.restoreSession();
       if (cancelled) return;
-      final expectedAccount = arguments['accountHash'] as String?;
       if (expectedAccount != null && expectedAccount != store.accountHash) {
         await channel.invokeMethod<void>('finished', {
           'success': false,
@@ -122,6 +156,8 @@ Future<void> backgroundMain() async {
         'skipped': result.skipped,
         'nextTargetAt': result.nextTargetAt?.millisecondsSinceEpoch,
         'message': result.message,
+        'skipReason': result.skipReason,
+        'remoteReadInvoked': result.remoteReadInvoked,
       });
     } catch (error) {
       if (!cancelled) {
@@ -177,9 +213,11 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   AssignmentStore get assignmentStore => widget.assignmentStore;
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _leaveGuard = UnsavedEditGuard();
+  final _notificationFeedback = TransientFeedbackController();
   late final GoRouter _router;
   late final AppUpdateController _updates;
   bool _pendingUpdatePrompt = false;
+  bool _notificationRouterReady = false;
 
   @override
   void initState() {
@@ -192,8 +230,11 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     _lastAccountEpoch = assignmentStore.accountEpoch;
     _lastAccountHash = assignmentStore.accountHash;
     assignmentStore.addListener(_handleStoreIdentityChanged);
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _checkUpdateOnStartup());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _notificationRouterReady = true;
+      _checkUpdateOnStartup();
+    });
   }
 
   bool _lastAuthenticated = false;
@@ -215,6 +256,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     _lastAccountEpoch = epoch;
     _lastAccountHash = accountHash;
     _leaveGuard.invalidate();
+    _notificationFeedback.dismiss();
     // A private editor belongs to the old identity. Leaving it mounted after
     // an in-place account restore would let edits appear to belong to the new
     // account even though the page is stale.
@@ -222,7 +264,9 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
       final location = _router.routeInformationProvider.value.uri.path;
       if (location.startsWith('/personal/') ||
           location == '/agenda' ||
-          location == '/reminders') {
+          location == '/reminders' ||
+          location.startsWith('/reminder-history') ||
+          location.startsWith('/reminder-status/')) {
         _router.go('/assignments');
       }
     }
@@ -257,6 +301,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     assignmentStore.removeListener(_handleStoreIdentityChanged);
+    _notificationFeedback.dispose();
     if (widget.updateController == null) _updates.dispose();
     _router.dispose();
     widget.notificationService.setPayloadHandler(null);
@@ -279,11 +324,23 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   }
 
   GoRouter _buildRouter() {
+    final platformUri = Uri.tryParse(
+        WidgetsBinding.instance.platformDispatcher.defaultRouteName);
+    final ownedInitialLink =
+        platformUri != null && AppDeepLinks.isOwnedNotificationUri(platformUri);
     return GoRouter(
       navigatorKey: _navigatorKey,
       refreshListenable: assignmentStore,
-      initialLocation:
-          assignmentStore.isAuthenticated ? '/assignments' : '/login',
+      // go_router 14.8.1 _effectiveInitialLocation rebuilds an empty-path
+      // platform URI as Uri(path: '/', queryParameters: {}). That loses the
+      // scheme/host of native digest links and yields '/?' before redirect.
+      // Preserve only recognized app links here; ordinary errors stay errors.
+      overridePlatformDefaultLocation: ownedInitialLink,
+      initialLocation: ownedInitialLink
+          ? _notificationTarget(platformUri.toString())
+          : assignmentStore.isAuthenticated
+              ? '/assignments'
+              : '/login',
       routes: [
         GoRoute(
           path: '/login',
@@ -301,7 +358,8 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
           routes: [
             GoRoute(
                 path: '/agenda',
-                onExit: (_, __) => _leaveGuard.confirmLeave(),
+                onExit: (_, __) =>
+                    _leaveGuard.confirmLeave(routeScope: '/agenda'),
                 builder: (_, __) => ManualAgendaScreen(store: assignmentStore)),
             GoRoute(
                 path: '/terms',
@@ -311,7 +369,8 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                 builder: (_, __) => DailyPlanScreen(store: assignmentStore)),
             GoRoute(
                 path: '/personal/:id',
-                onExit: (_, __) => _leaveGuard.confirmLeave(),
+                onExit: (_, __) =>
+                    _leaveGuard.confirmLeave(routeScope: '/personal'),
                 builder: (_, s) => PersonalWorkScreen(
                     store: assignmentStore,
                     assignmentId: s.pathParameters['id']!)),
@@ -319,6 +378,19 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                 path: '/reminder-health',
                 builder: (_, __) =>
                     ReminderHealthScreen(store: assignmentStore)),
+            GoRoute(
+                path: '/reminder-history',
+                builder: (_, __) =>
+                    ReminderHistoryScreen(store: assignmentStore)),
+            GoRoute(
+              path: '/reminder-status/:kind/:id',
+              builder: (_, state) => ReminderStatusScreen(
+                store: assignmentStore,
+                kind: state.pathParameters['kind']!,
+                id: state.pathParameters['id']!,
+                hasUnsavedEdits: state.uri.queryParameters['unsaved'] == '1',
+              ),
+            ),
             GoRoute(
                 path: '/changes',
                 builder: (_, __) =>
@@ -351,7 +423,8 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             ),
             GoRoute(
               path: '/reminders',
-              onExit: (_, __) => _leaveGuard.confirmLeave(),
+              onExit: (_, __) =>
+                  _leaveGuard.confirmLeave(routeScope: '/reminders'),
               builder: (_, __) => ReminderSettingsScreen(
                 assignmentStore: assignmentStore,
               ),
@@ -359,8 +432,14 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             GoRoute(
                 path: '/help', builder: (_, __) => const HelpFeedbackScreen()),
             GoRoute(
-                path: '/records',
-                builder: (_, __) => LocalRecordsScreen(store: assignmentStore)),
+              path: '/records',
+              builder: (_, state) => LocalRecordsScreen(
+                store: assignmentStore,
+                initialFilter: LocalRecordFilterSpec.fromQueryParameters(
+                  state.uri.queryParameters,
+                ),
+              ),
+            ),
             GoRoute(
                 path: '/courses',
                 builder: (_, __) => CourseListScreen(store: assignmentStore)),
@@ -377,14 +456,22 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
               path: '/profile/records',
               builder: (_, __) => ProfileRecordsScreen(store: assignmentStore),
             ),
+            GoRoute(
+              path: '/course-hub',
+              builder: (_, state) => CourseStudyHubScreen(
+                store: assignmentStore,
+                initialTab: state.uri.queryParameters['tab'],
+                initialCourseKey: state.uri.queryParameters['courseKey'],
+              ),
+            ),
           ],
         ),
       ],
       redirect: (_, state) {
-        final normalizedLocation =
-            AppDeepLinks.normalizeIncomingLocation(state.uri);
-        if (normalizedLocation != null) {
-          return normalizedLocation;
+        // Only owned external links use notification recovery. Internal
+        // routing failures keep go_router's normal error page and diagnosis.
+        if (AppDeepLinks.isOwnedNotificationUri(state.uri)) {
+          return _notificationTarget(state.uri.toString());
         }
 
         final loggedIn = assignmentStore.isAuthenticated;
@@ -411,19 +498,40 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     unawaited(_navigateForNotification(payload));
   }
 
-  Future<void> _navigateForNotification(String payload) async {
-    final String? location;
-    if (payload.startsWith('p:')) {
-      location = '/agenda';
-    } else if (payload == 'd:summary') {
-      location = '/assignments';
-    } else {
-      final uri = Uri.tryParse(payload);
-      location =
-          uri == null ? null : AppDeepLinks.normalizeIncomingLocation(uri);
+  String _notificationTarget(String payload) {
+    var missing = false;
+    final target =
+        AppDeepLinks.notificationLocation(payload, containsAssignment: (id) {
+      final exists = assignmentStore.findAssignment(id) != null;
+      missing = !exists;
+      return exists;
+    });
+    if (missing) {
+      debugPrint(
+          '[NotificationRoute] assignment_missing_from_current_snapshot');
+      final epoch = assignmentStore.accountEpoch;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || epoch != assignmentStore.accountEpoch) return;
+        final context = _navigatorKey.currentContext;
+        if (context != null) {
+          _notificationFeedback.show(
+              context, const SnackBar(content: Text('通知对应的课业暂不可用，已返回课业列表')));
+        }
+      });
     }
-    if (location == null) return;
-    final target = location;
+    return target;
+  }
+
+  Future<void> _navigateForNotification(String payload) async {
+    final epoch = assignmentStore.accountEpoch;
+    // Only a cached click delivered during initState needs the first frame.
+    // Warm clicks must enter the shared guard immediately: delaying them a
+    // frame would let older notifications supersede a newer tab selection.
+    if (!_notificationRouterReady) {
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (!mounted || assignmentStore.accountEpoch != epoch) return;
+    final target = _notificationTarget(payload);
     // A notification for the current route must not ask to discard a draft or
     // approve a future exit; a later different destination asks normally.
     if (_router.routeInformationProvider.value.uri.path == target) return;
@@ -431,8 +539,10 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     // the same confirmation used for back navigation. `navigate` also makes
     // concurrent notifications/tabs resolve to one winning destination.
     await _leaveGuard.navigate(
-      isCurrent: () => mounted,
-      action: () => _router.go(target),
+      isCurrent: () => mounted && assignmentStore.accountEpoch == epoch,
+      // A same-account sync can remove the record while the discard dialog
+      // is open. Resolve again at commit, without delaying guard ordering.
+      action: () => _router.go(_notificationTarget(payload)),
     );
   }
 }
