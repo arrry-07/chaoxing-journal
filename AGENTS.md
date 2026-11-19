@@ -27,6 +27,7 @@
 
 ## 发布渠道与维护成本
 
+- **业务补丁默认正式发布。** 维护者确认执行的业务修复方案，在本版范围验收和发布关卡通过后，连续完成提交、推送、PR、CI、合并、Tag、原签名 APK、GitHub Release 和发布后验证。该默认授权覆盖沿现有签名与渠道的常规补丁，各节点复用已有授权。当前任务明确指定候选、暂停发布或其他停止线时，按当前边界执行。纯文档、只读取证和方案编写采用各自交付终点。按[验收与发版规则](docs/ai-workflow/VALIDATION.md#先确定本次终点)判定阻断、登记遗留。
 - 每个冻结并递增版本的正式包都必须在 GitHub 完成 CI、原签名 APK、`SHA256SUMS.txt`、Tag、Release 和回下载校验；GitHub 发布是正式交付的必选门禁。
 - 每个 GitHub 正式 Release 发布后，Gitee workflow 自动运行 `index` 模式，只更新几 KB 的 `update-manual.json`；正式 APK 仍只以 GitHub 为权威发布源。
 - 新版本尚未镜像到 Gitee 时，索引中的 `apkUrl` 指向 GitHub 同版本 APK，并省略 `backupApkUrl`；只有经过完整校验的 Gitee 镜像才切换为主地址并保留 GitHub 备用地址。
