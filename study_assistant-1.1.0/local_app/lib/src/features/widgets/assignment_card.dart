@@ -209,6 +209,8 @@ class AssignmentCard extends StatelessWidget {
         if (clock.isEmpty)
           for (final line in examSchedule?.cardTimeLines ?? const <String>[])
             Text(line, style: Journal.metadata),
+        if (examSchedule?.yearUnconfirmed == true)
+          const Text('年份待确认', style: Journal.metadata),
         for (final line in examLines) Text(line, style: Journal.metadata),
       ] else if (showFullDeadline || countdown || !hasTime)
         Text(

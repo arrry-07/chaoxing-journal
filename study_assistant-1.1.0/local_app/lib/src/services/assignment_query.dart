@@ -558,23 +558,13 @@ class AssignmentQuery {
 
   static bool _displayExamNotExpired(
     Assignment assignment,
-    List<Assignment> sources,
-    DateTime now, {
-    AssignmentDisplayIndex? index,
-  }) {
-    final start =
-        displayTimelineAt(assignment, records: sources, index: index, now: now);
-    final end = displayTimelineEndAt(assignment,
-        records: sources, index: index, now: now);
+    DateTime now,
+  ) {
     final exam = assignment.exam!;
-    final trustedEnd = exam.endTrusted && exam.endAt != null;
-    // An opening already in the past with no usable end cannot confirm the
-    // exam is still open; it stays discoverable under "all" only.
-    // A yearless notice end without a projectable opening (for example a leap
-    // day in a non-leap year) is not usable evidence either.
-    if (start == null && !trustedEnd) return false;
-    return (start != null && start.isAfter(now)) ||
-        (end != null && end.isAfter(now));
+    // A projected yearless notice is display evidence, not a confirmed date.
+    // Only a trusted opening or ending can prove the exam is still unexpired.
+    return (exam.startTrusted && exam.startAt?.isAfter(now) == true) ||
+        (exam.endTrusted && exam.endAt?.isAfter(now) == true);
   }
 
   /// Lightweight home querying only. It does not reinterpret submission or
@@ -611,8 +601,9 @@ class AssignmentQuery {
       final due =
           displayTimelineAt(a, records: sourceRecords, index: index, now: now);
       final bucket = timelineBucketAt(a, now);
-      final trusted =
-          a.isExam ? !historical && due != null : _hasTrustedPendingDeadline(a);
+      final trusted = a.isExam
+          ? !historical && a.exam!.startTrusted && a.exam!.startAt != null
+          : _hasTrustedPendingDeadline(a);
       return switch (deadline) {
         AssignmentDeadlineFilter.all => true,
         AssignmentDeadlineFilter.next7Days => trusted &&
@@ -632,7 +623,7 @@ class AssignmentQuery {
         AssignmentDeadlineFilter.notExpired => historical
             ? false
             : a.isExam
-                ? _displayExamNotExpired(a, sourceRecords, now, index: index)
+                ? _displayExamNotExpired(a, now)
                 : bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
                     bucket == AssignmentDeadlineBucket.confirmedNoDeadline,
       };
@@ -689,7 +680,10 @@ class AssignmentQuery {
         if (leftTime != null && rightTime != null) {
           final time = leftTime.compareTo(rightTime);
           if (time != 0) {
-            return order == HomeSortOrder.deadlineDesc ? -time : time;
+            final reverse = left.homeTier == 2
+                ? order == HomeSortOrder.deadlineAsc
+                : order == HomeSortOrder.deadlineDesc;
+            return reverse ? -time : time;
           }
         }
         return left.compareNameKeys(right, HomeSortOrder.courseName);
@@ -747,7 +741,7 @@ class AssignmentQuery {
         ..addAll(sorted);
     }
     final sortedOverdue =
-        sortHome(g.overdue, HomeSortOrder.deadlineDesc, now: now);
+        sortHome(g.overdue, HomeSortOrder.deadlineAsc, now: now);
     g.overdue
       ..clear()
       ..addAll(sortedOverdue);

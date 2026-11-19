@@ -153,7 +153,7 @@ void main() {
     expect(find.text('已提交'), findsNothing);
   });
 
-  testWidgets('not-expired keeps a yearless open exam and excludes completed',
+  testWidgets('not-expired excludes yearless exams and completed work',
       (tester) async {
     final store = _Store([
       _examNotice(),
@@ -168,7 +168,7 @@ void main() {
 
     await _pump(tester, store);
 
-    expect(_visibleTitles(tester), ['开放性期中考试', '未截止作业']);
+    expect(_visibleTitles(tester), ['未截止作业']);
     expect(find.text('已完成作业'), findsNothing);
     expect(tester.takeException(), isNull);
   });

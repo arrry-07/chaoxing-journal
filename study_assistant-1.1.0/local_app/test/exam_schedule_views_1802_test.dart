@@ -140,7 +140,7 @@ void main() {
     expect(find.text('时长 60 分钟'), findsOneWidget);
     expect(find.text('归档'), findsNothing);
     expect(find.text('—'), findsNothing);
-    expect(find.textContaining('待确认'), findsNothing);
+    expect(find.text('年份待确认'), findsOneWidget);
     expect(t.takeException(), isNull);
   });
 

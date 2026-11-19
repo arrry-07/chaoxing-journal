@@ -28,7 +28,8 @@ class ExamTimelineStamp {
   /// Long windows read as a range so an opening date alone cannot look expired.
   static ExamTimelineStamp _range(ExamWallTime start, ExamWallTime end) {
     final from = _fromWallTime(start);
-    final endYear = end.year != start.year ? '${end.year}年' : '';
+    final endYear =
+        end.year != null && end.year != start.year ? '${end.year}年' : '';
     return ExamTimelineStamp(
       key: 'range:${from.key}:${end.year ?? 'notice'}:${end.month}:${end.day}',
       heading: '${from.heading}–$endYear${end.month}月${end.day}日',
@@ -41,11 +42,12 @@ class ExamTimelineStamp {
 class ExamSchedulePresentation {
   const ExamSchedulePresentation(
       this.cardTimeLines, this.detailTimeLines, this.verificationNote,
-      {this.timeline});
+      {this.timeline, this.yearUnconfirmed = false});
 
   final List<String> cardTimeLines, detailTimeLines;
   final String? verificationNote;
   final ExamTimelineStamp? timeline;
+  final bool yearUnconfirmed;
   static Expando<_PresentationCacheEntry> _cache =
       Expando<_PresentationCacheEntry>();
 
@@ -103,7 +105,9 @@ class ExamSchedulePresentation {
     }
     final crossDay = wallStart != null &&
         wallEnd != null &&
-        (wallEnd.year != wallStart.year ||
+        ((wallEnd.year != null &&
+                wallStart.year != null &&
+                wallEnd.year != wallStart.year) ||
             wallEnd.month != wallStart.month ||
             wallEnd.day != wallStart.day);
     final timeline = wallStart == null
@@ -112,8 +116,10 @@ class ExamSchedulePresentation {
             ? ExamTimelineStamp._range(wallStart, wallEnd)
             : ExamTimelineStamp._fromWallTime(wallStart);
     ExamSchedulePresentation result(
-            List<String> card, List<String> detail, String? note) =>
-        ExamSchedulePresentation(card, detail, note, timeline: timeline);
+            List<String> card, List<String> detail, String? note,
+            {bool yearUnconfirmed = false}) =>
+        ExamSchedulePresentation(card, detail, note,
+            timeline: timeline, yearUnconfirmed: yearUnconfirmed);
     String absolute(DateTime value, bool explicitSeconds) =>
         DateFormat(explicitSeconds || value.second != 0
                 ? 'yyyy年M月d日 HH:mm:ss'
@@ -136,6 +142,13 @@ class ExamSchedulePresentation {
     }
     if (ranges.isEmpty) return result(trusted, trusted, null);
     final range = ranges.values.single;
+    final usesNoticeStart = trustedStart == null && range.start != null;
+    final usesNoticeEnd = !exam.endTrusted && range.end != null;
+    if (!usesNoticeStart && !usesNoticeEnd && trusted.isNotEmpty) {
+      return result(trusted, trusted, null);
+    }
+    final missingUsedYear = (usesNoticeStart && range.start!.year == null) ||
+        (usesNoticeEnd && range.end!.year == null);
     final lines = trusted.isEmpty
         ? <String>[range.label]
         : <String>[
@@ -146,7 +159,8 @@ class ExamSchedulePresentation {
               '结束（通知） ${range.end!.label}',
           ];
     return result(lines, lines,
-        range.missingYear ? '通知未注明年份，暂不作为定时依据' : '通知原文时间尚未核实，暂不作为定时依据');
+        missingUsedYear ? '通知未注明年份，暂不作为定时依据' : '通知原文时间尚未核实，暂不作为定时依据',
+        yearUnconfirmed: missingUsedYear);
   }
 }
 

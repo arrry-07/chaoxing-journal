@@ -40,6 +40,48 @@ Assignment formal({DateTime? start, DateTime? end}) => Assignment(
         endTrusted: end != null,
         lifecycle: 'scheduled'));
 void main() {
+  test('same-day mixed trusted and yearless endpoints use one date heading',
+      () {
+    final start = formal(start: DateTime.utc(2026, 11, 16, 0));
+    final n1 = notice('考试时间：11-16 08:00 至 11-16 09:00');
+    expect(
+        ExamSchedulePresentation.build(start, records: [start, n1])
+            .timeline!
+            .heading,
+        '2026年11月16日 周一');
+    final end = formal(end: DateTime.utc(2026, 11, 16, 1));
+    final n2 = notice('考试时间：11-16 08:00 至 11-16 09:00');
+    expect(
+        ExamSchedulePresentation.build(end, records: [end, n2])
+            .timeline!
+            .heading,
+        '11月16日');
+  });
+  test('trusted end needs no year warning when notice supplies only same end',
+      () {
+    final a = formal(end: DateTime.utc(2026, 11, 30, 1, 0));
+    final n = notice('结束时间：11-30 09:00');
+    final p = ExamSchedulePresentation.build(a, records: [a, n]);
+    expect(p.yearUnconfirmed, isFalse);
+    expect(p.verificationNote, isNull);
+    expect(p.detailTimeLines, ['结束 2026年11月30日 09:00']);
+  });
+
+  test('mixed trusted and yearless cross-year endpoints never show null year',
+      () {
+    final start = formal(start: DateTime.utc(2026, 12, 31, 14));
+    final endOnlyNotice = notice('考试时间：12-31 22:00 至 1-01 01:00');
+    final first =
+        ExamSchedulePresentation.build(start, records: [start, endOnlyNotice]);
+    expect(first.timeline!.heading, isNot(contains('null')));
+    expect(first.yearUnconfirmed, isTrue);
+    final end = formal(end: DateTime.utc(2027, 1, 1, 1));
+    final startOnlyNotice = notice('考试时间：12-31 22:00 至 1-01 09:00');
+    final second =
+        ExamSchedulePresentation.build(end, records: [end, startOnlyNotice]);
+    expect(second.timeline!.heading, isNot(contains('null')));
+    expect(second.yearUnconfirmed, isTrue);
+  });
   test('notice timeline keeps month-day without guessing a year or weekday',
       () {
     final a = notice('考试时间：11-16 07:06:00 至 11-30 07:06:31');
