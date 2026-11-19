@@ -597,7 +597,10 @@ void main() {
       'background_check_legacy_migration_v1': true,
     });
     final gateway = _FakeGateway();
-    var currentNow = DateTime(2026, 11, 18, 9, 0);
+    // The repository records lastSync with the real clock. Keep the injected
+    // daytime clock on the current local date so a UTC date rollover cannot
+    // turn a same-day coalesce into a new-day due check.
+    var currentNow = todayAt(9);
     final quietStore = AssignmentStore(
       sessionStore: _MemorySessionStore(),
       notificationService: _NoopNotificationService(),
@@ -617,7 +620,7 @@ void main() {
       BackgroundSyncTrigger.daytime,
     );
     gateway.recordedObservations.clear();
-    currentNow = DateTime(2026, 11, 18, 9, 30);
+    currentNow = todayAt(9, 30);
     final quietResult = await quietStore.runBackgroundAutomaticCheck(
       BackgroundSyncTrigger.daytime,
     );
@@ -635,7 +638,7 @@ void main() {
       nativeReminderDeliveryEnabled: true,
       reminderHistoryEnabled: true,
       manageBackgroundSchedule: false,
-      clock: () => DateTime(2026, 11, 18, 2, 0),
+      clock: () => todayAt(2),
     );
     addTearDown(nightStore.dispose);
     await nightStore.restoreSession();
@@ -1083,6 +1086,11 @@ void main() {
       isTrue,
     );
   });
+}
+
+DateTime todayAt(int hour, [int minute = 0]) {
+  final now = DateTime.now();
+  return DateTime(now.year, now.month, now.day, hour, minute);
 }
 
 AssignmentStore _store({
