@@ -74,4 +74,13 @@ void main() {
     expect(yearless.availableFromText, '11月17日 00:00');
     expect(yearless.notOpen, isTrue);
   });
+  test('a start that contradicts the same work anchor is not trusted', () {
+    final evidence = ChaoxingAssignmentParser.readDetailDeadline(
+      '开始时间：10-28 08:00',
+      startedAt: DateTime.utc(2024, 10, 27),
+    );
+    expect(evidence.availableFromAt, isNull);
+    expect(evidence.availableFromText, '10-28 08:00');
+    expect(evidence.startEvidenceConflict, isTrue);
+  });
 }

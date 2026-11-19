@@ -81,6 +81,7 @@ class HomeSyncPresentation {
           categories == 1 &&
           report.issues.any((issue) => issue.stage == 'persistence');
       final showCached = hasCache &&
+          successAt != null &&
           (hasWorkListFailure ||
               hasExamFailure ||
               hasClassroomFailure ||

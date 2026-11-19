@@ -72,6 +72,19 @@ void main() {
     expect(assignments.first.submitUrl, isNull);
   });
 
+  test('deduplicates repeated course-class identities', () {
+    final parsed = ChaoxingApiParser.parseCourseRefsDetailed({
+      'courses': [
+        {'courseId': '7', 'clazzId': '11', 'courseName': '课程'},
+        {'courseId': '7', 'clazzId': '11', 'courseName': '课程'},
+        {'unexpected': true},
+      ],
+    });
+    expect(parsed.refs, hasLength(1));
+    expect(parsed.duplicates, 1);
+    expect(parsed.rejected, 1);
+  });
+
   test('parses active list exams into assignment items', () {
     final assignments = ChaoxingApiParser.parseActivityExamAssignments(
       {

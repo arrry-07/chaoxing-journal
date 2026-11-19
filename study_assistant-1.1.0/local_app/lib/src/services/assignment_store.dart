@@ -1033,6 +1033,7 @@ class AssignmentStore extends ChangeNotifier {
       resolvedCount: progress.resolvedCount,
       attemptedCount: progress.attemptedCount,
       unconfirmedCount: progress.unconfirmedCount,
+      workListFailureCount: progress.workListFailureCount,
     ));
   }
 

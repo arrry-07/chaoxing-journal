@@ -171,6 +171,7 @@ void main() {
     expect(find.text('无截止日期'), findsWidgets);
     expect(find.text('截止时间待确认'), findsOneWidget);
     expect(find.text('—'), findsOneWidget);
+    expect(find.text('无截止日期'), findsWidgets);
     expect(find.text('无日期与待确认'), findsOneWidget);
   });
 

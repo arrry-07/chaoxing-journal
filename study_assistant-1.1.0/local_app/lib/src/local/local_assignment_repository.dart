@@ -1129,11 +1129,13 @@ class _Journal {
     if (next.publishedAt == null && prior.publishedAt != null) {
       next = next.copyWith(publishedAt: prior.publishedAt);
     }
-    if (next.availableFromAt == null && prior.availableFromAt != null) {
-      next = next.copyWith(availableFromAt: prior.availableFromAt);
-    }
-    if (next.availableFromText == null && prior.availableFromText != null) {
-      next = next.copyWith(availableFromText: prior.availableFromText);
+    final hasIncomingStart =
+        next.availableFromAt != null || next.availableFromText != null;
+    if (!hasIncomingStart) {
+      next = next.copyWith(
+        availableFromAt: prior.availableFromAt,
+        availableFromText: prior.availableFromText,
+      );
     }
     // Completed work sometimes stops exposing its deadline in a refreshed
     // list. That absence is not evidence that the previous time was wrong.

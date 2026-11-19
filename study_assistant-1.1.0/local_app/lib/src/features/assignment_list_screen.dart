@@ -387,8 +387,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   '周${'一二三四五六日'[day.weekday - 1]}';
             }
             if (heading == null && recoveryScope == null) {
-              key = 'undated';
-              heading = '无日期与待确认';
+              if (!a.isExam &&
+                  AssignmentQuery.timelineBucketAt(a, now) ==
+                      AssignmentDeadlineBucket.confirmedNoDeadline) {
+                key = 'noDeadline';
+                heading = '无截止日期';
+              } else {
+                key = 'undated';
+                heading = '无日期与待确认';
+              }
             }
             final effectiveKey = isOverdue ? 'overdue:$key' : key;
             if (heading != null && effectiveKey != previous) {
@@ -400,7 +407,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   tierBadge = '已逾期置底';
                   overdueTierAnnounced = true;
                 }
-              } else if (key == 'undated') {
+              } else if (key == 'undated' || key == 'noDeadline') {
                 tone = _DayHeadingTone.undated;
               } else if (isTodayGroup) {
                 tone = _DayHeadingTone.today;

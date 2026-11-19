@@ -281,10 +281,6 @@ class AssignmentQuery {
         .toList();
     anchors.sort();
     final latestAnchor = anchors.isEmpty ? null : anchors.last;
-    if (deadline == null) {
-      return latestAnchor != null && latestAnchor.isBefore(termStart);
-    }
-    if (!deadline.isBefore(termStart)) return false;
     final published = assignment.publishedAt;
     final recentStart = now.subtract(const Duration(days: 30));
     if (published != null &&
@@ -292,7 +288,11 @@ class AssignmentQuery {
         !published.isAfter(now)) {
       return false;
     }
-    return latestAnchor == null || latestAnchor.isBefore(termStart);
+    if (deadline == null) {
+      return latestAnchor != null && latestAnchor.isBefore(termStart);
+    }
+    if (!deadline.isBefore(termStart)) return false;
+    return true;
   }
 
   // An empty followed set means all courses; exclusions are applied by the store.

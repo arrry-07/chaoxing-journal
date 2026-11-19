@@ -105,6 +105,15 @@ void main() {
     expect(AssignmentQuery.isArchivedPastTerm(previous, now), isTrue);
   });
 
+  test('recent no-deadline publication survives the term switch', () {
+    final now = _beijing(2026, 9, 1, 0, 1);
+    final recent = _work(
+      'recent-no-deadline',
+      publishedAt: _beijing(2026, 8, 31, 23, 59),
+    );
+    expect(AssignmentQuery.isArchivedPastTerm(recent, now), isFalse);
+  });
+
   test('past-term deadlines archive while extensions return to the home term',
       () {
     final now = _beijing(2026, 10, 5, 12);
@@ -112,6 +121,17 @@ void main() {
     final extended = _work('extended', deadlineAt: _beijing(2026, 12, 20));
     expect(AssignmentQuery.isArchivedPastTerm(overdue, now), isTrue);
     expect(AssignmentQuery.isArchivedPastTerm(extended, now), isFalse);
+    expect(
+      AssignmentQuery.isArchivedPastTerm(
+        _work(
+          'old-deadline-new-start',
+          deadlineAt: _beijing(2026, 1, 15),
+          availableFromAt: _beijing(2026, 9, 15),
+        ),
+        now,
+      ),
+      isTrue,
+    );
     expect(
       AssignmentQuery.isArchivedPastTerm(
         _work(

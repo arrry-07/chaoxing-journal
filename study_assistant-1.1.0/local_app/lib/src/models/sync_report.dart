@@ -184,32 +184,46 @@ class SyncReport {
                 .map((i) => SyncIssue.fromJson(i as Map<String, dynamic>))
                 .toList());
   }
-  String get summary => switch (phase) {
+  String get summary {
+    if (phase != SyncPhase.partial) {
+      return switch (phase) {
         SyncPhase.running => '正在读取作业…',
-        SyncPhase.partial => issues.any((issue) =>
-                issue.kind == SyncIssueKind.storage &&
-                issue.stage == 'persistence')
-            ? '作业数据已保存，但同步状态记录需要处理'
-            : failedCourses == 0 &&
-                    sourceResults
-                        .any((source) => source.detailUnconfirmedCount > 0) &&
-                    sourceResults.every((source) =>
-                        !const {'exam', 'examAccount', 'examNotice'}
-                            .contains(source.source) ||
-                        source.phase == SyncSourcePhase.success)
-                ? '作业列表已更新，部分截止时间待确认'
-                : failedCourses == 0 &&
-                        sourceResults.any((source) =>
-                            const {'exam', 'examAccount', 'examNotice'}
-                                .contains(source.source) &&
-                            source.phase != SyncSourcePhase.success)
-                    ? '作业记录已更新，部分考试信息未更新'
-                    : '已更新 $succeededCourses 门课程，$failedCourses 门待重试',
+        SyncPhase.partial => '',
         SyncPhase.failed => '本次未能读取作业',
         SyncPhase.cancelled => '本次同步已取消',
         SyncPhase.success => '作业记录已更新',
         SyncPhase.idle => '尚未获取作业',
       };
+    }
+    if (issues.any((issue) =>
+        issue.kind == SyncIssueKind.storage && issue.stage == 'persistence')) {
+      return '作业数据已保存，但同步状态记录需要处理';
+    }
+    final hasDetail = sourceResults.any((s) => s.detailUnconfirmedCount > 0);
+    final hasExam = sourceResults.any((s) =>
+        const {'exam', 'examAccount', 'examNotice'}.contains(s.source) &&
+        s.phase != SyncSourcePhase.success);
+    final hasClassroom = sourceResults.any((s) =>
+        s.source.startsWith('classroomActivity:') &&
+        s.phase != SyncSourcePhase.success);
+    final hasOther = sourceResults.any((s) =>
+        s.phase != SyncSourcePhase.success &&
+        s.source != 'courseWork' &&
+        !s.source.startsWith('classroomActivity:') &&
+        !const {'exam', 'examAccount', 'examNotice'}.contains(s.source));
+    final categories = [
+      failedCourses > 0,
+      hasDetail,
+      hasExam,
+      hasClassroom,
+      hasOther,
+    ].where((value) => value).length;
+    if (categories > 1) return '部分课业信息未更新';
+    if (hasDetail) return '作业列表已更新，部分截止时间待确认';
+    if (hasExam) return '作业记录已更新，部分考试信息未更新';
+    if (hasClassroom) return '作业记录已更新，部分课堂任务未更新';
+    return '已更新 $succeededCourses 门课程，$failedCourses 门待重试';
+  }
 }
 
 class SyncReadException implements Exception {

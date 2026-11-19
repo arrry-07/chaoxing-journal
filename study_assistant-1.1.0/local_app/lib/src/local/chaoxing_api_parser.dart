@@ -17,9 +17,17 @@ class ChaoxingCourseRef {
 
 class ChaoxingApiParser {
   static List<ChaoxingCourseRef> parseCourseRefs(dynamic payload) {
+    return parseCourseRefsDetailed(payload).refs;
+  }
+
+  static ({
+    List<ChaoxingCourseRef> refs,
+    int rejected,
+    int duplicates,
+  }) parseCourseRefsDetailed(dynamic payload) {
     final roots = _asMap(payload);
     if (roots == null) {
-      return [];
+      return (refs: const <ChaoxingCourseRef>[], rejected: 0, duplicates: 0);
     }
 
     final channels = _asList(roots['channelList']) ??
@@ -27,9 +35,13 @@ class ChaoxingApiParser {
         _asList(roots['courses']) ??
         const [];
     final courses = <ChaoxingCourseRef>[];
+    final seen = <String>{};
+    var rejected = 0;
+    var duplicates = 0;
     for (final item in channels) {
       final channel = _asMap(item);
       if (channel == null) {
+        rejected++;
         continue;
       }
       final content = _asMap(channel['content']) ?? channel;
@@ -60,6 +72,11 @@ class ChaoxingApiParser {
           clazzId == null ||
           courseName == null ||
           courseName.isEmpty) {
+        rejected++;
+        continue;
+      }
+      if (!seen.add('$courseId:$clazzId')) {
+        duplicates++;
         continue;
       }
 
@@ -72,7 +89,7 @@ class ChaoxingApiParser {
         ),
       );
     }
-    return courses;
+    return (refs: courses, rejected: rejected, duplicates: duplicates);
   }
 
   static List<Assignment> parseActivityAssignments(

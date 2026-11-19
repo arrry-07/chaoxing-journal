@@ -86,6 +86,34 @@ void main() {
     expect(await c.fetchAssignments(), isEmpty);
     expect(c.failedCourses, 1);
     expect(c.issues.single.kind, SyncIssueKind.schemaChanged);
+    expect(c.sourceResults.single.failedCourses, 1);
+  });
+  test('duplicate course identities are read once and reported once', () async {
+    final paths = <String>[];
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        paths.add(o.uri.path);
+        final body = switch (o.uri.path) {
+          '/mycourse/backclazzdata' => {
+              'courses': [
+                {'courseId': '1', 'clazzId': '2', 'courseName': '课'},
+                {'courseId': '1', 'clazzId': '2', 'courseName': '课'},
+              ]
+            },
+          '/visit/stucoursemiddle' => '<input id="workEnc" value="s">',
+          '/mooc2/work/list' => '暂无作业',
+          _ => '',
+        };
+        h.resolve(Response(requestOptions: o, statusCode: 200, data: body));
+      }));
+    final c = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
+    expect(await c.fetchAssignments(), isEmpty);
+    expect(c.succeededCourses, 1);
+    expect(c.failedCourses, 0);
+    expect(c.sourceResults.single.failedCourses, 0);
+    expect(
+        paths.where((path) => path == '/visit/stucoursemiddle'), hasLength(1));
   });
   test(
       'source migration survives restart without deleting history or merging classes',

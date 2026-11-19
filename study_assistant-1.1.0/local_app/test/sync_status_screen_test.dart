@@ -20,6 +20,26 @@ void main() {
   const examRedirect =
       SyncIssue(SyncIssueKind.schemaChanged, '考试页面跳转未通过安全检查', stage: 'exam');
 
+  test('sync summary does not hide detail and exam failures behind one source',
+      () {
+    const report = SyncReport(
+      phase: SyncPhase.partial,
+      sourceResults: [
+        SyncSourceResult(
+          source: 'courseWork',
+          phase: SyncSourcePhase.success,
+          detailUnconfirmedCount: 1,
+        ),
+        SyncSourceResult(
+          source: 'exam',
+          phase: SyncSourcePhase.partial,
+          failedCourses: 1,
+        ),
+      ],
+    );
+    expect(report.summary, '部分课业信息未更新');
+  });
+
   testWidgets('restored verification report without target asks for a refresh',
       (tester) async {
     await _pumpRestoredReport(tester, [verification]);

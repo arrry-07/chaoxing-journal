@@ -21,6 +21,7 @@ class AssignmentSyncProgress {
     required this.resolvedCount,
     required this.attemptedCount,
     this.unconfirmedCount = 0,
+    this.workListFailureCount = 0,
   })  : assignments = List.unmodifiable(assignments),
         pendingDetailIds = Set.unmodifiable(pendingDetailIds);
 
@@ -30,14 +31,18 @@ class AssignmentSyncProgress {
   final int resolvedCount;
   final int attemptedCount;
   final int unconfirmedCount;
+  final int workListFailureCount;
 
   String get stageLabel => switch (stage) {
         AssignmentSyncStage.courses => '正在读取课程',
         AssignmentSyncStage.workLists => '正在读取作业',
         AssignmentSyncStage.details => '正在确认截止时间',
         AssignmentSyncStage.classroomTasks => '正在读取课堂任务',
-        AssignmentSyncStage.exams =>
-          unconfirmedCount > 0 ? '作业已读取，部分截止待确认 · 正在读取考试' : '作业已读取 · 正在读取考试',
+        AssignmentSyncStage.exams => workListFailureCount > 0
+            ? '部分课程作业未更新 · 正在读取考试'
+            : unconfirmedCount > 0
+                ? '作业已读取，部分截止待确认 · 正在读取考试'
+                : '作业已读取 · 正在读取考试',
         AssignmentSyncStage.saving => '正在保存作业',
       };
 }

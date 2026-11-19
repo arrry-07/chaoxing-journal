@@ -157,6 +157,7 @@ void main() {
           loading: false,
           hasCache: true,
           now: now,
+          successAt: now.subtract(const Duration(days: 1)),
         );
 
     final detail = present(
@@ -236,5 +237,36 @@ void main() {
     );
     expect(multiple.summary, '部分课业信息未更新');
     expect(multiple.showCached, isTrue);
+  });
+
+  test('fresh preview is not called a cached fallback on first partial sync',
+      () {
+    final now = DateTime.utc(2026, 11, 19);
+    const report = SyncReport(
+      phase: SyncPhase.partial,
+      sourceResults: [
+        SyncSourceResult(
+          source: 'courseWork',
+          phase: SyncSourcePhase.partial,
+          succeededCourses: 39,
+          failedCourses: 1,
+        ),
+      ],
+    );
+    final fresh = HomeSyncPresentation.from(
+      report,
+      loading: false,
+      hasCache: true,
+      now: now,
+    );
+    expect(fresh.showCached, isFalse);
+    final cached = HomeSyncPresentation.from(
+      report,
+      loading: false,
+      hasCache: true,
+      now: now,
+      successAt: DateTime.utc(2026, 11, 18),
+    );
+    expect(cached.showCached, isTrue);
   });
 }

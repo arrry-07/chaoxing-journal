@@ -384,4 +384,29 @@ void main() {
     expect(a.deadlineLabel, '无截止日期');
     expect(c.issues, isEmpty);
   });
+  test('a conflicting detail start cannot remain archive evidence', () async {
+    final c = client(
+        [row(1)],
+        (o, h) => h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: '开始时间：10-28 08:00\n截止时间：不限')));
+    final previous = Assignment(
+      id: 'cx:work:1:2:1',
+      courseName: '课程',
+      title: '旧作业',
+      deadlineAt: null,
+      availableFromAt: DateTime.utc(2024, 8, 31),
+      availableFromText: '2024-08-31 08:00',
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: DateTime.utc(2024, 8, 1),
+    );
+    final work = await c.fetchAssignments();
+    final result = LocalAssignmentRepository.mergeAssignments([previous], work);
+    expect(work.single.availableFromAt, isNull);
+    expect(work.single.availableFromText, '10-28 08:00');
+    expect(result.single.availableFromAt, isNull);
+    expect(result.single.availableFromText, '10-28 08:00');
+  });
 }

@@ -602,12 +602,19 @@ class ChaoxingLocalClient {
         final raw = payload is Map
             ? payload['channelList'] ?? payload['courses'] ?? payload['data']
             : null;
-        final refs = ChaoxingApiParser.parseCourseRefs(payload);
-        return (payload: payload, raw: raw, refs: refs);
+        final parsed = ChaoxingApiParser.parseCourseRefsDetailed(payload);
+        return (
+          payload: payload,
+          raw: raw,
+          refs: parsed.refs,
+          rejected: parsed.rejected,
+          duplicates: parsed.duplicates,
+        );
       });
       _recordPhase('courseList', courseListWatch);
       final payload = parsedCourses.payload;
       final raw = parsedCourses.raw;
+      final invalidCourseCount = parsedCourses.rejected;
       courses = parsedCourses.refs;
       if (raw is! List ||
           (raw.isNotEmpty && courses.isEmpty) ||
@@ -620,8 +627,8 @@ class ChaoxingLocalClient {
       final problems = <String>{};
       hasCourseResponse = true;
       progress?.setStage(AssignmentSyncStage.workLists);
-      if (raw.length != courses.length) {
-        failedCourses = raw.length - courses.length;
+      if (invalidCourseCount > 0) {
+        failedCourses = invalidCourseCount;
         issues.add(const SyncIssue(SyncIssueKind.schemaChanged, '部分课程结构无法识别'));
         problems.add('部分课程无法识别');
       }
@@ -708,7 +715,10 @@ class ChaoxingLocalClient {
         }
       }
       _recordPhase('formalWork', formalWatch);
-      failedCourses = formalFailedCourseKeys.length;
+      final formalFailureCount =
+          invalidCourseCount + formalFailedCourseKeys.length;
+      failedCourses = formalFailureCount;
+      progress?.setWorkListFailureCount(formalFailureCount);
       sourceResults = [
         _formalSourceResult(assignments, succeededCourses, failedCourses)
       ];
@@ -718,7 +728,7 @@ class ChaoxingLocalClient {
       }
       final classroom = await _fetchClassroomTasks(courses,
           generation: generation,
-          unreadCourses: raw.length - courses.length,
+          unreadCourses: invalidCourseCount,
           progress: progress);
       _recordPhase('classroomTasks', classroomWatch);
       if (generation != _sessionGeneration) return const [];
@@ -728,7 +738,7 @@ class ChaoxingLocalClient {
         ...formalFailedCourseKeys,
         if (enableClassroomTasks) ...classroom.failedCourseKeys,
       };
-      failedCourses = raw.length - courses.length + failedCourseKeys.length;
+      failedCourses = invalidCourseCount + failedCourseKeys.length;
       if (classroom.failedCourses > 0) {
         problems.add('部分课堂任务信息尚未读取');
       }
@@ -1508,6 +1518,7 @@ class ChaoxingLocalClient {
         }
       }
       if (failure != null) issues.add(failure);
+      final startEvidenceConflict = evidence.startEvidenceConflict;
       final resolved = item.copyWith(
           deadlineAt: evidence.deadlineAt,
           clearDeadlineAt: evidence.noLimit,
@@ -1516,7 +1527,10 @@ class ChaoxingLocalClient {
           deadlineRawText: evidence.missingYear
               ? '${evidence.rawText}（年份待确认）'
               : evidence.rawText,
-          availableFromAt: evidence.availableFromAt ?? startTimes[item.id],
+          availableFromAt: startEvidenceConflict
+              ? null
+              : evidence.availableFromAt ?? startTimes[item.id],
+          clearAvailableFromAt: startEvidenceConflict,
           availableFromText: evidence.availableFromText);
       result.add(resolved);
       progress?.resolve(item.id, resolved);
@@ -2601,10 +2615,15 @@ class _SyncProgressTracker {
   AssignmentSyncStage stage = AssignmentSyncStage.courses;
   int resolvedCount = 0;
   int attemptedCount = 0;
+  int workListFailureCount = 0;
 
   void setStage(AssignmentSyncStage value) {
     stage = value;
     _emit();
+  }
+
+  void setWorkListFailureCount(int value) {
+    workListFailureCount = value;
   }
 
   void addRows(List<Assignment> rows, {String? courseKey}) {
@@ -2690,6 +2709,7 @@ class _SyncProgressTracker {
       resolvedCount: resolvedCount,
       attemptedCount: attemptedCount,
       unconfirmedCount: _unconfirmedIds.length,
+      workListFailureCount: workListFailureCount,
     ));
   }
 }
