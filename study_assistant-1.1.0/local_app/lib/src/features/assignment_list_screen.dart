@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
 import '../app/transient_feedback.dart';
+import '../local/chaoxing_local_client.dart';
 import '../models/assignment.dart';
 import '../models/assignment_sync_progress.dart';
 import '../models/home_filters.dart';
@@ -41,6 +42,7 @@ enum AssignmentRecoveryScope {
   /// Retained historical dates remain visible here even though the trusted
   /// calendar grid excludes them.
   bool matches(Assignment assignment, DateTime now) {
+    if (AssignmentQuery.isArchivedPastTerm(assignment, now)) return false;
     if (assignment.isExam) {
       return this == examUnknown &&
           !AssignmentQuery.isExamEnded(assignment, now) &&
@@ -166,7 +168,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   textColor: Journal.sheet,
                   onPressed: () {
                     _feedback.dismiss();
-                    if (mounted) context.push('/sync');
+                    if (mounted) context.push('/sync?expand=issues');
                   },
                 )
               : null,
@@ -193,6 +195,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             return true;
           }
           feedback('验证尚未完成，请在同步详情继续', details: true);
+        } on VerificationTargetUnavailable {
+          feedback('请先刷新作业数据，再完成安全验证', details: true);
         } catch (_) {
           feedback('验证页面未能打开，请到同步详情重试', details: true);
         }
@@ -325,6 +329,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             loading: store.isLoading,
             hasCache:
                 catalogAssignments.isNotEmpty || displayAssignments.isNotEmpty,
+            hasPreviousData: store.hadCacheBeforeLastSync,
             now: now,
             successAt: store.lastSyncAt,
             serviceWarning: store.error != null &&
@@ -379,13 +384,19 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final day = AssignmentQuery.dayKey(a.timelineAt!);
               isTodayGroup = !isOverdue && day == todayDay;
               key = '${day.year}:${day.month}:${day.day}';
-              heading =
-                  '${day.year == AssignmentQuery.beijing(now).year ? '' : '${day.year}年'}'
-                  '${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}';
+              heading = '${day.year}年${day.month}月${day.day}日 '
+                  '周${'一二三四五六日'[day.weekday - 1]}';
             }
             if (heading == null && recoveryScope == null) {
-              key = 'undated';
-              heading = '无日期与待确认';
+              if (!a.isExam &&
+                  AssignmentQuery.timelineBucketAt(a, now) ==
+                      AssignmentDeadlineBucket.confirmedNoDeadline) {
+                key = 'noDeadline';
+                heading = '无截止日期';
+              } else {
+                key = 'undated';
+                heading = '无日期与待确认';
+              }
             }
             final effectiveKey = isOverdue ? 'overdue:$key' : key;
             if (heading != null && effectiveKey != previous) {
@@ -397,7 +408,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   tierBadge = '已逾期置底';
                   overdueTierAnnounced = true;
                 }
-              } else if (key == 'undated') {
+              } else if (key == 'undated' || key == 'noDeadline') {
                 tone = _DayHeadingTone.undated;
               } else if (isTodayGroup) {
                 tone = _DayHeadingTone.today;
@@ -511,28 +522,46 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   ),
                 ),
               ),
-            Semantics(
-              liveRegion: true,
-              label: statusText,
-              child: Row(children: [
-                Icon(
-                  store.syncReport.phase == SyncPhase.failed
-                      ? Icons.error_outline_rounded
-                      : store.syncReport.phase == SyncPhase.partial
-                          ? Icons.info_outline_rounded
-                          : Icons.schedule_rounded,
-                  size: 15,
-                  color: store.syncReport.phase == SyncPhase.failed
-                      ? Journal.berry
-                      : store.syncReport.phase == SyncPhase.partial
-                          ? Journal.ochre
-                          : Journal.muted,
+            Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                key: const ValueKey('home-sync-status'),
+                onTap: sync.action == HomeSyncAction.none
+                    ? null
+                    : () => context.push('/sync?expand=issues'),
+                borderRadius: BorderRadius.circular(8),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Semantics(
+                    liveRegion: true,
+                    button: sync.action != HomeSyncAction.none,
+                    label: statusText,
+                    child: Row(children: [
+                      Icon(
+                        store.syncReport.phase == SyncPhase.failed
+                            ? Icons.error_outline_rounded
+                            : store.syncReport.phase == SyncPhase.partial
+                                ? Icons.info_outline_rounded
+                                : Icons.schedule_rounded,
+                        size: 15,
+                        color: store.syncReport.phase == SyncPhase.failed
+                            ? Journal.berry
+                            : store.syncReport.phase == SyncPhase.partial
+                                ? Journal.ochre
+                                : Journal.muted,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                          child: ExcludeSemantics(
+                              child:
+                                  Text(statusText, style: Journal.metadata))),
+                      if (sync.action != HomeSyncAction.none)
+                        const Icon(Icons.chevron_right_rounded,
+                            size: 18, color: Journal.muted),
+                    ]),
+                  ),
                 ),
-                const SizedBox(width: 6),
-                Expanded(
-                    child: ExcludeSemantics(
-                        child: Text(statusText, style: Journal.metadata))),
-              ]),
+              ),
             ),
             if (recoveryScope == null) ...[
               const SizedBox(height: 8),
@@ -833,18 +862,37 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       _DayHeadingTone.today => Journal.ink,
       _DayHeadingTone.normal => Journal.muted,
     };
+    final baseStyle = Journal.dayHeading.copyWith(
+      color: textColor,
+      fontSize: 14.5,
+    );
+    final date = RegExp(r'^(\d{4}年)?(\d{1,2}月\d{1,2}日)(.*)$').firstMatch(label);
+    final Widget labelWidget = date == null
+        ? Text(label, style: baseStyle)
+        : Text.rich(
+            TextSpan(children: [
+              if (date[1] != null)
+                TextSpan(
+                  text: date[1],
+                  style: baseStyle.copyWith(fontWeight: FontWeight.w500),
+                ),
+              TextSpan(
+                text: date[2],
+                style: baseStyle.copyWith(fontWeight: FontWeight.w700),
+              ),
+              TextSpan(
+                text: date[3],
+                style: baseStyle.copyWith(fontWeight: FontWeight.w400),
+              ),
+            ]),
+            style: baseStyle,
+          );
     return Padding(
       padding: EdgeInsets.only(top: top + 6, bottom: 2),
       child: Row(
         children: [
           Flexible(
-            child: Text(
-              label,
-              style: Journal.dayHeading.copyWith(
-                color: textColor,
-                fontSize: 14.5,
-              ),
-            ),
+            child: labelWidget,
           ),
           if (badge != null) ...[
             const SizedBox(width: 8),

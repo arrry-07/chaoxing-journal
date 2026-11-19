@@ -242,12 +242,33 @@ void main() {
 
     expect(
       titles(HomeSortOrder.deadlineAsc),
-      ['近期', '较远', '待确认', '无截止', '早逾期', '晚逾期'],
+      ['近期', '较远', '待确认', '无截止', '晚逾期', '早逾期'],
     );
     expect(
       titles(HomeSortOrder.deadlineDesc),
-      ['较远', '近期', '待确认', '无截止', '晚逾期', '早逾期'],
+      ['较远', '近期', '待确认', '无截止', '早逾期', '晚逾期'],
     );
+    expect(AssignmentQuery.home(records, now, {}).overdue,
+        [overdueNew, overdueOld]);
+  });
+
+  test('overdue equal deadlines retain identity and input tie order', () {
+    final now = DateTime.utc(2026, 11, 12, 2);
+    final due = now.subtract(const Duration(days: 1));
+    final z = _sortRecord('z', courseName: '课程', title: '同名', deadlineAt: due);
+    final a = _sortRecord('a', courseName: '课程', title: '同名', deadlineAt: due);
+    final duplicate =
+        _sortRecord('a', courseName: '课程', title: '同名', deadlineAt: due);
+    final records = [z, duplicate, a];
+    for (final order in [
+      HomeSortOrder.deadlineAsc,
+      HomeSortOrder.deadlineDesc
+    ]) {
+      final sorted = AssignmentQuery.sortHome(records, order, now: now);
+      expect(sorted.map((record) => record.id), [a.id, a.id, z.id]);
+      expect(identical(sorted[0], duplicate), isTrue);
+      expect(identical(sorted[1], a), isTrue);
+    }
   });
 
   test(
@@ -385,7 +406,7 @@ void main() {
     final records = [
       a('cx:work:1:2:1', 1, 'pending'),
       a('cx:work:1:3:1', 45, 'returned'),
-      a('cx:work:1:2:2', -200, 'pending'),
+      a('cx:work:1:2:2', -20, 'pending'),
       a('cx:work:1:2:3', 2, 'unknown'),
       a('cx:activity:1:2:4', 1, 'pending'),
       a('cx:work:1:2:5', 1, 'submitted')
@@ -676,6 +697,24 @@ void main() {
         courseName: 'B', title: '一月作业', deadlineAt: DateTime.utc(2027, 1, 30));
     final sources = [january, notice, december, formalExam];
 
+    final futureNotice =
+        notice.copyWith(requirementsText: '考试时间：11-20 07:06 至 11-20 09:06');
+    for (final rows in [
+      <Assignment>[futureNotice],
+      <Assignment>[formalExam, futureNotice]
+    ]) {
+      for (final filter in [
+        AssignmentDeadlineFilter.next7Days,
+        AssignmentDeadlineFilter.next30Days,
+        AssignmentDeadlineFilter.notExpired
+      ]) {
+        expect(AssignmentQuery.filterHome(rows, deadline: filter, now: now),
+            isEmpty,
+            reason: 'yearless evidence must not prove $filter');
+      }
+      expect(AssignmentQuery.filterHome(rows, now: now), isNotEmpty);
+    }
+
     expect(
       AssignmentQuery.sortHome(
         [january, formalExam, december],
@@ -810,7 +849,7 @@ void main() {
     );
   });
 
-  test('yearless exam remains in not-expired until its projected end', () {
+  test('yearless exam stays visible but is not confirmed unexpired', () {
     final now = DateTime.utc(2026, 11, 16);
     final notice = Assignment(
       id: 'cx:examNotice:inbox:active',
@@ -849,7 +888,7 @@ void main() {
         includeHistorical: true,
         now: now,
       ).map((assignment) => assignment.title),
-      ['开放性期中考试', '未截止作业'],
+      ['未截止作业'],
     );
     expect(
       AssignmentQuery.filterHome(

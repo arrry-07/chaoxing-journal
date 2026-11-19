@@ -8,7 +8,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course_notice.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/home_sync_presentation.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -96,6 +99,109 @@ void main() {
     expect(store.assignments.map((a) => a.id),
         unorderedEquals(['cx:one', 'cx:two']));
     expect(store.lastSyncAt, previous);
+  });
+
+  test('course notice read failure is partial without losing homework',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final store = AssignmentStore(
+        sessionStore: _MemorySessionStore(account: 'student'),
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        chaoxingClient: _NoticeSourceClient(SyncSourcePhase.partial));
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await store.syncAssignments();
+
+    expect(store.assignments.single.id, 'cx:work:1:2:3');
+    expect(store.syncReport.phase, SyncPhase.partial);
+    expect(store.syncReport.summary, '部分课程通知未更新');
+    expect(store.syncReport.issues.single.stage, 'courseNotice');
+    final presentation = HomeSyncPresentation.from(
+      store.syncReport,
+      loading: false,
+      hasCache: true,
+      hasPreviousData: true,
+      now: DateTime.now(),
+      successAt: DateTime.now().subtract(const Duration(minutes: 1)),
+    );
+    expect(presentation.summary, '部分课程通知未更新');
+    expect(presentation.showCached, isFalse);
+  });
+
+  test('partial course notice keeps old cache and local read state', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = LocalAssignmentRepository();
+    await repository.activateAccount('student');
+    final oldNotice = CourseNotice(
+      id: 'cx:notice:${'a' * 64}',
+      courseName: '高等数学',
+      title: '旧通知',
+      platformUnread: true,
+      localRead: true,
+      lastSyncedAt: DateTime.utc(2030, 5, 19),
+    );
+    final newNotice = CourseNotice(
+      id: 'cx:notice:${'b' * 64}',
+      courseName: '高等数学',
+      title: '新通知',
+      platformUnread: true,
+      lastSyncedAt: DateTime.utc(2030, 5, 20),
+    );
+    await repository.saveCourseNotices(
+        CourseNoticeCollection(items: [oldNotice]), 'student');
+    final store = AssignmentStore(
+        sessionStore: _MemorySessionStore(account: 'student'),
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        repository: repository,
+        chaoxingClient: _NoticeSourceClient(
+          SyncSourcePhase.partial,
+          notices: [newNotice],
+        ));
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await store.syncAssignments();
+
+    expect(store.assignments.single.id, 'cx:work:1:2:3');
+    expect(store.syncReport.summary, '部分课程通知未更新');
+    expect(store.courseNotices.items.map((notice) => notice.id),
+        containsAll([oldNotice.id, newNotice.id]));
+    expect(
+        store.courseNotices.items
+            .singleWhere((notice) => notice.id == oldNotice.id)
+            .localRead,
+        isTrue);
+    expect(
+        (await repository.loadCourseNotices()).items.map((notice) => notice.id),
+        containsAll([oldNotice.id, newNotice.id]));
+  });
+
+  test('course notice cache save failure is partial after homework save',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = _FailingNoticeSaveRepository();
+    final store = AssignmentStore(
+        sessionStore: _MemorySessionStore(account: 'student'),
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        repository: repository,
+        chaoxingClient: _NoticeSourceClient(SyncSourcePhase.success));
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await store.syncAssignments();
+
+    expect(store.assignments.single.id, 'cx:work:1:2:3');
+    expect(repository.noticeSaveAttempts, 1);
+    expect(store.syncReport.phase, SyncPhase.partial);
+    expect(
+        store.syncReport.issues.any((issue) =>
+            issue.stage == 'persistence' && issue.message.contains('课程通知缓存')),
+        isTrue);
+    expect(store.syncReport.summary, '作业数据已保存，但同步状态记录需要处理');
   });
 
   test('overlapping refreshes share one fetch and logout clears its result',
@@ -355,6 +461,61 @@ class _FailingFetchChaoxingClient extends ChaoxingLocalClient {
   @override
   Future<List<Assignment>> fetchAssignments() async {
     throw StateError('学习通临时失败');
+  }
+}
+
+class _NoticeSourceClient extends ChaoxingLocalClient {
+  _NoticeSourceClient(this.courseNoticePhase,
+      {this.notices = const <CourseNotice>[]});
+
+  final SyncSourcePhase courseNoticePhase;
+  final List<CourseNotice> notices;
+
+  @override
+  List<CourseNotice> get lastFetchedNotices => notices;
+
+  @override
+  Future<List<Assignment>> fetchAssignmentsWithOptions({
+    bool collectCourseNotices = false,
+    bool enableTaskEngineProbe = false,
+  }) async {
+    sourceResults = [
+      const SyncSourceResult(
+        source: 'courseWork',
+        phase: SyncSourcePhase.success,
+        succeededCourses: 1,
+      ),
+      const SyncSourceResult(
+        source: 'exam',
+        phase: SyncSourcePhase.success,
+        succeededCourses: 1,
+      ),
+      SyncSourceResult(
+        source: 'courseNotice',
+        phase: courseNoticePhase,
+        succeededCourses: courseNoticePhase == SyncSourcePhase.success ? 1 : 0,
+        failedCourses: courseNoticePhase == SyncSourcePhase.success ? 0 : 1,
+      ),
+    ];
+    issues = const [];
+    lastSyncWarning = null;
+    return [
+      _assignment(
+        id: 'cx:work:1:2:3',
+        title: '新作业',
+      )
+    ];
+  }
+}
+
+class _FailingNoticeSaveRepository extends LocalAssignmentRepository {
+  int noticeSaveAttempts = 0;
+
+  @override
+  Future<void> saveCourseNotices(
+      CourseNoticeCollection value, String account) async {
+    noticeSaveAttempts++;
+    throw StateError('通知缓存写入失败');
   }
 }
 

@@ -235,6 +235,66 @@ class AssignmentQuery {
     return DateTime(d.year, d.month, d.day);
   }
 
+  static DateTime _beijingInstant(int year, int month, int day) =>
+      DateTime.utc(year, month, day).subtract(const Duration(hours: 8));
+
+  /// The active teaching term starts at Beijing midnight on March 1 or
+  /// September 1. This is a local absolute instant so it can be compared with
+  /// trusted server times without relying on the device's calendar zone.
+  static DateTime semesterStartAt(DateTime now) {
+    final local = beijing(now);
+    final start = local.month >= 9
+        ? _beijingInstant(local.year, 9, 1)
+        : local.month >= 3
+            ? _beijingInstant(local.year, 3, 1)
+            : _beijingInstant(local.year - 1, 9, 1);
+    return start.toLocal();
+  }
+
+  /// Raw records remain in the local journal. This only decides whether an
+  /// observation still belongs to the active teaching term.
+  static bool isArchivedPastTerm(Assignment assignment, DateTime now) {
+    if (assignment.isCompleted) return false;
+    final termStart = semesterStartAt(now);
+    if (assignment.isExam) {
+      final exam = assignment.exam;
+      if (exam == null || exam.lifecycle == 'inProgress') return false;
+      if (exam.endTrusted && exam.endAt != null) {
+        if (exam.endAt!.isAfter(now)) return false;
+        return exam.endAt!.isBefore(termStart);
+      }
+      if (!exam.startTrusted || exam.startAt == null) return false;
+      if (exam.startAt!.isAfter(now)) return false;
+      final duration = exam.durationMinutes;
+      if (duration != null && duration > 0) {
+        final expectedEnd = exam.startAt!.add(Duration(minutes: duration));
+        if (!expectedEnd.isBefore(termStart)) return false;
+      }
+      return exam.startAt!.isBefore(termStart);
+    }
+    if (assignment.deadlineReadFailed || !assignment.deadlineTrusted) {
+      return false;
+    }
+    final deadline = assignment.deadlineAt;
+    final anchors = [assignment.publishedAt, assignment.availableFromAt]
+        .whereType<DateTime>()
+        .toList();
+    anchors.sort();
+    final latestAnchor = anchors.isEmpty ? null : anchors.last;
+    final published = assignment.publishedAt;
+    final recentStart = now.subtract(const Duration(days: 30));
+    if (published != null &&
+        !published.isBefore(recentStart) &&
+        !published.isAfter(now)) {
+      return false;
+    }
+    if (deadline == null) {
+      return latestAnchor != null && latestAnchor.isBefore(termStart);
+    }
+    if (!deadline.isBefore(termStart)) return false;
+    return true;
+  }
+
   // An empty followed set means all courses; exclusions are applied by the store.
   static List<Assignment> scope(
           List<Assignment> records, Set<String> followed) =>
@@ -479,6 +539,7 @@ class AssignmentQuery {
           .where((a) =>
               !a.isCompleted &&
               !isExamEnded(a, now) &&
+              !isArchivedPastTerm(a, now) &&
               !isArchivedClassroomPractice(a, now))
           .toList();
 
@@ -542,6 +603,7 @@ class AssignmentQuery {
 
   static bool isCalendarDated(Assignment assignment, DateTime now) {
     if ((!assignment.isExam && assignment.isCompleted) ||
+        isArchivedPastTerm(assignment, now) ||
         !assignment.timelineTrusted ||
         assignment.timelineAt == null) {
       return false;
@@ -558,23 +620,13 @@ class AssignmentQuery {
 
   static bool _displayExamNotExpired(
     Assignment assignment,
-    List<Assignment> sources,
-    DateTime now, {
-    AssignmentDisplayIndex? index,
-  }) {
-    final start =
-        displayTimelineAt(assignment, records: sources, index: index, now: now);
-    final end = displayTimelineEndAt(assignment,
-        records: sources, index: index, now: now);
+    DateTime now,
+  ) {
     final exam = assignment.exam!;
-    final trustedEnd = exam.endTrusted && exam.endAt != null;
-    // An opening already in the past with no usable end cannot confirm the
-    // exam is still open; it stays discoverable under "all" only.
-    // A yearless notice end without a projectable opening (for example a leap
-    // day in a non-leap year) is not usable evidence either.
-    if (start == null && !trustedEnd) return false;
-    return (start != null && start.isAfter(now)) ||
-        (end != null && end.isAfter(now));
+    // A projected yearless notice is display evidence, not a confirmed date.
+    // Only a trusted opening or ending can prove the exam is still unexpired.
+    return (exam.startTrusted && exam.startAt?.isAfter(now) == true) ||
+        (exam.endTrusted && exam.endAt?.isAfter(now) == true);
   }
 
   /// Lightweight home querying only. It does not reinterpret submission or
@@ -597,6 +649,7 @@ class AssignmentQuery {
             : scope(records, followed);
     return projectDisplay(sourceRecords, index: index).where((a) {
       if (isArchivedClassroomPractice(a, now)) return false;
+      if (isArchivedPastTerm(a, now)) return false;
       final historical = a.isCompleted || (a.isExam && isExamEnded(a, now));
       if ((!includeHistorical && historical) ||
           !matchesType(a, type) ||
@@ -611,8 +664,9 @@ class AssignmentQuery {
       final due =
           displayTimelineAt(a, records: sourceRecords, index: index, now: now);
       final bucket = timelineBucketAt(a, now);
-      final trusted =
-          a.isExam ? !historical && due != null : _hasTrustedPendingDeadline(a);
+      final trusted = a.isExam
+          ? !historical && a.exam!.startTrusted && a.exam!.startAt != null
+          : _hasTrustedPendingDeadline(a);
       return switch (deadline) {
         AssignmentDeadlineFilter.all => true,
         AssignmentDeadlineFilter.next7Days => trusted &&
@@ -632,7 +686,7 @@ class AssignmentQuery {
         AssignmentDeadlineFilter.notExpired => historical
             ? false
             : a.isExam
-                ? _displayExamNotExpired(a, sourceRecords, now, index: index)
+                ? _displayExamNotExpired(a, now)
                 : bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
                     bucket == AssignmentDeadlineBucket.confirmedNoDeadline,
       };
@@ -689,7 +743,10 @@ class AssignmentQuery {
         if (leftTime != null && rightTime != null) {
           final time = leftTime.compareTo(rightTime);
           if (time != 0) {
-            return order == HomeSortOrder.deadlineDesc ? -time : time;
+            final reverse = left.homeTier == 2
+                ? order == HomeSortOrder.deadlineAsc
+                : order == HomeSortOrder.deadlineDesc;
+            return reverse ? -time : time;
           }
         }
         return left.compareNameKeys(right, HomeSortOrder.courseName);
@@ -747,7 +804,7 @@ class AssignmentQuery {
         ..addAll(sorted);
     }
     final sortedOverdue =
-        sortHome(g.overdue, HomeSortOrder.deadlineDesc, now: now);
+        sortHome(g.overdue, HomeSortOrder.deadlineAsc, now: now);
     g.overdue
       ..clear()
       ..addAll(sortedOverdue);

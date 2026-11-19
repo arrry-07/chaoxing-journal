@@ -366,7 +366,10 @@ class LocalAssignmentRepository {
               // future source clock must never outrank the next real sync.
               lastSyncedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
               deadlineTrusted: false,
-              deadlineRawText: '备份记录，待同步确认');
+              deadlineRawText: '备份记录，待同步确认',
+              publishedAt: a.publishedAt,
+              availableFromAt: a.availableFromAt,
+              availableFromText: a.availableFromText);
           final taskKey = validated.courseTaskKeys[a.id];
           if (taskKey != null) state.courseTaskKeys[a.id] = taskKey;
           if (validated.hidden.contains(a.id)) state.hidden.add(a.id);
@@ -1122,14 +1125,26 @@ class _Journal {
   }
 
   static Assignment _preserveFailedDeadline(Assignment item, Assignment prior) {
+    var next = item;
+    if (next.publishedAt == null && prior.publishedAt != null) {
+      next = next.copyWith(publishedAt: prior.publishedAt);
+    }
+    final hasIncomingStart =
+        next.availableFromAt != null || next.availableFromText != null;
+    if (!hasIncomingStart) {
+      next = next.copyWith(
+        availableFromAt: prior.availableFromAt,
+        availableFromText: prior.availableFromText,
+      );
+    }
     // Completed work sometimes stops exposing its deadline in a refreshed
     // list. That absence is not evidence that the previous time was wrong.
-    final preserveCompleted = item.isCompleted &&
-        !item.deadlineTrusted &&
+    final preserveCompleted = next.isCompleted &&
+        !next.deadlineTrusted &&
         prior.deadlineTrusted &&
         prior.deadlineAt != null;
-    if (!item.deadlineReadFailed && !preserveCompleted) return item;
-    return item.copyWith(
+    if (!next.deadlineReadFailed && !preserveCompleted) return next;
+    return next.copyWith(
         deadlineAt: prior.deadlineAt,
         deadlineTrusted: prior.deadlineTrusted,
         deadlineRawText: prior.deadlineRawText,

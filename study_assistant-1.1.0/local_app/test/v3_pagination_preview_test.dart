@@ -69,10 +69,10 @@ Assignment _oldWork(int workId, {String courseId = '1'}) => Assignment(
       id: 'cx:work:$courseId:2:$workId',
       courseName: '课$courseId',
       title: '旧题$workId',
-      deadlineAt: DateTime.utc(2024, 1, 2),
+      deadlineAt: DateTime.now().add(const Duration(days: 7)),
       requirementsText: '',
       status: 'pending',
-      lastSyncedAt: DateTime.utc(2024),
+      lastSyncedAt: DateTime.now().subtract(const Duration(hours: 1)),
     );
 
 void main() {

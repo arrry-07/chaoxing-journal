@@ -918,6 +918,9 @@ class AssignmentStore extends ChangeNotifier {
   Set<String> _homePendingDeadlineIds = {};
   AssignmentSyncProgress? _queuedHomeProgress;
   Timer? _homeProgressTimer;
+  bool _hadCacheBeforeLastSync = false;
+
+  bool get hadCacheBeforeLastSync => _hadCacheBeforeLastSync;
 
   AssignmentSyncProgress? get homeSyncProgress => _homeSyncProgress;
 
@@ -996,7 +999,8 @@ class AssignmentStore extends ChangeNotifier {
         progress.pendingDetailIds.isEmpty &&
         progress.resolvedCount >= progress.attemptedCount;
     final firstState = _homeSyncProgress == null;
-    if (firstBatch || finalDetails || firstState) {
+    final stageChanged = _homeSyncProgress?.stage != progress.stage;
+    if (firstBatch || finalDetails || firstState || stageChanged) {
       _publishHomeProgress(progress);
       return;
     }
@@ -1031,6 +1035,8 @@ class AssignmentStore extends ChangeNotifier {
       pendingDetailIds: const {},
       resolvedCount: progress.resolvedCount,
       attemptedCount: progress.attemptedCount,
+      unconfirmedCount: progress.unconfirmedCount,
+      workListFailureCount: progress.workListFailureCount,
     ));
   }
 
@@ -1355,6 +1361,8 @@ class AssignmentStore extends ChangeNotifier {
     });
     await stage('作业记录', () async {
       await _reloadJournal();
+      _hadCacheBeforeLastSync =
+          _assignments.isNotEmpty || _hiddenAssignments.isNotEmpty;
     });
     await stage('作业变化', () async {
       changes = await changeLog.load();
@@ -1546,7 +1554,10 @@ class AssignmentStore extends ChangeNotifier {
     });
     _loginRunning = false;
     if (loginSucceeded && _authenticated && generation == _generation) {
-      unawaited(syncAssignments());
+      unawaited(syncAssignmentsForTrigger(
+        BackgroundSyncTrigger.manual,
+        skipTaskEngineProbe: true,
+      ));
       unawaited(_hydrateProfile(generation));
     }
   }
@@ -1606,18 +1617,30 @@ class AssignmentStore extends ChangeNotifier {
   Future<void> syncAssignments() =>
       syncAssignmentsForTrigger(BackgroundSyncTrigger.manual);
 
-  Future<void> syncAssignmentsForTrigger(BackgroundSyncTrigger trigger) async {
-    await _syncForTrigger(trigger);
+  Future<void> syncAssignmentsForTrigger(
+    BackgroundSyncTrigger trigger, {
+    bool skipTaskEngineProbe = false,
+  }) async {
+    await _syncForTrigger(trigger, skipTaskEngineProbe: skipTaskEngineProbe);
   }
 
-  Future<String?> _syncForTrigger(BackgroundSyncTrigger trigger) {
+  Future<String?> _syncForTrigger(
+    BackgroundSyncTrigger trigger, {
+    bool skipTaskEngineProbe = false,
+  }) {
     if (!_authenticated) return Future.value();
-    return _syncInFlight ??= _performCoordinatedSync(trigger).whenComplete(() {
+    return _syncInFlight ??= _performCoordinatedSync(
+      trigger,
+      skipTaskEngineProbe: skipTaskEngineProbe,
+    ).whenComplete(() {
       _syncInFlight = null;
     });
   }
 
-  Future<String?> _performCoordinatedSync(BackgroundSyncTrigger trigger) async {
+  Future<String?> _performCoordinatedSync(
+    BackgroundSyncTrigger trigger, {
+    bool skipTaskEngineProbe = false,
+  }) async {
     final operation = ++_syncOperation;
     final generation = _generation;
     _syncCancelled = false;
@@ -1676,7 +1699,11 @@ class AssignmentStore extends ChangeNotifier {
             )) {
           return;
         }
-        await _syncAssignmentsBody(trigger, operation: operation);
+        await _syncAssignmentsBody(
+          trigger,
+          operation: operation,
+          skipTaskEngineProbe: skipTaskEngineProbe,
+        );
       });
       if (_syncSkipReasonOperation == operation &&
           _syncSkipReasonGeneration == generation) {
@@ -2913,7 +2940,7 @@ class AssignmentStore extends ChangeNotifier {
   bool _needsProfileRecovery = false;
 
   Future<void> _syncAssignmentsBody(BackgroundSyncTrigger trigger,
-      {required int operation}) async {
+      {required int operation, bool skipTaskEngineProbe = false}) async {
     final generation = _generation;
     final startedAt = _autoSyncRunning && _lastSyncAttemptAt != null
         ? _lastSyncAttemptAt!
@@ -2957,6 +2984,8 @@ class AssignmentStore extends ChangeNotifier {
       _remoteReadInvoked = true;
     }
     final attempted = startedAt;
+    _hadCacheBeforeLastSync =
+        _assignments.isNotEmpty || _hiddenAssignments.isNotEmpty;
     _lastSyncAttemptAt = attempted;
     syncReport = SyncReport(
         phase: SyncPhase.running,
@@ -3004,7 +3033,7 @@ class AssignmentStore extends ChangeNotifier {
     try {
       incoming = await chaoxingClient.fetchAssignmentsWithOptions(
         collectCourseNotices: manualSync,
-        enableTaskEngineProbe: manualSync,
+        enableTaskEngineProbe: manualSync && !skipTaskEngineProbe,
       );
     } on ChaoxingAuthenticationException {
       _needsProfileRecovery = false;
@@ -3014,7 +3043,7 @@ class AssignmentStore extends ChangeNotifier {
       attachProgress();
       incoming = await chaoxingClient.fetchAssignmentsWithOptions(
         collectCourseNotices: manualSync,
-        enableTaskEngineProbe: manualSync,
+        enableTaskEngineProbe: manualSync && !skipTaskEngineProbe,
       );
     } on SyncReadException catch (error) {
       if (error.issue.kind == SyncIssueKind.cancelled) {
@@ -3096,6 +3125,20 @@ class AssignmentStore extends ChangeNotifier {
         prefs, 'sync_data_at', dataSuccessAt.toUtc().toIso8601String());
     final timestampMirrorFailed = !attemptMirrorSaved || !dataMirrorSaved;
     final reportIssues = List<SyncIssue>.of(chaoxingClient.issues);
+    var courseNoticeReadFailed = false;
+    var courseNoticeSaveFailed = false;
+    final courseNoticeResults = chaoxingClient.sourceResults
+        .where((source) => source.source == 'courseNotice')
+        .toList();
+    if (courseNoticeResults.isNotEmpty &&
+        courseNoticeResults.first.phase != SyncSourcePhase.success) {
+      courseNoticeReadFailed = true;
+      reportIssues.add(const SyncIssue(
+        SyncIssueKind.partial,
+        '部分课程通知未更新',
+        stage: 'courseNotice',
+      ));
+    }
     if (manualSync &&
         chaoxingClient.sourceResults.any((s) =>
             s.source == 'courseNotice' && s.phase != SyncSourcePhase.failed)) {
@@ -3109,6 +3152,7 @@ class AssignmentStore extends ChangeNotifier {
             _courseNotices = mergedNotices;
           }
         } catch (error) {
+          courseNoticeSaveFailed = true;
           reportIssues.add(SyncIssue(
               SyncIssueKind.storage, '作业已保存，但课程通知缓存未能更新：$error',
               stage: 'persistence'));
@@ -3126,7 +3170,10 @@ class AssignmentStore extends ChangeNotifier {
           stage: 'persistence'));
     }
     syncReport = SyncReport(
-        phase: warning == null && !timestampMirrorFailed
+        phase: warning == null &&
+                !timestampMirrorFailed &&
+                !courseNoticeReadFailed &&
+                !courseNoticeSaveFailed
             ? SyncPhase.success
             : SyncPhase.partial,
         attemptedAt: attempted,
@@ -3139,7 +3186,8 @@ class AssignmentStore extends ChangeNotifier {
     await _updateServerBackoff(reportIssues);
     final timestampWarning =
         timestampMirrorFailed ? '作业数据已保存，但同步时间记录未能完整保存；请重新同步核对' : null;
-    _error = [warning, timestampWarning]
+    final courseNoticeWarning = courseNoticeReadFailed ? '部分课程通知未更新' : null;
+    _error = [warning, timestampWarning, courseNoticeWarning]
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .join('；');

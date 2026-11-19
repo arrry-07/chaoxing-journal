@@ -321,6 +321,21 @@ void main() {
     expect(agendaEntry.center.dy, closeTo(title.center.dy, 2));
     final agendaHeading = find.text('11月18日 · 议程');
     expect(agendaHeading.hitTestable(), findsOneWidget);
+    final calendarCard = find
+        .ancestor(
+          of: find.byKey(const ValueKey('calendar-count-18')),
+          matching: find.byType(Card),
+        )
+        .first;
+    final explanation = find.text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。');
+    expect(
+      tester.getTopLeft(explanation).dy,
+      greaterThan(tester.getBottomRight(calendarCard).dy),
+    );
+    expect(
+      tester.getTopLeft(agendaHeading).dy,
+      greaterThan(tester.getTopLeft(explanation).dy),
+    );
 
     final count = tester.widget<Text>(
       find.byKey(const ValueKey('calendar-count-18')),

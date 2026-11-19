@@ -35,6 +35,7 @@ class AssignmentReminderSnapshot {
 
   bool eligibleAt(DateTime now) {
     if (!assignment.isInAssignmentScope ||
+        AssignmentQuery.isArchivedPastTerm(assignment, now) ||
         !assignment.isPendingConfirmed ||
         assignment.isCompleted ||
         hidden ||

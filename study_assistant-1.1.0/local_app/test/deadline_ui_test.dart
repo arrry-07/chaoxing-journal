@@ -58,7 +58,7 @@ void main() {
     expect(t.takeException(), isNull);
     await show(
         AssignmentDetailScreen(store: store, assignmentId: 'cx:work:1:2:task'));
-    expect(find.text('未设置截止时间'), findsOneWidget);
+    expect(find.text('无截止日期'), findsOneWidget);
     expect(find.textContaining('已退回'), findsOneWidget);
     expect(t.takeException(), isNull);
     await show(CalendarScreen(store: store));
@@ -139,7 +139,22 @@ void main() {
     expect(find.text('截止时间待确认'), findsOneWidget);
 
     await show(value: assignment.copyWith(deadlineTrusted: true));
-    expect(find.text('无期限'), findsOneWidget);
+    expect(find.text('无截止日期'), findsOneWidget);
+
+    await show(
+      value: assignment.copyWith(
+        deadlineTrusted: true,
+        availableFromAt: DateTime.utc(2026, 11, 16, 16),
+      ),
+    );
+    expect(find.text('开始 11月17日 00:00 · 无截止日期'), findsOneWidget);
+
+    await show(
+      value: assignment.copyWith(
+        availableFromAt: DateTime.utc(2026, 11, 16, 16),
+      ),
+    );
+    expect(find.text('开始 11月17日 00:00 · 截止时间待确认'), findsOneWidget);
   });
 
   testWidgets('card keeps only time in the left rail with full semantics',
@@ -209,10 +224,10 @@ void main() {
     ));
 
     expect(find.text('—'), findsOneWidget);
-    expect(find.text('无期限'), findsOneWidget);
+    expect(find.text('无截止日期'), findsOneWidget);
     final title = find.text('无时间作业');
     final course = find.text('课程');
-    final deadline = find.text('无期限');
+    final deadline = find.text('无截止日期');
     expect(title, findsOneWidget);
     expect(course, findsOneWidget);
     final cardLeft = tester.getTopLeft(find.byType(AssignmentCard)).dx;
@@ -300,7 +315,34 @@ void main() {
       ),
     ));
 
-    expect(find.text('无期限'), findsNothing);
+    expect(find.text('无截止日期'), findsNothing);
     expect(find.text('截止信息待确认'), findsOneWidget);
+  });
+
+  testWidgets('card reserves four logical pixels before its divider',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 13, 4);
+    final assignment = Assignment(
+      id: 'cx:work:1:2:gap',
+      courseName: '课程',
+      title: '留白作业',
+      deadlineAt: now.add(const Duration(days: 1)),
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentCard(
+          assignment: assignment,
+          now: now,
+          onTap: () {},
+        ),
+      ),
+    ));
+    final gap =
+        find.byKey(const ValueKey('assignment-card-gap-cx:work:1:2:gap'));
+    expect(gap, findsOneWidget);
+    expect(tester.getSize(gap).height, 4);
   });
 }

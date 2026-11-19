@@ -55,4 +55,41 @@ void main() {
       expect(e.noLimit, isFalse);
     }
   });
+  test('details keep a trustworthy start independently from the deadline', () {
+    final startOnly =
+        ChaoxingAssignmentParser.readDetailDeadline('开始时间：2026-11-17 00:00');
+    expect(startOnly.availableFromAt!.toUtc(), DateTime.utc(2026, 11, 16, 16));
+    expect(startOnly.availableFromText, '2026-11-17 00:00');
+    expect(startOnly.deadlineAt, isNull);
+    expect(startOnly.noLimit, isFalse);
+
+    final unlimited = ChaoxingAssignmentParser.readDetailDeadline(
+        '开始时间：2026-11-17 00:00\n作答时间：不限');
+    expect(unlimited.availableFromAt!.toUtc(), DateTime.utc(2026, 11, 16, 16));
+    expect(unlimited.noLimit, isTrue);
+
+    final yearless = ChaoxingAssignmentParser.readDetailDeadline(
+        '作业尚未开放\n开始时间：11月17日 00:00');
+    expect(yearless.availableFromAt, isNull);
+    expect(yearless.availableFromText, '11月17日 00:00');
+    expect(yearless.notOpen, isTrue);
+  });
+  test('a start that contradicts the same work anchor is not trusted', () {
+    final evidence = ChaoxingAssignmentParser.readDetailDeadline(
+      '开始时间：10-28 08:00',
+      startedAt: DateTime.utc(2024, 10, 27),
+    );
+    expect(evidence.availableFromAt, isNull);
+    expect(evidence.availableFromText, '10-28 08:00');
+    expect(evidence.startEvidenceConflict, isTrue);
+  });
+  test('a conflicting absolute start cannot anchor a yearless deadline', () {
+    final evidence = ChaoxingAssignmentParser.readDetailDeadline(
+      '开始时间：2024-10-28 08:00\n截止时间：11-05 23:59',
+      startedAt: DateTime.utc(2024, 10, 27),
+    );
+    expect(evidence.startEvidenceConflict, isTrue);
+    expect(evidence.missingYear, isTrue);
+    expect(evidence.deadlineAt, isNull);
+  });
 }

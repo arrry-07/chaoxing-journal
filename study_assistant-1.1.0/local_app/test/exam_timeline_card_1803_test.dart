@@ -109,6 +109,38 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
+  testWidgets('yearless notice shows a visible year warning and semantics',
+      (t) async {
+    final semantics = t.ensureSemantics();
+    try {
+      for (final linked in [false, true]) {
+        final notice = _exam(notice: true, body: _range);
+        final a = linked ? _exam() : notice;
+        final before = a.toJson();
+        await _pump(t, a, sources: linked ? [a, notice] : []);
+        expect(find.text('年份待确认'), findsOneWidget);
+        expect(
+            find.bySemanticsLabel(RegExp('通知未注明年份，暂不作为定时依据')), findsOneWidget);
+        expect(a.toJson(), before);
+        expect(a.reminderAnchorAt, isNull);
+        expect(t.takeException(), isNull);
+      }
+    } finally {
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('trusted or absent exam time has no year warning', (t) async {
+    for (final a in [
+      _exam(start: _start, end: _end, startTrusted: true, endTrusted: true),
+      _exam(),
+    ]) {
+      await _pump(t, a);
+      expect(find.text('年份待确认'), findsNothing);
+      expect(t.takeException(), isNull);
+    }
+  });
+
   for (final scenario in [
     'unknown',
     'untrusted instant',
@@ -128,6 +160,8 @@ void main() {
       expect(find.text('待定'), findsOneWidget);
       if (scenario == 'end only' || scenario == 'notice end only') {
         expect(find.textContaining('10:00'), findsOneWidget);
+        expect(find.text('年份待确认'),
+            scenario == 'notice end only' ? findsOneWidget : findsNothing);
       } else {
         expect(find.textContaining(RegExp(r'\d{2}:\d{2}')), findsNothing);
       }
@@ -214,6 +248,10 @@ void main() {
         expect(t.getRect(clock).right, lessThanOrEqualTo(304));
         expect(t.getRect(find.text(a.title)).right, lessThanOrEqualTo(304));
         expect(find.text('时长 90 分钟'), findsOneWidget);
+        expect(find.text('年份待确认'), trusted ? findsNothing : findsOneWidget);
+        if (!trusted) {
+          expect(t.getRect(find.text('年份待确认')).right, lessThanOrEqualTo(304));
+        }
         expect(find.text('地点 教学楼第一考场三层教室101'), findsOneWidget);
         expect(t.takeException(), isNull);
       }

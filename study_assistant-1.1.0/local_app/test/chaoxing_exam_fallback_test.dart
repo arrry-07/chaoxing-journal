@@ -114,6 +114,96 @@ void main() {
     expect(examSource.reasonCodes, contains('examPcSupplementUnavailable'));
   });
 
+  test(
+      'course notice later invalid row keeps earlier page and marks source partial',
+      () async {
+    var noticeCalls = 0;
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        dynamic body = '';
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                {'courseId': '7', 'clazzId': '11', 'courseName': '合成课程'}
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            body = '<input id="workEnc" value="synthetic-work">';
+          case '/mooc2/work/list':
+            body = '<div>暂无作业</div>';
+          case '/v2/apis/active/student/activelist':
+            body = {
+              'result': 1,
+              'data': {'activeList': []}
+            };
+          case '/phone/moocAnalysis/examList':
+            body = _phoneEmpty;
+          case '/exam-ans/exam/test/examcode/examlist':
+            body = _accountEmptyNoScript;
+          case '/pc/notice/getNoticeList':
+            noticeCalls++;
+            final firstPage =
+                o.data is Map && (o.data as Map)['lastValue'] == '';
+            body = firstPage
+                ? {
+                    'status': true,
+                    'notices': {
+                      'lastGetId': 'notice-cursor-1',
+                      'lastPage': false,
+                      'list': [
+                        {
+                          'uuid': 'course-notice-1',
+                          'title': '普通课程公告',
+                          'content': '这是一条普通课程公告',
+                          'createrName': '任课教师',
+                          'completeTime': '2030-05-20 10:00',
+                          'isread': '0',
+                        }
+                      ],
+                    },
+                  }
+                : {
+                    'status': true,
+                    'notices': {
+                      'lastGetId': '',
+                      'lastPage': true,
+                      'list': [
+                        {
+                          'uuid': 'bad uuid',
+                          'title': '后续普通公告',
+                          'content': '没有考试信息',
+                          'createrName': '任课教师',
+                          'completeTime': '2030-05-20 11:00',
+                          'isread': '0',
+                        }
+                      ],
+                    },
+                  };
+          default:
+            throw StateError('unexpected ${o.uri.path}');
+        }
+        h.resolve(Response(requestOptions: o, data: body, statusCode: 200));
+      }));
+
+    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final rows =
+        await client.fetchAssignmentsWithOptions(collectCourseNotices: true);
+
+    expect(rows, isEmpty);
+    expect(noticeCalls, 2);
+    expect(client.lastFetchedNotices.single.title, '普通课程公告');
+    final courseNotice =
+        client.sourceResults.singleWhere((s) => s.source == 'courseNotice');
+    expect(courseNotice.phase, SyncSourcePhase.partial);
+    expect(courseNotice.recordCount, 1);
+    expect(courseNotice.reasonCodes, contains('listOrMetadataUnavailable'));
+    expect(
+      client.sourceResults.singleWhere((s) => s.source == 'examNotice').phase,
+      SyncSourcePhase.success,
+    );
+  });
+
   test('coursePc accepts valid empty page without Math.ceil pagination script',
       () {
     const html =

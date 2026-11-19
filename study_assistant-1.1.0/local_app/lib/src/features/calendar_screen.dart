@@ -392,6 +392,11 @@ class _CalendarScreenState extends State<CalendarScreen>
                               }))
                           ]),
                       ]))),
+              const Padding(
+                padding: EdgeInsets.only(top: 10, bottom: 2),
+                child: Text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。',
+                    style: TextStyle(fontSize: 12, color: Journal.muted)),
+              ),
               Padding(
                 padding: const EdgeInsets.only(top: 12, bottom: 4),
                 child: Text(
@@ -441,11 +446,6 @@ class _CalendarScreenState extends State<CalendarScreen>
                     onTap: () => context.push('/agenda'),
                   );
                 }),
-              const Padding(
-                padding: EdgeInsets.only(top: 10),
-                child: Text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。',
-                    style: TextStyle(fontSize: 12, color: Journal.muted)),
-              ),
               if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
                 const Divider(height: 24),
                 const Text('待核对课业', style: Journal.section),

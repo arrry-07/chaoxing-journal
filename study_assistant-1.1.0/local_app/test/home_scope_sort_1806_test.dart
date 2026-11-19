@@ -264,6 +264,20 @@ void main() {
     ExamSchedulePresentation.debugResetCache();
   });
 
+  testWidgets('home verification without a target guides refresh',
+      (tester) async {
+    final store = _ScreenStore()
+      ..syncReport = const SyncReport(phase: SyncPhase.partial, issues: [
+        SyncIssue(SyncIssueKind.verificationRequired, '需要验证'),
+      ]);
+    addTearDown(store.dispose);
+    await _pumpScreen(tester, store);
+    await tester.tap(find.byTooltip('刷新作业'));
+    await tester.pump();
+    expect(find.text('请先刷新作业数据，再完成安全验证'), findsOneWidget);
+    expect(store.syncCalls, 0);
+  });
+
   group('query scope union', () {
     test('all equals homework union exam across deadline search and course',
         () {
@@ -386,8 +400,8 @@ void main() {
         'C十二月待提交作业',
         'D次年一月状态未知作业',
         'E无时间作业',
-        'F早逾期作业',
         'G晚逾期作业',
+        'F早逾期作业',
       ]);
       expect(titles(HomeSortOrder.deadlineDesc), [
         'D次年一月状态未知作业',
@@ -395,8 +409,8 @@ void main() {
         'B十一月已结束考试',
         'A九月已提交作业',
         'E无时间作业',
-        'G晚逾期作业',
         'F早逾期作业',
+        'G晚逾期作业',
       ]);
       expect(records, original);
     });
@@ -442,16 +456,16 @@ void main() {
         '状态未知作业',
         '已完成但时间不可信',
         '无截止作业',
-        '早逾期',
         '晚逾期',
+        '早逾期',
       ]);
       expect(titles(HomeSortOrder.deadlineDesc), [
         '状态未知作业',
         '有时间作业',
         '已完成但时间不可信',
         '无截止作业',
-        '晚逾期',
         '早逾期',
+        '晚逾期',
       ]);
     });
 
@@ -610,7 +624,7 @@ void main() {
               now: _now)
           .map((assignment) => assignment.title)
           .toSet();
-      expect(notExpired, {'未来开考', '进行中', '无年份开放通知'});
+      expect(notExpired, {'未来开考', '进行中'});
       final all =
           AssignmentQuery.filterHome(rows, includeHistorical: true, now: _now)
               .map((assignment) => assignment.title)
@@ -740,7 +754,7 @@ void main() {
       addTearDown(store.dispose);
       await _pumpScreen(tester, store);
 
-      const statusText = '部分课程未更新 · 显示上次记录';
+      const statusText = '部分课程作业未更新';
       expect(find.text(statusText), findsOneWidget);
       expect(find.text('上次记录'), findsNothing);
       final statusSemantics = tester.widget<Semantics>(find.byWidgetPredicate(

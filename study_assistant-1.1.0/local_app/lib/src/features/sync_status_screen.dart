@@ -4,14 +4,20 @@ import '../models/sync_report.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../app/journal.dart';
+import '../local/chaoxing_local_client.dart';
 
 import '../services/assignment_store.dart';
 import '../services/sync_issue_presentation.dart';
 
 class SyncStatusScreen extends StatefulWidget {
-  const SyncStatusScreen({super.key, required this.store});
+  const SyncStatusScreen({
+    super.key,
+    required this.store,
+    this.expandIssues = false,
+  });
 
   final AssignmentStore store;
+  final bool expandIssues;
 
   @override
   State<SyncStatusScreen> createState() => _SyncStatusScreenState();
@@ -28,6 +34,15 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         final lastSyncAt = store.lastSyncAt;
         final stale = lastSyncAt == null ||
             DateTime.now().difference(lastSyncAt).inHours >= 24;
+        final issues = store.syncReport.issues;
+        final needsVerification = issues
+            .any((issue) => issue.kind == SyncIssueKind.verificationRequired);
+        // Other read errors also use coursePage. The report preserves the
+        // diagnostic text, with an optional course label prepended.
+        final canInspectCoursePage = issues.any((issue) =>
+            issue.kind == SyncIssueKind.schemaChanged &&
+            issue.stage == 'coursePage' &&
+            issue.message.endsWith('课程页未生成作业读取凭证，可在应用内检查访问'));
         return Scaffold(
             appBar: AppBar(
                 leading: IconButton(
@@ -67,6 +82,18 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                     ),
                   ),
                 ),
+                if (store.syncReport.failedCourses > 0 &&
+                    lastSyncAt != null &&
+                    store.hadCacheBeforeLastSync)
+                  Card(
+                    key: const ValueKey('sync-cached-record-status'),
+                    child: ListTile(
+                      leading: const Icon(Icons.history_rounded),
+                      title: const Text('当前保留上次完整同步记录'),
+                      subtitle: Text(
+                          '完整读取时间：${DateFormat('M月d日 HH:mm', 'zh_CN').format(lastSyncAt)}'),
+                    ),
+                  ),
                 if (store.chaoxingClient.requestTimings.isNotEmpty)
                   ExpansionTile(
                       title: const Text('本机临时请求采样'),
@@ -166,9 +193,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                   icon: const Icon(Icons.sync),
                   label: Text(store.isLoading ? '正在刷新...' : '刷新作业数据'),
                 ),
-                if (store.syncReport.issues.any((i) =>
-                    i.kind == SyncIssueKind.verificationRequired ||
-                    i.kind == SyncIssueKind.schemaChanged))
+                if (needsVerification || canInspectCoursePage)
                   FilledButton.icon(
                       onPressed: store.isLoading
                           ? null
@@ -177,14 +202,22 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                                 final continued = await store.chaoxingClient
                                     .verifyInBrowser();
                                 if (continued) await store.syncAssignments();
+                              } on VerificationTargetUnavailable {
+                                if (context.mounted) {
+                                  _showMessage(needsVerification
+                                      ? '请先刷新作业数据，再完成安全验证'
+                                      : '请先刷新作业数据，再检查访问');
+                                }
                               } catch (_) {
                                 if (context.mounted) {
-                                  _showMessage('验证页面未能打开，请稍后重试');
+                                  _showMessage(needsVerification
+                                      ? '验证页面未能打开，请稍后重试'
+                                      : '检查访问页面未能打开，请稍后重试');
                                 }
                               }
                             },
                       icon: const Icon(Icons.verified_user_outlined),
-                      label: const Text('完成安全验证')),
+                      label: Text(needsVerification ? '完成安全验证' : '在应用内检查访问')),
                 if (store.syncReport.sourceResults.isNotEmpty)
                   ExpansionTile(title: const Text('读取来源'), children: [
                     for (final source in store.syncReport.sourceResults)
@@ -238,6 +271,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
 
                     return ExpansionTile(
                         key: const ValueKey('sync-issue-groups'),
+                        initiallyExpanded: widget.expandIssues,
                         title: Text(
                             '问题明细（${groups.length} 组，共 ${store.syncReport.issues.length} 条）'),
                         children: [

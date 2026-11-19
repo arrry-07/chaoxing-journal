@@ -272,6 +272,7 @@ void main() {
 
       expect(find.text('待定'), findsNWidgets(2));
       expect(find.text('—'), findsOneWidget);
+      expect(find.text('无截止日期'), findsWidgets);
       expect(find.text('无日期与待确认'), findsOneWidget);
       final datedTitle = tester.getTopLeft(find.text('有日期作业'));
       final undatedTitle = tester.getTopLeft(find.text('无时间考试'));

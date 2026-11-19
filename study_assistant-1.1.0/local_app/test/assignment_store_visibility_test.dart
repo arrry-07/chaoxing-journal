@@ -33,10 +33,10 @@ Assignment _assignment({required String id, required String status}) {
     id: 'cx:work:1:2:$id',
     courseName: '大学英语',
     title: id,
-    deadlineAt: DateTime(2026, 5, 7, 8),
+    deadlineAt: DateTime.now().add(const Duration(days: 3)),
     requirementsText: '完成后提交',
     status: status,
-    lastSyncedAt: DateTime(2026, 5, 5, 8),
+    lastSyncedAt: DateTime.now(),
   );
 }
 

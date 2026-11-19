@@ -7,6 +7,7 @@ import 'package:study_assistant_mobile/src/local/chaoxing_exam_parser.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_web_link.dart';
 import 'ai_practice_client_test.dart' show AiFixture;
@@ -269,6 +270,20 @@ void main() {
           : await c.fetchAssignments();
       expect(rows.any((a) => a.isExam && !a.exam!.noticeOnly), isTrue);
     }
+  });
+  test('failed formal lists are not described as already read at exam stage',
+      () async {
+    final f = ExamFixture()..formalHttp = 403;
+    final c = f.client();
+    AssignmentSyncProgress? examStage;
+    c.onProgress = (progress) {
+      if (progress.stage == AssignmentSyncStage.exams) examStage = progress;
+    };
+    await c.fetchAssignments();
+    expect(examStage, isNotNull);
+    expect(examStage!.workListFailureCount, greaterThan(0));
+    expect(examStage!.stageLabel, contains('部分课程作业未更新'));
+    expect(examStage!.stageLabel, isNot(contains('作业已读取')));
   });
   test('PC partial pagination preserves parsed first page when the next fails',
       () async {

@@ -71,7 +71,7 @@ void main() {
     expect(snapshot.items[1].toJson()['deadlineText'], isNotEmpty);
     final noDeadline = WidgetSnapshotItem.fromJson(snapshot.items[3].toJson());
     expect(noDeadline.deadlineAt, isNull);
-    expect(noDeadline.remainingText, '未设置截止时间');
+    expect(noDeadline.remainingText, '无截止日期');
     expect(noDeadline.urgencyLevel, 'unknown');
   });
 
