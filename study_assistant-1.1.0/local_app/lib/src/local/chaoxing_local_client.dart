@@ -1689,15 +1689,20 @@ class ChaoxingLocalClient {
             }
             final status = int.tryParse('${row['stuStatus']}');
             final evaluation = int.tryParse('${row['evaluation'] ?? 0}') ?? 0;
-            final state = evaluation != 0
-                ? (status == 4 ? 'completed' : 'unknown')
-                : switch (status) {
-                    0 || 1 || 2 => 'pending',
-                    3 => 'reviewing',
-                    4 => 'completed',
-                    5 => 'returned',
-                    _ => 'unknown'
-                  };
+            // An explicit returned status is actionable even when the teacher
+            // has already evaluated the previous submission. The evaluation
+            // flag must not hide the student's need to resubmit.
+            final state = status == 5
+                ? 'returned'
+                : evaluation != 0
+                    ? (status == 4 ? 'completed' : 'unknown')
+                    : switch (status) {
+                        0 || 1 || 2 => 'pending',
+                        3 => 'reviewing',
+                        4 => 'completed',
+                        5 => 'returned',
+                        _ => 'unknown'
+                      };
             final end = int.tryParse('${row['endTime']}');
             final start = int.tryParse('${row['startTime']}');
             if (start != null &&
