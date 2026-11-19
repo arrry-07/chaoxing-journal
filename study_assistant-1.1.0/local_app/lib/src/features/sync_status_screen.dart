@@ -4,6 +4,7 @@ import '../models/sync_report.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../app/journal.dart';
+import '../local/chaoxing_local_client.dart';
 
 import '../services/assignment_store.dart';
 import '../services/sync_issue_presentation.dart';
@@ -177,6 +178,10 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                                 final continued = await store.chaoxingClient
                                     .verifyInBrowser();
                                 if (continued) await store.syncAssignments();
+                              } on VerificationTargetUnavailable {
+                                if (context.mounted) {
+                                  _showMessage('请先刷新作业数据，再完成安全验证');
+                                }
                               } catch (_) {
                                 if (context.mounted) {
                                   _showMessage('验证页面未能打开，请稍后重试');

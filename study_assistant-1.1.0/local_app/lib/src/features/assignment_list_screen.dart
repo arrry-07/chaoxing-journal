@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../app/journal.dart';
 import '../app/transient_feedback.dart';
+import '../local/chaoxing_local_client.dart';
 import '../models/assignment.dart';
 import '../models/assignment_sync_progress.dart';
 import '../models/home_filters.dart';
@@ -193,6 +194,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             return true;
           }
           feedback('验证尚未完成，请在同步详情继续', details: true);
+        } on VerificationTargetUnavailable {
+          feedback('请先刷新作业数据，再完成安全验证', details: true);
         } catch (_) {
           feedback('验证页面未能打开，请到同步详情重试', details: true);
         }

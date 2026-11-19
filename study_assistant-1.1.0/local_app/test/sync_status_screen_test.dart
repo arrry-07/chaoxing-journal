@@ -3,12 +3,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/sync_status_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
+  testWidgets('restored verification report without target asks for a refresh',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    store.syncReport = const SyncReport(phase: SyncPhase.partial, issues: [
+      SyncIssue(SyncIssueKind.verificationRequired, '需要验证'),
+    ]);
+    await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
+    await tester.ensureVisible(find.text('完成安全验证'));
+    await tester.tap(find.text('完成安全验证'));
+    await tester.pump();
+    expect(find.text('请先刷新作业数据，再完成安全验证'), findsOneWidget);
+  });
+
   testWidgets('sync status links to the single background-check setting',
       (tester) async {
     SharedPreferences.setMockInitialValues({});

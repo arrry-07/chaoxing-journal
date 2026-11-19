@@ -21,6 +21,10 @@ import 'chaoxing_notice_parser.dart';
 
 part 'chaoxing_exam_client.dart';
 
+class VerificationTargetUnavailable implements Exception {
+  const VerificationTargetUnavailable();
+}
+
 class ChaoxingAuthenticationException implements Exception {
   const ChaoxingAuthenticationException([this.httpStatus]);
 
@@ -278,7 +282,7 @@ class ChaoxingLocalClient {
   Future<bool> verifyInBrowser() async {
     final generation = _sessionGeneration;
     final target = _verificationTarget ?? _courseVerificationProbe;
-    if (target == null) throw StateError('请先刷新作业以确认需要验证的页面');
+    if (target == null) throw const VerificationTargetUnavailable();
     final rows = await const MethodChannel('study_assistant/external_links')
         .invokeListMethod<dynamic>('verifySession', {
       'url': target.toString(),
