@@ -6,6 +6,10 @@
     python -B -c "import runpy; raise SystemExit(runpy.run_path('tests/run_tests.py')['run_all']())"
 如果 `python` 不可用或依赖未安装，应先配置可用 Python 环境；不要将个人虚拟环境绝对路径写进项目规则。2026-11-17 本机复核：历史硬编码路径 `%LOCALAPPDATA%/xxt-reference-venv/Scripts/python.exe` 不存在；`python --version` 为 3.13.14，命令虽位于 WindowsApps 路径但解释器可运行。参考 CLI 依赖是否完整以及上述 `hw-ls`/`run_all()` 命令尚未在本机重新验证；不能仅凭路径把 Python 判为不可用，也不能声称参考 CLI 或测试已经通过。摘取部分使用核心测试入口 `run_all()`；独立桌面应用测试套件在上游仓库。
 
+## 第三方依赖文档
+
+- 遇到第三方库的 API 用法、版本兼容或升级问题，先查对应锁文件（Flutter 使用 `pubspec.lock`）确认项目当前版本，再主动用 Context7 查对应版本的文档。仅涉及项目自身业务逻辑时，直接查本地实现和测试。
+
 ## 界面与视觉变更边界
 
 - 只有用户在当前任务中明确要求 UI/UX、布局、排版、字体、颜色、图标、动画、导航结构、设置分组或视觉样式时，才可改动这些内容。
