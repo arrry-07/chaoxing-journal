@@ -264,6 +264,20 @@ void main() {
     ExamSchedulePresentation.debugResetCache();
   });
 
+  testWidgets('home verification without a target guides refresh',
+      (tester) async {
+    final store = _ScreenStore()
+      ..syncReport = const SyncReport(phase: SyncPhase.partial, issues: [
+        SyncIssue(SyncIssueKind.verificationRequired, '需要验证'),
+      ]);
+    addTearDown(store.dispose);
+    await _pumpScreen(tester, store);
+    await tester.tap(find.byTooltip('刷新作业'));
+    await tester.pump();
+    expect(find.text('请先刷新作业数据，再完成安全验证'), findsOneWidget);
+    expect(store.syncCalls, 0);
+  });
+
   group('query scope union', () {
     test('all equals homework union exam across deadline search and course',
         () {
