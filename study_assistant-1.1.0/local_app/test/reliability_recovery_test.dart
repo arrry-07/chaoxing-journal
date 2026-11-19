@@ -12,6 +12,7 @@ import 'package:study_assistant_mobile/src/local/local_assignment_repository.dar
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/course_notice.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
@@ -516,6 +517,74 @@ void main() {
             .map((c) => c.name),
         ['old']);
   });
+  test(
+      'course notice save failure keeps old cache and read state, then recovers',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('student');
+    final oldNotice = _notice('a', title: '旧通知', localRead: true);
+    final newNotice = _notice('b', title: '新通知');
+    final laterNotice = _notice('c', title: '恢复后通知');
+    await repo.saveCourseNotices(
+        CourseNoticeCollection(items: [oldNotice]), 'student');
+
+    final client = _NoticeProgressClient(newNotice);
+    final store = AssignmentStore(
+      sessionStore: _SignedInSession(),
+      notificationService: _QuietNotifications(),
+      widgetSnapshotService: _QuietWidget(),
+      repository: repo,
+      chaoxingClient: client,
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    expect(store.courseNotices.items.single.localRead, isTrue);
+
+    final prefs = await SharedPreferences.getInstance();
+    final failing = _installFailingStore(prefs, {'flutter.course_notices_v1'});
+    await store.syncAssignments();
+
+    expect(store.assignments.single.id, 'cx:work:1:2:preview');
+    expect(store.syncReport.phase, SyncPhase.partial);
+    expect(
+        store.syncReport.issues.any((issue) =>
+            issue.kind == SyncIssueKind.storage &&
+            issue.stage == 'persistence'),
+        isTrue);
+    expect(store.courseNotices.items.single.id, oldNotice.id);
+    expect(store.courseNotices.items.single.localRead, isTrue);
+    await prefs.reload();
+    expect(
+        (await LocalAssignmentRepository().loadCourseNotices()).items.single.id,
+        oldNotice.id);
+
+    failing.enabled = false;
+    await store.syncAssignments();
+    expect(store.syncReport.phase, SyncPhase.success);
+    expect(store.courseNotices.items.map((notice) => notice.id),
+        containsAll([oldNotice.id, newNotice.id]));
+    expect(
+        store.courseNotices.items
+            .singleWhere((notice) => notice.id == oldNotice.id)
+            .localRead,
+        isTrue);
+
+    client.notice = laterNotice;
+    _installWriteThenRejectStore(prefs, {'flutter.course_notices_v1'});
+    await store.syncAssignments();
+
+    expect(store.syncReport.phase, SyncPhase.success);
+    expect(store.courseNotices.items.map((notice) => notice.id),
+        contains(laterNotice.id));
+    await prefs.reload();
+    expect(
+        (await LocalAssignmentRepository().loadCourseNotices())
+            .items
+            .map((notice) => notice.id),
+        contains(laterNotice.id));
+  });
   test('savingStagePrecedesCoursePersistence', () async {
     SharedPreferences.setMockInitialValues({});
     final store = AssignmentStore(
@@ -657,6 +726,41 @@ class _ProgressClient extends ChaoxingLocalClient {
   }
 }
 
+class _NoticeProgressClient extends _ProgressClient {
+  _NoticeProgressClient(this.notice);
+
+  CourseNotice notice;
+
+  @override
+  List<CourseNotice> get lastFetchedNotices => [notice];
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    final rows = await super.fetchAssignments();
+    sourceResults = const [
+      SyncSourceResult(
+        source: 'courseWork',
+        phase: SyncSourcePhase.success,
+        succeededCourses: 1,
+      ),
+      SyncSourceResult(
+        source: 'exam',
+        phase: SyncSourcePhase.success,
+        succeededCourses: 1,
+      ),
+      SyncSourceResult(
+        source: 'courseNotice',
+        phase: SyncSourcePhase.success,
+        succeededCourses: 1,
+        recordCount: 1,
+      ),
+    ];
+    issues = const [];
+    lastSyncWarning = null;
+    return rows;
+  }
+}
+
 class _QuietNotifications extends LocalNotificationService {
   @override
   Future<void> cancelPrivateSchedules() async {}
@@ -708,3 +812,15 @@ Assignment journalItem(String id) => Assignment(
 
 CourseRef course(String name) =>
     CourseRef(courseId: name, clazzId: '1', name: name);
+
+CourseNotice _notice(String salt,
+        {required String title, bool localRead = false}) =>
+    CourseNotice(
+      id: 'cx:notice:${salt * 64}',
+      courseName: '数学',
+      title: title,
+      summary: '$title 内容',
+      platformUnread: true,
+      localRead: localRead,
+      lastSyncedAt: DateTime.utc(2030, 5, 20),
+    );
