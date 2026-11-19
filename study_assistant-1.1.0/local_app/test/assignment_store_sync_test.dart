@@ -130,6 +130,55 @@ void main() {
     expect(presentation.showCached, isFalse);
   });
 
+  test('partial course notice keeps old cache and local read state', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = LocalAssignmentRepository();
+    await repository.activateAccount('student');
+    final oldNotice = CourseNotice(
+      id: 'cx:notice:${'a' * 64}',
+      courseName: '高等数学',
+      title: '旧通知',
+      platformUnread: true,
+      localRead: true,
+      lastSyncedAt: DateTime.utc(2030, 5, 19),
+    );
+    final newNotice = CourseNotice(
+      id: 'cx:notice:${'b' * 64}',
+      courseName: '高等数学',
+      title: '新通知',
+      platformUnread: true,
+      lastSyncedAt: DateTime.utc(2030, 5, 20),
+    );
+    await repository.saveCourseNotices(
+        CourseNoticeCollection(items: [oldNotice]), 'student');
+    final store = AssignmentStore(
+        sessionStore: _MemorySessionStore(account: 'student'),
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        repository: repository,
+        chaoxingClient: _NoticeSourceClient(
+          SyncSourcePhase.partial,
+          notices: [newNotice],
+        ));
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await store.syncAssignments();
+
+    expect(store.assignments.single.id, 'cx:work:1:2:3');
+    expect(store.syncReport.summary, '部分课程通知未更新');
+    expect(store.courseNotices.items.map((notice) => notice.id),
+        containsAll([oldNotice.id, newNotice.id]));
+    expect(
+        store.courseNotices.items
+            .singleWhere((notice) => notice.id == oldNotice.id)
+            .localRead,
+        isTrue);
+    expect(
+        (await repository.loadCourseNotices()).items.map((notice) => notice.id),
+        containsAll([oldNotice.id, newNotice.id]));
+  });
+
   test('course notice cache save failure is partial after homework save',
       () async {
     SharedPreferences.setMockInitialValues({});
@@ -416,9 +465,14 @@ class _FailingFetchChaoxingClient extends ChaoxingLocalClient {
 }
 
 class _NoticeSourceClient extends ChaoxingLocalClient {
-  _NoticeSourceClient(this.courseNoticePhase);
+  _NoticeSourceClient(this.courseNoticePhase,
+      {this.notices = const <CourseNotice>[]});
 
   final SyncSourcePhase courseNoticePhase;
+  final List<CourseNotice> notices;
+
+  @override
+  List<CourseNotice> get lastFetchedNotices => notices;
 
   @override
   Future<List<Assignment>> fetchAssignmentsWithOptions({
