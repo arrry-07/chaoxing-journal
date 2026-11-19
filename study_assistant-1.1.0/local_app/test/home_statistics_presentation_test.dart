@@ -257,13 +257,16 @@ void main() {
       report,
       loading: false,
       hasCache: true,
+      hasPreviousData: false,
       now: now,
+      successAt: now.subtract(const Duration(days: 1)),
     );
     expect(fresh.showCached, isFalse);
     final cached = HomeSyncPresentation.from(
       report,
       loading: false,
       hasCache: true,
+      hasPreviousData: true,
       now: now,
       successAt: DateTime.utc(2026, 11, 18),
     );

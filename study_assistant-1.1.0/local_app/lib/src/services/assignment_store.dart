@@ -918,6 +918,9 @@ class AssignmentStore extends ChangeNotifier {
   Set<String> _homePendingDeadlineIds = {};
   AssignmentSyncProgress? _queuedHomeProgress;
   Timer? _homeProgressTimer;
+  bool _hadCacheBeforeLastSync = false;
+
+  bool get hadCacheBeforeLastSync => _hadCacheBeforeLastSync;
 
   AssignmentSyncProgress? get homeSyncProgress => _homeSyncProgress;
 
@@ -1358,6 +1361,8 @@ class AssignmentStore extends ChangeNotifier {
     });
     await stage('作业记录', () async {
       await _reloadJournal();
+      _hadCacheBeforeLastSync =
+          _assignments.isNotEmpty || _hiddenAssignments.isNotEmpty;
     });
     await stage('作业变化', () async {
       changes = await changeLog.load();
@@ -2979,6 +2984,8 @@ class AssignmentStore extends ChangeNotifier {
       _remoteReadInvoked = true;
     }
     final attempted = startedAt;
+    _hadCacheBeforeLastSync =
+        _assignments.isNotEmpty || _hiddenAssignments.isNotEmpty;
     _lastSyncAttemptAt = attempted;
     syncReport = SyncReport(
         phase: SyncPhase.running,

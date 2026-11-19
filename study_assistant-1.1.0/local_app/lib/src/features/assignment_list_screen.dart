@@ -329,6 +329,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             loading: store.isLoading,
             hasCache:
                 catalogAssignments.isNotEmpty || displayAssignments.isNotEmpty,
+            hasPreviousData: store.hadCacheBeforeLastSync,
             now: now,
             successAt: store.lastSyncAt,
             serviceWarning: store.error != null &&

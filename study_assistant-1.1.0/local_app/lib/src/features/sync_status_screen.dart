@@ -82,7 +82,9 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                     ),
                   ),
                 ),
-                if (store.syncReport.failedCourses > 0 && lastSyncAt != null)
+                if (store.syncReport.failedCourses > 0 &&
+                    lastSyncAt != null &&
+                    store.hadCacheBeforeLastSync)
                   Card(
                     key: const ValueKey('sync-cached-record-status'),
                     child: ListTile(

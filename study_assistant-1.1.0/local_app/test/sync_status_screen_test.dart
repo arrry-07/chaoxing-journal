@@ -40,6 +40,46 @@ void main() {
     expect(report.summary, '部分课业信息未更新');
   });
 
+  test(
+      'not-enabled group history does not turn a detail retry into a source failure',
+      () {
+    const report = SyncReport(
+      phase: SyncPhase.partial,
+      sourceResults: [
+        SyncSourceResult(
+          source: 'courseWork',
+          phase: SyncSourcePhase.success,
+          detailUnconfirmedCount: 1,
+        ),
+        SyncSourceResult(
+          source: 'groupHistory',
+          phase: SyncSourcePhase.notEnabled,
+        ),
+      ],
+    );
+    expect(report.summary, '作业列表已更新，部分截止时间待确认');
+  });
+
+  test('classroom failure is counted once without a generic multi-source label',
+      () {
+    const report = SyncReport(
+      phase: SyncPhase.partial,
+      failedCourses: 1,
+      sourceResults: [
+        SyncSourceResult(
+          source: 'courseWork',
+          phase: SyncSourcePhase.success,
+        ),
+        SyncSourceResult(
+          source: 'classroomActivity:42',
+          phase: SyncSourcePhase.partial,
+          failedCourses: 1,
+        ),
+      ],
+    );
+    expect(report.summary, '作业记录已更新，部分课堂任务未更新');
+  });
+
   testWidgets('restored verification report without target asks for a refresh',
       (tester) async {
     await _pumpRestoredReport(tester, [verification]);

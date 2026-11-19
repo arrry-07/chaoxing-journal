@@ -83,4 +83,13 @@ void main() {
     expect(evidence.availableFromText, '10-28 08:00');
     expect(evidence.startEvidenceConflict, isTrue);
   });
+  test('a conflicting absolute start cannot anchor a yearless deadline', () {
+    final evidence = ChaoxingAssignmentParser.readDetailDeadline(
+      '开始时间：2024-10-28 08:00\n截止时间：11-05 23:59',
+      startedAt: DateTime.utc(2024, 10, 27),
+    );
+    expect(evidence.startEvidenceConflict, isTrue);
+    expect(evidence.missingYear, isTrue);
+    expect(evidence.deadlineAt, isNull);
+  });
 }

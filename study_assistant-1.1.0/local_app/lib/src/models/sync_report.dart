@@ -200,19 +200,25 @@ class SyncReport {
       return '作业数据已保存，但同步状态记录需要处理';
     }
     final hasDetail = sourceResults.any((s) => s.detailUnconfirmedCount > 0);
+    bool failed(SyncSourceResult source) => const {
+          SyncSourcePhase.partial,
+          SyncSourcePhase.failed
+        }.contains(source.phase);
     final hasExam = sourceResults.any((s) =>
         const {'exam', 'examAccount', 'examNotice'}.contains(s.source) &&
-        s.phase != SyncSourcePhase.success);
-    final hasClassroom = sourceResults.any((s) =>
-        s.source.startsWith('classroomActivity:') &&
-        s.phase != SyncSourcePhase.success);
+        failed(s));
+    final hasClassroom = sourceResults
+        .any((s) => s.source.startsWith('classroomActivity:') && failed(s));
+    final hasFormal =
+        sourceResults.any((s) => s.source == 'courseWork' && failed(s)) ||
+            (failedCourses > 0 && !hasClassroom);
     final hasOther = sourceResults.any((s) =>
-        s.phase != SyncSourcePhase.success &&
+        failed(s) &&
         s.source != 'courseWork' &&
         !s.source.startsWith('classroomActivity:') &&
         !const {'exam', 'examAccount', 'examNotice'}.contains(s.source));
     final categories = [
-      failedCourses > 0,
+      hasFormal,
       hasDetail,
       hasExam,
       hasClassroom,

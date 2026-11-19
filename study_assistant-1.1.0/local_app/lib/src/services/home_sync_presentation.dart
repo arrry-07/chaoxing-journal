@@ -21,6 +21,7 @@ class HomeSyncPresentation {
       required bool hasCache,
       required DateTime now,
       DateTime? successAt,
+      bool? hasPreviousData,
       bool serviceWarning = false}) {
     if (loading || report.phase == SyncPhase.running) {
       return HomeSyncPresentation(
@@ -82,6 +83,7 @@ class HomeSyncPresentation {
           report.issues.any((issue) => issue.stage == 'persistence');
       final showCached = hasCache &&
           successAt != null &&
+          (hasPreviousData ?? hasCache) &&
           (hasWorkListFailure ||
               hasExamFailure ||
               hasClassroomFailure ||

@@ -514,7 +514,7 @@ class ChaoxingAssignmentParser {
           startEvidenceConflict: startEvidenceConflict);
     }
     var year = int.tryParse(parts[1] ?? '');
-    if (year == null && start != null) {
+    if (year == null && start != null && !startEvidenceConflict) {
       DateTime? matchedStart;
       if (RegExp(r'^20\d{2}[-/年]').hasMatch(start)) {
         matchedStart =
