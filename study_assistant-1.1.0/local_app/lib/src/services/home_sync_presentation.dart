@@ -43,6 +43,7 @@ class HomeSyncPresentation {
           (report.sourceResults.isEmpty &&
               report.issues.any((issue) =>
                   issue.stage != 'detail' &&
+                  issue.stage != 'courseNotice' &&
                   issue.stage != 'persistence' &&
                   !issue.stage.startsWith('exam')));
       final hasExamFailure = report.sourceResults.any((source) =>
@@ -53,6 +54,7 @@ class HomeSyncPresentation {
           source.source.startsWith('classroomActivity:') &&
           const {SyncSourcePhase.partial, SyncSourcePhase.failed}
               .contains(source.phase));
+      final hasCourseNoticeFailure = sourceFailed('courseNotice');
       final hasDetailFailure =
           report.issues.any((issue) => issue.stage == 'detail') ||
               report.sourceResults
@@ -64,6 +66,7 @@ class HomeSyncPresentation {
         'exam',
         'examAccount',
         'examNotice',
+        'courseNotice',
       };
       final hasOtherSourceFailure = report.sourceResults.any((source) =>
           const {SyncSourcePhase.partial, SyncSourcePhase.failed}
@@ -75,6 +78,7 @@ class HomeSyncPresentation {
         hasDetailFailure,
         hasExamFailure,
         hasClassroomFailure,
+        hasCourseNoticeFailure,
         hasStorageFailure,
         hasOtherSourceFailure,
       ].where((value) => value).length;
@@ -94,11 +98,13 @@ class HomeSyncPresentation {
               ? '部分课业信息未更新'
               : hasDetailFailure
                   ? '部分截止时间待确认'
-                  : hasExamFailure
-                      ? '部分考试信息未更新'
-                      : hasClassroomFailure
-                          ? '部分课堂任务未更新'
-                          : '部分课程作业未更新';
+                  : hasCourseNoticeFailure
+                      ? '部分课程通知未更新'
+                      : hasExamFailure
+                          ? '部分考试信息未更新'
+                          : hasClassroomFailure
+                              ? '部分课堂任务未更新'
+                              : '部分课程作业未更新';
       return HomeSyncPresentation(
           report.phase == SyncPhase.partial
               ? partialSummary

@@ -209,6 +209,8 @@ class SyncReport {
         failed(s));
     final hasClassroom = sourceResults
         .any((s) => s.source.startsWith('classroomActivity:') && failed(s));
+    final hasCourseNotice =
+        sourceResults.any((s) => s.source == 'courseNotice' && failed(s));
     final hasFormal =
         sourceResults.any((s) => s.source == 'courseWork' && failed(s)) ||
             (failedCourses > 0 && !hasClassroom);
@@ -216,16 +218,19 @@ class SyncReport {
         failed(s) &&
         s.source != 'courseWork' &&
         !s.source.startsWith('classroomActivity:') &&
+        s.source != 'courseNotice' &&
         !const {'exam', 'examAccount', 'examNotice'}.contains(s.source));
     final categories = [
       hasFormal,
       hasDetail,
       hasExam,
       hasClassroom,
+      hasCourseNotice,
       hasOther,
     ].where((value) => value).length;
     if (categories > 1) return '部分课业信息未更新';
     if (hasDetail) return '作业列表已更新，部分截止时间待确认';
+    if (hasCourseNotice) return '部分课程通知未更新';
     if (hasExam) return '作业记录已更新，部分考试信息未更新';
     if (hasClassroom) return '作业记录已更新，部分课堂任务未更新';
     return '已更新 $succeededCourses 门课程，$failedCourses 门待重试';

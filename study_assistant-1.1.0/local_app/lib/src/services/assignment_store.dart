@@ -3125,6 +3125,20 @@ class AssignmentStore extends ChangeNotifier {
         prefs, 'sync_data_at', dataSuccessAt.toUtc().toIso8601String());
     final timestampMirrorFailed = !attemptMirrorSaved || !dataMirrorSaved;
     final reportIssues = List<SyncIssue>.of(chaoxingClient.issues);
+    var courseNoticeReadFailed = false;
+    var courseNoticeSaveFailed = false;
+    final courseNoticeResults = chaoxingClient.sourceResults
+        .where((source) => source.source == 'courseNotice')
+        .toList();
+    if (courseNoticeResults.isNotEmpty &&
+        courseNoticeResults.first.phase != SyncSourcePhase.success) {
+      courseNoticeReadFailed = true;
+      reportIssues.add(const SyncIssue(
+        SyncIssueKind.partial,
+        '部分课程通知未更新',
+        stage: 'courseNotice',
+      ));
+    }
     if (manualSync &&
         chaoxingClient.sourceResults.any((s) =>
             s.source == 'courseNotice' && s.phase != SyncSourcePhase.failed)) {
@@ -3138,6 +3152,7 @@ class AssignmentStore extends ChangeNotifier {
             _courseNotices = mergedNotices;
           }
         } catch (error) {
+          courseNoticeSaveFailed = true;
           reportIssues.add(SyncIssue(
               SyncIssueKind.storage, '作业已保存，但课程通知缓存未能更新：$error',
               stage: 'persistence'));
@@ -3155,7 +3170,10 @@ class AssignmentStore extends ChangeNotifier {
           stage: 'persistence'));
     }
     syncReport = SyncReport(
-        phase: warning == null && !timestampMirrorFailed
+        phase: warning == null &&
+                !timestampMirrorFailed &&
+                !courseNoticeReadFailed &&
+                !courseNoticeSaveFailed
             ? SyncPhase.success
             : SyncPhase.partial,
         attemptedAt: attempted,
@@ -3168,7 +3186,8 @@ class AssignmentStore extends ChangeNotifier {
     await _updateServerBackoff(reportIssues);
     final timestampWarning =
         timestampMirrorFailed ? '作业数据已保存，但同步时间记录未能完整保存；请重新同步核对' : null;
-    _error = [warning, timestampWarning]
+    final courseNoticeWarning = courseNoticeReadFailed ? '部分课程通知未更新' : null;
+    _error = [warning, timestampWarning, courseNoticeWarning]
         .whereType<String>()
         .where((value) => value.isNotEmpty)
         .join('；');
