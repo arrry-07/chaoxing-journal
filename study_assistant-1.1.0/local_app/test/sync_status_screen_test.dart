@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,25 +12,71 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
+  const verification = SyncIssue(SyncIssueKind.verificationRequired, '需要验证');
+  const missingCourseCredential = SyncIssue(
+      SyncIssueKind.schemaChanged, '示例课程 课程页未生成作业读取凭证，可在应用内检查访问',
+      stage: 'coursePage');
+  const examRedirect =
+      SyncIssue(SyncIssueKind.schemaChanged, '考试页面跳转未通过安全检查', stage: 'exam');
+
   testWidgets('restored verification report without target asks for a refresh',
       (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    final store = AssignmentStore(
-      sessionStore: _MemorySessionStore(),
-      notificationService: _NoopNotificationService(),
-      widgetSnapshotService: _NoopWidgetSnapshotService(),
-    );
-    addTearDown(store.dispose);
-    await store.restoreSession();
-    store.syncReport = const SyncReport(phase: SyncPhase.partial, issues: [
-      SyncIssue(SyncIssueKind.verificationRequired, '需要验证'),
-    ]);
-    await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
+    await _pumpRestoredReport(tester, [verification]);
+    expect(find.text('在应用内检查访问'), findsNothing);
     await tester.ensureVisible(find.text('完成安全验证'));
     await tester.tap(find.text('完成安全验证'));
     await tester.pump();
     expect(find.text('请先刷新作业数据，再完成安全验证'), findsOneWidget);
   });
+
+  testWidgets('restored course credential issue offers an access check',
+      (tester) async {
+    await _pumpRestoredReport(tester, [missingCourseCredential]);
+    expect(find.text('完成安全验证'), findsNothing);
+    await tester.ensureVisible(find.text('在应用内检查访问'));
+    await tester.tap(find.text('在应用内检查访问'));
+    await tester.pump();
+    expect(find.text('请先刷新作业数据，再检查访问'), findsOneWidget);
+  });
+
+  for (final scenario in [
+    (
+      name: 'exam redirect failure alone offers neither browser action',
+      issues: [examRedirect],
+      action: null
+    ),
+    (
+      name: 'generic course page parse failure offers neither browser action',
+      issues: [
+        const SyncIssue(SyncIssueKind.schemaChanged, '学习通响应无法解析，请稍后重试',
+            stage: 'coursePage')
+      ],
+      action: null
+    ),
+    (
+      name: 'exam redirect failure preserves the access check',
+      issues: [examRedirect, missingCourseCredential],
+      action: '在应用内检查访问'
+    ),
+    (
+      name: 'exam redirect failure preserves the real verification action',
+      issues: [examRedirect, verification],
+      action: '完成安全验证'
+    ),
+    (
+      name: 'real verification takes priority over the access check',
+      issues: [examRedirect, missingCourseCredential, verification],
+      action: '完成安全验证'
+    ),
+  ]) {
+    testWidgets(scenario.name, (tester) async {
+      await _pumpRestoredReport(tester, scenario.issues);
+      for (final label in ['完成安全验证', '在应用内检查访问']) {
+        expect(find.text(label),
+            label == scenario.action ? findsOneWidget : findsNothing);
+      }
+    });
+  }
 
   testWidgets('sync status links to the single background-check setting',
       (tester) async {
@@ -73,6 +121,22 @@ void main() {
     expect(store.backgroundCheckEnabled, isFalse);
     expect(find.textContaining('已关闭；手动刷新'), findsOneWidget);
   });
+}
+
+Future<void> _pumpRestoredReport(
+    WidgetTester tester, List<SyncIssue> issues) async {
+  final report = SyncReport(phase: SyncPhase.partial, issues: issues);
+  SharedPreferences.setMockInitialValues({
+    'sync_report_v1': jsonEncode(report.toJson()),
+  });
+  final store = AssignmentStore(
+    sessionStore: _MemorySessionStore(),
+    notificationService: _NoopNotificationService(),
+    widgetSnapshotService: _NoopWidgetSnapshotService(),
+  );
+  addTearDown(store.dispose);
+  await store.restoreSession();
+  await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
 }
 
 class _MemorySessionStore extends SecureSessionStore {

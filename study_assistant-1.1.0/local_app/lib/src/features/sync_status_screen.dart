@@ -29,6 +29,15 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         final lastSyncAt = store.lastSyncAt;
         final stale = lastSyncAt == null ||
             DateTime.now().difference(lastSyncAt).inHours >= 24;
+        final issues = store.syncReport.issues;
+        final needsVerification = issues
+            .any((issue) => issue.kind == SyncIssueKind.verificationRequired);
+        // Other read errors also use coursePage. The report preserves the
+        // diagnostic text, with an optional course label prepended.
+        final canInspectCoursePage = issues.any((issue) =>
+            issue.kind == SyncIssueKind.schemaChanged &&
+            issue.stage == 'coursePage' &&
+            issue.message.endsWith('课程页未生成作业读取凭证，可在应用内检查访问'));
         return Scaffold(
             appBar: AppBar(
                 leading: IconButton(
@@ -167,9 +176,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                   icon: const Icon(Icons.sync),
                   label: Text(store.isLoading ? '正在刷新...' : '刷新作业数据'),
                 ),
-                if (store.syncReport.issues.any((i) =>
-                    i.kind == SyncIssueKind.verificationRequired ||
-                    i.kind == SyncIssueKind.schemaChanged))
+                if (needsVerification || canInspectCoursePage)
                   FilledButton.icon(
                       onPressed: store.isLoading
                           ? null
@@ -180,16 +187,20 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                                 if (continued) await store.syncAssignments();
                               } on VerificationTargetUnavailable {
                                 if (context.mounted) {
-                                  _showMessage('请先刷新作业数据，再完成安全验证');
+                                  _showMessage(needsVerification
+                                      ? '请先刷新作业数据，再完成安全验证'
+                                      : '请先刷新作业数据，再检查访问');
                                 }
                               } catch (_) {
                                 if (context.mounted) {
-                                  _showMessage('验证页面未能打开，请稍后重试');
+                                  _showMessage(needsVerification
+                                      ? '验证页面未能打开，请稍后重试'
+                                      : '检查访问页面未能打开，请稍后重试');
                                 }
                               }
                             },
                       icon: const Icon(Icons.verified_user_outlined),
-                      label: const Text('完成安全验证')),
+                      label: Text(needsVerification ? '完成安全验证' : '在应用内检查访问')),
                 if (store.syncReport.sourceResults.isNotEmpty)
                   ExpansionTile(title: const Text('读取来源'), children: [
                     for (final source in store.syncReport.sourceResults)
