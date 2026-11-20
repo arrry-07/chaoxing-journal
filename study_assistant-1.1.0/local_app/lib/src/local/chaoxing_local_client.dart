@@ -704,10 +704,6 @@ class ChaoxingLocalClient {
           succeededCourses++;
           assignments.addAll(work);
           if (work.any((a) => a.deadlineReadFailed)) {
-            issues.add(SyncIssue(SyncIssueKind.partial, '$label 部分截止时间尚未确认',
-                courseKey: '${course.courseId}:${course.clazzId}',
-                stage: 'detail',
-                elapsedMs: watch.elapsedMilliseconds));
             problems.add('$label 部分截止时间未读取');
           }
         }
@@ -1341,6 +1337,10 @@ class ChaoxingLocalClient {
       );
     });
     final html = middlePage.html;
+    if (html.contains('没有此页面访问权限')) {
+      throw SyncReadException(SyncIssue(SyncIssueKind.forbidden, '学习通未允许访问此课程',
+          stage: 'coursePage', httpStatus: middle?.statusCode));
+    }
     final workEnc = middlePage.workEnc;
     if (kDebugMode) {
       debugPrint(
@@ -1352,18 +1352,23 @@ class ChaoxingLocalClient {
                 generation: generation, verificationProbe: courseUri)
             : null;
     if (generation != _sessionGeneration) return null;
-    if ((workEnc == null || workEnc.isEmpty) &&
-        navigationUri == null &&
-        html.contains('/mooc2-ans-vue/')) {
-      final work = await _fetchV3FormalHomework(course,
-          generation: generation,
-          progress: progress,
-          verificationProbe: courseUri);
-      if (generation != _sessionGeneration) return null;
-      _v3FormalApiConfirmed = true;
-      return work;
-    }
     if ((workEnc == null || workEnc.isEmpty) && navigationUri == null) {
+      final isVue = html.contains('/mooc2-ans-vue/');
+      if (isVue || middle?.statusCode == 200) {
+        try {
+          final work = await _fetchV3FormalHomework(course,
+              generation: generation,
+              progress: progress,
+              verificationProbe: courseUri);
+          if (generation != _sessionGeneration) return null;
+          if (isVue) _v3FormalApiConfirmed = true;
+          return work;
+        } on SyncReadException catch (error) {
+          if (isVue || error.issue.kind != SyncIssueKind.schemaChanged) {
+            rethrow;
+          }
+        }
+      }
       throw SyncReadException(SyncIssue(
           SyncIssueKind.schemaChanged, '课程页未生成作业读取凭证，可在应用内检查访问',
           stage: 'coursePage', httpStatus: middle?.statusCode));
@@ -1446,6 +1451,11 @@ class ChaoxingLocalClient {
       }
       DeadlineEvidence evidence = const DeadlineEvidence();
       SyncIssue? failure;
+      bool isUnconfirmedDeadline() =>
+          evidence.deadlineAt == null &&
+          !evidence.noLimit &&
+          !evidence.notOpen &&
+          !evidence.startOnly;
       if (_deadlineReadsBlockedBy == null) {
         progress?.attempt(item.id);
         final watch = Stopwatch()..start();
@@ -1500,19 +1510,10 @@ class ChaoxingLocalClient {
             debugPrint(
                 '[DeadlineRead] status=${response?.statusCode} bytes=${detail.body.length} startAnchor=${startTimes.containsKey(item.id)} exact=${evidence.deadlineAt != null} noLimit=${evidence.noLimit} missingYear=${evidence.missingYear} notOpen=${evidence.notOpen} startOnly=${evidence.startOnly}');
           }
-          if (evidence.deadlineAt == null && !evidence.noLimit) {
+          if (isUnconfirmedDeadline()) {
             _noteParseFailure('作业详情');
-            failure = SyncIssue(
-                evidence.notOpen || evidence.startOnly
-                    ? SyncIssueKind.partial
-                    : SyncIssueKind.schemaChanged,
-                evidence.notOpen
-                    ? '作业尚未开放，开放后可读取截止时间'
-                    : evidence.startOnly
-                        ? '官方详情仅提供作答开始时间，截止时间待确认'
-                        : evidence.missingYear
-                            ? '作业详情只提供月日，截止年份待确认'
-                            : '作业详情未提供可识别的截止信息',
+            failure = SyncIssue(SyncIssueKind.schemaChanged,
+                evidence.missingYear ? '作业详情只提供月日，截止年份待确认' : '作业详情未提供可识别的截止信息',
                 stage: 'detail',
                 courseKey: item.courseKey,
                 assignmentId: item.id,
@@ -1548,7 +1549,8 @@ class ChaoxingLocalClient {
           }
         }
       }
-      if (evidence.deadlineAt == null && !evidence.noLimit) {
+      final readFailed = failure != null || isUnconfirmedDeadline();
+      if (readFailed) {
         detailUnconfirmedCount++;
         if (item.courseKey != null) {
           _detailUnconfirmedCourseKeys.add(item.courseKey!);
@@ -1556,14 +1558,24 @@ class ChaoxingLocalClient {
       }
       if (failure != null) issues.add(failure);
       final startEvidenceConflict = evidence.startEvidenceConflict;
+      final retainedDeadline = !readFailed &&
+              !evidence.noLimit &&
+              evidence.deadlineAt == null &&
+              prior?.deadlineTrusted == true
+          ? prior?.deadlineAt
+          : null;
       final resolved = item.copyWith(
-          deadlineAt: evidence.deadlineAt,
+          deadlineAt: evidence.deadlineAt ?? retainedDeadline,
           clearDeadlineAt: evidence.noLimit,
-          deadlineTrusted: evidence.deadlineAt != null || evidence.noLimit,
-          deadlineReadFailed: evidence.deadlineAt == null && !evidence.noLimit,
+          deadlineTrusted: evidence.deadlineAt != null ||
+              retainedDeadline != null ||
+              evidence.noLimit,
+          deadlineReadFailed: readFailed,
           deadlineRawText: evidence.missingYear
               ? '${evidence.rawText}（年份待确认）'
-              : evidence.rawText,
+              : retainedDeadline != null
+                  ? prior?.deadlineRawText
+                  : evidence.rawText,
           availableFromAt: startEvidenceConflict
               ? null
               : evidence.availableFromAt ?? startTimes[item.id],
@@ -1913,6 +1925,13 @@ class ChaoxingLocalClient {
   /// Share only a successful terminal credential page within one refresh. The
   /// callers still validate redirects independently; never cache a redirect,
   /// failed/missing credential response, or a page from a replaced session.
+  static String _courseEntryCacheKey(Uri uri) {
+    final keys = uri.queryParametersAll.keys.toList()..sort();
+    return uri.replace(queryParameters: {
+      for (final key in keys) key: uri.queryParametersAll[key]!,
+    }).toString();
+  }
+
   Future<Response<dynamic>?> _readCourseEntryOrGet(Uri uri,
       {required int generation,
       String? requestKind,
@@ -1929,10 +1948,7 @@ class ChaoxingLocalClient {
         !uri.hasFragment &&
         uri.port == 443;
     // Canonicalize only parameter order, not identities or signature values.
-    final keys = uri.queryParametersAll.keys.toList()..sort();
-    final key = uri.replace(queryParameters: {
-      for (final k in keys) k: uri.queryParametersAll[k]!,
-    }).toString();
+    final key = _courseEntryCacheKey(uri);
     if (generation != _sessionGeneration ||
         _stopRequested ||
         token?.isCancelled == true) {

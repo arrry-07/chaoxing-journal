@@ -638,10 +638,11 @@ void main() {
             .where((issue) => issue.kind == SyncIssueKind.forbidden)
             .length,
         2);
-    expect(
-        client.issues.any((issue) =>
-            issue.kind == SyncIssueKind.partial && issue.stage == 'detail'),
-        isTrue);
+    final detailIssue =
+        client.issues.where((issue) => issue.stage == 'detail').single;
+    expect(detailIssue.kind, SyncIssueKind.forbidden);
+    expect(detailIssue.assignmentId, rows.last.id);
+    expect(detailIssue.courseKey, rows.last.courseKey);
   });
 
   test('V3 multi-page success requests each page exactly once', () async {

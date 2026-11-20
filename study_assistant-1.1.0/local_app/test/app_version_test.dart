@@ -5,8 +5,8 @@ import 'package:study_assistant_mobile/src/app/app_version.dart';
 
 void main() {
   test('journal uses the frozen release version', () {
-    expect(AppVersion.name, '1.8.18');
-    expect(AppVersion.code, 85);
+    expect(AppVersion.name, '1.8.19');
+    expect(AppVersion.code, 86);
   });
 
   test('AppVersion matches pubspec version', () {

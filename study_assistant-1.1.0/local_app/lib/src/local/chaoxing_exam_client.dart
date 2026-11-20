@@ -147,27 +147,27 @@ extension _ExamCollection on ChaoxingLocalClient {
           if (parsed.rows.isEmpty) throw StateError('examEmptyMore');
         }
         if (!finished) throw StateError('examPageLimit');
+        // Preserve independent PC results when this refresh already has a
+        // validated exam credential. A phone-empty course needs no new probe.
+        final cachedEntry = _syncCourseEntries?[
+            ChaoxingLocalClient._courseEntryCacheKey(courseProbe)];
+        if (observed.isEmpty && cachedEntry == null) {
+          succeeded++;
+          continue;
+        }
         // PC time evidence is supplemental. Failure retains phone identities.
         {
           checkWindow();
-          final middle = await _examListGet(
-              Uri.https('mooc1.chaoxing.com', '/visit/stucoursemiddle', {
-                'courseid': course.courseId,
-                'clazzid': course.clazzId,
-                'ismooc2': '1',
-                'v': '2',
-                if (course.cpi != null) 'cpi': course.cpi!
-              }),
-              generation: generation,
-              verificationProbe: courseProbe);
+          final middle = cachedEntry ??
+              await _examListGet(courseProbe,
+                  generation: generation, verificationProbe: courseProbe);
           if (!current()) return const [];
           final html = middle?.data?.toString() ?? '';
           final enc = ChaoxingAssignmentParser.hiddenValue(html, 'examEnc');
-          final workEnc = ChaoxingAssignmentParser.hiddenValue(html, 'workEnc');
           if (enc == null || enc.isEmpty) {
-            // A course with a valid work entry and empty phone exam list
-            // simply does not enable the exam module; treat it as 0 exams.
-            if (observed.isEmpty && workEnc != null && workEnc.isNotEmpty) {
+            if (_isVueExamCoursePath(middle?.realUri.path ?? '') ||
+                html.contains('/mooc2-ans-vue/')) {
+              examExtraReasons.add('examPcSupplementUnavailable');
               succeeded++;
               rows.addAll(observed);
               continue;
@@ -226,10 +226,6 @@ extension _ExamCollection on ChaoxingLocalClient {
           if (pcRows.length + pcSkipped != expectedTotal) {
             throw StateError('examPcIncomplete');
           }
-          // A completed, non-viewable PC row has no stable node ID. It is a
-          // legitimate supplemental gap only when the phone list already
-          // supplied an identity; it must not turn the whole course into a
-          // schema failure or be guessed by title/order.
           if (observed.isEmpty && pcSkipped > 0 && pcRows.isEmpty) {
             throw StateError('examPcUnreadable');
           }
@@ -476,6 +472,9 @@ extension _ExamCollection on ChaoxingLocalClient {
     return enriched;
   }
 
+  static bool _isVueExamCoursePath(String path) =>
+      RegExp(r'^/mooc2-ans-vue/[A-Za-z0-9_-]+/stu$').hasMatch(path);
+
   Future<Response<dynamic>?> _examListGet(Uri uri,
       {required int generation, Uri? verificationProbe}) async {
     final initial =
@@ -484,23 +483,26 @@ extension _ExamCollection on ChaoxingLocalClient {
     final expectedClass = initial['classid'] ?? initial['clazzid'];
     for (var i = 0; i < 5; i++) {
       if (generation != _sessionGeneration) return null;
+      final isVueCoursePage = _isVueExamCoursePath(uri.path);
       if (uri.scheme != 'https' ||
           uri.userInfo.isNotEmpty ||
           uri.port != 443 ||
           uri.hasFragment ||
           !uri.host.endsWith('.chaoxing.com') ||
-          !const {
-            '/visit/stucoursemiddle',
-            '/mooc2-ans/mycourse/stu',
-            '/phone/moocAnalysis/examList',
-            '/mooc-ans/phone/moocAnalysis/examList',
-            '/exam/test',
-            '/exam-ans/exam/test',
-            '/exam-ans/exam/test/examcode/examlist',
-          }.contains(uri.path)) {
+          (!isVueCoursePage &&
+              !const {
+                '/visit/stucoursemiddle',
+                '/mooc2-ans/mycourse/stu',
+                '/phone/moocAnalysis/examList',
+                '/mooc-ans/phone/moocAnalysis/examList',
+                '/exam/test',
+                '/exam-ans/exam/test',
+                '/exam-ans/exam/test/examcode/examlist',
+              }.contains(uri.path))) {
         throw StateError('unsafeExamRedirect');
       }
-      final isCoursePage = uri.path == '/mooc2-ans/mycourse/stu';
+      final isCoursePage =
+          uri.path == '/mooc2-ans/mycourse/stu' || isVueCoursePage;
       if (isCoursePage &&
           (uri.host != 'mooc2-ans.chaoxing.com' ||
               expectedCourse == null ||

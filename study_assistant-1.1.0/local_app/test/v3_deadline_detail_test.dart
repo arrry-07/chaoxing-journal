@@ -75,7 +75,7 @@ void main() {
   });
 
   test(
-      'V3 endTime=0 with only an official start reports partial instead of schema change',
+      'V3 endTime=0 with an official start keeps an unknown deadline without errors',
       () async {
     var details = 0;
     final start = DateTime.utc(2026, 11, 16, 16);
@@ -121,12 +121,14 @@ void main() {
     expect(item.availableFromAt!.toUtc(), start);
     expect(item.deadlineAt, isNull);
     expect(item.deadlineTrusted, isFalse);
+    expect(item.deadlineReadFailed, isFalse);
+    expect(item.availableFromText, '2026-11-17 00:00');
+    expect(c.issues.where((issue) => issue.stage == 'detail'), isEmpty);
     expect(
-        c.issues.any((i) =>
-            i.stage == 'detail' &&
-            i.kind == SyncIssueKind.partial &&
-            i.message.contains('仅提供作答开始时间')),
-        isTrue);
+        c.sourceResults
+            .singleWhere((source) => source.source == 'courseWork')
+            .detailUnconfirmedCount,
+        0);
     expect(c.issues.any((i) => i.kind == SyncIssueKind.schemaChanged), isFalse);
   });
 }
