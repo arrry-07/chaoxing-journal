@@ -748,32 +748,10 @@ class ChaoxingLocalClient {
       if (enableClassroomTasks) {
         progress?.setStage(AssignmentSyncStage.classroomTasks);
       }
-      final verificationBeforeClassroom = _verificationRequiredThisSync;
-      final classroom = verificationBeforeClassroom
-          ? (
-              rows: const <Assignment>[],
-              recognized: false,
-              failedCourses: enableClassroomTasks ? courses.length : 0,
-              failedCourseKeys: {
-                if (enableClassroomTasks)
-                  for (final course in courses)
-                    '${course.courseId}:${course.clazzId}',
-              }
-            )
-          : await _fetchClassroomTasks(courses,
-              generation: generation,
-              unreadCourses: invalidCourseCount,
-              progress: progress);
-      if (verificationBeforeClassroom && enableClassroomTasks) {
-        sourceResults = [
-          ...sourceResults,
-          for (final type in [35, 42, 77])
-            _verificationPausedSource(
-                'classroomActivity:$type', courses.length + invalidCourseCount),
-          const SyncSourceResult(
-              source: 'groupHistory', phase: SyncSourcePhase.notEnabled),
-        ];
-      }
+      final classroom = await _fetchClassroomTasks(courses,
+          generation: generation,
+          unreadCourses: invalidCourseCount,
+          progress: progress);
       _recordPhase('classroomTasks', classroomWatch);
       if (generation != _sessionGeneration) return const [];
       assignments.addAll(classroom.rows);
@@ -790,23 +768,11 @@ class ChaoxingLocalClient {
         progress?.setStage(AssignmentSyncStage.exams);
       }
       final examWatch = Stopwatch()..start();
-      final verificationBeforeExams = _verificationRequiredThisSync;
-      final exams = verificationBeforeExams
-          ? const <Assignment>[]
-          : await _fetchExams(
-              courses,
-              generation: generation,
-              collectCourseNotices: collectNotices,
-            );
-      if (verificationBeforeExams && enableExams) {
-        sourceResults = [
-          ...sourceResults,
-          _verificationPausedSource('exam', courses.length),
-          _verificationPausedSource('examAccount', 1),
-          _verificationPausedSource('examNotice', 1),
-          if (collectNotices) _verificationPausedSource('courseNotice', 1),
-        ];
-      }
+      final exams = await _fetchExams(
+        courses,
+        generation: generation,
+        collectCourseNotices: collectNotices,
+      );
       _recordPhase('exams', examWatch);
       if (generation != _sessionGeneration) return const [];
       assignments.addAll(exams);
@@ -829,7 +795,9 @@ class ChaoxingLocalClient {
           s.phase != SyncSourcePhase.success)) {
         problems.add('部分考试或通知来源尚未读取');
       }
-      if (problems.isNotEmpty) {
+      if (_verificationRequiredThisSync) {
+        lastSyncWarning = '学习通要求人工验证，已暂停剩余读取';
+      } else if (problems.isNotEmpty) {
         final examProblem = sourceResults.any((source) =>
             const {'exam', 'examAccount', 'examNotice'}
                 .contains(source.source) &&
@@ -922,9 +890,14 @@ class ChaoxingLocalClient {
         if (e.issue.kind == SyncIssueKind.cancelled) rethrow;
         failed++;
         reasons.add(e.issue.kind.name);
+        if (e.issue.kind == SyncIssueKind.verificationRequired) {
+          issues.add(e.issue);
+          reasons.add('verificationPaused');
+          failed = refs.length - succeeded;
+          break;
+        }
         if (const {
           SyncIssueKind.authExpired,
-          SyncIssueKind.verificationRequired,
           SyncIssueKind.rateLimited,
         }.contains(e.issue.kind)) {
           break;
@@ -1088,6 +1061,24 @@ class ChaoxingLocalClient {
       failedCourseKeys: <String>{}
     );
     if (!enableClassroomTasks) return stale;
+    if (_verificationRequiredThisSync) {
+      final unread = refs.length + unreadCourses;
+      sourceResults = [
+        ...sourceResults,
+        for (final type in [35, 42, 77])
+          _verificationPausedSource('classroomActivity:$type', unread),
+        const SyncSourceResult(
+            source: 'groupHistory', phase: SyncSourcePhase.notEnabled),
+      ];
+      return (
+        rows: const <Assignment>[],
+        recognized: false,
+        failedCourses: unread,
+        failedCourseKeys: {
+          for (final ref in refs) '${ref.courseId}:${ref.clazzId}',
+        },
+      );
+    }
     bool isCurrent() {
       if (_stopRequested) {
         throw const SyncReadException(

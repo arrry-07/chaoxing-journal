@@ -135,6 +135,7 @@ class ExamSchedulePresentation {
     ];
     if (trustedStart != null && exam.endTrusted && exam.endAt != null) {
       final originalRanges = <String>{};
+      var newerConflictingNotice = false;
       if (!exam.noticeOnly) {
         for (final source
             in AssignmentQuery.displaySources(a, records, index: index)) {
@@ -143,12 +144,18 @@ class ExamSchedulePresentation {
           if (range != null &&
               AssignmentQuery.noticeRangeConflicts(range, exam)) {
             originalRanges.add(range.label);
+            newerConflictingNotice = newerConflictingNotice ||
+                AssignmentQuery.noticePublishedAfterFormalRead(source, a);
           }
         }
       }
       if (originalRanges.isEmpty) return result(trusted, trusted, null);
-      return result(trusted, [...trusted, ...(originalRanges.toList()..sort())],
-          '官方考试时间与原通知不一致，请以最新安排为准');
+      return result(
+          trusted,
+          [...trusted, ...(originalRanges.toList()..sort())],
+          newerConflictingNotice
+              ? '有较新的通知与本机考试时间不一致，请核对官方最新安排'
+              : '官方考试时间与原通知不一致，请以最新安排为准');
     }
     if (ranges.length > 1) {
       final labels = ranges.values.map((range) => range.label).toList()..sort();

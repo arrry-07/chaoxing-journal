@@ -230,6 +230,46 @@ void main() {
   }
 
   test(
+      'task engine verification retains typed issue and reports remaining courses',
+      () async {
+    final requests = <RequestOptions>[];
+    final dio = _dioFor((request) {
+      switch (request.uri.path) {
+        case '/mycourse/backclazzdata':
+          return _courseList([_course('1'), _course('2')]);
+        case '/visit/stucoursemiddle':
+          return _v3Middle();
+        case '/mooc2-ans/coursemanagev3/stu-base-info':
+          return _v3Navigation();
+        case '/mooc-ans/work/api/task':
+          return _workPage(0, []);
+        case '/v2/apis/active/student/activelist':
+          return const _Reply(200, {
+            'result': 1,
+            'data': {'activeList': []}
+          });
+        case '/v2/apis/active/getData':
+          return const _Reply(200, '<html><p>请完成安全验证</p></html>');
+        default:
+          throw StateError('unexpected endpoint ${request.uri.path}');
+      }
+    }, requests);
+    final client =
+        ChaoxingLocalClient(dio: dio, wait: (_) async {}, enableExams: false);
+    await client.fetchAssignmentsWithOptions(enableTaskEngineProbe: true);
+    expect(
+        requests.where((r) => r.uri.path.endsWith('/getData')), hasLength(1));
+    final issue = client.issues
+        .singleWhere((i) => i.kind == SyncIssueKind.verificationRequired);
+    expect(issue.stage, 'taskEnginePlan');
+    final probe =
+        client.sourceResults.singleWhere((s) => s.source == 'taskEnginePlan');
+    expect(probe.failedCourses, 2);
+    expect(probe.reasonCodes, contains('verificationPaused'));
+    expect(client.lastSyncWarning, contains('人工验证'));
+  });
+
+  test(
       'detail timeouts retry once, open the detail circuit, and reset next sync',
       () async {
     final requests = <RequestOptions>[];

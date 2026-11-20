@@ -432,6 +432,10 @@ class AssignmentQuery {
           formal.endAt != null &&
           range.end?.matches(formal.endAt!) == false);
 
+  static bool noticePublishedAfterFormalRead(
+          Assignment notice, Assignment formal) =>
+      notice.publishedAt?.isAfter(formal.lastSyncedAt) == true;
+
   static Assignment _supplementDisplay(
       Assignment primary, List<Assignment> sources) {
     if (!primary.isExam || sources.length < 2) return primary;
@@ -482,6 +486,16 @@ class AssignmentQuery {
         durationMinutes: null,
       ));
     }
+    final conflictingNotices = <Assignment>[];
+    if (!e.noticeOnly) {
+      for (final source in sources) {
+        if (source.exam?.noticeOnly != true) continue;
+        final range = _cachedNoticeRange(source.requirementsText);
+        if (range != null && noticeRangeConflicts(range, e)) {
+          conflictingNotices.add(source);
+        }
+      }
+    }
     final rescheduled = !e.noticeOnly &&
         ((e.startTrusted &&
                 e.startAt != null &&
@@ -489,18 +503,24 @@ class AssignmentQuery {
             (e.endTrusted &&
                 e.endAt != null &&
                 ends.any((v) => v != e.endAt!.toUtc())) ||
-            sources.any((source) {
-              if (source.exam?.noticeOnly != true) return false;
-              final range = _cachedNoticeRange(source.requirementsText);
-              return range != null && noticeRangeConflicts(range, e);
-            }));
+            conflictingNotices.isNotEmpty);
     final contradictsFormal = rescheduled ||
         (!e.noticeOnly &&
             e.lifecycle != 'unknown' &&
             states.any((v) => v != e.lifecycle));
     final canSupplement = !conflict && !contradictsFormal;
     var location = e.location;
-    if (location.isEmpty && locations.length == 1) {
+    final newerNotices = conflictingNotices
+        .where((notice) => noticePublishedAfterFormalRead(notice, primary));
+    if (location.isEmpty && newerNotices.isNotEmpty) {
+      final newerLocations = newerNotices
+          .map((notice) => notice.exam!.location.trim())
+          .where((value) => value.isNotEmpty)
+          .toSet();
+      if (newerLocations.length == 1) {
+        location = '新通知地点：${newerLocations.single}（请核对）';
+      }
+    } else if (location.isEmpty && locations.length == 1) {
       final noticeLocation = locations.single;
       if (rescheduled) {
         location = noticeLocation.startsWith('通知原地点：')

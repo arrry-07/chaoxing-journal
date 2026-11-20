@@ -67,7 +67,8 @@ void main() {
     expect(const DisplayPreferences().forWidget(rows, now), rows);
   });
 
-  test('formal schedule conflict blocks stale notice location and duration too',
+  test(
+      'formal schedule conflict labels the old venue and excludes its duration',
       () {
     final now = DateTime.utc(2026, 11, 16, 2);
     final formal = row('3', start: now.add(const Duration(days: 1)));
@@ -80,7 +81,8 @@ void main() {
     final projected = AssignmentQuery.projectDisplay([formal, stale]).single;
     expect(projected.timelineAt, formal.timelineAt);
     expect(projected.exam!.lifecycle, 'scheduled');
-    expect(projected.exam!.location, isEmpty);
+    expect(projected.exam!.location, '通知原地点：旧教室（已改期，请核对）');
+    expect(formal.exam!.location, isEmpty);
     expect(projected.exam!.durationMinutes, isNull);
     final compatible = row('n',
         notice: true, start: formal.timelineAt!, location: '新教室', duration: 60);

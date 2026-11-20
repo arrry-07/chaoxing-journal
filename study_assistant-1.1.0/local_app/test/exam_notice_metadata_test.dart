@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
+import 'package:study_assistant_mobile/src/services/exam_schedule_presentation.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_exam_parser.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
@@ -338,6 +341,44 @@ void main() {
     expect(notice.exam!.endAt!.toUtc(), DateTime.utc(2030, 4, 2, 3));
     expect(notice.timelineTrusted, isTrue);
   });
+  test(
+      'a newer notice is flagged for verification when the formal time stayed cached',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    final payload = noticePayload(
+        '考试时间：2026-11-26 09:00 至 2026-11-26 11:00\r考试地点：新地点',
+        sendTime: '2026-11-19 12:00');
+    final f = ExamFixture()
+      ..unsignedCoursePage = '<main>课程入口</main>'
+      ..emptyPhone = true
+      ..noticeRows = List<Map<String, dynamic>>.from(
+          (payload['notices'] as Map)['list'] as List);
+    final old = ChaoxingExamParser.make(
+      id: '99',
+      title: '旧考试',
+      courseId: '7',
+      clazzId: '11',
+      status: 'pending',
+      now: DateTime.utc(2026, 11, 17),
+      start: DateTime.utc(2026, 11, 18, 1),
+      end: DateTime.utc(2026, 11, 18, 3),
+    );
+    await repo.mergeAndSave([old]);
+    final client = f.client()..previousAssignments = {old.id: old};
+    await repo.mergeAndSave(await client.fetchAssignments(),
+        completeSync: false);
+    final records = await repo.loadJournal();
+    final formal = AssignmentQuery.projectDisplay(records).single;
+    expect(formal.id, old.id);
+    expect(formal.exam!.startAt?.toUtc(), old.exam!.startAt?.toUtc());
+    expect(formal.exam!.location, '新通知地点：新地点（请核对）');
+    final result = ExamSchedulePresentation.build(formal, records: records);
+    expect(result.verificationNote, '有较新的通知与本机考试时间不一致，请核对官方最新安排');
+    expect(result.detailTimeLines,
+        contains('考试时间：2026-11-26 09:00 至 2026-11-26 11:00'));
+  });
+
   test('normal full client refresh enriches notice records before persistence',
       () async {
     final payload = noticePayload(full);

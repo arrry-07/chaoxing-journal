@@ -67,7 +67,7 @@ class ExamFixture {
   int examHttp = 200;
   int courseCount = 1;
   bool phoneTimeout = false, pcTimeout = false, phoneSecondPageFails = false;
-  String? examRetryAfter;
+  String? examRetryAfter, verificationPath;
   int formalHttp = 200;
   bool partialPc = false;
   bool notViewablePc = false;
@@ -84,6 +84,14 @@ class ExamFixture {
       dynamic body = '';
       var status = 200;
       final headers = <String, List<String>>{};
+      if (o.uri.path == verificationPath) {
+        h.resolve(Response(
+          requestOptions: o,
+          statusCode: 200,
+          data: '<html><p>请完成安全验证</p></html>',
+        ));
+        return;
+      }
       switch (o.uri.path) {
         case '/mycourse/backclazzdata':
           if (legacy != null) {
@@ -594,6 +602,75 @@ void main() {
     final exam = c.sourceResults.singleWhere((s) => s.source == 'exam');
     expect(exam.reasonCodes, contains('examPhoneListFailed'));
     expect(exam.reasonCodes, isNot(contains('examPcSupplementUnavailable')));
+  });
+
+  for (final phase in ['phone-page', 'pc-supplement']) {
+    test('an unread exam after $phase failure remains in the journal',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final repo = LocalAssignmentRepository();
+      final f = ExamFixture()
+        ..phoneSecondPageFails = phase == 'phone-page'
+        ..pcTimeout = phase == 'pc-supplement';
+      final client = f.client();
+      final completedAt = DateTime.utc(2026, 11, 1);
+      final old = ChaoxingExamParser.make(
+        id: '101',
+        title: '旧考试',
+        courseId: '7',
+        clazzId: '11',
+        status: 'submitted',
+        now: completedAt,
+      ).copyWith(completedAt: completedAt);
+      await repo.mergeAndSave([old]);
+      client.previousAssignments = {old.id: old};
+      final incoming = await client.fetchAssignments();
+      expect(incoming.where((row) => row.id == old.id), isEmpty);
+      expect(incoming.any((row) => row.exam!.examId == '99'), isTrue);
+      await repo.mergeAndSave(incoming, completeSync: false);
+      final retained =
+          (await repo.loadJournal()).singleWhere((row) => row.id == old.id);
+      expect(retained.status, 'submitted');
+      expect(retained.completedAt?.toUtc(), completedAt);
+      expect(retained.lastSyncedAt.toUtc(), completedAt);
+    });
+  }
+
+  for (final (route, stage) in [
+    ('/phone/moocAnalysis/examList', 'exam'),
+    ('/exam-ans/exam/test/examcode/examlist', 'examAccount'),
+  ]) {
+    test('verification in $stage stops later exam and notice sources',
+        () async {
+      final f = ExamFixture()..verificationPath = route;
+      final client = f.client();
+      final rows =
+          await client.fetchAssignmentsWithOptions(collectCourseNotices: true);
+      expect(f.requests.last.uri.path, route);
+      expect(rows.any((row) => row.exam!.noticeOnly), isFalse);
+      expect(rows.isNotEmpty, stage == 'examAccount');
+      final issue = client.issues
+          .singleWhere((i) => i.kind == SyncIssueKind.verificationRequired);
+      expect(issue.stage, stage);
+      final paused = client.sourceResults
+          .where((s) => s.reasonCodes.contains('verificationPaused'));
+      expect(paused.map((s) => s.source),
+          containsAll(['examNotice', 'courseNotice']));
+      expect(paused.every((s) => s.phase == SyncSourcePhase.failed), isTrue);
+    });
+  }
+
+  test('single course verification stops classroom and exam requests',
+      () async {
+    final f = ExamFixture()..verificationPath = '/mooc2/work/list';
+    final client = ChaoxingLocalClient(dio: f.dio, wait: (_) async {});
+    await expectLater(
+        client.fetchAssignmentsForCourse(courseId: '7', clazzId: '11'),
+        throwsA(isA<SyncReadException>().having(
+            (e) => e.issue.kind, 'kind', SyncIssueKind.verificationRequired)));
+    expect(f.requests.last.uri.path, f.verificationPath);
+    expect(client.sourceResults.map((s) => s.source),
+        containsAll(['courseWork', 'classroomActivity:35', 'exam']));
   });
 
   test('exam rate limit retains Retry-After and isolation metadata', () async {
