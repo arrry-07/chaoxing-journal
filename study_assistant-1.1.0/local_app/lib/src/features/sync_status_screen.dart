@@ -261,6 +261,11 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                   Builder(builder: (context) {
                     final groups = groupSyncIssues(store.syncReport.issues);
                     final names = {
+                      for (final course in store.chaoxingClient.courses)
+                        '${course.courseId}:${course.clazzId}':
+                            course.courseName,
+                      for (final course in store.courses)
+                        course.key: course.name,
                       for (final assignment in store.courseAssignments)
                         if (assignment.courseKey case final key?)
                           key: assignment.courseName,

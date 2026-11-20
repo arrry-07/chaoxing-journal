@@ -3,6 +3,43 @@ import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_classroom_parser.dart';
 
 void main() {
+  test('recurses into course folders and counts malformed leaves only', () {
+    const course = {'courseId': '7', 'clazzId': '11', 'courseName': '文件夹内课程'};
+    final result = ChaoxingApiParser.parseCourseRefsDetailed({
+      'channelList': [
+        {
+          'content': {
+            'folderName': '第一层',
+            'children': [
+              {
+                'courseList': [
+                  course,
+                  {
+                    'content': {
+                      'id': '8',
+                      'name': '空子列表课程',
+                      'clazz': {'id': '12'},
+                      'children': [],
+                    },
+                  },
+                  {'unexpected': true}
+                ],
+              },
+              {'folderName': '空文件夹', 'channelList': []},
+            ],
+          },
+        },
+        course,
+      ],
+    });
+    expect(result.refs.map((course) => course.courseId), ['7', '8']);
+    expect(result.refs.map((course) => course.clazzId), ['11', '12']);
+    expect(
+        result.refs.map((course) => course.courseName), ['文件夹内课程', '空子列表课程']);
+    expect(result.duplicates, 1);
+    expect(result.rejected, 1);
+  });
+
   test('parses backclazzdata course list', () {
     final courses = ChaoxingApiParser.parseCourseRefs({
       'channelList': [

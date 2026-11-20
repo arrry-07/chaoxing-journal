@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_exam_parser.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
+import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'exam_sync_test.dart' show pcRow, course, ExamFixture;
 
 Map<String, dynamic> noticePayload(String body,
@@ -12,6 +13,7 @@ Map<String, dynamic> noticePayload(String body,
         String course = '7',
         String clazz = '11',
         String? url,
+        String sendTime = '2040-01-01',
         bool attachment = true}) =>
     {
       'status': true,
@@ -37,7 +39,7 @@ Map<String, dynamic> noticePayload(String body,
                     }
                   ]
                 : []),
-            'sendTime': '2040-01-01',
+            'sendTime': sendTime,
             'completeTime': '2040-01-02'
           }
         ]
@@ -50,6 +52,56 @@ void main() {
   const yearless = '试卷名称：合成期末考试\r考试时间：04-01 09:00:00 至 04-01 11:00:00';
   Assignment parse(Map<String, dynamic> payload) =>
       ChaoxingExamParser.notices(payload)!.rows.single;
+  test('title timestamp anchors a June exam and archives it in autumn', () {
+    final now = DateTime.utc(2026, 11, 20);
+    final payload = noticePayload('考试时间：06-10 08:00 至 06-10 10:00',
+        title: '新建试卷20260609232000');
+    final row = ChaoxingExamParser.notices(payload, now: now)!.rows.single;
+    expect(row.exam!.startTrusted, isTrue);
+    expect(row.exam!.endTrusted, isTrue);
+    expect(row.exam!.startAt!.toUtc(), DateTime.utc(2026, 6, 10));
+    expect(row.exam!.endAt!.toUtc(), DateTime.utc(2026, 6, 10, 2));
+    expect(AssignmentQuery.isArchivedPastTerm(row, now), isTrue);
+    expect(AssignmentQuery.currentDisplay([row], now), isEmpty);
+  });
+  test('official send date anchors a valid range across Beijing New Year', () {
+    final payload = noticePayload('考试时间：12-31 23:30 至 01-01 00:30',
+        sendTime: '2026-12-29 12:30:00');
+    final row =
+        ChaoxingExamParser.notices(payload, now: DateTime.utc(2026, 12, 30))!
+            .rows
+            .single;
+    expect(row.publishedAt!.toUtc(), DateTime.utc(2026, 12, 29, 4, 30));
+    expect(row.exam!.startAt!.toUtc(), DateTime.utc(2026, 12, 31, 15, 30));
+    expect(row.exam!.endAt!.toUtc(), DateTime.utc(2026, 12, 31, 16, 30));
+    expect(row.exam!.endTrusted, isTrue);
+  });
+  test('conflicting years from title and send date cannot archive an exam', () {
+    final now = DateTime.utc(2026, 6, 9, 23);
+    final payload = noticePayload('考试时间：06-10 08:00 至 06-10 10:00',
+        title: '新建试卷20260609232000', sendTime: '2025-06-09 12:00');
+    final row = ChaoxingExamParser.notices(payload, now: now)!.rows.single;
+    expect(row.exam!.startAt, isNull);
+    expect(row.exam!.endAt, isNull);
+    expect(row.timelineTrusted, isFalse);
+    expect(AssignmentQuery.isArchivedPastTerm(row, now), isFalse);
+    expect(AssignmentQuery.currentDisplay([row], now), [row]);
+  });
+  test('anchor cannot promote a reversed or distant range to trusted time', () {
+    for (final range in [
+      '06-10 10:00 至 06-10 08:00',
+      '11-10 08:00 至 11-10 10:00'
+    ]) {
+      final payload = noticePayload('考试时间：$range', sendTime: '2026-06-09');
+      final row =
+          ChaoxingExamParser.notices(payload, now: DateTime.utc(2026, 11, 20))!
+              .rows
+              .single;
+      expect(row.exam!.startAt, isNull);
+      expect(row.exam!.endAt, isNull);
+      expect(row.timelineTrusted, isFalse);
+    }
+  });
   test(
       'notice reads actual exam name absolute dates duration and physical place',
       () {

@@ -138,19 +138,26 @@ void main() {
     final work = await c.fetchAssignments();
     expect(work.single.deadlineAt, isNull);
     expect(work.single.deadlineLabel, '尚未开放，截止时间待确认');
-    expect(c.issues.first.message, contains('尚未开放'));
-    expect(c.issues.first.assignmentId, 'cx:work:1:2:1');
+    expect(work.single.id, 'cx:work:1:2:1');
+    expect(work.single.availableFromText, '2026-11-05 08:00');
+    expect(work.single.deadlineTrusted, isFalse);
+    expect(work.single.deadlineReadFailed, isFalse);
+    expect(c.issues.where((issue) => issue.stage == 'detail'), isEmpty);
     expect(c.failedCourses, 0);
     final formal = c.sourceResults.singleWhere((s) => s.source == 'courseWork');
     expect(formal.phase, SyncSourcePhase.success);
     expect(formal.failedCourses, 0);
-    expect(formal.detailUnconfirmedCount, 1);
+    expect(formal.detailUnconfirmedCount, 0);
     final summary = HomeSyncPresentation.from(
-        SyncReport(phase: SyncPhase.partial, issues: c.issues),
+        SyncReport(
+            phase: SyncPhase.success,
+            issues: c.issues,
+            sourceResults: c.sourceResults),
         loading: false,
         hasCache: true,
         now: DateTime.now());
-    expect(summary.summary, '部分截止时间待确认');
+    expect(summary.action, HomeSyncAction.none);
+    expect(summary.summary, isNot(contains('部分截止时间待确认')));
     expect(summary.showCached, isFalse);
   });
   test('same-work start restores historical cutoff and calendar day', () async {
@@ -221,7 +228,7 @@ void main() {
   });
 
   test(
-      'start-only detail keeps the previous trusted deadline and reports partial',
+      'start-only detail retains a prior trusted deadline without a sync issue',
       () async {
     final start = DateTime.utc(2026, 11, 16, 16);
     final rowWithStart = row(1)..['startTime'] = start.millisecondsSinceEpoch;
@@ -230,21 +237,18 @@ void main() {
         (o, h) => h.resolve(Response(
             requestOptions: o,
             statusCode: 200,
-            data: '作答开始时间：2026-11-17 00:00')));
+            data: '作答开始时间：2026-11-17 00:00')))
+      ..previousAssignments = {oldWork().id: oldWork()};
     final work = await c.fetchAssignments();
     expect(work.single.availableFromAt!.toUtc(), start);
-    expect(work.single.deadlineAt, isNull);
-    expect(
-        c.issues.any((i) =>
-            i.stage == 'detail' &&
-            i.kind == SyncIssueKind.partial &&
-            i.message.contains('仅提供作答开始时间')),
-        isTrue);
+    expect(work.single.deadlineAt, oldWork().deadlineAt);
+    expect(work.single.availableFromText, '2026-11-17 00:00');
+    expect(c.issues.where((issue) => issue.stage == 'detail'), isEmpty);
     final merged =
         LocalAssignmentRepository.mergeAssignments([oldWork()], work);
     expect(merged.single.deadlineAt, oldWork().deadlineAt);
     expect(merged.single.deadlineTrusted, isTrue);
-    expect(merged.single.deadlineReadFailed, isTrue);
+    expect(merged.single.deadlineReadFailed, isFalse);
   });
 
   test('challenge stops remaining details without discarding list rows',
@@ -391,8 +395,9 @@ void main() {
     expect(a.availableFromText, '10-27 08:00');
     expect(a.deadlineAt, isNull);
     expect(a.deadlineTrusted, isFalse);
-    expect(a.deadlineReadFailed, isTrue);
-    expect(c.issues.first.message, contains('尚未开放'));
+    expect(a.deadlineReadFailed, isFalse);
+    expect(a.deadlineLabel, '尚未开放，截止时间待确认');
+    expect(c.issues.where((issue) => issue.stage == 'detail'), isEmpty);
   });
   test('explicit unlimited detail keeps the start and exits retry state',
       () async {

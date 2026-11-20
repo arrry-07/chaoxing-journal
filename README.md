@@ -39,6 +39,8 @@
 
 ## 下载安装
 
+仓库候选版为 **1.8.19（86）**，范围见[版本记录](CHANGELOG.md)。
+
 **当前正式包为 1.8.18（85）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
 1. [下载 chaoxing-journal-1.8.18.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.18/chaoxing-journal-1.8.18.apk)。发布说明及校验文件见 [1.8.18 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.18)。

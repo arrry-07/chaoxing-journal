@@ -91,8 +91,14 @@ int _nameGroupRank(AssignmentDeadlineBucket bucket) => switch (bucket) {
     };
 
 class _PreparedAssignment {
-  _PreparedAssignment(this.assignment, this.index, DateTime now, this.displayAt)
+  _PreparedAssignment(this.assignment, this.index, DateTime now, this.displayAt,
+      {DateTime? displayEndAt})
       : bucket = AssignmentQuery.timelineBucketAt(assignment, now),
+        elapsedNotice = assignment.exam?.startTrusted == false &&
+            assignment.exam?.endTrusted == false &&
+            !assignment.isCompleted &&
+            displayAt != null &&
+            !(displayEndAt ?? displayAt).isAfter(now),
         course = _NaturalKey(assignment.courseName),
         title = _NaturalKey(assignment.title),
         courseKey = _NaturalKey(assignment.courseKey ?? ''),
@@ -102,6 +108,7 @@ class _PreparedAssignment {
   final int index;
   final AssignmentDeadlineBucket bucket;
   final DateTime? displayAt;
+  final bool elapsedNotice;
   final _NaturalKey course;
   final _NaturalKey title;
   final _NaturalKey courseKey;
@@ -123,13 +130,10 @@ class _PreparedAssignment {
     return index.compareTo(other.index);
   }
 
-  /// The home timeline orders every non-overdue record with usable display
-  /// time by that time, keeps undated/untrusted records in a stable middle
-  /// tier, and always puts confirmed overdue work last. Completion or an
-  /// ended exam never changes the tier; an earlier overdue date must never
-  /// put overdue work first.
+  /// Keep elapsed notice projections in the last tier for home sorting only.
+  /// This does not change the record's deadline bucket or timestamp trust.
   int get homeTier {
-    if (bucket == AssignmentDeadlineBucket.overdue) return 2;
+    if (bucket == AssignmentDeadlineBucket.overdue || elapsedNotice) return 2;
     return displayAt != null ? 0 : 1;
   }
 }
@@ -726,6 +730,11 @@ class AssignmentQuery {
           now,
           displayTimelineAt(records[index],
               records: sources, index: displayIndex, now: now),
+          displayEndAt: records[index].exam?.startTrusted == false &&
+                  records[index].exam?.endTrusted == false
+              ? displayTimelineEndAt(records[index],
+                  records: sources, index: displayIndex, now: now)
+              : null,
         ),
     ];
     prepared.sort((left, right) {

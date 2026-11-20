@@ -588,8 +588,10 @@ class ChaoxingExamParser {
       // The platform's uuid is an opaque compound resource reference, not
       // necessarily an RFC UUID. Hash it whole to retain stable portable IDs.
       final id = sha256.convert(utf8.encode(rawId)).toString();
-      var start = chinaTime(_field(body, '考试开始时间|开始时间|开考时间') ?? '');
-      var end = chinaTime(_field(body, '考试结束时间|结束时间|截止时间') ?? '');
+      var rawStart = _field(body, '考试开始时间|开始时间|开考时间');
+      var rawEnd = _field(body, '考试结束时间|结束时间|截止时间');
+      var start = chinaTime(rawStart ?? '');
+      var end = chinaTime(rawEnd ?? '');
       final range = _field(body, '考试起止时间|起止时间|考试时间');
       final rangeTimes = times(range ?? '');
       if (rangeTimes.length == 2) {
@@ -597,23 +599,57 @@ class ChaoxingExamParser {
         end ??= rangeTimes[1];
       }
       final name = examTitle ?? card?['title'] ?? title;
+      final syncTime = now ?? DateTime.now();
+      final beijingNow = syncTime.toUtc().add(const Duration(hours: 8));
+      final published = _noticePublishedAt(item, syncTime);
+      if (start == null && end == null) {
+        final parts = range?.split(RegExp(r'\s*(?:至|到|~|～|—|--)\s*'));
+        if (parts?.length == 2) {
+          rawStart ??= parts![0];
+          rawEnd ??= parts![1];
+        }
+        final publishedWall = published?.toUtc().add(const Duration(hours: 8));
+        final titleDate = _noticeTitleDate([name, title], beijingNow);
+        final anchor = publishedWall ?? titleDate;
+        if (anchor != null) {
+          final candidateStart = _yearlessNoticeTime(rawStart, anchor);
+          final candidateEnd = _yearlessNoticeTime(rawEnd, anchor);
+          final titleStart = publishedWall != null && titleDate != null
+              ? _yearlessNoticeTime(rawStart, titleDate)
+              : null;
+          final titleEnd = publishedWall != null && titleDate != null
+              ? _yearlessNoticeTime(rawEnd, titleDate)
+              : null;
+          final conflictingYears =
+              (titleStart != null && titleStart != candidateStart) ||
+                  (titleEnd != null && titleEnd != candidateEnd);
+          if (candidateStart != null &&
+              candidateEnd != null &&
+              !conflictingYears &&
+              !candidateEnd.isBefore(candidateStart)) {
+            start = candidateStart;
+            end = candidateEnd;
+          }
+        }
+      }
       rows.add(make(
-          id: id,
-          title: name.isEmpty ? '考试通知' : name,
-          courseName: _field(body, '课程名称') ?? '考试通知',
-          courseId: card?['courseId'],
-          clazzId: card?['clazzId'],
-          relatedExamId: card?['examId'],
-          start: start,
-          end: end,
-          duration: _duration(_field(body, '答题时长|考试时长|时长')),
-          location: _field(body, '考试地点|考场地点|考试场地|地点|考场|教室|考试地址') ?? '',
-          noticeText: body.isEmpty
-              ? title
-              : body.substring(0, body.length > 4000 ? 4000 : body.length),
-          status: 'unknown',
-          notice: true,
-          now: now));
+              id: id,
+              title: name.isEmpty ? '考试通知' : name,
+              courseName: _field(body, '课程名称') ?? '考试通知',
+              courseId: card?['courseId'],
+              clazzId: card?['clazzId'],
+              relatedExamId: card?['examId'],
+              start: start,
+              end: end,
+              duration: _duration(_field(body, '答题时长|考试时长|时长')),
+              location: _field(body, '考试地点|考场地点|考试场地|地点|考场|教室|考试地址') ?? '',
+              noticeText: body.isEmpty
+                  ? title
+                  : body.substring(0, body.length > 4000 ? 4000 : body.length),
+              status: 'unknown',
+              notice: true,
+              now: syncTime)
+          .copyWith(publishedAt: published));
     }
     final cursor = box['lastGetId']?.toString();
     return (
@@ -622,6 +658,61 @@ class ChaoxingExamParser {
           ? null
           : cursor
     );
+  }
+
+  static DateTime? _noticePublishedAt(
+      Map<dynamic, dynamic> item, DateTime now) {
+    for (final key in const ['sendTime', 'completeTime']) {
+      final raw = item[key];
+      if (raw is! String) continue;
+      final value = raw.trim();
+      final match = RegExp(
+              r'^(20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?)(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?$')
+          .firstMatch(value);
+      if (match == null) continue;
+      final time = chinaTime('${match[1]} ${match[2] ?? '00:00'}');
+      if (time != null && !time.isAfter(now)) return time;
+    }
+    return null;
+  }
+
+  static DateTime? _noticeTitleDate(List<String> titles, DateTime beijingNow) {
+    final dates = <DateTime>{};
+    final pattern =
+        RegExp(r'(?<!\d)(20\d{2})(\d{2})(\d{2})(?:\d{4}(?:\d{2})?)?(?!\d)');
+    for (final title in titles) {
+      for (final match in pattern.allMatches(title)) {
+        final year = int.parse(match[1]!);
+        final month = int.parse(match[2]!);
+        final day = int.parse(match[3]!);
+        final date = DateTime.utc(year, month, day);
+        if (date.month == month &&
+            date.day == day &&
+            !date.isAfter(beijingNow)) {
+          dates.add(date);
+        }
+      }
+    }
+    return dates.length == 1 ? dates.single : null;
+  }
+
+  static DateTime? _yearlessNoticeTime(String? raw, DateTime anchor) {
+    if (raw == null ||
+        !RegExp(r'^\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?::\d{2})?$')
+            .hasMatch(raw.trim())) {
+      return null;
+    }
+    const beijingOffset = Duration(hours: 8);
+    final anchorDay = DateTime.utc(anchor.year, anchor.month, anchor.day);
+    for (final year in [anchor.year, anchor.year - 1, anchor.year + 1]) {
+      final time = chinaTime('$year-${raw.trim().replaceAll('：', ':')}');
+      if (time == null) continue;
+      final wall = time.toUtc().add(beijingOffset);
+      final dayOffset =
+          DateTime.utc(wall.year, wall.month, wall.day).difference(anchorDay);
+      if (dayOffset.inDays >= -7 && dayOffset.inDays <= 90) return time;
+    }
+    return null;
   }
 
   /// Safe plaintext with source line boundaries retained for display parsing.
