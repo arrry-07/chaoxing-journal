@@ -443,9 +443,9 @@ extension _ExamCollection on ChaoxingLocalClient {
         continue;
       }
       if (!old.exam!.noticeOnly && skippedPcCourses.contains(old.courseKey)) {
-        // An empty phone list cannot invalidate an unqueried PC observation.
+        // Leave the PC record in the repository. Including it here would let
+        // notification matching and return checks treat it as a fresh read.
         examExtraReasons.add('examPcSupplementUnavailable');
-        rows.add(old);
         continue;
       }
       rows.add(old.copyWith(

@@ -272,6 +272,29 @@ void main() {
       ]),
     );
   });
+  test('an unqueried cached exam cannot override a fresh reschedule', () async {
+    final payload = noticePayload('考试时间：2030-04-02 09:00 至 2030-04-02 11:00');
+    final f = ExamFixture()
+      ..unsignedCoursePage = '<main>课程入口</main>'
+      ..emptyPhone = true
+      ..noticeRows = List<Map<String, dynamic>>.from(
+          (payload['notices'] as Map)['list'] as List);
+    final old = ChaoxingExamParser.make(
+      id: '99',
+      title: '旧考试',
+      courseId: '7',
+      clazzId: '11',
+      status: 'pending',
+      start: DateTime.utc(2030, 4, 1, 1),
+      end: DateTime.utc(2030, 4, 1, 3),
+    ).copyWith(availability: AssignmentAvailability.available);
+    final client = f.client()..previousAssignments = {old.id: old};
+    final notice = (await client.fetchAssignments())
+        .singleWhere((row) => row.exam!.noticeOnly);
+    expect(notice.exam!.startAt!.toUtc(), DateTime.utc(2030, 4, 2, 1));
+    expect(notice.exam!.endAt!.toUtc(), DateTime.utc(2030, 4, 2, 3));
+    expect(notice.timelineTrusted, isTrue);
+  });
   test('normal full client refresh enriches notice records before persistence',
       () async {
     final payload = noticePayload(full);

@@ -488,6 +488,8 @@ void main() {
     expect(f.middleReads, 1);
   });
   test('skipped PC supplement preserves the prior exam observation', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
     final f = ExamFixture()
       ..unsignedCoursePage = '<main>课程入口</main>'
       ..emptyPhone = true;
@@ -501,13 +503,17 @@ void main() {
       status: 'submitted',
       now: DateTime.utc(2026, 10, 2),
     ).copyWith(completedAt: completion);
+    await repo.mergeAndSave([old]);
     client.previousAssignments = {old.id: old};
 
     final rows = await client.fetchAssignments();
-    final retained = rows.singleWhere((row) => row.id == old.id);
+    expect(rows.where((row) => row.id == old.id), isEmpty);
+    await repo.mergeAndSave(rows, completeSync: false);
+    final retained =
+        (await repo.loadJournal()).singleWhere((row) => row.id == old.id);
     expect(retained.status, old.status);
-    expect(retained.completedAt, completion);
-    expect(retained.lastSyncedAt, old.lastSyncedAt);
+    expect(retained.completedAt!.toUtc(), completion);
+    expect(retained.lastSyncedAt.toUtc(), old.lastSyncedAt.toUtc());
     expect(f.middleReads, 1);
     final source = client.sourceResults.singleWhere((s) => s.source == 'exam');
     expect(source.phase, SyncSourcePhase.partial);
