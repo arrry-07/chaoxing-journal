@@ -134,7 +134,21 @@ class ExamSchedulePresentation {
         '结束 ${absolute(exam.endAt!, endSeconds)}',
     ];
     if (trustedStart != null && exam.endTrusted && exam.endAt != null) {
-      return result(trusted, trusted, null);
+      final originalRanges = <String>{};
+      if (!exam.noticeOnly) {
+        for (final source
+            in AssignmentQuery.displaySources(a, records, index: index)) {
+          if (source.exam?.noticeOnly != true) continue;
+          final range = ExamNoticeRange.read(source.requirementsText);
+          if (range != null &&
+              AssignmentQuery.noticeRangeConflicts(range, exam)) {
+            originalRanges.add(range.label);
+          }
+        }
+      }
+      if (originalRanges.isEmpty) return result(trusted, trusted, null);
+      return result(trusted, [...trusted, ...(originalRanges.toList()..sort())],
+          '官方考试时间与原通知不一致，请以最新安排为准');
     }
     if (ranges.length > 1) {
       final labels = ranges.values.map((range) => range.label).toList()..sort();

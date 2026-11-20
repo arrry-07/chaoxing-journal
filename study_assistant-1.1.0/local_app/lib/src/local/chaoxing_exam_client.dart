@@ -51,8 +51,10 @@ extension _ExamCollection on ChaoxingLocalClient {
       return generation == _sessionGeneration;
     }
 
+    var windowEnded = false;
     void checkWindow() {
-      if (shouldStop?.call() == true) {
+      if (windowEnded || shouldStop?.call() == true) {
+        windowEnded = true;
         throw const SyncReadException(SyncIssue(
             SyncIssueKind.partial, '检查窗口已结束，已保留此前取得的课业',
             stage: 'exam'));
@@ -64,16 +66,19 @@ extension _ExamCollection on ChaoxingLocalClient {
           error.issue.kind == SyncIssueKind.cancelled) {
         throw error;
       }
-      final reason = error is SyncReadException
-          ? error.issue.kind
-          : error is ChaoxingAuthenticationException
+      final issue = error is SyncReadException ? error.issue : null;
+      final reason = issue?.kind ??
+          (error is ChaoxingAuthenticationException
               ? SyncIssueKind.authExpired
-              : SyncIssueKind.schemaChanged;
+              : SyncIssueKind.schemaChanged);
       issues.add(SyncIssue(reason, _examFailureMessage(source, error),
           stage: source,
           courseKey: courseKey,
-          httpStatus:
-              error is SyncReadException ? error.issue.httpStatus : null));
+          httpStatus: issue?.httpStatus,
+          retryAfter: issue?.retryAfter,
+          retryAfterSeconds: issue?.retryAfterSeconds,
+          circuitOpen: issue?.circuitOpen ?? false,
+          elapsedMs: issue?.elapsedMs));
     }
 
     SyncSourceResult report(
@@ -99,19 +104,22 @@ extension _ExamCollection on ChaoxingLocalClient {
     var succeeded = 0, failed = 0;
     final examExtraReasons = <String>{};
     final skippedPcCourses = <String>{};
-    SyncIssueKind? blocked;
+    final preservePriorExamCourses = <String>{};
+    var blocked = false;
     for (final course in refs) {
       if (!current()) return const [];
       final courseKey = '${course.courseId}:${course.clazzId}';
       final courseProbe = _courseVerificationEntry(course);
-      if (blocked != null) {
+      if (blocked || windowEnded) {
         failed++;
+        preservePriorExamCourses.add(courseKey);
         continue;
       }
       final observed = <Assignment>[];
+      var phoneListFinished = false;
+      var failureReason = 'examPhoneListFailed';
       try {
         final seen = <String>{};
-        var finished = false;
         for (var page = 1; page <= 100; page++) {
           checkWindow();
           final response = page == 1
@@ -142,12 +150,12 @@ extension _ExamCollection on ChaoxingLocalClient {
           }
           observed.addAll(parsed.rows);
           if (!parsed.more) {
-            finished = true;
+            phoneListFinished = true;
             break;
           }
           if (parsed.rows.isEmpty) throw StateError('examEmptyMore');
         }
-        if (!finished) throw StateError('examPageLimit');
+        if (!phoneListFinished) throw StateError('examPageLimit');
         // Preserve independent PC results when this refresh already has a
         // validated exam credential. A phone-empty course needs no new probe.
         final cachedEntry = _syncCourseEntries?[
@@ -159,6 +167,7 @@ extension _ExamCollection on ChaoxingLocalClient {
         }
         // PC time evidence is supplemental. Failure retains phone identities.
         {
+          failureReason = 'examCourseEntryFailed';
           checkWindow();
           final middle = cachedEntry ??
               await _examListGet(courseProbe,
@@ -176,6 +185,7 @@ extension _ExamCollection on ChaoxingLocalClient {
             }
             throw StateError('examCredentialMissing');
           }
+          failureReason = 'examPcListFailed';
           final pcRows = <Assignment>[];
           final phoneIds = observed.map((a) => a.id).toSet();
           final pcSeen = <String>{};
@@ -239,23 +249,38 @@ extension _ExamCollection on ChaoxingLocalClient {
         succeeded++;
       } catch (error) {
         if (!current()) return const [];
-        if (observed.isNotEmpty) {
+        examExtraReasons.add(failureReason);
+        if (phoneListFinished) {
           examExtraReasons.add('examPcSupplementUnavailable');
         }
+        final issue = error is SyncReadException ? error.issue : null;
+        final kind = issue?.kind ??
+            (error is ChaoxingAuthenticationException
+                ? SyncIssueKind.authExpired
+                : null);
+        final circuitOpen = issue?.circuitOpen ?? false;
+        if (circuitOpen) examExtraReasons.add('examCircuitPaused');
         failure('exam', error, courseKey: courseKey);
         failed++;
-        final kind = error is SyncReadException
-            ? error.issue.kind
-            : error is ChaoxingAuthenticationException
-                ? SyncIssueKind.authExpired
-                : null;
-        if (const {
-          SyncIssueKind.authExpired,
-          SyncIssueKind.verificationRequired,
-          SyncIssueKind.rateLimited
-        }.contains(kind)) {
-          blocked = kind;
+        if (windowEnded ||
+            (!phoneListFinished &&
+                observed.isEmpty &&
+                (circuitOpen ||
+                    const {
+                      SyncIssueKind.network,
+                      SyncIssueKind.serverError,
+                      SyncIssueKind.rateLimited,
+                      SyncIssueKind.verificationRequired,
+                      SyncIssueKind.authExpired,
+                    }.contains(kind)))) {
+          preservePriorExamCourses.add(courseKey);
         }
+        blocked = (circuitOpen && !phoneListFinished) ||
+            const {
+              SyncIssueKind.authExpired,
+              SyncIssueKind.verificationRequired,
+              SyncIssueKind.rateLimited,
+            }.contains(kind);
       }
       rows.addAll(observed);
     }
@@ -448,6 +473,11 @@ extension _ExamCollection on ChaoxingLocalClient {
         examExtraReasons.add('examPcSupplementUnavailable');
         continue;
       }
+      if (!old.exam!.noticeOnly &&
+          preservePriorExamCourses.contains(old.courseKey)) {
+        // No fresh personal observation was available for this record.
+        continue;
+      }
       rows.add(old.copyWith(
           status: 'unknown',
           availability: AssignmentAvailability.unknown,
@@ -537,11 +567,9 @@ extension _ExamCollection on ChaoxingLocalClient {
       final response = await _readCourseEntryOrGet(uri,
           generation: generation,
           verificationProbe: verificationProbe,
-          requestKind: uri.path.contains('/examcode/examlist')
-              ? '账号考试'
-              : uri.path == '/visit/stucoursemiddle'
-                  ? '课程入口'
-                  : '课程考试');
+          requestKind: isCoursePage
+              ? '课程入口'
+              : ChaoxingLocalClient._requestKind(uri.path));
       if (generation != _sessionGeneration) return null;
       if (response == null || (response.statusCode ?? 0) < 300) return response;
       final location = response.headers.value('location');

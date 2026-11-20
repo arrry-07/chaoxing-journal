@@ -357,6 +357,11 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
   }
 
   String _reasonLabel(String code) => switch (code) {
+        'examPhoneListFailed' => '手机考试列表未完整读取',
+        'examCourseEntryFailed' => '考试补查所需的课程入口未读取',
+        'examPcListFailed' => 'PC 考试列表未完整读取',
+        'examCircuitPaused' => '考试请求连续失败，本轮已暂停该类请求',
+        'verificationPaused' => '学习通要求人工验证，已暂停读取',
         'examPcSupplementUnavailable' => '部分课程 PC 考试补充时间未取得，已保留手机端记录',
         'accountExamRowSkippedNoId' => '部分历史账号考试缺少唯一标识已跳过',
         'examAccountTimeConflict' => '账号考试与课程考试时间不一致，已保留课程时间',

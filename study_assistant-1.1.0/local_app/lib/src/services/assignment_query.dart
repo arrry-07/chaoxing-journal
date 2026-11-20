@@ -358,16 +358,7 @@ class AssignmentQuery {
           ? index.readNoticeRange(source.requirementsText)
           : _cachedNoticeRange(source.requirementsText);
       if (range == null) continue;
-      if ((exam.startTrusted &&
-              exam.startAt != null &&
-              range.start != null &&
-              !range.start!.matches(exam.startAt!)) ||
-          (exam.endTrusted &&
-              exam.endAt != null &&
-              range.end != null &&
-              !range.end!.matches(exam.endAt!))) {
-        continue;
-      }
+      if (noticeRangeConflicts(range, exam)) continue;
       final prior = ranges[range.key];
       if (prior == null || range.precision > prior.precision) {
         ranges[range.key] = range;
@@ -432,6 +423,15 @@ class AssignmentQuery {
         : null;
   }
 
+  /// Contradictory original notice times are display evidence only.
+  static bool noticeRangeConflicts(ExamNoticeRange range, ExamInfo formal) =>
+      (formal.startTrusted &&
+          formal.startAt != null &&
+          range.start?.matches(formal.startAt!) == false) ||
+      (formal.endTrusted &&
+          formal.endAt != null &&
+          range.end?.matches(formal.endAt!) == false);
+
   static Assignment _supplementDisplay(
       Assignment primary, List<Assignment> sources) {
     if (!primary.isExam || sources.length < 2) return primary;
@@ -482,15 +482,34 @@ class AssignmentQuery {
         durationMinutes: null,
       ));
     }
-    final contradictsFormal = !e.noticeOnly &&
+    final rescheduled = !e.noticeOnly &&
         ((e.startTrusted &&
                 e.startAt != null &&
                 starts.any((v) => v != e.startAt!.toUtc())) ||
             (e.endTrusted &&
                 e.endAt != null &&
                 ends.any((v) => v != e.endAt!.toUtc())) ||
-            (e.lifecycle != 'unknown' && states.any((v) => v != e.lifecycle)));
+            sources.any((source) {
+              if (source.exam?.noticeOnly != true) return false;
+              final range = _cachedNoticeRange(source.requirementsText);
+              return range != null && noticeRangeConflicts(range, e);
+            }));
+    final contradictsFormal = rescheduled ||
+        (!e.noticeOnly &&
+            e.lifecycle != 'unknown' &&
+            states.any((v) => v != e.lifecycle));
     final canSupplement = !conflict && !contradictsFormal;
+    var location = e.location;
+    if (location.isEmpty && locations.length == 1) {
+      final noticeLocation = locations.single;
+      if (rescheduled) {
+        location = noticeLocation.startsWith('通知原地点：')
+            ? noticeLocation
+            : '通知原地点：$noticeLocation（已改期，请核对）';
+      } else if (canSupplement) {
+        location = noticeLocation;
+      }
+    }
     var start = e.startAt ?? (canSupplement ? uniqueStart : null);
     var end = e.endAt ?? (canSupplement ? uniqueEnd : null);
     if (start != null && end != null && end.isBefore(start)) {
@@ -506,9 +525,7 @@ class AssignmentQuery {
       endTrusted: e.endAt != null ? e.endTrusted : end != null,
       // A notice cannot resolve an unknown formal lifecycle without chronology.
       lifecycle: e.lifecycle, noticeOnly: e.noticeOnly,
-      location: canSupplement && e.location.isEmpty && locations.length == 1
-          ? locations.single
-          : e.location,
+      location: location,
       durationMinutes: e.durationMinutes ??
           (canSupplement && durations.length == 1 ? durations.single : null),
     ));

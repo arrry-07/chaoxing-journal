@@ -27,6 +27,37 @@ void main() {
   const examRedirect =
       SyncIssue(SyncIssueKind.schemaChanged, '考试页面跳转未通过安全检查', stage: 'exam');
 
+  testWidgets('exam read stages display localized pause information',
+      (tester) async {
+    final report = SyncReport(
+      phase: SyncPhase.partial,
+      sourceResults: const [
+        SyncSourceResult(
+            source: 'exam',
+            phase: SyncSourcePhase.partial,
+            reasonCodes: [
+              'examPhoneListFailed',
+              'examCourseEntryFailed',
+              'examPcListFailed',
+              'examCircuitPaused'
+            ]),
+      ],
+    );
+    final store = await _storeWithCachedRecords(report);
+    await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
+    await tester.scrollUntilVisible(find.text('读取来源'), 250);
+    await tester.tap(find.text('读取来源'));
+    await tester.pumpAndSettle();
+    for (final text in [
+      '手机考试列表未完整读取',
+      '考试补查所需的课程入口未读取',
+      'PC 考试列表未完整读取',
+      '考试请求连续失败，本轮已暂停该类请求'
+    ]) {
+      expect(find.textContaining(text), findsOneWidget);
+    }
+  });
+
   test('sync summary does not hide detail and exam failures behind one source',
       () {
     const report = SyncReport(

@@ -97,6 +97,49 @@ void main() {
     expect(row.exam!.endAt, isNull);
     expect(AssignmentQuery.currentDisplay([row], now), [row]);
   });
+  test('completeTime is neither publication nor a year anchor', () {
+    for (final send in [null, '2027-06-09 12:00', 'invalid']) {
+      final payload = noticePayload('考试时间：06-10 08:00 至 06-10 10:00');
+      final raw = (payload['notices']['list'] as List).single as Map;
+      if (send == null) {
+        raw.remove('sendTime');
+      } else {
+        raw['sendTime'] = send;
+      }
+      raw['completeTime'] = '2026-06-09 12:00';
+      final row =
+          ChaoxingExamParser.notices(payload, now: DateTime.utc(2026, 11, 20))!
+              .rows
+              .single;
+      expect(row.publishedAt, isNull);
+      expect(row.exam!.startAt, isNull);
+      expect(row.exam!.endAt, isNull);
+      expect(row.timelineTrusted, isFalse);
+    }
+  });
+
+  test('an old title outside the anchor window keeps the year unconfirmed', () {
+    final now = DateTime.utc(2026, 11, 20);
+    final payload = noticePayload('考试时间：06-10 08:00 至 06-10 10:00',
+        title: '重考：新建试卷20250110080000', sendTime: '2026-06-09 12:00');
+    final row = ChaoxingExamParser.notices(payload, now: now)!.rows.single;
+    expect(row.publishedAt!.toUtc(), DateTime.utc(2026, 6, 9, 4));
+    expect(row.exam!.startAt, isNull);
+    expect(row.exam!.endAt, isNull);
+    expect(row.timelineTrusted, isFalse);
+    expect(AssignmentQuery.isArchivedPastTerm(row, now), isFalse);
+  });
+
+  test('compatible title dates can independently agree on both endpoints', () {
+    final now = DateTime.utc(2026, 11, 20);
+    final payload = noticePayload('考试时间：06-10 08:00 至 06-10 10:00',
+        title: '试卷20260608080000 更新20260609080000');
+    final row = ChaoxingExamParser.notices(payload, now: now)!.rows.single;
+    expect(row.publishedAt, isNull);
+    expect(row.exam!.startAt!.toUtc(), DateTime.utc(2026, 6, 10));
+    expect(row.exam!.endAt!.toUtc(), DateTime.utc(2026, 6, 10, 2));
+  });
+
   test('anchor cannot promote a reversed or distant range to trusted time', () {
     for (final range in [
       '06-10 10:00 至 06-10 08:00',

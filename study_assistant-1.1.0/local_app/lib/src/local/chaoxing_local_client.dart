@@ -176,6 +176,9 @@ class ChaoxingLocalClient {
     }
     if (path.contains('/work/')) return '作业详情';
     if (path.contains('/examcode/examlist')) return '账号考试';
+    if (path == '/exam/test' || path == '/exam-ans/exam/test') {
+      return '课程考试补充';
+    }
     if (path.contains('/exam/') ||
         path.contains('/exam-ans/') ||
         path.endsWith('/examList')) {
@@ -278,6 +281,18 @@ class ChaoxingLocalClient {
   Uri? _courseVerificationProbe;
   bool _v3FormalApiConfirmed = false;
   SyncIssueKind? _deadlineReadsBlockedBy;
+
+  bool get _verificationRequiredThisSync =>
+      _deadlineReadsBlockedBy == SyncIssueKind.verificationRequired ||
+      issues.any((issue) => issue.kind == SyncIssueKind.verificationRequired);
+
+  SyncSourceResult _verificationPausedSource(String source, int unread) =>
+      SyncSourceResult(
+        source: source,
+        phase: SyncSourcePhase.failed,
+        failedCourses: unread,
+        reasonCodes: const ['verificationPaused'],
+      );
 
   Future<bool> verifyInBrowser({bool courseInspection = false}) async {
     final generation = _sessionGeneration;
@@ -733,10 +748,32 @@ class ChaoxingLocalClient {
       if (enableClassroomTasks) {
         progress?.setStage(AssignmentSyncStage.classroomTasks);
       }
-      final classroom = await _fetchClassroomTasks(courses,
-          generation: generation,
-          unreadCourses: invalidCourseCount,
-          progress: progress);
+      final verificationBeforeClassroom = _verificationRequiredThisSync;
+      final classroom = verificationBeforeClassroom
+          ? (
+              rows: const <Assignment>[],
+              recognized: false,
+              failedCourses: enableClassroomTasks ? courses.length : 0,
+              failedCourseKeys: {
+                if (enableClassroomTasks)
+                  for (final course in courses)
+                    '${course.courseId}:${course.clazzId}',
+              }
+            )
+          : await _fetchClassroomTasks(courses,
+              generation: generation,
+              unreadCourses: invalidCourseCount,
+              progress: progress);
+      if (verificationBeforeClassroom && enableClassroomTasks) {
+        sourceResults = [
+          ...sourceResults,
+          for (final type in [35, 42, 77])
+            _verificationPausedSource(
+                'classroomActivity:$type', courses.length + invalidCourseCount),
+          const SyncSourceResult(
+              source: 'groupHistory', phase: SyncSourcePhase.notEnabled),
+        ];
+      }
       _recordPhase('classroomTasks', classroomWatch);
       if (generation != _sessionGeneration) return const [];
       assignments.addAll(classroom.rows);
@@ -753,19 +790,38 @@ class ChaoxingLocalClient {
         progress?.setStage(AssignmentSyncStage.exams);
       }
       final examWatch = Stopwatch()..start();
-      final exams = await _fetchExams(
-        courses,
-        generation: generation,
-        collectCourseNotices: collectNotices,
-      );
+      final verificationBeforeExams = _verificationRequiredThisSync;
+      final exams = verificationBeforeExams
+          ? const <Assignment>[]
+          : await _fetchExams(
+              courses,
+              generation: generation,
+              collectCourseNotices: collectNotices,
+            );
+      if (verificationBeforeExams && enableExams) {
+        sourceResults = [
+          ...sourceResults,
+          _verificationPausedSource('exam', courses.length),
+          _verificationPausedSource('examAccount', 1),
+          _verificationPausedSource('examNotice', 1),
+          if (collectNotices) _verificationPausedSource('courseNotice', 1),
+        ];
+      }
       _recordPhase('exams', examWatch);
       if (generation != _sessionGeneration) return const [];
       assignments.addAll(exams);
       recognized = recognized || _hasExamObservation;
       if (enableProbe && enableClassroomTasks && courses.isNotEmpty) {
         final probeWatch = Stopwatch()..start();
-        await _probeTaskEnginePlans(courses, generation: generation);
-        _recordPhase('taskEnginePlan', probeWatch);
+        if (_verificationRequiredThisSync) {
+          sourceResults = [
+            ...sourceResults,
+            _verificationPausedSource('taskEnginePlan', courses.length),
+          ];
+        } else {
+          await _probeTaskEnginePlans(courses, generation: generation);
+          _recordPhase('taskEnginePlan', probeWatch);
+        }
         if (generation != _sessionGeneration) return const [];
       }
       if (sourceResults.any((s) =>
@@ -1066,7 +1122,9 @@ class ChaoxingLocalClient {
         final remaining = refs.length - refs.indexOf(course);
         for (final type in [35, 42, 77]) {
           failure[type] = failure[type]! + remaining;
-          reasons[type]!.add('readStopped');
+          reasons[type]!.add(listBlockedBy == SyncIssueKind.verificationRequired
+              ? 'verificationPaused'
+              : 'readStopped');
         }
         failedCourseKeys.addAll(refs
             .skip(refs.indexOf(course))
@@ -1104,6 +1162,9 @@ class ChaoxingLocalClient {
         for (final type in [35, 42, 77]) {
           failure[type] = failure[type]! + 1;
           reasons[type]!.add('activityListFailed');
+          if (issue.kind == SyncIssueKind.verificationRequired) {
+            reasons[type]!.add('verificationPaused');
+          }
         }
         failedCourseKeys.add('${course.courseId}:${course.clazzId}');
         continue;
@@ -1126,7 +1187,10 @@ class ChaoxingLocalClient {
             if (!isCurrent()) return stale;
             if (blockedTypes.contains(type) || shouldStop?.call() == true) {
               complete = false;
-              reasons[type]!.add('sourceReadStopped');
+              reasons[type]!.add(
+                  listBlockedBy == SyncIssueKind.verificationRequired
+                      ? 'verificationPaused'
+                      : 'sourceReadStopped');
             } else {
               try {
                 task = await _hydrateClassroomTask(seed,
@@ -1144,7 +1208,11 @@ class ChaoxingLocalClient {
                 reasons[type]!.add('personalDetailFailed');
                 final issue = _classroomIssue(e);
                 issues.add(issue);
-                if (issue.kind == SyncIssueKind.authExpired) {
+                if (issue.kind == SyncIssueKind.verificationRequired) {
+                  listBlockedBy = issue.kind;
+                  blockedTypes.addAll([35, 42, 77]);
+                  reasons[type]!.add('verificationPaused');
+                } else if (issue.kind == SyncIssueKind.authExpired) {
                   // Same login, while already read formal results remain valid.
                   blockedTypes.addAll([35, 42, 77]);
                 } else if (blocks(issue.kind)) {
@@ -1976,6 +2044,17 @@ class ChaoxingLocalClient {
     return response;
   }
 
+  SyncIssue _pausedRequestIssue(String kind, SyncIssue issue) => SyncIssue(
+        issue.kind,
+        '连续请求失败，已暂停本次刷新中的$kind请求',
+        stage: issue.stage,
+        elapsedMs: issue.elapsedMs,
+        httpStatus: issue.httpStatus,
+        retryAfter: issue.retryAfter,
+        retryAfterSeconds: issue.retryAfterSeconds,
+        circuitOpen: true,
+      );
+
   Future<Response<T>?> _safeGet<T>(
     String uri, {
     Map<String, dynamic>? queryParameters,
@@ -1998,17 +2077,11 @@ class ChaoxingLocalClient {
         ));
       }
       if (generation != _sessionGeneration) return null;
+      // The exam collector stops the group immediately once its circuit opens.
+      final reportExamCircuit = kind == '课程考试' || kind == '课程考试补充';
       final circuit = _openCircuits[kind];
       if (circuit != null) {
-        throw SyncReadException(SyncIssue(
-          circuit.kind,
-          '连续请求失败，已暂停本次刷新中的$kind请求',
-          stage: circuit.stage,
-          httpStatus: circuit.httpStatus,
-          retryAfter: circuit.retryAfter,
-          retryAfterSeconds: circuit.retryAfterSeconds,
-          circuitOpen: true,
-        ));
+        throw SyncReadException(_pausedRequestIssue(kind, circuit));
       }
       attempt++;
       final watch = Stopwatch()..start();
@@ -2064,7 +2137,9 @@ class ChaoxingLocalClient {
           await _waitOrCancel(delay);
           continue;
         }
-        throw SyncReadException(failure.issue);
+        throw SyncReadException(opened && reportExamCircuit
+            ? _pausedRequestIssue(kind, failure.issue)
+            : failure.issue);
       }
       final received = response!;
       _rememberCookies(received);
@@ -2108,7 +2183,9 @@ class ChaoxingLocalClient {
           await _waitOrCancel(delay);
           continue;
         }
-        throw SyncReadException(issue);
+        throw SyncReadException(opened && reportExamCircuit
+            ? _pausedRequestIssue(kind, issue)
+            : issue);
       }
       _consecutiveTransientFailures.remove(kind);
       return received;
@@ -2158,7 +2235,7 @@ class ChaoxingLocalClient {
                 caseSensitive: false),
             ''),
         uri: uri,
-        requestKind: kind);
+        requestKind: kind == '课程考试补充' ? '课程考试' : kind);
     final challenge = RegExp(
                 r'请输入验证码|请完成.{0,12}(?:验证|校验)|安全验证|访问异常|人机验证|verify\.chaoxing',
                 caseSensitive: false)
@@ -2169,7 +2246,7 @@ class ChaoxingLocalClient {
           '[SyncShape] stage=coursePage status=$status workEnc=${ChaoxingAssignmentParser.hiddenValue(body, 'workEnc') != null} captchaLibrary=${body.toLowerCase().contains('captcha')} challenge=$challenge');
     }
     if (challenge) {
-      _verificationTarget = verificationProbe ?? uri;
+      _verificationTarget ??= verificationProbe ?? uri;
       return _ResponseOutcome.issue(SyncIssue(
           SyncIssueKind.verificationRequired, '学习通要求人工验证，请点击完成安全验证',
           stage: stage, httpStatus: status));
@@ -2279,6 +2356,13 @@ class ChaoxingLocalClient {
         '课程入口' => 'coursePage',
         '课程导航' || '作业列表' => 'workList',
         '作业详情' || '截止时间佐证' => 'detail',
+        '课程考试' || '课程考试补充' => 'exam',
+        '账号考试' => 'examAccount',
+        '考试通知' => 'examNotice',
+        '课程通知' => 'courseNotice',
+        '章节进度' => 'chapters',
+        '任务引擎探测' => 'taskEnginePlan',
+        '课堂活动列表' || '个人分组任务' || '随堂练习' || 'AI实践' => 'classroom',
         _ => 'courses',
       };
 
