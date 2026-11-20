@@ -1,5 +1,6 @@
 import 'package:lpinyin/lpinyin.dart';
 
+import '../local/chaoxing_exam_parser.dart';
 import '../models/assignment.dart';
 import '../models/home_filters.dart';
 import 'assignment_grouping.dart';
@@ -436,6 +437,15 @@ class AssignmentQuery {
           Assignment notice, Assignment formal) =>
       notice.publishedAt?.isAfter(formal.lastSyncedAt) == true;
 
+  static String? explicitNoticeVenueLabel(Iterable<Assignment> notices) {
+    final locations = notices
+        .map((notice) =>
+            ChaoxingExamParser.noticeLocation(notice.requirementsText))
+        .whereType<String>()
+        .toSet();
+    return locations.length == 1 ? '新通知地点：${locations.single}（请核对）' : null;
+  }
+
   static Assignment _supplementDisplay(
       Assignment primary, List<Assignment> sources) {
     if (!primary.isExam || sources.length < 2) return primary;
@@ -513,13 +523,7 @@ class AssignmentQuery {
     final newerNotices = conflictingNotices
         .where((notice) => noticePublishedAfterFormalRead(notice, primary));
     if (location.isEmpty && newerNotices.isNotEmpty) {
-      final newerLocations = newerNotices
-          .map((notice) => notice.exam!.location.trim())
-          .where((value) => value.isNotEmpty)
-          .toSet();
-      if (newerLocations.length == 1) {
-        location = '新通知地点：${newerLocations.single}（请核对）';
-      }
+      location = explicitNoticeVenueLabel(newerNotices) ?? location;
     } else if (location.isEmpty && locations.length == 1) {
       final noticeLocation = locations.single;
       if (rescheduled) {

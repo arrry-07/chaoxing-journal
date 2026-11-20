@@ -279,9 +279,11 @@ extension _ExamCollection on ChaoxingLocalClient {
         failure('exam', error, courseKey: courseKey);
         failed++;
         // A failed supplement cannot establish that a missing PC row vanished.
-        // Likewise, a transient failure leaves the rest of a phone list unread.
+        // The remainder of a partial phone list is also unverified, even
+        // when the failure is structural rather than transient.
         if (windowEnded ||
             phoneListFinished ||
+            observed.isNotEmpty ||
             circuitOpen ||
             const {
               SyncIssueKind.network,
@@ -498,7 +500,7 @@ extension _ExamCollection on ChaoxingLocalClient {
       }
       if (old.exam!.noticeOnly
           ? noticeVerificationPaused
-          : accountVerificationPaused && old.courseKey == null) {
+          : accountVerificationPaused) {
         continue;
       }
       if (!old.exam!.noticeOnly && skippedPcCourses.contains(old.courseKey)) {

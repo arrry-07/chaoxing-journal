@@ -68,6 +68,7 @@ class ExamFixture {
   int courseCount = 1;
   bool phoneTimeout = false, pcTimeout = false, phoneSecondPageFails = false;
   String? examRetryAfter, verificationPath;
+  bool phoneSecondPageMalformed = false;
   int formalHttp = 200;
   bool partialPc = false;
   bool notViewablePc = false;
@@ -157,10 +158,15 @@ class ExamFixture {
               : [
                   phoneRow(phoneState,
                       courseId: courseId,
-                      more: repeatPhone || phoneSecondPageFails),
+                      more: repeatPhone ||
+                          phoneSecondPageFails ||
+                          phoneSecondPageMalformed),
                   for (var i = 0; i < extraPhoneExams; i++)
                     phoneRow('未开始', id: '${100 + i}'),
                 ].join();
+          if (phoneSecondPageMalformed && o.method == 'POST') {
+            body = '<html>无法识别的列表</html>';
+          }
           if (unsafeRedirect) {
             status = 302;
             headers['location'] = [
@@ -604,13 +610,14 @@ void main() {
     expect(exam.reasonCodes, isNot(contains('examPcSupplementUnavailable')));
   });
 
-  for (final phase in ['phone-page', 'pc-supplement']) {
+  for (final phase in ['phone-page', 'phone-schema', 'pc-supplement']) {
     test('an unread exam after $phase failure remains in the journal',
         () async {
       SharedPreferences.setMockInitialValues({});
       final repo = LocalAssignmentRepository();
       final f = ExamFixture()
         ..phoneSecondPageFails = phase == 'phone-page'
+        ..phoneSecondPageMalformed = phase == 'phone-schema'
         ..pcTimeout = phase == 'pc-supplement';
       final client = f.client();
       final completedAt = DateTime.utc(2026, 11, 1);
@@ -659,6 +666,33 @@ void main() {
       expect(paused.every((s) => s.phase == SyncSourcePhase.failed), isTrue);
     });
   }
+
+  test('account verification preserves unread exams with course identity',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    final f = ExamFixture()
+      ..verificationPath = '/exam-ans/exam/test/examcode/examlist';
+    final client = f.client();
+    final stored = ChaoxingExamParser.make(
+      id: '105',
+      title: '账号考试',
+      courseId: '22',
+      clazzId: '33',
+      status: 'submitted',
+      now: DateTime.utc(2026, 11, 1),
+    );
+    await repo.mergeAndSave([stored]);
+    client.previousAssignments = {stored.id: stored};
+    final rows = await client.fetchAssignments();
+    expect(rows.map((row) => row.id), isNot(contains(stored.id)));
+    await repo.mergeAndSave(rows, completeSync: false);
+    final old =
+        (await repo.loadJournal()).singleWhere((row) => row.id == stored.id);
+    expect(old.status, 'submitted');
+    expect(old.lastSyncedAt.toUtc(), stored.lastSyncedAt.toUtc());
+    expect(old.courseKey, '22:33');
+  });
 
   test('single course verification stops classroom and exam requests',
       () async {

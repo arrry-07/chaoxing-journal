@@ -379,6 +379,48 @@ void main() {
         contains('考试时间：2026-11-26 09:00 至 2026-11-26 11:00'));
   });
 
+  for (final explicitVenue in [false, true]) {
+    test(
+        'newer notice venue must come from its own text (explicit=$explicitVenue)',
+        () {
+      final formal = ChaoxingExamParser.make(
+        id: '99',
+        title: '缓存考试',
+        courseId: '7',
+        clazzId: '11',
+        status: 'pending',
+        now: DateTime.utc(2026, 11, 17),
+        start: DateTime.utc(2026, 11, 18, 1),
+        end: DateTime.utc(2026, 11, 18, 3),
+        location: explicitVenue ? '旧地点' : '',
+      );
+      final earlier = parse(noticePayload(
+          '考试时间：2026-11-18 09:00 至 2026-11-18 11:00\r考试地点：旧地点',
+          uuid: 'older-notice',
+          sendTime: '2026-11-14 12:00'));
+      final newer = parse(noticePayload(
+          '考试时间：2026-11-26 09:00 至 2026-11-26 11:00'
+          '${explicitVenue ? '\r考试地点：新地点' : ''}',
+          uuid: 'newer-notice',
+          sendTime: '2026-11-19 12:00'));
+      final records = [
+        formal,
+        ...ChaoxingExamParser.enrichNotices([earlier, newer])
+      ];
+      final projected = AssignmentQuery.projectDisplay(records).single;
+      final display =
+          ExamSchedulePresentation.build(projected, records: records);
+      expect(projected.exam!.location, formal.exam!.location);
+      expect(display.cardTimeLines,
+          ['开考 2026年11月18日 09:00', '结束 2026年11月18日 11:00']);
+      if (explicitVenue) {
+        expect(display.detailTimeLines, contains('新通知地点：新地点（请核对）'));
+      } else {
+        expect(display.detailTimeLines.join(), isNot(contains('新通知地点')));
+      }
+    });
+  }
+
   test('normal full client refresh enriches notice records before persistence',
       () async {
     final payload = noticePayload(full);

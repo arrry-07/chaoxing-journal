@@ -647,7 +647,7 @@ class ChaoxingExamParser {
               start: start,
               end: end,
               duration: _duration(_field(body, '答题时长|考试时长|时长')),
-              location: _field(body, '考试地点|考场地点|考试场地|地点|考场|教室|考试地址') ?? '',
+              location: noticeLocation(body) ?? '',
               noticeText: body.isEmpty
                   ? title
                   : body.substring(0, body.length > 4000 ? 4000 : body.length),
@@ -740,6 +740,10 @@ class ChaoxingExamParser {
         .where((s) => s.isNotEmpty)
         .join('\n');
   }
+
+  /// Read a venue explicitly present in one notice's own text.
+  static String? noticeLocation(String body) =>
+      _field(body, '考试地点|考场地点|考试场地|地点|考场|教室|考试地址');
 
   static String? _field(String body, String names) {
     final fields = RegExp('^(?:$names)\\s*[:：]\\s*(.+?)\\s*\$', multiLine: true)

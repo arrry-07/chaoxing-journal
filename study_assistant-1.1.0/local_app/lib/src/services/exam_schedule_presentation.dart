@@ -135,7 +135,7 @@ class ExamSchedulePresentation {
     ];
     if (trustedStart != null && exam.endTrusted && exam.endAt != null) {
       final originalRanges = <String>{};
-      var newerConflictingNotice = false;
+      final newerConflictingNotices = <Assignment>[];
       if (!exam.noticeOnly) {
         for (final source
             in AssignmentQuery.displaySources(a, records, index: index)) {
@@ -144,16 +144,23 @@ class ExamSchedulePresentation {
           if (range != null &&
               AssignmentQuery.noticeRangeConflicts(range, exam)) {
             originalRanges.add(range.label);
-            newerConflictingNotice = newerConflictingNotice ||
-                AssignmentQuery.noticePublishedAfterFormalRead(source, a);
+            if (AssignmentQuery.noticePublishedAfterFormalRead(source, a)) {
+              newerConflictingNotices.add(source);
+            }
           }
         }
       }
       if (originalRanges.isEmpty) return result(trusted, trusted, null);
+      final newerVenue =
+          AssignmentQuery.explicitNoticeVenueLabel(newerConflictingNotices);
       return result(
           trusted,
-          [...trusted, ...(originalRanges.toList()..sort())],
-          newerConflictingNotice
+          [
+            ...trusted,
+            ...(originalRanges.toList()..sort()),
+            if (newerVenue != null && newerVenue != exam.location) newerVenue,
+          ],
+          newerConflictingNotices.isNotEmpty
               ? '有较新的通知与本机考试时间不一致，请核对官方最新安排'
               : '官方考试时间与原通知不一致，请以最新安排为准');
     }
