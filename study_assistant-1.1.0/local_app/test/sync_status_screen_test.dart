@@ -11,6 +11,7 @@ import 'package:study_assistant_mobile/src/local/local_assignment_repository.dar
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/home_sync_presentation.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -450,6 +451,98 @@ void main() {
       find.byKey(const ValueKey('sync-cached-record-status')),
       findsNothing,
     );
+  });
+
+  testWidgets(
+      'normal exam degradation keeps success summary, full sync time and source reasons',
+      (tester) async {
+    final syncedAt = DateTime.utc(2026, 11, 20, 15, 52);
+    final legacyPartialPayload = {
+      'phase': 'partial',
+      'attemptedAt': syncedAt.toIso8601String(),
+      'lastDataSuccessAt': syncedAt.toIso8601String(),
+      'lastFullSuccessAt': null,
+      'succeededCourses': 40,
+      'failedCourses': 0,
+      'issues': const [],
+      'sourceResults': const [
+        {
+          'source': 'courseWork',
+          'phase': 'success',
+          'succeededCourses': 40,
+          'failedCourses': 0,
+          'recordCount': 39,
+          'unconfirmedCount': 0,
+          'detailUnconfirmedCount': 0,
+          'reasonCodes': <String>[],
+        },
+        {
+          'source': 'exam',
+          'phase': 'partial',
+          'succeededCourses': 40,
+          'failedCourses': 0,
+          'recordCount': 8,
+          'unconfirmedCount': 8,
+          'detailUnconfirmedCount': 0,
+          'reasonCodes': ['examPcSupplementUnavailable'],
+        },
+        {
+          'source': 'examAccount',
+          'phase': 'partial',
+          'succeededCourses': 1,
+          'failedCourses': 0,
+          'recordCount': 3,
+          'unconfirmedCount': 0,
+          'detailUnconfirmedCount': 0,
+          'reasonCodes': ['accountExamRowSkippedNoId'],
+        },
+      ],
+    };
+
+    final restored = SyncReport.fromJson(legacyPartialPayload);
+    expect(restored.phase, SyncPhase.success);
+    expect(restored.incompleteExamSourceCount, 0);
+    expect(restored.lastFullSuccessAt?.toUtc(), syncedAt);
+    expect(restored.summary, '作业记录已更新');
+
+    final homePresentation = HomeSyncPresentation.from(
+      restored,
+      loading: false,
+      hasCache: true,
+      now: syncedAt.add(const Duration(seconds: 20)),
+    );
+    expect(homePresentation.summary, '刚刚更新');
+    expect(homePresentation.action, HomeSyncAction.none);
+
+    SharedPreferences.setMockInitialValues({
+      'sync_report_v1': jsonEncode(legacyPartialPayload),
+    });
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    expect(store.syncReport.phase, SyncPhase.success);
+    expect(store.syncReport.summary, '作业记录已更新');
+    expect(store.lastSyncAt, isNotNull);
+
+    await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
+    expect(find.text(store.syncSummary), findsOneWidget);
+    expect(find.text('尚无完整同步记录'), findsNothing);
+    expect(find.textContaining('最近完整同步：'), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('sync-cached-record-status')), findsNothing);
+
+    await tester.tap(find.text('读取来源'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('读取完成 · 8 条'), findsOneWidget);
+    expect(
+      find.textContaining('部分课程 PC 考试补充时间未取得，已保留手机端记录'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('部分历史账号考试缺少唯一标识已跳过'), findsOneWidget);
   });
 }
 

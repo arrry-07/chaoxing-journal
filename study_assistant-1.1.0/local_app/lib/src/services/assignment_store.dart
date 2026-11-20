@@ -773,7 +773,11 @@ class AssignmentStore extends ChangeNotifier {
     return '同学';
   }
 
-  DateTime? get lastSyncAt => _lastSyncAt;
+  DateTime? get lastSyncAt =>
+      _lastSyncAt ??
+      (syncReport.phase == SyncPhase.success
+          ? syncReport.lastFullSuccessAt
+          : null);
   int get autoSyncIntervalMinutes => _backgroundCheckSettings.enabled
       ? _backgroundCheckSettings.intervalMinutes
       : 0;

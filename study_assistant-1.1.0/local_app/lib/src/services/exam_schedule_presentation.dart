@@ -140,7 +140,8 @@ class ExamSchedulePresentation {
         for (final source
             in AssignmentQuery.displaySources(a, records, index: index)) {
           if (source.exam?.noticeOnly != true) continue;
-          final range = ExamNoticeRange.read(source.requirementsText);
+          final range = ExamNoticeRange.read(source.requirementsText)
+              ?.withTrustedExam(source.exam);
           if (range != null &&
               AssignmentQuery.noticeRangeConflicts(range, exam)) {
             originalRanges.add(range.label);

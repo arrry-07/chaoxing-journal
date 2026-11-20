@@ -37,6 +37,7 @@ class HomeSyncPresentation {
                   : HomeSyncAction.retry;
       bool sourceFailed(String name) => report.sourceResults.any((source) =>
           source.source == name &&
+          !source.isNormalDegradation &&
           const {SyncSourcePhase.partial, SyncSourcePhase.failed}
               .contains(source.phase));
       final hasWorkListFailure = sourceFailed('courseWork') ||
@@ -49,6 +50,7 @@ class HomeSyncPresentation {
       final hasExamFailure = report.incompleteExamSourceCount > 0;
       final hasClassroomFailure = report.sourceResults.any((source) =>
           source.source.startsWith('classroomActivity:') &&
+          !source.isNormalDegradation &&
           const {SyncSourcePhase.partial, SyncSourcePhase.failed}
               .contains(source.phase));
       final hasCourseNoticeFailure = sourceFailed('courseNotice');
@@ -66,6 +68,7 @@ class HomeSyncPresentation {
         'courseNotice',
       };
       final hasOtherSourceFailure = report.sourceResults.any((source) =>
+          !source.isNormalDegradation &&
           const {SyncSourcePhase.partial, SyncSourcePhase.failed}
               .contains(source.phase) &&
           !knownSources.contains(source.source) &&
@@ -79,37 +82,43 @@ class HomeSyncPresentation {
         hasStorageFailure,
         hasOtherSourceFailure,
       ].where((value) => value).length;
-      final updatedButNeedsAttention = hasStorageFailure &&
-          categories == 1 &&
-          report.issues.any((issue) => issue.stage == 'persistence');
-      final showCached = hasCache &&
-          successAt != null &&
-          (hasPreviousData ?? hasCache) &&
-          (hasWorkListFailure ||
-              hasExamFailure ||
-              hasClassroomFailure ||
-              hasOtherSourceFailure);
-      final partialSummary = updatedButNeedsAttention
-          ? '作业数据已保存，但同步状态记录需要处理'
-          : categories > 1
-              ? '部分课业信息未更新'
-              : hasDetailFailure
-                  ? '部分截止时间待确认'
-                  : hasCourseNoticeFailure
-                      ? '部分课程通知未更新'
-                      : hasExamFailure
-                          ? '部分考试信息未更新'
-                          : hasClassroomFailure
-                              ? '部分课堂任务未更新'
-                              : '部分课程作业未更新';
-      return HomeSyncPresentation(
-          report.phase == SyncPhase.partial
-              ? partialSummary
-              : hasCache
-                  ? '更新失败'
-                  : '暂时无法读取作业',
-          action,
-          showCached: report.phase == SyncPhase.failed ? hasCache : showCached);
+      if (report.phase != SyncPhase.partial ||
+          categories > 0 ||
+          report.failedCourses > 0 ||
+          report.issues.isNotEmpty) {
+        final updatedButNeedsAttention = hasStorageFailure &&
+            categories == 1 &&
+            report.issues.any((issue) => issue.stage == 'persistence');
+        final showCached = hasCache &&
+            successAt != null &&
+            (hasPreviousData ?? hasCache) &&
+            (hasWorkListFailure ||
+                hasExamFailure ||
+                hasClassroomFailure ||
+                hasOtherSourceFailure);
+        final partialSummary = updatedButNeedsAttention
+            ? '作业数据已保存，但同步状态记录需要处理'
+            : categories > 1
+                ? '部分课业信息未更新'
+                : hasDetailFailure
+                    ? '部分截止时间待确认'
+                    : hasCourseNoticeFailure
+                        ? '部分课程通知未更新'
+                        : hasExamFailure
+                            ? '部分考试信息未更新'
+                            : hasClassroomFailure
+                                ? '部分课堂任务未更新'
+                                : '部分课程作业未更新';
+        return HomeSyncPresentation(
+            report.phase == SyncPhase.partial
+                ? partialSummary
+                : hasCache
+                    ? '更新失败'
+                    : '暂时无法读取作业',
+            action,
+            showCached:
+                report.phase == SyncPhase.failed ? hasCache : showCached);
+      }
     }
     if (serviceWarning) {
       return const HomeSyncPresentation(

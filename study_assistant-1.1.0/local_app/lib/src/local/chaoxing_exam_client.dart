@@ -99,7 +99,9 @@ extension _ExamCollection on ChaoxingLocalClient {
             {List<String> extraReasons = const []}) =>
         SyncSourceResult(
             source: source,
-            phase: failed == 0 && extraReasons.isEmpty
+            phase: failed == 0 &&
+                    extraReasons.every(
+                        SyncSourceResult.nonDegradingReasonCodes.contains)
                 ? SyncSourcePhase.success
                 : success > 0 || observed.isNotEmpty
                     ? SyncSourcePhase.partial
@@ -170,10 +172,13 @@ extension _ExamCollection on ChaoxingLocalClient {
         }
         if (!phoneListFinished) throw StateError('examPageLimit');
         // Preserve independent PC results when this refresh already has a
-        // validated exam credential. A phone-empty course needs no new probe.
+        // validated exam credential, or skip probing when this refresh already
+        // confirmed the course entry is unsigned/Vue.
         final cachedEntry = _syncCourseEntries?[
             ChaoxingLocalClient._courseEntryCacheKey(courseProbe)];
-        if (observed.isEmpty && cachedEntry == null) {
+        final knownUnsigned =
+            _syncUnsignedCourseEntries?.contains(courseKey) == true;
+        if (observed.isEmpty && cachedEntry == null && knownUnsigned) {
           skippedPcCourses.add(courseKey);
           succeeded++;
           continue;
@@ -184,14 +189,26 @@ extension _ExamCollection on ChaoxingLocalClient {
           checkWindow();
           final middle = cachedEntry ??
               await _examListGet(courseProbe,
-                  generation: generation, verificationProbe: courseProbe);
+                  generation: generation,
+                  verificationProbe: courseProbe,
+                  supplementEntry: true);
           if (!current()) return const [];
           final html = middle?.data?.toString() ?? '';
           final enc = ChaoxingAssignmentParser.hiddenValue(html, 'examEnc');
           if (enc == null || enc.isEmpty) {
-            if (_isVueExamCoursePath(middle?.realUri.path ?? '') ||
-                html.contains('/mooc2-ans-vue/')) {
-              examExtraReasons.add('examPcSupplementUnavailable');
+            final isVuePage =
+                _isVueExamCoursePath(middle?.realUri.path ?? '') ||
+                    html.contains('/mooc2-ans-vue/');
+            if (isVuePage) {
+              _v3FormalApiConfirmed = true;
+            }
+            if (isVuePage || observed.isEmpty) {
+              _syncUnsignedCourseEntries?.add(courseKey);
+              if (observed.isEmpty) {
+                skippedPcCourses.add(courseKey);
+              } else {
+                examExtraReasons.add('examPcSupplementUnavailable');
+              }
               succeeded++;
               rows.addAll(observed);
               continue;
@@ -550,7 +567,9 @@ extension _ExamCollection on ChaoxingLocalClient {
       RegExp(r'^/mooc2-ans-vue/[A-Za-z0-9_-]+/stu$').hasMatch(path);
 
   Future<Response<dynamic>?> _examListGet(Uri uri,
-      {required int generation, Uri? verificationProbe}) async {
+      {required int generation,
+      Uri? verificationProbe,
+      bool supplementEntry = false}) async {
     final initial =
         uri.queryParameters.map((k, v) => MapEntry(k.toLowerCase(), v));
     final expectedCourse = initial['courseid'];
@@ -603,6 +622,7 @@ extension _ExamCollection on ChaoxingLocalClient {
       final response = await _readCourseEntryOrGet(uri,
           generation: generation,
           verificationProbe: verificationProbe,
+          circuitKind: supplementEntry ? '课程考试补充' : null,
           requestKind: isCoursePage
               ? '课程入口'
               : ChaoxingLocalClient._requestKind(uri.path));

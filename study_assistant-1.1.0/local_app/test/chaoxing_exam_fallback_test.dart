@@ -596,8 +596,11 @@ void main() {
 
     final source =
         client.sourceResults.singleWhere((s) => s.source == 'examAccount');
-    expect(source.phase, SyncSourcePhase.partial);
+    expect(source.phase, SyncSourcePhase.success);
+    expect(source.isNormalDegradation, isTrue);
     expect(source.reasonCodes, contains('accountExamRowSkippedNoId'));
+    expect(client.issues, isEmpty);
+    expect(client.lastSyncWarning, isNull);
   });
 
   test(

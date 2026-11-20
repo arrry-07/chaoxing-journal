@@ -98,6 +98,7 @@ class ChaoxingLocalClient {
   final _requestStats = <String, _RequestStats>{};
   final _phaseElapsedMs = <String, int>{};
   Map<String, Response<dynamic>>? _syncCourseEntries;
+  Set<String>? _syncUnsignedCourseEntries;
   final _openCircuits = <String, SyncIssue>{};
   final _consecutiveTransientFailures = <String, int>{};
   int _syncRetryCount = 0;
@@ -107,6 +108,7 @@ class ChaoxingLocalClient {
 
   void cancelActiveRequests({bool reportCancelled = true}) {
     _syncCourseEntries = null;
+    _syncUnsignedCourseEntries = null;
     _stopRequested = reportCancelled;
     _activeRequestToken?.cancel('主动停止后台学习通请求');
     _activeRequestToken = null;
@@ -115,6 +117,7 @@ class ChaoxingLocalClient {
 
   CancelToken _startRequestToken() {
     _syncCourseEntries = null;
+    _syncUnsignedCourseEntries = null;
     _activeRequestToken?.cancel('开始新的学习通请求');
     _stopRequested = false;
     return _activeRequestToken = CancelToken();
@@ -506,9 +509,12 @@ class ChaoxingLocalClient {
     _verificationTarget = null;
     _courseVerificationProbe = null;
     final entryCache = _syncCourseEntries = <String, Response<dynamic>>{};
+    final unsignedCache = _syncUnsignedCourseEntries = <String>{};
     issues = [];
     sourceResults = const [];
     _deadlineReadsBlockedBy = null;
+    detailUnconfirmedCount = 0;
+    _detailUnconfirmedCourseKeys.clear();
     try {
       final courseListWatch = Stopwatch()..start();
       final mcode =
@@ -569,6 +575,9 @@ class ChaoxingLocalClient {
       return _dedupeAssignments([...?rows, ...classroom.rows, ...exams]);
     } finally {
       if (identical(_syncCourseEntries, entryCache)) _syncCourseEntries = null;
+      if (identical(_syncUnsignedCourseEntries, unsignedCache)) {
+        _syncUnsignedCourseEntries = null;
+      }
       if (generation == _sessionGeneration) {
         _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
       }
@@ -602,6 +611,7 @@ class ChaoxingLocalClient {
     _verificationTarget = null;
     _courseVerificationProbe = null;
     final entryCache = _syncCourseEntries = <String, Response<dynamic>>{};
+    final unsignedCache = _syncUnsignedCourseEntries = <String>{};
     final progress =
         onProgress == null ? null : _SyncProgressTracker(onProgress!);
     progress?.setStage(AssignmentSyncStage.courses);
@@ -790,18 +800,17 @@ class ChaoxingLocalClient {
         }
         if (generation != _sessionGeneration) return const [];
       }
-      if (sourceResults.any((s) =>
+      bool examSourceIncomplete(SyncSourceResult s) =>
           const {'exam', 'examAccount', 'examNotice'}.contains(s.source) &&
-          s.phase != SyncSourcePhase.success)) {
+          s.phase != SyncSourcePhase.success &&
+          !s.isNormalDegradation;
+      if (sourceResults.any(examSourceIncomplete)) {
         problems.add('部分考试或通知来源尚未读取');
       }
       if (_verificationRequiredThisSync) {
         lastSyncWarning = '学习通要求人工验证，已暂停剩余读取';
       } else if (problems.isNotEmpty) {
-        final examProblem = sourceResults.any((source) =>
-            const {'exam', 'examAccount', 'examNotice'}
-                .contains(source.source) &&
-            source.phase != SyncSourcePhase.success);
+        final examProblem = sourceResults.any(examSourceIncomplete);
         lastSyncWarning = failedCourses > 0
             ? '已更新 $succeededCourses 门课程，$failedCourses 门待重试'
             : detailUnconfirmedCount > 0 && examProblem
@@ -821,6 +830,9 @@ class ChaoxingLocalClient {
       return _dedupeAssignments(assignments);
     } finally {
       if (identical(_syncCourseEntries, entryCache)) _syncCourseEntries = null;
+      if (identical(_syncUnsignedCourseEntries, unsignedCache)) {
+        _syncUnsignedCourseEntries = null;
+      }
       if (generation == _sessionGeneration) {
         _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
       }
@@ -1022,24 +1034,35 @@ class ChaoxingLocalClient {
   }
 
   SyncSourceResult _formalSourceResult(
-          List<Assignment> rows, int succeeded, int failed) =>
-      SyncSourceResult(
-          source: 'courseWork',
-          phase: failed == 0
-              ? SyncSourcePhase.success
-              : succeeded > 0
-                  ? SyncSourcePhase.partial
-                  : SyncSourcePhase.failed,
-          succeededCourses: succeeded,
-          failedCourses: failed,
-          recordCount: rows.length,
-          unconfirmedCount: rows
-              .where((a) =>
-                  a.status == 'unknown' ||
-                  !a.deadlineTrusted ||
-                  a.deadlineReadFailed)
-              .length,
-          detailUnconfirmedCount: detailUnconfirmedCount);
+      List<Assignment> rows, int succeeded, int failed) {
+    final verificationPaused =
+        _deadlineReadsBlockedBy == SyncIssueKind.verificationRequired ||
+            issues.any((issue) =>
+                issue.kind == SyncIssueKind.verificationRequired &&
+                const {'courses', 'coursePage', 'work', 'workList', 'detail'}
+                    .contains(issue.stage));
+    return SyncSourceResult(
+        source: 'courseWork',
+        phase: failed == 0 && !verificationPaused
+            ? SyncSourcePhase.success
+            : succeeded > 0 || rows.isNotEmpty
+                ? SyncSourcePhase.partial
+                : SyncSourcePhase.failed,
+        succeededCourses: succeeded,
+        failedCourses: failed,
+        recordCount: rows.length,
+        unconfirmedCount: rows
+            .where((a) =>
+                a.status == 'unknown' ||
+                !a.deadlineTrusted ||
+                a.deadlineReadFailed)
+            .length,
+        detailUnconfirmedCount: detailUnconfirmedCount,
+        reasonCodes: [
+          if (failed > 0) 'listOrMetadataUnavailable',
+          if (verificationPaused) 'verificationPaused',
+        ]);
+  }
 
   /// Enumerate the server course activity list independently of formal work.
   /// A task detail failure remains unknown, cancelling stale pending reminders.
@@ -1413,6 +1436,12 @@ class ChaoxingLocalClient {
     if (generation != _sessionGeneration) return null;
     if ((workEnc == null || workEnc.isEmpty) && navigationUri == null) {
       final isVue = html.contains('/mooc2-ans-vue/');
+      final missingExamEnc =
+          ChaoxingAssignmentParser.hiddenValue(html, 'examEnc')?.isNotEmpty !=
+              true;
+      if (middle?.statusCode == 200 && (isVue || missingExamEnc)) {
+        _syncUnsignedCourseEntries?.add('${course.courseId}:${course.clazzId}');
+      }
       if (isVue || middle?.statusCode == 200) {
         try {
           final work = await _fetchV3FormalHomework(course,
@@ -1940,6 +1969,12 @@ class ChaoxingLocalClient {
   Future<Response<dynamic>?> _courseGet(Uri uri,
       {int? generation, String? requestKind, Uri? verificationProbe}) async {
     final expectedGeneration = generation ?? _sessionGeneration;
+    final initialUri = uri;
+    final initialCourse =
+        uri.queryParameters['courseid'] ?? uri.queryParameters['courseId'];
+    final initialClass = uri.queryParameters['clazzid'] ??
+        uri.queryParameters['classid'] ??
+        uri.queryParameters['classId'];
     for (var i = 0; i < 5; i++) {
       // Some deployments still advertise HTTP in Location. Upgrade locally;
       // cookies and signed parameters must never travel over plaintext HTTP.
@@ -1955,6 +1990,25 @@ class ChaoxingLocalClient {
           verificationProbe: verificationProbe);
       if (expectedGeneration != _sessionGeneration) return null;
       if (response == null || (response.statusCode ?? 0) < 300) {
+        if (i > 0 &&
+            initialUri.host == 'mooc1.chaoxing.com' &&
+            initialUri.path == '/visit/stucoursemiddle' &&
+            uri.host == 'mooc2-ans.chaoxing.com' &&
+            uri.path == '/mooc2-ans/mycourse/stu' &&
+            initialCourse != null &&
+            initialClass != null &&
+            uri.queryParameters['courseid'] == initialCourse &&
+            (uri.queryParameters['clazzid'] ??
+                    uri.queryParameters['classid']) ==
+                initialClass &&
+            response?.statusCode == 200) {
+          final html = response?.data?.toString() ?? '';
+          if (ChaoxingAssignmentParser.hiddenValue(html, 'examEnc')
+                  ?.isNotEmpty ==
+              true) {
+            _syncCourseEntries?[_courseEntryCacheKey(initialUri)] = response!;
+          }
+        }
         if (kDebugMode) {
           final route = uri.path
               .split('/')
@@ -1994,6 +2048,7 @@ class ChaoxingLocalClient {
   Future<Response<dynamic>?> _readCourseEntryOrGet(Uri uri,
       {required int generation,
       String? requestKind,
+      String? circuitKind,
       Uri? verificationProbe}) async {
     final cache = _syncCourseEntries;
     final token = _activeRequestToken;
@@ -2017,6 +2072,7 @@ class ChaoxingLocalClient {
     final response = await _safeGet<dynamic>(uri.toString(),
         headers: {'User-Agent': courseUserAgent},
         requestKind: requestKind,
+        circuitKind: circuitKind,
         verificationProbe: verificationProbe);
     if (eligible &&
         identical(cache, _syncCourseEntries) &&
@@ -2025,10 +2081,8 @@ class ChaoxingLocalClient {
         generation == _sessionGeneration &&
         response?.statusCode == 200) {
       final html = response?.data?.toString() ?? '';
-      if (ChaoxingAssignmentParser.hiddenValue(html, 'workEnc')?.isNotEmpty ==
-              true &&
-          ChaoxingAssignmentParser.hiddenValue(html, 'examEnc')?.isNotEmpty ==
-              true) {
+      if (ChaoxingAssignmentParser.hiddenValue(html, 'examEnc')?.isNotEmpty ==
+          true) {
         cache[key] = response!;
       }
     }
@@ -2051,12 +2105,14 @@ class ChaoxingLocalClient {
     Map<String, dynamic>? queryParameters,
     Map<String, String>? headers,
     String? requestKind,
+    String? circuitKind,
     String method = 'GET',
     Map<String, dynamic>? form,
     Uri? verificationProbe,
   }) async {
     final parsedUri = Uri.parse(uri);
     final kind = requestKind ?? _requestKind(parsedUri.path);
+    final breakerKind = circuitKind ?? kind;
     final generation = _sessionGeneration;
     var attempt = 0;
     while (true) {
@@ -2069,10 +2125,11 @@ class ChaoxingLocalClient {
       }
       if (generation != _sessionGeneration) return null;
       // The exam collector stops the group immediately once its circuit opens.
-      final reportExamCircuit = kind == '课程考试' || kind == '课程考试补充';
-      final circuit = _openCircuits[kind];
+      final reportExamCircuit =
+          breakerKind == '课程考试' || breakerKind == '课程考试补充';
+      final circuit = _openCircuits[breakerKind];
       if (circuit != null) {
-        throw SyncReadException(_pausedRequestIssue(kind, circuit));
+        throw SyncReadException(_pausedRequestIssue(breakerKind, circuit));
       }
       attempt++;
       final watch = Stopwatch()..start();
@@ -2120,16 +2177,16 @@ class ChaoxingLocalClient {
       if (transportError != null) {
         final failure = _networkFailure(transportError, kind);
         _recordHttp(kind, httpElapsedMs, failed: true);
-        final opened = _registerTransientFailure(kind, failure);
+        final opened = _registerTransientFailure(breakerKind, failure);
         final delay =
-            _retryDelay(kind, attempt, failure, circuitOpened: opened);
+            _retryDelay(breakerKind, attempt, failure, circuitOpened: opened);
         if (delay != null) {
           _syncRetryCount++;
           await _waitOrCancel(delay);
           continue;
         }
         throw SyncReadException(opened && reportExamCircuit
-            ? _pausedRequestIssue(kind, failure.issue)
+            ? _pausedRequestIssue(breakerKind, failure.issue)
             : failure.issue);
       }
       final received = response!;
@@ -2156,7 +2213,7 @@ class ChaoxingLocalClient {
             !httpFailed && (outcome.auth != null || outcome.issue != null),
       );
       if (outcome.auth != null) {
-        _consecutiveTransientFailures.remove(kind);
+        _consecutiveTransientFailures.remove(breakerKind);
         throw outcome.auth!;
       }
       final issue = outcome.issue;
@@ -2166,19 +2223,19 @@ class ChaoxingLocalClient {
           transient: _isTransient(issue),
           retryAfter: outcome.retryAfter,
         );
-        final opened = _registerTransientFailure(kind, failure);
+        final opened = _registerTransientFailure(breakerKind, failure);
         final delay =
-            _retryDelay(kind, attempt, failure, circuitOpened: opened);
+            _retryDelay(breakerKind, attempt, failure, circuitOpened: opened);
         if (delay != null) {
           _syncRetryCount++;
           await _waitOrCancel(delay);
           continue;
         }
         throw SyncReadException(opened && reportExamCircuit
-            ? _pausedRequestIssue(kind, issue)
+            ? _pausedRequestIssue(breakerKind, issue)
             : issue);
       }
-      _consecutiveTransientFailures.remove(kind);
+      _consecutiveTransientFailures.remove(breakerKind);
       return received;
     }
   }
@@ -2192,7 +2249,8 @@ class ChaoxingLocalClient {
     final body = response.data is String ? response.data as String : '';
     final payload = _decodeJsonPayload(response.data);
     final message = payload is Map
-        ? (payload['msg'] ?? payload['message'] ?? '').toString()
+        ? (payload['msg'] ?? payload['message'] ?? payload['errorMsg'] ?? '')
+            .toString()
         : '';
     if (payload is Map &&
         (payload['result'] == false || payload['status'] == false) &&
@@ -2200,6 +2258,17 @@ class ChaoxingLocalClient {
                 caseSensitive: false)
             .hasMatch(message)) {
       return _ResponseOutcome.auth(ChaoxingAuthenticationException(status));
+    }
+    if (payload is Map &&
+        (payload['code']?.toString() == '9010' ||
+            (message.contains('9010') && message.contains('验证码')) ||
+            RegExp(r'请输入验证码|请完成.{0,12}(?:验证|校验)|安全验证|访问异常|人机验证|verify\.chaoxing',
+                    caseSensitive: false)
+                .hasMatch(message))) {
+      _verificationTarget ??= verificationProbe ?? uri;
+      return _ResponseOutcome.issue(SyncIssue(
+          SyncIssueKind.verificationRequired, '学习通要求人工验证，请点击完成安全验证',
+          stage: stage, httpStatus: status));
     }
     if (status == 401 ||
         (status >= 300 &&
@@ -2227,10 +2296,12 @@ class ChaoxingLocalClient {
             ''),
         uri: uri,
         requestKind: kind == '课程考试补充' ? '课程考试' : kind);
+    final visibleText = _stripTags(visible);
     final challenge = RegExp(
                 r'请输入验证码|请完成.{0,12}(?:验证|校验)|安全验证|访问异常|人机验证|verify\.chaoxing',
                 caseSensitive: false)
-            .hasMatch(_stripTags(visible)) ||
+            .hasMatch(visibleText) ||
+        (visibleText.contains('9010') && visibleText.contains('验证码')) ||
         location.contains('antispider');
     if (kDebugMode && uri.path.contains('stucoursemiddle')) {
       debugPrint(

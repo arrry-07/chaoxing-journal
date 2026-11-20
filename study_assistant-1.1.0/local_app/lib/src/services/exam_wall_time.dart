@@ -1,4 +1,5 @@
 import '../local/chaoxing_exam_parser.dart';
+import '../models/exam_info.dart';
 
 /// A wall-clock value from a notice. It is display evidence, not a trusted
 /// scheduling instant.
@@ -16,6 +17,14 @@ class ExamWallTime {
     return '${year == null ? '' : '$year-'}'
         '${two(month)}-${two(day)} ${two(hour)}:${two(minute)}'
         '${second == null ? '' : ':${two(second!)}'}';
+  }
+
+  ExamWallTime withTrustedYear(DateTime? instant, {required bool trusted}) {
+    if (year != null || !trusted || instant == null || !matches(instant)) {
+      return this;
+    }
+    final wall = instant.toUtc().add(const Duration(hours: 8));
+    return ExamWallTime(wall.year, month, day, hour, minute, second);
   }
 
   bool matches(DateTime instant) {
@@ -57,7 +66,7 @@ class ExamWallTime {
       return [];
     }
     if (matches.length == 2 &&
-        !RegExp(r'^\s*(?:至|到|[-—~～])\s*$')
+        !RegExp(r'^\s*(?:至|到|--|[-—~～])\s*$')
             .hasMatch(text.substring(matches.first.end, matches.last.start))) {
       return [];
     }
@@ -87,6 +96,15 @@ class ExamNoticeRange {
   const ExamNoticeRange(this.start, this.end);
 
   final ExamWallTime? start, end;
+
+  ExamNoticeRange withTrustedExam(ExamInfo? exam) {
+    if (exam == null) return this;
+    final nextStart =
+        start?.withTrustedYear(exam.startAt, trusted: exam.startTrusted);
+    final nextEnd = end?.withTrustedYear(exam.endAt, trusted: exam.endTrusted);
+    if (identical(nextStart, start) && identical(nextEnd, end)) return this;
+    return ExamNoticeRange(nextStart, nextEnd);
+  }
 
   String get key => '${start?.key}|${end?.key}';
   int get precision =>
