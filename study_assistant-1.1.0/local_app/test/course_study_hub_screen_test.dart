@@ -196,6 +196,114 @@ class _WidgetHubClient extends ChaoxingLocalClient {
       );
 }
 
+class _NoticeScopeHubClient extends ChaoxingLocalClient {
+  @override
+  bool get needsSessionInitialization => false;
+
+  @override
+  Future<ChaoxingLoginResult> login({
+    required String account,
+    required String password,
+  }) async =>
+      const ChaoxingLoginResult(success: true, displayName: '测试同学');
+
+  @override
+  List<CourseNotice> get lastFetchedNotices => [
+        CourseNotice(
+          id: 'cx:notice:${'a' * 64}',
+          courseId: '10',
+          clazzId: '20',
+          courseName: '人工智能导论',
+          senderName: '王教授',
+          title: '已关联通知一',
+          summary: '课程作业说明。',
+          publishedAt: DateTime.utc(2030, 5, 20, 2, 0),
+          publishedTrusted: true,
+          platformUnread: true,
+          lastSyncedAt: DateTime.utc(2030, 5, 20, 2, 0),
+        ),
+        CourseNotice(
+          id: 'cx:notice:${'b' * 64}',
+          courseId: '10',
+          clazzId: '20',
+          courseName: '人工智能导论',
+          senderName: '王教授',
+          title: '已关联通知二',
+          summary: '课程实验安排。',
+          publishedAt: DateTime.utc(2030, 5, 21, 2, 0),
+          publishedTrusted: true,
+          platformUnread: true,
+          lastSyncedAt: DateTime.utc(2030, 5, 21, 2, 0),
+        ),
+        CourseNotice(
+          id: 'cx:notice:${'c' * 64}',
+          courseName: '通知中心',
+          senderName: '小通活动助手',
+          title: '平台竞赛邀请',
+          summary: '平台活动邀请，不属于已关注课程。',
+          publishedAt: DateTime.utc(2030, 5, 22, 2, 0),
+          publishedTrusted: true,
+          platformUnread: true,
+          lastSyncedAt: DateTime.utc(2030, 5, 22, 2, 0),
+        ),
+      ];
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    hasCourseResponse = true;
+    courses = const [
+      ChaoxingCourseRef(courseId: '10', clazzId: '20', courseName: '人工智能导论'),
+    ];
+    succeededCourses = 1;
+    failedCourses = 0;
+    issues = const [];
+    sourceResults = const [
+      SyncSourceResult(
+        source: 'courseNotice',
+        phase: SyncSourcePhase.success,
+        succeededCourses: 1,
+        recordCount: 3,
+      ),
+    ];
+    return const [];
+  }
+}
+
+class _InboxOnlyHubClient extends _NoticeScopeHubClient {
+  @override
+  List<CourseNotice> get lastFetchedNotices => [
+        CourseNotice(
+          id: 'cx:notice:${'d' * 64}',
+          courseName: '通知中心',
+          senderName: '小通活动助手',
+          title: '空目录平台邀请',
+          summary: '没有课程目录时仍可切到收件箱。',
+          publishedAt: DateTime.utc(2030, 5, 22, 2, 0),
+          publishedTrusted: true,
+          platformUnread: true,
+          lastSyncedAt: DateTime.utc(2030, 5, 22, 2, 0),
+        ),
+      ];
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    hasCourseResponse = true;
+    courses = const [];
+    succeededCourses = 0;
+    failedCourses = 0;
+    issues = const [];
+    sourceResults = const [
+      SyncSourceResult(
+        source: 'courseNotice',
+        phase: SyncSourcePhase.success,
+        succeededCourses: 1,
+        recordCount: 1,
+      ),
+    ];
+    return const [];
+  }
+}
+
 class _HubNetworkFixture {
   int noticeCalls = 0;
   int probeCalls = 0;
@@ -283,6 +391,105 @@ class _HubNetworkFixture {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets(
+      'notices default to linked courses and inbox exposes platform invitations',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _TestSessionStore(),
+      notificationService: _TestNotificationService(),
+      widgetSnapshotService: _TestWidgetSnapshotService(),
+      chaoxingClient: _NoticeScopeHubClient(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.syncAssignments();
+    expect(store.courseNotices.items, hasLength(3));
+
+    await tester.pumpWidget(
+      MaterialApp(home: CourseStudyHubScreen(store: store)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+    expect(find.text('全部 (2)'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('已关联通知一'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('已关联通知一'), findsOneWidget);
+    expect(find.text('已关联通知二'), findsOneWidget);
+    expect(find.text('平台竞赛邀请'), findsNothing);
+
+    await tester.ensureVisible(find.text('全部标为已读'));
+    await tester.tap(find.text('全部标为已读'));
+    await tester.pumpAndSettle();
+    expect(
+      store.courseNotices.items
+          .where((n) => n.courseKey != null)
+          .every((n) => n.localRead),
+      isTrue,
+    );
+    expect(
+      store.courseNotices.items
+          .singleWhere((n) => n.courseKey == null)
+          .localRead,
+      isFalse,
+    );
+
+    await tester.ensureVisible(find.byType(DropdownButtonFormField<String>));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('收件箱').last);
+    await tester.pumpAndSettle();
+    expect(find.text('全部 (3)'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('平台竞赛邀请'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('平台竞赛邀请'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('全部标为已读'));
+    await tester.tap(find.text('全部标为已读'));
+    await tester.pumpAndSettle();
+    expect(store.courseNotices.items.every((n) => n.localRead), isTrue);
+  }, timeout: const Timeout(Duration(seconds: 15)));
+
+  testWidgets('empty course directory still offers the inbox scope',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _TestSessionStore(),
+      notificationService: _TestNotificationService(),
+      widgetSnapshotService: _TestWidgetSnapshotService(),
+      chaoxingClient: _InboxOnlyHubClient(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.syncAssignments();
+    expect(store.courseNotices.items, hasLength(1));
+
+    await tester.pumpWidget(
+      MaterialApp(home: CourseStudyHubScreen(store: store)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('全部 (0)'), findsOneWidget);
+    expect(find.text('当前通知范围内没有记录，可切换到「收件箱」查看平台消息。'), findsOneWidget);
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('收件箱').last);
+    await tester.pumpAndSettle();
+    expect(find.text('全部 (1)'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('空目录平台邀请'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('空目录平台邀请'), findsOneWidget);
+  }, timeout: const Timeout(Duration(seconds: 15)));
 
   test(
       'manual sync collects course notices and task probe while background check skips them',

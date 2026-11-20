@@ -62,17 +62,29 @@ void main() {
     expect(startOnly.availableFromText, '2026-11-17 00:00');
     expect(startOnly.deadlineAt, isNull);
     expect(startOnly.noLimit, isFalse);
+    expect(startOnly.startOnly, isTrue);
 
     final unlimited = ChaoxingAssignmentParser.readDetailDeadline(
         '开始时间：2026-11-17 00:00\n作答时间：不限');
     expect(unlimited.availableFromAt!.toUtc(), DateTime.utc(2026, 11, 16, 16));
     expect(unlimited.noLimit, isTrue);
+    expect(unlimited.startOnly, isFalse);
 
     final yearless = ChaoxingAssignmentParser.readDetailDeadline(
         '作业尚未开放\n开始时间：11月17日 00:00');
     expect(yearless.availableFromAt, isNull);
     expect(yearless.availableFromText, '11月17日 00:00');
     expect(yearless.notOpen, isTrue);
+    expect(yearless.startOnly, isFalse);
+
+    final explicitDeadline = ChaoxingAssignmentParser.readDetailDeadline(
+        '开始时间：2026-11-17 00:00\n截止时间：');
+    expect(explicitDeadline.startOnly, isFalse);
+
+    final anchoredOnly = ChaoxingAssignmentParser.readDetailDeadline('',
+        startedAt: DateTime.utc(2026, 11, 16, 16));
+    expect(anchoredOnly.availableFromAt, isNotNull);
+    expect(anchoredOnly.startOnly, isFalse);
   });
   test('a start that contradicts the same work anchor is not trusted', () {
     final evidence = ChaoxingAssignmentParser.readDetailDeadline(

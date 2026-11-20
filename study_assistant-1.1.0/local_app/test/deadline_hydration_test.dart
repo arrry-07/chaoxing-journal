@@ -220,6 +220,33 @@ void main() {
     expect(merged.single.deadlineReadFailed, isFalse);
   });
 
+  test(
+      'start-only detail keeps the previous trusted deadline and reports partial',
+      () async {
+    final start = DateTime.utc(2026, 11, 16, 16);
+    final rowWithStart = row(1)..['startTime'] = start.millisecondsSinceEpoch;
+    final c = client(
+        [rowWithStart],
+        (o, h) => h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: '作答开始时间：2026-11-17 00:00')));
+    final work = await c.fetchAssignments();
+    expect(work.single.availableFromAt!.toUtc(), start);
+    expect(work.single.deadlineAt, isNull);
+    expect(
+        c.issues.any((i) =>
+            i.stage == 'detail' &&
+            i.kind == SyncIssueKind.partial &&
+            i.message.contains('仅提供作答开始时间')),
+        isTrue);
+    final merged =
+        LocalAssignmentRepository.mergeAssignments([oldWork()], work);
+    expect(merged.single.deadlineAt, oldWork().deadlineAt);
+    expect(merged.single.deadlineTrusted, isTrue);
+    expect(merged.single.deadlineReadFailed, isTrue);
+  });
+
   test('challenge stops remaining details without discarding list rows',
       () async {
     var calls = 0;

@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 
 void main() {
   for (final value in [0, null]) {
@@ -71,5 +72,61 @@ void main() {
     expect(restored.id, a.id);
     expect(restored.deadlineTrusted, isFalse);
     expect(restored.deadlineLabel, isNot('未设置截止时间'));
+  });
+
+  test(
+      'V3 endTime=0 with only an official start reports partial instead of schema change',
+      () async {
+    var details = 0;
+    final start = DateTime.utc(2026, 11, 16, 16);
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        final data = switch (o.uri.path) {
+          '/mycourse/backclazzdata' => {
+              'courses': [
+                {'courseId': '1', 'clazzId': '2', 'courseName': '课'}
+              ]
+            },
+          '/visit/stucoursemiddle' =>
+            '<script src="/mooc2-ans-vue/js/fanyav3.js"></script>',
+          '/mooc2-ans/coursemanagev3/stu-base-info' => {
+              'status': true,
+              'navigationList': []
+            },
+          '/mooc-ans/work/api/task' => {
+              'status': true,
+              'total': 1,
+              'data': [
+                {
+                  'title': '第二次讨论作业',
+                  'stuStatus': 0,
+                  'startTime': start.millisecondsSinceEpoch,
+                  'endTime': 0,
+                  'taskUrl':
+                      'https://mooc1.chaoxing.com/work/task?workId=1&classId=2&enc=fixture-only'
+                }
+              ]
+            },
+          '/work/task' => '<p>作答开始时间：2026-11-17 00:00</p>',
+          _ => throw StateError('unexpected')
+        };
+        if (o.uri.path == '/work/task') details++;
+        h.resolve(Response(requestOptions: o, statusCode: 200, data: data));
+      }));
+    final c = ChaoxingLocalClient(
+        enableExams: false, enableClassroomTasks: false, dio: dio);
+    final work = await c.fetchAssignments();
+    expect(details, 1);
+    final item = work.single;
+    expect(item.availableFromAt!.toUtc(), start);
+    expect(item.deadlineAt, isNull);
+    expect(item.deadlineTrusted, isFalse);
+    expect(
+        c.issues.any((i) =>
+            i.stage == 'detail' &&
+            i.kind == SyncIssueKind.partial &&
+            i.message.contains('仅提供作答开始时间')),
+        isTrue);
+    expect(c.issues.any((i) => i.kind == SyncIssueKind.schemaChanged), isFalse);
   });
 }

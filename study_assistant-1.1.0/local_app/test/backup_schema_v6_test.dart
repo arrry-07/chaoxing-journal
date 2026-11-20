@@ -2,11 +2,13 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
+import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/course_chapter_progress.dart';
 import 'package:study_assistant_mobile/src/models/course_notice.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
+import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -172,5 +174,282 @@ void main() {
     expect((await repo.loadCourseNotices()).items.single.title, 'Alice 通知');
     expect(
         (await repo.loadCourseChapters()).byCourse['7:11']?.completedPoints, 1);
+  });
+
+  test(
+      'schema 7 round-trips publication and start evidence without restoring trust',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('alice');
+    final publishedAt = DateTime.utc(2026, 11, 2, 3);
+    final availableFromAt = DateTime.utc(2026, 11, 16, 16);
+    await repo.mergeAndSave([
+      Assignment(
+        id: 'cx:work:7:11:9',
+        courseName: '编译原理',
+        title: '第二次讨论作业',
+        deadlineAt: DateTime.utc(2026, 11, 20, 10),
+        publishedAt: publishedAt,
+        availableFromAt: availableFromAt,
+        availableFromText: '2026-11-17 00:00',
+        deadlineTrusted: true,
+        requirementsText: '正文包含 https://example.test/work?enc=secret',
+        status: 'pending',
+        lastSyncedAt: DateTime.utc(2026, 11, 19, 8),
+        submitUrl: 'https://example.test/work?enc=secret',
+      )
+    ]);
+
+    final snapshot = await repo.createBackupSnapshot('alice');
+    final raw = jsonDecode(snapshot.encode()) as Map<String, dynamic>;
+    expect(raw['schema'], 7);
+    expect(raw, contains('notices'));
+    expect(raw, contains('chapters'));
+    final portable = (raw['records'] as List).single as Map<String, dynamic>;
+    expect(
+      portable.keys,
+      containsAll(['publishedAt', 'availableFromAt', 'availableFromText']),
+    );
+    expect(portable['publishedAt'], publishedAt.toIso8601String());
+    expect(portable['availableFromAt'], availableFromAt.toIso8601String());
+    expect(portable['availableFromText'], '2026-11-17 00:00');
+    expect(snapshot.encode(), isNot(contains('enc=secret')));
+
+    final decoded = BackupSnapshot.decode(snapshot.encode());
+    expect(decoded.records.single.publishedAt!.toUtc(), publishedAt);
+    expect(decoded.records.single.availableFromAt!.toUtc(), availableFromAt);
+    expect(decoded.records.single.availableFromText, '2026-11-17 00:00');
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('chaoxing_journal_v2');
+    await repo.restoreBackupSnapshot(decoded, 'alice');
+    final restored = (await repo.loadJournal()).single;
+    expect(restored.publishedAt!.toUtc(), publishedAt);
+    expect(restored.availableFromAt!.toUtc(), availableFromAt);
+    expect(restored.availableFromText, '2026-11-17 00:00');
+    expect(restored.status, 'unknown');
+    expect(restored.deadlineTrusted, isFalse);
+    expect(restored.submitUrl, isNull);
+    expect(restored.requirementsText, isEmpty);
+  });
+
+  test('schema 7 omits or rejects malformed start evidence', () {
+    final now = DateTime.utc(2030, 5, 1, 8);
+    final owner = BackupSnapshot.ownerFor('alice');
+    Assignment work({String? publishedAt, String? availableFromText}) =>
+        Assignment(
+          id: 'cx:work:7:11:10',
+          courseName: '编译原理',
+          title: '讨论作业',
+          deadlineAt: now,
+          publishedAt: publishedAt == null ? null : now,
+          availableFromText: availableFromText,
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: now,
+        );
+
+    final ignoredText = BackupSnapshot.create(
+      owner: owner,
+      createdAt: now,
+      records: [work(availableFromText: 'https://example.test/secret')],
+      hidden: const {},
+      courses: const [],
+      unfollowed: const {},
+      reminderOffsets: const [120],
+      autoSyncIntervalMinutes: 240,
+    );
+    final ignoredRaw = jsonDecode(ignoredText.encode()) as Map<String, dynamic>;
+    expect(ignoredRaw['schema'], 5);
+    expect(
+      (ignoredRaw['records'] as List).single,
+      isNot(contains('availableFromText')),
+    );
+
+    final validRaw = jsonDecode(
+      BackupSnapshot.create(
+        owner: owner,
+        createdAt: now,
+        records: [
+          work(
+            publishedAt: now.toIso8601String(),
+            availableFromText: '2030-05-01 08:00',
+          )
+        ],
+        hidden: const {},
+        courses: const [],
+        unfollowed: const {},
+        reminderOffsets: const [120],
+        autoSyncIntervalMinutes: 240,
+      ).encode(),
+    ) as Map<String, dynamic>;
+    expect(validRaw['schema'], 7);
+
+    final badText = jsonDecode(jsonEncode(validRaw)) as Map<String, dynamic>;
+    ((badText['records'] as List).single as Map)['availableFromText'] =
+        'https://example.test/secret';
+    expect(
+      () => BackupSnapshot.decode(jsonEncode(badText)),
+      throwsFormatException,
+    );
+
+    final badDate = jsonDecode(jsonEncode(validRaw)) as Map<String, dynamic>;
+    ((badDate['records'] as List).single as Map)['publishedAt'] =
+        '2026-11-02 11:00';
+    expect(
+      () => BackupSnapshot.decode(jsonEncode(badDate)),
+      throwsFormatException,
+    );
+  });
+
+  test('overlong optional start text cannot block the whole export', () {
+    final now = DateTime.utc(2030, 5, 1, 8);
+    final owner = BackupSnapshot.ownerFor('alice');
+    final overlong = '11-20${' ' * 48}08:00';
+    final snapshot = BackupSnapshot.create(
+      owner: owner,
+      createdAt: now,
+      records: [
+        Assignment(
+          id: 'cx:work:7:11:20',
+          courseName: '编译原理',
+          title: '超长可选文本',
+          deadlineAt: now,
+          availableFromText: overlong,
+          deadlineTrusted: true,
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: now,
+        ),
+        Assignment(
+          id: 'cx:work:7:11:21',
+          courseName: '编译原理',
+          title: '正常作业',
+          deadlineAt: now.add(const Duration(days: 1)),
+          deadlineTrusted: true,
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: now,
+        ),
+      ],
+      hidden: const {},
+      courses: const [],
+      unfollowed: const {},
+      reminderOffsets: const [120],
+      autoSyncIntervalMinutes: 240,
+    );
+    final raw = jsonDecode(snapshot.encode()) as Map<String, dynamic>;
+    expect(raw['schema'], 5);
+    final records = (raw['records'] as List).cast<Map<String, dynamic>>();
+    expect(records, hasLength(2));
+    expect(
+      records.singleWhere((r) => r['id'] == 'cx:work:7:11:20'),
+      isNot(contains('availableFromText')),
+    );
+    expect(snapshot.records, hasLength(2));
+    expect(snapshot.records.first.availableFromText, isNull);
+
+    final tampered = jsonDecode(jsonEncode(raw)) as Map<String, dynamic>;
+    ((tampered['records'] as List).first as Map)['availableFromText'] =
+        overlong;
+    expect(
+      () => BackupSnapshot.decode(jsonEncode(tampered)),
+      throwsFormatException,
+    );
+  });
+
+  test('backup-only time evidence cannot grant archival grace after sync',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('alice');
+    final now = DateTime.utc(2026, 11, 19, 4);
+    final id = 'cx:work:7:11:11';
+    final oldDeadline = DateTime.utc(2026, 7, 1, 10);
+    await repo.mergeAndSave([
+      Assignment(
+        id: id,
+        courseName: '编译原理',
+        title: '旧学期讨论作业',
+        deadlineAt: oldDeadline,
+        publishedAt: DateTime.utc(2026, 11, 10),
+        availableFromAt: DateTime.utc(2026, 11, 12),
+        availableFromText: '11-12 08:00',
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: DateTime.utc(2026, 7, 1, 10),
+      )
+    ]);
+    final backup = await repo.createBackupSnapshot('alice');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('chaoxing_journal_v2');
+    await repo.restoreBackupSnapshot(backup, 'alice');
+    final restored = (await repo.loadJournal()).single;
+    expect(restored.publishedAt, isNotNull);
+    expect(restored.lastSyncedAt.millisecondsSinceEpoch, 0);
+
+    await repo.mergeAndSave([
+      Assignment(
+        id: id,
+        courseName: '编译原理',
+        title: '旧学期讨论作业',
+        deadlineAt: oldDeadline,
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: DateTime.utc(2026, 11, 19, 3),
+      )
+    ]);
+    final synced = (await repo.loadJournal()).single;
+    expect(synced.publishedAt, isNull);
+    expect(synced.availableFromAt, isNull);
+    expect(synced.availableFromText, isNull);
+    expect(AssignmentQuery.isArchivedPastTerm(synced, now), isTrue);
+  });
+
+  test('time evidence from an earlier genuine sync remains mergeable',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('alice');
+    final now = DateTime.utc(2026, 11, 19, 4);
+    final id = 'cx:work:7:11:12';
+    final publishedAt = DateTime.utc(2026, 11, 10);
+    final availableFromAt = DateTime.utc(2026, 11, 12);
+    await repo.mergeAndSave([
+      Assignment(
+        id: id,
+        courseName: '编译原理',
+        title: '旧学期讨论作业',
+        deadlineAt: DateTime.utc(2026, 7, 1, 10),
+        publishedAt: publishedAt,
+        availableFromAt: availableFromAt,
+        availableFromText: '11-12 08:00',
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: DateTime.utc(2026, 11, 18, 3),
+      )
+    ]);
+    await repo.mergeAndSave([
+      Assignment(
+        id: id,
+        courseName: '编译原理',
+        title: '旧学期讨论作业',
+        deadlineAt: DateTime.utc(2026, 7, 1, 10),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: DateTime.utc(2026, 11, 19, 3),
+      )
+    ]);
+
+    final synced = (await repo.loadJournal()).single;
+    expect(synced.publishedAt!.toUtc(), publishedAt);
+    expect(synced.availableFromAt!.toUtc(), availableFromAt);
+    expect(synced.availableFromText, '11-12 08:00');
+    expect(AssignmentQuery.isArchivedPastTerm(synced, now), isFalse);
   });
 }

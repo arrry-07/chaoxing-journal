@@ -102,6 +102,7 @@ extension _ExamCollection on ChaoxingLocalClient {
     for (final course in refs) {
       if (!current()) return const [];
       final courseKey = '${course.courseId}:${course.clazzId}';
+      final courseProbe = _courseVerificationEntry(course);
       if (blocked != null) {
         failed++;
         continue;
@@ -118,7 +119,8 @@ extension _ExamCollection on ChaoxingLocalClient {
                       'mooc1-api.chaoxing.com',
                       '/phone/moocAnalysis/examList',
                       {'courseId': course.courseId, 'classId': course.clazzId}),
-                  generation: generation)
+                  generation: generation,
+                  verificationProbe: courseProbe)
               : await _safeGet<dynamic>(
                   'https://mooc1-api.chaoxing.com/mooc-ans/phone/moocAnalysis/examList',
                   method: 'POST',
@@ -128,7 +130,8 @@ extension _ExamCollection on ChaoxingLocalClient {
                     'pageSize': '20',
                     'pageNum': '$page'
                   },
-                  requestKind: '课程考试');
+                  requestKind: '课程考试',
+                  verificationProbe: courseProbe);
           if (!current()) return const [];
           final parsed = ChaoxingExamParser.phone(
               response?.data?.toString() ?? '', course);
@@ -155,7 +158,8 @@ extension _ExamCollection on ChaoxingLocalClient {
                 'v': '2',
                 if (course.cpi != null) 'cpi': course.cpi!
               }),
-              generation: generation);
+              generation: generation,
+              verificationProbe: courseProbe);
           if (!current()) return const [];
           final html = middle?.data?.toString() ?? '';
           final enc = ChaoxingAssignmentParser.hiddenValue(html, 'examEnc');
@@ -191,7 +195,8 @@ extension _ExamCollection on ChaoxingLocalClient {
                   'enc': enc,
                   'start': '${page * 9}'
                 }),
-                generation: generation);
+                generation: generation,
+                verificationProbe: courseProbe);
             if (!current()) return const [];
             final parsed = ChaoxingExamParser.coursePc(
                 response?.data?.toString() ?? '', course);
@@ -266,6 +271,7 @@ extension _ExamCollection on ChaoxingLocalClient {
       final accountRows = <Assignment>[];
       var accountFailed = false;
       var accountSkippedNoId = 0;
+      final accountExtraReasons = <String>{};
       try {
         int? total;
         final ids = <String>{};
@@ -302,7 +308,19 @@ extension _ExamCollection on ChaoxingLocalClient {
         failure('examAccount', error);
         accountFailed = true;
       }
-      rows.addAll(accountRows);
+      final mergedAccount =
+          ChaoxingExamParser.mergeAccountEvidence(rows, accountRows);
+      rows
+        ..clear()
+        ..addAll(mergedAccount.rows);
+      if (mergedAccount.timeConflicts > 0) {
+        accountExtraReasons.add('examAccountTimeConflict');
+        issues.add(SyncIssue(
+          SyncIssueKind.partial,
+          '账号考试与课程考试的时间不一致，已保留课程列表时间',
+          stage: 'examAccount',
+        ));
+      }
       sourceResults = [
         ...sourceResults,
         report(
@@ -310,9 +328,10 @@ extension _ExamCollection on ChaoxingLocalClient {
           accountFailed ? 0 : 1,
           accountFailed ? 1 : 0,
           accountRows,
-          extraReasons: accountSkippedNoId > 0
-              ? const ['accountExamRowSkippedNoId']
-              : const [],
+          extraReasons: {
+            if (accountSkippedNoId > 0) 'accountExamRowSkippedNoId',
+            ...accountExtraReasons,
+          }.toList(),
         ),
       ];
       final notices = <Assignment>[];
@@ -320,10 +339,14 @@ extension _ExamCollection on ChaoxingLocalClient {
       final courseNoticeIds = <String>{};
       var noticeFailed = false;
       var courseNoticeFailed = false;
+      var courseNoticeWindowDone = false;
+      var pageFeedsCourseNotices = false;
       try {
         final cursors = <String>{}, ids = <String>{};
         var cursor = '', done = false;
         for (var page = 0; page < 100; page++) {
+          pageFeedsCourseNotices =
+              collectCourseNotices && !courseNoticeWindowDone && page < 5;
           checkWindow();
           final response = await _safeGet<dynamic>(
               'https://notice.chaoxing.com/pc/notice/getNoticeList',
@@ -345,7 +368,9 @@ extension _ExamCollection on ChaoxingLocalClient {
                 'fidsCode': '',
                 'filterSenderPuids': '',
                 'filterTags': ''
-              });
+              },
+              verificationProbe:
+                  Uri.parse('https://notice.chaoxing.com/pc/notice/myNotice'));
           if (!current()) return const [];
           final decodedPayload = _decodeJsonPayload(response?.data);
           final parsed = ChaoxingExamParser.notices(decodedPayload);
@@ -365,6 +390,7 @@ extension _ExamCollection on ChaoxingLocalClient {
             }
           }
           if (parsed.cursor == null) {
+            if (pageFeedsCourseNotices) courseNoticeWindowDone = true;
             done = true;
             break;
           }
@@ -372,13 +398,16 @@ extension _ExamCollection on ChaoxingLocalClient {
             throw StateError('examNoticeRepeated');
           }
           cursor = parsed.cursor!;
+          if (collectCourseNotices && page >= 4) {
+            courseNoticeWindowDone = true;
+          }
         }
         if (!done) throw StateError('examNoticeLimit');
       } catch (error) {
         if (!current()) return const [];
         failure('examNotice', error);
         noticeFailed = true;
-        if (collectCourseNotices) courseNoticeFailed = true;
+        if (pageFeedsCourseNotices) courseNoticeFailed = true;
       }
       rows.addAll(notices);
       if (collectCourseNotices) {
@@ -448,7 +477,7 @@ extension _ExamCollection on ChaoxingLocalClient {
   }
 
   Future<Response<dynamic>?> _examListGet(Uri uri,
-      {required int generation}) async {
+      {required int generation, Uri? verificationProbe}) async {
     final initial =
         uri.queryParameters.map((k, v) => MapEntry(k.toLowerCase(), v));
     final expectedCourse = initial['courseid'];
@@ -497,6 +526,7 @@ extension _ExamCollection on ChaoxingLocalClient {
       }
       final response = await _readCourseEntryOrGet(uri,
           generation: generation,
+          verificationProbe: verificationProbe,
           requestKind: uri.path.contains('/examcode/examlist')
               ? '账号考试'
               : uri.path == '/visit/stucoursemiddle'

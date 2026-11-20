@@ -236,10 +236,14 @@ class CourseNoticeCollection {
           if (item.id == id) item.copyWith(localRead: read) else item,
       ]);
 
-  CourseNoticeCollection markAllLocalRead() => CourseNoticeCollection(
+  CourseNoticeCollection markAllLocalRead({Set<String>? noticeIds}) =>
+      CourseNoticeCollection(
         items: [
           for (final item in items)
-            item.localRead ? item : item.copyWith(localRead: true),
+            if (noticeIds == null || noticeIds.contains(item.id))
+              item.localRead ? item : item.copyWith(localRead: true)
+            else
+              item,
         ],
       );
 
