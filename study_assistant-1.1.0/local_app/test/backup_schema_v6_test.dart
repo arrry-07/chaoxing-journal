@@ -303,6 +303,62 @@ void main() {
     );
   });
 
+  test('overlong optional start text cannot block the whole export', () {
+    final now = DateTime.utc(2030, 5, 1, 8);
+    final owner = BackupSnapshot.ownerFor('alice');
+    final overlong = '11-20${' ' * 48}08:00';
+    final snapshot = BackupSnapshot.create(
+      owner: owner,
+      createdAt: now,
+      records: [
+        Assignment(
+          id: 'cx:work:7:11:20',
+          courseName: '编译原理',
+          title: '超长可选文本',
+          deadlineAt: now,
+          availableFromText: overlong,
+          deadlineTrusted: true,
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: now,
+        ),
+        Assignment(
+          id: 'cx:work:7:11:21',
+          courseName: '编译原理',
+          title: '正常作业',
+          deadlineAt: now.add(const Duration(days: 1)),
+          deadlineTrusted: true,
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: now,
+        ),
+      ],
+      hidden: const {},
+      courses: const [],
+      unfollowed: const {},
+      reminderOffsets: const [120],
+      autoSyncIntervalMinutes: 240,
+    );
+    final raw = jsonDecode(snapshot.encode()) as Map<String, dynamic>;
+    expect(raw['schema'], 5);
+    final records = (raw['records'] as List).cast<Map<String, dynamic>>();
+    expect(records, hasLength(2));
+    expect(
+      records.singleWhere((r) => r['id'] == 'cx:work:7:11:20'),
+      isNot(contains('availableFromText')),
+    );
+    expect(snapshot.records, hasLength(2));
+    expect(snapshot.records.first.availableFromText, isNull);
+
+    final tampered = jsonDecode(jsonEncode(raw)) as Map<String, dynamic>;
+    ((tampered['records'] as List).first as Map)['availableFromText'] =
+        overlong;
+    expect(
+      () => BackupSnapshot.decode(jsonEncode(tampered)),
+      throwsFormatException,
+    );
+  });
+
   test('backup-only time evidence cannot grant archival grace after sync',
       () async {
     SharedPreferences.setMockInitialValues({});

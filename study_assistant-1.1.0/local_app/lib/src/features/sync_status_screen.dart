@@ -201,7 +201,8 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                           : () async {
                               try {
                                 final continued = await store.chaoxingClient
-                                    .verifyInBrowser();
+                                    .verifyInBrowser(
+                                        courseInspection: !needsVerification);
                                 if (continued) await store.syncAssignments();
                               } on VerificationTargetUnavailable {
                                 if (context.mounted) {
@@ -353,6 +354,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
   String _reasonLabel(String code) => switch (code) {
         'examPcSupplementUnavailable' => '部分课程 PC 考试补充时间未取得，已保留手机端记录',
         'accountExamRowSkippedNoId' => '部分历史账号考试缺少唯一标识已跳过',
+        'examAccountTimeConflict' => '账号考试与课程考试时间不一致，已保留课程时间',
         'unfinishedPlanDetected' => '存在待核对课程补充任务计划',
         'listOrMetadataUnavailable' => '列表或元数据暂不可用',
         'identityConflict' => '存在重复关联待核对',

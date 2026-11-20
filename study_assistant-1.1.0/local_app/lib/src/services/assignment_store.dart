@@ -235,7 +235,7 @@ class AssignmentStore extends ChangeNotifier {
     return saved;
   }
 
-  Future<bool> markAllNoticesLocalRead() async {
+  Future<bool> markAllNoticesLocalRead({Iterable<String>? noticeIds}) async {
     final account = _account;
     final epoch = _generation;
     var saved = false;
@@ -246,7 +246,8 @@ class AssignmentStore extends ChangeNotifier {
           account != _account) {
         return;
       }
-      final next = _courseNotices.markAllLocalRead();
+      final next =
+          _courseNotices.markAllLocalRead(noticeIds: noticeIds?.toSet());
       await repository.saveCourseNotices(next, account);
       if (_generation != epoch || !_authenticated || account != _account) {
         return;

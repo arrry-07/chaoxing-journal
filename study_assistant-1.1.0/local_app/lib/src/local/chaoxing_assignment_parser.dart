@@ -9,13 +9,15 @@ class DeadlineEvidence {
       this.noLimit = false,
       this.notOpen = false,
       this.missingYear = false,
-      this.startEvidenceConflict = false});
+      this.startEvidenceConflict = false,
+      this.startOnly = false});
   final DateTime? deadlineAt;
   final DateTime? availableFromAt;
   final String? availableFromText;
   final String? rawText;
   final bool noLimit, missingYear, notOpen;
   final bool startEvidenceConflict;
+  final bool startOnly;
 }
 
 class ChaoxingAssignmentParser {
@@ -436,6 +438,9 @@ class ChaoxingAssignmentParser {
     final labeledStart =
         RegExp('(?:作答开始时间|答题开始时间|作业开始时间|考试开始时间|开始时间|开放时间)\\s*[:：]?\\s*($token)')
             .firstMatch(text);
+    final hasDeadlineLabel =
+        RegExp(r'(?:作答截止时间|提交截止时间|答题结束时间|截止时间|截止日期|结束时间)\s*[:：]?')
+            .hasMatch(text);
     String? raw;
     String? start;
     if (period != null) {
@@ -484,7 +489,8 @@ class ChaoxingAssignmentParser {
           startEvidenceConflict: startEvidenceConflict);
     }
     if (raw == null) {
-      return text.contains('未开始') || text.contains('尚未开放')
+      final notOpen = text.contains('未开始') || text.contains('尚未开放');
+      return notOpen
           ? DeadlineEvidence(
               notOpen: true,
               rawText: '尚未开放',
@@ -494,7 +500,11 @@ class ChaoxingAssignmentParser {
           : DeadlineEvidence(
               availableFromAt: availableFrom,
               availableFromText: start,
-              startEvidenceConflict: startEvidenceConflict);
+              startEvidenceConflict: startEvidenceConflict,
+              startOnly: period == null &&
+                  labeledStart != null &&
+                  !hasDeadlineLabel &&
+                  !startEvidenceConflict);
     }
     if (const ['不限', '无截止时间', '长期有效'].contains(raw)) {
       return DeadlineEvidence(

@@ -279,10 +279,17 @@ class ChaoxingLocalClient {
   bool _v3FormalApiConfirmed = false;
   SyncIssueKind? _deadlineReadsBlockedBy;
 
-  Future<bool> verifyInBrowser() async {
+  Future<bool> verifyInBrowser({bool courseInspection = false}) async {
     final generation = _sessionGeneration;
-    final target = _verificationTarget ?? _courseVerificationProbe;
+    final target = _verificationTarget ??
+        (courseInspection ? _courseVerificationProbe : null);
     if (target == null) throw const VerificationTargetUnavailable();
+    if (target.scheme != 'https' ||
+        target.userInfo.isNotEmpty ||
+        !(target.host == 'chaoxing.com' ||
+            target.host.endsWith('.chaoxing.com'))) {
+      throw const VerificationTargetUnavailable();
+    }
     final rows = await const MethodChannel('study_assistant/external_links')
         .invokeListMethod<dynamic>('verifySession', {
       'url': target.toString(),
@@ -481,6 +488,8 @@ class ChaoxingLocalClient {
     final generation = _sessionGeneration;
     final syncWatch = Stopwatch()..start();
     _resetSyncTracking(clearRequestStats: false);
+    _verificationTarget = null;
+    _courseVerificationProbe = null;
     final entryCache = _syncCourseEntries = <String, Response<dynamic>>{};
     issues = [];
     sourceResults = const [];
@@ -575,6 +584,8 @@ class ChaoxingLocalClient {
     final generation = _sessionGeneration;
     final syncWatch = Stopwatch()..start();
     _resetSyncTracking(clearRequestStats: true);
+    _verificationTarget = null;
+    _courseVerificationProbe = null;
     final entryCache = _syncCourseEntries = <String, Response<dynamic>>{};
     final progress =
         onProgress == null ? null : _SyncProgressTracker(onProgress!);
@@ -820,6 +831,7 @@ class ChaoxingLocalClient {
             'DB_STRATEGY': 'DEFAULT',
           },
           requestKind: '任务引擎探测',
+          verificationProbe: _courseVerificationEntry(course),
         );
         if (generation != _sessionGeneration) return;
         final decoded = _decodeJsonPayload(response?.data);
@@ -1053,6 +1065,7 @@ class ChaoxingLocalClient {
     final uid = _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
     for (final course in refs) {
       if (!isCurrent()) return stale;
+      final courseProbe = _courseVerificationEntry(course);
       if (shouldStop?.call() == true || listBlockedBy != null) {
         final remaining = refs.length - refs.indexOf(course);
         for (final type in [35, 42, 77]) {
@@ -1076,7 +1089,8 @@ class ChaoxingLocalClient {
               'classId': course.clazzId,
               'showNotStartedActive': 0
             },
-            requestKind: '课堂活动列表');
+            requestKind: '课堂活动列表',
+            verificationProbe: courseProbe);
         if (!isCurrent()) return stale;
         activities = _measureParse(
             '课堂活动列表',
@@ -1120,7 +1134,10 @@ class ChaoxingLocalClient {
             } else {
               try {
                 task = await _hydrateClassroomTask(seed,
-                    uid: uid, generation: generation, expectedCpi: course.cpi);
+                    uid: uid,
+                    generation: generation,
+                    expectedCpi: course.cpi,
+                    verificationProbe: courseProbe);
               } catch (e) {
                 if (e is SyncReadException &&
                     e.issue.kind == SyncIssueKind.cancelled) {
@@ -1219,13 +1236,16 @@ class ChaoxingLocalClient {
   Future<Assignment> _hydrateClassroomTask(Assignment seed,
       {required String? uid,
       required int generation,
-      String? expectedCpi}) async {
+      String? expectedCpi,
+      Uri? verificationProbe}) async {
     if (seed.activityType == 77) {
       if (seed.submitUrl == null) {
         throw const FormatException('aiPracticeEntryMissing');
       }
       final page = await _courseGet(Uri.parse(seed.submitUrl!),
-          generation: generation, requestKind: 'AI实践');
+          generation: generation,
+          requestKind: 'AI实践',
+          verificationProbe: verificationProbe);
       if (generation != _sessionGeneration) return seed;
       final context = ChaoxingAiPracticeParser.pageContext(
           seed, page?.data?.toString() ?? '',
@@ -1233,7 +1253,8 @@ class ChaoxingLocalClient {
       final response = await _safeGet<dynamic>(
           'https://mooc2-ans.chaoxing.com/mooc2-ans/ai-evaluate/v2/answer/load-data',
           queryParameters: context,
-          requestKind: 'AI实践');
+          requestKind: 'AI实践',
+          verificationProbe: verificationProbe);
       if (generation != _sessionGeneration) return seed;
       return ChaoxingAiPracticeParser.personal(
           seed, _decodeJsonPayload(response?.data), context);
@@ -1243,7 +1264,8 @@ class ChaoxingLocalClient {
       final response = await _safeGet<dynamic>(
           'https://mobilelearn.chaoxing.com$path',
           queryParameters: parameters,
-          requestKind: kind);
+          requestKind: kind,
+          verificationProbe: verificationProbe);
       if (generation != _sessionGeneration) return null;
       return _decodeJsonPayload(response?.data);
     }
@@ -1287,22 +1309,27 @@ class ChaoxingLocalClient {
             detailPayload: detail, answerPayload: answer, currentUid: uid));
   }
 
+  Uri _courseVerificationEntry(ChaoxingCourseRef course) =>
+      Uri.https('mooc1.chaoxing.com', '/visit/stucoursemiddle', {
+        'courseid': course.courseId,
+        'clazzid': course.clazzId,
+        if (course.cpi != null) 'cpi': course.cpi!,
+        'ismooc2': '1',
+        'v': '2',
+      });
+
   Future<List<Assignment>?> _fetchCourseWork(ChaoxingCourseRef course,
       {required int generation, _SyncProgressTracker? progress}) async {
-    final courseUri =
-        Uri.https('mooc1.chaoxing.com', '/visit/stucoursemiddle', {
-      'courseid': course.courseId,
-      'clazzid': course.clazzId,
-      if (course.cpi != null) 'cpi': course.cpi!,
-      'ismooc2': '1',
-      'v': '2',
-    });
+    final courseUri = _courseVerificationEntry(course);
     _courseVerificationProbe = courseUri;
     if (_v3FormalApiConfirmed) {
       return _fetchV3FormalHomework(course,
-          generation: generation, progress: progress);
+          generation: generation,
+          progress: progress,
+          verificationProbe: courseUri);
     }
-    final middle = await _courseGet(courseUri, generation: generation);
+    final middle = await _courseGet(courseUri,
+        generation: generation, verificationProbe: courseUri);
     if (generation != _sessionGeneration) return null;
     final middlePage = _measureParse('课程入口', () {
       final html = middle?.data?.toString() ?? '';
@@ -1321,14 +1348,17 @@ class ChaoxingLocalClient {
     }
     final navigationUri =
         (workEnc == null || workEnc.isEmpty) && html.contains('/mooc2-ans-vue/')
-            ? await _fetchNavigationWorkUri(course, generation: generation)
+            ? await _fetchNavigationWorkUri(course,
+                generation: generation, verificationProbe: courseUri)
             : null;
     if (generation != _sessionGeneration) return null;
     if ((workEnc == null || workEnc.isEmpty) &&
         navigationUri == null &&
         html.contains('/mooc2-ans-vue/')) {
       final work = await _fetchV3FormalHomework(course,
-          generation: generation, progress: progress);
+          generation: generation,
+          progress: progress,
+          verificationProbe: courseUri);
       if (generation != _sessionGeneration) return null;
       _v3FormalApiConfirmed = true;
       return work;
@@ -1350,7 +1380,8 @@ class ChaoxingLocalClient {
           'isdisplaytable': '2',
           't': DateTime.now().millisecondsSinceEpoch.toString(),
         });
-    final list = await _courseGet(uri, generation: generation);
+    final list = await _courseGet(uri,
+        generation: generation, verificationProbe: courseUri);
     if (generation != _sessionGeneration) return null;
     final parsed = _measureParse(
         '作业列表',
@@ -1368,14 +1399,18 @@ class ChaoxingLocalClient {
     return _hydrateWorkDeadlines(parsed,
         generation: generation,
         progress: progress,
+        verificationProbe: courseUri,
         readStartTimes: () async => (await _readV3FormalHomework(course,
-                generation: generation, requestKind: '截止时间佐证'))
+                generation: generation,
+                requestKind: '截止时间佐证',
+                verificationProbe: courseUri))
             .starts);
   }
 
   Future<List<Assignment>> _hydrateWorkDeadlines(List<Assignment> rows,
       {required int generation,
       _SyncProgressTracker? progress,
+      Uri? verificationProbe,
       Map<String, DateTime> starts = const {},
       Future<Map<String, DateTime>> Function()? readStartTimes}) async {
     final result = <Assignment>[];
@@ -1416,7 +1451,7 @@ class ChaoxingLocalClient {
         final watch = Stopwatch()..start();
         try {
           final response = await _courseGet(Uri.parse(item.submitUrl!),
-              generation: generation);
+              generation: generation, verificationProbe: verificationProbe);
           if (generation != _sessionGeneration) {
             progress?.clearPending();
             return const [];
@@ -1463,19 +1498,21 @@ class ChaoxingLocalClient {
           }
           if (kDebugMode) {
             debugPrint(
-                '[DeadlineRead] status=${response?.statusCode} bytes=${detail.body.length} startAnchor=${startTimes.containsKey(item.id)} exact=${evidence.deadlineAt != null} noLimit=${evidence.noLimit} missingYear=${evidence.missingYear} notOpen=${evidence.notOpen}');
+                '[DeadlineRead] status=${response?.statusCode} bytes=${detail.body.length} startAnchor=${startTimes.containsKey(item.id)} exact=${evidence.deadlineAt != null} noLimit=${evidence.noLimit} missingYear=${evidence.missingYear} notOpen=${evidence.notOpen} startOnly=${evidence.startOnly}');
           }
           if (evidence.deadlineAt == null && !evidence.noLimit) {
             _noteParseFailure('作业详情');
             failure = SyncIssue(
-                evidence.notOpen
+                evidence.notOpen || evidence.startOnly
                     ? SyncIssueKind.partial
                     : SyncIssueKind.schemaChanged,
                 evidence.notOpen
                     ? '作业尚未开放，开放后可读取截止时间'
-                    : evidence.missingYear
-                        ? '作业详情只提供月日，截止年份待确认'
-                        : '作业详情未提供可识别的截止信息',
+                    : evidence.startOnly
+                        ? '官方详情仅提供作答开始时间，截止时间待确认'
+                        : evidence.missingYear
+                            ? '作业详情只提供月日，截止年份待确认'
+                            : '作业详情未提供可识别的截止信息',
                 stage: 'detail',
                 courseKey: item.courseKey,
                 assignmentId: item.id,
@@ -1541,7 +1578,7 @@ class ChaoxingLocalClient {
   // fanyav3 obtains its signed navigation from this first-party endpoint.
   // Only follow the formal homework page, with the same course/class identity.
   Future<Uri?> _fetchNavigationWorkUri(ChaoxingCourseRef course,
-      {required int generation}) async {
+      {required int generation, Uri? verificationProbe}) async {
     final response = await _safeGet<dynamic>(
         'https://mooc2-ans.chaoxing.com/mooc2-ans/coursemanagev3/stu-base-info',
         queryParameters: {
@@ -1549,9 +1586,8 @@ class ChaoxingLocalClient {
           'clazzId': course.clazzId,
           if (course.cpi != null) 'cpi': course.cpi!
         },
-        headers: {
-          'User-Agent': courseUserAgent
-        });
+        headers: {'User-Agent': courseUserAgent},
+        verificationProbe: verificationProbe);
     if (generation != _sessionGeneration) return null;
     final payload =
         _measureParse('课程导航', () => _decodeJsonPayload(response?.data));
@@ -1645,19 +1681,27 @@ class ChaoxingLocalClient {
 
   // fanyav3 fetches homework separately from its exam and activity APIs.
   Future<List<Assignment>> _fetchV3FormalHomework(ChaoxingCourseRef course,
-      {required int generation, _SyncProgressTracker? progress}) async {
+      {required int generation,
+      _SyncProgressTracker? progress,
+      Uri? verificationProbe}) async {
     final list = await _readV3FormalHomework(course,
-        generation: generation, progress: progress);
+        generation: generation,
+        progress: progress,
+        verificationProbe: verificationProbe);
     if (generation != _sessionGeneration) return const [];
     return _hydrateWorkDeadlines(list.rows,
-        generation: generation, starts: list.starts, progress: progress);
+        generation: generation,
+        starts: list.starts,
+        progress: progress,
+        verificationProbe: verificationProbe);
   }
 
   Future<({List<Assignment> rows, Map<String, DateTime> starts})>
       _readV3FormalHomework(ChaoxingCourseRef course,
           {required int generation,
           _SyncProgressTracker? progress,
-          String requestKind = '作业列表'}) async {
+          String requestKind = '作业列表',
+          Uri? verificationProbe}) async {
     final result = <Assignment>[];
     final starts = <String, DateTime>{};
     final seen = <String>{};
@@ -1673,6 +1717,7 @@ class ChaoxingLocalClient {
               'pageSize': 100
             },
             requestKind: requestKind,
+            verificationProbe: verificationProbe,
             headers: {'User-Agent': courseUserAgent});
         if (generation != _sessionGeneration) {
           progress?.retractCourse(courseKey);
@@ -1822,7 +1867,7 @@ class ChaoxingLocalClient {
   // Only forward the authenticated session within Chaoxing when the course
   // middle page redirects to the current deployment.
   Future<Response<dynamic>?> _courseGet(Uri uri,
-      {int? generation, String? requestKind}) async {
+      {int? generation, String? requestKind, Uri? verificationProbe}) async {
     final expectedGeneration = generation ?? _sessionGeneration;
     for (var i = 0; i < 5; i++) {
       // Some deployments still advertise HTTP in Location. Upgrade locally;
@@ -1834,7 +1879,9 @@ class ChaoxingLocalClient {
         return null;
       }
       final response = await _readCourseEntryOrGet(uri,
-          generation: expectedGeneration, requestKind: requestKind);
+          generation: expectedGeneration,
+          requestKind: requestKind,
+          verificationProbe: verificationProbe);
       if (expectedGeneration != _sessionGeneration) return null;
       if (response == null || (response.statusCode ?? 0) < 300) {
         if (kDebugMode) {
@@ -1867,7 +1914,9 @@ class ChaoxingLocalClient {
   /// callers still validate redirects independently; never cache a redirect,
   /// failed/missing credential response, or a page from a replaced session.
   Future<Response<dynamic>?> _readCourseEntryOrGet(Uri uri,
-      {required int generation, String? requestKind}) async {
+      {required int generation,
+      String? requestKind,
+      Uri? verificationProbe}) async {
     final cache = _syncCourseEntries;
     final token = _activeRequestToken;
     final eligible = cache != null &&
@@ -1891,7 +1940,9 @@ class ChaoxingLocalClient {
     }
     if (eligible && cache.containsKey(key)) return cache[key];
     final response = await _safeGet<dynamic>(uri.toString(),
-        headers: {'User-Agent': courseUserAgent}, requestKind: requestKind);
+        headers: {'User-Agent': courseUserAgent},
+        requestKind: requestKind,
+        verificationProbe: verificationProbe);
     if (eligible &&
         identical(cache, _syncCourseEntries) &&
         identical(token, _activeRequestToken) &&
@@ -1916,6 +1967,7 @@ class ChaoxingLocalClient {
     String? requestKind,
     String method = 'GET',
     Map<String, dynamic>? form,
+    Uri? verificationProbe,
   }) async {
     final parsedUri = Uri.parse(uri);
     final kind = requestKind ?? _requestKind(parsedUri.path);
@@ -2003,7 +2055,8 @@ class ChaoxingLocalClient {
       final parseWatch = Stopwatch()..start();
       _ResponseOutcome outcome;
       try {
-        outcome = _evaluateResponse(received, parsedUri, kind);
+        outcome = _evaluateResponse(received, parsedUri, kind,
+            verificationProbe: verificationProbe);
       } catch (_) {
         outcome = _ResponseOutcome.issue(SyncIssue(
             SyncIssueKind.schemaChanged, '学习通响应无法解析，请稍后重试',
@@ -2047,7 +2100,8 @@ class ChaoxingLocalClient {
   }
 
   _ResponseOutcome _evaluateResponse(
-      Response<dynamic> response, Uri uri, String kind) {
+      Response<dynamic> response, Uri uri, String kind,
+      {Uri? verificationProbe}) {
     final status = response.statusCode ?? 0;
     final stage = _stageForKind(kind);
     final location = response.headers.value('location') ?? '';
@@ -2099,7 +2153,7 @@ class ChaoxingLocalClient {
           '[SyncShape] stage=coursePage status=$status workEnc=${ChaoxingAssignmentParser.hiddenValue(body, 'workEnc') != null} captchaLibrary=${body.toLowerCase().contains('captcha')} challenge=$challenge');
     }
     if (challenge) {
-      _verificationTarget = _courseVerificationProbe ?? uri;
+      _verificationTarget = verificationProbe ?? uri;
       return _ResponseOutcome.issue(SyncIssue(
           SyncIssueKind.verificationRequired, '学习通要求人工验证，请点击完成安全验证',
           stage: stage, httpStatus: status));

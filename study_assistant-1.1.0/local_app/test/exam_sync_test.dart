@@ -10,6 +10,7 @@ import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_web_link.dart';
+import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'ai_practice_client_test.dart' show AiFixture;
 
 const course =
@@ -30,6 +31,28 @@ String notViewablePcRow() =>
 const accountEmpty =
     '<table class="dataTable"><tr><th>考试名称</th><th>作答状态</th></tr></table><script>page.showPage(0/12+1,Math.ceil(0/12));</script>';
 
+String accountGoRow({
+  required String title,
+  required String time,
+  String courseId = '7',
+  String clazzId = '11',
+  String examId = '99',
+  String personal = '未交',
+}) {
+  final refer = Uri.encodeComponent(
+      '/exam-ans/exam/test/examcode/examnotes?courseId=$courseId&classId=$clazzId&examId=$examId');
+  return '''
+<table class="dataTable">
+  <tr><th>序号</th><th>考试名称</th><th>时间</th><th>时长</th><th>考试状态</th><th>作答状态</th><th>分数</th><th>方式</th><th>操作</th></tr>
+  <tr class="dataTr">
+    <td>1</td><td>$title</td><td>$time</td><td>100</td><td>已过期</td><td>$personal</td><td>--</td><td>线上</td>
+    <td><a href="javascript:;" onclick="go('https://mooc1-api.chaoxing.com/exam-ans/mycourse/transfer?moocId=$courseId&amp;clazzid=$clazzId&amp;refer=$refer', stopExam)">查看</a></td>
+  </tr>
+</table>
+<script>page.showPage(0/12+1,Math.ceil(1/12));</script>
+''';
+}
+
 class ExamFixture {
   Dio? legacy;
   bool emptyPhone = false;
@@ -45,6 +68,8 @@ class ExamFixture {
   bool notViewablePc = false;
   int extraPhoneExams = 0;
   bool badPc = false, repeatPhone = false, unsafeRedirect = false;
+  String phoneState = '完成';
+  String accountHtml = accountEmpty;
   Completer<void>? gate;
   final started = Completer<void>();
   final requests = <RequestOptions>[];
@@ -100,7 +125,7 @@ class ExamFixture {
           body = emptyPhone
               ? phoneEmpty
               : [
-                  phoneRow('完成', more: repeatPhone),
+                  phoneRow(phoneState, more: repeatPhone),
                   for (var i = 0; i < extraPhoneExams; i++)
                     phoneRow('未开始', id: '${100 + i}'),
                 ].join();
@@ -128,7 +153,7 @@ class ExamFixture {
             }
           }
         case '/exam-ans/exam/test/examcode/examlist':
-          body = accountEmpty;
+          body = accountHtml;
         case '/work/task':
           body = '作答时间：2026-01-01 00:00 至 2026-01-01 00:30';
         case '/pc/notice/getNoticeList':
@@ -172,6 +197,39 @@ class ExamFixture {
 }
 
 void main() {
+  test(
+      'account evidence fills same-identity exam times without replacing status',
+      () async {
+    final f = ExamFixture()
+      ..phoneState = '已过期'
+      ..badPc = true
+      ..accountHtml = accountGoRow(
+        title: '新建试卷20260609191916',
+        time: '2026-06-09 21:30 至 2026-06-09 23:10',
+      );
+    final c = f.client();
+    final rows = await c.fetchAssignments();
+    final examRows =
+        rows.where((a) => a.isExam && !a.exam!.noticeOnly).toList();
+    expect(examRows, hasLength(1));
+    final exam = examRows.single;
+    expect(exam.id, 'cx:exam:7:11:99');
+    expect(exam.courseName, '合成课程');
+    expect(exam.title, '合成考试');
+    expect(exam.status, 'pending');
+    expect(exam.exam!.lifecycle, 'ended');
+    expect(exam.exam!.startAt!.toUtc(), DateTime.utc(2026, 6, 9, 13, 30));
+    expect(exam.exam!.endAt!.toUtc(), DateTime.utc(2026, 6, 9, 15, 10));
+    expect(exam.exam!.startTrusted, isTrue);
+    expect(exam.exam!.endTrusted, isTrue);
+    expect(AssignmentQuery.currentDisplay([exam], DateTime.utc(2026, 11, 20)),
+        isEmpty);
+    final account =
+        c.sourceResults.singleWhere((s) => s.source == 'examAccount');
+    expect(account.phase, SyncSourcePhase.success);
+    expect(account.recordCount, 1);
+  });
+
   test('verified course middle redirect preserves exam time collection',
       () async {
     final f = ExamFixture()..redirectedMiddle = true;

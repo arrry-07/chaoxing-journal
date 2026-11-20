@@ -28,9 +28,12 @@ class CourseStudyHubScreen extends StatefulWidget {
 
 enum _NoticeFilter { all, localUnread, withTime }
 
+enum _NoticeScope { linked, inbox, course }
+
 class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   late String _tab;
   _NoticeFilter _noticeFilter = _NoticeFilter.all;
+  _NoticeScope _noticeScope = _NoticeScope.linked;
   String? _selectedCourseKey;
   bool _pendingChaptersOnly = false;
   late final TextEditingController _searchController;
@@ -41,9 +44,11 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   void initState() {
     super.initState();
     _tab = widget.initialTab == 'chapters' ? 'chapters' : 'notices';
-    _selectedCourseKey = widget.initialCourseKey?.trim().isEmpty == true
-        ? null
-        : widget.initialCourseKey?.trim();
+    final initialCourseKey = widget.initialCourseKey?.trim();
+    if (initialCourseKey != null && initialCourseKey.isNotEmpty) {
+      _noticeScope = _NoticeScope.course;
+      _selectedCourseKey = initialCourseKey;
+    }
     _searchController = TextEditingController();
     _accountHash = widget.store.accountHash;
     _accountEpoch = widget.store.accountEpoch;
@@ -59,6 +64,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     if (!mounted) return;
     setState(() {
       _selectedCourseKey = null;
+      _noticeScope = _NoticeScope.linked;
       _noticeFilter = _NoticeFilter.all;
       _searchController.clear();
     });
@@ -78,9 +84,14 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       _tab = widget.initialTab == 'chapters' ? 'chapters' : 'notices';
     }
     if (oldWidget.initialCourseKey != widget.initialCourseKey) {
-      _selectedCourseKey = widget.initialCourseKey?.trim().isEmpty == true
-          ? null
-          : widget.initialCourseKey?.trim();
+      final initialCourseKey = widget.initialCourseKey?.trim();
+      if (initialCourseKey != null && initialCourseKey.isNotEmpty) {
+        _noticeScope = _NoticeScope.course;
+        _selectedCourseKey = initialCourseKey;
+      } else {
+        _noticeScope = _NoticeScope.linked;
+        _selectedCourseKey = null;
+      }
     }
   }
 
@@ -367,20 +378,25 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         courseOptions[n.courseKey!] = n.courseName;
       }
     }
-    final effectiveCourseKey = (_selectedCourseKey != null &&
-            courseOptions.containsKey(_selectedCourseKey))
-        ? _selectedCourseKey
-        : null;
+    if (_noticeScope == _NoticeScope.course &&
+        _selectedCourseKey != null &&
+        !courseOptions.containsKey(_selectedCourseKey)) {
+      courseOptions[_selectedCourseKey!] = '所选课程';
+    }
+    final scoped = switch (_noticeScope) {
+      _NoticeScope.linked => notices.where((n) => n.courseKey != null).toList(),
+      _NoticeScope.inbox => notices,
+      _NoticeScope.course =>
+        notices.where((n) => n.courseKey == _selectedCourseKey).toList(),
+    };
+    final scopedUnread = scoped.where((n) => !n.localRead).length;
 
-    final filtered = notices.where((n) {
+    final filtered = scoped.where((n) {
       if (_noticeFilter == _NoticeFilter.localUnread && n.localRead) {
         return false;
       }
       if (_noticeFilter == _NoticeFilter.withTime &&
           n.extractedEventAt == null) {
-        return false;
-      }
-      if (effectiveCourseKey != null && n.courseKey != effectiveCourseKey) {
         return false;
       }
       if (query.isNotEmpty) {
@@ -415,10 +431,13 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                     label: Text(widget.store.isLoading ? '正在同步…' : '手动同步通知'),
                   ),
                   OutlinedButton.icon(
-                    onPressed: widget.store.isLoading ||
-                            widget.store.unreadCourseNoticeCount == 0
+                    onPressed: widget.store.isLoading || scopedUnread == 0
                         ? null
-                        : widget.store.markAllNoticesLocalRead,
+                        : () => widget.store.markAllNoticesLocalRead(
+                              noticeIds: scoped
+                                  .where((n) => !n.localRead)
+                                  .map((n) => n.id),
+                            ),
                     icon: const Icon(Icons.done_all),
                     label: const Text('全部标为已读'),
                   ),
@@ -453,13 +472,13 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         runSpacing: 6,
         children: [
           ChoiceChip(
-            label: Text('全部 (${notices.length})'),
+            label: Text('全部 (${scoped.length})'),
             selected: _noticeFilter == _NoticeFilter.all,
             onSelected: (_) =>
                 setState(() => _noticeFilter = _NoticeFilter.all),
           ),
           ChoiceChip(
-            label: Text('本机未读 (${widget.store.unreadCourseNoticeCount})'),
+            label: Text('本机未读 ($scopedUnread)'),
             selected: _noticeFilter == _NoticeFilter.localUnread,
             onSelected: (_) =>
                 setState(() => _noticeFilter = _NoticeFilter.localUnread),
@@ -472,39 +491,63 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
           ),
         ],
       ),
-      if (courseOptions.isNotEmpty) ...[
-        const SizedBox(height: 10),
-        DropdownButtonFormField<String?>(
-          key: ValueKey(
-            'hub-course-${effectiveCourseKey ?? 'all'}-${courseOptions.length}',
-          ),
-          initialValue: effectiveCourseKey,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            labelText: '按已关联课程筛选',
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          ),
-          items: [
-            const DropdownMenuItem<String?>(
-              value: null,
-              child: Text('全部通知'),
-            ),
-            for (final entry in courseOptions.entries)
-              DropdownMenuItem<String?>(
-                value: entry.key,
-                child: Text(entry.value, overflow: TextOverflow.ellipsis),
-              ),
-          ],
-          onChanged: (value) => setState(() => _selectedCourseKey = value),
+      const SizedBox(height: 10),
+      DropdownButtonFormField<String>(
+        key: ValueKey(
+          'notice-scope-field-${_noticeScope.name}-${_selectedCourseKey ?? ''}',
         ),
-      ],
+        initialValue: switch (_noticeScope) {
+          _NoticeScope.linked => '__linked__',
+          _NoticeScope.inbox => '__inbox__',
+          _NoticeScope.course => _selectedCourseKey ?? '__linked__',
+        },
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: '通知范围',
+          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
+        items: [
+          const DropdownMenuItem<String>(
+            value: '__linked__',
+            child: Text('已关联课程'),
+          ),
+          const DropdownMenuItem<String>(
+            value: '__inbox__',
+            child: Text('收件箱'),
+          ),
+          for (final entry in courseOptions.entries)
+            DropdownMenuItem<String>(
+              value: entry.key,
+              child: Text(entry.value, overflow: TextOverflow.ellipsis),
+            ),
+        ],
+        onChanged: (value) {
+          if (value == null) return;
+          setState(() {
+            if (value == '__linked__') {
+              _noticeScope = _NoticeScope.linked;
+              _selectedCourseKey = null;
+            } else if (value == '__inbox__') {
+              _noticeScope = _NoticeScope.inbox;
+              _selectedCourseKey = null;
+            } else {
+              _noticeScope = _NoticeScope.course;
+              _selectedCourseKey = value;
+            }
+          });
+        },
+      ),
       const SizedBox(height: 12),
       if (filtered.isEmpty)
         Card(
           child: Padding(
             padding: const EdgeInsets.all(18),
             child: Text(
-              notices.isEmpty ? '暂无课程通知记录，点击上方「手动同步通知」获取。' : '当前筛选条件下没有匹配的通知。',
+              notices.isEmpty
+                  ? '暂无课程通知记录，点击上方「手动同步通知」获取。'
+                  : scoped.isEmpty
+                      ? '当前通知范围内没有记录，可切换到「收件箱」查看平台消息。'
+                      : '当前筛选条件下没有匹配的通知。',
               style: Journal.metadata,
             ),
           ),

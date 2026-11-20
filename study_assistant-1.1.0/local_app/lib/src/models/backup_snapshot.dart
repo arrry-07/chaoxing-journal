@@ -51,13 +51,15 @@ class BackupSnapshot {
 
   static final RegExp _portableStartTextPattern = RegExp(
       r'^(?:20\d{2}[-/年])?\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?:[:：]\d{2})?$');
+  static const _maxStartTextLength = 40;
 
-  static String? _portableStartText(String? value) {
-    final text = value?.trim();
-    return text != null && _portableStartTextPattern.hasMatch(text)
-        ? text
-        : null;
-  }
+  static bool _isPortableStartText(String value) =>
+      value.length <= _maxStartTextLength &&
+      value == value.trim() &&
+      _portableStartTextPattern.hasMatch(value);
+
+  static String? _portableStartText(String? value) =>
+      value != null && _isPortableStartText(value) ? value : null;
 
   static bool _hasPortableTimeEvidence(Assignment record) =>
       record.publishedAt != null ||
@@ -465,8 +467,8 @@ class BackupSnapshot {
   }
 
   static String _startText(dynamic value) {
-    final text = _text(value, max: 40);
-    if (text != text.trim() || _portableStartText(text) == null) _bad();
+    final text = _text(value, max: _maxStartTextLength);
+    if (!_isPortableStartText(text)) _bad();
     return text;
   }
 }

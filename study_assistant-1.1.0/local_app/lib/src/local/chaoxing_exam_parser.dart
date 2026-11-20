@@ -66,8 +66,18 @@ class ChaoxingExamParser {
     if (const {'完成', '已完成', '已交卷', '已提交', '待批阅', '已批阅', '已批改'}.contains(v)) {
       return 'submitted';
     }
-    if (const {'未开始', '未开考', '待考试', '待考', '未作答', '未交卷', '进行中', '考试中', '未完成'}
-        .contains(v)) {
+    if (const {
+      '未开始',
+      '未开考',
+      '待考试',
+      '待考',
+      '未作答',
+      '未交',
+      '未交卷',
+      '进行中',
+      '考试中',
+      '未完成'
+    }.contains(v)) {
       return 'pending';
     }
     return 'unknown';
@@ -81,7 +91,7 @@ class ChaoxingExamParser {
     if (start != null && end != null) return 'inProgress';
     if (RegExp(r'未开始|未开考').hasMatch(raw)) return 'scheduled';
     if (RegExp(r'进行中|考试中').hasMatch(raw)) return 'inProgress';
-    if (RegExp(r'已结束').hasMatch(raw)) return 'ended';
+    if (RegExp(r'已结束|已过期').hasMatch(raw)) return 'ended';
     return 'unknown';
   }
 
@@ -274,6 +284,203 @@ class ChaoxingExamParser {
     return (rows: rows, total: total, skipped: skipped, observed: observed);
   }
 
+  static String? _singleQueryValue(Uri uri, List<String> names) {
+    String? value;
+    for (final entry in uri.queryParametersAll.entries) {
+      if (!names.any((name) => name.toLowerCase() == entry.key.toLowerCase())) {
+        continue;
+      }
+      if (entry.value.length != 1) return null;
+      final next = entry.value.single.trim();
+      if (next.isEmpty) return null;
+      if (value != null && value != next) return null;
+      value = next;
+    }
+    return value;
+  }
+
+  static bool _safeAccountIdentity(String value) =>
+      RegExp(r'^[0-9A-Za-z_-]+$').hasMatch(value);
+
+  static ({String courseId, String clazzId, String examId})?
+      _accountCourseIdentityFromGo(String html) {
+    final attributes = RegExp(r'''\bonclick\s*=\s*(?:"([^"]*)"|'([^']*)')''',
+            caseSensitive: false, dotAll: true)
+        .allMatches(html)
+        .map((match) => entities(match[1] ?? match[2] ?? ''))
+        .where((value) => value.isNotEmpty)
+        .toList();
+    if (attributes.isEmpty) return null;
+
+    final calls = RegExp(
+            r'''\bgo\s*\(\s*(['"])(.*?)\1\s*,\s*(?:['"]([^'"]*)['"]|([A-Za-z0-9_]+))\s*\)''',
+            caseSensitive: false, dotAll: true)
+        .allMatches(attributes.join(' '))
+        .toList();
+
+    Uri? transferUri(String raw) {
+      var uri = Uri.tryParse(raw);
+      if (uri == null) return null;
+      if (!uri.hasScheme) {
+        uri = Uri.parse('https://mooc1-api.chaoxing.com').resolveUri(uri);
+      }
+      if (uri.scheme == 'http' &&
+          (uri.host == 'chaoxing.com' || uri.host.endsWith('.chaoxing.com'))) {
+        uri = uri.replace(scheme: 'https', port: 443);
+      }
+      return uri.scheme == 'https' &&
+              uri.userInfo.isEmpty &&
+              !uri.hasFragment &&
+              uri.port == 443 &&
+              (uri.host == 'chaoxing.com' ||
+                  uri.host.endsWith('.chaoxing.com')) &&
+              uri.path == '/exam-ans/mycourse/transfer'
+          ? uri
+          : null;
+    }
+
+    final transferCalls = <({RegExpMatch match, Uri uri})>[
+      for (final call in calls)
+        if (transferUri(call[2]!) case final uri?) (match: call, uri: uri),
+    ];
+    final stopCalls = transferCalls
+        .where((call) => (call.match[3] ?? call.match[4] ?? '')
+            .toLowerCase()
+            .contains('stopexam'))
+        .toList();
+    final selectedCalls = stopCalls.isNotEmpty ? stopCalls : transferCalls;
+    final uris = selectedCalls.map((call) => call.uri).toSet();
+    if (uris.length != 1) return null;
+    final outer = uris.single;
+
+    final moocId = _singleQueryValue(outer, ['moocId', 'moocid']);
+    final clazzId = _singleQueryValue(outer, ['clazzid', 'clazzId']);
+    final refer = _singleQueryValue(outer, ['refer']);
+    if (moocId == null ||
+        clazzId == null ||
+        refer == null ||
+        !_safeAccountIdentity(moocId) ||
+        !_safeAccountIdentity(clazzId)) {
+      return null;
+    }
+
+    final parsedRefer = Uri.tryParse(refer);
+    if (parsedRefer == null) return null;
+    final inner = outer.resolveUri(parsedRefer);
+    if (inner.scheme != 'https' ||
+        inner.host != outer.host ||
+        inner.userInfo.isNotEmpty ||
+        inner.hasFragment ||
+        inner.port != 443 ||
+        inner.path != '/exam-ans/exam/test/examcode/examnotes') {
+      return null;
+    }
+
+    final courseId = _singleQueryValue(inner, ['courseId', 'courseid']);
+    final classId = _singleQueryValue(inner, ['classId', 'classid', 'clazzid']);
+    final examId = _singleQueryValue(inner, ['examId', 'examid']);
+    if (courseId == null ||
+        classId == null ||
+        examId == null ||
+        !_safeAccountIdentity(courseId) ||
+        !_safeAccountIdentity(classId) ||
+        !RegExp(r'^\d+$').hasMatch(examId) ||
+        courseId != moocId ||
+        classId != clazzId) {
+      return null;
+    }
+    return (courseId: courseId, clazzId: classId, examId: examId);
+  }
+
+  static ({List<Assignment> rows, int timeConflicts}) mergeAccountEvidence(
+      List<Assignment> courseRows, List<Assignment> accountRows) {
+    final accountById = <String, Assignment>{
+      for (final row in accountRows)
+        if (row.hasExamIdentity && !row.exam!.noticeOnly) row.id: row,
+    };
+    final result = <Assignment>[];
+    final matched = <String>{};
+    var timeConflicts = 0;
+    for (final courseRow in courseRows) {
+      final account = accountById[courseRow.id];
+      if (account == null ||
+          !courseRow.hasExamIdentity ||
+          courseRow.exam!.noticeOnly) {
+        result.add(courseRow);
+        continue;
+      }
+      matched.add(account.id);
+      final official = courseRow.exam!;
+      final candidate = account.exam!;
+      final accountTimesUsable = candidate.startTrusted &&
+          candidate.endTrusted &&
+          candidate.startAt != null &&
+          candidate.endAt != null &&
+          !candidate.endAt!.isBefore(candidate.startAt!);
+      var start = official.startAt;
+      var end = official.endAt;
+      var startTrusted = official.startTrusted;
+      var endTrusted = official.endTrusted;
+      var conflict = false;
+      if (accountTimesUsable) {
+        if (startTrusted && start != null) {
+          conflict = conflict || !start.isAtSameMomentAs(candidate.startAt!);
+        } else {
+          start = candidate.startAt;
+          startTrusted = true;
+        }
+        if (endTrusted && end != null) {
+          conflict = conflict || !end.isAtSameMomentAs(candidate.endAt!);
+        } else {
+          end = candidate.endAt;
+          endTrusted = true;
+        }
+      }
+      if (conflict) timeConflicts++;
+      var lifecycle = official.lifecycle;
+      if (lifecycle == 'unknown') lifecycle = candidate.lifecycle;
+      if (candidate.lifecycle == 'ended' && lifecycle != 'cancelled') {
+        lifecycle = 'ended';
+      }
+      final status =
+          courseRow.status == 'unknown' && account.status != 'unknown'
+              ? account.status
+              : courseRow.status;
+      final info = ExamInfo(
+        examId: official.examId,
+        relatedExamId: official.relatedExamId,
+        courseId: official.courseId,
+        clazzId: official.clazzId,
+        startAt: start,
+        endAt: end,
+        startTrusted: startTrusted,
+        endTrusted: endTrusted,
+        durationMinutes: official.durationMinutes ?? candidate.durationMinutes,
+        location:
+            official.location.isEmpty ? candidate.location : official.location,
+        lifecycle: lifecycle,
+        noticeOnly: false,
+      );
+      result.add(courseRow.copyWith(
+        exam: info,
+        deadlineAt: end,
+        clearDeadlineAt: end == null,
+        deadlineTrusted: endTrusted,
+        clearDeadlineRawText: official.endAt == null,
+        status: status,
+        lastSyncedAt: courseRow.lastSyncedAt.isAfter(account.lastSyncedAt)
+            ? courseRow.lastSyncedAt
+            : account.lastSyncedAt,
+      ));
+    }
+    for (final account in accountRows) {
+      if (matched.contains(account.id)) continue;
+      if (result.any((row) => row.id == account.id)) continue;
+      result.add(account);
+    }
+    return (rows: result, timeConflicts: timeConflicts);
+  }
+
   static ({List<Assignment> rows, int total, int skippedWithoutId})? account(
       String html,
       {DateTime? now}) {
@@ -310,12 +517,20 @@ class ChaoxingExamParser {
       // A display ordinal is not an exam identity. Try explicit official IDs,
       // otherwise skip the unidentifiable historical row rather than guessing.
       var id = attr(row[1]!, 'data-examid');
+      String? courseId, clazzId;
       if (id == null || !RegExp(r'^\d+$').hasMatch(id)) {
-        final explicitId = RegExp(
-                r'(?:[?&]|data-)(?:examId|testPaperId)\s*=\s*["\x27]?(\d+)\b',
-                caseSensitive: false)
-            .firstMatch(row[2]!);
-        id = explicitId?[1];
+        final identity = _accountCourseIdentityFromGo(row[0]!);
+        if (identity != null) {
+          id = identity.examId;
+          courseId = identity.courseId;
+          clazzId = identity.clazzId;
+        } else {
+          final explicitId = RegExp(
+                  r'(?:[?&]|data-)(?:examId|testPaperId)\s*=\s*["\x27]?(\d+)\b',
+                  caseSensitive: false)
+              .firstMatch(row[2]!);
+          id = explicitId?[1];
+        }
       }
       if (id == null || !RegExp(r'^\d+$').hasMatch(id)) {
         skippedWithoutId++;
@@ -325,6 +540,8 @@ class ChaoxingExamParser {
       rows.add(make(
           id: id,
           title: cells[1],
+          courseId: courseId,
+          clazzId: clazzId,
           status: personalStatus(cells[5]),
           stateText: cells[4],
           start: ts.isNotEmpty ? ts[0] : null,
