@@ -1005,7 +1005,7 @@ void main() {
   });
 
   test(
-      'empty phone list reads PC-only exam when prior Vue course skips course middle cache',
+      'empty phone list reads PC-only exam when redirected course entry provides examEnc',
       () async {
     final requests = <Uri>[];
     final dio = Dio()
@@ -1014,31 +1014,23 @@ void main() {
         dynamic body = '';
         var status = 200;
         final headers = <String, List<String>>{};
-        final courseId = o.uri.queryParameters['courseId'] ??
-            o.uri.queryParameters['courseid'];
         switch (o.uri.path) {
           case '/mycourse/backclazzdata':
             body = {
               'courses': [
-                {'courseId': '7', 'clazzId': '11', 'courseName': 'Vue课程'},
                 {'courseId': '8', 'clazzId': '11', 'courseName': '仅PC考试课程'},
               ]
             };
           case '/visit/stucoursemiddle':
-            if (courseId == '7') {
-              body = '<main>/mooc2-ans-vue/fanyav3/stu</main>';
-            } else {
-              status = 302;
-              headers['location'] = [
-                'https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu?courseid=8&clazzid=11'
-              ];
-            }
+            status = 302;
+            headers['location'] = [
+              'https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu?courseid=8&clazzid=11'
+            ];
           case '/mooc2-ans/mycourse/stu':
-            body = '<input id="examEnc" value="pc-only-enc">';
-          case '/mooc2-ans/coursemanagev3/stu-base-info':
-            body = {'status': true};
-          case '/mooc-ans/work/api/task':
-            body = {'status': true, 'total': 0, 'data': []};
+            body =
+                '<input id="workEnc" value="synthetic-work"><input id="examEnc" value="pc-only-enc">';
+          case '/mooc2/work/list':
+            body = '<div>暂无作业</div>';
           case '/v2/apis/active/student/activelist':
             body = {
               'result': 1,
@@ -1069,10 +1061,96 @@ void main() {
     expect(pcOnly.exam!.examId, '801');
     expect(pcOnly.timelineTrusted, isTrue);
     expect(requests.where((u) => u.path == '/exam/test'), hasLength(1));
+    expect(requests.where((u) => u.path == '/visit/stucoursemiddle'),
+        hasLength(2));
+    expect(requests.where((u) => u.path == '/mooc2-ans/mycourse/stu'),
+        hasLength(1));
     final examSource =
         client.sourceResults.singleWhere((s) => s.source == 'exam');
     expect(examSource.phase, SyncSourcePhase.success);
     expect(client.issues, isEmpty);
+  });
+
+  test(
+      'multi-course Vue deployment caps course entry probes and avoids request storm across refreshes',
+      () async {
+    final requests = <Uri>[];
+    final examCourseIds = {'2', '3', '4', '5'};
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        requests.add(o.uri);
+        dynamic body = '';
+        var status = 200;
+        final headers = <String, List<String>>{};
+        final courseId = o.uri.queryParameters['courseId'] ??
+            o.uri.queryParameters['courseid'];
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                for (var i = 1; i <= 10; i++)
+                  {'courseId': '$i', 'clazzId': '11', 'courseName': 'Vue课程$i'},
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            status = 302;
+            headers['location'] = [
+              'https://mooc2-ans.chaoxing.com/mooc2-ans-vue/fanyav3/stu?courseid=$courseId&clazzid=11'
+            ];
+          case '/mooc2-ans-vue/fanyav3/stu':
+            body = '<main>新版课程</main>';
+          case '/mooc-ans/work/api/task':
+            body = {'status': true, 'total': 0, 'data': []};
+          case '/v2/apis/active/student/activelist':
+            body = {
+              'result': 1,
+              'data': {'activeList': []}
+            };
+          case '/phone/moocAnalysis/examList':
+            body = examCourseIds.contains(courseId)
+                ? phoneRow('未开始', id: '90$courseId', courseId: courseId!)
+                : phoneEmpty;
+          case '/exam-ans/exam/test/examcode/examlist':
+            body = accountEmpty;
+          case '/pc/notice/getNoticeList':
+            body = {'status': true};
+          default:
+            throw StateError('unexpected ${o.uri.path}');
+        }
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: status,
+            data: body,
+            headers: Headers.fromMap(headers)));
+      }));
+
+    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final first = await client.fetchAssignments();
+    expect(first.where((a) => a.isExam && !a.exam!.noticeOnly), hasLength(4));
+    final firstMiddle =
+        requests.where((u) => u.path == '/visit/stucoursemiddle').toList();
+    expect(firstMiddle, hasLength(3));
+    expect(
+        firstMiddle.map((u) => u.queryParameters['courseid']), ['1', '2', '3']);
+    final firstSource =
+        client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(firstSource.phase, SyncSourcePhase.success);
+    expect(firstSource.isNormalDegradation, isTrue);
+    expect(firstSource.reasonCodes, contains('examPcSupplementUnavailable'));
+    expect(client.issues, isEmpty);
+    expect(client.lastSyncWarning, isNull);
+
+    requests.clear();
+    final second = await client.fetchAssignments();
+    expect(second.where((a) => a.isExam && !a.exam!.noticeOnly), hasLength(4));
+    expect(requests.where((u) => u.path == '/visit/stucoursemiddle'), isEmpty);
+    final secondSource =
+        client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(secondSource.phase, SyncSourcePhase.success);
+    expect(secondSource.isNormalDegradation, isTrue);
+    expect(secondSource.reasonCodes, contains('examPcSupplementUnavailable'));
+    expect(client.issues, isEmpty);
+    expect(client.lastSyncWarning, isNull);
   });
 
   test(

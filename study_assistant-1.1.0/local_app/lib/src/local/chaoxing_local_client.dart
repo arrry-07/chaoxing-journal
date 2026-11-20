@@ -98,7 +98,9 @@ class ChaoxingLocalClient {
   final _requestStats = <String, _RequestStats>{};
   final _phaseElapsedMs = <String, int>{};
   Map<String, Response<dynamic>>? _syncCourseEntries;
-  Set<String>? _syncUnsignedCourseEntries;
+  Set<String>? _syncExamEntryCourses;
+  final Set<String> _sessionVueExamCourses = <String>{};
+  bool _sessionHasPcExamCredential = false;
   final _openCircuits = <String, SyncIssue>{};
   final _consecutiveTransientFailures = <String, int>{};
   int _syncRetryCount = 0;
@@ -108,7 +110,7 @@ class ChaoxingLocalClient {
 
   void cancelActiveRequests({bool reportCancelled = true}) {
     _syncCourseEntries = null;
-    _syncUnsignedCourseEntries = null;
+    _syncExamEntryCourses = null;
     _stopRequested = reportCancelled;
     _activeRequestToken?.cancel('主动停止后台学习通请求');
     _activeRequestToken = null;
@@ -117,7 +119,7 @@ class ChaoxingLocalClient {
 
   CancelToken _startRequestToken() {
     _syncCourseEntries = null;
-    _syncUnsignedCourseEntries = null;
+    _syncExamEntryCourses = null;
     _activeRequestToken?.cancel('开始新的学习通请求');
     _stopRequested = false;
     return _activeRequestToken = CancelToken();
@@ -321,7 +323,21 @@ class ChaoxingLocalClient {
       ],
     });
     if (generation != _sessionGeneration || rows == null) return false;
-    for (final row in rows.whereType<Map>()) {
+    final sortedRows = rows.whereType<Map>().toList()
+      ..sort((a, b) {
+        int rank(Map row) {
+          final u = Uri.tryParse(row['url']?.toString() ?? '');
+          if (u == null) return 3;
+          if (u.host == 'chaoxing.com' && (u.path.isEmpty || u.path == '/')) {
+            return 0;
+          }
+          if (u.path.isEmpty || u.path == '/') return 1;
+          return 2;
+        }
+
+        return rank(a).compareTo(rank(b));
+      });
+    for (final row in sortedRows) {
       final agent = row['userAgent'];
       if (agent is String &&
           agent.length < 512 &&
@@ -334,6 +350,8 @@ class ChaoxingLocalClient {
           !(uri.host == 'chaoxing.com' || uri.host.endsWith('.chaoxing.com'))) {
         continue;
       }
+      final path = uri.path.isEmpty ? '/' : uri.path;
+      final isRootDomain = uri.host == 'chaoxing.com';
       for (final pair in (row['cookies']?.toString() ?? '').split(';')) {
         final split = pair.indexOf('=');
         if (split < 1) continue;
@@ -342,17 +360,26 @@ class ChaoxingLocalClient {
         final matches = _cookies
             .where((e) => e.cookie.name == name && e.matches(uri))
             .toList();
-        if (matches.any((e) => e.cookie.value == value)) continue;
-        if (matches.isNotEmpty && (uri.path.isEmpty || uri.path == '/')) {
+        if (matches.any((e) =>
+                e.cookie.value == value && (!isRootDomain || !e.hostOnly)) &&
+            matches.every((e) =>
+                e.domain != uri.host ||
+                e.path != path ||
+                e.cookie.value == value)) {
+          continue;
+        }
+        if (matches.isNotEmpty && path == '/' && !isRootDomain) {
           for (final e in matches) {
             e.cookie.value = value;
           }
         } else {
-          final path = uri.path.isEmpty ? '/' : uri.path;
+          _cookies.removeWhere((e) =>
+              e.cookie.name == name && e.domain == uri.host && e.path == path);
           final cookie = Cookie(name, value)
             ..path = path
             ..secure = true;
-          _cookies.add(_SessionCookie(cookie, uri.host, path, true));
+          if (isRootDomain) cookie.domain = '.chaoxing.com';
+          _cookies.add(_SessionCookie(cookie, uri.host, path, !isRootDomain));
         }
       }
     }
@@ -412,6 +439,8 @@ class ChaoxingLocalClient {
     _verificationTarget = null;
     _courseVerificationProbe = null;
     _v3FormalApiConfirmed = false;
+    _sessionVueExamCourses.clear();
+    _sessionHasPcExamCredential = false;
     _deadlineReadsBlockedBy = null;
     lastSyncWarning = null;
   }
@@ -509,7 +538,7 @@ class ChaoxingLocalClient {
     _verificationTarget = null;
     _courseVerificationProbe = null;
     final entryCache = _syncCourseEntries = <String, Response<dynamic>>{};
-    final unsignedCache = _syncUnsignedCourseEntries = <String>{};
+    final examEntryCourses = _syncExamEntryCourses = <String>{};
     issues = [];
     sourceResults = const [];
     _deadlineReadsBlockedBy = null;
@@ -549,7 +578,10 @@ class ChaoxingLocalClient {
         issues.add(e.issue);
       }
       if (generation != _sessionGeneration) return const [];
-      if (rows == null) _syncCourseEntries?.clear();
+      if (rows == null) {
+        _syncCourseEntries?.clear();
+        _syncExamEntryCourses?.clear();
+      }
       _recordPhase('formalWork', formalWatch);
       sourceResults = [
         _formalSourceResult(
@@ -575,8 +607,8 @@ class ChaoxingLocalClient {
       return _dedupeAssignments([...?rows, ...classroom.rows, ...exams]);
     } finally {
       if (identical(_syncCourseEntries, entryCache)) _syncCourseEntries = null;
-      if (identical(_syncUnsignedCourseEntries, unsignedCache)) {
-        _syncUnsignedCourseEntries = null;
+      if (identical(_syncExamEntryCourses, examEntryCourses)) {
+        _syncExamEntryCourses = null;
       }
       if (generation == _sessionGeneration) {
         _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
@@ -611,7 +643,7 @@ class ChaoxingLocalClient {
     _verificationTarget = null;
     _courseVerificationProbe = null;
     final entryCache = _syncCourseEntries = <String, Response<dynamic>>{};
-    final unsignedCache = _syncUnsignedCourseEntries = <String>{};
+    final examEntryCourses = _syncExamEntryCourses = <String>{};
     final progress =
         onProgress == null ? null : _SyncProgressTracker(onProgress!);
     progress?.setStage(AssignmentSyncStage.courses);
@@ -706,6 +738,7 @@ class ChaoxingLocalClient {
         final label = '${course.courseName}（班级 ${course.clazzId}）';
         if (work == null) {
           _syncCourseEntries?.clear();
+          _syncExamEntryCourses?.clear();
           formalFailedCourseKeys.add('${course.courseId}:${course.clazzId}');
           final issue = SyncIssue(failure?.kind ?? SyncIssueKind.schemaChanged,
               '$label ${failure?.message ?? '作业页签名或列表无法识别'}',
@@ -830,8 +863,8 @@ class ChaoxingLocalClient {
       return _dedupeAssignments(assignments);
     } finally {
       if (identical(_syncCourseEntries, entryCache)) _syncCourseEntries = null;
-      if (identical(_syncUnsignedCourseEntries, unsignedCache)) {
-        _syncUnsignedCourseEntries = null;
+      if (identical(_syncExamEntryCourses, examEntryCourses)) {
+        _syncExamEntryCourses = null;
       }
       if (generation == _sessionGeneration) {
         _fullSyncElapsedMs = syncWatch.elapsedMilliseconds;
@@ -1435,12 +1468,10 @@ class ChaoxingLocalClient {
             : null;
     if (generation != _sessionGeneration) return null;
     if ((workEnc == null || workEnc.isEmpty) && navigationUri == null) {
-      final isVue = html.contains('/mooc2-ans-vue/');
-      final missingExamEnc =
-          ChaoxingAssignmentParser.hiddenValue(html, 'examEnc')?.isNotEmpty !=
-              true;
-      if (middle?.statusCode == 200 && (isVue || missingExamEnc)) {
-        _syncUnsignedCourseEntries?.add('${course.courseId}:${course.clazzId}');
+      final isVue = html.contains('/mooc2-ans-vue/') ||
+          _ExamCollection._isVueExamCoursePath(middle?.realUri.path ?? '');
+      if (middle?.statusCode == 200 && isVue) {
+        _sessionVueExamCourses.add('${course.courseId}:${course.clazzId}');
       }
       if (isVue || middle?.statusCode == 200) {
         try {
@@ -2059,6 +2090,15 @@ class ChaoxingLocalClient {
       if (ChaoxingAssignmentParser.hiddenValue(html, 'examEnc')?.isNotEmpty ==
           true) {
         cache[key] = response!;
+        _sessionHasPcExamCredential = true;
+        final cId =
+            uri.queryParameters['courseid'] ?? uri.queryParameters['courseId'];
+        final clzId = uri.queryParameters['clazzid'] ??
+            uri.queryParameters['classid'] ??
+            uri.queryParameters['classId'];
+        if (cId != null && clzId != null) {
+          _syncExamEntryCourses?.add('$cId:$clzId');
+        }
       }
     }
     return response;

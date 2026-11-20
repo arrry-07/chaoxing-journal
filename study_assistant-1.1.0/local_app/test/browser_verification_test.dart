@@ -294,4 +294,122 @@ void main() {
     expect(await verifyFuture, isFalse);
     expect(c.needsSessionInitialization, isTrue);
   });
+
+  test(
+      'root chaoxing.com verification cookies apply across subdomains and subpath updates do not duplicate',
+      () async {
+    const channel = MethodChannel('study_assistant/external_links');
+    var round = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'verifySession');
+      round++;
+      return [
+        {
+          'url': 'https://mooc1.chaoxing.com/visit/stucoursemiddle',
+          'cookies':
+              'antispider=cleared; route=mooc1; pathTok=${round == 1 ? 'old' : 'new'}',
+        },
+        {
+          'url': 'https://mooc1.chaoxing.com/',
+          'cookies': 'antispider=cleared; route=mooc1',
+        },
+        {
+          'url': 'https://chaoxing.com/',
+          'cookies': 'antispider=cleared',
+        },
+      ];
+    });
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+
+    final sentCookies = <String, String>{};
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        final cookie = o.headers['Cookie']?.toString() ?? '';
+        sentCookies['${o.uri.host}${o.uri.path}'] = cookie;
+        dynamic body = '';
+        var status = 200;
+        final headers = <String, List<String>>{};
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                {'courseId': '1', 'clazzId': '2', 'courseName': '课程 A'}
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            if (round == 0) {
+              body = '<html><body>请完成安全验证</body></html>';
+            } else {
+              status = 302;
+              headers['location'] = [
+                'https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu?courseid=1&clazzid=2'
+              ];
+            }
+          case '/mooc2-ans/mycourse/stu':
+            body =
+                '<input id="workEnc" value="w"><input id="examEnc" value="e">';
+          case '/mooc2/work/list':
+            body = '<div>暂无作业</div>';
+          case '/v2/apis/active/student/activelist':
+            body = {
+              'result': 1,
+              'data': {'activeList': []}
+            };
+          case '/phone/moocAnalysis/examList':
+            body = '<p class="blankTips">您好，本课程下暂未收到考试</p>';
+          case '/exam-ans/exam/test/examcode/examlist':
+            body = '<table class="dataTable"><tr><th>作答状态</th></tr></table>';
+          case '/pc/notice/getNoticeList':
+            body = {'status': true};
+          default:
+            throw StateError('unexpected ${o.uri.path}');
+        }
+        h.resolve(Response(
+            requestOptions: o,
+            data: body,
+            statusCode: status,
+            headers: Headers.fromMap(headers)));
+      }));
+
+    final c = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    await expectLater(c.fetchAssignments(), throwsA(isA<SyncReadException>()));
+
+    expect(await c.verifyInBrowser(), isTrue);
+    sentCookies.clear();
+    await c.fetchAssignments();
+
+    expect(sentCookies['mooc1-api.chaoxing.com/mycourse/backclazzdata'],
+        contains('antispider=cleared'));
+    expect(sentCookies['mooc1-api.chaoxing.com/mycourse/backclazzdata'],
+        isNot(contains('route=mooc1')));
+    expect(sentCookies['mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu'],
+        contains('antispider=cleared'));
+    expect(sentCookies['mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu'],
+        isNot(contains('route=mooc1')));
+    expect(
+        sentCookies[
+            'mobilelearn.chaoxing.com/v2/apis/active/student/activelist'],
+        contains('antispider=cleared'));
+    expect(sentCookies['notice.chaoxing.com/pc/notice/getNoticeList'],
+        contains('antispider=cleared'));
+    final mooc1MiddleCookie =
+        sentCookies['mooc1.chaoxing.com/visit/stucoursemiddle']!;
+    expect(RegExp(r'\bantispider=cleared\b').allMatches(mooc1MiddleCookie),
+        hasLength(1));
+    expect(mooc1MiddleCookie, contains('route=mooc1'));
+    expect(mooc1MiddleCookie, contains('pathTok=old'));
+
+    expect(await c.verifyInBrowser(courseInspection: true), isTrue);
+    sentCookies.clear();
+    await c.fetchAssignments();
+    final updatedMiddleCookie =
+        sentCookies['mooc1.chaoxing.com/visit/stucoursemiddle']!;
+    expect(updatedMiddleCookie, contains('pathTok=new'));
+    expect(updatedMiddleCookie, isNot(contains('pathTok=old')));
+    expect(RegExp(r'\bantispider=cleared\b').allMatches(updatedMiddleCookie),
+        hasLength(1));
+  });
 }

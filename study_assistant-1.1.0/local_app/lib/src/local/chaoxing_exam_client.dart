@@ -172,15 +172,31 @@ extension _ExamCollection on ChaoxingLocalClient {
         }
         if (!phoneListFinished) throw StateError('examPageLimit');
         // Preserve independent PC results when this refresh already has a
-        // validated exam credential, or skip probing when this refresh already
-        // confirmed the course entry is unsigned/Vue.
+        // validated exam credential, and avoid probing phone-empty courses or
+        // confirmed Vue deployments across every course.
         final cachedEntry = _syncCourseEntries?[
             ChaoxingLocalClient._courseEntryCacheKey(courseProbe)];
-        final knownUnsigned =
-            _syncUnsignedCourseEntries?.contains(courseKey) == true;
-        if (observed.isEmpty && cachedEntry == null && knownUnsigned) {
+        final hasExamEntry = cachedEntry != null ||
+            _syncExamEntryCourses?.contains(courseKey) == true;
+        if (observed.isEmpty && !hasExamEntry) {
           skippedPcCourses.add(courseKey);
           succeeded++;
+          continue;
+        }
+        final vueDeploymentConfirmed = _v3FormalApiConfirmed &&
+            !_sessionHasPcExamCredential &&
+            _sessionVueExamCourses.length >= 3;
+        if (!hasExamEntry &&
+            (_sessionVueExamCourses.contains(courseKey) ||
+                vueDeploymentConfirmed)) {
+          _sessionVueExamCourses.add(courseKey);
+          if (observed.isEmpty) {
+            skippedPcCourses.add(courseKey);
+          } else {
+            examExtraReasons.add('examPcSupplementUnavailable');
+          }
+          succeeded++;
+          rows.addAll(observed);
           continue;
         }
         // PC time evidence is supplemental. Failure retains phone identities.
@@ -201,9 +217,9 @@ extension _ExamCollection on ChaoxingLocalClient {
                     html.contains('/mooc2-ans-vue/');
             if (isVuePage) {
               _v3FormalApiConfirmed = true;
+              _sessionVueExamCourses.add(courseKey);
             }
             if (isVuePage || observed.isEmpty) {
-              _syncUnsignedCourseEntries?.add(courseKey);
               if (observed.isEmpty) {
                 skippedPcCourses.add(courseKey);
               } else {
