@@ -487,6 +487,39 @@ void main() {
     expect(rows.where((a) => a.isExam && !a.exam!.noticeOnly).length, 1);
     expect(f.middleReads, 1);
   });
+  test('skipped PC supplement preserves the prior exam observation', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    final f = ExamFixture()
+      ..unsignedCoursePage = '<main>课程入口</main>'
+      ..emptyPhone = true;
+    final client = f.client();
+    final completion = DateTime.utc(2026, 10, 1, 5);
+    final old = ChaoxingExamParser.make(
+      id: '99',
+      title: '往期考试',
+      courseId: '7',
+      clazzId: '11',
+      status: 'submitted',
+      now: DateTime.utc(2026, 10, 2),
+    ).copyWith(completedAt: completion);
+    await repo.mergeAndSave([old]);
+    client.previousAssignments = {old.id: old};
+
+    final rows = await client.fetchAssignments();
+    expect(rows.where((row) => row.id == old.id), isEmpty);
+    await repo.mergeAndSave(rows, completeSync: false);
+    final retained =
+        (await repo.loadJournal()).singleWhere((row) => row.id == old.id);
+    expect(retained.status, old.status);
+    expect(retained.completedAt!.toUtc(), completion);
+    expect(retained.lastSyncedAt.toUtc(), old.lastSyncedAt.toUtc());
+    expect(f.middleReads, 1);
+    final source = client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(source.phase, SyncSourcePhase.partial);
+    expect(source.recordCount, 0);
+    expect(source.reasonCodes, contains('examPcSupplementUnavailable'));
+  });
   test('empty phone list does not probe for a missing PC credential', () async {
     final f = ExamFixture()
       ..unsignedCoursePage = '<main>课程入口</main>'

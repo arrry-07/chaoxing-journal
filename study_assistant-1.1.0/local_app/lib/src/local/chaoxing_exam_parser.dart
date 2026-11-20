@@ -609,20 +609,19 @@ class ChaoxingExamParser {
           rawEnd ??= parts![1];
         }
         final publishedWall = published?.toUtc().add(const Duration(hours: 8));
-        final titleDate = _noticeTitleDate([name, title], beijingNow);
-        final anchor = publishedWall ?? titleDate;
+        final titleDates = _noticeTitleDates([name, title], beijingNow);
+        final anchor = publishedWall ??
+            (titleDates.length == 1 ? titleDates.single : null);
         if (anchor != null) {
           final candidateStart = _yearlessNoticeTime(rawStart, anchor);
           final candidateEnd = _yearlessNoticeTime(rawEnd, anchor);
-          final titleStart = publishedWall != null && titleDate != null
-              ? _yearlessNoticeTime(rawStart, titleDate)
-              : null;
-          final titleEnd = publishedWall != null && titleDate != null
-              ? _yearlessNoticeTime(rawEnd, titleDate)
-              : null;
-          final conflictingYears =
-              (titleStart != null && titleStart != candidateStart) ||
-                  (titleEnd != null && titleEnd != candidateEnd);
+          final conflictingYears = publishedWall != null &&
+              titleDates.any((date) {
+                final titleStart = _yearlessNoticeTime(rawStart, date);
+                final titleEnd = _yearlessNoticeTime(rawEnd, date);
+                return (titleStart != null && titleStart != candidateStart) ||
+                    (titleEnd != null && titleEnd != candidateEnd);
+              });
           if (candidateStart != null &&
               candidateEnd != null &&
               !conflictingYears &&
@@ -676,7 +675,8 @@ class ChaoxingExamParser {
     return null;
   }
 
-  static DateTime? _noticeTitleDate(List<String> titles, DateTime beijingNow) {
+  static Set<DateTime> _noticeTitleDates(
+      List<String> titles, DateTime beijingNow) {
     final dates = <DateTime>{};
     final pattern =
         RegExp(r'(?<!\d)(20\d{2})(\d{2})(\d{2})(?:\d{4}(?:\d{2})?)?(?!\d)');
@@ -693,7 +693,7 @@ class ChaoxingExamParser {
         }
       }
     }
-    return dates.length == 1 ? dates.single : null;
+    return dates;
   }
 
   static DateTime? _yearlessNoticeTime(String? raw, DateTime anchor) {

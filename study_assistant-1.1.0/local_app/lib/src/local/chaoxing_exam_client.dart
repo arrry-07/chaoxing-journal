@@ -98,6 +98,7 @@ extension _ExamCollection on ChaoxingLocalClient {
             }.toList());
     var succeeded = 0, failed = 0;
     final examExtraReasons = <String>{};
+    final skippedPcCourses = <String>{};
     SyncIssueKind? blocked;
     for (final course in refs) {
       if (!current()) return const [];
@@ -152,6 +153,7 @@ extension _ExamCollection on ChaoxingLocalClient {
         final cachedEntry = _syncCourseEntries?[
             ChaoxingLocalClient._courseEntryCacheKey(courseProbe)];
         if (observed.isEmpty && cachedEntry == null) {
+          skippedPcCourses.add(courseKey);
           succeeded++;
           continue;
         }
@@ -258,11 +260,8 @@ extension _ExamCollection on ChaoxingLocalClient {
       rows.addAll(observed);
     }
     if (!current()) return const [];
-    sourceResults = [
-      ...sourceResults,
-      report('exam', succeeded, failed, rows,
-          extraReasons: examExtraReasons.toList()),
-    ];
+    final examResultIndex = sourceResults.length;
+    final courseObservations = List<Assignment>.of(rows);
     if (includeAccount) {
       final accountRows = <Assignment>[];
       var accountFailed = false;
@@ -443,6 +442,12 @@ extension _ExamCollection on ChaoxingLocalClient {
           (!includeAccount && !keys.contains(old.courseKey))) {
         continue;
       }
+      if (!old.exam!.noticeOnly && skippedPcCourses.contains(old.courseKey)) {
+        // Leave the PC record in the repository. Including it here would let
+        // notification matching and return checks treat it as a fresh read.
+        examExtraReasons.add('examPcSupplementUnavailable');
+        continue;
+      }
       rows.add(old.copyWith(
           status: 'unknown',
           availability: AssignmentAvailability.unknown,
@@ -454,7 +459,10 @@ extension _ExamCollection on ChaoxingLocalClient {
         .where((a) => a.isExam && a.exam!.noticeOnly && ids.contains(a.id))
         .toList();
     sourceResults = [
-      for (final source in sourceResults)
+      ...sourceResults.take(examResultIndex),
+      report('exam', succeeded, failed, courseObservations,
+          extraReasons: examExtraReasons.toList()),
+      for (final source in sourceResults.skip(examResultIndex))
         if (source.source == 'examNotice')
           SyncSourceResult(
               source: source.source,
