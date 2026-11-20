@@ -6,13 +6,11 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.8.19](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.19/chaoxing-journal-1.8.19.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.19) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.8.20](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.20/chaoxing-journal-1.8.20.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.20) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
-**1.8.19（86）已正式发布。** 改善考试通知年份与归档，保留未补查的旧考试及真实改期信息，区分作业待确认和实际读取失败，并补齐同步明细的课程名称。详见[1.8.19 发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.19)。
-
-仓库中的 1.8.20（87）进入发布验证，完成后更新正式包下载入口。
+**1.8.20（87）已正式发布。** 改善课程考试中断后的旧状态保留，遇到人工安全验证时暂停后续读取，并在考试详情提示正式时间与关联通知的差异。详见[1.8.20 发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.20)。
 
 **1.8.14（81）** 统一霞鹜文楷，收淡「我的」页面分组色，调整日历让当天议程更早出现，并恢复统计分类细环和手绘课程图案。
 
@@ -41,20 +39,20 @@
 
 ## 下载安装
 
-**当前正式包为 1.8.19（86）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**当前正式包为 1.8.20（87）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.8.19.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.19/chaoxing-journal-1.8.19.apk)。发布说明及校验文件见 [1.8.19 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.19)。
+1. [下载 chaoxing-journal-1.8.20.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.20/chaoxing-journal-1.8.20.apk)。发布说明及校验文件见 [1.8.20 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.20)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到 1.8.19？</summary>
+<summary>已经安装：如何升级到 1.8.20？</summary>
 
 1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版继续把 manual 小索引更新到 GitHub 同版本正式包，stable 保持 1.8.0，APK 批量镜像点仍由维护者单独选择。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
-正式包使用 `com.example.studyassistant.journal` 包名，是非 debuggable 的 Release 构建，但证书沿用维护者既有的 Android Debug 体验证书（证书主题仍为 Android Debug）；这不是生产或应用商店签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.19 继续沿用既有包名与体验证书。
+正式包使用 `com.example.studyassistant.journal` 包名，是非 debuggable 的 Release 构建，但证书沿用维护者既有的 Android Debug 体验证书（证书主题仍为 Android Debug）；这不是生产或应用商店签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.20 继续沿用既有包名与体验证书。
 
 ## 使用边界
 
