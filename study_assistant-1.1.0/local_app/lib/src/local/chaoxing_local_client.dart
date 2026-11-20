@@ -1969,12 +1969,6 @@ class ChaoxingLocalClient {
   Future<Response<dynamic>?> _courseGet(Uri uri,
       {int? generation, String? requestKind, Uri? verificationProbe}) async {
     final expectedGeneration = generation ?? _sessionGeneration;
-    final initialUri = uri;
-    final initialCourse =
-        uri.queryParameters['courseid'] ?? uri.queryParameters['courseId'];
-    final initialClass = uri.queryParameters['clazzid'] ??
-        uri.queryParameters['classid'] ??
-        uri.queryParameters['classId'];
     for (var i = 0; i < 5; i++) {
       // Some deployments still advertise HTTP in Location. Upgrade locally;
       // cookies and signed parameters must never travel over plaintext HTTP.
@@ -1990,25 +1984,6 @@ class ChaoxingLocalClient {
           verificationProbe: verificationProbe);
       if (expectedGeneration != _sessionGeneration) return null;
       if (response == null || (response.statusCode ?? 0) < 300) {
-        if (i > 0 &&
-            initialUri.host == 'mooc1.chaoxing.com' &&
-            initialUri.path == '/visit/stucoursemiddle' &&
-            uri.host == 'mooc2-ans.chaoxing.com' &&
-            uri.path == '/mooc2-ans/mycourse/stu' &&
-            initialCourse != null &&
-            initialClass != null &&
-            uri.queryParameters['courseid'] == initialCourse &&
-            (uri.queryParameters['clazzid'] ??
-                    uri.queryParameters['classid']) ==
-                initialClass &&
-            response?.statusCode == 200) {
-          final html = response?.data?.toString() ?? '';
-          if (ChaoxingAssignmentParser.hiddenValue(html, 'examEnc')
-                  ?.isNotEmpty ==
-              true) {
-            _syncCourseEntries?[_courseEntryCacheKey(initialUri)] = response!;
-          }
-        }
         if (kDebugMode) {
           final route = uri.path
               .split('/')

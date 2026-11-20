@@ -177,7 +177,15 @@ void main() {
             'taskEnginePlan',
             if (blockedStage != 'classroom') 'classroomActivity:35',
           ]));
-      expect(paused.every((s) => s.phase == SyncSourcePhase.failed), isTrue);
+      expect(
+          paused
+              .where((s) => s.source != 'courseWork')
+              .every((s) => s.phase == SyncSourcePhase.failed),
+          isTrue);
+      if (blockedStage == 'detail') {
+        expect(paused.singleWhere((s) => s.source == 'courseWork').phase,
+            SyncSourcePhase.partial);
+      }
 
       const channel = MethodChannel('study_assistant/external_links');
       final messenger =
