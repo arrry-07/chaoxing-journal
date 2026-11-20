@@ -87,6 +87,16 @@ void main() {
     expect(AssignmentQuery.isArchivedPastTerm(row, now), isFalse);
     expect(AssignmentQuery.currentDisplay([row], now), [row]);
   });
+  test('multiple title dates cannot hide an eligible conflicting year', () {
+    final now = DateTime.utc(2026, 6, 9, 23);
+    final payload = noticePayload('考试时间：06-10 08:00 至 06-10 10:00',
+        title: '旧卷20250609232000 新卷20260609232000',
+        sendTime: '2025-06-09 12:00');
+    final row = ChaoxingExamParser.notices(payload, now: now)!.rows.single;
+    expect(row.exam!.startAt, isNull);
+    expect(row.exam!.endAt, isNull);
+    expect(AssignmentQuery.currentDisplay([row], now), [row]);
+  });
   test('anchor cannot promote a reversed or distant range to trusted time', () {
     for (final range in [
       '06-10 10:00 至 06-10 08:00',
