@@ -355,10 +355,11 @@ class AssignmentQuery {
     final ranges = <String, ExamNoticeRange>{};
     for (final source
         in sources.where((item) => item.exam?.noticeOnly == true)) {
-      final range = index != null && index.matches(records)
+      final rawRange = index != null && index.matches(records)
           ? index.readNoticeRange(source.requirementsText)
           : _cachedNoticeRange(source.requirementsText);
-      if (range == null) continue;
+      if (rawRange == null) continue;
+      final range = rawRange.withTrustedExam(source.exam);
       if (noticeRangeConflicts(range, exam)) continue;
       final prior = ranges[range.key];
       if (prior == null || range.precision > prior.precision) {
@@ -500,7 +501,8 @@ class AssignmentQuery {
     if (!e.noticeOnly) {
       for (final source in sources) {
         if (source.exam?.noticeOnly != true) continue;
-        final range = _cachedNoticeRange(source.requirementsText);
+        final range = _cachedNoticeRange(source.requirementsText)
+            ?.withTrustedExam(source.exam);
         if (range != null && noticeRangeConflicts(range, e)) {
           conflictingNotices.add(source);
         }

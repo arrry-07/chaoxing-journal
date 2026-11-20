@@ -43,18 +43,33 @@ class VerificationBrowser(private val activity: MainActivity) {
         browser.settings.allowFileAccess = false
         browser.settings.allowContentAccess = false
         browser.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        manager.setAcceptCookie(true)
         manager.setAcceptThirdPartyCookies(browser, false)
-        val origins = mutableSetOf("https://mooc1.chaoxing.com/", "https://mooc1-api.chaoxing.com/")
+        val origins = linkedSetOf(
+            "https://chaoxing.com/",
+            "https://mooc1.chaoxing.com/",
+            "https://mooc1-api.chaoxing.com/",
+            "https://mooc2-ans.chaoxing.com/",
+            "https://mobilelearn.chaoxing.com/",
+            "https://notice.chaoxing.com/",
+            "https://i.chaoxing.com/",
+        )
         origins.add(Uri.parse(url).buildUpon().clearQuery().fragment(null).build().toString())
         cookies.mapNotNull { it["url"] }.filter { trusted(it) }.forEach { origins.add(it) }
         browser.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val target = request.url
                 if (target.scheme == "http" && target.host?.endsWith(".chaoxing.com") == true) {
-                    view.loadUrl(target.buildUpon().scheme("https").build().toString())
+                    val upgraded = target.buildUpon().scheme("https").build()
+                    upgraded.host?.let { origins.add("https://$it/") }
+                    view.loadUrl(upgraded.toString())
                     return true
                 }
-                return !trusted(target.toString())
+                if (trusted(target.toString())) {
+                    target.host?.let { origins.add("https://$it/") }
+                    return false
+                }
+                return true
             }
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 return if (trusted(request.url.toString())) null else WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
@@ -69,6 +84,7 @@ class VerificationBrowser(private val activity: MainActivity) {
             if (finished) return
             finished = true
             closeAction = null
+            if (collect) runCatching { manager.flush() }
             val exported = if (collect) origins.mapNotNull { origin -> manager.getCookie(origin)?.let { mapOf("url" to origin, "cookies" to it) } } else emptyList()
             val agent = browser.settings.userAgentString
             browser.stopLoading()
@@ -100,7 +116,11 @@ class VerificationBrowser(private val activity: MainActivity) {
             if (!cleaned) { finish(false); return@clear }
             fun seed(index: Int) {
                 if (finished) return
-                if (index == cookies.size) { browser.loadUrl(url); return }
+                if (index == cookies.size) {
+                    runCatching { manager.flush() }
+                    browser.loadUrl(url)
+                    return
+                }
                 val entry=cookies[index]; val origin=entry["url"]; val value=entry["value"]
                 if (origin == null || value == null || !trusted(origin)) seed(index+1)
                 else manager.setCookie(origin,value) { seed(index+1) }

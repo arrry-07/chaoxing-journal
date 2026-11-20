@@ -624,13 +624,8 @@ class ChaoxingExamParser {
         if (candidateStart != null &&
             candidateEnd != null &&
             !candidateEnd.isBefore(candidateStart)) {
-          const beijingOffset = Duration(hours: 8);
-          final startYear = candidateStart.toUtc().add(beijingOffset).year;
-          final endYear = candidateEnd.toUtc().add(beijingOffset).year;
           final conflictingYears = publishedWall != null &&
-              (titleRanges.any((range) => range != candidate) ||
-                  titleDates.any((date) =>
-                      date.year != startYear && date.year != endYear));
+              titleRanges.any((range) => range != candidate);
           if (!conflictingYears) {
             start = candidateStart;
             end = candidateEnd;
@@ -1017,8 +1012,8 @@ class ChaoxingExamParser {
   static bool _matchesNoticeTime(String body, DateTime reference, bool start) {
     var raw = _field(body, start ? '考试开始时间|开始时间|开考时间' : '考试结束时间|结束时间|截止时间');
     if (raw == null) {
-      final range =
-          _field(body, '考试起止时间|起止时间|考试时间')?.split(RegExp(r'\s*(?:至|~|～|—)\s*'));
+      final range = _field(body, '考试起止时间|起止时间|考试时间')
+          ?.split(RegExp(r'\s*(?:至|到|~|～|—|--)\s*'));
       if (range != null && range.length == 2) raw = range[start ? 0 : 1];
     }
     if (raw == null) return false;

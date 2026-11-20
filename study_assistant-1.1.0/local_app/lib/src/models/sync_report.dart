@@ -12,6 +12,13 @@ class SyncSourceResult {
       this.unconfirmedCount = 0,
       this.detailUnconfirmedCount = 0,
       this.reasonCodes = const []});
+
+  static const nonDegradingReasonCodes = {
+    'examPcSupplementUnavailable',
+    'accountExamRowSkippedNoId',
+    'unfinishedPlanDetected',
+  };
+
   final String source;
   final SyncSourcePhase phase;
   final int succeededCourses,
@@ -20,6 +27,13 @@ class SyncSourceResult {
       unconfirmedCount,
       detailUnconfirmedCount;
   final List<String> reasonCodes;
+
+  bool get isNormalDegradation =>
+      failedCourses == 0 &&
+      detailUnconfirmedCount == 0 &&
+      reasonCodes.isNotEmpty &&
+      reasonCodes.every(nonDegradingReasonCodes.contains);
+
   SyncSourceResult withIdentityConflict() => SyncSourceResult(
       source: source,
       phase: phase == SyncSourcePhase.success ? SyncSourcePhase.partial : phase,
@@ -39,15 +53,27 @@ class SyncSourceResult {
         'detailUnconfirmedCount': detailUnconfirmedCount,
         'reasonCodes': reasonCodes
       };
-  factory SyncSourceResult.fromJson(Map<String, dynamic> j) => SyncSourceResult(
-      source: j['source'] as String,
-      phase: SyncSourcePhase.values.byName(j['phase'] as String),
-      succeededCourses: j['succeededCourses'] as int? ?? 0,
-      failedCourses: j['failedCourses'] as int? ?? 0,
-      recordCount: j['recordCount'] as int? ?? 0,
-      unconfirmedCount: j['unconfirmedCount'] as int? ?? 0,
-      detailUnconfirmedCount: j['detailUnconfirmedCount'] as int? ?? 0,
-      reasonCodes: List<String>.from(j['reasonCodes'] as List? ?? const []));
+  factory SyncSourceResult.fromJson(Map<String, dynamic> j) {
+    final rawPhase = SyncSourcePhase.values.byName(j['phase'] as String);
+    final failedCourses = j['failedCourses'] as int? ?? 0;
+    final detailUnconfirmedCount = j['detailUnconfirmedCount'] as int? ?? 0;
+    final reasonCodes =
+        List<String>.from(j['reasonCodes'] as List? ?? const []);
+    final normalDegradation = rawPhase == SyncSourcePhase.partial &&
+        failedCourses == 0 &&
+        detailUnconfirmedCount == 0 &&
+        reasonCodes.isNotEmpty &&
+        reasonCodes.every(nonDegradingReasonCodes.contains);
+    return SyncSourceResult(
+        source: j['source'] as String,
+        phase: normalDegradation ? SyncSourcePhase.success : rawPhase,
+        succeededCourses: j['succeededCourses'] as int? ?? 0,
+        failedCourses: failedCourses,
+        recordCount: j['recordCount'] as int? ?? 0,
+        unconfirmedCount: j['unconfirmedCount'] as int? ?? 0,
+        detailUnconfirmedCount: detailUnconfirmedCount,
+        reasonCodes: reasonCodes);
+  }
 }
 
 enum SyncIssueKind {
@@ -137,6 +163,7 @@ class SyncReport {
     return sourceResults
         .where((source) =>
             examSources.contains(source.source) &&
+            !source.isNormalDegradation &&
             const {
               SyncSourcePhase.partial,
               SyncSourcePhase.failed,
@@ -182,21 +209,39 @@ class SyncReport {
     final interrupted = phase == SyncPhase.running;
     DateTime? time(String key) =>
         DateTime.tryParse(json[key] as String? ?? '')?.toLocal();
+    final sourceResults = (json['sourceResults'] as List? ?? const [])
+        .map((s) => SyncSourceResult.fromJson(s as Map<String, dynamic>))
+        .toList();
+    final issues = interrupted
+        ? const [SyncIssue(SyncIssueKind.network, '上次同步未完成，请重新读取作业')]
+        : (json['issues'] as List? ?? [])
+            .map((i) => SyncIssue.fromJson(i as Map<String, dynamic>))
+            .toList();
+    final failedCourses = json['failedCourses'] as int? ?? 0;
+    final lastDataSuccessAt = time('lastDataSuccessAt');
+    final normalizedSuccess = phase == SyncPhase.partial &&
+        failedCourses == 0 &&
+        issues.isEmpty &&
+        sourceResults.isNotEmpty &&
+        sourceResults.every((s) =>
+            (s.phase == SyncSourcePhase.success ||
+                s.phase == SyncSourcePhase.notEnabled) &&
+            s.detailUnconfirmedCount == 0);
     return SyncReport(
-        phase: interrupted ? SyncPhase.failed : phase,
+        phase: interrupted
+            ? SyncPhase.failed
+            : normalizedSuccess
+                ? SyncPhase.success
+                : phase,
         attemptedAt: time('attemptedAt'),
-        lastDataSuccessAt: time('lastDataSuccessAt'),
-        lastFullSuccessAt: time('lastFullSuccessAt'),
+        lastDataSuccessAt: lastDataSuccessAt,
+        lastFullSuccessAt: normalizedSuccess
+            ? (time('lastFullSuccessAt') ?? lastDataSuccessAt)
+            : time('lastFullSuccessAt'),
         succeededCourses: json['succeededCourses'] as int? ?? 0,
-        failedCourses: json['failedCourses'] as int? ?? 0,
-        sourceResults: (json['sourceResults'] as List? ?? const [])
-            .map((s) => SyncSourceResult.fromJson(s as Map<String, dynamic>))
-            .toList(),
-        issues: interrupted
-            ? const [SyncIssue(SyncIssueKind.network, '上次同步未完成，请重新读取作业')]
-            : (json['issues'] as List? ?? [])
-                .map((i) => SyncIssue.fromJson(i as Map<String, dynamic>))
-                .toList());
+        failedCourses: failedCourses,
+        sourceResults: sourceResults,
+        issues: issues);
   }
   String get summary {
     if (phase != SyncPhase.partial) {
@@ -214,10 +259,10 @@ class SyncReport {
       return '作业数据已保存，但同步状态记录需要处理';
     }
     final hasDetail = sourceResults.any((s) => s.detailUnconfirmedCount > 0);
-    bool failed(SyncSourceResult source) => const {
-          SyncSourcePhase.partial,
-          SyncSourcePhase.failed
-        }.contains(source.phase);
+    bool failed(SyncSourceResult source) =>
+        !source.isNormalDegradation &&
+        const {SyncSourcePhase.partial, SyncSourcePhase.failed}
+            .contains(source.phase);
     final hasExam = incompleteExamSourceCount > 0;
     final hasClassroom = sourceResults
         .any((s) => s.source.startsWith('classroomActivity:') && failed(s));
@@ -240,6 +285,9 @@ class SyncReport {
       hasCourseNotice,
       hasOther,
     ].where((value) => value).length;
+    if (categories == 0 && failedCourses == 0 && issues.isEmpty) {
+      return '作业记录已更新';
+    }
     if (categories > 1) return '部分课业信息未更新';
     if (hasDetail) return '作业列表已更新，部分截止时间待确认';
     if (hasCourseNotice) return '部分课程通知未更新';

@@ -24,8 +24,9 @@ String pcRow(
         {String end = '2030-04-02 10:00',
         String start = '2030-04-01 09:00',
         String courseId = '7',
+        String examId = '99',
         int total = 1}) =>
-    '''<input id="courseId" value="$courseId"><input id="classId" value="11"><ul><li class="lookLi"><div class="titTxt"><p><a title="合成考试" onclick="show(0)">合成考试</a></p><span>$start 至 $end</span><span><strong>已完成<strong onclick="goTest('$courseId','99','2','2030','3','0','secret')">不得保留成绩</strong></strong></span></div></li></ul><script>page.showPage(0/9+1,Math.ceil($total/9),"changePage");</script>''';
+    '''<input id="courseId" value="$courseId"><input id="classId" value="11"><ul><li class="lookLi"><div class="titTxt"><p><a title="合成考试" onclick="show(0)">合成考试</a></p><span>$start 至 $end</span><span><strong>已完成<strong onclick="goTest('$courseId','$examId','2','2030','3','0','secret')">不得保留成绩</strong></strong></span></div></li></ul><script>page.showPage(0/9+1,Math.ceil($total/9),"changePage");</script>''';
 String notViewablePcRow() =>
     '''<input id="courseId" value="7"><input id="classId" value="11"><ul><li class="lookLi"><div class="titTxt"><p><a title="合成考试" onclick="WAY.box.show({'divid':'notAllowLookPaperWin'});">合成考试</a></p><span>2030-04-01 09:00 至 2030-04-02 10:00</span><span><strong>已完成</strong></span></div><div class="titOper"><span>查看</span></div></li></ul><script>page.showPage(0/9+1,Math.ceil(1/9),"changePage");</script>''';
 const accountEmpty =
@@ -756,9 +757,11 @@ void main() {
     expect(retained.lastSyncedAt.toUtc(), old.lastSyncedAt.toUtc());
     expect(f.middleReads, 1);
     final source = client.sourceResults.singleWhere((s) => s.source == 'exam');
-    expect(source.phase, SyncSourcePhase.partial);
-    expect(source.recordCount, 0);
+    expect(source.phase, SyncSourcePhase.success);
+    expect(source.isNormalDegradation, isTrue);
     expect(source.reasonCodes, contains('examPcSupplementUnavailable'));
+    expect(client.issues, isEmpty);
+    expect(client.lastSyncWarning, isNull);
   });
   test('empty phone list does not probe for a missing PC credential', () async {
     final f = ExamFixture()
@@ -804,7 +807,10 @@ void main() {
     expect(f.requests.where((r) => r.uri.path == '/mooc2-ans-vue/fanyav3/stu'),
         hasLength(1));
     expect(client.issues.where((i) => i.stage == 'exam'), isEmpty);
+    expect(client.lastSyncWarning, isNull);
     final source = client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(source.phase, SyncSourcePhase.success);
+    expect(source.isNormalDegradation, isTrue);
     expect(source.succeededCourses, 1);
     expect(source.failedCourses, 0);
     expect(source.reasonCodes, ['examPcSupplementUnavailable']);
@@ -996,5 +1002,203 @@ void main() {
         isNull);
     final restored = Assignment.fromJson(a.toJson());
     expect(restored.hasExamIdentity, isTrue);
+  });
+
+  test(
+      'empty phone list reads PC-only exam when redirected course entry provides examEnc',
+      () async {
+    final requests = <Uri>[];
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        requests.add(o.uri);
+        dynamic body = '';
+        var status = 200;
+        final headers = <String, List<String>>{};
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                {'courseId': '8', 'clazzId': '11', 'courseName': '仅PC考试课程'},
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            status = 302;
+            headers['location'] = [
+              'https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu?courseid=8&clazzid=11'
+            ];
+          case '/mooc2-ans/mycourse/stu':
+            body =
+                '<input id="workEnc" value="synthetic-work"><input id="examEnc" value="pc-only-enc">';
+          case '/mooc2/work/list':
+            body = '<div>暂无作业</div>';
+          case '/v2/apis/active/student/activelist':
+            body = {
+              'result': 1,
+              'data': {'activeList': []}
+            };
+          case '/phone/moocAnalysis/examList':
+            body = '<p class="blankTips">您好，本课程下暂未收到考试</p>';
+          case '/exam/test':
+            body = pcRow(courseId: '8', examId: '801');
+          case '/exam-ans/exam/test/examcode/examlist':
+            body = '<table class="dataTable"><tr><th>作答状态</th></tr></table>';
+          case '/pc/notice/getNoticeList':
+            body = {'status': true};
+          default:
+            throw StateError('unexpected ${o.uri.path}');
+        }
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: status,
+            data: body,
+            headers: Headers.fromMap(headers)));
+      }));
+
+    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final rows = await client.fetchAssignments();
+    final pcOnly = rows.singleWhere((a) => !a.exam!.noticeOnly);
+    expect(pcOnly.courseId, '8');
+    expect(pcOnly.exam!.examId, '801');
+    expect(pcOnly.timelineTrusted, isTrue);
+    expect(requests.where((u) => u.path == '/exam/test'), hasLength(1));
+    expect(requests.where((u) => u.path == '/visit/stucoursemiddle'),
+        hasLength(2));
+    expect(requests.where((u) => u.path == '/mooc2-ans/mycourse/stu'),
+        hasLength(1));
+    final examSource =
+        client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(examSource.phase, SyncSourcePhase.success);
+    expect(client.issues, isEmpty);
+  });
+
+  test(
+      'multi-course Vue deployment caps course entry probes and avoids request storm across refreshes',
+      () async {
+    final requests = <Uri>[];
+    final examCourseIds = {'2', '3', '4', '5'};
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        requests.add(o.uri);
+        dynamic body = '';
+        var status = 200;
+        final headers = <String, List<String>>{};
+        final courseId = o.uri.queryParameters['courseId'] ??
+            o.uri.queryParameters['courseid'];
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                for (var i = 1; i <= 10; i++)
+                  {'courseId': '$i', 'clazzId': '11', 'courseName': 'Vue课程$i'},
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            status = 302;
+            headers['location'] = [
+              'https://mooc2-ans.chaoxing.com/mooc2-ans-vue/fanyav3/stu?courseid=$courseId&clazzid=11'
+            ];
+          case '/mooc2-ans-vue/fanyav3/stu':
+            body = '<main>新版课程</main>';
+          case '/mooc-ans/work/api/task':
+            body = {'status': true, 'total': 0, 'data': []};
+          case '/v2/apis/active/student/activelist':
+            body = {
+              'result': 1,
+              'data': {'activeList': []}
+            };
+          case '/phone/moocAnalysis/examList':
+            body = examCourseIds.contains(courseId)
+                ? phoneRow('未开始', id: '90$courseId', courseId: courseId!)
+                : phoneEmpty;
+          case '/exam-ans/exam/test/examcode/examlist':
+            body = accountEmpty;
+          case '/pc/notice/getNoticeList':
+            body = {'status': true};
+          default:
+            throw StateError('unexpected ${o.uri.path}');
+        }
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: status,
+            data: body,
+            headers: Headers.fromMap(headers)));
+      }));
+
+    final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+    final first = await client.fetchAssignments();
+    expect(first.where((a) => a.isExam && !a.exam!.noticeOnly), hasLength(4));
+    final firstMiddle =
+        requests.where((u) => u.path == '/visit/stucoursemiddle').toList();
+    expect(firstMiddle, hasLength(3));
+    expect(
+        firstMiddle.map((u) => u.queryParameters['courseid']), ['1', '2', '3']);
+    final firstSource =
+        client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(firstSource.phase, SyncSourcePhase.success);
+    expect(firstSource.isNormalDegradation, isTrue);
+    expect(firstSource.reasonCodes, contains('examPcSupplementUnavailable'));
+    expect(client.issues, isEmpty);
+    expect(client.lastSyncWarning, isNull);
+
+    requests.clear();
+    final second = await client.fetchAssignments();
+    expect(second.where((a) => a.isExam && !a.exam!.noticeOnly), hasLength(4));
+    expect(requests.where((u) => u.path == '/visit/stucoursemiddle'), isEmpty);
+    final secondSource =
+        client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(secondSource.phase, SyncSourcePhase.success);
+    expect(secondSource.isNormalDegradation, isTrue);
+    expect(secondSource.reasonCodes, contains('examPcSupplementUnavailable'));
+    expect(client.issues, isEmpty);
+    expect(client.lastSyncWarning, isNull);
+  });
+
+  test(
+      'PC supplement circuit preserves trusted exam schedule and recovers to success',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    final f = ExamFixture()
+      ..courseCount = 2
+      ..pcTimeout = true;
+    final client = f.client();
+    final trustedStart = DateTime.utc(2030, 6, 1, 1);
+    final trustedEnd = DateTime.utc(2030, 6, 1, 3);
+    final prior = ChaoxingExamParser.make(
+      id: '99',
+      title: '合成考试',
+      courseId: '7',
+      clazzId: '11',
+      status: 'pending',
+      start: trustedStart,
+      end: trustedEnd,
+      location: '原考场A101',
+      now: DateTime.utc(2026, 11, 1),
+    );
+    await repo.mergeAndSave([prior]);
+    client.previousAssignments = {prior.id: prior};
+
+    final failedRows = await client.fetchAssignments();
+    await repo.mergeAndSave(failedRows, completeSync: false);
+    final retained =
+        (await repo.loadJournal()).singleWhere((row) => row.id == prior.id);
+    expect(retained.exam!.startAt?.toUtc(), trustedStart);
+    expect(retained.exam!.endAt?.toUtc(), trustedEnd);
+    expect(retained.exam!.startTrusted, isFalse);
+    expect(retained.exam!.location, '原考场A101');
+    expect(
+        client.issues.any((i) => i.stage == 'exam' && i.circuitOpen), isTrue);
+    expect(
+        client.sourceResults.singleWhere((s) => s.source == 'exam').reasonCodes,
+        containsAll(['examPcSupplementUnavailable', 'examCircuitPaused']));
+
+    f.pcTimeout = false;
+    final recovered = await client.fetchAssignments();
+    await repo.mergeAndSave(recovered,
+        completeSync: client.lastSyncWarning == null);
+    expect(client.issues.where((i) => i.circuitOpen), isEmpty);
+    expect(client.lastSyncWarning, isNull);
+    expect(client.sourceResults.singleWhere((s) => s.source == 'exam').phase,
+        SyncSourcePhase.success);
   });
 }

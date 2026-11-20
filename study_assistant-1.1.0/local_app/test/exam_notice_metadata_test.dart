@@ -499,4 +499,58 @@ void main() {
     expect(result.exam!.endTrusted, isFalse);
     expect(result.reminderAnchorAt, isNull);
   });
+
+  test('December sendTime and title timestamp agree on early January exam', () {
+    final now = DateTime.utc(2026, 12, 30);
+    final payload = noticePayload('考试时间：01-03 09:00 至 01-03 11:00',
+        title: '期末考试20261229120000', sendTime: '2026-12-29 12:00:00');
+    final row = ChaoxingExamParser.notices(payload, now: now)!.rows.single;
+    expect(row.exam!.startTrusted, isTrue);
+    expect(row.exam!.endTrusted, isTrue);
+    expect(row.exam!.startAt!.toUtc(), DateTime.utc(2027, 1, 3, 1));
+    expect(row.exam!.endAt!.toUtc(), DateTime.utc(2027, 1, 3, 3));
+  });
+
+  test(
+      'conflicting cross-year title timestamp stays unconfirmed for January exam',
+      () {
+    final now = DateTime.utc(2026, 12, 30);
+    final payload = noticePayload('考试时间：01-03 09:00 至 01-03 11:00',
+        title: '旧卷20251229120000', sendTime: '2026-12-29 12:00:00');
+    final row = ChaoxingExamParser.notices(payload, now: now)!.rows.single;
+    expect(row.exam!.startAt, isNull);
+    expect(row.exam!.endAt, isNull);
+    expect(row.timelineTrusted, isFalse);
+  });
+
+  test(
+      'yearless notice anchored by sendTime flags cross-year reschedule and conflict',
+      () {
+    final formal2025 = ChaoxingExamParser.make(
+      id: '99',
+      title: '跨年测试考试',
+      courseId: '7',
+      clazzId: '11',
+      status: 'pending',
+      now: DateTime.utc(2025, 6, 1),
+      start: DateTime.utc(2025, 6, 10, 0),
+      end: DateTime.utc(2025, 6, 10, 2),
+    );
+    final anchored2026 = parse(noticePayload(
+        '考试时间：06-10 08:00 至 06-10 10:00\r考试地点：新教学楼',
+        uuid: 'notice:2026',
+        sendTime: '2026-06-09 12:00:00'));
+    final anchored2025 = parse(noticePayload('考试时间：06-10 08:00 至 06-10 10:00',
+        uuid: 'notice:2025', sendTime: '2025-06-09 12:00:00'));
+    final display = ExamSchedulePresentation.build(formal2025,
+        records: [formal2025, anchored2026]);
+    expect(display.verificationNote, '有较新的通知与本机考试时间不一致，请核对官方最新安排');
+    expect(display.detailTimeLines,
+        contains('考试时间：2026-06-10 08:00 至 2026-06-10 10:00'));
+    final projected =
+        AssignmentQuery.projectDisplay([anchored2025, anchored2026]).single;
+    final conflictingRanges = AssignmentQuery.displayNoticeRanges(projected,
+        records: [anchored2025, anchored2026]);
+    expect(conflictingRanges, hasLength(2));
+  });
 }
