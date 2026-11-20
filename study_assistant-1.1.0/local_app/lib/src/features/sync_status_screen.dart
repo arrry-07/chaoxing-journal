@@ -82,7 +82,8 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                     ),
                   ),
                 ),
-                if (store.syncReport.failedCourses > 0 &&
+                if ((store.syncReport.failedCourses > 0 ||
+                        store.syncReport.incompleteExamSourceCount > 0) &&
                     lastSyncAt != null &&
                     store.hadCacheBeforeLastSync)
                   Card(

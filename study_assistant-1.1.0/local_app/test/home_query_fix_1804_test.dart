@@ -158,7 +158,7 @@ void main() {
     final store = _Store([
       _examNotice(),
       _formalExam(),
-      _work('pending', '未截止作业', DateTime.utc(2026, 11, 20)),
+      _work('pending', '未截止作业', DateTime.utc(2030, 1, 15)),
       _work('done', '已完成作业', DateTime.utc(2026, 11, 21), status: 'submitted'),
     ])
       ..homeFilters = const HomeFilters(

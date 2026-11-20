@@ -1126,16 +1126,22 @@ class _Journal {
 
   static Assignment _preserveFailedDeadline(Assignment item, Assignment prior) {
     var next = item;
-    if (next.publishedAt == null && prior.publishedAt != null) {
-      next = next.copyWith(publishedAt: prior.publishedAt);
-    }
-    final hasIncomingStart =
-        next.availableFromAt != null || next.availableFromText != null;
-    if (!hasIncomingStart) {
-      next = next.copyWith(
-        availableFromAt: prior.availableFromAt,
-        availableFromText: prior.availableFromText,
-      );
+    // Restored observations carry an epoch sync marker. Their portable times
+    // cannot become server-backed archive evidence merely because one later
+    // sync matches the identity; only an earlier genuine sync may be carried
+    // forward when the new response omits these fields.
+    if (prior.lastSyncedAt.millisecondsSinceEpoch > 0) {
+      if (next.publishedAt == null && prior.publishedAt != null) {
+        next = next.copyWith(publishedAt: prior.publishedAt);
+      }
+      final hasIncomingStart =
+          next.availableFromAt != null || next.availableFromText != null;
+      if (!hasIncomingStart) {
+        next = next.copyWith(
+          availableFromAt: prior.availableFromAt,
+          availableFromText: prior.availableFromText,
+        );
+      }
     }
     // Completed work sometimes stops exposing its deadline in a refreshed
     // list. That absence is not evidence that the previous time was wrong.

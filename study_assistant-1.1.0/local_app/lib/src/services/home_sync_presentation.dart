@@ -46,10 +46,7 @@ class HomeSyncPresentation {
                   issue.stage != 'courseNotice' &&
                   issue.stage != 'persistence' &&
                   !issue.stage.startsWith('exam')));
-      final hasExamFailure = report.sourceResults.any((source) =>
-          const {'exam', 'examAccount', 'examNotice'}.contains(source.source) &&
-          const {SyncSourcePhase.partial, SyncSourcePhase.failed}
-              .contains(source.phase));
+      final hasExamFailure = report.incompleteExamSourceCount > 0;
       final hasClassroomFailure = report.sourceResults.any((source) =>
           source.source.startsWith('classroomActivity:') &&
           const {SyncSourcePhase.partial, SyncSourcePhase.failed}

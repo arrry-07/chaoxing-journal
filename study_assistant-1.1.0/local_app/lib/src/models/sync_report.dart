@@ -132,6 +132,20 @@ class SyncReport {
   final List<SyncIssue> issues;
   final List<SyncSourceResult> sourceResults;
 
+  int get incompleteExamSourceCount {
+    const examSources = {'exam', 'examAccount', 'examNotice'};
+    return sourceResults
+        .where((source) =>
+            examSources.contains(source.source) &&
+            const {
+              SyncSourcePhase.partial,
+              SyncSourcePhase.failed,
+            }.contains(source.phase))
+        .map((source) => source.source)
+        .toSet()
+        .length;
+  }
+
   SyncReport copyWith({
     SyncPhase? phase,
     DateTime? attemptedAt,
@@ -204,9 +218,7 @@ class SyncReport {
           SyncSourcePhase.partial,
           SyncSourcePhase.failed
         }.contains(source.phase);
-    final hasExam = sourceResults.any((s) =>
-        const {'exam', 'examAccount', 'examNotice'}.contains(s.source) &&
-        failed(s));
+    final hasExam = incompleteExamSourceCount > 0;
     final hasClassroom = sourceResults
         .any((s) => s.source.startsWith('classroomActivity:') && failed(s));
     final hasCourseNotice =

@@ -49,7 +49,36 @@ class BackupSnapshot {
   static String ownerFor(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
 
-  static Map<String, dynamic> _record(Assignment a, String? retainedKey) {
+  static final RegExp _portableStartTextPattern = RegExp(
+      r'^(?:20\d{2}[-/年])?\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?:[:：]\d{2})?$');
+
+  static String? _portableStartText(String? value) {
+    final text = value?.trim();
+    return text != null && _portableStartTextPattern.hasMatch(text)
+        ? text
+        : null;
+  }
+
+  static bool _hasPortableTimeEvidence(Assignment record) =>
+      record.publishedAt != null ||
+      record.availableFromAt != null ||
+      _portableStartText(record.availableFromText) != null;
+
+  static int _schemaVersion(
+    List<Assignment> records,
+    CourseNoticeCollection notices,
+    CourseChapterCatalog chapters,
+  ) {
+    if (records.any(_hasPortableTimeEvidence)) return 7;
+    if (notices.items.isNotEmpty || chapters.byCourse.isNotEmpty) return 6;
+    return 5;
+  }
+
+  static Map<String, dynamic> _record(
+    Assignment a,
+    String? retainedKey, {
+    required bool includeTimeEvidence,
+  }) {
     return {
       'id': a.id,
       'source': a.source.name,
@@ -68,6 +97,12 @@ class BackupSnapshot {
       'deadlineAt': a.deadlineAt?.toUtc().toIso8601String(),
       'completedAt': a.completedAt?.toUtc().toIso8601String(),
       'lastSyncedAt': a.lastSyncedAt.toUtc().toIso8601String(),
+      if (includeTimeEvidence)
+        'publishedAt': a.publishedAt?.toUtc().toIso8601String(),
+      if (includeTimeEvidence)
+        'availableFromAt': a.availableFromAt?.toUtc().toIso8601String(),
+      if (includeTimeEvidence)
+        'availableFromText': _portableStartText(a.availableFromText),
     };
   }
 
@@ -77,9 +112,6 @@ class BackupSnapshot {
       key is String &&
       record.copyWith(id: key, clearSubmitUrl: true).courseTaskKey == key &&
       (record.courseTaskKey == null || record.courseTaskKey == key);
-
-  bool get _usesSchema6 =>
-      notices.items.isNotEmpty || chapters.byCourse.isNotEmpty;
 
   factory BackupSnapshot.create(
       {required String owner,
@@ -97,17 +129,20 @@ class BackupSnapshot {
       CourseChapterCatalog? chapters}) {
     final effectiveNotices = notices ?? CourseNoticeCollection();
     final effectiveChapters = chapters ?? CourseChapterCatalog();
-    final schema6 = effectiveNotices.items.isNotEmpty ||
-        effectiveChapters.byCourse.isNotEmpty;
+    final version =
+        _schemaVersion(records, effectiveNotices, effectiveChapters);
     return BackupSnapshot.decode(jsonEncode({
-      'schema': schema6 ? 6 : 5,
+      'schema': version,
       'notebook': (notebook ?? StudyNotebook()).toJson(),
       'personal': (personal ?? PersonalWorkspace()).toJson(portable: true),
-      if (schema6) 'notices': effectiveNotices.toJson(portable: true),
-      if (schema6) 'chapters': effectiveChapters.toJson(portable: true),
+      if (version >= 6) 'notices': effectiveNotices.toJson(portable: true),
+      if (version >= 6) 'chapters': effectiveChapters.toJson(portable: true),
       'owner': owner,
       'createdAt': createdAt.toUtc().toIso8601String(),
-      'records': records.map((a) => _record(a, courseTaskKeys[a.id])).toList(),
+      'records': records
+          .map((a) => _record(a, courseTaskKeys[a.id],
+              includeTimeEvidence: version >= 7))
+          .toList(),
       'hidden': hidden.toList(),
       'courses': courses.map((c) => c.toJson()).toList(),
       'unfollowed': unfollowed.toList(),
@@ -116,22 +151,27 @@ class BackupSnapshot {
     }));
   }
 
-  String encode() => jsonEncode({
-        'schema': _usesSchema6 ? 6 : 5,
-        'notebook': notebook.toJson(),
-        'personal': personal.toJson(portable: true),
-        if (_usesSchema6) 'notices': notices.toJson(portable: true),
-        if (_usesSchema6) 'chapters': chapters.toJson(portable: true),
-        'owner': owner,
-        'createdAt': createdAt.toUtc().toIso8601String(),
-        'records':
-            records.map((a) => _record(a, courseTaskKeys[a.id])).toList(),
-        'hidden': hidden.toList(),
-        'courses': courses.map((c) => c.toJson()).toList(),
-        'unfollowed': unfollowed.toList(),
-        'reminderOffsets': reminderOffsets,
-        'autoSyncIntervalMinutes': autoSyncIntervalMinutes,
-      });
+  String encode() {
+    final version = _schemaVersion(records, notices, chapters);
+    return jsonEncode({
+      'schema': version,
+      'notebook': notebook.toJson(),
+      'personal': personal.toJson(portable: true),
+      if (version >= 6) 'notices': notices.toJson(portable: true),
+      if (version >= 6) 'chapters': chapters.toJson(portable: true),
+      'owner': owner,
+      'createdAt': createdAt.toUtc().toIso8601String(),
+      'records': records
+          .map((a) => _record(a, courseTaskKeys[a.id],
+              includeTimeEvidence: version >= 7))
+          .toList(),
+      'hidden': hidden.toList(),
+      'courses': courses.map((c) => c.toJson()).toList(),
+      'unfollowed': unfollowed.toList(),
+      'reminderOffsets': reminderOffsets,
+      'autoSyncIntervalMinutes': autoSyncIntervalMinutes,
+    });
+  }
 
   static Never _bad() => throw const FormatException('备份文件格式不受支持或数据损坏');
   static Map<String, dynamic> _map(dynamic v, Set<String> keys) {
@@ -179,7 +219,7 @@ class BackupSnapshot {
     }
     final decoded = jsonDecode(plaintext);
     final version = decoded is Map ? decoded['schema'] : null;
-    if (version is! int || !{1, 2, 3, 4, 5, 6}.contains(version)) _bad();
+    if (version is! int || !{1, 2, 3, 4, 5, 6, 7}.contains(version)) _bad();
     final j = _map(decoded, {
       if (version >= 2) 'personal',
       if (version >= 3) 'notebook',
@@ -205,6 +245,9 @@ class BackupSnapshot {
         if (version >= 4) 'availability',
         if (version >= 4) 'courseTaskKey',
         if (version >= 5) 'exam',
+        if (version >= 7) 'publishedAt',
+        if (version >= 7) 'availableFromAt',
+        if (version >= 7) 'availableFromText',
         'id',
         'source',
         'courseName',
@@ -256,6 +299,15 @@ class BackupSnapshot {
           completedAt:
               r['completedAt'] == null ? null : _date(r['completedAt']),
           lastSyncedAt: _date(r['lastSyncedAt']),
+          publishedAt: version >= 7 && r['publishedAt'] != null
+              ? _date(r['publishedAt'])
+              : null,
+          availableFromAt: version >= 7 && r['availableFromAt'] != null
+              ? _date(r['availableFromAt'])
+              : null,
+          availableFromText: version >= 7 && r['availableFromText'] != null
+              ? _startText(r['availableFromText'])
+              : null,
           deadlineTrusted: false);
       if (record.exam != null &&
           (source != AssignmentSource.exam || !record.hasExamIdentity)) {
@@ -410,5 +462,11 @@ class BackupSnapshot {
       lifecycle: e['lifecycle'] as String,
       noticeOnly: e['noticeOnly'] as bool,
     );
+  }
+
+  static String _startText(dynamic value) {
+    final text = _text(value, max: 40);
+    if (text != text.trim() || _portableStartText(text) == null) _bad();
+    return text;
   }
 }

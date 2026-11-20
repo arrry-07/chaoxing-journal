@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/sync_status_screen.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
@@ -13,6 +15,10 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
+  setUpAll(() async {
+    await initializeDateFormatting('zh_CN');
+  });
+
   const verification = SyncIssue(SyncIssueKind.verificationRequired, '需要验证');
   const missingCourseCredential = SyncIssue(
       SyncIssueKind.schemaChanged, '示例课程 课程页未生成作业读取凭证，可在应用内检查访问',
@@ -78,6 +84,31 @@ void main() {
       ],
     );
     expect(report.summary, '作业记录已更新，部分课堂任务未更新');
+  });
+
+  test('incomplete exam count deduplicates repeated source rows', () {
+    const report = SyncReport(
+      phase: SyncPhase.partial,
+      sourceResults: [
+        SyncSourceResult(
+          source: 'exam',
+          phase: SyncSourcePhase.partial,
+        ),
+        SyncSourceResult(
+          source: 'exam',
+          phase: SyncSourcePhase.failed,
+        ),
+        SyncSourceResult(
+          source: 'examNotice',
+          phase: SyncSourcePhase.partial,
+        ),
+        SyncSourceResult(
+          source: 'examAccount',
+          phase: SyncSourcePhase.success,
+        ),
+      ],
+    );
+    expect(report.incompleteExamSourceCount, 2);
   });
 
   testWidgets('restored verification report without target asks for a refresh',
@@ -220,6 +251,162 @@ void main() {
     expect(find.textContaining('作业详情未识别'), findsOneWidget);
     expect(find.textContaining('涉及：课程信息待刷新'), findsOneWidget);
   });
+
+  for (final scenario in [
+    (
+      name: 'partial exam source without failed course count',
+      source: 'exam',
+      phase: SyncSourcePhase.partial,
+      failedCourses: 0,
+      reasonCodes: const ['schemaChanged'],
+    ),
+    (
+      name: 'failed account exam source',
+      source: 'examAccount',
+      phase: SyncSourcePhase.failed,
+      failedCourses: 1,
+      reasonCodes: const <String>[],
+    ),
+    (
+      name: 'partial exam notice source',
+      source: 'examNotice',
+      phase: SyncSourcePhase.partial,
+      failedCourses: 0,
+      reasonCodes: const ['parseFailure'],
+    ),
+  ]) {
+    testWidgets('${scenario.name} keeps the last complete records card visible',
+        (tester) async {
+      final report = SyncReport(
+        phase: SyncPhase.partial,
+        attemptedAt: DateTime.utc(2026, 11, 19, 4),
+        lastDataSuccessAt: DateTime.utc(2026, 11, 19, 3),
+        lastFullSuccessAt: DateTime.utc(2026, 11, 18, 3),
+        sourceResults: [
+          const SyncSourceResult(
+            source: 'courseWork',
+            phase: SyncSourcePhase.success,
+          ),
+          SyncSourceResult(
+            source: scenario.source,
+            phase: scenario.phase,
+            failedCourses: scenario.failedCourses,
+            reasonCodes: scenario.reasonCodes,
+          ),
+        ],
+      );
+      expect(report.failedCourses, 0);
+      expect(report.incompleteExamSourceCount, 1);
+      expect(report.summary, '作业记录已更新，部分考试信息未更新');
+
+      final store = await _storeWithCachedRecords(report);
+      expect(store.lastSyncAt, isNotNull);
+      expect(store.hadCacheBeforeLastSync, isTrue);
+      expect(
+        store.assignments.map((item) => item.title),
+        containsAll(['本次新作业', '上次考试']),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(home: SyncStatusScreen(store: store)),
+      );
+      expect(
+        find.byKey(const ValueKey('sync-cached-record-status')),
+        findsOneWidget,
+      );
+      expect(find.text('当前保留上次完整同步记录'), findsOneWidget);
+    });
+  }
+
+  testWidgets('successful exam source never shows the cached records card',
+      (tester) async {
+    final report = SyncReport(
+      phase: SyncPhase.partial,
+      attemptedAt: DateTime.utc(2026, 11, 19, 4),
+      lastDataSuccessAt: DateTime.utc(2026, 11, 19, 3),
+      lastFullSuccessAt: DateTime.utc(2026, 11, 18, 3),
+      sourceResults: const [
+        SyncSourceResult(
+          source: 'courseWork',
+          phase: SyncSourcePhase.success,
+        ),
+        SyncSourceResult(
+          source: 'exam',
+          phase: SyncSourcePhase.success,
+        ),
+      ],
+    );
+    final store = await _storeWithCachedRecords(report, includeNewWork: false);
+    await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
+    expect(
+      find.byKey(const ValueKey('sync-cached-record-status')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('not-enabled group history never shows the cached records card',
+      (tester) async {
+    final report = SyncReport(
+      phase: SyncPhase.partial,
+      attemptedAt: DateTime.utc(2026, 11, 19, 4),
+      lastDataSuccessAt: DateTime.utc(2026, 11, 19, 3),
+      lastFullSuccessAt: DateTime.utc(2026, 11, 18, 3),
+      sourceResults: const [
+        SyncSourceResult(
+          source: 'courseWork',
+          phase: SyncSourcePhase.success,
+        ),
+        SyncSourceResult(
+          source: 'groupHistory',
+          phase: SyncSourcePhase.notEnabled,
+        ),
+      ],
+    );
+    final store = await _storeWithCachedRecords(report, includeNewWork: false);
+    await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
+    expect(
+      find.byKey(const ValueKey('sync-cached-record-status')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('empty cache never shows the cached records card',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final report = SyncReport(
+      phase: SyncPhase.partial,
+      attemptedAt: DateTime.utc(2026, 11, 19, 4),
+      lastDataSuccessAt: DateTime.utc(2026, 11, 19, 3),
+      lastFullSuccessAt: DateTime.utc(2026, 11, 18, 3),
+      sourceResults: const [
+        SyncSourceResult(
+          source: 'exam',
+          phase: SyncSourcePhase.partial,
+          reasonCodes: ['schemaChanged'],
+        ),
+      ],
+    );
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('student');
+    await repo.mergeAndSave(const []);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('sync_report_v1', jsonEncode(report.toJson()));
+    final store = AssignmentStore(
+      repository: repo,
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    expect(store.lastSyncAt, isNotNull);
+    expect(store.hadCacheBeforeLastSync, isFalse);
+    await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
+    expect(
+      find.byKey(const ValueKey('sync-cached-record-status')),
+      findsNothing,
+    );
+  });
 }
 
 Future<void> _pumpRestoredReport(
@@ -236,6 +423,56 @@ Future<void> _pumpRestoredReport(
   addTearDown(store.dispose);
   await store.restoreSession();
   await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
+}
+
+Future<AssignmentStore> _storeWithCachedRecords(
+  SyncReport report, {
+  bool includeNewWork = true,
+}) async {
+  SharedPreferences.setMockInitialValues({});
+  final repo = LocalAssignmentRepository();
+  await repo.activateAccount('student');
+  final oldExam = Assignment(
+    id: 'cx:exam:7:11:old',
+    source: AssignmentSource.exam,
+    courseName: '编译原理',
+    title: '上次考试',
+    deadlineAt: null,
+    requirementsText: '',
+    status: 'pending',
+    lastSyncedAt: DateTime.utc(2026, 11, 18),
+    exam: ExamInfo(
+      examId: 'old',
+      courseId: '7',
+      clazzId: '11',
+      startAt: null,
+      endAt: null,
+      startTrusted: false,
+      endTrusted: false,
+      lifecycle: 'unknown',
+    ),
+  );
+  final newWork = Assignment(
+    id: 'cx:work:7:11:new',
+    courseName: '编译原理',
+    title: '本次新作业',
+    deadlineAt: DateTime.utc(2026, 12, 1),
+    requirementsText: '',
+    status: 'pending',
+    lastSyncedAt: DateTime.utc(2026, 11, 19, 3),
+  );
+  await repo.mergeAndSave([oldExam, if (includeNewWork) newWork]);
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString('sync_report_v1', jsonEncode(report.toJson()));
+  final store = AssignmentStore(
+    repository: repo,
+    sessionStore: _MemorySessionStore(),
+    notificationService: _NoopNotificationService(),
+    widgetSnapshotService: _NoopWidgetSnapshotService(),
+  );
+  addTearDown(store.dispose);
+  await store.restoreSession();
+  return store;
 }
 
 class _MemorySessionStore extends SecureSessionStore {
