@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
+import 'package:study_assistant_mobile/src/services/exam_schedule_presentation.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_exam_parser.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
@@ -97,6 +100,49 @@ void main() {
     expect(row.exam!.endAt, isNull);
     expect(AssignmentQuery.currentDisplay([row], now), [row]);
   });
+  test('completeTime is neither publication nor a year anchor', () {
+    for (final send in [null, '2027-06-09 12:00', 'invalid']) {
+      final payload = noticePayload('考试时间：06-10 08:00 至 06-10 10:00');
+      final raw = (payload['notices']['list'] as List).single as Map;
+      if (send == null) {
+        raw.remove('sendTime');
+      } else {
+        raw['sendTime'] = send;
+      }
+      raw['completeTime'] = '2026-06-09 12:00';
+      final row =
+          ChaoxingExamParser.notices(payload, now: DateTime.utc(2026, 11, 20))!
+              .rows
+              .single;
+      expect(row.publishedAt, isNull);
+      expect(row.exam!.startAt, isNull);
+      expect(row.exam!.endAt, isNull);
+      expect(row.timelineTrusted, isFalse);
+    }
+  });
+
+  test('an old title outside the anchor window keeps the year unconfirmed', () {
+    final now = DateTime.utc(2026, 11, 20);
+    final payload = noticePayload('考试时间：06-10 08:00 至 06-10 10:00',
+        title: '重考：新建试卷20250110080000', sendTime: '2026-06-09 12:00');
+    final row = ChaoxingExamParser.notices(payload, now: now)!.rows.single;
+    expect(row.publishedAt!.toUtc(), DateTime.utc(2026, 6, 9, 4));
+    expect(row.exam!.startAt, isNull);
+    expect(row.exam!.endAt, isNull);
+    expect(row.timelineTrusted, isFalse);
+    expect(AssignmentQuery.isArchivedPastTerm(row, now), isFalse);
+  });
+
+  test('compatible title dates can independently agree on both endpoints', () {
+    final now = DateTime.utc(2026, 11, 20);
+    final payload = noticePayload('考试时间：06-10 08:00 至 06-10 10:00',
+        title: '试卷20260608080000 更新20260609080000');
+    final row = ChaoxingExamParser.notices(payload, now: now)!.rows.single;
+    expect(row.publishedAt, isNull);
+    expect(row.exam!.startAt!.toUtc(), DateTime.utc(2026, 6, 10));
+    expect(row.exam!.endAt!.toUtc(), DateTime.utc(2026, 6, 10, 2));
+  });
+
   test('anchor cannot promote a reversed or distant range to trusted time', () {
     for (final range in [
       '06-10 10:00 至 06-10 08:00',
@@ -295,6 +341,86 @@ void main() {
     expect(notice.exam!.endAt!.toUtc(), DateTime.utc(2030, 4, 2, 3));
     expect(notice.timelineTrusted, isTrue);
   });
+  test(
+      'a newer notice is flagged for verification when the formal time stayed cached',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    final payload = noticePayload(
+        '考试时间：2026-11-26 09:00 至 2026-11-26 11:00\r考试地点：新地点',
+        sendTime: '2026-11-19 12:00');
+    final f = ExamFixture()
+      ..unsignedCoursePage = '<main>课程入口</main>'
+      ..emptyPhone = true
+      ..noticeRows = List<Map<String, dynamic>>.from(
+          (payload['notices'] as Map)['list'] as List);
+    final old = ChaoxingExamParser.make(
+      id: '99',
+      title: '旧考试',
+      courseId: '7',
+      clazzId: '11',
+      status: 'pending',
+      now: DateTime.utc(2026, 11, 17),
+      start: DateTime.utc(2026, 11, 18, 1),
+      end: DateTime.utc(2026, 11, 18, 3),
+    );
+    await repo.mergeAndSave([old]);
+    final client = f.client()..previousAssignments = {old.id: old};
+    await repo.mergeAndSave(await client.fetchAssignments(),
+        completeSync: false);
+    final records = await repo.loadJournal();
+    final formal = AssignmentQuery.projectDisplay(records).single;
+    expect(formal.id, old.id);
+    expect(formal.exam!.startAt?.toUtc(), old.exam!.startAt?.toUtc());
+    expect(formal.exam!.location, '新通知地点：新地点（请核对）');
+    final result = ExamSchedulePresentation.build(formal, records: records);
+    expect(result.verificationNote, '有较新的通知与本机考试时间不一致，请核对官方最新安排');
+    expect(result.detailTimeLines,
+        contains('考试时间：2026-11-26 09:00 至 2026-11-26 11:00'));
+  });
+
+  for (final explicitVenue in [false, true]) {
+    test(
+        'newer notice venue must come from its own text (explicit=$explicitVenue)',
+        () {
+      final formal = ChaoxingExamParser.make(
+        id: '99',
+        title: '缓存考试',
+        courseId: '7',
+        clazzId: '11',
+        status: 'pending',
+        now: DateTime.utc(2026, 11, 17),
+        start: DateTime.utc(2026, 11, 18, 1),
+        end: DateTime.utc(2026, 11, 18, 3),
+        location: explicitVenue ? '旧地点' : '',
+      );
+      final earlier = parse(noticePayload(
+          '考试时间：2026-11-18 09:00 至 2026-11-18 11:00\r考试地点：旧地点',
+          uuid: 'older-notice',
+          sendTime: '2026-11-14 12:00'));
+      final newer = parse(noticePayload(
+          '考试时间：2026-11-26 09:00 至 2026-11-26 11:00'
+          '${explicitVenue ? '\r考试地点：新地点' : ''}',
+          uuid: 'newer-notice',
+          sendTime: '2026-11-19 12:00'));
+      final records = [
+        formal,
+        ...ChaoxingExamParser.enrichNotices([earlier, newer])
+      ];
+      final projected = AssignmentQuery.projectDisplay(records).single;
+      final display =
+          ExamSchedulePresentation.build(projected, records: records);
+      expect(projected.exam!.location, formal.exam!.location);
+      expect(display.cardTimeLines,
+          ['开考 2026年11月18日 09:00', '结束 2026年11月18日 11:00']);
+      if (explicitVenue) {
+        expect(display.detailTimeLines, contains('新通知地点：新地点（请核对）'));
+      } else {
+        expect(display.detailTimeLines.join(), isNot(contains('新通知地点')));
+      }
+    });
+  }
+
   test('normal full client refresh enriches notice records before persistence',
       () async {
     final payload = noticePayload(full);

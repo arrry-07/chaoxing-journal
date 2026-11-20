@@ -610,22 +610,28 @@ class ChaoxingExamParser {
         }
         final publishedWall = published?.toUtc().add(const Duration(hours: 8));
         final titleDates = _noticeTitleDates([name, title], beijingNow);
-        final anchor = publishedWall ??
-            (titleDates.length == 1 ? titleDates.single : null);
-        if (anchor != null) {
-          final candidateStart = _yearlessNoticeTime(rawStart, anchor);
-          final candidateEnd = _yearlessNoticeTime(rawEnd, anchor);
+        ({DateTime? start, DateTime? end}) resolve(DateTime anchor) => (
+              start: _yearlessNoticeTime(rawStart, anchor),
+              end: _yearlessNoticeTime(rawEnd, anchor),
+            );
+        final titleRanges = {for (final date in titleDates) resolve(date)};
+        final candidate = publishedWall != null
+            ? resolve(publishedWall)
+            : titleRanges.length == 1
+                ? titleRanges.single
+                : null;
+        final candidateStart = candidate?.start, candidateEnd = candidate?.end;
+        if (candidateStart != null &&
+            candidateEnd != null &&
+            !candidateEnd.isBefore(candidateStart)) {
+          const beijingOffset = Duration(hours: 8);
+          final startYear = candidateStart.toUtc().add(beijingOffset).year;
+          final endYear = candidateEnd.toUtc().add(beijingOffset).year;
           final conflictingYears = publishedWall != null &&
-              titleDates.any((date) {
-                final titleStart = _yearlessNoticeTime(rawStart, date);
-                final titleEnd = _yearlessNoticeTime(rawEnd, date);
-                return (titleStart != null && titleStart != candidateStart) ||
-                    (titleEnd != null && titleEnd != candidateEnd);
-              });
-          if (candidateStart != null &&
-              candidateEnd != null &&
-              !conflictingYears &&
-              !candidateEnd.isBefore(candidateStart)) {
+              (titleRanges.any((range) => range != candidate) ||
+                  titleDates.any((date) =>
+                      date.year != startYear && date.year != endYear));
+          if (!conflictingYears) {
             start = candidateStart;
             end = candidateEnd;
           }
@@ -641,7 +647,7 @@ class ChaoxingExamParser {
               start: start,
               end: end,
               duration: _duration(_field(body, '答题时长|考试时长|时长')),
-              location: _field(body, '考试地点|考场地点|考试场地|地点|考场|教室|考试地址') ?? '',
+              location: noticeLocation(body) ?? '',
               noticeText: body.isEmpty
                   ? title
                   : body.substring(0, body.length > 4000 ? 4000 : body.length),
@@ -661,18 +667,14 @@ class ChaoxingExamParser {
 
   static DateTime? _noticePublishedAt(
       Map<dynamic, dynamic> item, DateTime now) {
-    for (final key in const ['sendTime', 'completeTime']) {
-      final raw = item[key];
-      if (raw is! String) continue;
-      final value = raw.trim();
-      final match = RegExp(
-              r'^(20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?)(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?$')
-          .firstMatch(value);
-      if (match == null) continue;
-      final time = chinaTime('${match[1]} ${match[2] ?? '00:00'}');
-      if (time != null && !time.isAfter(now)) return time;
-    }
-    return null;
+    final raw = item['sendTime'];
+    if (raw is! String) return null;
+    final match = RegExp(
+            r'^(20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?)(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?$')
+        .firstMatch(raw.trim());
+    if (match == null) return null;
+    final time = chinaTime('${match[1]} ${match[2] ?? '00:00'}');
+    return time != null && !time.isAfter(now) ? time : null;
   }
 
   static Set<DateTime> _noticeTitleDates(
@@ -738,6 +740,10 @@ class ChaoxingExamParser {
         .where((s) => s.isNotEmpty)
         .join('\n');
   }
+
+  /// Read a venue explicitly present in one notice's own text.
+  static String? noticeLocation(String body) =>
+      _field(body, '考试地点|考场地点|考试场地|地点|考场|教室|考试地址');
 
   static String? _field(String body, String names) {
     final fields = RegExp('^(?:$names)\\s*[:：]\\s*(.+?)\\s*\$', multiLine: true)

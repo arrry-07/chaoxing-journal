@@ -25,7 +25,7 @@ String pcRow(
         String start = '2030-04-01 09:00',
         String courseId = '7',
         int total = 1}) =>
-    '''<input id="courseId" value="$courseId"><input id="classId" value="11"><ul><li class="lookLi"><div class="titTxt"><p><a title="合成考试" onclick="show(0)">合成考试</a></p><span>$start 至 $end</span><span><strong>已完成<strong onclick="goTest('7','99','2','2030','3','0','secret')">不得保留成绩</strong></strong></span></div></li></ul><script>page.showPage(0/9+1,Math.ceil($total/9),"changePage");</script>''';
+    '''<input id="courseId" value="$courseId"><input id="classId" value="11"><ul><li class="lookLi"><div class="titTxt"><p><a title="合成考试" onclick="show(0)">合成考试</a></p><span>$start 至 $end</span><span><strong>已完成<strong onclick="goTest('$courseId','99','2','2030','3','0','secret')">不得保留成绩</strong></strong></span></div></li></ul><script>page.showPage(0/9+1,Math.ceil($total/9),"changePage");</script>''';
 String notViewablePcRow() =>
     '''<input id="courseId" value="7"><input id="classId" value="11"><ul><li class="lookLi"><div class="titTxt"><p><a title="合成考试" onclick="WAY.box.show({'divid':'notAllowLookPaperWin'});">合成考试</a></p><span>2030-04-01 09:00 至 2030-04-02 10:00</span><span><strong>已完成</strong></span></div><div class="titOper"><span>查看</span></div></li></ul><script>page.showPage(0/9+1,Math.ceil(1/9),"changePage");</script>''';
 const accountEmpty =
@@ -65,6 +65,10 @@ class ExamFixture {
   String pcMetadata = '';
   List<Map<String, dynamic>>? noticeRows;
   int examHttp = 200;
+  int courseCount = 1;
+  bool phoneTimeout = false, pcTimeout = false, phoneSecondPageFails = false;
+  String? examRetryAfter, verificationPath;
+  bool phoneSecondPageMalformed = false;
   int formalHttp = 200;
   bool partialPc = false;
   bool notViewablePc = false;
@@ -81,6 +85,14 @@ class ExamFixture {
       dynamic body = '';
       var status = 200;
       final headers = <String, List<String>>{};
+      if (o.uri.path == verificationPath) {
+        h.resolve(Response(
+          requestOptions: o,
+          statusCode: 200,
+          data: '<html><p>请完成安全验证</p></html>',
+        ));
+        return;
+      }
       switch (o.uri.path) {
         case '/mycourse/backclazzdata':
           if (legacy != null) {
@@ -89,7 +101,8 @@ class ExamFixture {
           }
           body = {
             'courses': [
-              {'courseId': '7', 'clazzId': '11', 'courseName': '合成课程'}
+              for (var i = 7; i < 7 + courseCount; i++)
+                {'courseId': '$i', 'clazzId': '11', 'courseName': '合成课程'}
             ]
           };
         case '/visit/stucoursemiddle':
@@ -130,14 +143,30 @@ class ExamFixture {
             if (!started.isCompleted) started.complete();
             await gate!.future;
           }
-          status = examHttp;
+          if (phoneTimeout) {
+            h.reject(DioException(
+                requestOptions: o, type: DioExceptionType.connectionTimeout));
+            return;
+          }
+          if (examRetryAfter != null) {
+            headers['retry-after'] = [examRetryAfter!];
+          }
+          status = phoneSecondPageFails && o.method == 'POST' ? 500 : examHttp;
+          final courseId = o.uri.queryParameters['courseId'] ?? '7';
           body = emptyPhone
               ? phoneEmpty
               : [
-                  phoneRow(phoneState, more: repeatPhone),
+                  phoneRow(phoneState,
+                      courseId: courseId,
+                      more: repeatPhone ||
+                          phoneSecondPageFails ||
+                          phoneSecondPageMalformed),
                   for (var i = 0; i < extraPhoneExams; i++)
                     phoneRow('未开始', id: '${100 + i}'),
                 ].join();
+          if (phoneSecondPageMalformed && o.method == 'POST') {
+            body = '<html>无法识别的列表</html>';
+          }
           if (unsafeRedirect) {
             status = 302;
             headers['location'] = [
@@ -145,11 +174,17 @@ class ExamFixture {
             ];
           }
         case '/exam/test':
+          if (pcTimeout) {
+            h.reject(DioException(
+                requestOptions: o, type: DioExceptionType.connectionTimeout));
+            return;
+          }
           body = badPc
               ? '<unknown>'
               : notViewablePc
                   ? notViewablePcRow()
-                  : pcRow() + pcMetadata;
+                  : pcRow(courseId: o.uri.queryParameters['courseId']!) +
+                      pcMetadata;
           if (partialPc) {
             if (o.uri.queryParameters['start'] == '0') {
               body = [
@@ -481,6 +516,211 @@ void main() {
             (r) => RegExp('testStart|lookPaper|submit').hasMatch(r.uri.path)),
         isFalse);
   });
+  test('phone circuit protects prior exams and resets on the next refresh',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    final f = ExamFixture()
+      ..courseCount = 3
+      ..phoneTimeout = true;
+    final client = f.client();
+    final old = [
+      for (final (id, status) in [('7', 'submitted'), ('9', 'pending')])
+        ChaoxingExamParser.make(
+          id: '99',
+          title: '旧考试',
+          courseId: id,
+          clazzId: '11',
+          status: status,
+          now: DateTime.utc(2026, 11, 1),
+        ).copyWith(
+            completedAt:
+                status == 'submitted' ? DateTime.utc(2026, 11, 1) : null),
+    ];
+    await repo.mergeAndSave(old);
+    client.previousAssignments = {for (final a in old) a.id: a};
+
+    final first = await client.fetchAssignments();
+    expect(first.where((a) => !a.exam!.noticeOnly), isEmpty);
+    await repo.mergeAndSave(first, completeSync: false);
+    final retained = {for (final a in await repo.loadJournal()) a.id: a};
+    for (final previous in old) {
+      final saved = retained[previous.id]!;
+      expect(saved.status, previous.status);
+      expect(saved.lastSyncedAt.toUtc(), previous.lastSyncedAt.toUtc());
+      expect(saved.completedAt?.toUtc(), previous.completedAt?.toUtc());
+    }
+    expect(
+        f.requests
+            .where((r) => r.uri.path.endsWith('/examList'))
+            .map((r) => r.uri.queryParameters['courseId']),
+        ['7', '7']);
+    final failures = client.issues.where((i) => i.stage == 'exam').toList();
+    expect(failures, hasLength(1));
+    expect(failures.single.circuitOpen, isTrue);
+    final source = client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(source.failedCourses, 3);
+    expect(source.reasonCodes,
+        containsAll(['examPhoneListFailed', 'examCircuitPaused']));
+
+    f.phoneTimeout = false;
+    f.requests.clear();
+    final recovered = await client.fetchAssignments();
+    expect(
+        recovered.singleWhere((a) => a.id == old.last.id).status, 'submitted');
+    expect(
+        f.requests
+            .where((r) => r.uri.path.endsWith('/examList'))
+            .map((r) => r.uri.queryParameters['courseId']),
+        ['7', '8', '9']);
+    expect(client.issues.where((i) => i.circuitOpen), isEmpty);
+  });
+
+  test('PC supplement circuit does not block the next phone course', () async {
+    final f = ExamFixture()
+      ..courseCount = 2
+      ..pcTimeout = true;
+    final c = f.client();
+    final rows = await c.fetchAssignments();
+    expect(rows.where((a) => !a.exam!.noticeOnly).map((a) => a.courseId),
+        unorderedEquals(['7', '8']));
+    expect(f.requests.where((r) => r.uri.path == '/exam/test'), hasLength(2));
+    expect(f.requests.where((r) => r.uri.path.endsWith('/examList')),
+        hasLength(2));
+    final exam = c.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(exam.recordCount, 2);
+    expect(
+        exam.reasonCodes,
+        containsAll([
+          'examPcSupplementUnavailable',
+          'examPcListFailed',
+          'examCircuitPaused'
+        ]));
+    expect(exam.reasonCodes, isNot(contains('examPhoneListFailed')));
+  });
+
+  test('phone pagination failure retains its first page and phase', () async {
+    final f = ExamFixture()..phoneSecondPageFails = true;
+    final c = f.client();
+    final rows = await c.fetchAssignments();
+    expect(rows.where((a) => !a.exam!.noticeOnly), hasLength(1));
+    expect(f.requests.where((r) => r.uri.path == '/exam/test'), isEmpty);
+    final exam = c.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(exam.reasonCodes, contains('examPhoneListFailed'));
+    expect(exam.reasonCodes, isNot(contains('examPcSupplementUnavailable')));
+  });
+
+  for (final phase in ['phone-page', 'phone-schema', 'pc-supplement']) {
+    test('an unread exam after $phase failure remains in the journal',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final repo = LocalAssignmentRepository();
+      final f = ExamFixture()
+        ..phoneSecondPageFails = phase == 'phone-page'
+        ..phoneSecondPageMalformed = phase == 'phone-schema'
+        ..pcTimeout = phase == 'pc-supplement';
+      final client = f.client();
+      final completedAt = DateTime.utc(2026, 11, 1);
+      final old = ChaoxingExamParser.make(
+        id: '101',
+        title: '旧考试',
+        courseId: '7',
+        clazzId: '11',
+        status: 'submitted',
+        now: completedAt,
+      ).copyWith(completedAt: completedAt);
+      await repo.mergeAndSave([old]);
+      client.previousAssignments = {old.id: old};
+      final incoming = await client.fetchAssignments();
+      expect(incoming.where((row) => row.id == old.id), isEmpty);
+      expect(incoming.any((row) => row.exam!.examId == '99'), isTrue);
+      await repo.mergeAndSave(incoming, completeSync: false);
+      final retained =
+          (await repo.loadJournal()).singleWhere((row) => row.id == old.id);
+      expect(retained.status, 'submitted');
+      expect(retained.completedAt?.toUtc(), completedAt);
+      expect(retained.lastSyncedAt.toUtc(), completedAt);
+    });
+  }
+
+  for (final (route, stage) in [
+    ('/phone/moocAnalysis/examList', 'exam'),
+    ('/exam-ans/exam/test/examcode/examlist', 'examAccount'),
+  ]) {
+    test('verification in $stage stops later exam and notice sources',
+        () async {
+      final f = ExamFixture()..verificationPath = route;
+      final client = f.client();
+      final rows =
+          await client.fetchAssignmentsWithOptions(collectCourseNotices: true);
+      expect(f.requests.last.uri.path, route);
+      expect(rows.any((row) => row.exam!.noticeOnly), isFalse);
+      expect(rows.isNotEmpty, stage == 'examAccount');
+      final issue = client.issues
+          .singleWhere((i) => i.kind == SyncIssueKind.verificationRequired);
+      expect(issue.stage, stage);
+      final paused = client.sourceResults
+          .where((s) => s.reasonCodes.contains('verificationPaused'));
+      expect(paused.map((s) => s.source),
+          containsAll(['examNotice', 'courseNotice']));
+      expect(paused.every((s) => s.phase == SyncSourcePhase.failed), isTrue);
+    });
+  }
+
+  test('account verification preserves unread exams with course identity',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repo = LocalAssignmentRepository();
+    final f = ExamFixture()
+      ..verificationPath = '/exam-ans/exam/test/examcode/examlist';
+    final client = f.client();
+    final stored = ChaoxingExamParser.make(
+      id: '105',
+      title: '账号考试',
+      courseId: '22',
+      clazzId: '33',
+      status: 'submitted',
+      now: DateTime.utc(2026, 11, 1),
+    );
+    await repo.mergeAndSave([stored]);
+    client.previousAssignments = {stored.id: stored};
+    final rows = await client.fetchAssignments();
+    expect(rows.map((row) => row.id), isNot(contains(stored.id)));
+    await repo.mergeAndSave(rows, completeSync: false);
+    final old =
+        (await repo.loadJournal()).singleWhere((row) => row.id == stored.id);
+    expect(old.status, 'submitted');
+    expect(old.lastSyncedAt.toUtc(), stored.lastSyncedAt.toUtc());
+    expect(old.courseKey, '22:33');
+  });
+
+  test('single course verification stops classroom and exam requests',
+      () async {
+    final f = ExamFixture()..verificationPath = '/mooc2/work/list';
+    final client = ChaoxingLocalClient(dio: f.dio, wait: (_) async {});
+    await expectLater(
+        client.fetchAssignmentsForCourse(courseId: '7', clazzId: '11'),
+        throwsA(isA<SyncReadException>().having(
+            (e) => e.issue.kind, 'kind', SyncIssueKind.verificationRequired)));
+    expect(f.requests.last.uri.path, f.verificationPath);
+    expect(client.sourceResults.map((s) => s.source),
+        containsAll(['courseWork', 'classroomActivity:35', 'exam']));
+  });
+
+  test('exam rate limit retains Retry-After and isolation metadata', () async {
+    final f = ExamFixture()
+      ..examHttp = 429
+      ..examRetryAfter = '3';
+    final c = f.client();
+    await c.fetchAssignments();
+    final issue = c.issues.singleWhere((i) => i.stage == 'exam');
+    expect(issue.kind, SyncIssueKind.rateLimited);
+    expect(issue.httpStatus, 429);
+    expect(issue.retryAfter, '3');
+    expect(issue.retryAfterSeconds, 3);
+    expect(issue.circuitOpen, isFalse);
+  });
+
   test('empty phone list still reads independent PC course exams', () async {
     final f = ExamFixture()..emptyPhone = true;
     final rows = await f.client().fetchAssignments();

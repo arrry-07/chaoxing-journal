@@ -155,7 +155,16 @@ void main() {
         records: [a, notice('考试时间：12-01 08:00 至 12-02 08:00')]);
     expect(
         p.cardTimeLines, ['开考 2026年11月16日 08:00', '结束 2026年11月30日 08:00:31']);
-    expect(p.verificationNote, isNull);
+    expect(p.detailTimeLines, [
+      '开考 2026年11月16日 08:00',
+      '结束 2026年11月30日 08:00:31',
+      '考试时间：12-01 08:00 至 12-02 08:00',
+    ]);
+    expect(p.verificationNote, '官方考试时间与原通知不一致，请以最新安排为准');
+    final matching = ExamSchedulePresentation.build(a,
+        records: [a, notice('考试时间：11-16 08:00 至 11-30 08:00')]);
+    expect(matching.verificationNote, isNull);
+    expect(matching.detailTimeLines, matching.cardTimeLines);
   });
   test('conflicting notifications are not chosen by read order or stitched',
       () {

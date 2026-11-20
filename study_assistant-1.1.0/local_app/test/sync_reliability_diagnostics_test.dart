@@ -4,7 +4,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_sync_diagnostics_exporter.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 
@@ -110,6 +112,163 @@ DioException _timeout(RequestOptions request) => DioException(
     );
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  for (final blockedStage in ['workList', 'detail', 'classroom']) {
+    test(
+        'verification in $blockedStage stops later sources and keeps the first probe',
+        () async {
+      const courseId = '987654321';
+      const clazzId = '112233';
+      const title = '秘密课程名称';
+      final requests = <RequestOptions>[];
+      const challenge = _Reply(200, '<html><p>请完成安全验证</p></html>');
+      final dio = _dioFor((request) {
+        switch (request.uri.path) {
+          case '/mycourse/backclazzdata':
+            return _courseList(
+                [_course(courseId, clazzId: clazzId, name: title)]);
+          case '/visit/stucoursemiddle':
+            return _v3Middle();
+          case '/mooc2-ans/coursemanagev3/stu-base-info':
+            return _v3Navigation();
+          case '/mooc-ans/work/api/task':
+            if (blockedStage == 'workList') return challenge;
+            if (blockedStage == 'detail') {
+              return _workPage(
+                  1, [_workRow(33, courseId: courseId, clazzId: clazzId)]);
+            }
+            return _workPage(0, []);
+          case '/work/task':
+          case '/v2/apis/active/student/activelist':
+            return challenge;
+          default:
+            return challenge;
+        }
+      }, requests);
+      final client = ChaoxingLocalClient(dio: dio, wait: (_) async {});
+      final sync = client.fetchAssignmentsWithOptions(
+          collectCourseNotices: true, enableTaskEngineProbe: true);
+      if (blockedStage == 'workList') {
+        await expectLater(sync, throwsA(isA<SyncReadException>()));
+      } else {
+        final rows = await sync;
+        expect(rows, hasLength(blockedStage == 'detail' ? 1 : 0));
+      }
+      expect(
+          requests.where((r) =>
+              r.uri.path.contains('/exam') ||
+              r.uri.path.contains('/notice') ||
+              r.uri.path.endsWith('/getData')),
+          isEmpty);
+      if (blockedStage != 'classroom') {
+        expect(
+            requests.where((r) => r.uri.path.endsWith('/activelist')), isEmpty);
+      }
+      final paused = client.sourceResults
+          .where((s) => s.reasonCodes.contains('verificationPaused'));
+      expect(
+          paused.map((s) => s.source),
+          containsAll([
+            'exam',
+            'examAccount',
+            'examNotice',
+            'courseNotice',
+            'taskEnginePlan',
+            if (blockedStage != 'classroom') 'classroomActivity:35',
+          ]));
+      expect(paused.every((s) => s.phase == SyncSourcePhase.failed), isTrue);
+
+      const channel = MethodChannel('study_assistant/external_links');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        expect(call.method, 'verifySession');
+        final probe = Uri.parse((call.arguments as Map)['url'] as String);
+        expect(probe.path, '/visit/stucoursemiddle');
+        expect(probe.queryParameters['courseid'], courseId);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      expect(await client.verifyInBrowser(), isFalse);
+
+      final encoded = ChaoxingSyncDiagnosticsExporter.exportJson(
+        appVersion: 'fixture',
+        report: SyncReport(issues: [
+          ...client.issues,
+          for (final delay in [1, 3])
+            SyncIssue(SyncIssueKind.rateLimited, 'secret URL',
+                stage: 'exam',
+                courseKey: '$courseId:$clazzId',
+                retryAfter: 'raw header',
+                retryAfterSeconds: delay,
+                circuitOpen: delay == 3),
+        ]),
+        phaseElapsedMs: client.diagnostics.phaseElapsedMs,
+        requestTimings: client.requestTimings,
+      );
+      final decoded = jsonDecode(encoded) as Map;
+      expect(decoded['verificationRequiredStage'], blockedStage);
+      final groups = (decoded['issueGroups'] as List).cast<Map>();
+      final exam = groups.singleWhere((g) => g['stage'] == 'exam');
+      expect(exam['circuitOpen'], isTrue);
+      expect(exam['maxRetryAfterSeconds'], 3);
+      expect(groups.first['circuitOpen'], isFalse);
+      for (final secret in [
+        courseId,
+        clazzId,
+        title,
+        'stucoursemiddle',
+        'https://',
+        'secret URL',
+        'raw header',
+        'cookie'
+      ]) {
+        expect(encoded, isNot(contains(secret)));
+      }
+    });
+  }
+
+  test(
+      'task engine verification retains typed issue and reports remaining courses',
+      () async {
+    final requests = <RequestOptions>[];
+    final dio = _dioFor((request) {
+      switch (request.uri.path) {
+        case '/mycourse/backclazzdata':
+          return _courseList([_course('1'), _course('2')]);
+        case '/visit/stucoursemiddle':
+          return _v3Middle();
+        case '/mooc2-ans/coursemanagev3/stu-base-info':
+          return _v3Navigation();
+        case '/mooc-ans/work/api/task':
+          return _workPage(0, []);
+        case '/v2/apis/active/student/activelist':
+          return const _Reply(200, {
+            'result': 1,
+            'data': {'activeList': []}
+          });
+        case '/v2/apis/active/getData':
+          return const _Reply(200, '<html><p>请完成安全验证</p></html>');
+        default:
+          throw StateError('unexpected endpoint ${request.uri.path}');
+      }
+    }, requests);
+    final client =
+        ChaoxingLocalClient(dio: dio, wait: (_) async {}, enableExams: false);
+    await client.fetchAssignmentsWithOptions(enableTaskEngineProbe: true);
+    expect(
+        requests.where((r) => r.uri.path.endsWith('/getData')), hasLength(1));
+    final issue = client.issues
+        .singleWhere((i) => i.kind == SyncIssueKind.verificationRequired);
+    expect(issue.stage, 'taskEnginePlan');
+    final probe =
+        client.sourceResults.singleWhere((s) => s.source == 'taskEnginePlan');
+    expect(probe.failedCourses, 2);
+    expect(probe.reasonCodes, contains('verificationPaused'));
+    expect(client.lastSyncWarning, contains('人工验证'));
+  });
+
   test(
       'detail timeouts retry once, open the detail circuit, and reset next sync',
       () async {

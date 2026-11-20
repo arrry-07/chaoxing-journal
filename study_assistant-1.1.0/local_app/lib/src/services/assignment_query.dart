@@ -1,5 +1,6 @@
 import 'package:lpinyin/lpinyin.dart';
 
+import '../local/chaoxing_exam_parser.dart';
 import '../models/assignment.dart';
 import '../models/home_filters.dart';
 import 'assignment_grouping.dart';
@@ -358,16 +359,7 @@ class AssignmentQuery {
           ? index.readNoticeRange(source.requirementsText)
           : _cachedNoticeRange(source.requirementsText);
       if (range == null) continue;
-      if ((exam.startTrusted &&
-              exam.startAt != null &&
-              range.start != null &&
-              !range.start!.matches(exam.startAt!)) ||
-          (exam.endTrusted &&
-              exam.endAt != null &&
-              range.end != null &&
-              !range.end!.matches(exam.endAt!))) {
-        continue;
-      }
+      if (noticeRangeConflicts(range, exam)) continue;
       final prior = ranges[range.key];
       if (prior == null || range.precision > prior.precision) {
         ranges[range.key] = range;
@@ -432,6 +424,28 @@ class AssignmentQuery {
         : null;
   }
 
+  /// Contradictory original notice times are display evidence only.
+  static bool noticeRangeConflicts(ExamNoticeRange range, ExamInfo formal) =>
+      (formal.startTrusted &&
+          formal.startAt != null &&
+          range.start?.matches(formal.startAt!) == false) ||
+      (formal.endTrusted &&
+          formal.endAt != null &&
+          range.end?.matches(formal.endAt!) == false);
+
+  static bool noticePublishedAfterFormalRead(
+          Assignment notice, Assignment formal) =>
+      notice.publishedAt?.isAfter(formal.lastSyncedAt) == true;
+
+  static String? explicitNoticeVenueLabel(Iterable<Assignment> notices) {
+    final locations = notices
+        .map((notice) =>
+            ChaoxingExamParser.noticeLocation(notice.requirementsText))
+        .whereType<String>()
+        .toSet();
+    return locations.length == 1 ? '新通知地点：${locations.single}（请核对）' : null;
+  }
+
   static Assignment _supplementDisplay(
       Assignment primary, List<Assignment> sources) {
     if (!primary.isExam || sources.length < 2) return primary;
@@ -482,15 +496,44 @@ class AssignmentQuery {
         durationMinutes: null,
       ));
     }
-    final contradictsFormal = !e.noticeOnly &&
+    final conflictingNotices = <Assignment>[];
+    if (!e.noticeOnly) {
+      for (final source in sources) {
+        if (source.exam?.noticeOnly != true) continue;
+        final range = _cachedNoticeRange(source.requirementsText);
+        if (range != null && noticeRangeConflicts(range, e)) {
+          conflictingNotices.add(source);
+        }
+      }
+    }
+    final rescheduled = !e.noticeOnly &&
         ((e.startTrusted &&
                 e.startAt != null &&
                 starts.any((v) => v != e.startAt!.toUtc())) ||
             (e.endTrusted &&
                 e.endAt != null &&
                 ends.any((v) => v != e.endAt!.toUtc())) ||
-            (e.lifecycle != 'unknown' && states.any((v) => v != e.lifecycle)));
+            conflictingNotices.isNotEmpty);
+    final contradictsFormal = rescheduled ||
+        (!e.noticeOnly &&
+            e.lifecycle != 'unknown' &&
+            states.any((v) => v != e.lifecycle));
     final canSupplement = !conflict && !contradictsFormal;
+    var location = e.location;
+    final newerNotices = conflictingNotices
+        .where((notice) => noticePublishedAfterFormalRead(notice, primary));
+    if (location.isEmpty && newerNotices.isNotEmpty) {
+      location = explicitNoticeVenueLabel(newerNotices) ?? location;
+    } else if (location.isEmpty && locations.length == 1) {
+      final noticeLocation = locations.single;
+      if (rescheduled) {
+        location = noticeLocation.startsWith('通知原地点：')
+            ? noticeLocation
+            : '通知原地点：$noticeLocation（已改期，请核对）';
+      } else if (canSupplement) {
+        location = noticeLocation;
+      }
+    }
     var start = e.startAt ?? (canSupplement ? uniqueStart : null);
     var end = e.endAt ?? (canSupplement ? uniqueEnd : null);
     if (start != null && end != null && end.isBefore(start)) {
@@ -506,9 +549,7 @@ class AssignmentQuery {
       endTrusted: e.endAt != null ? e.endTrusted : end != null,
       // A notice cannot resolve an unknown formal lifecycle without chronology.
       lifecycle: e.lifecycle, noticeOnly: e.noticeOnly,
-      location: canSupplement && e.location.isEmpty && locations.length == 1
-          ? locations.single
-          : e.location,
+      location: location,
       durationMinutes: e.durationMinutes ??
           (canSupplement && durations.length == 1 ? durations.single : null),
     ));

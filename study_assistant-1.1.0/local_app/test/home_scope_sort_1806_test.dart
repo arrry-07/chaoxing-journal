@@ -84,6 +84,7 @@ Assignment _exam(
   String? related,
   int? duration,
   String requirements = '',
+  String location = '',
 }) =>
     Assignment(
       id: notice
@@ -107,6 +108,7 @@ Assignment _exam(
         endTrusted: end != null,
         lifecycle: lifecycle,
         noticeOnly: notice,
+        location: location,
         durationMinutes: duration,
       ),
     );
@@ -333,6 +335,36 @@ void main() {
       expect(examIds, contains('cx:exam:8:9:9'));
       expect(examIds.where((id) => id.contains(':9')).length,
           greaterThanOrEqualTo(2));
+    });
+
+    test('rescheduled formal exam keeps its timeline and labels the old venue',
+        () {
+      final start = _bj(2026, 12, 5, 9, 0), end = _bj(2026, 12, 5, 11, 0);
+      final formal = _exam('84',
+          start: start, end: end, duration: 120, lifecycle: 'scheduled');
+      final notice = _exam('notice84',
+          notice: true,
+          related: '84',
+          location: '合成机房A301',
+          duration: 60,
+          requirements: '考试时间：12-04 09:00 至 12-04 10:00');
+      final records = [formal, notice];
+      final projected = AssignmentQuery.projectDisplay(records).single;
+      expect(AssignmentQuery.displaySources(projected, records), hasLength(2));
+      expect(projected.exam!.startAt, start);
+      expect(projected.exam!.endAt, end);
+      expect(projected.exam!.durationMinutes, 120);
+      expect(projected.exam!.lifecycle, 'scheduled');
+      expect(projected.timelineTrusted, isTrue);
+      expect(projected.exam!.location, '通知原地点：合成机房A301（已改期，请核对）');
+      expect(formal.exam!.location, isEmpty);
+      final display =
+          ExamSchedulePresentation.build(projected, records: records);
+      expect(display.cardTimeLines,
+          ['开考 2026年12月5日 09:00', '结束 2026年12月5日 11:00']);
+      expect(
+          display.detailTimeLines, contains('考试时间：12-04 09:00 至 12-04 10:00'));
+      expect(display.verificationNote, '官方考试时间与原通知不一致，请以最新安排为准');
     });
 
     test('archived classroom practice stays local history for every filter',

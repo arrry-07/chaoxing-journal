@@ -42,6 +42,19 @@ extension _ExamCollection on ChaoxingLocalClient {
       bool includeAccount = true,
       bool collectCourseNotices = false}) async {
     if (!enableExams) return const [];
+    if (_verificationRequiredThisSync) {
+      sourceResults = [
+        ...sourceResults,
+        _verificationPausedSource('exam', refs.length),
+        if (includeAccount) ...[
+          _verificationPausedSource('examAccount', 1),
+          _verificationPausedSource('examNotice', 1),
+          if (collectCourseNotices)
+            _verificationPausedSource('courseNotice', 1),
+        ],
+      ];
+      return const [];
+    }
     final rows = <Assignment>[];
     bool current() {
       if (_stopRequested) {
@@ -51,8 +64,10 @@ extension _ExamCollection on ChaoxingLocalClient {
       return generation == _sessionGeneration;
     }
 
+    var windowEnded = false;
     void checkWindow() {
-      if (shouldStop?.call() == true) {
+      if (windowEnded || shouldStop?.call() == true) {
+        windowEnded = true;
         throw const SyncReadException(SyncIssue(
             SyncIssueKind.partial, '检查窗口已结束，已保留此前取得的课业',
             stage: 'exam'));
@@ -64,16 +79,19 @@ extension _ExamCollection on ChaoxingLocalClient {
           error.issue.kind == SyncIssueKind.cancelled) {
         throw error;
       }
-      final reason = error is SyncReadException
-          ? error.issue.kind
-          : error is ChaoxingAuthenticationException
+      final issue = error is SyncReadException ? error.issue : null;
+      final reason = issue?.kind ??
+          (error is ChaoxingAuthenticationException
               ? SyncIssueKind.authExpired
-              : SyncIssueKind.schemaChanged;
+              : SyncIssueKind.schemaChanged);
       issues.add(SyncIssue(reason, _examFailureMessage(source, error),
           stage: source,
           courseKey: courseKey,
-          httpStatus:
-              error is SyncReadException ? error.issue.httpStatus : null));
+          httpStatus: issue?.httpStatus,
+          retryAfter: issue?.retryAfter,
+          retryAfterSeconds: issue?.retryAfterSeconds,
+          circuitOpen: issue?.circuitOpen ?? false,
+          elapsedMs: issue?.elapsedMs));
     }
 
     SyncSourceResult report(
@@ -99,19 +117,22 @@ extension _ExamCollection on ChaoxingLocalClient {
     var succeeded = 0, failed = 0;
     final examExtraReasons = <String>{};
     final skippedPcCourses = <String>{};
-    SyncIssueKind? blocked;
+    final preservePriorExamCourses = <String>{};
+    var blocked = false;
     for (final course in refs) {
       if (!current()) return const [];
       final courseKey = '${course.courseId}:${course.clazzId}';
       final courseProbe = _courseVerificationEntry(course);
-      if (blocked != null) {
+      if (blocked || windowEnded) {
         failed++;
+        preservePriorExamCourses.add(courseKey);
         continue;
       }
       final observed = <Assignment>[];
+      var phoneListFinished = false;
+      var failureReason = 'examPhoneListFailed';
       try {
         final seen = <String>{};
-        var finished = false;
         for (var page = 1; page <= 100; page++) {
           checkWindow();
           final response = page == 1
@@ -142,12 +163,12 @@ extension _ExamCollection on ChaoxingLocalClient {
           }
           observed.addAll(parsed.rows);
           if (!parsed.more) {
-            finished = true;
+            phoneListFinished = true;
             break;
           }
           if (parsed.rows.isEmpty) throw StateError('examEmptyMore');
         }
-        if (!finished) throw StateError('examPageLimit');
+        if (!phoneListFinished) throw StateError('examPageLimit');
         // Preserve independent PC results when this refresh already has a
         // validated exam credential. A phone-empty course needs no new probe.
         final cachedEntry = _syncCourseEntries?[
@@ -159,6 +180,7 @@ extension _ExamCollection on ChaoxingLocalClient {
         }
         // PC time evidence is supplemental. Failure retains phone identities.
         {
+          failureReason = 'examCourseEntryFailed';
           checkWindow();
           final middle = cachedEntry ??
               await _examListGet(courseProbe,
@@ -176,6 +198,7 @@ extension _ExamCollection on ChaoxingLocalClient {
             }
             throw StateError('examCredentialMissing');
           }
+          failureReason = 'examPcListFailed';
           final pcRows = <Assignment>[];
           final phoneIds = observed.map((a) => a.id).toSet();
           final pcSeen = <String>{};
@@ -239,38 +262,61 @@ extension _ExamCollection on ChaoxingLocalClient {
         succeeded++;
       } catch (error) {
         if (!current()) return const [];
-        if (observed.isNotEmpty) {
+        examExtraReasons.add(failureReason);
+        if (phoneListFinished) {
           examExtraReasons.add('examPcSupplementUnavailable');
+        }
+        final issue = error is SyncReadException ? error.issue : null;
+        final kind = issue?.kind ??
+            (error is ChaoxingAuthenticationException
+                ? SyncIssueKind.authExpired
+                : null);
+        final circuitOpen = issue?.circuitOpen ?? false;
+        if (circuitOpen) examExtraReasons.add('examCircuitPaused');
+        if (kind == SyncIssueKind.verificationRequired) {
+          examExtraReasons.add('verificationPaused');
         }
         failure('exam', error, courseKey: courseKey);
         failed++;
-        final kind = error is SyncReadException
-            ? error.issue.kind
-            : error is ChaoxingAuthenticationException
-                ? SyncIssueKind.authExpired
-                : null;
-        if (const {
-          SyncIssueKind.authExpired,
-          SyncIssueKind.verificationRequired,
-          SyncIssueKind.rateLimited
-        }.contains(kind)) {
-          blocked = kind;
+        // A failed supplement cannot establish that a missing PC row vanished.
+        // The remainder of a partial phone list is also unverified, even
+        // when the failure is structural rather than transient.
+        if (windowEnded ||
+            phoneListFinished ||
+            observed.isNotEmpty ||
+            circuitOpen ||
+            const {
+              SyncIssueKind.network,
+              SyncIssueKind.serverError,
+              SyncIssueKind.rateLimited,
+              SyncIssueKind.verificationRequired,
+              SyncIssueKind.authExpired,
+            }.contains(kind)) {
+          preservePriorExamCourses.add(courseKey);
         }
+        blocked = (circuitOpen && !phoneListFinished) ||
+            const {
+              SyncIssueKind.authExpired,
+              SyncIssueKind.verificationRequired,
+              SyncIssueKind.rateLimited,
+            }.contains(kind);
       }
       rows.addAll(observed);
     }
     if (!current()) return const [];
     final examResultIndex = sourceResults.length;
     final courseObservations = List<Assignment>.of(rows);
+    var accountVerificationPaused = false;
+    var noticeVerificationPaused = false;
     if (includeAccount) {
       final accountRows = <Assignment>[];
-      var accountFailed = false;
+      var accountFailed = _verificationRequiredThisSync;
       var accountSkippedNoId = 0;
       final accountExtraReasons = <String>{};
       try {
         int? total;
         final ids = <String>{};
-        for (var page = 0; page < 100; page++) {
+        for (var page = 0; !accountFailed && page < 100; page++) {
           checkWindow();
           final response = await _examListGet(
               Uri.https(
@@ -295,13 +341,18 @@ extension _ExamCollection on ChaoxingLocalClient {
             throw StateError('accountExamIncomplete');
           }
         }
-        if (accountRows.length + accountSkippedNoId != total) {
+        if (!accountFailed &&
+            accountRows.length + accountSkippedNoId != total) {
           throw StateError('accountExamIncomplete');
         }
       } catch (error) {
         if (!current()) return const [];
         failure('examAccount', error);
         accountFailed = true;
+      }
+      accountVerificationPaused = _verificationRequiredThisSync;
+      if (accountVerificationPaused) {
+        accountExtraReasons.add('verificationPaused');
       }
       final mergedAccount =
           ChaoxingExamParser.mergeAccountEvidence(rows, accountRows);
@@ -332,14 +383,14 @@ extension _ExamCollection on ChaoxingLocalClient {
       final notices = <Assignment>[];
       final courseNotices = <CourseNotice>[];
       final courseNoticeIds = <String>{};
-      var noticeFailed = false;
-      var courseNoticeFailed = false;
+      var noticeFailed = _verificationRequiredThisSync;
+      var courseNoticeFailed = noticeFailed;
       var courseNoticeWindowDone = false;
       var pageFeedsCourseNotices = false;
       try {
         final cursors = <String>{}, ids = <String>{};
         var cursor = '', done = false;
-        for (var page = 0; page < 100; page++) {
+        for (var page = 0; !noticeFailed && page < 100; page++) {
           pageFeedsCourseNotices =
               collectCourseNotices && !courseNoticeWindowDone && page < 5;
           checkWindow();
@@ -397,13 +448,14 @@ extension _ExamCollection on ChaoxingLocalClient {
             courseNoticeWindowDone = true;
           }
         }
-        if (!done) throw StateError('examNoticeLimit');
+        if (!noticeFailed && !done) throw StateError('examNoticeLimit');
       } catch (error) {
         if (!current()) return const [];
         failure('examNotice', error);
         noticeFailed = true;
         if (pageFeedsCourseNotices) courseNoticeFailed = true;
       }
+      noticeVerificationPaused = _verificationRequiredThisSync;
       rows.addAll(notices);
       if (collectCourseNotices) {
         _lastFetchedNotices = List.unmodifiable(courseNotices);
@@ -411,7 +463,8 @@ extension _ExamCollection on ChaoxingLocalClient {
       sourceResults = [
         ...sourceResults,
         report(
-            'examNotice', noticeFailed ? 0 : 1, noticeFailed ? 1 : 0, notices),
+            'examNotice', noticeFailed ? 0 : 1, noticeFailed ? 1 : 0, notices,
+            extraReasons: [if (noticeVerificationPaused) 'verificationPaused']),
         if (collectCourseNotices)
           SyncSourceResult(
             source: 'courseNotice',
@@ -426,7 +479,10 @@ extension _ExamCollection on ChaoxingLocalClient {
             unconfirmedCount:
                 courseNotices.where((n) => !n.publishedTrusted).length,
             reasonCodes: courseNoticeFailed
-                ? const ['listOrMetadataUnavailable']
+                ? [
+                    'listOrMetadataUnavailable',
+                    if (noticeVerificationPaused) 'verificationPaused',
+                  ]
                 : const [],
           ),
       ];
@@ -442,10 +498,20 @@ extension _ExamCollection on ChaoxingLocalClient {
           (!includeAccount && !keys.contains(old.courseKey))) {
         continue;
       }
+      if (old.exam!.noticeOnly
+          ? noticeVerificationPaused
+          : accountVerificationPaused) {
+        continue;
+      }
       if (!old.exam!.noticeOnly && skippedPcCourses.contains(old.courseKey)) {
         // Leave the PC record in the repository. Including it here would let
         // notification matching and return checks treat it as a fresh read.
         examExtraReasons.add('examPcSupplementUnavailable');
+        continue;
+      }
+      if (!old.exam!.noticeOnly &&
+          preservePriorExamCourses.contains(old.courseKey)) {
+        // No fresh personal observation was available for this record.
         continue;
       }
       rows.add(old.copyWith(
@@ -537,11 +603,9 @@ extension _ExamCollection on ChaoxingLocalClient {
       final response = await _readCourseEntryOrGet(uri,
           generation: generation,
           verificationProbe: verificationProbe,
-          requestKind: uri.path.contains('/examcode/examlist')
-              ? '账号考试'
-              : uri.path == '/visit/stucoursemiddle'
-                  ? '课程入口'
-                  : '课程考试');
+          requestKind: isCoursePage
+              ? '课程入口'
+              : ChaoxingLocalClient._requestKind(uri.path));
       if (generation != _sessionGeneration) return null;
       if (response == null || (response.statusCode ?? 0) < 300) return response;
       final location = response.headers.value('location');
