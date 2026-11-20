@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/sync_status_screen.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
@@ -250,6 +251,18 @@ void main() {
     expect(find.text('问题明细（1 组，共 1 条）'), findsOneWidget);
     expect(find.textContaining('作业详情未识别'), findsOneWidget);
     expect(find.textContaining('涉及：课程信息待刷新'), findsOneWidget);
+
+    store.chaoxingClient.courses = const [
+      ChaoxingCourseRef(courseId: '1', clazzId: '2', courseName: '无作业课程'),
+    ];
+    expect(store.courseAssignments, isEmpty);
+    await tester.pumpWidget(MaterialApp.router(
+      key: const ValueKey('with-fetched-courses'),
+      routerConfig: router,
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('涉及：无作业课程'), findsOneWidget);
+    expect(find.textContaining('涉及：课程信息待刷新'), findsNothing);
   });
 
   for (final scenario in [

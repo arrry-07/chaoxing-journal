@@ -518,6 +518,49 @@ void main() {
       expect(AssignmentQuery.dayKey(midnight), DateTime(2026, 11, 17));
     });
 
+    test('elapsed projected notice sorts last without becoming trusted', () {
+      final elapsed = _exam('elapsed',
+          notice: true, requirements: '考试时间：11-16 07:00 至 11-16 10:00');
+      final future = _exam('future-notice',
+          notice: true, requirements: '考试时间：11-16 07:00 至 11-16 10:01');
+      final work = _work('due',
+          course: '高等数学',
+          title: '待交作业',
+          due: _now.add(const Duration(days: 1)));
+      final records = [elapsed, work, future];
+      expect(
+          AssignmentQuery.sortHome(records, HomeSortOrder.deadlineAsc,
+              now: _now),
+          [future, work, elapsed]);
+      expect(
+          AssignmentQuery.sortHome(records, HomeSortOrder.deadlineDesc,
+              now: _now),
+          [work, future, elapsed]);
+      expect(AssignmentQuery.timelineBucketAt(elapsed, _now),
+          AssignmentDeadlineBucket.unconfirmed);
+      expect(AssignmentQuery.isArchivedPastTerm(elapsed, _now), isFalse);
+      expect(elapsed.exam!.endTrusted, isFalse);
+    });
+
+    test('an end-only projection stays in the middle tier', () {
+      final endOnly =
+          _exam('end-only', notice: true, requirements: '考试结束时间：11-16 09:00');
+      final overdue = _work('overdue',
+          course: '高等数学',
+          title: '逾期作业',
+          due: _now.subtract(const Duration(hours: 2)));
+      expect(AssignmentQuery.displayTimelineAt(endOnly, now: _now), isNull);
+      expect(AssignmentQuery.displayTimelineEndAt(endOnly, now: _now),
+          _now.subtract(const Duration(hours: 1)));
+      for (final order in [
+        HomeSortOrder.deadlineAsc,
+        HomeSortOrder.deadlineDesc
+      ]) {
+        expect(AssignmentQuery.sortHome([overdue, endOnly], order, now: _now),
+            [endOnly, overdue]);
+      }
+    });
+
     test('untrusted and conflicting times never join the time tiers', () {
       final formal = _exam('9',
           course: '线性代数', title: '冲突考试', courseId: '6', classId: '7');

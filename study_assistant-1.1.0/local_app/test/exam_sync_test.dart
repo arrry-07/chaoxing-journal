@@ -57,6 +57,8 @@ class ExamFixture {
   Dio? legacy;
   bool emptyPhone = false;
   bool redirectedMiddle = false, compoundNotice = false;
+  String? unsignedCoursePage;
+  bool vueExamRedirect = false;
   int middleReads = 0;
   String redirectedClass = '11';
   String redirectedExtras = '';
@@ -94,6 +96,7 @@ class ExamFixture {
           body =
               '<input id="workEnc" value="synthetic"><input id="examEnc" value="synthetic">';
           middleReads++;
+          if (unsignedCoursePage != null) body = unsignedCoursePage;
           // Force the exam reader to revisit the entry in redirect scenarios;
           // a complete first credential page is legitimately shared in-sync.
           if (redirectedMiddle && middleReads == 1) {
@@ -102,12 +105,18 @@ class ExamFixture {
           if (redirectedMiddle && middleReads > 1) {
             status = 302;
             headers['location'] = [
-              'https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu?courseid=7&clazzid=$redirectedClass$redirectedExtras'
+              'https://mooc2-ans.chaoxing.com${vueExamRedirect ? '/mooc2-ans-vue/fanyav3/stu' : '/mooc2-ans/mycourse/stu'}?courseid=7&clazzid=$redirectedClass$redirectedExtras'
             ];
           }
         case '/mooc2-ans/mycourse/stu':
           body =
               '<input id="workEnc" value="synthetic"><input id="examEnc" value="synthetic">';
+        case '/mooc2-ans-vue/fanyav3/stu':
+          body = '<main>新版课程</main>';
+        case '/mooc-ans/work/api/task':
+          if (unsignedCoursePage != null) {
+            body = {'status': true, 'total': 0, 'data': []};
+          }
         case '/mooc2/work/list':
           if (legacy != null) {
             h.resolve(await legacy!.fetch<dynamic>(o));
@@ -476,6 +485,67 @@ void main() {
     final f = ExamFixture()..emptyPhone = true;
     final rows = await f.client().fetchAssignments();
     expect(rows.where((a) => a.isExam && !a.exam!.noticeOnly).length, 1);
+    expect(f.middleReads, 1);
+  });
+  test('empty phone list does not probe for a missing PC credential', () async {
+    final f = ExamFixture()
+      ..unsignedCoursePage = '<main>课程入口</main>'
+      ..emptyPhone = true;
+    final client = f.client();
+    final rows = await client.fetchAssignments();
+    expect(rows.where((a) => a.isExam && !a.exam!.noticeOnly), isEmpty);
+    expect(f.middleReads, 1);
+    expect(f.requests.where((r) => r.uri.path == '/exam/test'), isEmpty);
+    final source = client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(source.phase, SyncSourcePhase.success);
+    expect(source.succeededCourses, 1);
+    expect(source.failedCourses, 0);
+    expect(
+        client.sourceResults.singleWhere((s) => s.source == 'courseWork').phase,
+        SyncSourcePhase.success);
+  });
+  test('an explicit course access denial stops the homework fallback',
+      () async {
+    final f = ExamFixture()
+      ..unsignedCoursePage = '<main>没有此页面访问权限</main>'
+      ..emptyPhone = true;
+    final client = f.client();
+    await client.fetchAssignments();
+    expect(f.requests.where((r) => r.uri.path == '/mooc-ans/work/api/task'),
+        isEmpty);
+    final issue = client.issues.singleWhere((i) => i.stage == 'coursePage');
+    expect(issue.kind, SyncIssueKind.forbidden);
+    expect(issue.courseKey, '7:11');
+  });
+  test('validated Vue redirect retains phone exam without a PC credential',
+      () async {
+    final f = ExamFixture()
+      ..redirectedMiddle = true
+      ..vueExamRedirect = true;
+    final client = f.client();
+    final rows = await client.fetchAssignments();
+    final exam = rows.singleWhere((a) => a.isExam && !a.exam!.noticeOnly);
+    expect(exam.exam!.examId, '99');
+    expect(exam.isCompleted, isTrue);
+    expect(exam.timelineTrusted, isFalse);
+    expect(f.requests.where((r) => r.uri.path == '/mooc2-ans-vue/fanyav3/stu'),
+        hasLength(1));
+    expect(client.issues.where((i) => i.stage == 'exam'), isEmpty);
+    final source = client.sourceResults.singleWhere((s) => s.source == 'exam');
+    expect(source.succeededCourses, 1);
+    expect(source.failedCourses, 0);
+    expect(source.reasonCodes, ['examPcSupplementUnavailable']);
+  });
+  test('Vue redirects still require the exact class identity', () async {
+    final f = ExamFixture()
+      ..redirectedMiddle = true
+      ..vueExamRedirect = true
+      ..redirectedClass = '12';
+    final client = f.client();
+    await client.fetchAssignments();
+    expect(f.requests.where((r) => r.uri.path == '/mooc2-ans-vue/fanyav3/stu'),
+        isEmpty);
+    expect(client.issues.where((i) => i.stage == 'exam'), isNotEmpty);
   });
   test('non-viewable completed PC row never fails a successful phone list',
       () async {

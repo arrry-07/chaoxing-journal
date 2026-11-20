@@ -34,11 +34,42 @@ class ChaoxingApiParser {
         _asList(roots['data']) ??
         _asList(roots['courses']) ??
         const [];
+    Iterable<dynamic> flattenChannels(List<dynamic> items) sync* {
+      const childKeys = ['channelList', 'children', 'childList', 'courseList'];
+      for (final item in items) {
+        final channel = _asMap(item);
+        final content = _asMap(channel?['content']) ?? channel;
+        final children = [
+          for (final key in childKeys) ...?_asList(channel?[key]),
+          if (content != channel)
+            for (final key in childKeys) ...?_asList(content?[key]),
+        ];
+        final markedFolder = content?['folderName'] != null ||
+            content?['datatype']?.toString() == '1' ||
+            channel?['cataName'] == '文件夹';
+        final hasCourse = content?['course'] != null ||
+            content?['courseId'] != null ||
+            content?['courseid'] != null ||
+            (!markedFolder &&
+                content?['id'] != null &&
+                (content?['clazz'] != null ||
+                    content?['clazzId'] != null ||
+                    content?['clazzid'] != null ||
+                    channel?['key'] != null));
+        final isFolder = markedFolder ||
+            childKeys.any((key) =>
+                _asList(channel?[key]) != null ||
+                _asList(content?[key]) != null);
+        if (hasCourse || !isFolder) yield item;
+        if (children.isNotEmpty) yield* flattenChannels(children);
+      }
+    }
+
     final courses = <ChaoxingCourseRef>[];
     final seen = <String>{};
     var rejected = 0;
     var duplicates = 0;
-    for (final item in channels) {
+    for (final item in flattenChannels(channels)) {
       final channel = _asMap(item);
       if (channel == null) {
         rejected++;
