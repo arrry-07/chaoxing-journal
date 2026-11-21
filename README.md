@@ -6,15 +6,11 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.8.22](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.22/chaoxing-journal-1.8.22.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.22) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.8.22+89](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.22/chaoxing-journal-1.8.22.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.22) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
-**1.8.22（89）已正式发布。** 支持在课业详情置顶至首页，已提交、隐藏或退出当前课业目录的记录会自动取消置顶。有开始时间但截止待确认的待交课业可在“未逾期”中找到。首页显示“今天”和“明天”，详情显示完整北京时间。详见[1.8.22 发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.22)。
-
-**1.8.14（81）** 统一霞鹜文楷，收淡「我的」页面分组色，调整日历让当天议程更早出现，并恢复统计分类细环和手绘课程图案。
-
-**1.8.13（80）** 完成方向 A「精制手账 · 纸墨分明」视觉与交互精修：首页改为无框两列时间轴、开放式搜索与筛选胶囊；课业详情用单张暖白信息面集中课程、标题、状态和北京时间，只保留一个学习通主入口，并按用途整理网页打开、手记工具与记录管理；底栏安全区统一适配。统计页保留时间窗、图例和各课程下钻，收淡卡片与课程图标，把完成率改成 `10dp` 低饱和鼠尾草绿单段细环。完整保留 1.8.12 的考试兼容、课程通知、章节任务点进度、账号隔离存储、备份 `schema 6` 与本机提醒能力。
+**1.8.22+89 已正式发布。**课业详情可置顶至首页，已提交、隐藏或退出未完成目录后自动退顶。有开始时间但截止待确认的待交课业纳入「未逾期」。按时间近到远时排在七天内与更远的有日期课业之间，远到近时排在有日期课业之后。首页本年作业日期省略年份，跨年保留年份，并按北京时间显示「今天」「明天」。详情保留完整年份。历次变更见[版本记录](CHANGELOG.md)。
 
 ## 功能
 
@@ -31,7 +27,7 @@
 
 ## 界面预览
 
-以下截图由 1.8.08 系列界面实际渲染，使用**合成样例数据**，不包含真实账号资料。它们用于说明布局，具体文案、数据与细节以当前安装版本为准；文档任务不为截图重做 UI。
+以下截图由 1.8.08 系列界面实际渲染，使用**合成样例数据**，不包含真实账号资料。它们用于说明布局，具体文案、数据与细节以当前安装版本为准。
 
 | 首页 | 统计 | 我的 |
 | --- | --- | --- |
@@ -88,7 +84,7 @@ docs/images/                   合成数据的界面预览
 docs/archive/                  历史验收与实施资料
 ```
 
-当前验证范围见[验收记录](docs/验收.md)，全部文档入口见[文档索引](docs/README.md)。本地安装包、设备截图、工具输出与签名材料不进入 Git 源码历史。
+当前工程基线见[项目状态](docs/ai-workflow/PROJECT_STATE.md)，最近两版证据见[验收导航](docs/验收.md)，开发按[文档路由](docs/README.md)查阅。本地安装包、设备截图、工具输出与签名材料不进入 Git 源码历史。
 
 ## 反馈与贡献
 
