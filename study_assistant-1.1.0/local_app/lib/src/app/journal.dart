@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 class Journal {
@@ -198,7 +197,23 @@ class JournalHeading extends StatelessWidget {
   }
 }
 
-// Draw small margin illustrations in the same pen, keyed to the subject.
+// Render a calm monogram badge keyed deterministically to the course name.
+@visibleForTesting
+String courseMonogram(String name) {
+  var s = name.trim();
+  final prefix = RegExp(
+    r'^(?:\s+|\d+|\([^)]*\)|（[^）]*）|\[[^\]]*\]|【[^】]*】|[·\-—_:：./]+)',
+  );
+  while (true) {
+    final m = prefix.firstMatch(s);
+    if (m == null) break;
+    s = s.substring(m.end);
+  }
+  final match = RegExp(r'[\u4e00-\u9fffA-Za-z]').firstMatch(s);
+  if (match == null) return '课';
+  return match.group(0)!.toUpperCase();
+}
+
 class CourseLabel extends StatelessWidget {
   const CourseLabel(this.name, {super.key});
   final String name;
@@ -217,99 +232,50 @@ class CourseMark extends StatelessWidget {
   const CourseMark(this.name, {super.key, this.size = 28});
   final String name;
   final double size;
-  @override
-  Widget build(BuildContext context) => ExcludeSemantics(
-      child: SizedBox.square(
-          dimension: size,
-          child: FittedBox(
-              child: CustomPaint(
-                  size: const Size.square(40),
-                  painter: _CourseSketch(name, Journal.of(context))))));
-}
 
-class _CourseSketch extends CustomPainter {
-  _CourseSketch(this.name, this.journal);
-  final JournalPalette journal;
-  final String name;
+  static const _swatches = <(Color bg, Color fg)>[
+    (Color(0xFFE8EEFD), Color(0xFF3456B8)),
+    (Color(0xFFE3F4F1), Color(0xFF1F7A6C)),
+    (Color(0xFFEFEAFB), Color(0xFF6246B5)),
+    (Color(0xFFFBF1DE), Color(0xFF8A5A12)),
+    (Color(0xFFFBE9EE), Color(0xFF9F3A4F)),
+    (Color(0xFFE7F3E6), Color(0xFF3C7A35)),
+    (Color(0xFFECEFF3), Color(0xFF4B5563)),
+    (Color(0xFFE3F1F8), Color(0xFF1F6B8E)),
+  ];
+
   @override
-  void paint(Canvas canvas, Size size) {
-    final pen = Paint()
-      ..color = journal.ink
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    final fill = Paint()..color = journal.sage;
-    canvas.translate(20, 20);
-    canvas.rotate(-0.09);
-    void line(double x, double y, double a, double b) =>
-        canvas.drawLine(Offset(x, y), Offset(a, b), pen);
-    if (RegExp('数|代数|几何|统计').hasMatch(name)) {
-      final ruler = Path()
-        ..moveTo(-15, 11)
-        ..lineTo(14, 11)
-        ..lineTo(12, -12)
-        ..close();
-      canvas.drawPath(ruler, fill);
-      canvas.drawPath(ruler, pen);
-      for (var i = 0; i < 5; i++) {
-        line(-6 + i * 4, 11, -6 + i * 4, 7);
-      }
-    } else if (RegExp('物理|天文|力学').hasMatch(name)) {
-      canvas.drawCircle(Offset.zero, 9, fill);
-      canvas.drawCircle(Offset.zero, 9, pen);
-      canvas.rotate(-math.pi / 7);
-      canvas.drawOval(const Rect.fromLTRB(-18, -4, 18, 4), pen);
-      canvas.drawCircle(const Offset(14, -10), 1.5, pen);
-    } else if (RegExp('化学|生物|实验').hasMatch(name)) {
-      final flask = Path()
-        ..moveTo(-4, -13)
-        ..lineTo(-4, -5)
-        ..lineTo(-13, 10)
-        ..quadraticBezierTo(-14, 14, -8, 14)
-        ..lineTo(10, 14)
-        ..quadraticBezierTo(15, 14, 12, 9)
-        ..lineTo(4, -5)
-        ..lineTo(4, -13);
-      canvas.drawPath(flask, fill);
-      canvas.drawPath(flask, pen);
-      line(-6, -13, 6, -13);
-      line(-8, 5, 8, 5);
-    } else if (RegExp('英语|外语|语言|写作|语文').hasMatch(name)) {
-      final feather = Path()
-        ..moveTo(-10, 12)
-        ..quadraticBezierTo(-9, -9, 14, -14)
-        ..quadraticBezierTo(16, 5, -10, 12)
-        ..close();
-      canvas.drawPath(feather, fill);
-      canvas.drawPath(feather, pen);
-      line(-14, 16, 9, -8);
-      line(0, 4, 6, 4);
-    } else {
-      final cover = Path()
-        ..moveTo(-13, -12)
-        ..lineTo(9, -13)
-        ..lineTo(13, 11)
-        ..lineTo(-10, 14)
-        ..close();
-      fill.color = [
-        journal.sage,
-        journal == JournalPalette.dark
-            ? journal.berryBg
-            : const Color(0xFFE8DDE6),
-        journal == JournalPalette.dark
-            ? journal.ochreBg
-            : const Color(0xFFECE3C9),
-      ][name.runes.fold(0, (int a, b) => a + b) % 3];
-      canvas.drawPath(cover, fill);
-      canvas.drawPath(cover, pen);
-      line(-8, -11, -5, 12);
-      line(-3, -4, 6, -5);
-      line(-2, 0, 4, -1);
-    }
+  Widget build(BuildContext context) {
+    final dark = Journal.of(context) == JournalPalette.dark;
+    final pair = _swatches[name.runes.fold(0, (int a, b) => a + b) % 8];
+    final bg = dark
+        ? Color.alphaBlend(
+            pair.$2.withValues(alpha: .22),
+            JournalPalette.dark.sheet,
+          )
+        : pair.$1;
+    final fg = dark ? Color.lerp(pair.$2, Colors.white, .45)! : pair.$2;
+    return ExcludeSemantics(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(size * .28),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          courseMonogram(name),
+          style: TextStyle(
+            color: fg,
+            fontSize: size * .5,
+            fontWeight: FontWeight.w600,
+            fontFamily: Journal.bodyFamily,
+            fontFamilyFallback: Journal.bodyFallback,
+            height: 1,
+          ),
+        ),
+      ),
+    );
   }
-
-  @override
-  bool shouldRepaint(_CourseSketch oldDelegate) =>
-      oldDelegate.name != name || oldDelegate.journal != journal;
 }
