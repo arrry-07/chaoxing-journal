@@ -1,7 +1,11 @@
 name: Flutter checks
 on:
   push:
+    branches: [main]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
   pull_request:
+    branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -38,7 +42,11 @@ jobs:
         run: flutter pub get --enforce-lockfile
       - name: Check release metadata and changed Dart formatting
         run: |
-          python3 tool/check_release_metadata.py
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/dev ]]; then
+            python3 tool/check_release_metadata.py --allow-dev
+          else
+            python3 tool/check_release_metadata.py
+          fi
           python3 tool/check_changed_format.py
       - name: Check Gitee distribution scripts
         working-directory: ${{ github.workspace }}
