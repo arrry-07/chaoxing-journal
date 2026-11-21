@@ -4,6 +4,30 @@ import 'package:study_assistant_mobile/src/local/local_assignment_repository.dar
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 
 void main() {
+  test('local pins follow the active account and clear with local data',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = LocalAssignmentRepository();
+    await repository.activateAccount('account-a');
+    expect(await repository.loadPinnedIds('account-a'), isEmpty);
+    await repository
+        .savePinnedIds({' work-2 ', 'work-1', '', 'work-2'}, 'account-a');
+    expect(await repository.loadPinnedIds('account-a'), {'work-1', 'work-2'});
+
+    await repository.activateAccount('account-b');
+    expect(await repository.loadPinnedIds('account-b'), isEmpty);
+    await expectLater(repository.loadPinnedIds('account-a'), throwsStateError);
+    await expectLater(repository.savePinnedIds({'wrong-account'}, 'account-a'),
+        throwsStateError);
+    await repository.savePinnedIds({'work-3'}, 'account-b');
+
+    await repository.activateAccount('account-a');
+    expect(await repository.loadPinnedIds('account-a'), {'work-1', 'work-2'});
+    await repository.clear();
+    await repository.activateAccount('account-b');
+    expect(await repository.loadPinnedIds('account-b'), isEmpty);
+  });
+
   test(
     'mergeAssignments skips previously completed assignments when refreshed',
     () {

@@ -13,6 +13,7 @@ import '../services/assignment_query.dart';
 import '../services/exam_schedule_presentation.dart';
 import '../services/assignment_web_link.dart';
 import '../services/external_link_service.dart';
+import 'assignment_list_screen.dart' show AssignmentRecoveryScope;
 import 'widgets/assignment_card.dart';
 import 'widgets/coursework_status_pill.dart';
 
@@ -36,6 +37,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     with WidgetsBindingObserver {
   final _links = ExternalLinkService();
   bool _opening = false, _hiding = false, _refreshing = false;
+  bool _togglingPin = false;
   String? _actionMessage;
   _DetailNoticeTarget? _actionMessageTarget;
   Timer? _clock;
@@ -186,6 +188,38 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
         _actionMessageTarget = _DetailNoticeTarget.records;
       });
     }
+  }
+
+  Future<void> _togglePin(Assignment assignment) async {
+    if (_togglingPin) return;
+    final store = widget.store;
+    final accountEpoch = store.accountEpoch;
+    final wasPinned = store.isPinned(assignment);
+    setState(() {
+      _togglingPin = true;
+      if (_actionMessageTarget == _DetailNoticeTarget.pin) {
+        _actionMessage = null;
+        _actionMessageTarget = null;
+      }
+    });
+    var saved = false;
+    try {
+      saved = await store.togglePin(assignment);
+    } catch (_) {
+      saved = false;
+    }
+    if (!mounted) return;
+    setState(() {
+      _togglingPin = false;
+      if (saved ||
+          widget.store != store ||
+          store.accountEpoch != accountEpoch ||
+          widget.assignmentId != assignment.id) {
+        return;
+      }
+      _actionMessage = wasPinned ? '取消置顶失败，请稍后重试。' : '置顶失败，请稍后重试。';
+      _actionMessageTarget = _DetailNoticeTarget.pin;
+    });
   }
 
   Future<void> _hide() async {
@@ -458,11 +492,38 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
             assignment.deadlineLabel,
         ];
         final hasTimeLine = assignment.isExam ? examLines.isNotEmpty : true;
-        final timeText = assignment.isExam
-            ? '${examLines.join('\n')}${hasExamTime ? '\n（北京时间）' : ''}'
-            : assignment.deadlineAt == null
-                ? assignment.deadlineLabel
-                : '${!assignment.deadlineTrusted || assignment.deadlineReadFailed ? '历史截止（未核实） ' : ''}${DateFormat('yyyy年M月d日 HH:mm', 'zh_CN').format(AssignmentQuery.beijing(assignment.deadlineAt!))}（北京时间）';
+        final String timeText;
+        if (assignment.isExam) {
+          timeText = '${examLines.join('\n')}${hasExamTime ? '\n（北京时间）' : ''}';
+        } else {
+          String fullBeijingTime(DateTime value) =>
+              '${DateFormat('yyyy年M月d日 HH:mm', 'zh_CN').format(AssignmentQuery.beijing(value))}（北京时间）';
+
+          final start = assignment.availableFromAt;
+          final startText = assignment.availableFromText?.trim() ?? '';
+          final deadline = assignment.deadlineAt;
+          final deadlinePrefix =
+              !assignment.deadlineTrusted || assignment.deadlineReadFailed
+                  ? '历史截止（未核实） '
+                  : '截止：';
+          timeText = [
+            if (start != null)
+              '开始：${fullBeijingTime(start)}'
+            else if (startText.isNotEmpty)
+              '开始：$startText',
+            if (deadline != null)
+              '$deadlinePrefix${fullBeijingTime(deadline)}'
+            else
+              assignment.deadlineLabel,
+          ].join('\n');
+        }
+        final pinTarget = original != null &&
+                !isHidden &&
+                AssignmentRecoveryScope.of(context) == null &&
+                widget.store.canTogglePin(original)
+            ? original
+            : null;
+        final pinned = pinTarget != null && widget.store.isPinned(pinTarget);
         final showOpeningNotice = _actionMessage != null &&
             _actionMessageTarget == _DetailNoticeTarget.opening;
         final showRecordsNotice = _actionMessage != null &&
@@ -478,21 +539,47 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
                 children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      key: const ValueKey('assignment-detail-back'),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        minimumSize: const Size(48, 48),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton.icon(
+                        key: const ValueKey('assignment-detail-back'),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: const Size(48, 48),
+                        ),
+                        onPressed: () => context.canPop()
+                            ? context.pop()
+                            : context.go('/assignments'),
+                        icon: const Icon(Icons.arrow_back_rounded, size: 20),
+                        label: const Text('返回'),
                       ),
-                      onPressed: () => context.canPop()
-                          ? context.pop()
-                          : context.go('/assignments'),
-                      icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                      label: const Text('返回'),
-                    ),
+                      if (pinTarget != null)
+                        TextButton.icon(
+                          key: const ValueKey('assignment-detail-pin'),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            minimumSize: const Size(48, 48),
+                            foregroundColor:
+                                pinned ? Journal.ink : Journal.muted,
+                          ),
+                          onPressed: _togglingPin || _hiding
+                              ? null
+                              : () => _togglePin(pinTarget),
+                          icon: Icon(
+                            pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                            size: 18,
+                          ),
+                          label: Text(pinned ? '已置顶' : '置顶'),
+                        ),
+                    ],
                   ),
+                  if (_actionMessageTarget == _DetailNoticeTarget.pin &&
+                      _actionMessage != null)
+                    _DetailActionNotice(
+                      key: const ValueKey('assignment-pin-result'),
+                      message: _actionMessage!,
+                    ),
                   const SizedBox(height: 8),
                   Material(
                     key: const ValueKey('assignment-detail-sheet'),
@@ -900,7 +987,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   }
 }
 
-enum _DetailNoticeTarget { opening, records, restore }
+enum _DetailNoticeTarget { opening, records, restore, pin }
 
 class _DetailActionNotice extends StatelessWidget {
   const _DetailActionNotice({super.key, required this.message});

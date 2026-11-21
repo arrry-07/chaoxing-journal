@@ -95,6 +95,7 @@ class _PreparedAssignment {
   _PreparedAssignment(this.assignment, this.index, DateTime now, this.displayAt,
       {DateTime? displayEndAt})
       : bucket = AssignmentQuery.timelineBucketAt(assignment, now),
+        _nearLimit = now.add(const Duration(days: 7)),
         elapsedNotice = assignment.exam?.startTrusted == false &&
             assignment.exam?.endTrusted == false &&
             !assignment.isCompleted &&
@@ -109,6 +110,7 @@ class _PreparedAssignment {
   final int index;
   final AssignmentDeadlineBucket bucket;
   final DateTime? displayAt;
+  final DateTime _nearLimit;
   final bool elapsedNotice;
   final _NaturalKey course;
   final _NaturalKey title;
@@ -133,9 +135,22 @@ class _PreparedAssignment {
 
   /// Keep elapsed notice projections in the last tier for home sorting only.
   /// This does not change the record's deadline bucket or timestamp trust.
-  int get homeTier {
-    if (bucket == AssignmentDeadlineBucket.overdue || elapsedNotice) return 2;
-    return displayAt != null ? 0 : 1;
+  int homeTier(HomeSortOrder order, {required bool prioritizeStartOnly}) {
+    if (bucket == AssignmentDeadlineBucket.overdue || elapsedNotice) return 4;
+    final time = displayAt;
+    if (time != null) {
+      return prioritizeStartOnly &&
+              order == HomeSortOrder.deadlineAsc &&
+              time.isAfter(_nearLimit)
+          ? 2
+          : 0;
+    }
+    if (prioritizeStartOnly &&
+        AssignmentQuery._isUndatedActiveWork(assignment) &&
+        AssignmentQuery._hasStartAnchor(assignment)) {
+      return 1;
+    }
+    return 3;
   }
 }
 
@@ -676,6 +691,17 @@ class AssignmentQuery {
         (exam.endTrusted && exam.endAt?.isAfter(now) == true);
   }
 
+  static bool _hasStartAnchor(Assignment assignment) =>
+      assignment.availableFromAt != null ||
+      assignment.availableFromText?.trim().isNotEmpty == true;
+
+  static bool _isUndatedActiveWork(Assignment assignment) =>
+      !assignment.isExam &&
+      assignment.isPendingConfirmed &&
+      assignment.status != 'overdue' &&
+      assignment.deadlineAt == null &&
+      (!assignment.deadlineReadFailed || _hasStartAnchor(assignment));
+
   /// Lightweight home querying only. It does not reinterpret submission or
   /// deadline states; untrusted deadline rows remain discoverable.
   static List<Assignment> filterHome(
@@ -735,7 +761,8 @@ class AssignmentQuery {
             : a.isExam
                 ? _displayExamNotExpired(a, now)
                 : bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
-                    bucket == AssignmentDeadlineBucket.confirmedNoDeadline,
+                    bucket == AssignmentDeadlineBucket.confirmedNoDeadline ||
+                    _isUndatedActiveWork(a),
       };
     }).toList();
   }
@@ -760,6 +787,7 @@ class AssignmentQuery {
     required DateTime now,
     List<Assignment> sourceRecords = const [],
     AssignmentDisplayIndex? displayIndex,
+    bool prioritizeStartOnly = true,
   }) {
     if (order == HomeSortOrder.grouped) {
       return List<Assignment>.of(records);
@@ -783,19 +811,22 @@ class AssignmentQuery {
     prepared.sort((left, right) {
       if (order == HomeSortOrder.deadlineAsc ||
           order == HomeSortOrder.deadlineDesc) {
-        final tier = left.homeTier.compareTo(right.homeTier);
+        final leftTier =
+            left.homeTier(order, prioritizeStartOnly: prioritizeStartOnly);
+        final rightTier =
+            right.homeTier(order, prioritizeStartOnly: prioritizeStartOnly);
+        final tier = leftTier.compareTo(rightTier);
         if (tier != 0) return tier;
-        if (left.homeTier == 1) {
-          return left.compareNameKeys(right, HomeSortOrder.courseName);
-        }
-        final leftTime = left.displayAt;
-        final rightTime = right.displayAt;
+        final leftTime =
+            leftTier == 1 ? left.assignment.availableFromAt : left.displayAt;
+        final rightTime =
+            leftTier == 1 ? right.assignment.availableFromAt : right.displayAt;
         if (leftTime == null && rightTime != null) return 1;
         if (rightTime == null && leftTime != null) return -1;
         if (leftTime != null && rightTime != null) {
           final time = leftTime.compareTo(rightTime);
           if (time != 0) {
-            final reverse = left.homeTier == 2
+            final reverse = leftTier == 4
                 ? order == HomeSortOrder.deadlineAsc
                 : order == HomeSortOrder.deadlineDesc;
             return reverse ? -time : time;

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
@@ -58,9 +59,13 @@ DateTime _chinaTime(DateTime now, int dayOffset, int hour) {
   );
 }
 
-String _heading(DateTime instant) {
+final _dateHeading = RegExp(r'^(?:\d{4}年)?\d+月\d+日 周[一二三四五六日]$');
+
+String _heading(DateTime instant, DateTime now, {bool fullYear = false}) {
   final day = instant.toUtc().add(const Duration(hours: 8));
-  return '${day.year}年${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}';
+  final today = now.toUtc().add(const Duration(hours: 8));
+  final year = fullYear || day.year != today.year ? '${day.year}年' : '';
+  return '$year${day.month}月${day.day}日 周${'一二三四五六日'[day.weekday - 1]}';
 }
 
 void main() {
@@ -100,23 +105,27 @@ void main() {
     final expected = {
       HomeSortOrder.grouped: (
         ['Alpha 作业', 'Beta 作业', 'Gamma 作业', 'Unknown 作业', 'Delta 作业'],
-        [_heading(dayOne), _heading(dayTwo)],
+        [_heading(dayOne, now), _heading(dayTwo, now)],
       ),
       HomeSortOrder.deadlineAsc: (
         ['Alpha 作业', 'Beta 作业', 'Gamma 作业', 'Unknown 作业', 'Delta 作业'],
-        [_heading(dayOne), _heading(dayTwo)],
+        [_heading(dayOne, now), _heading(dayTwo, now)],
       ),
       HomeSortOrder.deadlineDesc: (
         ['Gamma 作业', 'Beta 作业', 'Alpha 作业', 'Unknown 作业', 'Delta 作业'],
-        [_heading(dayTwo), _heading(dayOne)],
+        [_heading(dayTwo, now), _heading(dayOne, now)],
       ),
       HomeSortOrder.courseName: (
         ['Beta 作业', 'Gamma 作业', 'Alpha 作业', 'Unknown 作业', 'Delta 作业'],
-        [_heading(dayOne), _heading(dayTwo), _heading(dayOne)],
+        [
+          _heading(dayOne, now),
+          _heading(dayTwo, now),
+          _heading(dayOne, now),
+        ],
       ),
       HomeSortOrder.title: (
         ['Alpha 作业', 'Beta 作业', 'Gamma 作业', 'Unknown 作业', 'Delta 作业'],
-        [_heading(dayOne), _heading(dayTwo)],
+        [_heading(dayOne, now), _heading(dayTwo, now)],
       ),
     };
 
@@ -133,7 +142,7 @@ void main() {
       final headings = tester
           .widgetList<Text>(find.byWidgetPredicate((widget) =>
               widget is Text &&
-              RegExp(r'^\d{4}年\d+月\d+日 周[一二三四五六日]$').hasMatch(
+              _dateHeading.hasMatch(
                   widget.data ?? widget.textSpan?.toPlainText() ?? '')))
           .map((text) => text.data ?? text.textSpan?.toPlainText())
           .toList();
@@ -162,7 +171,7 @@ void main() {
     expect(
       find.byWidgetPredicate((widget) =>
           widget is Text &&
-          RegExp(r'^\d{4}年\d+月\d+日 周[一二三四五六日]$')
+          _dateHeading
               .hasMatch(widget.data ?? widget.textSpan?.toPlainText() ?? '')),
       findsNothing,
     );
@@ -209,7 +218,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: '$width/$scale');
-        expect(find.text(_heading(due)), findsOneWidget);
+        expect(find.text(_heading(due, now)), findsOneWidget);
 
         final action = find.byTooltip('在学习通内打开作业');
         await tester.scrollUntilVisible(
@@ -227,22 +236,47 @@ void main() {
     }
   });
 
-  testWidgets('date heading shows the year and emphasizes month and day',
+  testWidgets(
+      'home date headings keep only cross-year prefixes and mark Beijing today and tomorrow',
       (tester) async {
     final now = DateTime.now();
-    final due = _chinaTime(now, 1, 14);
+    final today =
+        _chinaTime(now, 1, 0).subtract(const Duration(microseconds: 1));
+    final tomorrow = _chinaTime(now, 1, 0).add(const Duration(minutes: 30));
+    final nextYear = DateTime.utc(
+      now.toUtc().add(const Duration(hours: 8)).year + 1,
+      4,
+      15,
+      4,
+    );
     final store = _Store()
       ..replaceAssignmentsForTest([
-        _work('heading', title: '日期标题样式', course: '课程', due: due),
+        _work('today', title: '当天作业', course: '课程', due: today),
+        _work('tomorrow', title: '次日作业', course: '课程', due: tomorrow),
+        _work('next-year', title: '跨年作业', course: '课程', due: nextYear),
       ]);
     addTearDown(store.dispose);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 1400);
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       MaterialApp(home: Scaffold(body: AssignmentListScreen(store: store))),
     );
-    final heading = tester.widget<Text>(find.text(_heading(due)));
-    final plain = heading.data ?? heading.textSpan?.toPlainText() ?? '';
-    expect(
-        plain, contains('${due.toUtc().add(const Duration(hours: 8)).year}年'));
+
+    final todayHeading = find.text(_heading(today, now));
+    final tomorrowHeading = find.text(_heading(tomorrow, now));
+    expect(find.text(_heading(today, now, fullYear: true)), findsNothing);
+    expect(find.text(_heading(nextYear, now, fullYear: true)), findsOneWidget);
+    for (final (label, badge) in [
+      (todayHeading, '今天'),
+      (tomorrowHeading, '明天'),
+    ]) {
+      final row = find.ancestor(of: label, matching: find.byType(Row)).first;
+      expect(
+          find.descendant(of: row, matching: find.text(badge)), findsOneWidget);
+    }
+
+    final heading = tester.widget<Text>(todayHeading);
     final spans = (heading.textSpan as TextSpan?)?.children;
     expect(spans, isNotNull);
     expect(
@@ -252,4 +286,109 @@ void main() {
       isTrue,
     );
   });
+
+  testWidgets('recovery keeps full work headings and the original time order',
+      (tester) async {
+    final now = DateTime.now();
+    final due = _chinaTime(now, 12, 14);
+    final later = _work('later', title: '远期截止', course: '课程', due: due)
+        .copyWith(status: 'unknown');
+    final startOnly = _work(
+      'start-only',
+      title: '仅有开始时间',
+      course: '课程',
+      due: null,
+      trusted: false,
+    ).copyWith(availableFromAt: now);
+    final store = _Store()..replaceAssignmentsForTest([later, startOnly]);
+    addTearDown(store.dispose);
+    final router = await _mountRoutedHome(tester, store);
+
+    List<String> cardIds() => tester
+        .widgetList<AssignmentCard>(find.byType(AssignmentCard))
+        .map((card) => card.assignment.id)
+        .toList();
+    expect(cardIds(), [startOnly.id, later.id]);
+
+    router.go('/assignments?scope=deadlinePending');
+    await tester.pumpAndSettle();
+    expect(cardIds(), [later.id, startOnly.id]);
+    expect(find.text(_heading(due, now, fullYear: true)), findsOneWidget);
+    expect(find.text('无日期与待确认'), findsNothing);
+  });
+
+  testWidgets('same-day exam retains its full heading in home and recovery',
+      (tester) async {
+    final now = DateTime.now();
+    final start = _chinaTime(now, 1, 9);
+    final work = _work(
+      'same-day',
+      title: '同日作业',
+      course: '课程',
+      due: start.subtract(const Duration(hours: 1)),
+    );
+    final exam = Assignment(
+      id: 'cx:exam:1:2:1',
+      source: AssignmentSource.exam,
+      title: '同日考试',
+      courseName: '课程',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: '1',
+        courseId: '1',
+        clazzId: '2',
+        lifecycle: 'scheduled',
+        startAt: start,
+        startTrusted: true,
+        endAt: start.add(const Duration(hours: 2)),
+        endTrusted: true,
+      ),
+    );
+    final store = _Store()..replaceAssignmentsForTest([work, exam]);
+    addTearDown(store.dispose);
+    final router = await _mountRoutedHome(tester, store);
+
+    final workHeading = _heading(start, now);
+    final examHeading = _heading(start, now, fullYear: true);
+    if (workHeading != examHeading) {
+      expect(find.text(workHeading), findsOneWidget);
+      expect(find.text('明天'), findsNWidgets(2));
+    } else {
+      expect(find.text('明天'), findsOneWidget);
+    }
+    expect(find.text(examHeading), findsOneWidget);
+
+    router.go('/assignments?scope=examUnknown');
+    await tester.pumpAndSettle();
+    expect(find.text(examHeading), findsOneWidget);
+    expect(find.text(work.title), findsNothing);
+    expect(find.text(exam.title), findsOneWidget);
+    expect(find.text('明天'), findsNothing);
+    expect(find.text('置顶'), findsNothing);
+  });
+}
+
+Future<GoRouter> _mountRoutedHome(
+  WidgetTester tester,
+  AssignmentStore store,
+) async {
+  final router = GoRouter(
+    initialLocation: '/assignments',
+    routes: [
+      GoRoute(
+        path: '/assignments',
+        builder: (_, __) => Scaffold(body: AssignmentListScreen(store: store)),
+      ),
+    ],
+  );
+  addTearDown(router.dispose);
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(390, 1400);
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+  await tester.pumpAndSettle();
+  return router;
 }
