@@ -344,6 +344,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             displayIndex: displayIndex,
             now: now,
             showFullDeadline: false,
+            showDivider: false,
             inPinnedSection: pinned,
             compact: store.display.compact,
             countdown: store.display.countdown,
@@ -383,7 +384,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             }
             if (pinned.isNotEmpty) {
               widgets
-                  .add(dayHeading('置顶', top: 10, tone: _DayHeadingTone.today));
+                  .add(dayHeading('置顶', top: 14, tone: _DayHeadingTone.today));
               widgets.addAll(pinned.map((item) => card(item, pinned: true)));
             }
           }
@@ -450,16 +451,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
               widgets.add(dayHeading(
                 heading,
-                top: widgets.isEmpty ? 10 : 14,
+                top: widgets.isEmpty ? 14 : 22,
                 tone: tone,
                 badge: tierBadge,
               ));
             }
             previous = effectiveKey;
-            final row = card(a);
-            widgets.add(widgets.isEmpty
-                ? Padding(padding: const EdgeInsets.only(top: 8), child: row)
-                : row);
+            widgets.add(card(a));
           }
           return widgets;
         }
@@ -598,7 +596,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               ),
             ),
             if (recoveryScope == null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               _homeActions(context, options, filtersActive, sortOrder),
               AnimatedSize(
                 duration: JournalLayout.motionDuration(context),
@@ -647,6 +645,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
                       style: Journal.metadata)),
             if (sortedItems.isNotEmpty) ...[
+              if (recoveryScope == null) const SizedBox(height: 16),
               ...timeline(sortedItems),
             ] else if (recoveryScope != null) ...[
               _emptyStateCard(
@@ -769,7 +768,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   heightFactor: 1,
                   child: Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
                     decoration: BoxDecoration(
                       color: Journal.sage,
                       borderRadius: BorderRadius.circular(16),
@@ -922,35 +921,43 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             style: baseStyle,
           );
     return Padding(
-      padding: EdgeInsets.only(top: top + 6, bottom: 2),
-      child: Row(
+      padding: EdgeInsets.only(top: top, bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Flexible(
-            child: labelWidget,
-          ),
-          if (badge != null) ...[
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              decoration: BoxDecoration(
-                color: tone == _DayHeadingTone.overdue
-                    ? Journal.berryBg
-                    : Journal.sage,
-                borderRadius: BorderRadius.circular(10),
+          Row(
+            children: [
+              Flexible(
+                child: labelWidget,
               ),
-              child: Text(
-                badge,
-                style: Journal.metadata.copyWith(
-                  fontSize: 11,
-                  height: 1.2,
-                  fontWeight: FontWeight.w600,
-                  color: tone == _DayHeadingTone.overdue
-                      ? Journal.berry
-                      : Journal.ink,
+              if (badge != null) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: tone == _DayHeadingTone.overdue
+                        ? Journal.berryBg
+                        : Journal.sage,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    badge,
+                    style: Journal.metadata.copyWith(
+                      fontSize: 11,
+                      height: 1.2,
+                      fontWeight: FontWeight.w600,
+                      color: tone == _DayHeadingTone.overdue
+                          ? Journal.berry
+                          : Journal.ink,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ],
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Divider(height: 1, thickness: 0.8, color: Journal.rule),
         ],
       ),
     );
@@ -1034,7 +1041,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       return width;
     }
 
-    final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 28;
+    final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 24;
     final sortWidth = 16 + 6 + labelWidth(sortLabel, sortStyle) + 16;
 
     Widget buildFilterPill({bool fullWidth = false}) {
@@ -1062,7 +1069,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     widthFactor: fullWidth ? null : 1,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 9),
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: filtersActive ? Journal.sage : Journal.parchment,
                         borderRadius: BorderRadius.circular(22),

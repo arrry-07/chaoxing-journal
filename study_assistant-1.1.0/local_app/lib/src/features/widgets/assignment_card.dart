@@ -20,6 +20,7 @@ class AssignmentCard extends StatelessWidget {
       this.compact = false,
       this.countdown = false,
       this.showFullDeadline = true,
+      this.showDivider = true,
       this.inPinnedSection = false,
       this.deadlinePending = false,
       this.previewOnly = false,
@@ -31,7 +32,7 @@ class AssignmentCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onOpenAssignment;
   final bool opening;
-  final bool showFullDeadline, inPinnedSection;
+  final bool showFullDeadline, inPinnedSection, showDivider;
   final bool deadlinePending, previewOnly, previewSaving;
   final bool compact, countdown;
 
@@ -341,8 +342,8 @@ class AssignmentCard extends StatelessWidget {
       );
     }
 
-    final verticalPad = compact ? 9.0 : 13.0;
-    const railGap = 10.0;
+    final verticalPad = compact ? 8.5 : 12.0;
+    const railGap = 12.0;
     final contentLeftInset = railWidth + railGap;
 
     final bodyColumn = Column(
@@ -482,14 +483,15 @@ class AssignmentCard extends StatelessWidget {
           key: ValueKey('assignment-card-gap-${a.id}'),
           height: 4,
         ),
-        Padding(
-          padding: EdgeInsets.only(left: contentLeftInset),
-          child: const Divider(
-            height: 1,
-            thickness: 0.8,
-            color: Journal.rule,
+        if (showDivider)
+          Padding(
+            padding: EdgeInsets.only(left: contentLeftInset),
+            child: const Divider(
+              height: 1,
+              thickness: 0.8,
+              color: Journal.rule,
+            ),
           ),
-        ),
       ],
     );
   }
