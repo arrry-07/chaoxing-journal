@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/journal.dart';
+import 'widgets/journal_grouped_card.dart';
 
 enum AgreementKind {
   service('服务协议'),
@@ -22,23 +23,34 @@ class AgreementScreen extends StatelessWidget {
     final sections = kind == AgreementKind.service ? _service : _privacy;
     return Scaffold(
       backgroundColor: journal.paper,
-      appBar: AppBar(title: Text(kind.title)),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final section in sections) ...[
-              Semantics(
-                header: true,
-                child: Text(section.$1, style: journal.section),
+      appBar: AppBar(
+        backgroundColor: journal.paper,
+        title: Text(kind.title),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+        children: [
+          for (var i = 0; i < sections.length; i++) ...[
+            if (i > 0) const SizedBox(height: 12),
+            Semantics(
+              header: true,
+              child: JournalGroupedCard(
+                title: sections[i].$1,
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                children: [
+                  SelectableText(
+                    sections[i].$2,
+                    style: journal.metadata.copyWith(
+                      color: journal.ink,
+                      fontSize: 14.5,
+                      height: 1.7,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              SelectableText(section.$2, style: const TextStyle(height: 1.7)),
-              const SizedBox(height: 28),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -59,7 +71,7 @@ const _service = [
   ),
   (
     '记录与退出',
-    '账号密码保存在本机安全存储，课程作业等记录保存在本机偏好文件。切换账号会在本机备份原账号记录，再隔离加载目标账号记录。退出登录会清理保存的登录信息、本机课程作业、隐藏状态、课程关注、提醒规则、同步记录及所有账号切换备份，并更新本机通知及小组件；不会删除学习通服务器上的数据。卸载或清除应用数据可能丢失本机记录，当前没有完整导出恢复功能。'
+    '账号密码保存在本机安全存储，课程作业等记录保存在本机偏好文件。切换账号会在本机备份原账号记录，再隔离加载目标账号记录。退出登录会清理保存的登录信息、本机课程作业、隐藏状态、课程关注、提醒规则、同步记录及所有账号切换备份，并更新本机通知及小组件；不会删除学习通服务器上的数据。卸载或清除应用数据可能丢失本机记录；应用内提供的加密备份仅补入部分本机课业与手记数据，不包含登录凭据与本地文件关联。'
   ),
   (
     '更新与反馈',

@@ -7,6 +7,7 @@ import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/coursework_status_pill.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
@@ -209,12 +210,12 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
     await tester.tap(find.text('第二次理论作业（办公自动化）'));
     await tester.pumpAndSettle();
 
     expect(find.byType(AssignmentDetailScreen), findsOneWidget);
-    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
     expect(find.textContaining('已逾期'), findsOneWidget);
     expect(find.text('第二次理论作业（办公自动化）'), findsOneWidget);
     expect(find.text('09-23 23:55'), findsNothing);
@@ -222,7 +223,7 @@ void main() {
     await tester.tap(find.text('返回'));
     await tester.pumpAndSettle();
     expect(find.byType(AssignmentListScreen), findsOneWidget);
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
   });
 
   testWidgets(
@@ -273,9 +274,9 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('期限'), findsOneWidget);
 
-    final dropdown = find.byType(DropdownButtonFormField<String>);
-    await tester.ensureVisible(dropdown);
-    await tester.tap(dropdown);
+    final courseRow = find.text('所选课程');
+    await tester.ensureVisible(courseRow);
+    await tester.tap(courseRow);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.textContaining('班级 classA'), findsWidgets);

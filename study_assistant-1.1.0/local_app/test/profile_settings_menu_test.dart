@@ -7,6 +7,7 @@ import 'package:study_assistant_mobile/src/features/assignment_changes_screen.da
 import 'package:study_assistant_mobile/src/features/profile_arrangements_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_records_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -114,12 +115,12 @@ void main() {
     await tester.tap(find.text('作业变化'));
     await tester.pumpAndSettle();
     expect(find.byType(AssignmentChangesScreen), findsOneWidget);
-    await tester.tap(find.text('返回'));
+    await tester.tap(find.byTooltip('返回'));
     await tester.pumpAndSettle();
     expect(find.byType(ProfileRecordsScreen), findsOneWidget);
   });
 
-  testWidgets('plan keeps the profile navigation destination selected',
+  testWidgets('plan hides floating nav bar and returns to profile tab',
       (tester) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     final store = _store();
@@ -132,10 +133,23 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    expect(
+      tester
+          .widget<JournalFloatingNavBar>(find.byType(JournalFloatingNavBar))
+          .selectedIndex,
+      3,
+    );
     router.push('/plan');
     await tester.pumpAndSettle();
-    final navigation = tester.widget<NavigationBar>(find.byType(NavigationBar));
-    expect(navigation.selectedIndex, 3);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
+    router.pop();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<JournalFloatingNavBar>(find.byType(JournalFloatingNavBar))
+          .selectedIndex,
+      3,
+    );
   });
 
   for (final width in [320.0, 390.0]) {

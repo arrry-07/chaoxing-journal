@@ -4,10 +4,18 @@ import '../app/journal.dart';
 import '../models/display_preferences.dart';
 import '../services/assignment_store.dart';
 import 'widgets/appearance_controls.dart';
+import 'widgets/journal_grouped_card.dart';
+import 'widgets/journal_picker_sheet.dart';
 
 class DisplaySettingsScreen extends StatelessWidget {
   const DisplaySettingsScreen({super.key, required this.store});
   final AssignmentStore store;
+
+  String _rangeLabel(WidgetRange range) => switch (range) {
+        WidgetRange.all => '全部未完成',
+        WidgetRange.today => '今天剩余',
+        WidgetRange.week => '未来7天（含今天）',
+      };
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -19,110 +27,98 @@ class DisplaySettingsScreen extends StatelessWidget {
             backgroundColor: journal.paper,
             appBar: AppBar(
               backgroundColor: journal.paper,
+              title: const Text('显示与小组件'),
             ),
             body: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
               children: [
-                const JournalHeading(
-                  '显示与小组件',
-                  eyebrow: 'CAMPUS JOURNAL   /   DISPLAY',
-                ),
-                const SizedBox(height: 8),
-                Text('调整课业时间轴密度与桌面小组件展示范围。', style: journal.metadata),
-                const SizedBox(height: 16),
-                AppearanceControls(store: store),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
+                JournalGroupedCard(
+                  title: '首页显示',
+                  dividerIndent: 16,
+                  children: [
+                    SwitchListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 2),
+                      title: Text('紧凑密度', style: journal.entryTitle),
+                      subtitle: Text(
+                        '缩小作业间距，保留文字与操作大小',
+                        style: journal.metadata,
+                      ),
+                      value: d.compact,
+                      onChanged: (v) => saveDisplaySetting(
+                        context,
+                        store,
+                        store.display.copyWith(compact: v),
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('首页显示', style: journal.entryTitle),
-                        const SizedBox(height: 4),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('紧凑密度'),
-                          subtitle: Text(
-                            '缩小作业间距，保留文字与操作大小',
-                            style: journal.metadata,
-                          ),
-                          value: d.compact,
-                          onChanged: (v) => saveDisplaySetting(context, store,
-                              store.display.copyWith(compact: v)),
-                        ),
-                        Divider(height: 1, color: journal.rule),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('显示倒计时'),
-                          subtitle: Text(
-                            '关闭时按日期显示；待确认截止仍保留提示',
-                            style: journal.metadata,
-                          ),
-                          value: d.countdown,
-                          onChanged: (v) => saveDisplaySetting(context, store,
-                              store.display.copyWith(countdown: v)),
-                        ),
-                      ],
+                    SwitchListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 2),
+                      title: Text('显示倒计时', style: journal.entryTitle),
+                      subtitle: Text(
+                        '关闭时按日期显示；待确认截止仍保留提示',
+                        style: journal.metadata,
+                      ),
+                      value: d.countdown,
+                      onChanged: (v) => saveDisplaySetting(
+                        context,
+                        store,
+                        store.display.copyWith(countdown: v),
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('桌面小组件', style: journal.entryTitle),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<WidgetRange>(
-                          key: ValueKey(d.widgetRange),
-                          initialValue: d.widgetRange,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: '桌面小组件范围',
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: WidgetRange.all,
-                              child: Text('全部未完成'),
-                            ),
-                            DropdownMenuItem(
-                              value: WidgetRange.today,
-                              child: Text('今天剩余'),
-                            ),
-                            DropdownMenuItem(
-                              value: WidgetRange.week,
-                              child: Text('未来7天（含今天）'),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) {
-                              saveDisplaySetting(
-                                context,
-                                store,
-                                store.display.copyWith(widgetRange: v),
-                              );
-                            }
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          '桌面小组件会按网格高度自动显示前 2、4 或 6 条已关注课程的未完成课业，并在标题栏显示当前范围总数，不跟随首页课程筛选。今天与未来7天仅包含可信且尚未截止或开考的项目；全部范围保留待确认与逾期项目。时间按北京时间，范围会在保存设置、同步或后台检查后自动更新。',
-                          style: journal.metadata,
-                        ),
-                      ],
-                    ),
-                  ),
+                  ],
                 ),
                 const SizedBox(height: 14),
-                Text(
-                  '显示偏好保存在此设备，不改变同步、提醒或课程关注。',
-                  style: journal.metadata,
+                JournalGroupedCard(
+                  title: '桌面小组件',
+                  infoTitle: '桌面小组件规则说明',
+                  infoItems: const [
+                    '桌面小组件按网格高度自动展示前 2、4 或 6 条已关注课程的未完成课业，不跟随首页课程筛选。',
+                    '“今天剩余”与“未来7天”仅包含时间可信且尚未截止或开考的项目；“全部未完成”保留待确认与逾期项。',
+                    '时间均以北京时间为准，在保存设置、同步或后台检查后自动更新。',
+                  ],
+                  children: [
+                    JournalGroupTile(
+                      key: ValueKey('widget-range-${d.widgetRange.name}'),
+                      icon: Icons.widgets_outlined,
+                      title: '桌面小组件范围',
+                      trailingText: _rangeLabel(d.widgetRange),
+                      onTap: () async {
+                        final picked =
+                            await showJournalPickerSheet<WidgetRange>(
+                          context,
+                          title: '桌面小组件范围',
+                          selectedValue: d.widgetRange,
+                          searchable: false,
+                          displayPrefs: d,
+                          options: const [
+                            JournalPickerOption(
+                              value: WidgetRange.all,
+                              label: '全部未完成',
+                              subtitle: '保留待确认与已逾期项目',
+                            ),
+                            JournalPickerOption(
+                              value: WidgetRange.today,
+                              label: '今天剩余',
+                              subtitle: '仅含今天内未截止或未开考的可信项目',
+                            ),
+                            JournalPickerOption(
+                              value: WidgetRange.week,
+                              label: '未来7天（含今天）',
+                              subtitle: '仅含 7 天内可信且尚未截止的项目',
+                            ),
+                          ],
+                        );
+                        if (picked != null && context.mounted) {
+                          await saveDisplaySetting(
+                            context,
+                            store,
+                            store.display.copyWith(widgetRange: picked),
+                          );
+                        }
+                      },
+                    ),
+                  ],
                 ),
               ],
             ),

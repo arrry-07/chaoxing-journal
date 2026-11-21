@@ -1,36 +1,23 @@
 import 'package:flutter/material.dart';
 
 import '../../app/journal.dart';
+import 'journal_grouped_card.dart';
 
 class ProfileMenuCard extends StatelessWidget {
   const ProfileMenuCard({
     super.key,
-    required this.title,
+    this.title,
     required this.children,
   });
 
-  final String title;
+  final String? title;
   final List<Widget> children;
 
   @override
-  Widget build(BuildContext context) => Card(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-              child: Text(
-                title,
-                style: Journal.of(context).entryTitle,
-              ),
-            ),
-            for (var index = 0; index < children.length; index++) ...[
-              children[index],
-              if (index != children.length - 1)
-                const Divider(height: 1, indent: 56, endIndent: 16),
-            ],
-          ],
-        ),
+  Widget build(BuildContext context) => JournalGroupedCard(
+        title: title,
+        dividerIndent: 52,
+        children: children,
       );
 }
 
@@ -41,7 +28,7 @@ class ProfileMenuTile extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.compactSubtitle = false,
-    this.trailing = Icons.chevron_right,
+    this.trailing = Icons.chevron_right_rounded,
     this.onTap,
   });
 
@@ -53,20 +40,13 @@ class ProfileMenuTile extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
-  Widget build(BuildContext context) => ListTile(
-        leading: Icon(icon, color: Journal.of(context).ink),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: subtitle == null ? null : Text(subtitle!),
-        subtitleTextStyle: compactSubtitle
-            ? Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontSize: 12,
-                  height: 1.4,
-                  color: Journal.of(context).muted,
-                )
-            : null,
+  Widget build(BuildContext context) => JournalGroupTile(
+        icon: icon,
+        title: title,
+        subtitle: subtitle,
         trailing: onTap == null
             ? null
-            : Icon(trailing, color: Journal.of(context).muted),
+            : Icon(trailing, size: 20, color: Journal.of(context).muted),
         onTap: onTap,
       );
 }

@@ -274,7 +274,7 @@ void main() {
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
     await t.tap(find.text('搜索与筛选'));
     await t.pumpAndSettle();
-    await t.tap(find.byType(DropdownButtonFormField<String>));
+    await t.tap(find.text('所选课程'));
     await t.pumpAndSettle();
     await t.tap(find.byKey(const ValueKey('course-option-1:2')));
     await t.pumpAndSettle();

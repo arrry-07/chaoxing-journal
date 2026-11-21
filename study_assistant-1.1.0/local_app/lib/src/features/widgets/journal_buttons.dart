@@ -6,6 +6,7 @@ import '../../app/journal_motion.dart';
 class JournalPrimaryButton extends StatefulWidget {
   const JournalPrimaryButton({
     super.key,
+    this.buttonKey,
     required this.label,
     required this.onPressed,
     this.icon,
@@ -15,6 +16,7 @@ class JournalPrimaryButton extends StatefulWidget {
     this.height = 48.0,
   });
 
+  final Key? buttonKey;
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
@@ -69,12 +71,14 @@ class _JournalPrimaryButtonState extends State<JournalPrimaryButton> {
 
     final Widget button = widget.icon != null && !widget.loading
         ? FilledButton.icon(
+            key: widget.buttonKey,
             onPressed: enabled ? widget.onPressed : null,
             style: style,
             icon: Icon(widget.icon, size: 18),
             label: child,
           )
         : FilledButton(
+            key: widget.buttonKey,
             onPressed: enabled ? widget.onPressed : null,
             style: style,
             child: child,

@@ -9,6 +9,7 @@ import 'package:study_assistant_mobile/src/features/manual_agenda_screen.dart';
 import 'package:study_assistant_mobile/src/features/reminder_health_screen.dart';
 import 'package:study_assistant_mobile/src/features/reminder_history_screen.dart';
 import 'package:study_assistant_mobile/src/features/reminder_status_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/reminder_history.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
@@ -193,7 +194,7 @@ void main() {
       ));
       await tester.pump();
 
-      await tester.tap(find.widgetWithText(ChoiceChip, '截止提醒'));
+      await tester.tap(find.text('截止提醒'));
       await tester.pump();
 
       expect(requestedCategories, [null, 'deadline']);
@@ -276,7 +277,7 @@ void main() {
 
       expect(find.textContaining('已安排'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.refresh));
+      await tester.tap(find.byTooltip('刷新'));
       await tester.pumpAndSettle();
 
       expect(find.text('提醒记录当前不可用或仍在清理'), findsOneWidget);
@@ -566,13 +567,12 @@ void main() {
       await tester.tap(target);
       await tester.pumpAndSettle();
 
-      final navBar = tester.widget<NavigationBar>(find.byType(NavigationBar));
-      expect(navBar.selectedIndex, 3);
+      expect(find.byType(JournalFloatingNavBar), findsNothing);
       expect(router.canPop(), isTrue);
 
       router.pop();
       await tester.pumpAndSettle();
-      expect(find.text('提醒体检'), findsOneWidget);
+      expect(find.text('提醒与通知'), findsOneWidget);
     });
 
     testWidgets(
@@ -585,7 +585,16 @@ void main() {
               subjectKind: 'assignment',
               subjectId: 'a-1',
               displayName: '测试作业',
-              categories: const [],
+              categories: const [
+                ReminderCategoryExplanation(
+                  category: 'deadline',
+                  status: ReminderExplanationStatus.unconfirmed,
+                  reasonCodes: ['recoveryPending'],
+                  nextScheduledAt: null,
+                  evidenceAt: null,
+                  actionLabel: '重试提醒恢复',
+                ),
+              ],
               queryWarnings: const [],
             );
       addTearDown(store.dispose);

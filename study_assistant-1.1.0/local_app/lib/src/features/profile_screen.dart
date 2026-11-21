@@ -128,15 +128,9 @@ class ProfileScreen extends StatelessWidget {
                     headerColor: journal.sage,
                     children: [
                       _SettingsTile(
-                        icon: Icons.health_and_safety_outlined,
-                        title: '提醒体检',
-                        subtitle: '权限、测试通知与每日摘要',
-                        onTap: () => context.push('/reminder-health'),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.notifications_none,
-                        title: '提醒设置',
-                        subtitle: '管理作业提醒时间与通知权限',
+                        icon: Icons.notifications_none_rounded,
+                        title: '提醒与通知',
+                        subtitle: '权限状态、提前提醒时间与每日摘要',
                         compactSubtitle: true,
                         onTap: () => context.push('/reminders'),
                       ),

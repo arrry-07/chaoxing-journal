@@ -7,6 +7,7 @@ import '../../models/display_preferences.dart';
 @immutable
 class JournalPickerOption<T> {
   const JournalPickerOption({
+    this.key,
     required this.value,
     required this.label,
     this.subtitle,
@@ -15,6 +16,7 @@ class JournalPickerOption<T> {
     this.keywords,
   });
 
+  final Key? key;
   final T value;
   final String label;
   final String? subtitle;
@@ -258,6 +260,7 @@ class _JournalPickerSheetBodyState<T>
                                   ),
                                 ],
                                 Material(
+                                  key: opt.key,
                                   color: selected
                                       ? journal.sage.withValues(alpha: 0.65)
                                       : Colors.transparent,
@@ -296,6 +299,9 @@ class _JournalPickerSheetBodyState<T>
                                                 children: [
                                                   Text(
                                                     opt.label,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
                                                     style: journal.entryTitle
                                                         .copyWith(
                                                       color: selected

@@ -5,6 +5,8 @@
 ## dev 当前迭代进度（1.8.24-dev）
 
 - [x] Android 构建工具链与噪音治理：升级 Gradle 8.14.2 / AGP 8.11.1 / Kotlin 2.2.20、迁移 Kotlin `compilerOptions` DSL 并设置 `kotlin.incremental=false` 根治跨盘符缓存异常，核实 `lib/` 零 `CupertinoIcons` 引用；下一轮预览从 `1.8.24-dev.1+103` 起步。
+- [x] 全应用 UI/UX 与灵动交互升级（M1–M4）：`JournalPalette` 宣纸浅色 / 深夜台灯暖灰双色、`JournalMotion` 弹簧阻尼与触感、`JournalFloatingNavBar`（一级 Tab 专属 + 二级页自动隐藏）、`JournalGroupedCard` / `JournalPickerSheet` / 墨黑象牙主按钮（`bf61c0c`）；首页单行筛选与右滑加计划 / 左滑置顶 / 长按浮起快捷菜单（`548a5e7`）；日历单行顶栏 + 三色圆点 + 滑月收周、A+B 无衬线统计进度条与 `FB-001` 考试分组（`32a97e5`）；二级页与弹窗统一白卡、合并「提醒与通知」即点即存并消除全量原生 `DropdownButton`/`PopupMenuButton` 及英文眉标（本提交）。
+- [ ] 待补机端视觉与触感手感真机/MuMu 验收。
 
 按独立改动随代码更新对应进度；当前无活跃交接或待执行计划。
 

@@ -1838,6 +1838,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                               ),
                               for (final option in courseOptions)
                                 JournalPickerOption<String>(
+                                  key: ValueKey(
+                                      'course-option-${option.courseKey}'),
                                   value: option.courseKey,
                                   label: option.name,
                                   subtitle: option.showClass

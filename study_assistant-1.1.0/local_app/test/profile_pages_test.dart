@@ -119,7 +119,7 @@ void main() {
               child: child!),
           home: CourseListScreen(store: s)));
       await t.scrollUntilVisible(find.text('课程 40：这是用于检查窄屏换行的完整课程名称'), 350);
-      expect(find.text('班级 40'), findsOneWidget);
+      expect(find.text('班级 40'), findsNothing);
       expect(t.takeException(), isNull);
     });
   }

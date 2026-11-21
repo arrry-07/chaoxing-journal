@@ -233,8 +233,12 @@ void main() {
         if (span is! TextSpan) return;
         final family = span.style?.fontFamily ?? inherited;
         if (RegExp(r'[A-Za-z0-9\u4e00-\u9fff]').hasMatch(span.text ?? '')) {
-          expect(family, Journal.bodyFamily,
-              reason: '$scene $width $scale: ${span.text}');
+          final isPageTitle = (span.style?.fontSize ?? 0) >= 20 &&
+              family == Journal.titleFamily;
+          if (!isPageTitle) {
+            expect(family, Journal.bodyFamily,
+                reason: '$scene $width $scale: ${span.text}');
+          }
         }
         for (final child in span.children ?? <InlineSpan>[]) {
           checkFont(child, family);

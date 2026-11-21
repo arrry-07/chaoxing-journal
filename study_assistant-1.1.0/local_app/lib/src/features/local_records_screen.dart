@@ -13,6 +13,8 @@ import '../services/assignment_store.dart';
 import '../services/exam_schedule_presentation.dart';
 import '../services/local_record_query.dart';
 import 'widgets/assignment_card.dart';
+import 'widgets/journal_grouped_card.dart';
+import 'widgets/journal_picker_sheet.dart';
 
 class LocalRecordsScreen extends StatefulWidget {
   const LocalRecordsScreen({
@@ -177,17 +179,17 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
         ),
       AssignmentStatBucket.expired => (
           label: label,
-          bg: journal.berry.withValues(alpha: 0.12),
+          bg: journal.berryBg,
           fg: journal.berry,
         ),
       AssignmentStatBucket.pending => (
           label: label,
-          bg: journal.paper,
+          bg: journal.parchment,
           fg: journal.ink,
         ),
       AssignmentStatBucket.unknown => (
           label: label,
-          bg: journal.paper,
+          bg: journal.parchment,
           fg: journal.muted,
         ),
     };
@@ -199,13 +201,12 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: journal.rule),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
         text,
-        style: journal.metadata.copyWith(
-          fontSize: 12,
+        style: journal.pillLabel.copyWith(
+          fontSize: 11.5,
           color: fg,
           fontWeight: FontWeight.w600,
         ),
@@ -231,6 +232,14 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
     return '当前统计筛选：${parts.join(' · ')}';
   }
 
+  String _sourceLabel(AssignmentSource source) => switch (source) {
+        AssignmentSource.courseWork => '正式作业',
+        AssignmentSource.classroomActivity => '课堂活动',
+        AssignmentSource.exam => '考试与通知',
+        AssignmentSource.manual => '手动安排',
+        AssignmentSource.legacyUnknown => '历史来源',
+      };
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: widget.store,
@@ -242,43 +251,59 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                   .any((option) => option.courseKey == _spec.courseKey)
               ? _spec.courseKey
               : null;
+          final selectedCourseLabel = selectedCourseKey == null
+              ? '全部课程'
+              : result.courseOptions
+                      .where((o) => o.courseKey == selectedCourseKey)
+                      .firstOrNull
+                      ?.label ??
+                  '全部课程';
+          final duplicateCourseNames = <String>{
+            for (final opt in result.courseOptions)
+              if (opt.label.contains(' · 班级 '))
+                opt.label.split(' · 班级 ').first.trim(),
+          };
 
           return Scaffold(
             backgroundColor: journal.paper,
             appBar: AppBar(
-              toolbarHeight: 40,
               backgroundColor: journal.paper,
               leading: IconButton(
                 tooltip: '返回',
-                icon: const Icon(Icons.arrow_back),
+                icon: const Icon(Icons.arrow_back_rounded),
                 onPressed: () => _handleBack(context),
               ),
+              title: const Text('本地记录'),
               actions: [
-                PopupMenuButton<LocalRecordSortOrder>(
+                IconButton(
                   tooltip: '排序方式',
-                  icon: const Icon(Icons.swap_vert),
-                  onSelected: (value) => setState(
-                    () => _spec = _spec.copyWith(sort: value),
-                  ),
-                  itemBuilder: (_) => [
-                    for (final option in LocalRecordSortOrder.values)
-                      CheckedPopupMenuItem<LocalRecordSortOrder>(
-                        value: option,
-                        checked: _spec.sort == option,
-                        child: Text(option.label),
-                      ),
-                  ],
+                  icon: const Icon(Icons.swap_vert_rounded),
+                  onPressed: () async {
+                    final picked =
+                        await showJournalPickerSheet<LocalRecordSortOrder>(
+                      context,
+                      title: '排序方式',
+                      selectedValue: _spec.sort,
+                      searchable: false,
+                      displayPrefs: widget.store.display,
+                      options: [
+                        for (final option in LocalRecordSortOrder.values)
+                          JournalPickerOption(
+                            value: option,
+                            label: option.label,
+                          ),
+                      ],
+                    );
+                    if (picked != null && mounted) {
+                      setState(() => _spec = _spec.copyWith(sort: picked));
+                    }
+                  },
                 ),
               ],
             ),
             body: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
               children: [
-                const JournalHeading(
-                  '本地记录',
-                  eyebrow: 'CAMPUS JOURNAL   /   ARCHIVE',
-                ),
-                const SizedBox(height: 6),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
@@ -302,14 +327,18 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                 const SizedBox(height: 10),
                 if (_spec.category == LocalRecordCategory.coursework &&
                     _spec.isStatsScoped) ...[
-                  Card(
-                    color: journal.sage.withValues(alpha: 0.45),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      child: Wrap(
+                  JournalGroupedCard(
+                    backgroundColor: Color.lerp(
+                      journal.sheet,
+                      journal.sage,
+                      journal.isDark ? 0.28 : 0.36,
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    children: [
+                      Wrap(
                         spacing: 12,
                         runSpacing: 4,
                         crossAxisAlignment: WrapCrossAlignment.center,
@@ -330,40 +359,90 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                               _searchController.clear();
                               setState(() => _spec = _spec.resetToAllLocal());
                             },
-                            icon: const Icon(Icons.restart_alt, size: 16),
+                            icon:
+                                const Icon(Icons.restart_alt_rounded, size: 16),
                             label: const Text('查看全部本机记录'),
                           ),
                         ],
                       ),
-                    ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                 ],
-                TextField(
-                  controller: _searchController,
-                  onChanged: (value) =>
-                      setState(() => _spec = _spec.copyWith(query: value)),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    labelText: '搜索标题或课程',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _spec.query.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: '清除搜索',
-                            icon: const Icon(Icons.close),
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(
-                                () => _spec = _spec.copyWith(query: ''),
-                              );
-                            },
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        onChanged: (value) => setState(
+                            () => _spec = _spec.copyWith(query: value)),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 11,
                           ),
-                  ),
+                          hintText: '搜索标题或课程',
+                          prefixIcon:
+                              const Icon(Icons.search_rounded, size: 19),
+                          suffixIcon: _spec.query.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: '清除搜索',
+                                  icon:
+                                      const Icon(Icons.close_rounded, size: 18),
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    setState(
+                                      () => _spec = _spec.copyWith(query: ''),
+                                    );
+                                  },
+                                ),
+                        ),
+                      ),
+                    ),
+                    if (_spec.category == LocalRecordCategory.coursework) ...[
+                      const SizedBox(width: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 146),
+                        child: JournalFilterPill(
+                          key: ValueKey(
+                            'records-course-${selectedCourseKey ?? 'all'}-${_spec.scope.name}-${result.courseOptions.length}',
+                          ),
+                          label: selectedCourseLabel,
+                          active: selectedCourseKey != null,
+                          onTap: () async {
+                            final picked = await showJournalPickerSheet<String>(
+                              context,
+                              title: '按课程筛选',
+                              selectedValue: selectedCourseKey ?? '',
+                              searchable: result.courseOptions.length > 5,
+                              searchHint: '搜索课程名称...',
+                              displayPrefs: widget.store.display,
+                              options: [
+                                const JournalPickerOption(
+                                  value: '',
+                                  label: '全部课程',
+                                ),
+                                for (final option in result.courseOptions)
+                                  JournalPickerOption(
+                                    value: option.courseKey,
+                                    label: option.label,
+                                    icon: courseIconFor(option.label),
+                                  ),
+                              ],
+                            );
+                            if (picked == null || !mounted) return;
+                            setState(
+                              () => picked.isEmpty
+                                  ? _spec = _spec.copyWith(clearCourseKey: true)
+                                  : _spec = _spec.copyWith(courseKey: picked),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 if (_spec.category == LocalRecordCategory.coursework) ...[
                   const SizedBox(height: 8),
@@ -388,53 +467,21 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<String?>(
-                    key: ValueKey(
-                      'records-course-${selectedCourseKey ?? 'all'}-${_spec.scope.name}-${result.courseOptions.length}',
-                    ),
-                    initialValue: selectedCourseKey,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      labelText: '按课程筛选',
-                    ),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('全部课程'),
-                      ),
-                      for (final option in result.courseOptions)
-                        DropdownMenuItem<String?>(
-                          value: option.courseKey,
-                          child: Text(
-                            option.label,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (value) => setState(
-                      () => value == null
-                          ? _spec = _spec.copyWith(clearCourseKey: true)
-                          : _spec = _spec.copyWith(courseKey: value),
-                    ),
-                  ),
                 ],
                 const SizedBox(height: 10),
-                Text(
-                  '${result.count} 条记录',
-                  style: journal.metadata,
+                Padding(
+                  padding: const EdgeInsets.only(left: 2),
+                  child: Text(
+                    '${result.count} 条记录',
+                    style: journal.metadata,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 if (result.count == 0)
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
+                  JournalGroupedCard(
+                    padding: const EdgeInsets.all(18),
+                    children: [
+                      Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
@@ -472,81 +519,89 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                           ],
                         ],
                       ),
-                    ),
+                    ],
                   )
                 else if (_spec.category == LocalRecordCategory.otherSources)
-                  for (final assignment in result.otherSources)
-                    _buildOtherSourceCard(context, assignment, now)
+                  JournalGroupedCard(
+                    dividerIndent: 52,
+                    children: [
+                      for (final assignment in result.otherSources)
+                        _buildOtherSourceRow(context, assignment, now, journal),
+                    ],
+                  )
                 else
-                  for (final group in result.groups)
-                    _buildGroupCard(context, group, now),
+                  JournalGroupedCard(
+                    dividerIndent: 52,
+                    children: [
+                      for (final group in result.groups)
+                        _buildGroupRow(
+                          context,
+                          group,
+                          now,
+                          journal,
+                          duplicateCourseNames: duplicateCourseNames,
+                        ),
+                    ],
+                  ),
               ],
             ),
           );
         },
       );
 
-  Widget _buildOtherSourceCard(
+  Widget _buildOtherSourceRow(
     BuildContext context,
     Assignment a,
     DateTime now,
+    JournalPalette journal,
   ) {
-    final journal = Journal.of(context);
     final badge = _statusBadge(a, now);
     final title = a.title.trim().isNotEmpty ? a.title.trim() : a.courseName;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Card(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => _openDetail(context, a.id),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CourseMark(a.courseName, size: 32),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title, style: journal.entryTitle),
-                      if (a.courseName.trim().isNotEmpty &&
-                          a.title.trim().isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Text(a.courseName.trim(), style: journal.metadata),
-                      ],
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          _pill(badge.label, bg: badge.bg, fg: badge.fg),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '来源：${a.source.name} · 读取：${DateFormat('yyyy-MM-dd HH:mm').format(AssignmentQuery.beijing(a.lastSyncedAt))}',
-                        style: journal.metadata,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+    return InkWell(
+      onTap: () => _openDetail(context, a.id),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CourseMark(a.courseName, size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: journal.entryTitle),
+                  if (a.courseName.trim().isNotEmpty &&
+                      a.title.trim().isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '${a.courseName.trim()} · ${_sourceLabel(a.source)}',
+                      style: journal.metadata,
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  _pill(badge.label, bg: badge.bg, fg: badge.fg),
+                ],
+              ),
             ),
-          ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: journal.muted,
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildGroupCard(
+  Widget _buildGroupRow(
     BuildContext context,
     CourseworkGroup group,
     DateTime now,
-  ) {
-    final journal = Journal.of(context);
+    JournalPalette journal, {
+    required Set<String> duplicateCourseNames,
+  }) {
     final primary = group.primary;
     final badge = _statusBadge(primary, now);
     final title = primary.title.trim().isNotEmpty
@@ -554,68 +609,71 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
         : primary.courseName;
     final timeText = _businessTimeText(primary, group.sources);
     final isHiddenTab = _spec.category == LocalRecordCategory.hidden;
+    final courseName = primary.courseName.trim();
+    final showClass = duplicateCourseNames.contains(courseName) &&
+        primary.clazzId != null &&
+        primary.clazzId!.isNotEmpty;
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Card(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => _openDetail(context, primary.id),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CourseMark(primary.courseName, size: 28),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+    return InkWell(
+      onTap: () => _openDetail(context, primary.id),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CourseMark(primary.courseName, size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: journal.entryTitle),
+                  if (courseName.isNotEmpty &&
+                      primary.title.trim().isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      showClass
+                          ? '$courseName · 班级 ${primary.clazzId}'
+                          : courseName,
+                      style: journal.metadata,
+                    ),
+                  ],
+                  const SizedBox(height: 5),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
                     children: [
-                      Text(title, style: journal.entryTitle),
-                      if (primary.courseName.trim().isNotEmpty &&
-                          primary.title.trim().isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          primary.clazzId == null || primary.clazzId!.isEmpty
-                              ? primary.courseName.trim()
-                              : '${primary.courseName.trim()} · 班级 ${primary.clazzId}',
-                          style: journal.metadata,
+                      if (group.hidden)
+                        _pill('已隐藏', bg: journal.parchment, fg: journal.muted),
+                      _pill(badge.label, bg: badge.bg, fg: badge.fg),
+                      if (primary.isExam || group.sources.length > 1)
+                        _pill(
+                          '${primary.isExam ? '考试' : _sourceLabel(primary.source)}${group.sources.length > 1 ? ' · ${group.sources.length} 条来源' : ''}',
+                          bg: journal.parchment,
+                          fg: journal.muted,
                         ),
-                      ],
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          if (group.hidden)
-                            _pill('已隐藏', bg: journal.paper, fg: journal.muted),
-                          _pill(badge.label, bg: badge.bg, fg: badge.fg),
-                        ],
-                      ),
-                      const SizedBox(height: 3),
-                      Text(timeText, style: journal.metadata),
-                      const SizedBox(height: 2),
-                      Text(
-                        '来源：${group.sourceLabel} · 读取：${DateFormat('yyyy-MM-dd HH:mm').format(AssignmentQuery.beijing(primary.lastSyncedAt))}',
-                        style: journal.metadata,
-                      ),
                     ],
                   ),
-                ),
-                if (isHiddenTab) ...[
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: widget.store.isLoading
-                        ? null
-                        : () =>
-                            widget.store.setCourseworkGroupHidden(group, false),
-                    child: const Text('恢复'),
-                  ),
+                  const SizedBox(height: 4),
+                  Text(timeText, style: journal.metadata),
                 ],
-              ],
+              ),
             ),
-          ),
+            if (isHiddenTab) ...[
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: widget.store.isLoading
+                    ? null
+                    : () => widget.store.setCourseworkGroupHidden(group, false),
+                child: const Text('恢复'),
+              ),
+            ] else
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: journal.muted,
+              ),
+          ],
         ),
       ),
     );

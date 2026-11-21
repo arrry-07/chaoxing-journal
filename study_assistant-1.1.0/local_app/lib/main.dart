@@ -12,7 +12,6 @@ import 'src/features/term_archives_screen.dart';
 import 'src/features/personal_work_screen.dart';
 import 'src/features/profile_arrangements_screen.dart';
 import 'src/features/profile_records_screen.dart';
-import 'src/features/reminder_health_screen.dart';
 import 'src/features/reminder_history_screen.dart';
 import 'src/features/reminder_status_screen.dart';
 import 'src/features/widgets/update_scope.dart';
@@ -399,9 +398,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                     store: assignmentStore,
                     assignmentId: s.pathParameters['id']!)),
             GoRoute(
-                path: '/reminder-health',
-                builder: (_, __) =>
-                    ReminderHealthScreen(store: assignmentStore)),
+                path: '/reminder-health', redirect: (_, __) => '/reminders'),
             GoRoute(
                 path: '/reminder-history',
                 builder: (_, __) =>
@@ -450,8 +447,6 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             ),
             GoRoute(
               path: '/reminders',
-              onExit: (_, __) =>
-                  _leaveGuard.confirmLeave(routeScope: '/reminders'),
               builder: (_, __) => ReminderSettingsScreen(
                 assignmentStore: assignmentStore,
               ),

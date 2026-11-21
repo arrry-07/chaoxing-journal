@@ -17,6 +17,7 @@ import '../services/external_link_service.dart';
 import 'assignment_list_screen.dart' show AssignmentRecoveryScope;
 import 'widgets/assignment_card.dart';
 import 'widgets/coursework_status_pill.dart';
+import 'widgets/journal_grouped_card.dart';
 
 class AssignmentDetailScreen extends StatefulWidget {
   const AssignmentDetailScreen({
@@ -792,47 +793,61 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     ),
                   ],
                   if (showRequirements) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      cleanRequirements,
-                      key: const ValueKey('assignment-detail-requirements'),
-                      style: journal.metadata.copyWith(
-                        color: journal.ink,
-                        fontSize: 14.5,
-                        height: 1.55,
-                      ),
+                    const SizedBox(height: 14),
+                    JournalGroupedCard(
+                      padding: const EdgeInsets.all(14),
+                      children: [
+                        Text(
+                          cleanRequirements,
+                          key: const ValueKey('assignment-detail-requirements'),
+                          style: journal.metadata.copyWith(
+                            color: journal.ink,
+                            fontSize: 14.5,
+                            height: 1.55,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                   if (sources.length > 1) ...[
                     const SizedBox(height: 14),
-                    ExpansionTile(
-                      key: const ValueKey('assignment-source-records'),
-                      tilePadding: const EdgeInsets.symmetric(horizontal: 4),
-                      childrenPadding: const EdgeInsets.only(bottom: 8),
-                      title: Text(
-                        '来源记录 · ${sources.length} 条',
-                        style: journal.metadata.copyWith(
-                          color: journal.ink,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                    JournalGroupedCard(
                       children: [
-                        for (final source in sources)
-                          ListTile(
-                            dense: true,
-                            contentPadding:
-                                const EdgeInsets.symmetric(horizontal: 4),
+                        Theme(
+                          data: Theme.of(context)
+                              .copyWith(dividerColor: Colors.transparent),
+                          child: ExpansionTile(
+                            key: const ValueKey('assignment-source-records'),
+                            tilePadding:
+                                const EdgeInsets.symmetric(horizontal: 14),
+                            childrenPadding: const EdgeInsets.only(bottom: 8),
                             title: Text(
-                              '${_sourceType(source)} · ${source.statusLabel}',
+                              '来源记录 · ${sources.length} 条',
+                              style: journal.metadata.copyWith(
+                                color: journal.ink,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                            subtitle: Text(
-                              '读取 ${DateFormat('yyyy-MM-dd HH:mm').format(source.lastSyncedAt)}',
-                            ),
-                            trailing: TextButton(
-                              onPressed: () => _showSourceDetail(source),
-                              child: const Text('查看'),
-                            ),
+                            children: [
+                              for (final source in sources)
+                                ListTile(
+                                  dense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 14),
+                                  title: Text(
+                                    '${_sourceType(source)} · ${source.statusLabel}',
+                                  ),
+                                  subtitle: Text(
+                                    '读取 ${DateFormat('yyyy-MM-dd HH:mm').format(source.lastSyncedAt)}',
+                                  ),
+                                  trailing: TextButton(
+                                    onPressed: () => _showSourceDetail(source),
+                                    child: const Text('查看'),
+                                  ),
+                                ),
+                            ],
                           ),
+                        ),
                       ],
                     ),
                   ],
@@ -841,10 +856,8 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     key: const ValueKey('assignment-detail-open'),
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(50),
-                      backgroundColor: journal.ink,
-                      foregroundColor: journal == JournalPalette.dark
-                          ? journal.paper
-                          : journal.sheet,
+                      backgroundColor: journal.primaryFill,
+                      foregroundColor: journal.onPrimaryFill,
                       disabledBackgroundColor: journal.parchment,
                       disabledForegroundColor: journal.muted,
                     ),
@@ -873,9 +886,9 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     icon: const Icon(Icons.open_in_browser_rounded, size: 18),
                     label: Text(_opening ? '正在请求浏览器…' : '打开$_itemLabel网页'),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Text(
-                    '将在学习通内打开$_itemLabel网页；也可主动选择浏览器打开，可能需要另行登录。返回后可刷新核对提交状态。',
+                    '将在学习通内打开$_itemLabel网页；浏览器打开可能需要另行登录，返回可刷新核对状态。',
                     style: journal.metadata.copyWith(fontSize: 12.5),
                   ),
                   if (_currentUrl == null) ...[
@@ -895,101 +908,100 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                       message: _actionMessage!,
                     ),
                   ],
-                  const SizedBox(height: 18),
-                  Divider(
-                    height: 1,
-                    thickness: 0.8,
-                    color: journal.rule,
-                  ),
                   const SizedBox(height: 16),
-                  Text(
-                    '手记工具',
-                    style: journal.metadata.copyWith(
-                      color: journal.ink,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _DetailToolButton(
-                    onPressed: () => context.push(
-                      '/personal/${Uri.encodeComponent(widget.assignmentId)}',
-                    ),
-                    icon: Icons.edit_note_rounded,
-                    label: '个人清单与备注',
-                    iconSize: 20,
-                  ),
-                  const SizedBox(height: 8),
-                  _DetailToolPair(
+                  JournalGroupedCard(
+                    title: '手记工具',
+                    dividerIndent: 16,
                     children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        child: _DetailToolButton(
+                          onPressed: () => context.push(
+                            '/personal/${Uri.encodeComponent(widget.assignmentId)}',
+                          ),
+                          icon: Icons.edit_note_rounded,
+                          label: '个人清单与备注',
+                          iconSize: 20,
+                        ),
+                      ),
                       if (!isHidden)
-                        _DetailToolButton(
-                          onPressed: () => context.push('/plan'),
-                          icon: Icons.checklist_rounded,
-                          label: '安排每日计划',
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          child: _DetailToolButton(
+                            onPressed: () => context.push('/plan'),
+                            icon: Icons.checklist_rounded,
+                            label: '安排每日计划',
+                          ),
                         ),
-                      _DetailToolButton(
-                        onPressed: () => context.push(
-                          '/reminder-status/assignment/'
-                          '${Uri.encodeComponent(assignment.id)}',
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        child: _DetailToolButton(
+                          onPressed: () => context.push(
+                            '/reminder-status/assignment/'
+                            '${Uri.encodeComponent(assignment.id)}',
+                          ),
+                          icon: Icons.notifications_active_outlined,
+                          label: '提醒状态',
                         ),
-                        icon: Icons.notifications_active_outlined,
-                        label: '提醒状态',
                       ),
                     ],
                   ),
-                  const SizedBox(height: 18),
-                  Divider(
-                    height: 1,
-                    thickness: 0.8,
-                    color: journal.rule,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '记录管理',
-                    style: journal.metadata.copyWith(
-                      color: journal.ink,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _DetailToolPair(
+                  const SizedBox(height: 14),
+                  JournalGroupedCard(
+                    title: '记录管理',
+                    dividerIndent: 16,
                     children: [
-                      _DetailToolButton(
-                        onPressed:
-                            _refreshing || widget.store.isLoading || _hiding
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        child: _DetailToolButton(
+                          onPressed:
+                              _refreshing || widget.store.isLoading || _hiding
+                                  ? null
+                                  : _refresh,
+                          icon: Icons.refresh_rounded,
+                          label: _refreshing ? '正在刷新…' : '刷新$_itemLabel信息',
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        child: _DetailToolButton(
+                          onPressed:
+                              _currentUrl == null || _hiding ? null : _copyLink,
+                          icon: Icons.copy_outlined,
+                          label: '复制$_itemLabel链接',
+                          iconSize: 17,
+                        ),
+                      ),
+                      if (showRecordsNotice)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                          child: _DetailActionNotice(
+                            key: const ValueKey('assignment-records-result'),
+                            message: _actionMessage!,
+                          ),
+                        ),
+                      if (!isHidden && !assignment.isCompleted)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          child: _DetailToolButton(
+                            key: const ValueKey('assignment-detail-hide'),
+                            onPressed: _hiding || _opening || _refreshing
                                 ? null
-                                : _refresh,
-                        icon: Icons.refresh_rounded,
-                        label: _refreshing ? '正在刷新…' : '刷新$_itemLabel信息',
-                      ),
-                      _DetailToolButton(
-                        onPressed:
-                            _currentUrl == null || _hiding ? null : _copyLink,
-                        icon: Icons.copy_outlined,
-                        label: '复制$_itemLabel链接',
-                        iconSize: 17,
-                      ),
+                                : _hide,
+                            icon: Icons.visibility_off_outlined,
+                            label: sources.length > 1
+                                ? '在本机隐藏此$_itemLabel（${sources.length} 条来源）'
+                                : '在本机隐藏此$_itemLabel',
+                          ),
+                        ),
                     ],
                   ),
-                  if (showRecordsNotice) ...[
-                    const SizedBox(height: 10),
-                    _DetailActionNotice(
-                      key: const ValueKey('assignment-records-result'),
-                      message: _actionMessage!,
-                    ),
-                  ],
-                  if (!isHidden && !assignment.isCompleted) ...[
-                    const SizedBox(height: 8),
-                    _DetailToolButton(
-                      key: const ValueKey('assignment-detail-hide'),
-                      onPressed:
-                          _hiding || _opening || _refreshing ? null : _hide,
-                      icon: Icons.visibility_off_outlined,
-                      label: sources.length > 1
-                          ? '在本机隐藏此$_itemLabel（${sources.length} 条来源）'
-                          : '在本机隐藏此$_itemLabel',
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -1024,41 +1036,6 @@ class _DetailActionNotice extends StatelessWidget {
                 ),
           ),
         ),
-      );
-}
-
-class _DetailToolPair extends StatelessWidget {
-  const _DetailToolPair({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) => LayoutBuilder(
-        builder: (context, constraints) {
-          final scaledBodySize = MediaQuery.textScalerOf(context).scale(14);
-          final useColumns = constraints.maxWidth >= 312 &&
-              scaledBodySize <= 18.2 &&
-              children.length == 2;
-          if (useColumns) {
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: children[0]),
-                const SizedBox(width: 8),
-                Expanded(child: children[1]),
-              ],
-            );
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (var i = 0; i < children.length; i++) ...[
-                if (i > 0) const SizedBox(height: 8),
-                children[i],
-              ],
-            ],
-          );
-        },
       );
 }
 

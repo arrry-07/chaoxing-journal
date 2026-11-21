@@ -60,6 +60,9 @@ void main() {
     expect(find.text('课堂题'), findsNothing);
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: CalendarScreen(store: s))));
+    expect(find.text('回今天'), findsNothing);
+    await t.tap(find.byTooltip('下个月'));
+    await t.pumpAndSettle();
     expect(find.text('回今天'), findsOneWidget);
     expect(find.text('三月旧题'), findsNothing);
     semantics.dispose();

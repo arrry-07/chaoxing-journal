@@ -8,6 +8,7 @@ import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/main.dart';
+import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/unsaved_edit_guard.dart';
 import 'package:study_assistant_mobile/src/app/app_deep_links.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
@@ -16,6 +17,7 @@ import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/login_screen.dart';
 import 'package:study_assistant_mobile/src/features/manual_agenda_screen.dart';
 import 'package:study_assistant_mobile/src/features/personal_work_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 
@@ -346,14 +348,19 @@ void main() {
   testWidgets('dirtyPersonalEditorBlocksTabReplacement', (tester) async {
     await _launchApp(tester, _personalLocation);
     expect(find.byType(PersonalWorkScreen), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
 
     final noteField = find.byType(TextField).first;
     await tester.enterText(noteField, '未保存的备注');
     await tester.pump();
 
-    final calendarTab = find.descendant(
-        of: find.byType(NavigationBar), matching: find.text('日历'));
-    await tester.tap(calendarTab);
+    final editorContext = tester.element(find.byType(PersonalWorkScreen));
+    final guard = UnsavedEditGuardScope.maybeOf(editorContext)!;
+    final router = GoRouter.of(editorContext);
+    unawaited(guard.navigate(
+      isCurrent: () => find.byType(PersonalWorkScreen).evaluate().isNotEmpty,
+      action: () => router.go('/calendar'),
+    ));
     await tester.pumpAndSettle();
     expect(find.text('放弃未保存的修改？'), findsOneWidget);
     expect(find.byType(PersonalWorkScreen), findsOneWidget);
@@ -365,13 +372,17 @@ void main() {
     expect(find.byType(PersonalWorkScreen), findsOneWidget);
     expect(tester.widget<TextField>(noteField).controller?.text, '未保存的备注');
 
-    await tester.tap(calendarTab);
+    unawaited(guard.navigate(
+      isCurrent: () => find.byType(PersonalWorkScreen).evaluate().isNotEmpty,
+      action: () => router.go('/calendar'),
+    ));
     await tester.pumpAndSettle();
     expect(find.text('放弃未保存的修改？'), findsOneWidget);
     await tester.tap(find.text('放弃修改'));
     await tester.pumpAndSettle();
     expect(find.byType(CalendarScreen), findsOneWidget);
     expect(find.byType(PersonalWorkScreen), findsNothing);
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
   });
 
   testWidgets('dirty personal editor asks once on system back', (tester) async {
@@ -484,7 +495,9 @@ void main() {
     final notifications = _CapturingNotifications();
     await _launchApp(tester, _personalLocation, notifications: notifications);
     await tester.enterText(find.byType(TextField).first, '竞争中的草稿');
-    final router = GoRouter.of(tester.element(find.byType(PersonalWorkScreen)));
+    final editorContext = tester.element(find.byType(PersonalWorkScreen));
+    final guard = UnsavedEditGuardScope.maybeOf(editorContext)!;
+    final router = GoRouter.of(editorContext);
     final destinations = <String>[];
     void record() =>
         destinations.add(router.routeInformationProvider.value.uri.path);
@@ -492,9 +505,10 @@ void main() {
     addTearDown(() => router.routeInformationProvider.removeListener(record));
     notifications.handler!('p:first');
     notifications.handler!('d:summary');
-    tester
-        .widget<NavigationBar>(find.byType(NavigationBar))
-        .onDestinationSelected!(1);
+    unawaited(guard.navigate(
+      isCurrent: () => find.byType(PersonalWorkScreen).evaluate().isNotEmpty,
+      action: () => router.go('/calendar'),
+    ));
     await tester.pumpAndSettle();
     expect(find.text('放弃未保存的修改？'), findsOneWidget);
     await tester.tap(find.text('放弃修改'));
@@ -603,7 +617,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       expect(find.byType(ManualAgendaScreen), findsNothing);
       if (switchAccount) {
-        final context = tester.element(find.byType(NavigationBar));
+        final context = tester.element(find.byType(AppShell));
         GoRouter.of(context).go(_personalLocation);
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField).first, '新账号草稿');
@@ -771,23 +785,25 @@ void main() {
   });
 
   testWidgets(
-      'M5: system back on dirty reminder settings prompts once without duplicate dialog',
+      'M5: system back on instant-save reminder settings leaves cleanly without prompt',
       (tester) async {
-    await _launchApp(tester, '/reminders');
+    final store = await _launchApp(tester, '/reminders');
     final preset = find.text('提前 1 天');
-    await tester.ensureVisible(preset);
+    await tester.scrollUntilVisible(
+      preset,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await Scrollable.ensureVisible(tester.element(preset), alignment: 0.5);
     await tester.pumpAndSettle();
     await tester.tap(preset);
     await tester.pumpAndSettle();
 
+    expect(store.reminderOffsetsMinutes, isNot(contains(1440)));
     unawaited(tester.binding.handlePopRoute());
     await tester.pumpAndSettle();
 
-    expect(find.text('放弃未保存的提醒规则？'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '放弃修改'));
-    await tester.pumpAndSettle();
-
-    // Confirm no second discard dialog is shown by GoRouter onExit after pop.
     expect(find.text('放弃未保存的提醒规则？'), findsNothing);
+    expect(find.byType(CalendarScreen), findsNothing);
   });
 }

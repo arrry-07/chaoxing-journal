@@ -183,7 +183,8 @@ void main() {
 
     await tester.tap(find.text('搜索与筛选'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.ensureVisible(find.text('所选课程'));
+    await tester.tap(find.text('所选课程'));
     await tester.pumpAndSettle();
 
     expect(find.text('高等数学'), findsNothing);

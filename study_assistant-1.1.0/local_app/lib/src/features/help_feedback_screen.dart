@@ -1,10 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../app/app_version.dart';
 import '../app/journal.dart';
-import '../services/external_link_service.dart';
 import '../services/app_update_service.dart';
+import '../services/external_link_service.dart';
+import 'widgets/journal_buttons.dart';
+import 'widgets/journal_grouped_card.dart';
 
 class HelpFeedbackScreen extends StatelessWidget {
   const HelpFeedbackScreen({super.key});
@@ -14,62 +17,109 @@ class HelpFeedbackScreen extends StatelessWidget {
     '同步失败怎么办？':
         '先在“我的 → 同步学习通”查看本次读取结果，然后重试。若提示登录失效，请重新登录；若需要安全验证，点击同步详情中的“完成安全验证”，输入图片中的字符后继续。无需安装官方 App 即可使用本应用的账号登录与同步。',
     '为什么没有看到作业？':
-        '首页关注课程班级中的正式作业。已完成、已隐藏、不再关注和历史来源的记录，可以在“我的 → 本地记录”查看。截止时间或提交情况无法确认的作业，会放在首页的待确认分组中。',
-    '如何开启截止提醒？': '在“我的 → 提醒设置”选择提前提醒时间，并允许系统通知。系统省电限制可能影响投递；请保留必要权限。本应用不会代交作业。',
-    '隐藏的作业怎么恢复？': '进入“我的 → 已隐藏作业”点击恢复。隐藏只改变本机显示，不会改变学习通中的提交情况。',
+        '首页关注课程班级中的正式作业。已完成、已隐藏、不再关注和历史来源的记录，可以在“我的 → 学习记录 → 本地记录”查看。截止时间或提交情况无法确认的作业，会放在首页的待确认分组中。',
+    '如何开启截止提醒？':
+        '在“我的 → 提醒与通知”选择提前提醒时间，并允许系统通知。系统省电限制可能影响投递；请保留必要权限。本应用不会代交作业。',
+    '隐藏的作业怎么恢复？': '进入“我的 → 学习记录 → 已隐藏作业”点击恢复。隐藏只改变本机显示，不会改变学习通中的提交情况。',
     '怎样更新应用？':
         '在“我的 → 检查更新”请求 GitHub Release，发现新版本后可下载并校验安装包，再由系统确认安装。网络不可达或没有可用版本时可稍后重试。升级需要兼容当前包名和签名；请保留原应用数据，不要通过卸载解决安装冲突。',
   };
+
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    return Scaffold(
+      backgroundColor: journal.paper,
       appBar: AppBar(
-          leading: IconButton(
-              tooltip: '返回',
-              icon: const Icon(Icons.arrow_back),
-              onPressed: () => Navigator.of(context).maybePop()),
-          title: const Text('帮助中心')),
-      body: ListView(padding: const EdgeInsets.all(20), children: [
-        Text('有什么可以帮你？', style: Journal.of(context).section),
-        const SizedBox(height: 8),
-        const Text('从常见问题开始，也可以留下你的使用感受。'),
-        const SizedBox(height: 24),
-        Text('常见问题', style: Journal.of(context).section),
-        const SizedBox(height: 8),
-        for (final e in questions.entries)
-          ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(e.key),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _detail(context, e.key, e.value)),
-        const SizedBox(height: 24),
-        FilledButton.icon(
-            onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute<void>(
-                    builder: (_) => const FeedbackScreen())),
-            icon: const Icon(Icons.edit_note),
-            label: const Text('意见反馈')),
-        const SizedBox(height: 16),
-        ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('版本说明'),
-            subtitle: Text('当前版本 ${AppVersion.display}'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _detail(context, '版本说明',
-                '支持应用内安全验证、作业截止日历和中文帮助。通过“我的 → 检查更新”访问 GitHub Release，按检查、下载、校验、系统确认安装的流程更新；网络不可达时可重试，安装包需与当前包名和签名兼容。')),
-      ]));
+        backgroundColor: journal.paper,
+        leading: IconButton(
+          tooltip: '返回',
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+        title: const Text('帮助中心'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+        children: [
+          JournalGroupedCard(
+            title: '常见问题',
+            children: [
+              for (final e in questions.entries)
+                JournalGroupTile(
+                  title: e.key,
+                  onTap: () => _detail(context, e.key, e.value),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          JournalGroupedCard(
+            children: [
+              JournalGroupTile(
+                icon: Icons.info_outline_rounded,
+                title: '版本说明',
+                subtitle: '当前版本 ${AppVersion.display}',
+                onTap: () => _detail(
+                  context,
+                  '版本说明',
+                  '支持应用内安全验证、作业截止日历和中文帮助。通过“我的 → 检查更新”访问 GitHub Release，按检查、下载、校验、系统确认安装的流程更新；网络不可达时可重试，安装包需与当前包名和签名兼容。',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          JournalPrimaryButton(
+            icon: Icons.edit_note_rounded,
+            label: '意见反馈',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const FeedbackScreen(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _detail(BuildContext c, String title, String body) =>
-      Navigator.of(c).push(MaterialPageRoute<void>(
-          builder: (_) => Scaffold(
+      Navigator.of(c).push(
+        MaterialPageRoute<void>(
+          builder: (_) {
+            final journal = Journal.of(c);
+            return Scaffold(
+              backgroundColor: journal.paper,
               appBar: AppBar(
-                  leading: IconButton(
-                      tooltip: '返回',
-                      icon: const Icon(Icons.arrow_back),
-                      onPressed: () => Navigator.of(c).maybePop()),
-                  title: Text(title)),
-              body: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(body, style: const TextStyle(height: 1.7))))));
+                backgroundColor: journal.paper,
+                leading: IconButton(
+                  tooltip: '返回',
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  onPressed: () => Navigator.of(c).maybePop(),
+                ),
+                title: Text(title),
+              ),
+              body: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+                children: [
+                  JournalGroupedCard(
+                    padding: const EdgeInsets.all(18),
+                    children: [
+                      SelectableText(
+                        body,
+                        style: journal.metadata.copyWith(
+                          color: journal.ink,
+                          fontSize: 15,
+                          height: 1.7,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      );
 }
 
 class FeedbackScreen extends StatefulWidget {
@@ -131,88 +181,152 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     await showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
-      builder: (sheetContext) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('未能打开邮件草稿', style: Journal.of(context).section),
-            const SizedBox(height: 8),
-            const Text('没有可用的邮件客户端，或系统未接受打开请求。当前填写内容已保留。'),
-            const SizedBox(height: 12),
-            SelectableText(
-              _feedbackEmail,
-              style: Journal.of(context)
-                  .metadata
-                  .copyWith(color: Journal.of(context).ink),
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(sheetContext);
-                copy();
-              },
-              child: const Text('复制反馈内容'),
-            ),
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(
-                  const ClipboardData(text: _feedbackEmail),
-                );
-                if (sheetContext.mounted) Navigator.pop(sheetContext);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('收件地址已复制')),
-                  );
-                }
-              },
-              child: const Text('复制收件地址'),
-            ),
-          ],
-        ),
+      backgroundColor: Journal.of(context).sheetElevated,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
+      builder: (sheetContext) {
+        final journal = Journal.of(sheetContext);
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: journal.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('未能打开邮件草稿', style: journal.section),
+              const SizedBox(height: 8),
+              Text(
+                '没有可用的邮件客户端，或系统未接受打开请求。当前填写内容已保留。',
+                style: journal.metadata,
+              ),
+              const SizedBox(height: 12),
+              SelectableText(
+                _feedbackEmail,
+                style: journal.metadata.copyWith(color: journal.ink),
+              ),
+              const SizedBox(height: 16),
+              JournalPrimaryButton(
+                label: '复制反馈内容',
+                onPressed: () {
+                  Navigator.pop(sheetContext);
+                  copy();
+                },
+              ),
+              const SizedBox(height: 6),
+              TextButton(
+                onPressed: () async {
+                  await Clipboard.setData(
+                    const ClipboardData(text: _feedbackEmail),
+                  );
+                  if (sheetContext.mounted) Navigator.pop(sheetContext);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('收件地址已复制')),
+                    );
+                  }
+                },
+                child: const Text('复制收件地址'),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    return Scaffold(
+      backgroundColor: journal.paper,
       appBar: AppBar(
-          leading: IconButton(
-              tooltip: '返回',
-              icon: const Icon(Icons.arrow_back),
-              onPressed: () => Navigator.of(context).maybePop()),
-          title: const Text('意见反馈')),
-      body: ListView(padding: const EdgeInsets.all(20), children: [
-        TextField(
-            controller: problem,
-            minLines: 3,
-            maxLines: 8,
-            decoration: const InputDecoration(
-                labelText: '遇到了什么问题？', alignLabelWithHint: true)),
-        const SizedBox(height: 20),
-        TextField(
-            controller: steps,
-            minLines: 2,
-            maxLines: 6,
-            decoration: const InputDecoration(
-                labelText: '怎样出现的？（选填）', alignLabelWithHint: true)),
-        const SizedBox(height: 16),
-        Text('复制或打开邮件时会附带应用和系统版本。请勿填写登录信息或附上含个人信息的截图。',
-            style: TextStyle(color: Journal.of(context).muted)),
-        const SizedBox(height: 20),
-        FilledButton(onPressed: composeEmail, child: const Text('通过邮件反馈')),
-        TextButton(onPressed: copy, child: const Text('复制反馈内容')),
-        TextButton(
+        backgroundColor: journal.paper,
+        leading: IconButton(
+          tooltip: '返回',
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+        title: const Text('意见反馈'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+        children: [
+          JournalGroupedCard(
+            padding: const EdgeInsets.all(16),
+            children: [
+              TextField(
+                controller: problem,
+                minLines: 3,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                  labelText: '遇到了什么问题？',
+                  alignLabelWithHint: true,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: steps,
+                minLines: 2,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  labelText: '怎样出现的？（选填）',
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              '复制或打开邮件时会附带应用和系统版本，请勿填写登录凭据或含个人信息的截图。',
+              style: journal.metadata.copyWith(fontSize: 12.5),
+            ),
+          ),
+          const SizedBox(height: 16),
+          JournalPrimaryButton(
+            label: '通过邮件反馈',
+            onPressed: composeEmail,
+          ),
+          const SizedBox(height: 10),
+          JournalSecondaryButton(
+            label: '复制反馈内容',
+            onPressed: copy,
+          ),
+          const SizedBox(height: 6),
+          TextButton(
             onPressed: () async {
               final ok = await links
                   .openUrl('${AppUpdateService.repositoryUrl}/issues');
               if (!ok && context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('无法打开反馈页面，请先复制保存')));
+                  const SnackBar(content: Text('无法打开反馈页面，请先复制保存')),
+                );
               }
             },
-            child: const Text('打开 GitHub 反馈页面')),
-        const Text('邮件入口只会打开系统邮件草稿，不会自动发送；收到邮箱客户端返回结果不等于邮件已发送。'),
-      ]));
+            child: const Text('打开 GitHub 反馈页面'),
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              '邮件入口只会打开系统邮件草稿，不会自动发送。',
+              style: journal.metadata.copyWith(fontSize: 12.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

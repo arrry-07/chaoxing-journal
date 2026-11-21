@@ -12,6 +12,7 @@ import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dar
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/features/widgets/coursework_status_pill.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
@@ -61,7 +62,7 @@ void main() {
 
     final detail = find.byType(AssignmentDetailScreen);
     expect(detail, findsOneWidget);
-    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
     expect(
       find.descendant(
         of: detail,
@@ -170,10 +171,10 @@ void main() {
     await tester.tap(back);
     await tester.pumpAndSettle();
     expect(find.byType(AssignmentListScreen), findsOneWidget);
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
     expect(
-      tester.getRect(find.byType(NavigationBar)).bottom,
-      closeTo(safeBottom, 0.5),
+      tester.getRect(find.byType(JournalFloatingNavBar)).bottom,
+      lessThanOrEqualTo(safeBottom),
     );
   });
 
@@ -296,30 +297,24 @@ void main() {
           )
           .first;
       await tester.scrollUntilVisible(
-        find.text('安排每日计划'),
+        find.text('提醒状态'),
         240,
         scrollable: scroll,
       );
       expect(tester.takeException(), isNull);
+      expect(
+        tester.getTopLeft(find.text('个人清单与备注')).dy,
+        lessThan(tester.getTopLeft(find.text('安排每日计划')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('安排每日计划')).dy,
+        lessThan(tester.getTopLeft(find.text('提醒状态')).dy),
+      );
     }
 
     await render(const Size(360, 800), 1);
-    expect(
-      tester.getTopLeft(find.text('安排每日计划')).dy,
-      tester.getTopLeft(find.text('提醒状态')).dy,
-    );
-
     await render(const Size(393, 852), 1.3);
-    expect(
-      tester.getTopLeft(find.text('安排每日计划')).dy,
-      tester.getTopLeft(find.text('提醒状态')).dy,
-    );
-
     await render(const Size(320, 640), 2);
-    expect(
-      tester.getTopLeft(find.text('安排每日计划')).dy,
-      lessThan(tester.getTopLeft(find.text('提醒状态')).dy),
-    );
   });
 
   testWidgets(

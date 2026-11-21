@@ -168,9 +168,14 @@ class JournalGroupTile extends StatelessWidget {
             ),
             if (trailingText != null && trailingText!.isNotEmpty) ...[
               const SizedBox(width: 8),
-              Text(
-                trailingText!,
-                style: journal.metadata.copyWith(fontSize: 13),
+              Flexible(
+                child: Text(
+                  trailingText!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: journal.metadata.copyWith(fontSize: 13),
+                ),
               ),
             ],
             if (trailing != null) ...[

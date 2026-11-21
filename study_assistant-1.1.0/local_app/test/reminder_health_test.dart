@@ -1294,7 +1294,11 @@ void main() {
     expect(find.textContaining('原生作业截止事件：2 条'), findsOneWidget);
     expect(find.textContaining('原生作业截止事件：2 条（上次结果）'), findsNothing);
     expect(find.textContaining('上次结果'), findsNothing);
-    await tester.scrollUntilVisible(find.text('先确认提醒能到达'), -200);
+    await tester.scrollUntilVisible(
+      find.text('提醒状态与体检'),
+      -200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.textContaining('暂时无法读取，可重试'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     debugDefaultTargetPlatformOverride = null;
@@ -1371,7 +1375,11 @@ void main() {
     await tester.scrollUntilVisible(find.textContaining('已安排摘要'), 200);
     expect(find.textContaining('已安排摘要：0 条'), findsOneWidget);
     expect(find.textContaining('原生作业截止事件：0 条'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('先确认提醒能到达'), -200);
+    await tester.scrollUntilVisible(
+      find.text('提醒状态与体检'),
+      -200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.textContaining('暂时无法读取，可重试'), findsNothing);
     expect(find.textContaining('上次结果'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -3018,14 +3026,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('先确认提醒能到达'), findsOneWidget);
     expect(find.text('基础通知权限与渠道已开启'), findsOneWidget);
+    expect(find.text('建议发一条测试通知，确认锁屏与横幅正常显示。'), findsOneWidget);
     expect(find.text('没有待恢复的调度事务'), findsNothing);
 
     await showTechnicalInfo(tester);
     await tester.scrollUntilVisible(
       find.textContaining('没有待恢复的调度事务'),
       200,
+      scrollable: find.byType(Scrollable).first,
     );
     expect(find.textContaining('没有待恢复的调度事务'), findsOneWidget);
 
@@ -3046,9 +3055,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('有 1 项提醒设置或事务需关注'), findsOneWidget);
-    expect(find.text('提醒批次恢复状态'), findsOneWidget);
-    expect(find.textContaining('有未完成的调度事务'), findsOneWidget);
+    expect(find.text('有 1 项提醒状态需关注'), findsOneWidget);
+    expect(find.textContaining('提醒批次恢复状态'), findsOneWidget);
+    expect(find.textContaining('有未完成的调度事务'), findsWidgets);
     await tester.pumpWidget(const SizedBox.shrink());
     debugDefaultTargetPlatformOverride = null;
   });

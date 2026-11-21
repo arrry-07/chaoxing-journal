@@ -72,8 +72,12 @@ void main() {
     await t.tap(find.text('编辑个人记录'));
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), 'shell note');
+    await t.pump();
+    FocusManager.instance.primaryFocus?.unfocus();
+    await t.pumpAndSettle();
     await t.scrollUntilVisible(find.text('保存个人记录'), 250,
-        scrollable: find.byType(Scrollable).last);
+        scrollable: find.byType(Scrollable).first);
+    await t.ensureVisible(find.text('保存个人记录'));
     await t.pumpAndSettle();
     await t.tap(find.text('保存个人记录'));
     await t.pumpAndSettle();
