@@ -5,8 +5,8 @@
 ## dev 当前迭代进度（1.8.24-dev）
 
 - [x] Android 构建工具链与噪音治理：升级 Gradle 8.14.2 / AGP 8.11.1 / Kotlin 2.2.20、迁移 Kotlin `compilerOptions` DSL 并设置 `kotlin.incremental=false` 根治跨盘符缓存异常，核实 `lib/` 零 `CupertinoIcons` 引用；下一轮预览从 `1.8.24-dev.1+103` 起步。
-- [x] 全应用 UI/UX 与灵动交互升级（M1–M4）：`JournalPalette` 宣纸浅色 / 深夜台灯暖灰双色、`JournalMotion` 弹簧阻尼与触感、`JournalFloatingNavBar`（一级 Tab 专属 + 二级页自动隐藏）、`JournalGroupedCard` / `JournalPickerSheet` / 墨黑象牙主按钮（`bf61c0c`）；首页单行筛选与右滑加计划 / 左滑置顶 / 长按浮起快捷菜单（`548a5e7`）；日历单行顶栏 + 三色圆点 + 滑月收周、A+B 无衬线统计进度条与 `FB-001` 考试分组（`32a97e5`）；二级页与弹窗统一白卡、合并「提醒与通知」即点即存并消除全量原生 `DropdownButton`/`PopupMenuButton` 及英文眉标（本提交）。
-- [ ] 待补机端视觉与触感手感真机/MuMu 验收。
+- [x] 全应用 UI/UX 与灵动交互升级（M1–M4）：`JournalPalette` 宣纸浅色 / 深夜台灯暖灰双色、`JournalMotion` 弹簧阻尼与触感、`JournalFloatingNavBar`（一级 Tab 专属 + 二级页自动隐藏）、`JournalGroupedCard` / `JournalPickerSheet` / 墨黑象牙主按钮（`bf61c0c`）；首页单行筛选与右滑加计划 / 左滑置顶 / 长按浮起快捷菜单（`548a5e7`）；日历单行顶栏 + 三色圆点 + 滑月收周、A+B 无衬线统计进度条与 `FB-001` 考试分组（`32a97e5`）；二级页与弹窗统一白卡、合并「提醒与通知」即点即存并消除全量原生 `DropdownButton`/`PopupMenuButton` 及英文眉标（`756153f`）。
+- [x] 双端保数据覆盖与界面/交互验收（`1.8.24-dev.2+104`）：已校验原签名双架构预览包并在 MuMu「学习通」（API 35）与华为实机 `CDY-AN00`（API 29）完成 `-r` 保数据覆盖与 `base.apk` 哈希一致性核验；修复并回归 `AppShell.currentLocationOf` 在 `push` 二级页触发 Store 刷新时底栏误复出问题（`app_shell_test` 含 `refreshListenable` 78/78 绿灯 + 双端实屏复验），实测浅/深夜台灯双色、悬浮底栏、首页手势/长按菜单、日历/统计、合并提醒与测试通知横幅零报错通过（已恢复原有设置；真机实际握持振感/外放音效/通知栏主观手感待用户确认）。
 
 按独立改动随代码更新对应进度；当前无活跃交接或待执行计划。
 

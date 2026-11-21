@@ -275,7 +275,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     // an in-place account restore would let edits appear to belong to the new
     // account even though the page is stale.
     if (authenticated) {
-      final location = _router.routeInformationProvider.value.uri.path;
+      final location = AppShell.currentLocationOf(_router);
       if (location.startsWith('/personal/') ||
           location == '/agenda' ||
           location == '/reminders' ||
@@ -564,7 +564,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     final target = _notificationTarget(payload);
     // A notification for the current route must not ask to discard a draft or
     // approve a future exit; a later different destination asks normally.
-    if (_router.routeInformationProvider.value.uri.path == target) return;
+    if (AppShell.currentLocationOf(_router) == target) return;
     // A dirty editor must not be replaced by a notification deep link without
     // the same confirmation used for back navigation. `navigate` also makes
     // concurrent notifications/tabs resolve to one winning destination.

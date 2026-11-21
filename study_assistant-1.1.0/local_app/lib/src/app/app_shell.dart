@@ -30,6 +30,27 @@ class AppShell extends StatefulWidget {
     '/profile',
   };
 
+  /// Resolves the true top-most route path, including imperative `push()`
+  /// routes that `routeInformationProvider.value.uri` overwrites when
+  /// `GoRouter.optionURLReflectsImperativeAPIs` is false.
+  static String currentLocationOf(GoRouter router) {
+    final configuration = router.routerDelegate.currentConfiguration;
+    final lastMatch = configuration.lastOrNull;
+    if (lastMatch is ImperativeRouteMatch) {
+      final uriPath = lastMatch.matches.uri.path;
+      if (uriPath.isNotEmpty) return uriPath;
+      if (lastMatch.matchedLocation.isNotEmpty) {
+        return lastMatch.matchedLocation;
+      }
+    }
+    if (lastMatch != null && lastMatch.matchedLocation.isNotEmpty) {
+      return lastMatch.matchedLocation;
+    }
+    final configPath = configuration.uri.path;
+    if (configPath.isNotEmpty) return configPath;
+    return router.routeInformationProvider.value.uri.path;
+  }
+
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -37,6 +58,8 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Timer? _returnTimer;
   UnsavedEditGuard? _leaveGuard;
+  GoRouter? _boundRouter;
+  Listenable? _routerListenable;
 
   @override
   void initState() {
@@ -77,14 +100,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final router = GoRouter.of(context);
+    if (!identical(_boundRouter, router)) {
+      _boundRouter = router;
+      _routerListenable = Listenable.merge([
+        router.routerDelegate,
+        router.routeInformationProvider,
+      ]);
+    }
     return ListenableBuilder(
-      listenable: router.routeInformationProvider,
+      listenable: _routerListenable!,
       builder: (context, _) {
-        final routerState = GoRouterState.of(context);
-        final configUri = router.routeInformationProvider.value.uri;
-        final location = configUri.path.isNotEmpty
-            ? configUri.path
-            : routerState.matchedLocation;
+        final resolved = AppShell.currentLocationOf(router);
+        final location = resolved.isNotEmpty
+            ? resolved
+            : GoRouterState.of(context).matchedLocation;
         final showTabBar = AppShell.primaryTabPaths.contains(location);
         final updates = AppUpdateScope.maybeOf(context);
 
@@ -152,7 +181,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _selectDestination(int index) async {
     Future<void> go() async {
       final router = GoRouter.of(context);
-      final from = router.routeInformationProvider.value.uri.path;
+      final from = AppShell.currentLocationOf(router);
       final to = switch (index) {
         0 => '/assignments',
         1 => '/calendar',

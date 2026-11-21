@@ -105,6 +105,86 @@ void main() {
     expect(find.byType(JournalFloatingNavBar), findsOneWidget);
   });
 
+  testWidgets(
+      'floating bottom navigation stays hidden on pushed route after refreshListenable fires',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    final router = GoRouter(
+      initialLocation: '/profile',
+      refreshListenable: store,
+      routes: [
+        ShellRoute(
+          builder: (context, state, child) => AppShell(
+            assignmentStore: store,
+            child: child,
+          ),
+          routes: [
+            GoRoute(
+              path: '/assignments',
+              builder: (context, state) => const Text('首页内容'),
+            ),
+            GoRoute(
+              path: '/calendar',
+              builder: (context, state) => const Text('日历页'),
+            ),
+            GoRoute(
+              path: '/stats',
+              builder: (context, state) => const Text('统计页'),
+            ),
+            GoRoute(
+              path: '/profile',
+              builder: (context, state) => const Text('我的页'),
+            ),
+            GoRoute(
+              path: '/courses',
+              builder: (context, state) => const Text('我的课程二级页'),
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(MaterialApp.router(
+      theme: StudyAssistantTheme.light,
+      routerConfig: router,
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
+
+    router.push('/courses');
+    await tester.pumpAndSettle();
+    expect(find.text('我的课程二级页'), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
+
+    await store.saveDisplay(
+      store.display.copyWith(compact: !store.display.compact),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('我的课程二级页'), findsOneWidget);
+    expect(
+      find.byType(JournalFloatingNavBar),
+      findsNothing,
+      reason: 'Pushed secondary page must keep hiding nav bar after refresh',
+    );
+
+    router.pop();
+    await tester.pumpAndSettle();
+    expect(find.text('我的页'), findsOneWidget);
+    expect(
+      tester
+          .widget<JournalFloatingNavBar>(find.byType(JournalFloatingNavBar))
+          .selectedIndex,
+      3,
+    );
+  });
+
   testWidgets('JournalPickerSheet supports search filtering and selection',
       (tester) async {
     String? picked;
