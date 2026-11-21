@@ -39,6 +39,18 @@ enum AssignmentRecoveryScope {
     return null;
   }
 
+  static AssignmentRecoveryScope? of(BuildContext context) {
+    if (GoRouter.maybeOf(context) == null) return null;
+    try {
+      return fromQueryValue(
+        GoRouterState.of(context).uri.queryParameters[queryParameter],
+      );
+    } on GoError {
+      // The screen is also embedded in plain test hosts without a page state.
+      return null;
+    }
+  }
+
   /// Retained historical dates remain visible here even though the trusted
   /// calendar grid excludes them.
   bool matches(Assignment assignment, DateTime now) {
@@ -248,19 +260,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     }
   }
 
-  AssignmentRecoveryScope? _recoveryScope(BuildContext context) {
-    if (GoRouter.maybeOf(context) == null) return null;
-    try {
-      final value = GoRouterState.of(context)
-          .uri
-          .queryParameters[AssignmentRecoveryScope.queryParameter];
-      return AssignmentRecoveryScope.fromQueryValue(value);
-    } on GoError {
-      // The screen is also embedded in plain test hosts without a page state.
-      return null;
-    }
-  }
-
   void _exitRecoveryScope(BuildContext context) {
     if (GoRouter.maybeOf(context) != null) {
       context.go('/assignments');
@@ -276,7 +275,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         final busy = _refreshing ||
             store.isLoading ||
             store.syncReport.phase == SyncPhase.running;
-        final recoveryScope = _recoveryScope(context);
+        final recoveryScope = AssignmentRecoveryScope.of(context);
         final now = DateTime.now();
         final filtersActive = _query.trim().isNotEmpty ||
             _typeFilter != AssignmentTypeFilter.all ||
@@ -321,6 +320,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           now: now,
           sourceRecords: catalogAssignments,
           displayIndex: displayIndex,
+          prioritizeStartOnly: recoveryScope == null,
         );
         final today = PersonalWorkspace.dayKey(now);
         final plans =
@@ -354,17 +354,42 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ? null
                 : () => openAssignment(a.id),
             opening: _openingAssignments.contains(a.id),
-            onTap: () =>
-                context.push('/assignments/${Uri.encodeComponent(a.id)}'));
+            onTap: () {
+              final path = '/assignments/${Uri.encodeComponent(a.id)}';
+              final scope = recoveryScope == null
+                  ? ''
+                  : '?${AssignmentRecoveryScope.queryParameter}=${recoveryScope.queryValue}';
+              context.push('$path$scope');
+            });
         List<Widget> timeline(List<Assignment> list) {
           String? previous;
           var overdueTierAnnounced = false;
           final todayDay = AssignmentQuery.dayKey(now);
+          final tomorrowDay =
+              DateTime(todayDay.year, todayDay.month, todayDay.day + 1);
           final widgets = <Widget>[];
-          for (final a in list) {
+          var regular = list;
+          if (recoveryScope == null && store.isAuthenticated) {
+            final pinned = <Assignment>[];
+            regular = <Assignment>[];
+            for (final a in list) {
+              if (store.isPinned(a) &&
+                  !store.isHomeAssignmentPreviewOnly(a.id)) {
+                pinned.add(a);
+              } else {
+                regular.add(a);
+              }
+            }
+            if (pinned.isNotEmpty) {
+              widgets
+                  .add(dayHeading('置顶', top: 10, tone: _DayHeadingTone.today));
+              widgets.addAll(pinned.map(card));
+            }
+          }
+          for (final a in regular) {
             final bucket = AssignmentQuery.timelineBucketAt(a, now);
             final isOverdue = bucket == AssignmentDeadlineBucket.overdue;
-            var isTodayGroup = false;
+            DateTime? badgeDay;
             String? key;
             String? heading;
             if (a.isExam) {
@@ -373,18 +398,23 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   .timeline;
               key = stamp?.key;
               heading = stamp?.heading;
-              if (!isOverdue &&
-                  a.timelineAt != null &&
-                  AssignmentQuery.dayKey(a.timelineAt!) == todayDay) {
-                isTodayGroup = true;
+              final start = a.timelineAt;
+              if (start != null &&
+                  (a.timelineTrusted || recoveryScope != null)) {
+                badgeDay = AssignmentQuery.dayKey(start);
               }
             } else if (a.timelineAt != null &&
                 a.timelineTrusted &&
                 !a.deadlineReadFailed) {
               final day = AssignmentQuery.dayKey(a.timelineAt!);
-              isTodayGroup = !isOverdue && day == todayDay;
-              key = '${day.year}:${day.month}:${day.day}';
-              heading = '${day.year}年${day.month}月${day.day}日 '
+              badgeDay = day;
+              final showYear =
+                  recoveryScope != null || day.year != todayDay.year;
+              // An exam on the same day can have a full-year heading.
+              key =
+                  '${showYear ? '' : 'work:'}${day.year}:${day.month}:${day.day}';
+              heading =
+                  '${showYear ? '${day.year}年' : ''}${day.month}月${day.day}日 '
                   '周${'一二三四五六日'[day.weekday - 1]}';
             }
             if (heading == null && recoveryScope == null) {
@@ -410,9 +440,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 }
               } else if (key == 'undated' || key == 'noDeadline') {
                 tone = _DayHeadingTone.undated;
-              } else if (isTodayGroup) {
+              } else if (badgeDay == todayDay) {
                 tone = _DayHeadingTone.today;
                 tierBadge = '今天';
+              } else if (recoveryScope == null && badgeDay == tomorrowDay) {
+                tone = _DayHeadingTone.today;
+                tierBadge = '明天';
               }
               widgets.add(dayHeading(
                 heading,

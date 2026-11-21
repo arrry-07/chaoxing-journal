@@ -811,6 +811,73 @@ class AssignmentStore extends ChangeNotifier {
       List.unmodifiable(_reminderOffsetsMinutes);
   List<Assignment> get assignments => List.unmodifiable(_assignments);
   final Set<String> _unfollowed = {};
+  Set<String> _pinnedIds = {};
+  bool _pinsNeedSave = false;
+
+  static String _pinKey(Assignment assignment) =>
+      assignment.courseTaskKey ?? assignment.id;
+
+  bool isPinned(Assignment assignment) =>
+      _authenticated &&
+      (_pinnedIds.contains(_pinKey(assignment)) ||
+          _pinnedIds.contains(assignment.id));
+
+  bool canTogglePin(Assignment assignment) =>
+      _manageBackgroundSchedule &&
+      _authenticated &&
+      _account != null &&
+      visibleAssignments.any((item) => _pinKey(item) == _pinKey(assignment));
+
+  Future<bool> togglePin(Assignment assignment) async {
+    final account = _account;
+    final generation = _generation;
+    if (account == null || !canTogglePin(assignment)) return false;
+    final key = _pinKey(assignment);
+    var saved = false;
+    await _run(() async {
+      if (generation != _generation || !canTogglePin(assignment)) return;
+      final next = {..._pinnedIds};
+      if (isPinned(assignment)) {
+        next
+          ..remove(key)
+          ..remove(assignment.id);
+      } else {
+        next.add(key);
+      }
+      await repository.savePinnedIds(next, account);
+      if (generation != _generation || _disposed) return;
+      _pinnedIds = next;
+      _pinsNeedSave = false;
+      saved = true;
+    });
+    return saved;
+  }
+
+  Future<void> _prunePins() async {
+    final account = _account;
+    // Only the foreground store manages pins. A headless sync may have
+    // restored a snapshot from before a foreground pin operation.
+    if (!_manageBackgroundSchedule ||
+        !_authenticated ||
+        account == null ||
+        (_pinnedIds.isEmpty && !_pinsNeedSave) ||
+        repository.recoveryWarning != null) {
+      return;
+    }
+    final retained = visibleAssignments.where(isPinned).map(_pinKey).toSet();
+    if (setEquals(_pinnedIds, retained) && !_pinsNeedSave) return;
+    _pinnedIds = retained;
+    _pinsNeedSave = true;
+    final generation = _generation;
+    try {
+      await repository.savePinnedIds(_pinnedIds, account);
+      if (generation == _generation) _pinsNeedSave = false;
+    } catch (_) {
+      // The next successful journal update can retry without restoring pins
+      // for entries already removed during this session.
+    }
+  }
+
   List<CourseRef> _courses = [];
   List<CourseRef> get courses => List.unmodifiable(_courses);
   bool follows(String key) => !_unfollowed.contains(key);
@@ -1172,6 +1239,8 @@ class AssignmentStore extends ChangeNotifier {
     _hiddenAssignments = [];
     _courses = [];
     _unfollowed.clear();
+    _pinnedIds.clear();
+    _pinsNeedSave = false;
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
     _lastSyncAt = null;
     _lastSyncAttemptAt = null;
@@ -1213,6 +1282,12 @@ class AssignmentStore extends ChangeNotifier {
     });
     await stage('首页筛选', () async {
       if (_authenticated) homeFilters = await repository.loadHomeFilters();
+    });
+    await stage('置顶课业', () async {
+      final account = _account;
+      if (_manageBackgroundSchedule && _authenticated && account != null) {
+        _pinnedIds = await repository.loadPinnedIds(account);
+      }
     });
     await stage('提醒设置', () async {
       _reminderOffsetsMinutes = await reminderRuleStore.loadOffsetsMinutes();
@@ -1516,6 +1591,8 @@ class AssignmentStore extends ChangeNotifier {
           _hiddenAssignments = [];
           _courses = [];
           _unfollowed.clear();
+          _pinnedIds.clear();
+          _pinsNeedSave = false;
           _courseNotices = CourseNoticeCollection();
           _courseChapters = CourseChapterCatalog();
           _invalidateHomeDisplayIndex();
@@ -2376,6 +2453,8 @@ class AssignmentStore extends ChangeNotifier {
       _hiddenAssignments = [];
       _courses = [];
       _unfollowed.clear();
+      _pinnedIds.clear();
+      _pinsNeedSave = false;
       _invalidateHomeDisplayIndex();
       syncReport = const SyncReport();
       _visitedAssignment = null;
@@ -2419,6 +2498,7 @@ class AssignmentStore extends ChangeNotifier {
     String? syncFailure,
     DateTime? completedAt,
   }) async {
+    await _prunePins();
     var manualRescheduleSucceeded = false;
     _serviceWarnings.clear();
     // Restored app preferences can outlive excluded/nonportable credentials.

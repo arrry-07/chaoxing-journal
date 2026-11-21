@@ -457,6 +457,7 @@ class LocalRecordQuery {
       homeSort,
       now: now,
       sourceRecords: sources,
+      prioritizeStartOnly: false,
     );
     return [for (final primary in sortedPrimaries) byPrimaryId[primary.id]!];
   }
@@ -489,6 +490,7 @@ class LocalRecordQuery {
       homeSort,
       now: now,
       sourceRecords: sources,
+      prioritizeStartOnly: false,
     );
   }
 }

@@ -447,6 +447,59 @@ void main() {
       expect(records, original);
     });
 
+    test('start-only work remains visible next to imminent deadlines', () {
+      final boundary = _now.add(const Duration(days: 7));
+      final near = _work('near', course: '课程', title: '七天内', due: boundary);
+      final far = _work('far',
+          course: '课程',
+          title: '七天后',
+          due: boundary.add(const Duration(minutes: 1)));
+      final start = _work('start',
+              course: '课程', title: '第二次讨论作业', trusted: false, failed: true)
+          .copyWith(availableFromAt: _now);
+      final textStart = _work('text',
+              course: '课程', title: '有开始时间原文', trusted: false, failed: true)
+          .copyWith(availableFromText: '11月17日 00:00');
+      final undated =
+          _work('undated', course: '课程', title: '完全无时间', trusted: false);
+      final overdue = _work('overdue',
+          course: '课程',
+          title: '已逾期',
+          due: _now.subtract(const Duration(days: 1)));
+      final noEvidence = _work('failed',
+          course: '课程', title: '无开始且读取失败', trusted: false, failed: true);
+      final staleDeadline = _work('stale',
+              course: '课程',
+              title: '有历史截止',
+              due: boundary,
+              failed: true,
+              trusted: false)
+          .copyWith(availableFromAt: _now);
+      final overdueWithoutTime = _work('past',
+              course: '课程', title: '来源报告已逾期', status: 'overdue', trusted: false)
+          .copyWith(availableFromAt: _now);
+      final records = [far, overdue, undated, textStart, start, near];
+      expect(
+          AssignmentQuery.filterHome(
+            [...records, noEvidence, staleDeadline, overdueWithoutTime],
+            deadline: AssignmentDeadlineFilter.notExpired,
+            now: _now,
+          ),
+          unorderedEquals([near, far, start, textStart, undated]));
+      expect(
+          AssignmentQuery.filterHome(records,
+              deadline: AssignmentDeadlineFilter.next7Days, now: _now),
+          [near]);
+      expect(
+          AssignmentQuery.sortHome(records, HomeSortOrder.deadlineAsc,
+              now: _now),
+          [near, start, textStart, far, undated, overdue]);
+      expect(
+          AssignmentQuery.sortHome(records, HomeSortOrder.deadlineDesc,
+              now: _now),
+          [far, near, start, textStart, undated, overdue]);
+    });
+
     test('FB-005 middle tier keeps course name identity order both ways', () {
       final dated = _work('dated',
           course: '数学', title: '有时间作业', due: _now.add(const Duration(days: 1)));

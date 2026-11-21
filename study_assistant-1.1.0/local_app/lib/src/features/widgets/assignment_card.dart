@@ -328,7 +328,7 @@ class AssignmentCard extends StatelessWidget {
     }
 
     final verticalPad = compact ? 9.0 : 13.0;
-    const railGap = 14.0;
+    const railGap = 10.0;
     final contentLeftInset = railWidth + railGap;
 
     final bodyColumn = Column(

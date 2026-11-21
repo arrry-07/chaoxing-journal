@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -7,8 +8,11 @@ import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/transient_feedback.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/features/widgets/coursework_status_pill.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -172,6 +176,7 @@ void main() {
       id: 'cx:work:1:2:9',
       courseName: '工程制图基础',
       title: '组合体三视图测绘练习',
+      availableFromAt: DateTime.utc(2026, 11, 17, 16, 30),
       deadlineAt: now.add(const Duration(days: 1)),
       requirementsText: '按课堂要求提交测绘过程与最终视图。',
       status: 'pending',
@@ -198,6 +203,14 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
+
+    final time = find.byKey(const ValueKey('assignment-detail-time'));
+    expect(
+      tester.widget<Text>(time).data,
+      '开始：2026年11月18日 00:30（北京时间）\n'
+      '截止：2026年11月19日 12:00（北京时间）',
+    );
+    expect(find.byKey(const ValueKey('assignment-detail-pin')), findsNothing);
 
     store.returnCheckMessage = '正在核对刚才作业的提交状态…';
     store.notifyListeners();
@@ -334,6 +347,7 @@ void main() {
       deadlineAt: now.add(const Duration(days: 6)),
       deadlineTrusted: false,
       deadlineRawText: '11月24日 23:59（年份待确认）',
+      availableFromText: ' 11月18日（原文） ',
       requirementsText: '',
       status: 'pending',
       submitUrl:
@@ -429,6 +443,12 @@ void main() {
           expect(requirements, findsOneWidget);
         }
         if (entry.key == 'unconfirmed') {
+          final time = find.byKey(const ValueKey('assignment-detail-time'));
+          await reveal(time);
+          expect(
+            tester.widget<Text>(time).data,
+            '开始：11月18日（原文）\n历史截止（未核实） 2026年11月24日 12:00（北京时间）',
+          );
           final verification =
               find.byKey(const ValueKey('assignment-detail-verification'));
           await reveal(verification);
@@ -452,6 +472,171 @@ void main() {
       }
     }
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'detail pin moves one filtered home row and is pruned on submission and hiding',
+      (tester) async {
+    const account = 'pin-test-student';
+    SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({'chaoxingAccount': account});
+    addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 1500);
+    addTearDown(tester.view.reset);
+
+    final now = DateTime.now();
+    Assignment work(String id, String title, DateTime? deadline) => Assignment(
+          id: 'cx:work:1:2:$id',
+          courseName: '合成课程',
+          title: title,
+          deadlineAt: deadline,
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: now,
+        );
+    final near = work('31', '较早截止作业', now.add(const Duration(days: 1)));
+    final later = work('32', '稍后截止作业', now.add(const Duration(days: 5)));
+    final hide = work('33', '无截止待隐藏作业', null);
+    final overdue =
+        work('34', '未置顶逾期作业', now.subtract(const Duration(microseconds: 1)));
+    final repository = _PinWriteFailureRepository();
+    final store = _PinTestStore(repository: repository);
+    addTearDown(store.dispose);
+    await tester.runAsync(() async {
+      await repository.activateAccount(account);
+      await repository.mergeAndSave(
+        [near, later, hide, overdue],
+        completeSync: false,
+      );
+      await store.restoreSession();
+    });
+    expect(store.isAuthenticated, isTrue);
+
+    final router = _router(store, clock: () => now);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(
+      theme: StudyAssistantTheme.light,
+      routerConfig: router,
+    ));
+    await tester.pumpAndSettle();
+
+    final pin = find.byKey(const ValueKey('assignment-detail-pin'));
+    final back = find.byKey(const ValueKey('assignment-detail-back'));
+    final pinHeading = find.text('置顶');
+    List<String> homeIds() => tester
+        .widgetList<AssignmentCard>(find.byType(AssignmentCard))
+        .map((card) => card.assignment.id)
+        .toList();
+    Future<void> tap(Finder target) async {
+      await tester.runAsync(() async {
+        store.pendingMutation = null;
+        await tester.tap(target.hitTestable());
+        await store.pendingMutation;
+      });
+      await tester.pumpAndSettle();
+    }
+
+    expect(homeIds(), [near.id, later.id, hide.id, overdue.id]);
+    await tap(find.text(later.title));
+    expect(find.descendant(of: pin, matching: find.text('置顶')), findsOneWidget);
+
+    repository.failPinWrites = true;
+    await tap(pin);
+    expect(find.text('置顶失败，请稍后重试。'), findsOneWidget);
+    expect(store.isPinned(later), isFalse);
+    repository.failPinWrites = false;
+    await tap(pin);
+    expect(find.text('置顶失败，请稍后重试。'), findsNothing);
+    expect(
+        find.descendant(of: pin, matching: find.text('已置顶')), findsOneWidget);
+    await tap(back);
+
+    expect(pinHeading, findsOneWidget);
+    expect(homeIds(), [later.id, near.id, hide.id, overdue.id]);
+    expect(find.text(later.title), findsOneWidget);
+    expect(tester.getTopLeft(pinHeading).dy,
+        lessThan(tester.getTopLeft(find.text(later.title)).dy));
+    expect(await tester.runAsync(() => repository.loadPinnedIds(account)),
+        {later.courseTaskKey});
+
+    expect(
+      await tester.runAsync(() => store.saveHomeFilters(
+            HomeFilters(query: near.title),
+            store.accountEpoch,
+          )),
+      isTrue,
+    );
+    await tester.pumpAndSettle();
+    expect(homeIds(), [near.id]);
+    expect(pinHeading, findsNothing);
+    expect(
+      await tester.runAsync(
+          () => store.saveHomeFilters(const HomeFilters(), store.accountEpoch)),
+      isTrue,
+    );
+    await tester.pumpAndSettle();
+    expect(homeIds(), [later.id, near.id, hide.id, overdue.id]);
+
+    await tap(find.text(later.title));
+    await tap(pin);
+    expect(find.descendant(of: pin, matching: find.text('置顶')), findsOneWidget);
+    await tap(back);
+    expect(pinHeading, findsNothing);
+    expect(homeIds(), [near.id, later.id, hide.id, overdue.id]);
+
+    await tap(find.text(later.title));
+    await tap(pin);
+    await tester.runAsync(() async {
+      await repository.mergeAndSave(
+        [later.copyWith(status: 'submitted')],
+        completeSync: false,
+      );
+      await store.refreshAssignments();
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('已提交'), findsOneWidget);
+    expect(pin, findsNothing);
+    expect(store.isPinned(later), isFalse);
+    expect(await tester.runAsync(() => repository.loadPinnedIds(account)),
+        isEmpty);
+    await tap(back);
+    expect(homeIds(), [near.id, hide.id, overdue.id]);
+    expect(pinHeading, findsNothing);
+
+    await tap(find.text(hide.title));
+    await tap(pin);
+    await tap(back);
+    expect(homeIds(), [hide.id, near.id, overdue.id]);
+
+    router.go('/assignments?scope=noDeadline');
+    await tester.pumpAndSettle();
+    expect(homeIds(), [hide.id]);
+    expect(pinHeading, findsNothing);
+    await tap(find.text(hide.title));
+    expect(pin, findsNothing);
+    await tap(back);
+    expect(find.byKey(const ValueKey('assignment-recovery-scope')),
+        findsOneWidget);
+
+    router.go('/assignments');
+    await tester.pumpAndSettle();
+    await tap(find.text(hide.title));
+    expect(
+        find.descendant(of: pin, matching: find.text('已置顶')), findsOneWidget);
+    await tap(find.byKey(const ValueKey('assignment-detail-hide')));
+    expect(homeIds(), [near.id, overdue.id]);
+    expect(pinHeading, findsNothing);
+    expect(store.isPinned(hide), isFalse);
+    expect(await tester.runAsync(() => repository.loadPinnedIds(account)),
+        isEmpty);
+
+    router.go('/assignments/${Uri.encodeComponent(hide.id)}');
+    await tester.pumpAndSettle();
+    expect(find.text('恢复到课业清单'), findsOneWidget);
+    expect(pin, findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 }
 
@@ -542,8 +727,33 @@ List<Assignment> _examRecords(
   ];
 }
 
+class _PinTestStore extends _RefinementStore {
+  _PinTestStore({required super.repository});
+
+  Future<bool>? pendingMutation;
+
+  @override
+  Future<bool> togglePin(Assignment assignment) =>
+      pendingMutation = super.togglePin(assignment);
+
+  @override
+  Future<bool> setAssignmentsHidden(
+          Iterable<String> assignmentIds, bool hidden) =>
+      pendingMutation = super.setAssignmentsHidden(assignmentIds, hidden);
+}
+
+class _PinWriteFailureRepository extends LocalAssignmentRepository {
+  bool failPinWrites = false;
+
+  @override
+  Future<void> savePinnedIds(Set<String> ids, String account) async {
+    if (failPinWrites) throw StateError('simulated pin write failure');
+    await super.savePinnedIds(ids, account);
+  }
+}
+
 class _RefinementStore extends AssignmentStore {
-  _RefinementStore()
+  _RefinementStore({super.repository})
       : super(
           sessionStore: SecureSessionStore(),
           notificationService: LocalNotificationService(),

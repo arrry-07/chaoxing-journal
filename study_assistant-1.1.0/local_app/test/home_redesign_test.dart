@@ -265,7 +265,7 @@ void main() {
     expect(
         find.byWidgetPredicate((widget) =>
             widget is Text &&
-            RegExp(r'^\d{4}年\d+月\d+日 周[一二三四五六日]$')
+            RegExp(r'^(?:\d{4}年)?\d+月\d+日 周[一二三四五六日]$')
                 .hasMatch(widget.data ?? widget.textSpan?.toPlainText() ?? '')),
         findsNWidgets(3));
 
@@ -316,6 +316,8 @@ void main() {
     await t.pump();
     expect(t.takeException(), isNull);
     expect(find.byType(AssignmentListScreen), findsOneWidget);
+    expect(find.byKey(const ValueKey('assignment-detail-pin')), findsNothing);
+    expect(find.text('置顶'), findsNothing);
 
     final saved = pending.copyWith(
       deadlineAt: DateTime.now().add(const Duration(days: 1)),

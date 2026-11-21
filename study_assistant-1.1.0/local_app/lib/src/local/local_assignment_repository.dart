@@ -56,6 +56,7 @@ class LocalAssignmentRepository {
   static const _homeFiltersKey = 'home_filters_v1';
   static const _noticesKey = 'course_notices_v1';
   static const _chaptersKey = 'course_chapters_v1';
+  static const _pinnedKey = 'pinned_assignment_ids_v1';
   static const _maxAdditionalRecoveryBackups = 3;
   static const _maxRecoveryValueBytes = 4 * 1024 * 1024;
   static const _recoveryWriteFailedWarning =
@@ -89,6 +90,7 @@ class LocalAssignmentRepository {
     _personalKey,
     _notebookKey,
     _homeFiltersKey,
+    _pinnedKey,
     _noticesKey,
     _chaptersKey,
     '${_key}_recovery_backup',
@@ -122,6 +124,33 @@ class LocalAssignmentRepository {
         } catch (_) {
           // The plugin updates its cache before the platform write succeeds.
           // Reload so a failed preference cannot reappear on route restoration.
+          await prefs.reload();
+          rethrow;
+        }
+      });
+
+  Future<Set<String>> loadPinnedIds(String account) => _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return (prefs.getStringList(_pinnedKey) ?? const <String>[])
+            .map((id) => id.trim())
+            .where((id) => id.isNotEmpty)
+            .toSet();
+      });
+
+  Future<void> savePinnedIds(Set<String> ids, String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        final sorted = ids
+            .map((id) => id.trim())
+            .where((id) => id.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+        try {
+          await _require(prefs.setStringList(_pinnedKey, sorted));
+        } catch (_) {
           await prefs.reload();
           rethrow;
         }
