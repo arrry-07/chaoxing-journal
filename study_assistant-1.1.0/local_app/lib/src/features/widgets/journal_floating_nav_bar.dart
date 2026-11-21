@@ -75,99 +75,114 @@ class _JournalFloatingNavBarState extends State<JournalFloatingNavBar>
         journal.isDark ? journal.accent.withValues(alpha: 0.20) : journal.sage;
     final activeForeground = journal.isDark ? journal.accent : journal.ink;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-      child: Center(
-        heightFactor: 1.0,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(31),
-              boxShadow: [
-                BoxShadow(
-                  color: journal.isDark
-                      ? const Color(0x4D000000)
-                      : const Color(0x161F2328),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(31),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                child: Container(
-                  height: JournalLayout.floatingNavHeight,
-                  decoration: BoxDecoration(
-                    color: journal.navGlassFill,
-                    borderRadius: BorderRadius.circular(31),
-                    border: Border.all(
-                      color: journal.navGlassBorder,
-                      width: 0.8,
-                    ),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            journal.paper.withValues(alpha: 0.0),
+            journal.paper.withValues(alpha: 0.78),
+            journal.paper,
+          ],
+          stops: const [0.0, 0.56, 1.0],
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
+        child: Center(
+          heightFactor: 1.0,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(31),
+                boxShadow: [
+                  BoxShadow(
+                    color: journal.isDark
+                        ? const Color(0x4D000000)
+                        : const Color(0x161F2328),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
                   ),
-                  foregroundDecoration: journal.isDark
-                      ? BoxDecoration(
-                          borderRadius: BorderRadius.circular(31),
-                          border: Border(
-                            top: BorderSide(
-                              color: journal.navGlassHighlight,
-                              width: 0.8,
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(31),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  child: Container(
+                    height: JournalLayout.floatingNavHeight,
+                    decoration: BoxDecoration(
+                      color: journal.navGlassFill,
+                      borderRadius: BorderRadius.circular(31),
+                      border: Border.all(
+                        color: journal.navGlassBorder,
+                        width: 0.8,
+                      ),
+                    ),
+                    foregroundDecoration: journal.isDark
+                        ? BoxDecoration(
+                            borderRadius: BorderRadius.circular(31),
+                            border: Border(
+                              top: BorderSide(
+                                color: journal.navGlassHighlight,
+                                width: 0.8,
+                              ),
                             ),
-                          ),
-                        )
-                      : null,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final slotWidth = constraints.maxWidth / tabs.length;
-                      return Stack(
-                        alignment: Alignment.centerLeft,
-                        children: [
-                          AnimatedBuilder(
-                            animation: _slideController,
-                            builder: (context, _) {
-                              final clamped = _slideController.value
-                                  .clamp(0.0, (tabs.length - 1).toDouble());
-                              return Transform.translate(
-                                offset: Offset(clamped * slotWidth, 0),
-                                child: SizedBox(
-                                  width: slotWidth,
-                                  height: 48,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 3),
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        color: indicatorColor,
-                                        borderRadius: BorderRadius.circular(24),
+                          )
+                        : null,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final slotWidth = constraints.maxWidth / tabs.length;
+                        return Stack(
+                          alignment: Alignment.centerLeft,
+                          children: [
+                            AnimatedBuilder(
+                              animation: _slideController,
+                              builder: (context, _) {
+                                final clamped = _slideController.value
+                                    .clamp(0.0, (tabs.length - 1).toDouble());
+                                return Transform.translate(
+                                  offset: Offset(clamped * slotWidth, 0),
+                                  child: SizedBox(
+                                    width: slotWidth,
+                                    height: 48,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 3),
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: indicatorColor,
+                                          borderRadius:
+                                              BorderRadius.circular(24),
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              );
-                            },
-                          ),
-                          Row(
-                            children: [
-                              for (var i = 0; i < tabs.length; i++)
-                                Expanded(
-                                  child: _NavDestinationItem(
-                                    tab: tabs[i],
-                                    selected: i == widget.selectedIndex,
-                                    activeColor: activeForeground,
-                                    inactiveColor: journal.muted,
-                                    accentColor: journal.accent,
-                                    onTap: () => widget.onSelected(i),
+                                );
+                              },
+                            ),
+                            Row(
+                              children: [
+                                for (var i = 0; i < tabs.length; i++)
+                                  Expanded(
+                                    child: _NavDestinationItem(
+                                      tab: tabs[i],
+                                      selected: i == widget.selectedIndex,
+                                      activeColor: activeForeground,
+                                      inactiveColor: journal.muted,
+                                      accentColor: journal.accent,
+                                      onTap: () => widget.onSelected(i),
+                                    ),
                                   ),
-                                ),
-                            ],
-                          ),
-                        ],
-                      );
-                    },
+                              ],
+                            ),
+                          ],
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
@@ -179,7 +194,7 @@ class _JournalFloatingNavBarState extends State<JournalFloatingNavBar>
   }
 }
 
-class _NavDestinationItem extends StatelessWidget {
+class _NavDestinationItem extends StatefulWidget {
   const _NavDestinationItem({
     required this.tab,
     required this.selected,
@@ -197,54 +212,76 @@ class _NavDestinationItem extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_NavDestinationItem> createState() => _NavDestinationItemState();
+}
+
+class _NavDestinationItemState extends State<_NavDestinationItem> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    final fg = selected ? activeColor : inactiveColor;
+    final fg = widget.selected ? widget.activeColor : widget.inactiveColor;
+    final reduced = JournalMotion.isReducedMotion(context);
+    final iconScale = _pressed && !reduced
+        ? 0.94
+        : widget.selected && !reduced
+            ? 1.06
+            : 1.0;
+
     return Semantics(
       container: true,
       button: true,
-      selected: selected,
-      label: tab.label,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: SizedBox(
-          height: JournalLayout.floatingNavHeight,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AnimatedScale(
-                scale: selected && !JournalMotion.isReducedMotion(context)
-                    ? 1.06
-                    : 1.0,
-                duration: JournalMotion.duration(
-                  context,
-                  const Duration(milliseconds: 180),
-                ),
-                curve: JournalMotion.easeOut,
-                child: JournalNavIcon(
-                  tab: tab,
-                  selected: selected,
-                  color: fg,
-                  accentColor: accentColor,
-                ),
-              ),
-              const SizedBox(height: 3),
-              ExcludeSemantics(
-                child: Text(
-                  tab.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontFamily: Journal.bodyFamily,
-                    fontFamilyFallback: Journal.bodyFallback,
-                    fontSize: 11.5,
-                    height: 1.15,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+      selected: widget.selected,
+      label: widget.tab.label,
+      child: Listener(
+        onPointerDown: (_) => setState(() => _pressed = true),
+        onPointerUp: (_) {
+          if (_pressed) setState(() => _pressed = false);
+        },
+        onPointerCancel: (_) {
+          if (_pressed) setState(() => _pressed = false);
+        },
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: SizedBox(
+            height: JournalLayout.floatingNavHeight,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedScale(
+                  scale: iconScale,
+                  duration: JournalMotion.duration(
+                    context,
+                    Duration(milliseconds: _pressed ? 120 : 180),
+                  ),
+                  curve: JournalMotion.easeOut,
+                  child: JournalNavIcon(
+                    tab: widget.tab,
+                    selected: widget.selected,
                     color: fg,
+                    accentColor: widget.accentColor,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 3),
+                ExcludeSemantics(
+                  child: Text(
+                    widget.tab.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: Journal.bodyFamily,
+                      fontFamilyFallback: Journal.bodyFallback,
+                      fontSize: 11.5,
+                      height: 1.15,
+                      fontWeight:
+                          widget.selected ? FontWeight.w600 : FontWeight.w500,
+                      color: fg,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -49,7 +49,7 @@ class ProfileScreen extends StatelessWidget {
                 children: [
                   Card(
                     key: const ValueKey('profile-group-courses'),
-                    color: Color.lerp(journal.sheet, journal.sage, .35),
+                    color: journal.sheet,
                     clipBehavior: Clip.antiAlias,
                     child: IconTheme.merge(
                       data: IconThemeData(color: journal.ink),
@@ -467,7 +467,12 @@ class _SettingsCard extends StatelessWidget {
             Container(
               key: ValueKey('profile-group-$title'),
               width: double.infinity,
-              color: Color.lerp(journal.sheet, headerColor, .35),
+              decoration: BoxDecoration(
+                color: journal.sectionHeaderFill,
+                border: Border(
+                  bottom: BorderSide(color: journal.divider, width: 0.6),
+                ),
+              ),
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
               child: Text(
                 title,

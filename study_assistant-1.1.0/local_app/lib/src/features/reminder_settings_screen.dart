@@ -728,41 +728,89 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                     ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _customHoursController,
-                            enabled: !_saving,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              hintText: '小时',
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        InputDecoration buildTimeInputDecoration(
+                          String hint,
+                          IconData icon,
+                        ) =>
+                            InputDecoration(
+                              hintText: hint,
                               isDense: true,
-                              prefixIcon: Icon(Icons.schedule_rounded),
-                            ),
+                              contentPadding:
+                                  const EdgeInsets.fromLTRB(4, 11, 8, 11),
+                              prefixIconConstraints: const BoxConstraints(
+                                minWidth: 30,
+                                minHeight: 36,
+                              ),
+                              prefixIcon: Padding(
+                                padding:
+                                    const EdgeInsets.only(left: 10, right: 4),
+                                child: Icon(
+                                  icon,
+                                  size: 17,
+                                  color: journal.muted,
+                                ),
+                              ),
+                            );
+
+                        final hoursField = TextField(
+                          controller: _customHoursController,
+                          enabled: !_saving,
+                          keyboardType: TextInputType.number,
+                          decoration: buildTimeInputDecoration(
+                            '小时',
+                            Icons.schedule_rounded,
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _customMinutesController,
-                            enabled: !_saving,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              hintText: '分钟',
-                              isDense: true,
-                              prefixIcon: Icon(Icons.timer_outlined),
-                            ),
+                        );
+                        final minutesField = TextField(
+                          controller: _customMinutesController,
+                          enabled: !_saving,
+                          keyboardType: TextInputType.number,
+                          decoration: buildTimeInputDecoration(
+                            '分钟',
+                            Icons.timer_outlined,
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        JournalPrimaryButton(
-                          expanded: false,
-                          height: 44,
-                          label: '添加',
-                          onPressed: _saving ? null : _addCustomOffset,
-                        ),
-                      ],
+                        );
+
+                        final stacked = constraints.maxWidth < 276 ||
+                            JournalLayout.isLargeText(context);
+                        if (stacked) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(child: hoursField),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: minutesField),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              JournalPrimaryButton(
+                                expanded: true,
+                                height: 44,
+                                label: '添加',
+                                onPressed: _saving ? null : _addCustomOffset,
+                              ),
+                            ],
+                          );
+                        }
+                        return Row(
+                          children: [
+                            Expanded(child: hoursField),
+                            const SizedBox(width: 8),
+                            Expanded(child: minutesField),
+                            const SizedBox(width: 8),
+                            JournalPrimaryButton(
+                              expanded: false,
+                              height: 44,
+                              label: '添加',
+                              onPressed: _saving ? null : _addCustomOffset,
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                   for (final offset in customOffsets)

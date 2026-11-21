@@ -33,11 +33,7 @@ class JournalGroupedCard extends StatelessWidget {
     final hasHeader = title != null ||
         trailing != null ||
         (infoItems != null && infoItems!.isNotEmpty);
-    final headerFill = Color.lerp(
-      journal.sheet,
-      journal.sage,
-      journal.isDark ? 0.24 : 0.30,
-    )!;
+    final headerFill = journal.sectionHeaderFill;
 
     return Material(
       color: backgroundColor ?? journal.sheet,
@@ -52,7 +48,12 @@ class JournalGroupedCard extends StatelessWidget {
         children: [
           if (hasHeader)
             Container(
-              color: headerFill,
+              decoration: BoxDecoration(
+                color: headerFill,
+                border: Border(
+                  bottom: BorderSide(color: journal.divider, width: 0.6),
+                ),
+              ),
               padding: const EdgeInsets.fromLTRB(16, 12, 12, 10),
               child: Row(
                 children: [

@@ -242,6 +242,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
 
   Color get accent => slate;
 
+  Color get sectionHeaderFill => Color.lerp(sheet, parchment, 0.34)!;
+
   TextStyle get display =>
       isDark ? Journal.display.copyWith(color: ink) : Journal.display;
   TextStyle get pageTitle =>

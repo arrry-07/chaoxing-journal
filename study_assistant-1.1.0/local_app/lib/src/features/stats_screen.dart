@@ -509,7 +509,7 @@ class _StatsScreenState extends State<StatsScreen> {
                     ),
                   )
                 : CourseMark(group.name, size: 28),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: largeText
                   ? Column(
@@ -530,7 +530,7 @@ class _StatsScreenState extends State<StatsScreen> {
                             style: journal.entryTitle,
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         Flexible(flex: 0, child: pills),
                       ],
                     ),
@@ -564,7 +564,7 @@ class _CourseStatPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(10),
@@ -596,8 +596,11 @@ class _StatsRangeSegmentedBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
-        color: journal.parchment,
+        color: journal.isDark ? const Color(0xFF21201D) : journal.parchment,
         borderRadius: BorderRadius.circular(14),
+        border: journal.isDark
+            ? Border.all(color: journal.cardBorder, width: 0.7)
+            : null,
       ),
       child: Row(
         children: [
@@ -613,9 +616,15 @@ class _StatsRangeSegmentedBar extends StatelessWidget {
                   curve: JournalMotion.easeOut,
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   decoration: BoxDecoration(
-                    color:
-                        selected == range ? journal.sheet : Colors.transparent,
+                    color: selected == range
+                        ? (journal.isDark
+                            ? journal.sheetElevated
+                            : journal.sheet)
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(11),
+                    border: selected == range && journal.isDark
+                        ? Border.all(color: journal.cardBorder, width: 0.7)
+                        : null,
                     boxShadow: selected == range
                         ? [
                             BoxShadow(

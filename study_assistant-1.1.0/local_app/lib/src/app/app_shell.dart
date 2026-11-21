@@ -151,7 +151,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     const Duration(milliseconds: 200),
                   ),
                   switchInCurve: JournalMotion.easeOut,
-                  switchOutCurve: Curves.easeInCubic,
+                  switchOutCurve: JournalMotion.easeOut,
                   transitionBuilder: (child, animation) => SlideTransition(
                     position: Tween<Offset>(
                       begin: const Offset(0, 0.35),

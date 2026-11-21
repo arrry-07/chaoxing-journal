@@ -353,27 +353,35 @@ class AssignmentCard extends StatelessWidget {
     }
 
     final verticalPad = compact ? 8.5 : 12.0;
-    const railGap = 12.0;
+    const railGap = 10.0;
     final contentLeftInset = railWidth + railGap;
+    final hasInlineLaunch = onOpenAssignment != null && !largeText;
+    final titlePadding = EdgeInsets.only(right: hasInlineLaunch ? 36 : 0);
 
     final bodyColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (hasTitle)
-          Text(
-            a.title.trim(),
-            maxLines: largeText ? null : 2,
-            overflow: largeText ? null : TextOverflow.ellipsis,
-            style: overdue
-                ? journal.entryTitle.copyWith(
-                    color: journal == JournalPalette.dark
-                        ? journal.muted
-                        : const Color(0xFF4B5563),
-                  )
-                : journal.entryTitle,
+          Padding(
+            padding: titlePadding,
+            child: Text(
+              a.title.trim(),
+              maxLines: largeText ? null : 2,
+              overflow: largeText ? null : TextOverflow.ellipsis,
+              style: overdue
+                  ? journal.entryTitle.copyWith(
+                      color: journal == JournalPalette.dark
+                          ? journal.muted
+                          : const Color(0xFF4B5563),
+                    )
+                  : journal.entryTitle,
+            ),
           )
         else if (hasCourse)
-          Text(a.courseName.trim(), style: journal.entryTitle),
+          Padding(
+            padding: titlePadding,
+            child: Text(a.courseName.trim(), style: journal.entryTitle),
+          ),
         if (!largeText && hasTitle && hasCourse && showPlainInlineState) ...[
           const SizedBox(height: 4),
           _CourseStateLine(
@@ -432,16 +440,16 @@ class AssignmentCard extends StatelessWidget {
       ],
     );
 
-    return Padding(
-      padding: contentPadding,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Semantics(
+    return Stack(
+      children: [
+        Padding(
+          padding: contentPadding,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: hasInlineLaunch ? 52 : 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Semantics(
                   button: onCardTap != null,
                   onTap: onCardTap,
                   label:
@@ -501,37 +509,39 @@ class AssignmentCard extends StatelessWidget {
                     ),
                   ),
                 ),
-              ),
-              if (onOpenAssignment != null && !largeText) ...[
-                const SizedBox(width: 4),
-                buildLaunchControl(),
+                if (onOpenAssignment != null && largeText)
+                  Padding(
+                    padding: EdgeInsets.only(left: contentLeftInset, bottom: 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: buildLaunchControl(),
+                    ),
+                  ),
+                if (showDivider) ...[
+                  SizedBox(
+                    key: ValueKey('assignment-card-gap-${a.id}'),
+                    height: 4,
+                  ),
+                  Padding(
+                    padding: EdgeInsets.only(left: contentLeftInset),
+                    child: Divider(
+                      height: 1,
+                      thickness: 0.8,
+                      color: journal.rule,
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
-          if (onOpenAssignment != null && largeText)
-            Padding(
-              padding: EdgeInsets.only(left: contentLeftInset, bottom: 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: buildLaunchControl(),
-              ),
-            ),
-          if (showDivider) ...[
-            SizedBox(
-              key: ValueKey('assignment-card-gap-${a.id}'),
-              height: 4,
-            ),
-            Padding(
-              padding: EdgeInsets.only(left: contentLeftInset),
-              child: Divider(
-                height: 1,
-                thickness: 0.8,
-                color: journal.rule,
-              ),
-            ),
-          ],
-        ],
-      ),
+        ),
+        if (hasInlineLaunch)
+          Positioned(
+            top: compact ? 0 : 2,
+            right: 2,
+            child: buildLaunchControl(),
+          ),
+      ],
     );
   }
 }

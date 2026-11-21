@@ -81,7 +81,7 @@ class _JournalContextMenuOverlay extends StatelessWidget {
     final curved = CurvedAnimation(
       parent: animation,
       curve: JournalMotion.easeOut,
-      reverseCurve: Curves.easeInCubic,
+      reverseCurve: JournalMotion.easeOut,
     );
 
     const horizontalPad = 18.0;

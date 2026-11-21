@@ -250,55 +250,85 @@ class _CalendarScreenState extends State<CalendarScreen>
 
           return ListView(
             padding: EdgeInsets.fromLTRB(
-              18,
+              16,
               14,
-              18,
+              16,
               JournalLayout.floatingNavClearance(context),
             ),
             children: [
-              Wrap(
-                alignment: WrapAlignment.spaceBetween,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  Text('课业日历', style: journal.display),
-                  Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      if (isOffToday)
-                        JournalPillButton(
-                          label: '回今天',
-                          onPressed: _goToday,
+              Builder(builder: (context) {
+                final titleWidget = Text('课业日历', style: journal.display);
+                final refreshBtn = IconButton(
+                  tooltip: '刷新',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: busy ? null : _refresh,
+                  icon: busy
+                      ? JournalMotion.isReducedMotion(context)
+                          ? const Icon(Icons.hourglass_top_rounded, size: 20)
+                          : SizedBox.square(
+                              dimension: 19,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: journal.ink,
+                              ),
+                            )
+                      : const Icon(Icons.sync_rounded, size: 21),
+                );
+                final agendaBtn = JournalPillButton(
+                  label: '个人待办与考试',
+                  icon: Icons.event_note_outlined,
+                  onPressed: () => context.push('/agenda'),
+                );
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    if (!JournalLayout.isLargeText(context) &&
+                        !isOffToday &&
+                        constraints.maxWidth >= 300) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: titleWidget,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          refreshBtn,
+                          agendaBtn,
+                        ],
+                      );
+                    }
+                    return Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        titleWidget,
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (isOffToday)
+                              JournalPillButton(
+                                label: '回今天',
+                                onPressed: _goToday,
+                              ),
+                            refreshBtn,
+                            agendaBtn,
+                          ],
                         ),
-                      IconButton(
-                        tooltip: '刷新',
-                        visualDensity: VisualDensity.compact,
-                        onPressed: busy ? null : _refresh,
-                        icon: busy
-                            ? JournalMotion.isReducedMotion(context)
-                                ? const Icon(Icons.hourglass_top_rounded,
-                                    size: 20)
-                                : SizedBox.square(
-                                    dimension: 19,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: journal.ink,
-                                    ),
-                                  )
-                            : const Icon(Icons.sync_rounded, size: 21),
-                      ),
-                      JournalPillButton(
-                        label: '个人待办与考试',
-                        icon: Icons.event_note_outlined,
-                        onPressed: () => context.push('/agenda'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                      ],
+                    );
+                  },
+                );
+              }),
               const SizedBox(height: 2),
               Text(
                 syncStatusText,
@@ -309,239 +339,259 @@ class _CalendarScreenState extends State<CalendarScreen>
                 ),
               ),
               const SizedBox(height: 12),
-              GestureDetector(
-                onVerticalDragEnd: (details) {
-                  final v = details.primaryVelocity ?? 0;
-                  if (v < -220) {
-                    _toggleWeekCollapse(true);
-                  } else if (v > 220) {
-                    _toggleWeekCollapse(false);
-                  }
-                },
-                child: JournalGroupedCard(
-                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
-                  children: [
-                    Column(
-                      children: [
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final monthLabelText =
-                                DateFormat('yyyy年M月').format(month);
-                            final label = Text(
-                              monthLabelText,
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: journal.section.copyWith(
-                                fontFeatures: const [
-                                  FontFeature.tabularFigures()
-                                ],
-                              ),
-                            );
-                            final painter = TextPainter(
-                              text: TextSpan(
-                                  text: monthLabelText, style: journal.section),
-                              textDirection: Directionality.of(context),
-                              textScaler: textScaler,
-                            )..layout();
-                            final labelWidth = painter.width;
-                            painter.dispose();
+              JournalGroupedCard(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+                children: [
+                  Column(
+                    children: [
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final monthLabelText =
+                              DateFormat('yyyy年M月').format(month);
+                          final label = Text(
+                            monthLabelText,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: journal.section.copyWith(
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ],
+                            ),
+                          );
+                          final painter = TextPainter(
+                            text: TextSpan(
+                                text: monthLabelText, style: journal.section),
+                            textDirection: Directionality.of(context),
+                            textScaler: textScaler,
+                          )..layout();
+                          final labelWidth = painter.width;
+                          painter.dispose();
 
-                            final monthPill = GestureDetector(
-                              onTap: () {
-                                JournalMotion.tap(widget.store.display);
-                                setState(() => selected = null);
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 9, vertical: 4),
-                                decoration: BoxDecoration(
+                          final monthPill = GestureDetector(
+                            onTap: () {
+                              JournalMotion.tap(widget.store.display);
+                              setState(() => selected = null);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 9, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: selected == null
+                                    ? journal.sage
+                                    : journal.parchment,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
                                   color: selected == null
-                                      ? journal.sage
-                                      : journal.parchment,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: selected == null
-                                        ? journal.sageBorder
-                                        : Colors.transparent,
-                                    width: 0.8,
-                                  ),
-                                ),
-                                child: Text(
-                                  '本月',
-                                  style: journal.pillLabel.copyWith(
-                                    fontSize: 12,
-                                    color: selected == null && journal.isDark
-                                        ? journal.accent
-                                        : journal.ink,
-                                  ),
+                                      ? journal.sageBorder
+                                      : Colors.transparent,
+                                  width: 0.8,
                                 ),
                               ),
-                            );
+                              child: Text(
+                                '本月',
+                                style: journal.pillLabel.copyWith(
+                                  fontSize: 12,
+                                  color: selected == null && journal.isDark
+                                      ? journal.accent
+                                      : journal.ink,
+                                ),
+                              ),
+                            ),
+                          );
 
-                            const infoBtn = JournalInfoButton(
-                              title: '日历统计与圆点说明',
-                              items: [
-                                '蓝色圆点表示当天有待交或待确认课业，珊瑚红圆点表示考试或已逾期，中性灰点表示个人待办。',
-                                '考试按开考日展示，作业与课堂任务按截止日展示，均使用北京时间。',
-                                '左右滑动可切换月份；上滑日历可收拢为单周视图。',
-                              ],
-                            );
+                          const infoBtn = JournalInfoButton(
+                            title: '日历统计与圆点说明',
+                            items: [
+                              '蓝色圆点表示当天有待交或待确认课业，珊瑚红圆点表示考试或已逾期，中性灰点表示个人待办。',
+                              '考试按开考日展示，作业与课堂任务按截止日展示，均使用北京时间。',
+                              '左右滑动可切换月份；上滑或轻点底部横条可收拢为单周视图。',
+                            ],
+                          );
 
-                            final previous = IconButton(
-                              tooltip: '上个月',
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                  minWidth: 34, minHeight: 36),
-                              visualDensity: VisualDensity.compact,
-                              onPressed: () => move(-1),
-                              icon: const Icon(Icons.chevron_left_rounded),
-                            );
-                            final next = IconButton(
-                              tooltip: '下个月',
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                  minWidth: 34, minHeight: 36),
-                              visualDensity: VisualDensity.compact,
-                              onPressed: () => move(1),
-                              icon: const Icon(Icons.chevron_right_rounded),
-                            );
+                          final previous = IconButton(
+                            tooltip: '上个月',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                                minWidth: 34, minHeight: 36),
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => move(-1),
+                            icon: const Icon(Icons.chevron_left_rounded),
+                          );
+                          final next = IconButton(
+                            tooltip: '下个月',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                                minWidth: 34, minHeight: 36),
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => move(1),
+                            icon: const Icon(Icons.chevron_right_rounded),
+                          );
 
-                            if (labelWidth + 155 <= constraints.maxWidth) {
-                              return Row(
-                                key: const ValueKey('calendar-month-inline'),
-                                children: [
-                                  previous,
-                                  Expanded(child: label),
-                                  next,
-                                  const SizedBox(width: 2),
-                                  monthPill,
-                                  infoBtn,
-                                ],
-                              );
-                            }
-                            return Column(
-                              key: const ValueKey('calendar-month-stacked'),
+                          final controlsEstimate = 155.0 +
+                              (textScaler.scale(12) - 12).clamp(0.0, 24.0) *
+                                  2.5;
+                          if (labelWidth + controlsEstimate <=
+                              constraints.maxWidth) {
+                            return Row(
+                              key: const ValueKey('calendar-month-inline'),
                               children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [previous, next],
-                                    ),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [monthPill, infoBtn],
-                                    ),
-                                  ],
-                                ),
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 4),
-                                  child: label,
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            for (final label in [
-                              '日',
-                              '一',
-                              '二',
-                              '三',
-                              '四',
-                              '五',
-                              '六',
-                            ])
-                              Expanded(
-                                child: Center(
-                                  child: Text(
-                                    label,
-                                    style: journal.metadata.copyWith(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w500,
+                                Expanded(
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      alignment: Alignment.centerLeft,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          previous,
+                                          const SizedBox(width: 2),
+                                          label,
+                                          const SizedBox(width: 2),
+                                          next,
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
+                                const SizedBox(width: 4),
+                                monthPill,
+                                const SizedBox(width: 2),
+                                infoBtn,
+                              ],
+                            );
+                          }
+                          return Column(
+                            key: const ValueKey('calendar-month-stacked'),
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [previous, next],
+                                  ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [monthPill, infoBtn],
+                                  ),
+                                ],
                               ),
-                          ],
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: label,
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          for (final label in [
+                            '日',
+                            '一',
+                            '二',
+                            '三',
+                            '四',
+                            '五',
+                            '六',
+                          ])
+                            Expanded(
+                              child: Center(
+                                child: Text(
+                                  label,
+                                  style: journal.metadata.copyWith(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Divider(
+                        height: 0.6,
+                        thickness: 0.6,
+                        indent: 6,
+                        endIndent: 6,
+                        color: journal.divider,
+                      ),
+                      const SizedBox(height: 4),
+                      AnimatedContainer(
+                        key: const ValueKey('calendar-grid-viewport'),
+                        duration: JournalMotion.duration(
+                          context,
+                          const Duration(milliseconds: 240),
                         ),
-                        const SizedBox(height: 6),
-                        Divider(
-                          height: 0.6,
-                          thickness: 0.6,
-                          indent: 6,
-                          endIndent: 6,
-                          color: journal.divider,
-                        ),
-                        const SizedBox(height: 4),
-                        AnimatedContainer(
-                          key: const ValueKey('calendar-grid-viewport'),
-                          duration: JournalMotion.duration(
-                            context,
-                            const Duration(milliseconds: 240),
-                          ),
-                          curve: JournalMotion.easeOut,
-                          height: gridHeight,
-                          clipBehavior: Clip.hardEdge,
-                          decoration: const BoxDecoration(),
-                          child: OverflowBox(
-                            minHeight: cellHeight,
-                            maxHeight: rowCount * cellHeight,
-                            alignment: Alignment.topCenter,
-                            child: SizedBox(
-                              height: rowCount * cellHeight,
-                              child: PageView.builder(
-                                controller: _pageController,
-                                onPageChanged: (index) {
-                                  final nextMonth = _monthForPageIndex(index);
-                                  if (nextMonth.year == month.year &&
-                                      nextMonth.month == month.month) {
-                                    return;
+                        curve: JournalMotion.easeOut,
+                        height: gridHeight,
+                        clipBehavior: Clip.hardEdge,
+                        decoration: const BoxDecoration(),
+                        child: OverflowBox(
+                          minHeight: cellHeight,
+                          maxHeight: rowCount * cellHeight,
+                          alignment: Alignment.topCenter,
+                          child: SizedBox(
+                            height: rowCount * cellHeight,
+                            child: PageView.builder(
+                              controller: _pageController,
+                              onPageChanged: (index) {
+                                final nextMonth = _monthForPageIndex(index);
+                                if (nextMonth.year == month.year &&
+                                    nextMonth.month == month.month) {
+                                  return;
+                                }
+                                setState(() {
+                                  month = nextMonth;
+                                  if (selected != null) {
+                                    selected = (nextMonth.year == today.year &&
+                                            nextMonth.month == today.month)
+                                        ? today
+                                        : DateTime(
+                                            nextMonth.year, nextMonth.month, 1);
                                   }
-                                  setState(() {
-                                    month = nextMonth;
-                                    if (selected != null) {
-                                      selected = (nextMonth.year ==
-                                                  today.year &&
-                                              nextMonth.month == today.month)
-                                          ? today
-                                          : DateTime(nextMonth.year,
-                                              nextMonth.month, 1);
-                                    }
-                                  });
-                                },
-                                itemBuilder: (context, index) {
-                                  final pageMonth = _monthForPageIndex(index);
-                                  return _buildMonthGrid(
-                                    context,
-                                    pageMonth: pageMonth,
-                                    all: all,
-                                    manual: manual,
-                                    now: now,
-                                    cellHeight: cellHeight,
-                                  );
-                                },
-                              ),
+                                });
+                              },
+                              itemBuilder: (context, index) {
+                                final pageMonth = _monthForPageIndex(index);
+                                return _buildMonthGrid(
+                                  context,
+                                  pageMonth: pageMonth,
+                                  all: all,
+                                  manual: manual,
+                                  now: now,
+                                  cellHeight: cellHeight,
+                                );
+                              },
                             ),
                           ),
                         ),
-                        Semantics(
-                          button: true,
-                          label: _weekCollapsed ? '展开月视图' : '收拢为周视图',
-                          onTap: () => _toggleWeekCollapse(),
-                          excludeSemantics: true,
+                      ),
+                      Semantics(
+                        button: true,
+                        label: _weekCollapsed ? '展开月视图' : '收拢为周视图',
+                        onTap: () => _toggleWeekCollapse(),
+                        excludeSemantics: true,
+                        child: GestureDetector(
+                          onVerticalDragEnd: (details) {
+                            final v = details.primaryVelocity ?? 0;
+                            if (v < -180) {
+                              _toggleWeekCollapse(true);
+                            } else if (v > 180) {
+                              _toggleWeekCollapse(false);
+                            }
+                          },
                           child: InkWell(
                             key: const ValueKey('calendar-week-toggle'),
                             borderRadius: BorderRadius.circular(12),
                             onTap: () => _toggleWeekCollapse(),
                             child: SizedBox(
-                              height: 20,
+                              height: 28,
                               width: double.infinity,
                               child: Center(
                                 child: Container(
@@ -556,10 +606,10 @@ class _CalendarScreenState extends State<CalendarScreen>
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                  ],
-                ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 18, bottom: 8, left: 2),

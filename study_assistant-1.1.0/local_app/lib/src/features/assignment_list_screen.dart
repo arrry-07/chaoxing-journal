@@ -819,108 +819,132 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               ? 'home-list'
               : 'home-recovery-${recoveryScope.queryValue}'),
           padding: EdgeInsets.fromLTRB(
-            18,
+            16,
             14,
-            18,
+            16,
             JournalLayout.floatingNavClearance(context),
           ),
           children: [
-            Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text('课业手记', style: journal.display),
-                Builder(builder: (context) {
-                  Widget action(String label, Widget button) => Stack(
-                        alignment: Alignment.topCenter,
-                        children: [
-                          button,
-                          Positioned(
-                            bottom: 2,
-                            child: IgnorePointer(
-                              child: ExcludeSemantics(
-                                child: Text(
-                                  label,
-                                  style: journal.metadata.copyWith(
-                                    fontSize: 11,
-                                    height: 1,
-                                  ),
-                                ),
+            Builder(builder: (context) {
+              Widget action(String label, Widget button) => Stack(
+                    alignment: Alignment.topCenter,
+                    children: [
+                      button,
+                      Positioned(
+                        bottom: 2,
+                        child: IgnorePointer(
+                          child: ExcludeSemantics(
+                            child: Text(
+                              label,
+                              style: journal.metadata.copyWith(
+                                fontSize: 11,
+                                height: 1,
                               ),
                             ),
                           ),
-                        ],
-                      );
-
-                  return Row(mainAxisSize: MainAxisSize.min, children: [
-                    if (plans.isEmpty)
-                      action(
-                        '计划',
-                        IconButton(
-                            key: const ValueKey('home-plan-entry'),
-                            tooltip: '今日计划',
-                            padding: const EdgeInsets.only(bottom: 12),
-                            iconSize: 21,
-                            constraints: const BoxConstraints(
-                                minWidth: 48, minHeight: 48),
-                            onPressed: () => context.push('/plan'),
-                            icon: const Icon(Icons.checklist_rounded)),
-                      ),
-                    action(
-                      '刷新',
-                      IconButton(
-                          enableFeedback: false,
-                          tooltip: '刷新作业',
-                          padding: const EdgeInsets.only(bottom: 12),
-                          iconSize: 21,
-                          constraints:
-                              const BoxConstraints(minWidth: 48, minHeight: 48),
-                          onPressed: busy ? null : () => refresh(syncAction),
-                          icon: busy
-                              ? reduceMotion
-                                  ? Icon(Icons.hourglass_top_rounded,
-                                      size: 19, color: journal.ink)
-                                  : SizedBox.square(
-                                      dimension: 19,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2, color: journal.ink))
-                              : const Icon(Icons.sync_rounded)),
-                    ),
-                    if (recoveryScope == null)
-                      action(
-                        '主题',
-                        IconButton(
-                          key: const ValueKey('home-theme-toggle'),
-                          enableFeedback: false,
-                          padding: const EdgeInsets.only(bottom: 12),
-                          iconSize: 21,
-                          constraints:
-                              const BoxConstraints(minWidth: 48, minHeight: 48),
-                          tooltip: '切换主题（当前：${store.display.themeMode.label}）',
-                          icon: Icon(switch (store.display.themeMode) {
-                            JournalThemeMode.system =>
-                              Icons.brightness_auto_outlined,
-                            JournalThemeMode.light => Icons.light_mode_outlined,
-                            JournalThemeMode.dark => Icons.dark_mode_outlined,
-                          }),
-                          onPressed: () => _cycleTheme(context),
                         ),
                       ),
-                    action(
-                      '更多',
-                      IconButton(
-                          tooltip: '同步详情',
-                          padding: const EdgeInsets.only(bottom: 12),
-                          iconSize: 21,
-                          constraints:
-                              const BoxConstraints(minWidth: 48, minHeight: 48),
-                          onPressed: () => context.push('/sync'),
-                          icon: const Icon(Icons.more_horiz_rounded)),
+                    ],
+                  );
+
+              final actionsRow = Row(mainAxisSize: MainAxisSize.min, children: [
+                if (plans.isEmpty)
+                  action(
+                    '计划',
+                    IconButton(
+                        key: const ValueKey('home-plan-entry'),
+                        tooltip: '今日计划',
+                        padding: const EdgeInsets.only(bottom: 12),
+                        iconSize: 21,
+                        constraints:
+                            const BoxConstraints(minWidth: 48, minHeight: 48),
+                        onPressed: () => context.push('/plan'),
+                        icon: const Icon(Icons.checklist_rounded)),
+                  ),
+                action(
+                  '刷新',
+                  IconButton(
+                      enableFeedback: false,
+                      tooltip: '刷新作业',
+                      padding: const EdgeInsets.only(bottom: 12),
+                      iconSize: 21,
+                      constraints:
+                          const BoxConstraints(minWidth: 48, minHeight: 48),
+                      onPressed: busy ? null : () => refresh(syncAction),
+                      icon: busy
+                          ? reduceMotion
+                              ? Icon(Icons.hourglass_top_rounded,
+                                  size: 19, color: journal.ink)
+                              : SizedBox.square(
+                                  dimension: 19,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: journal.ink))
+                          : const Icon(Icons.sync_rounded)),
+                ),
+                if (recoveryScope == null)
+                  action(
+                    '主题',
+                    IconButton(
+                      key: const ValueKey('home-theme-toggle'),
+                      enableFeedback: false,
+                      padding: const EdgeInsets.only(bottom: 12),
+                      iconSize: 21,
+                      constraints:
+                          const BoxConstraints(minWidth: 48, minHeight: 48),
+                      tooltip: '切换主题（当前：${store.display.themeMode.label}）',
+                      icon: Icon(switch (store.display.themeMode) {
+                        JournalThemeMode.system =>
+                          Icons.brightness_auto_outlined,
+                        JournalThemeMode.light => Icons.light_mode_outlined,
+                        JournalThemeMode.dark => Icons.dark_mode_outlined,
+                      }),
+                      onPressed: () => _cycleTheme(context),
                     ),
-                  ]);
-                }),
-              ],
-            ),
+                  ),
+                action(
+                  '更多',
+                  IconButton(
+                      tooltip: '同步详情',
+                      padding: const EdgeInsets.only(bottom: 12),
+                      iconSize: 21,
+                      constraints:
+                          const BoxConstraints(minWidth: 48, minHeight: 48),
+                      onPressed: () => context.push('/sync'),
+                      icon: const Icon(Icons.more_horiz_rounded)),
+                ),
+              ]);
+
+              final title = Text('课业手记', style: journal.display);
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  if (!JournalLayout.isLargeText(context) &&
+                      constraints.maxWidth >= 300) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: title,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        actionsRow,
+                      ],
+                    );
+                  }
+                  return Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [title, actionsRow],
+                  );
+                },
+              );
+            }),
             const SizedBox(height: 2),
             Material(
               type: MaterialType.transparency,
