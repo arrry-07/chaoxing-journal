@@ -26,6 +26,7 @@ Assignment _exam(
   DateTime? start,
   DateTime? end,
   bool trusted = true,
+  int? durationMinutes = 90,
   bool notice = false,
   bool global = false,
   String lifecycle = 'scheduled',
@@ -40,13 +41,13 @@ Assignment _exam(
       source: AssignmentSource.exam,
       exam: ExamInfo(
         examId: id,
+        durationMinutes: durationMinutes,
         courseId: notice || global ? null : 'c',
         clazzId: notice || global ? null : 'k',
         startAt: start,
         endAt: end,
         startTrusted: trusted && start != null,
         endTrusted: trusted && end != null,
-        durationMinutes: 90,
         location: location,
         lifecycle: lifecycle,
         noticeOnly: notice,
@@ -305,7 +306,8 @@ void main() {
         body: AssignmentCard(
           assignment: exam,
           now: _now,
-          showFullDeadline: true,
+          showFullDeadline: false,
+          inPinnedSection: true,
           onTap: () {},
         ),
       ),
@@ -314,6 +316,27 @@ void main() {
     expect(find.text('22:00'), findsOneWidget);
     expect(find.text('开考 2026年11月16日 22:00'), findsOneWidget);
     expect(find.text('结束 2026年11月17日 10:00'), findsOneWidget);
+  });
+
+  testWidgets('standalone exam card marks the inferred overnight end',
+      (tester) async {
+    final exam = _exam('estimated',
+        start: DateTime.utc(2026, 11, 30, 15, 30), durationMinutes: 90);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentCard(
+          assignment: exam,
+          now: _now,
+          showFullDeadline: false,
+          inPinnedSection: true,
+          onTap: () {},
+        ),
+      ),
+    ));
+
+    expect(find.text('开考 2026年11月30日 23:30'), findsOneWidget);
+    expect(find.text('结束（按时长推算） 2026年12月1日 01:00'), findsOneWidget);
+    expect(exam.exam!.endAt, isNull);
   });
 
   testWidgets('ended and unconfirmed notice cards keep factual unknown states',

@@ -41,13 +41,19 @@ class ExamTimelineStamp {
 /// Display-only evidence. These labels never change reminder or calendar trust.
 class ExamSchedulePresentation {
   const ExamSchedulePresentation(
-      this.cardTimeLines, this.detailTimeLines, this.verificationNote,
-      {this.timeline, this.yearUnconfirmed = false});
+    this.cardTimeLines,
+    this.detailTimeLines,
+    this.verificationNote, {
+    this.timeline,
+    this.yearUnconfirmed = false,
+    this.estimatedOvernightEndLabel,
+  });
 
   final List<String> cardTimeLines, detailTimeLines;
   final String? verificationNote;
   final ExamTimelineStamp? timeline;
   final bool yearUnconfirmed;
+  final String? estimatedOvernightEndLabel;
   static Expando<_PresentationCacheEntry> _cache =
       Expando<_PresentationCacheEntry>();
 
@@ -89,6 +95,7 @@ class ExamSchedulePresentation {
             ? ranges.values.single.start
             : null;
     ExamWallTime? wallEnd;
+    DateTime? estimatedEndAt;
     if (exam.endTrusted && exam.endAt != null) {
       final value = AssignmentQuery.beijing(exam.endAt!);
       wallEnd = ExamWallTime(value.year, value.month, value.day, value.hour,
@@ -98,8 +105,9 @@ class ExamSchedulePresentation {
     } else if (trustedStart != null &&
         exam.durationMinutes != null &&
         exam.durationMinutes! > 0) {
-      final value = AssignmentQuery.beijing(
-          trustedStart.add(Duration(minutes: exam.durationMinutes!)));
+      estimatedEndAt =
+          trustedStart.add(Duration(minutes: exam.durationMinutes!));
+      final value = AssignmentQuery.beijing(estimatedEndAt);
       wallEnd = ExamWallTime(value.year, value.month, value.day, value.hour,
           value.minute, value.second);
     }
@@ -115,16 +123,21 @@ class ExamSchedulePresentation {
         : crossDay
             ? ExamTimelineStamp._range(wallStart, wallEnd)
             : ExamTimelineStamp._fromWallTime(wallStart);
-    ExamSchedulePresentation result(
-            List<String> card, List<String> detail, String? note,
-            {bool yearUnconfirmed = false}) =>
-        ExamSchedulePresentation(card, detail, note,
-            timeline: timeline, yearUnconfirmed: yearUnconfirmed);
     String absolute(DateTime value, bool explicitSeconds) =>
         DateFormat(explicitSeconds || value.second != 0
                 ? 'yyyy年M月d日 HH:mm:ss'
                 : 'yyyy年M月d日 HH:mm')
             .format(AssignmentQuery.beijing(value));
+    final estimatedOvernightEndLabel = crossDay && estimatedEndAt != null
+        ? absolute(estimatedEndAt, false)
+        : null;
+    ExamSchedulePresentation result(
+            List<String> card, List<String> detail, String? note,
+            {bool yearUnconfirmed = false}) =>
+        ExamSchedulePresentation(card, detail, note,
+            timeline: timeline,
+            yearUnconfirmed: yearUnconfirmed,
+            estimatedOvernightEndLabel: estimatedOvernightEndLabel);
     final startSeconds =
         ranges.values.any((range) => range.start?.second != null);
     final endSeconds = ranges.values.any((range) => range.end?.second != null);

@@ -20,6 +20,7 @@ class AssignmentCard extends StatelessWidget {
       this.compact = false,
       this.countdown = false,
       this.showFullDeadline = true,
+      this.inPinnedSection = false,
       this.deadlinePending = false,
       this.previewOnly = false,
       this.previewSaving = false});
@@ -30,7 +31,7 @@ class AssignmentCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onOpenAssignment;
   final bool opening;
-  final bool showFullDeadline;
+  final bool showFullDeadline, inPinnedSection;
   final bool deadlinePending, previewOnly, previewSaving;
   final bool compact, countdown;
 
@@ -123,8 +124,11 @@ class AssignmentCard extends StatelessWidget {
         ? ExamSchedulePresentation.build(a,
             records: examSources, index: displayIndex)
         : null;
+    final estimatedEnd =
+        inPinnedSection ? examSchedule?.estimatedOvernightEndLabel : null;
     final examLines = a.isExam
         ? <String>[
+            if (estimatedEnd != null) '结束（按时长推算） $estimatedEnd',
             if (a.exam!.durationMinutes != null && a.exam!.durationMinutes! > 0)
               '时长 ${a.exam!.durationMinutes} 分钟',
             if (a.exam!.location.trim().isNotEmpty)
@@ -147,7 +151,7 @@ class AssignmentCard extends StatelessWidget {
     final beijingDeadline = d == null ? null : AssignmentQuery.beijing(d);
     final deadlineDate = beijingDeadline == null
         ? ''
-        : DateFormat(showFullDeadline &&
+        : DateFormat(inPinnedSection &&
                     beijingDeadline.year != AssignmentQuery.beijing(now).year
                 ? 'yyyy年M月d日 HH:mm'
                 : 'M月d日 HH:mm')
@@ -167,7 +171,7 @@ class AssignmentCard extends StatelessWidget {
                     ? withStart(a.deadlineLabel)
                     : d == null
                         ? withStart('无截止日期')
-                        : countdown && !showFullDeadline
+                        : countdown && !inPinnedSection
                             ? DisplayPreferences.remaining(d, now)
                             : '截止 $deadlineDate';
     final hasTime =
@@ -221,13 +225,13 @@ class AssignmentCard extends StatelessWidget {
 
     final extraLines = <Widget>[
       if (a.isExam) ...[
-        if (clock.isEmpty || showFullDeadline)
+        if (clock.isEmpty || inPinnedSection)
           for (final line in examSchedule?.cardTimeLines ?? const <String>[])
             Text(line, style: Journal.metadata),
         if (examSchedule?.yearUnconfirmed == true)
           const Text('年份待确认', style: Journal.metadata),
         for (final line in examLines) Text(line, style: Journal.metadata),
-      ] else if (showFullDeadline || countdown || !hasTime)
+      ] else if (showFullDeadline || inPinnedSection || countdown || !hasTime)
         Text(
           deadline,
           style: !hasTime && railLabel == '待定'
@@ -237,7 +241,7 @@ class AssignmentCard extends StatelessWidget {
                 )
               : Journal.metadata,
         ),
-      if (!a.isExam && showFullDeadline && countdown && hasTime)
+      if (!a.isExam && inPinnedSection && countdown && hasTime)
         Text(DisplayPreferences.remaining(d, now), style: Journal.metadata),
     ];
 
