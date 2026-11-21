@@ -4,28 +4,66 @@ import 'assignment.dart';
 
 enum WidgetRange { all, today, week }
 
+enum JournalThemeMode {
+  system('跟随系统'),
+  light('浅色手记'),
+  dark('夜间深色');
+
+  const JournalThemeMode(this.label);
+  final String label;
+}
+
 class DisplayPreferences {
-  const DisplayPreferences(
-      {this.compact = false,
-      this.countdown = false,
-      this.widgetRange = WidgetRange.all});
+  const DisplayPreferences({
+    this.compact = false,
+    this.countdown = false,
+    this.widgetRange = WidgetRange.all,
+    this.themeMode = JournalThemeMode.system,
+  });
   final bool compact, countdown;
   final WidgetRange widgetRange;
-  String encode() => jsonEncode(
-      {'compact': compact, 'countdown': countdown, 'range': widgetRange.name});
+  final JournalThemeMode themeMode;
+
+  DisplayPreferences copyWith({
+    bool? compact,
+    bool? countdown,
+    WidgetRange? widgetRange,
+    JournalThemeMode? themeMode,
+  }) =>
+      DisplayPreferences(
+        compact: compact ?? this.compact,
+        countdown: countdown ?? this.countdown,
+        widgetRange: widgetRange ?? this.widgetRange,
+        themeMode: themeMode ?? this.themeMode,
+      );
+
+  String encode() => jsonEncode({
+        'compact': compact,
+        'countdown': countdown,
+        'range': widgetRange.name,
+        'themeMode': themeMode.name,
+      });
+
   factory DisplayPreferences.decode(String? raw) {
     try {
       final j = jsonDecode(raw ?? '{}') as Map<String, dynamic>;
       return DisplayPreferences(
-          compact: j['compact'] == true,
-          countdown: j['countdown'] == true,
-          widgetRange: WidgetRange.values.firstWhere(
-              (r) => r.name == j['range'],
-              orElse: () => WidgetRange.all));
+        compact: j['compact'] == true,
+        countdown: j['countdown'] == true,
+        widgetRange: WidgetRange.values.firstWhere(
+          (r) => r.name == j['range'],
+          orElse: () => WidgetRange.all,
+        ),
+        themeMode: JournalThemeMode.values.firstWhere(
+          (mode) => mode.name == j['themeMode'],
+          orElse: () => JournalThemeMode.system,
+        ),
+      );
     } catch (_) {
       return const DisplayPreferences();
     }
   }
+
   List<Assignment> forWidget(List<Assignment> items, DateTime now) {
     final display = AssignmentQuery.currentDisplay(items, now);
     if (widgetRange == WidgetRange.all) return display;

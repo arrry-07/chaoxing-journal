@@ -29,11 +29,11 @@ class HelpFeedbackScreen extends StatelessWidget {
               onPressed: () => Navigator.of(context).maybePop()),
           title: const Text('帮助中心')),
       body: ListView(padding: const EdgeInsets.all(20), children: [
-        const Text('有什么可以帮你？', style: Journal.section),
+        Text('有什么可以帮你？', style: Journal.of(context).section),
         const SizedBox(height: 8),
         const Text('从常见问题开始，也可以留下你的使用感受。'),
         const SizedBox(height: 24),
-        const Text('常见问题', style: Journal.section),
+        Text('常见问题', style: Journal.of(context).section),
         const SizedBox(height: 8),
         for (final e in questions.entries)
           ListTile(
@@ -137,13 +137,15 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('未能打开邮件草稿', style: Journal.section),
+            Text('未能打开邮件草稿', style: Journal.of(context).section),
             const SizedBox(height: 8),
             const Text('没有可用的邮件客户端，或系统未接受打开请求。当前填写内容已保留。'),
             const SizedBox(height: 12),
             SelectableText(
               _feedbackEmail,
-              style: Journal.metadata.copyWith(color: Journal.ink),
+              style: Journal.of(context)
+                  .metadata
+                  .copyWith(color: Journal.of(context).ink),
             ),
             const SizedBox(height: 16),
             FilledButton(
@@ -196,8 +198,8 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
             decoration: const InputDecoration(
                 labelText: '怎样出现的？（选填）', alignLabelWithHint: true)),
         const SizedBox(height: 16),
-        const Text('复制或打开邮件时会附带应用和系统版本。请勿填写登录信息或附上含个人信息的截图。',
-            style: TextStyle(color: Journal.muted)),
+        Text('复制或打开邮件时会附带应用和系统版本。请勿填写登录信息或附上含个人信息的截图。',
+            style: TextStyle(color: Journal.of(context).muted)),
         const SizedBox(height: 20),
         FilledButton(onPressed: composeEmail, child: const Text('通过邮件反馈')),
         TextButton(onPressed: copy, child: const Text('复制反馈内容')),

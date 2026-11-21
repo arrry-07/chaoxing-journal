@@ -32,6 +32,7 @@ class ProfileScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) {
+        final journal = Journal.of(context);
         return ListView(
           padding: EdgeInsets.zero,
           children: [
@@ -47,10 +48,10 @@ class ProfileScreen extends StatelessWidget {
                 children: [
                   Card(
                     key: const ValueKey('profile-group-courses'),
-                    color: Color.lerp(Journal.sheet, Journal.sage, .35),
+                    color: Color.lerp(journal.sheet, journal.sage, .35),
                     clipBehavior: Clip.antiAlias,
                     child: IconTheme.merge(
-                      data: const IconThemeData(color: Journal.ink),
+                      data: IconThemeData(color: journal.ink),
                       child: _SettingsTile(
                         icon: Icons.school_outlined,
                         title: '我的课程',
@@ -63,14 +64,14 @@ class ProfileScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
-                    child: Text('设置', style: Journal.section),
+                    child: Text('设置', style: journal.section),
                   ),
                   _SettingsCard(
                     title: '学习与同步',
-                    accentColor: Journal.ink,
-                    headerColor: Journal.sage,
+                    accentColor: journal.ink,
+                    headerColor: journal.sage,
                     children: [
                       _SettingsTile(
                         icon: Icons.sync,
@@ -114,8 +115,8 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   _SettingsCard(
                     title: '数据与安全',
-                    accentColor: Journal.ochre,
-                    headerColor: Journal.ochreBg,
+                    accentColor: journal.ochre,
+                    headerColor: journal.ochreBg,
                     children: [
                       _SettingsTile(
                         icon: Icons.health_and_safety_outlined,
@@ -141,8 +142,8 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   _SettingsCard(
                     title: '关于与更新',
-                    accentColor: Journal.slate,
-                    headerColor: Journal.slateBg,
+                    accentColor: journal.slate,
+                    headerColor: journal.slateBg,
                     children: [
                       _SettingsTile(
                         icon: Icons.help_outline,
@@ -197,10 +198,10 @@ class ProfileScreen extends StatelessWidget {
                           ? null
                           : () => _confirmLogout(context),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Journal.berry,
-                        side: const BorderSide(color: Journal.berryBorder),
+                        foregroundColor: journal.berry,
+                        side: BorderSide(color: journal.berryBorder),
                         backgroundColor:
-                            Color.lerp(Journal.sheet, Journal.berryBg, .25),
+                            Color.lerp(journal.sheet, journal.berryBg, .25),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 16,
@@ -247,8 +248,8 @@ class ProfileScreen extends StatelessWidget {
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, 'logout'),
             style: FilledButton.styleFrom(
-              backgroundColor: Journal.berry,
-              foregroundColor: Journal.sheet,
+              backgroundColor: Journal.of(context).berry,
+              foregroundColor: Journal.of(context).sheet,
             ),
             child: const Text('退出并清理本机记录'),
           ),
@@ -354,7 +355,7 @@ class _ProfileHeader extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 25,
-                backgroundColor: Journal.sage,
+                backgroundColor: Journal.of(context).sage,
                 child: url == null
                     ? const Icon(Icons.face_outlined)
                     : ClipOval(
@@ -437,7 +438,8 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = Color.lerp(Journal.ink, accentColor, .50)!;
+    final journal = Journal.of(context);
+    final foreground = Color.lerp(journal.ink, accentColor, .50)!;
     return Card(
       clipBehavior: Clip.antiAlias,
       child: IconTheme.merge(
@@ -448,11 +450,11 @@ class _SettingsCard extends StatelessWidget {
             Container(
               key: ValueKey('profile-group-$title'),
               width: double.infinity,
-              color: Color.lerp(Journal.sheet, headerColor, .35),
+              color: Color.lerp(journal.sheet, headerColor, .35),
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
               child: Text(
                 title,
-                style: Journal.section.copyWith(
+                style: journal.section.copyWith(
                   color: foreground,
                   fontSize: 17,
                 ),
@@ -491,15 +493,16 @@ class _SettingsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     return ListTile(
       leading: Icon(icon, color: IconTheme.of(context).color, size: 22),
-      title: Text(title, style: Journal.entryTitle),
+      title: Text(title, style: journal.entryTitle),
       subtitle: subtitle == null ? null : Text(subtitle!),
       subtitleTextStyle: compactSubtitle
           ? Theme.of(context).textTheme.bodySmall?.copyWith(
                 fontSize: 12,
                 height: 1.4,
-                color: Journal.muted,
+                color: journal.muted,
               )
           : null,
       trailing: trailingOnPressed != null
@@ -509,7 +512,7 @@ class _SettingsTile extends StatelessWidget {
               icon: Icon(trailing))
           : onTap == null
               ? null
-              : Icon(trailing, color: Journal.muted),
+              : Icon(trailing, color: journal.muted),
       onTap: onTap,
     );
   }

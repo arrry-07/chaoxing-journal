@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/main.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
+import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/login_screen.dart';
@@ -83,6 +85,37 @@ void main() {
     expect(find.byType(AssignmentListScreen), findsOneWidget);
   });
 
+  testWidgets('mounted home follows system and respects saved theme overrides',
+      (tester) async {
+    final dispatcher = tester.binding.platformDispatcher;
+    dispatcher.platformBrightnessTestValue = Brightness.light;
+    addTearDown(dispatcher.clearPlatformBrightnessTestValue);
+    final store = await launch(tester, '/assignments', authenticated: true);
+
+    Color? homeHeadingColor() =>
+        tester.widget<Text>(find.text('课业手记')).style?.color;
+    expect(homeHeadingColor(), Journal.ink);
+    dispatcher.platformBrightnessTestValue = Brightness.dark;
+    await tester.pumpAndSettle();
+    expect(homeHeadingColor(), JournalPalette.dark.ink);
+
+    await store
+        .saveDisplay(store.display.copyWith(themeMode: JournalThemeMode.light));
+    await tester.pumpAndSettle();
+    expect(homeHeadingColor(), Journal.ink);
+
+    await store
+        .saveDisplay(store.display.copyWith(themeMode: JournalThemeMode.dark));
+    dispatcher.platformBrightnessTestValue = Brightness.light;
+    await tester.pumpAndSettle();
+    expect(homeHeadingColor(), JournalPalette.dark.ink);
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+        DisplayPreferences.decode(prefs.getString('display_preferences_v1'))
+            .themeMode,
+        JournalThemeMode.dark);
+  });
+
   for (final location in ['/courses', '/records', '/help']) {
     testWidgets('profile subpage $location selects my navigation destination',
         (tester) async {
@@ -101,7 +134,7 @@ class _RouterStore extends AssignmentStore {
       : super(
           sessionStore: SecureSessionStore(),
           notificationService: LocalNotificationService(),
-          widgetSnapshotService: WidgetSnapshotService(),
+          widgetSnapshotService: _NoWidgetSnapshot(),
         );
 
   bool authenticated = false;
@@ -128,4 +161,9 @@ class _RouterStore extends AssignmentStore {
       requirementsText: '',
       status: 'pending',
       lastSyncedAt: DateTime.utc(2026));
+}
+
+class _NoWidgetSnapshot extends WidgetSnapshotService {
+  @override
+  Future<void> saveAssignments(List<Assignment> assignments) async {}
 }

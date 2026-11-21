@@ -167,17 +167,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
   void feedback(String message, {bool details = false}) {
     if (!mounted) return;
+    final journal = Journal.of(context);
     _feedback.show(
         context,
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          backgroundColor: Journal.ink,
+          backgroundColor: journal.ink,
           content: Text(message,
-              style: Journal.metadata.copyWith(color: Journal.sheet)),
+              style: journal.metadata.copyWith(color: journal.sheet)),
           action: details
               ? SnackBarAction(
                   label: '查看详情',
-                  textColor: Journal.sheet,
+                  textColor: journal.sheet,
                   onPressed: () {
                     _feedback.dismiss();
                     if (mounted) context.push('/sync?expand=issues');
@@ -272,6 +273,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: store,
       builder: (context, _) {
+        final journal = Journal.of(context);
         final busy = _refreshing ||
             store.isLoading ||
             store.syncReport.phase == SyncPhase.running;
@@ -480,7 +482,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 alignment: WrapAlignment.spaceBetween,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  const Text('课业手记', style: Journal.display),
+                  Text('课业手记', style: journal.display),
                   Row(mainAxisSize: MainAxisSize.min, children: [
                     if (plans.isEmpty)
                       IconButton(
@@ -495,12 +497,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                         onPressed: busy ? null : () => refresh(syncAction),
                         icon: busy
                             ? reduceMotion
-                                ? const Icon(Icons.hourglass_top_rounded,
-                                    size: 20, color: Journal.ink)
-                                : const SizedBox.square(
+                                ? Icon(Icons.hourglass_top_rounded,
+                                    size: 20, color: journal.ink)
+                                : SizedBox.square(
                                     dimension: 20,
                                     child: CircularProgressIndicator(
-                                        strokeWidth: 2, color: Journal.ink))
+                                        strokeWidth: 2, color: journal.ink))
                             : const Icon(Icons.sync_rounded)),
                     IconButton(
                         tooltip: '同步详情',
@@ -518,7 +520,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 padding: const EdgeInsets.only(bottom: 8),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: Journal.sage.withValues(alpha: 0.55),
+                    color: journal.sage.withValues(alpha: 0.55),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Material(
@@ -533,20 +535,20 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 8),
                           child: Row(children: [
-                            const Icon(Icons.checklist_rounded,
-                                size: 18, color: Journal.ink),
+                            Icon(Icons.checklist_rounded,
+                                size: 18, color: journal.ink),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 '今日计划 · 已完成${plans.where((p) => p.done).length}/${plans.length}',
-                                style: Journal.metadata.copyWith(
-                                  color: Journal.ink,
+                                style: journal.metadata.copyWith(
+                                  color: journal.ink,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ),
-                            const Icon(Icons.chevron_right_rounded,
-                                color: Journal.muted),
+                            Icon(Icons.chevron_right_rounded,
+                                color: journal.muted),
                           ]),
                         ),
                       ),
@@ -577,19 +579,19 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                 : Icons.schedule_rounded,
                         size: 15,
                         color: store.syncReport.phase == SyncPhase.failed
-                            ? Journal.berry
+                            ? journal.berry
                             : store.syncReport.phase == SyncPhase.partial
-                                ? Journal.ochre
-                                : Journal.muted,
+                                ? journal.ochre
+                                : journal.muted,
                       ),
                       const SizedBox(width: 6),
                       Expanded(
                           child: ExcludeSemantics(
                               child:
-                                  Text(statusText, style: Journal.metadata))),
+                                  Text(statusText, style: journal.metadata))),
                       if (sync.action != HomeSyncAction.none)
-                        const Icon(Icons.chevron_right_rounded,
-                            size: 18, color: Journal.muted),
+                        Icon(Icons.chevron_right_rounded,
+                            size: 18, color: journal.muted),
                     ]),
                   ),
                 ),
@@ -619,11 +621,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ClipRRect(
                       borderRadius: BorderRadius.circular(2),
                       child: reduceMotion
-                          ? Container(height: 3, color: Journal.sageBorder)
-                          : const LinearProgressIndicator(
+                          ? Container(height: 3, color: journal.sageBorder)
+                          : LinearProgressIndicator(
                               minHeight: 3,
-                              backgroundColor: Journal.parchment,
-                              color: Journal.ink,
+                              backgroundColor: journal.parchment,
+                              color: journal.ink,
                             ),
                     ),
                     const SizedBox(height: 6),
@@ -631,7 +633,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       liveRegion: true,
                       child: Text(
                         _syncProgressLabel(store),
-                        style: Journal.metadata.copyWith(color: Journal.ink),
+                        style: journal.metadata.copyWith(color: journal.ink),
                       ),
                     ),
                   ],
@@ -640,10 +642,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             if (recoveryScope == null &&
                 _courseKey != null &&
                 !displayAssignments.any((a) => a.courseKey == _courseKey))
-              const Padding(
+              Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
-                      style: Journal.metadata)),
+                      style: journal.metadata)),
             if (sortedItems.isNotEmpty) ...[
               if (recoveryScope == null) const SizedBox(height: 16),
               ...timeline(sortedItems),
@@ -717,21 +719,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             Container(
               width: 48,
               height: 48,
-              decoration: const BoxDecoration(
-                color: Journal.parchment,
+              decoration: BoxDecoration(
+                color: Journal.of(context).parchment,
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,
-              child: Icon(icon, size: 22, color: Journal.muted),
+              child: Icon(icon, size: 22, color: Journal.of(context).muted),
             ),
             const SizedBox(height: 14),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: Journal.metadata.copyWith(
-                color: Journal.ink,
-                fontSize: 14.5,
-              ),
+              style: Journal.of(context).metadata.copyWith(
+                    color: Journal.of(context).ink,
+                    fontSize: 14.5,
+                  ),
             ),
             if (actions.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -770,7 +772,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Journal.sage,
+                      color: Journal.of(context).sage,
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Row(
@@ -781,16 +783,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             text,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: Journal.metadata.copyWith(
-                              fontSize: 12,
-                              color: Journal.ink,
-                              fontWeight: FontWeight.w600,
-                            ),
+                            style: Journal.of(context).metadata.copyWith(
+                                  fontSize: 12,
+                                  color: Journal.of(context).ink,
+                                  fontWeight: FontWeight.w600,
+                                ),
                           ),
                         ),
                         const SizedBox(width: 4),
-                        const Icon(Icons.close_rounded,
-                            size: 14, color: Journal.ink),
+                        Icon(Icons.close_rounded,
+                            size: 14, color: Journal.of(context).ink),
                       ],
                     ),
                   ),
@@ -870,7 +872,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             minimumSize: const Size(48, 48),
             tapTargetSize: MaterialTapTargetSize.padded,
-            foregroundColor: Journal.muted,
+            foregroundColor: Journal.of(context).muted,
           ),
           onPressed: () => _saveFilters(
             HomeFilters(sortOrder: _sortOrder),
@@ -889,13 +891,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _DayHeadingTone tone = _DayHeadingTone.normal,
     String? badge,
   }) {
+    final journal = Journal.of(context);
     final textColor = switch (tone) {
-      _DayHeadingTone.overdue => Journal.berry,
-      _DayHeadingTone.undated => Journal.ochre,
-      _DayHeadingTone.today => Journal.ink,
-      _DayHeadingTone.normal => Journal.muted,
+      _DayHeadingTone.overdue => journal.berry,
+      _DayHeadingTone.undated => journal.ochre,
+      _DayHeadingTone.today => journal.ink,
+      _DayHeadingTone.normal => journal.muted,
     };
-    final baseStyle = Journal.dayHeading.copyWith(
+    final baseStyle = journal.dayHeading.copyWith(
       color: textColor,
       fontSize: 14.5,
     );
@@ -937,19 +940,19 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
                     color: tone == _DayHeadingTone.overdue
-                        ? Journal.berryBg
-                        : Journal.sage,
+                        ? journal.berryBg
+                        : journal.sage,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     badge,
-                    style: Journal.metadata.copyWith(
+                    style: journal.metadata.copyWith(
                       fontSize: 11,
                       height: 1.2,
                       fontWeight: FontWeight.w600,
                       color: tone == _DayHeadingTone.overdue
-                          ? Journal.berry
-                          : Journal.ink,
+                          ? journal.berry
+                          : journal.ink,
                     ),
                   ),
                 ),
@@ -957,7 +960,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             ],
           ),
           const SizedBox(height: 6),
-          const Divider(height: 1, thickness: 0.8, color: Journal.rule),
+          Divider(height: 1, thickness: 0.8, color: journal.rule),
         ],
       ),
     );
@@ -974,15 +977,17 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(children: [
-                const Icon(Icons.filter_alt_outlined,
-                    size: 18, color: Journal.muted),
+                Icon(Icons.filter_alt_outlined,
+                    size: 18, color: Journal.of(context).muted),
                 const SizedBox(width: 8),
-                Expanded(child: Text(scope.label, style: Journal.entryTitle)),
+                Expanded(
+                    child: Text(scope.label,
+                        style: Journal.of(context).entryTitle)),
               ]),
               const SizedBox(height: 4),
               Text(
                 '共 $count 项',
-                style: Journal.metadata,
+                style: Journal.of(context).metadata,
               ),
               Align(
                 alignment: Alignment.centerRight,
@@ -1018,13 +1023,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       List<HomeCourseFilterOption> options,
       bool filtersActive,
       HomeSortOrder sortOrder) {
+    final journal = Journal.of(context);
     final actionColor = Theme.of(context).colorScheme.primary;
-    final filterStyle = Journal.metadata.copyWith(
+    final filterStyle = journal.metadata.copyWith(
       color: actionColor,
       fontWeight: FontWeight.w500,
     );
-    final sortStyle = Journal.metadata.copyWith(
-      color: Journal.muted,
+    final sortStyle = journal.metadata.copyWith(
+      color: journal.muted,
       fontWeight: FontWeight.w500,
     );
     final scaler = MediaQuery.textScalerOf(context);
@@ -1045,6 +1051,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     final sortWidth = 16 + 6 + labelWidth(sortLabel, sortStyle) + 16;
 
     Widget buildFilterPill({bool fullWidth = false}) {
+      final journal = Journal.of(context);
       final message = filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选';
       void onTap() => _openFilters(options);
       return Semantics(
@@ -1071,7 +1078,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: filtersActive ? Journal.sage : Journal.parchment,
+                        color: filtersActive ? journal.sage : journal.parchment,
                         borderRadius: BorderRadius.circular(22),
                       ),
                       child: Row(
@@ -1121,8 +1128,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: horizontalPad),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.swap_vert_rounded,
-                          size: 17, color: Journal.muted),
+                      Icon(Icons.swap_vert_rounded,
+                          size: 17, color: Journal.of(context).muted),
                       const SizedBox(width: 7),
                       Flexible(
                         child: Text(
@@ -1228,12 +1235,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     height: 4,
                     margin: const EdgeInsets.only(bottom: 14),
                     decoration: BoxDecoration(
-                      color: Journal.ruleStrong,
+                      color: Journal.of(context).ruleStrong,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
-                Text('搜索、筛选与排序', style: Journal.section),
+                Text('搜索、筛选与排序', style: Journal.of(context).section),
                 const SizedBox(height: 16),
                 TextField(
                   controller: controller,
@@ -1298,10 +1305,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                           option.label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Journal.metadata.copyWith(
-                            fontSize: 14,
-                            color: Journal.ink,
-                          ),
+                          style: Journal.of(context).metadata.copyWith(
+                                fontSize: 14,
+                                color: Journal.of(context).ink,
+                              ),
                         ),
                       ),
                   ],
@@ -1430,20 +1437,20 @@ class _CourseOptionLabel extends StatelessWidget {
             option.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Journal.metadata.copyWith(
-              fontSize: 14,
-              color: Journal.ink,
-            ),
+            style: Journal.of(context).metadata.copyWith(
+                  fontSize: 14,
+                  color: Journal.of(context).ink,
+                ),
           ),
           if (option.showClass)
             Text(
               option.classLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Journal.metadata.copyWith(
-                fontSize: 12,
-                color: Journal.muted,
-              ),
+              style: Journal.of(context).metadata.copyWith(
+                    fontSize: 12,
+                    color: Journal.of(context).muted,
+                  ),
             ),
         ],
       );

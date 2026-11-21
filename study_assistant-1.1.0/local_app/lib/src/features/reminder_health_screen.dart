@@ -238,6 +238,7 @@ class _HealthState extends State<ReminderHealthScreen>
       health?.scheduleRecoveryPending == true || healthError != null;
 
   Widget _buildOverviewCard() {
+    final journal = Journal.of(context);
     final current = health;
     final issues = <String>[];
     if (current?.notifications == false) {
@@ -281,29 +282,29 @@ class _HealthState extends State<ReminderHealthScreen>
     if (current == null && healthError == null) {
       title = busy ? '正在核对系统通知与渠道状态…' : '通知体检准备就绪';
       detail = '正在检查通知权限、四个通知渠道与精确闹钟设置。';
-      accent = Journal.muted;
+      accent = journal.muted;
       icon = Icons.hourglass_top_outlined;
     } else if (issues.isNotEmpty) {
       title = '有 ${issues.length} 项提醒设置或事务需关注';
       detail = issues.join('、');
-      accent = Journal.berry;
+      accent = journal.berry;
       icon = Icons.warning_amber_rounded;
     } else if (healthError != null) {
       title = '部分通知体检项尚未确认';
       detail = '请先查看下方错误信息，处理后点击“重新体检”。';
-      accent = Journal.berry;
+      accent = journal.berry;
       icon = Icons.error_outline;
     } else if (hasPositiveSignal) {
       title = '基础通知权限与渠道已开启';
       detail = current.exact == false
           ? '精确闹钟未开启，提醒时间可能受系统省电策略顺延。'
           : '建议顺便发送测试通知，确认系统栏与锁屏横幅可见。';
-      accent = Journal.ink;
+      accent = journal.ink;
       icon = Icons.verified_outlined;
     } else {
       title = '基础通知状态暂待系统确认';
       detail = '当前环境未返回明确权限或渠道状态，请先点击各项检查或发送测试通知。';
-      accent = Journal.muted;
+      accent = journal.muted;
       icon = Icons.info_outline;
     }
 
@@ -321,10 +322,10 @@ class _HealthState extends State<ReminderHealthScreen>
                 children: [
                   Text(
                     title,
-                    style: Journal.entryTitle.copyWith(color: accent),
+                    style: journal.entryTitle.copyWith(color: accent),
                   ),
                   const SizedBox(height: 4),
-                  Text(detail, style: Journal.metadata),
+                  Text(detail, style: journal.metadata),
                 ],
               ),
             ),
@@ -355,11 +356,12 @@ class _HealthState extends State<ReminderHealthScreen>
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: widget.store,
         builder: (context, _) {
+          final journal = Journal.of(context);
           final p = widget.store.personal;
           return Scaffold(
-            backgroundColor: Journal.paper,
+            backgroundColor: journal.paper,
             appBar: AppBar(
-              backgroundColor: Journal.paper,
+              backgroundColor: journal.paper,
               title: const Text('提醒体检'),
             ),
             body: ListView(
@@ -370,14 +372,14 @@ class _HealthState extends State<ReminderHealthScreen>
                   eyebrow: 'CAMPUS JOURNAL   /   HEALTH',
                 ),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   '权限开启和已安排不等于一定送达。厂商省电、锁屏设置与应用被强制停止都可能影响提醒。',
-                  style: Journal.metadata,
+                  style: journal.metadata,
                 ),
                 const SizedBox(height: 6),
-                const Text(
+                Text(
                   '先核对：系统通知权限 → 四个通知渠道 → 发送测试通知。',
-                  style: Journal.metadata,
+                  style: journal.metadata,
                 ),
                 const SizedBox(height: 10),
                 _buildOverviewCard(),
@@ -387,7 +389,7 @@ class _HealthState extends State<ReminderHealthScreen>
                     liveRegion: true,
                     child: Text(
                       inspectionError,
-                      style: Journal.metadata.copyWith(
+                      style: journal.metadata.copyWith(
                         color: Theme.of(context).colorScheme.error,
                       ),
                     ),
@@ -395,7 +397,7 @@ class _HealthState extends State<ReminderHealthScreen>
                 ],
                 if (hasStaleResult) ...[
                   const SizedBox(height: 4),
-                  Text(lastResultLabel, style: Journal.metadata),
+                  Text(lastResultLabel, style: journal.metadata),
                 ],
                 if (_showRecoveryOnTop) ...[
                   const SizedBox(height: 8),
@@ -422,7 +424,7 @@ class _HealthState extends State<ReminderHealthScreen>
                           destination: '通知设置',
                         ),
                       ),
-                      const Divider(height: 1, color: Journal.rule),
+                      Divider(height: 1, color: journal.rule),
                       ListTile(
                         dense: true,
                         title: const Text('作业变化通知渠道'),
@@ -433,7 +435,7 @@ class _HealthState extends State<ReminderHealthScreen>
                           '作业变化通知渠道',
                         ),
                       ),
-                      const Divider(height: 1, color: Journal.rule),
+                      Divider(height: 1, color: journal.rule),
                       ListTile(
                         dense: true,
                         title: const Text('截止提醒通知渠道'),
@@ -443,7 +445,7 @@ class _HealthState extends State<ReminderHealthScreen>
                           '截止提醒通知渠道',
                         ),
                       ),
-                      const Divider(height: 1, color: Journal.rule),
+                      Divider(height: 1, color: journal.rule),
                       ListTile(
                         dense: true,
                         title: const Text('每日摘要通知渠道'),
@@ -453,7 +455,7 @@ class _HealthState extends State<ReminderHealthScreen>
                           '每日摘要通知渠道',
                         ),
                       ),
-                      const Divider(height: 1, color: Journal.rule),
+                      Divider(height: 1, color: journal.rule),
                       ListTile(
                         dense: true,
                         title: const Text('个人日程通知渠道'),
@@ -463,7 +465,7 @@ class _HealthState extends State<ReminderHealthScreen>
                           '个人日程通知渠道',
                         ),
                       ),
-                      const Divider(height: 1, color: Journal.rule),
+                      Divider(height: 1, color: journal.rule),
                       ListTile(
                         dense: true,
                         title: const Text('精确提醒权限'),
@@ -475,7 +477,7 @@ class _HealthState extends State<ReminderHealthScreen>
                           destination: '精确闹钟设置',
                         ),
                       ),
-                      const Divider(height: 1, color: Journal.rule),
+                      Divider(height: 1, color: journal.rule),
                       ListTile(
                         dense: true,
                         title: const Text('学习通通知使用权'),
@@ -501,7 +503,7 @@ class _HealthState extends State<ReminderHealthScreen>
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => context.push('/reminder-history'),
                       ),
-                      const Divider(height: 1, color: Journal.rule),
+                      Divider(height: 1, color: journal.rule),
                       ListTile(
                         dense: true,
                         title: const Text('每日摘要提醒状态'),
@@ -509,7 +511,7 @@ class _HealthState extends State<ReminderHealthScreen>
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => context.push('/reminder-status/summary/0'),
                       ),
-                      const Divider(height: 1, color: Journal.rule),
+                      Divider(height: 1, color: journal.rule),
                       ListTile(
                         dense: true,
                         title: const Text('本应用电池与后台设置'),
@@ -546,7 +548,7 @@ class _HealthState extends State<ReminderHealthScreen>
                           ),
                         ],
                       ),
-                      const Divider(height: 1, color: Journal.rule),
+                      Divider(height: 1, color: journal.rule),
                       ExpansionTile(
                         tilePadding: const EdgeInsets.symmetric(horizontal: 16),
                         childrenPadding:
@@ -644,7 +646,7 @@ class _HealthState extends State<ReminderHealthScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('每日摘要', style: Journal.section),
+                        Text('每日摘要', style: journal.section),
                         const SizedBox(height: 4),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
@@ -678,9 +680,9 @@ class _HealthState extends State<ReminderHealthScreen>
                                 },
                         ),
                         const SizedBox(height: 4),
-                        const Text(
+                        Text(
                           '摘要按当前快照预安排未来7天，包含当天截止与个人计划数量；进入应用、同步或修改设置后更新。超过7天未打开将停止摘要，不能在后台自动获取新作业。默认关闭，近似时间送达。',
-                          style: Journal.metadata,
+                          style: journal.metadata,
                         ),
                       ],
                     ),

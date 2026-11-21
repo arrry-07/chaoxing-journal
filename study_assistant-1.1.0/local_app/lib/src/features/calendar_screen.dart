@@ -28,13 +28,13 @@ class _CalendarScreenState extends State<CalendarScreen>
     fontSize: 14,
     height: 1.4,
   );
-  static const _countStyle = TextStyle(
-    fontFamily: Journal.bodyFamily,
-    fontFamilyFallback: Journal.bodyFallback,
-    fontSize: 11,
-    height: 1.4,
-    color: Journal.muted,
-  );
+  TextStyle get _countStyle => TextStyle(
+        fontFamily: Journal.bodyFamily,
+        fontFamilyFallback: Journal.bodyFallback,
+        fontSize: 11,
+        height: 1.4,
+        color: Journal.of(context).muted,
+      );
   static const _cellBorderWidth = 1.0;
   static const _cellVerticalPadding = 2.0;
   static const _cellSlack = 1.0;
@@ -141,6 +141,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
+        final journal = Journal.of(context);
         final now = _now;
         final courseSources = widget.store.courseAssignments;
         final all = AssignmentQuery.projectDisplay(courseSources);
@@ -184,7 +185,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                 crossAxisAlignment: WrapCrossAlignment.center,
                 spacing: 8,
                 children: [
-                  const Text('课业日历', style: Journal.display),
+                  Text('课业日历', style: journal.display),
                   TextButton.icon(
                     onPressed: () => context.push('/agenda'),
                     icon: const Icon(Icons.event_note_outlined),
@@ -230,7 +231,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                     fontSize: 12,
                     color: _refreshMessage?.contains('失败') == true
                         ? Theme.of(context).colorScheme.error
-                        : Journal.muted,
+                        : journal.muted,
                   ),
                 ),
               ),
@@ -256,13 +257,13 @@ class _CalendarScreenState extends State<CalendarScreen>
                             softWrap: false,
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
-                            style: Journal.section,
+                            style: Journal.of(context).section,
                           );
                           return LayoutBuilder(builder: (context, constraints) {
                             final painter = TextPainter(
                               text: TextSpan(
                                 text: DateFormat('yyyy年M月').format(month),
-                                style: Journal.section,
+                                style: Journal.of(context).section,
                               ),
                               textDirection: Directionality.of(context),
                               textScaler: textScaler,
@@ -305,9 +306,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                             Expanded(
                                 child: Center(
                                     child: Text(label,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                             fontSize: 13,
-                                            color: Journal.muted))))
+                                            color: journal.muted))))
                         ]),
                         const Divider(height: 9, indent: 8, endIndent: 8),
                         for (var row = 0;
@@ -316,6 +317,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                           Row(children: [
                             for (var col = 0; col < 7; col++)
                               Expanded(child: Builder(builder: (context) {
+                                final journal = Journal.of(context);
                                 final day = row * 7 + col - leading + 1;
                                 if (day < 1 || day > days) {
                                   return SizedBox(height: cellHeight);
@@ -355,11 +357,11 @@ class _CalendarScreenState extends State<CalendarScreen>
                                                 vertical: _cellVerticalPadding),
                                             decoration: BoxDecoration(
                                                 color: selected == date
-                                                    ? Journal.sage
+                                                    ? journal.sage
                                                     : null,
                                                 border: date == today
                                                     ? Border.all(
-                                                        color: Journal.ink)
+                                                        color: journal.ink)
                                                     : null,
                                                 borderRadius:
                                                     BorderRadius.circular(8)),
@@ -392,10 +394,10 @@ class _CalendarScreenState extends State<CalendarScreen>
                               }))
                           ]),
                       ]))),
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(top: 10, bottom: 2),
                 child: Text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。',
-                    style: TextStyle(fontSize: 12, color: Journal.muted)),
+                    style: TextStyle(fontSize: 12, color: journal.muted)),
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 12, bottom: 4),
@@ -403,7 +405,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                   selected == null
                       ? '本月议程'
                       : '${DateFormat('M月d日').format(selected!)} · 议程',
-                  style: Journal.section,
+                  style: journal.section,
                 ),
               ),
               const Divider(height: 1),
@@ -429,8 +431,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                         .push('/assignments/${Uri.encodeComponent(a.id)}')),
               for (final e in manualAgenda)
                 Builder(builder: (context) {
+                  final journal = Journal.of(context);
                   final exam = e.kind == 'exam';
-                  final accent = exam ? Journal.slate : Journal.ink;
+                  final accent = exam ? journal.slate : journal.ink;
                   final label = exam ? '手动考试' : '个人待办';
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -440,7 +443,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                     ),
                     title: Text(
                       '$label · ${e.title}',
-                      style: Journal.entryTitle.copyWith(color: accent),
+                      style: journal.entryTitle.copyWith(color: accent),
                     ),
                     subtitle: Text(manualTime(e.at)),
                     onTap: () => context.push('/agenda'),
@@ -448,7 +451,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                 }),
               if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
                 const Divider(height: 24),
-                const Text('待核对课业', style: Journal.section),
+                Text('待核对课业', style: journal.section),
                 if (noDeadlineCount > 0)
                   TextButton.icon(
                       key: const ValueKey('calendar-no-deadline-scope'),
@@ -460,7 +463,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                   TextButton.icon(
                       key: const ValueKey('calendar-deadline-pending-scope'),
                       style: TextButton.styleFrom(
-                        foregroundColor: Journal.ochre,
+                        foregroundColor: journal.ochre,
                       ),
                       onPressed: () => context.go(_recoveryLocation(
                           AssignmentRecoveryScope.deadlinePending)),

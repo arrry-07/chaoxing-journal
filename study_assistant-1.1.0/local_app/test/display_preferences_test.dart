@@ -33,6 +33,21 @@ AssignmentStore store() => AssignmentStore(
     notificationService: LocalNotificationService(),
     widgetSnapshotService: _Widgets());
 void main() {
+  test('legacy display preferences follow system and preserve other choices',
+      () {
+    final legacy = DisplayPreferences.decode(
+        '{"compact":true,"countdown":true,"range":"week"}');
+    expect(legacy.themeMode, JournalThemeMode.system);
+    final restored = DisplayPreferences.decode(
+        legacy.copyWith(themeMode: JournalThemeMode.dark).encode());
+    expect(restored.themeMode, JournalThemeMode.dark);
+    expect(restored.compact, isTrue);
+    expect(restored.countdown, isTrue);
+    expect(restored.widgetRange, WidgetRange.week);
+    expect(DisplayPreferences.decode('{"themeMode":"future"}').themeMode,
+        JournalThemeMode.system);
+  });
+
   test('widget ranges use trusted exam timeline rather than work deadline', () {
     final now = DateTime.utc(2026, 11, 16, 2);
     Assignment exam(String id, DateTime start,

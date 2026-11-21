@@ -138,7 +138,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: Journal.paper,
+      backgroundColor: Journal.of(context).paper,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -151,6 +151,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
           builder: (_, scrollController) => AnimatedBuilder(
             animation: widget.store,
             builder: (context, _) {
+              final journal = Journal.of(context);
               final latest = widget.store.courseNotices.items
                       .where((item) => item.id == notice.id)
                       .firstOrNull ??
@@ -174,13 +175,13 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                       width: 36,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Journal.rule,
+                        color: journal.rule,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Text(latest.title, style: Journal.section),
+                  Text(latest.title, style: journal.section),
                   const SizedBox(height: 6),
                   Text(
                     [
@@ -188,20 +189,20 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                       if (latest.senderName.isNotEmpty) latest.senderName,
                       timeText,
                     ].join(' · '),
-                    style: Journal.metadata,
+                    style: journal.metadata,
                   ),
                   if (latest.extractedEventAt != null) ...[
                     const SizedBox(height: 10),
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Journal.sage.withValues(alpha: 0.55),
+                        color: journal.sage.withValues(alpha: 0.55),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Journal.rule),
+                        border: Border.all(color: journal.rule),
                       ),
                       child: Text(
                         '识别时间：${DateFormat('yyyy-MM-dd HH:mm').format(AssignmentQuery.beijing(latest.extractedEventAt!))}（北京时间）',
-                        style: Journal.metadata.copyWith(color: Journal.ink),
+                        style: journal.metadata.copyWith(color: journal.ink),
                       ),
                     ),
                   ],
@@ -211,15 +212,14 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                       padding: const EdgeInsets.all(14),
                       child: Text(
                         latest.summary.isEmpty ? '无补充正文内容' : latest.summary,
-                        style:
-                            const TextStyle(height: 1.55, color: Journal.ink),
+                        style: TextStyle(height: 1.55, color: journal.ink),
                       ),
                     ),
                   ),
                   const SizedBox(height: 10),
-                  const Text(
+                  Text(
                     '说明：本机已读状态仅保存在当前设备手记，不会修改学习通平台未读状态。',
-                    style: Journal.metadata,
+                    style: journal.metadata,
                   ),
                   const SizedBox(height: 16),
                   Wrap(
@@ -310,10 +310,11 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     return AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
+        final journal = Journal.of(context);
         return Scaffold(
-          backgroundColor: Journal.paper,
+          backgroundColor: journal.paper,
           appBar: AppBar(
-            backgroundColor: Journal.paper,
+            backgroundColor: journal.paper,
             leading: IconButton(
               tooltip: '返回我的',
               icon: const Icon(Icons.arrow_back),
@@ -367,6 +368,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   }
 
   List<Widget> _buildNoticesTab(BuildContext context) {
+    final journal = Journal.of(context);
     final notices = widget.store.courseNotices.items;
     final query = _searchController.text.trim().toLowerCase();
     final courseOptions = <String, String>{};
@@ -414,9 +416,9 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 '仅在前台手动同步时读取收件箱近期通知；本机已读仅用于手记整理，不会修改学习通平台状态。',
-                style: Journal.metadata,
+                style: journal.metadata,
               ),
               const SizedBox(height: 10),
               Wrap(
@@ -548,7 +550,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                   : scoped.isEmpty
                       ? '当前通知范围内没有记录，可切换到「收件箱」查看平台消息。'
                       : '当前筛选条件下没有匹配的通知。',
-              style: Journal.metadata,
+              style: journal.metadata,
             ),
           ),
         ),
@@ -568,7 +570,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                       Expanded(
                         child: Text(
                           notice.title,
-                          style: Journal.entryTitle.copyWith(
+                          style: journal.entryTitle.copyWith(
                             fontWeight: notice.localRead
                                 ? FontWeight.w500
                                 : FontWeight.w700,
@@ -583,14 +585,14 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: Journal.berry.withValues(alpha: 0.12),
+                            color: journal.berry.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(6),
                           ),
-                          child: const Text(
+                          child: Text(
                             '未读',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Journal.berry,
+                              color: journal.berry,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -609,7 +611,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                       if (notice.platformUnread) '平台未读',
                       if (notice.linkedManualEntryId != null) '已设提醒',
                     ].join(' · '),
-                    style: Journal.metadata,
+                    style: journal.metadata,
                   ),
                   if (notice.summary.isNotEmpty) ...[
                     const SizedBox(height: 6),
@@ -617,7 +619,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                       notice.summary,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: Journal.metadata.copyWith(color: Journal.ink),
+                      style: journal.metadata.copyWith(color: journal.ink),
                     ),
                   ],
                 ],
@@ -631,6 +633,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   }
 
   List<Widget> _buildChaptersTab(BuildContext context) {
+    final journal = Journal.of(context);
     final courses = widget.store.courses;
     final catalog = widget.store.courseChapters;
     final targetCourses = <CourseRef>[
@@ -647,9 +650,9 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 '仅在前台手动按需读取课程章节与任务点进度，仅供个人学习安排参考，不自动学习或代完成。',
-                style: Journal.metadata,
+                style: journal.metadata,
               ),
               const SizedBox(height: 10),
               if (widget.store.isChapterSyncing) ...[
@@ -657,7 +660,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                 const SizedBox(height: 8),
                 Text(
                   widget.store.chapterSyncProgressText ?? '正在读取章节进度…',
-                  style: Journal.metadata,
+                  style: journal.metadata,
                 ),
                 const SizedBox(height: 8),
               ],
@@ -703,21 +706,22 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
             padding: const EdgeInsets.all(12),
             child: Text(
               widget.store.error!,
-              style: Journal.metadata.copyWith(color: Journal.berry),
+              style: journal.metadata.copyWith(color: journal.berry),
             ),
           ),
         ),
       ],
       const SizedBox(height: 12),
       if (targetCourses.isEmpty)
-        const Card(
+        Card(
           child: Padding(
             padding: EdgeInsets.all(18),
-            child: Text('暂无课程资料，请先前往「同步学习通」同步课程列表。', style: Journal.metadata),
+            child: Text('暂无课程资料，请先前往「同步学习通」同步课程列表。', style: journal.metadata),
           ),
         ),
       for (final course in targetCourses) ...[
         Builder(builder: (context) {
+          final journal = Journal.of(context);
           final snapshot = catalog.byCourse[course.key];
           final progressLabel = snapshot == null
               ? '尚未读取章节'
@@ -735,12 +739,12 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
           return Card(
             child: ExpansionTile(
               key: ValueKey('chapter-course-${course.key}'),
-              title: Text(course.name, style: Journal.entryTitle),
+              title: Text(course.name, style: journal.entryTitle),
               subtitle: Text(
                 snapshot == null
                     ? '班级 ${course.clazzId} · $progressLabel'
                     : '$progressLabel · 更新于 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(snapshot.lastSyncedAt))}',
-                style: Journal.metadata,
+                style: journal.metadata,
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -758,12 +762,12 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
               ),
               children: [
                 if (snapshot == null)
-                  const ListTile(
-                    title: Text('尚未读取该课程章节目录', style: Journal.metadata),
+                  ListTile(
+                    title: Text('尚未读取该课程章节目录', style: journal.metadata),
                   )
                 else if (visibleNodes.isEmpty)
-                  const ListTile(
-                    title: Text('当前筛选下没有可显示的章节小节', style: Journal.metadata),
+                  ListTile(
+                    title: Text('当前筛选下没有可显示的章节小节', style: journal.metadata),
                   )
                 else
                   for (final node in visibleNodes)
@@ -772,7 +776,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                         dense: true,
                         title: Text(
                           '${node.code}. ${node.title}',
-                          style: Journal.entryTitle.copyWith(fontSize: 15),
+                          style: journal.entryTitle.copyWith(fontSize: 15),
                         ),
                       )
                     else
@@ -789,10 +793,10 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                             ChapterTaskState.noTaskPoints => '无任务点',
                             ChapterTaskState.unknown => '状态待确认',
                           },
-                          style: Journal.metadata.copyWith(
+                          style: journal.metadata.copyWith(
                             color: node.state == ChapterTaskState.pendingPoints
-                                ? Journal.berry
-                                : Journal.muted,
+                                ? journal.berry
+                                : journal.muted,
                           ),
                         ),
                         trailing: node.state == ChapterTaskState.pendingPoints

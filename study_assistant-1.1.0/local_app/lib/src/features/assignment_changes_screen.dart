@@ -19,22 +19,22 @@ class AssignmentChangesScreen extends StatelessWidget {
   }
 
   ({String label, IconData icon, Color color}) _meta(
-      AssignmentChangeKind kind) {
+      AssignmentChangeKind kind, JournalPalette journal) {
     return switch (kind) {
       AssignmentChangeKind.published => (
           label: '新增作业',
           icon: Icons.add_circle_outline,
-          color: Journal.ink,
+          color: journal.ink,
         ),
       AssignmentChangeKind.deadline => (
           label: '截止调整',
           icon: Icons.event_outlined,
-          color: Journal.berry,
+          color: journal.berry,
         ),
       AssignmentChangeKind.status => (
           label: '状态变更',
           icon: Icons.task_alt,
-          color: Journal.ink,
+          color: journal.ink,
         ),
     };
   }
@@ -43,6 +43,7 @@ class AssignmentChangesScreen extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: store,
         builder: (context, _) {
+          final journal = Journal.of(context);
           final events = store.changes;
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -63,25 +64,26 @@ class AssignmentChangesScreen extends StatelessWidget {
                 eyebrow: 'CAMPUS JOURNAL   /   CHANGES',
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 '保留最近200条本机变化。首次完整同步建立基线；读取失败不代表没有作业。',
-                style: Journal.metadata,
+                style: journal.metadata,
               ),
               const SizedBox(height: 14),
               if (events.isEmpty)
-                const Card(
+                Card(
                   child: Padding(
                     padding: EdgeInsets.all(20),
                     child: Text(
                       '暂无变化记录。下次同步后，有新增作业或可信时间、提交状态变化时会显示在这里。',
-                      style: Journal.metadata,
+                      style: journal.metadata,
                     ),
                   ),
                 ),
               for (final event in events)
                 Builder(
                   builder: (context) {
-                    final meta = _meta(event.kind);
+                    final journal = Journal.of(context);
+                    final meta = _meta(event.kind, journal);
                     final summary = switch (event.kind) {
                       AssignmentChangeKind.published => event.after,
                       AssignmentChangeKind.deadline =>
@@ -121,16 +123,16 @@ class AssignmentChangesScreen extends StatelessWidget {
                                               vertical: 2,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: Journal.paper,
+                                              color: journal.paper,
                                               borderRadius:
                                                   BorderRadius.circular(6),
                                               border: Border.all(
-                                                color: Journal.rule,
+                                                color: journal.rule,
                                               ),
                                             ),
                                             child: Text(
                                               meta.label,
-                                              style: Journal.metadata.copyWith(
+                                              style: journal.metadata.copyWith(
                                                 fontSize: 12,
                                                 color: meta.color,
                                                 fontWeight: FontWeight.w600,
@@ -141,25 +143,25 @@ class AssignmentChangesScreen extends StatelessWidget {
                                             DateFormat('M月d日 HH:mm').format(
                                               AssignmentQuery.beijing(event.at),
                                             ),
-                                            style: Journal.metadata,
+                                            style: journal.metadata,
                                           ),
                                         ],
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
                                         event.title,
-                                        style: Journal.entryTitle,
+                                        style: journal.entryTitle,
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
                                         event.courseName,
-                                        style: Journal.metadata,
+                                        style: journal.metadata,
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
                                         summary,
-                                        style: Journal.metadata.copyWith(
-                                          color: Journal.ink,
+                                        style: journal.metadata.copyWith(
+                                          color: journal.ink,
                                         ),
                                       ),
                                     ],

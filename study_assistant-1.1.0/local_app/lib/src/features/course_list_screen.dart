@@ -12,9 +12,9 @@ class CourseListScreen extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: store,
         builder: (context, _) => Scaffold(
-          backgroundColor: Journal.paper,
+          backgroundColor: Journal.of(context).paper,
           appBar: AppBar(
-            backgroundColor: Journal.paper,
+            backgroundColor: Journal.of(context).paper,
           ),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -24,13 +24,13 @@ class CourseListScreen extends StatelessWidget {
                 eyebrow: 'CAMPUS JOURNAL   /   COURSES',
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 '关注课程影响首页、日历、提醒、小组件和统计；所有记录仍可在本地记录查看。',
-                style: Journal.metadata,
+                style: Journal.of(context).metadata,
               ),
               const SizedBox(height: 14),
               if (store.isLoading) ...[
-                const Card(
+                Card(
                   child: Padding(
                     padding: EdgeInsets.all(14),
                     child: Column(
@@ -38,7 +38,8 @@ class CourseListScreen extends StatelessWidget {
                       children: [
                         LinearProgressIndicator(semanticsLabel: '正在处理学习数据'),
                         SizedBox(height: 8),
-                        Text('正在处理学习数据，请稍候。', style: Journal.metadata),
+                        Text('正在处理学习数据，请稍候。',
+                            style: Journal.of(context).metadata),
                       ],
                     ),
                   ),
@@ -52,19 +53,21 @@ class CourseListScreen extends StatelessWidget {
                     padding: const EdgeInsets.all(14),
                     child: Text(
                       '当前提示：$message',
-                      style: Journal.metadata.copyWith(color: Journal.berry),
+                      style: Journal.of(context)
+                          .metadata
+                          .copyWith(color: Journal.of(context).berry),
                     ),
                   ),
                 ),
                 const SizedBox(height: 12),
               ],
               if (store.courses.isEmpty && !store.isLoading)
-                const Card(
+                Card(
                   child: Padding(
                     padding: EdgeInsets.all(18),
                     child: Text(
                       '尚未读取课程，请同步后重试。',
-                      style: Journal.metadata,
+                      style: Journal.of(context).metadata,
                     ),
                   ),
                 ),
@@ -87,28 +90,30 @@ class CourseListScreen extends StatelessWidget {
                     children: [
                       for (var i = 0; i < store.courses.length; i++) ...[
                         if (i > 0)
-                          const Divider(
+                          Divider(
                             height: 1,
                             indent: 14,
                             endIndent: 14,
-                            color: Journal.rule,
+                            color: Journal.of(context).rule,
                           ),
                         SwitchListTile(
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 2,
                           ),
-                          secondary: const Icon(
+                          secondary: Icon(
                             Icons.menu_book_outlined,
-                            color: Journal.ink,
+                            color: Journal.of(context).ink,
                           ),
                           title: Text(
                             store.courses[i].name,
-                            style: Journal.entryTitle.copyWith(fontSize: 16),
+                            style: Journal.of(context)
+                                .entryTitle
+                                .copyWith(fontSize: 16),
                           ),
                           subtitle: Text(
                             '班级 ${store.courses[i].clazzId}',
-                            style: Journal.metadata,
+                            style: Journal.of(context).metadata,
                           ),
                           value: store.follows(store.courses[i].key),
                           onChanged: (v) =>

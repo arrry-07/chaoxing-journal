@@ -63,7 +63,7 @@ class _DailyPlanState extends State<DailyPlanScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: Journal.paper,
+      backgroundColor: Journal.of(context).paper,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -76,7 +76,7 @@ class _DailyPlanState extends State<DailyPlanScreen> {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: Journal.rule,
+                color: Journal.of(context).rule,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -84,8 +84,9 @@ class _DailyPlanState extends State<DailyPlanScreen> {
               padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
               child: Row(
                 children: [
-                  const Expanded(
-                    child: Text('选择准备完成的作业', style: Journal.section),
+                  Expanded(
+                    child:
+                        Text('选择准备完成的作业', style: Journal.of(context).section),
                   ),
                   IconButton(
                     tooltip: '关闭',
@@ -95,7 +96,7 @@ class _DailyPlanState extends State<DailyPlanScreen> {
                 ],
               ),
             ),
-            const Divider(height: 1, color: Journal.rule),
+            Divider(height: 1, color: Journal.of(context).rule),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.all(16),
@@ -103,6 +104,7 @@ class _DailyPlanState extends State<DailyPlanScreen> {
                   for (final a in candidates)
                     Builder(
                       builder: (context) {
+                        final journal = Journal.of(context);
                         final overdue = a.isOverdueAt(now);
                         final deadlineText = a.deadlineAt != null &&
                                 a.deadlineTrusted &&
@@ -129,22 +131,22 @@ class _DailyPlanState extends State<DailyPlanScreen> {
                                         children: [
                                           Text(
                                             a.title,
-                                            style: Journal.entryTitle,
+                                            style: journal.entryTitle,
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
                                             a.courseName,
-                                            style: Journal.metadata,
+                                            style: journal.metadata,
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
                                             overdue
                                                 ? '$deadlineText · 已逾期'
                                                 : deadlineText,
-                                            style: Journal.metadata.copyWith(
+                                            style: journal.metadata.copyWith(
                                               color: overdue
-                                                  ? Journal.berry
-                                                  : Journal.muted,
+                                                  ? journal.berry
+                                                  : journal.muted,
                                             ),
                                           ),
                                         ],
@@ -338,13 +340,14 @@ class _PlannerEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     return OutlinedButton(
       style: OutlinedButton.styleFrom(
         alignment: Alignment.centerLeft,
-        foregroundColor: Journal.ink,
-        disabledForegroundColor: Journal.muted,
+        foregroundColor: journal.ink,
+        disabledForegroundColor: journal.muted,
         padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-        side: const BorderSide(color: Journal.rule),
+        side: BorderSide(color: journal.rule),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
         ),
@@ -354,11 +357,11 @@ class _PlannerEntry extends StatelessWidget {
         children: [
           const Icon(Icons.edit_calendar_outlined),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('安排学习时间', style: Journal.entryTitle),
+                Text('安排学习时间', style: journal.entryTitle),
                 SizedBox(height: 3),
                 Text('选作业、填预计耗时，根据可用时间生成安排。'),
               ],
@@ -383,18 +386,19 @@ class _PlannerSectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Semantics(
         header: true,
         child: Row(
           children: [
-            Icon(icon, size: 20, color: Journal.ink),
+            Icon(icon, size: 20, color: journal.ink),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 title,
-                style: Journal.section.copyWith(fontSize: 18),
+                style: journal.section.copyWith(fontSize: 18),
               ),
             ),
           ],
@@ -607,6 +611,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     final currentPreview = preview;
     final needsPreview =
         currentPreview == null || currentPreview.suggested.isEmpty;
@@ -633,13 +638,13 @@ class _PlannerSheetState extends State<_PlannerSheet> {
           padding: const EdgeInsets.fromLTRB(20, 14, 8, 8),
           child: Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       '安排学习时间',
-                      style: Journal.section,
+                      style: Journal.of(context).section,
                     ),
                     SizedBox(height: 4),
                     Text('选作业、填预计耗时，根据可用时间生成安排。'),
@@ -721,7 +726,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                 ),
                 Text(
                   '目标日期：${widget.day}',
-                  style: Journal.metadata,
+                  style: journal.metadata,
                 ),
                 const SizedBox(height: 8),
                 for (final assignment in candidates) _candidate(assignment),
@@ -781,23 +786,23 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                   const SizedBox(height: 16),
                   Text(
                     '当天可用时间 ${currentPreview.budgetMinutes} 分钟',
-                    style: Journal.time,
+                    style: journal.time,
                   ),
                   const SizedBox(height: 4),
                   Text(
                     '已有未完成计划占用 ${currentPreview.existingMinutes} 分钟',
-                    style: Journal.metadata,
+                    style: journal.metadata,
                   ),
                   const SizedBox(height: 4),
                   Text(
                     currentPreview.remainingMinutes == null
                         ? '已有计划耗时未确认，剩余可用时间暂不能确定'
                         : '预计剩余 ${currentPreview.remainingMinutes} 分钟',
-                    style: Journal.entryTitle,
+                    style: journal.entryTitle,
                   ),
                   if (currentPreview.suggested.isNotEmpty) ...[
                     const SizedBox(height: 16),
-                    Text('自动纳入', style: Journal.entryTitle),
+                    Text('自动纳入', style: journal.entryTitle),
                     for (final item in currentPreview.suggested)
                       CheckboxListTile(
                         key: ValueKey(
@@ -820,7 +825,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
                   ],
                   if (currentPreview.manual.isNotEmpty) ...[
                     const SizedBox(height: 16),
-                    Text('需要人工处理', style: Journal.entryTitle),
+                    Text('需要人工处理', style: journal.entryTitle),
                     for (final item in currentPreview.manual)
                       ListTile(
                         contentPadding: EdgeInsets.zero,
@@ -882,14 +887,15 @@ class _PlannerSheetState extends State<_PlannerSheet> {
   }
 
   Widget _estimateField(Assignment assignment) {
+    final journal = Journal.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(assignment.title, style: Journal.entryTitle),
+          Text(assignment.title, style: journal.entryTitle),
           const SizedBox(height: 2),
-          Text(assignment.courseName, style: Journal.metadata),
+          Text(assignment.courseName, style: journal.metadata),
           const SizedBox(height: 8),
           TextField(
             key: ValueKey('planning-estimate-${assignment.id}'),

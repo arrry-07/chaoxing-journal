@@ -36,10 +36,10 @@ class StatsScreen extends StatefulWidget {
 }
 
 class _StatsScreenState extends State<StatsScreen> {
-  static final _overviewCardColor =
-      Color.lerp(Journal.paper, Journal.sheet, .70)!;
-  static final _courseCardColor =
-      Color.lerp(Journal.paper, Journal.sheet, .50)!;
+  Color get _overviewCardColor =>
+      Color.lerp(Journal.of(context).paper, Journal.of(context).sheet, .70)!;
+  Color get _courseCardColor =>
+      Color.lerp(Journal.of(context).paper, Journal.of(context).sheet, .50)!;
   static const _bucketStatusParams = [
     'completed',
     'pending',
@@ -64,7 +64,7 @@ class _StatsScreenState extends State<StatsScreen> {
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          side: const BorderSide(color: Journal.rule, width: 0.8),
+          side: BorderSide(color: Journal.of(context).rule, width: 0.8),
         ),
         child: child,
       );
@@ -112,6 +112,7 @@ class _StatsScreenState extends State<StatsScreen> {
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: widget.store,
         builder: (context, _) {
+          final journal = Journal.of(context);
           final store = widget.store;
           final now = _now;
           // Use one instant for the overview and each course, including deadlines
@@ -167,6 +168,7 @@ class _StatsScreenState extends State<StatsScreen> {
                     if (i < 3 || stats.unknown > 0)
                       Builder(
                         builder: (context) {
+                          final journal = Journal.of(context);
                           final canTap = stats.counts[i] > 0;
                           final label = CompletionPieChart.labels[i];
                           final row = Padding(
@@ -183,7 +185,8 @@ class _StatsScreenState extends State<StatsScreen> {
                                     width: 9,
                                     height: 9,
                                     decoration: BoxDecoration(
-                                      color: CompletionPieChart.legendColors[i],
+                                      color: CompletionPieChart.colorsFor(
+                                          journal)[i],
                                       shape: BoxShape.circle,
                                     ),
                                   ),
@@ -199,14 +202,14 @@ class _StatsScreenState extends State<StatsScreen> {
                                           Expanded(
                                             child: Text(
                                               label,
-                                              style: Journal.time,
+                                              style: journal.time,
                                             ),
                                           ),
                                           if (canTap)
-                                            const Icon(
+                                            Icon(
                                               Icons.chevron_right,
                                               size: 16,
-                                              color: Journal.muted,
+                                              color: journal.muted,
                                             ),
                                         ],
                                       ),
@@ -218,14 +221,14 @@ class _StatsScreenState extends State<StatsScreen> {
                                           Flexible(
                                             child: Text(
                                               '${stats.counts[i]} 份',
-                                              style: Journal.metadata,
+                                              style: journal.metadata,
                                             ),
                                           ),
                                           const SizedBox(width: 8),
                                           Flexible(
                                             child: Text(
                                               '${stats.percentages[i]}%',
-                                              style: Journal.metadata,
+                                              style: journal.metadata,
                                               textAlign: TextAlign.right,
                                             ),
                                           ),
@@ -276,7 +279,7 @@ class _StatsScreenState extends State<StatsScreen> {
                   bookTitle: true,
                 ),
                 const SizedBox(height: 4),
-                const Text('统计范围：已关注课程的课业与账号考试', style: Journal.metadata),
+                Text('统计范围：已关注课程的课业与账号考试', style: journal.metadata),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
@@ -297,7 +300,7 @@ class _StatsScreenState extends State<StatsScreen> {
                   const SizedBox(height: 4),
                   Text(
                     '不含 $excludedUnscheduled 项无确定时间课业（切回“全部”可查看）',
-                    style: Journal.metadata,
+                    style: journal.metadata,
                   ),
                 ],
                 const SizedBox(height: 8),
@@ -310,12 +313,12 @@ class _StatsScreenState extends State<StatsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('暂无可统计的作业', style: Journal.entryTitle),
+                          Text('暂无可统计的作业', style: journal.entryTitle),
                           if (_range != StatsTimeRange.all) ...[
                             const SizedBox(height: 4),
                             Text(
                               '${_range.label}内暂无带确定时间的课业记录，可切回“全部”查看。',
-                              style: Journal.metadata,
+                              style: journal.metadata,
                             ),
                           ],
                         ],
@@ -335,9 +338,9 @@ class _StatsScreenState extends State<StatsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (stats.unknown == stats.total)
-                            const Padding(
+                            Padding(
                               padding: EdgeInsets.only(bottom: 8),
-                              child: Text('全部状态待确认', style: Journal.entryTitle),
+                              child: Text('全部状态待确认', style: journal.entryTitle),
                             ),
                           LayoutBuilder(
                             builder: (context, c) {
@@ -371,7 +374,7 @@ class _StatsScreenState extends State<StatsScreen> {
                             },
                           ),
                           const SizedBox(height: 8),
-                          const Divider(height: 1, color: Journal.rule),
+                          Divider(height: 1, color: journal.rule),
                           const SizedBox(height: 6),
                           Wrap(
                             spacing: 10,
@@ -380,11 +383,11 @@ class _StatsScreenState extends State<StatsScreen> {
                             children: [
                               Text(
                                 '共 ${stats.total} 项课业',
-                                style: Journal.metadata,
+                                style: journal.metadata,
                               ),
-                              const Text(
+                              Text(
                                 '不含已隐藏；提交未知计入；点击图例或课程查看明细',
-                                style: Journal.metadata,
+                                style: journal.metadata,
                               ),
                             ],
                           ),
@@ -393,20 +396,21 @@ class _StatsScreenState extends State<StatsScreen> {
                     ),
                   ),
                 const SizedBox(height: 12),
-                const Text('各课程待处理', style: Journal.section),
+                Text('各课程待处理', style: journal.section),
                 const SizedBox(height: 6),
                 if (!records.any((a) => !a.isCompleted))
                   _statsCard(
                     key: const ValueKey('stats-course-empty'),
                     color: _overviewCardColor,
-                    child: const Padding(
+                    child: Padding(
                       padding: EdgeInsets.all(14),
-                      child: Text('当前没有待处理的课程', style: Journal.metadata),
+                      child: Text('当前没有待处理的课程', style: journal.metadata),
                     ),
                   ),
                 for (final group in groups)
                   Builder(
                     builder: (context) {
+                      final journal = Journal.of(context);
                       final own = AssignmentStatistics(group.records, now: now);
                       if (own.pending + own.expired + own.unknown == 0) {
                         return const SizedBox.shrink();
@@ -444,14 +448,14 @@ class _StatsScreenState extends State<StatsScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   group.courseKey == null
-                                      ? const SizedBox(
+                                      ? SizedBox(
                                           width: 30,
                                           height: 30,
                                           child: Center(
                                             child: Icon(
                                               Icons.description_outlined,
                                               size: 22,
-                                              color: Journal.muted,
+                                              color: journal.muted,
                                             ),
                                           ),
                                         )
@@ -462,7 +466,7 @@ class _StatsScreenState extends State<StatsScreen> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Text(name, style: Journal.entryTitle),
+                                        Text(name, style: journal.entryTitle),
                                         const SizedBox(height: 3),
                                         Wrap(
                                           spacing: 16,
@@ -470,13 +474,13 @@ class _StatsScreenState extends State<StatsScreen> {
                                           children: [
                                             Text(
                                               '待完成 ${own.pending} 份',
-                                              style: Journal.metadata,
+                                              style: journal.metadata,
                                             ),
                                             Text(
                                               '已逾期 ${own.expired} 份',
-                                              style: Journal.metadata.copyWith(
+                                              style: journal.metadata.copyWith(
                                                 color: own.expired > 0
-                                                    ? Journal.berry
+                                                    ? journal.berry
                                                     : null,
                                               ),
                                             ),
@@ -484,9 +488,9 @@ class _StatsScreenState extends State<StatsScreen> {
                                               Text(
                                                 '提交未知 ${own.unknown} 份',
                                                 style:
-                                                    Journal.metadata.copyWith(
+                                                    journal.metadata.copyWith(
                                                   color: own.unknown > 0
-                                                      ? Journal.ochre
+                                                      ? journal.ochre
                                                       : null,
                                                 ),
                                               ),
@@ -495,11 +499,11 @@ class _StatsScreenState extends State<StatsScreen> {
                                       ],
                                     ),
                                   ),
-                                  const Padding(
+                                  Padding(
                                     padding: EdgeInsets.only(top: 4),
                                     child: Icon(
                                       Icons.chevron_right,
-                                      color: Journal.muted,
+                                      color: journal.muted,
                                     ),
                                   ),
                                 ],

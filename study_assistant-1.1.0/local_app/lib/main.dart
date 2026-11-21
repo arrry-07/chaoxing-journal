@@ -36,6 +36,7 @@ import 'src/features/reminder_settings_screen.dart';
 import 'src/features/stats_screen.dart';
 import 'src/features/sync_status_screen.dart';
 import 'src/features/widgets/update_dialog.dart';
+import 'src/models/display_preferences.dart';
 import 'src/services/assignment_store.dart';
 import 'src/services/background_reminder_gateway.dart';
 import 'src/services/local_notification_service.dart';
@@ -229,7 +230,8 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     _lastAuthenticated = assignmentStore.isAuthenticated;
     _lastAccountEpoch = assignmentStore.accountEpoch;
     _lastAccountHash = assignmentStore.accountHash;
-    assignmentStore.addListener(_handleStoreIdentityChanged);
+    _themeMode = assignmentStore.display.themeMode;
+    assignmentStore.addListener(_handleStoreChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _notificationRouterReady = true;
@@ -237,9 +239,16 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     });
   }
 
+  late JournalThemeMode _themeMode;
   bool _lastAuthenticated = false;
   int _lastAccountEpoch = 0;
   String? _lastAccountHash;
+
+  void _handleStoreChanged() {
+    final mode = assignmentStore.display.themeMode;
+    if (_themeMode != mode) setState(() => _themeMode = mode);
+    _handleStoreIdentityChanged();
+  }
 
   /// Account replacement must invalidate the old dialog/approval before a new
   /// page can inherit it. Other store notifications leave the guard alone.
@@ -300,7 +309,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    assignmentStore.removeListener(_handleStoreIdentityChanged);
+    assignmentStore.removeListener(_handleStoreChanged);
     _notificationFeedback.dispose();
     if (widget.updateController == null) _updates.dispose();
     _router.dispose();
@@ -318,6 +327,12 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             title: '学习通课业手记',
             debugShowCheckedModeBanner: false,
             theme: StudyAssistantTheme.light,
+            darkTheme: StudyAssistantTheme.dark,
+            themeMode: switch (_themeMode) {
+              JournalThemeMode.system => ThemeMode.system,
+              JournalThemeMode.light => ThemeMode.light,
+              JournalThemeMode.dark => ThemeMode.dark,
+            },
             routerConfig: _router,
           )),
     );

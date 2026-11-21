@@ -422,7 +422,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                     style: TextStyle(
                       color: _ruleDirty
                           ? Theme.of(context).colorScheme.error
-                          : Journal.muted,
+                          : Journal.of(context).muted,
                     ),
                   ),
                   const SizedBox(height: 8),

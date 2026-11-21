@@ -24,15 +24,15 @@ class CompletionPieChart extends StatelessWidget {
   final AssignmentStatistics statistics;
   final double diameter;
   static const ringThickness = 10.0;
-  static const trackColor = Journal.rule;
-  static final completedColor = Color.lerp(Journal.ink, Journal.sage, .30)!;
-  static final categoryColors = <Color>[
-    completedColor,
-    Color.lerp(Journal.ochre, Journal.paper, .18)!,
-    Color.lerp(Journal.berry, Journal.paper, .18)!,
-    Color.lerp(Journal.muted, Journal.paper, .12)!,
-  ];
+  static final categoryColors = colorsFor(JournalPalette.light);
   static final legendColors = categoryColors;
+
+  static List<Color> colorsFor(JournalPalette journal) => [
+        Color.lerp(journal.ink, journal.sage, .30)!,
+        Color.lerp(journal.ochre, journal.paper, .18)!,
+        Color.lerp(journal.berry, journal.paper, .18)!,
+        Color.lerp(journal.muted, journal.paper, .12)!,
+      ];
   static const labels = ['已完成', '待完成', '已逾期', '提交未知'];
 
   @visibleForTesting
@@ -57,6 +57,7 @@ class CompletionPieChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     final uncertain =
         statistics.total == 0 || statistics.unknown == statistics.total;
     final scaled = MediaQuery.textScalerOf(context).scale(24) / 24;
@@ -71,14 +72,14 @@ class CompletionPieChart extends StatelessWidget {
         child: SizedBox.square(
           dimension: scaledDiameter,
           child: CustomPaint(
-            painter: CompletionRingPainter(statistics.counts),
+            painter: CompletionRingPainter(statistics.counts, journal: journal),
             child: Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Text(uncertain ? '待确认' : '${statistics.percentages[0]}%',
-                    style: Journal.section
+                    style: journal.section
                         .copyWith(fontSize: uncertain ? 20 : 30)),
                 const SizedBox(height: 2),
-                const Text('完成率', style: Journal.metadata),
+                Text('完成率', style: journal.metadata),
               ]),
             ),
           ),
@@ -90,7 +91,8 @@ class CompletionPieChart extends StatelessWidget {
 
 @visibleForTesting
 class CompletionRingPainter extends CustomPainter {
-  CompletionRingPainter(this.counts);
+  CompletionRingPainter(this.counts, {this.journal = JournalPalette.light});
+  final JournalPalette journal;
   final List<int> counts;
 
   @override
@@ -103,10 +105,11 @@ class CompletionRingPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = thickness
       ..strokeCap = StrokeCap.butt
-      ..color = CompletionPieChart.trackColor;
+      ..color = journal.rule;
     canvas.drawCircle(center, radius, pen);
+    final colors = CompletionPieChart.colorsFor(journal);
     for (final segment in CompletionPieChart.segments(counts)) {
-      pen.color = segment.color;
+      pen.color = colors[segment.index];
       if (segment.sweep >= math.pi * 2 - 1e-9) {
         canvas.drawCircle(center, radius, pen);
       } else {
@@ -117,5 +120,5 @@ class CompletionRingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CompletionRingPainter old) =>
-      !listEquals(counts, old.counts);
+      journal != old.journal || !listEquals(counts, old.counts);
 }

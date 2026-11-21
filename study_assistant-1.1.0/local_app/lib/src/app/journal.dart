@@ -2,6 +2,11 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 class Journal {
+  static JournalPalette of(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? JournalPalette.dark
+          : JournalPalette.light;
+
   static const paper = Color(0xFFF7F5EC);
   static const sheet = Color(0xFFFFFDF5);
   static const parchment = Color(0xFFEFECE0);
@@ -75,6 +80,51 @@ class Journal {
   );
 }
 
+enum JournalPalette {
+  light,
+  dark;
+
+  Color get paper => this == dark ? const Color(0xFF141A17) : Journal.paper;
+  Color get sheet => this == dark ? const Color(0xFF1C2420) : Journal.sheet;
+  Color get parchment =>
+      this == dark ? const Color(0xFF232D28) : Journal.parchment;
+  Color get ink => this == dark ? const Color(0xFFE7E5DC) : Journal.ink;
+  Color get muted => this == dark ? const Color(0xFF9AA89F) : Journal.muted;
+  Color get sage => this == dark ? const Color(0xFF28382F) : Journal.sage;
+  Color get sageBorder =>
+      this == dark ? const Color(0xFF384D41) : Journal.sageBorder;
+  Color get rule => this == dark ? const Color(0xFF2A342F) : Journal.rule;
+  Color get ruleStrong =>
+      this == dark ? const Color(0xFF36423C) : Journal.ruleStrong;
+  Color get berry => this == dark ? const Color(0xFFE58C9E) : Journal.berry;
+  Color get berryBg => this == dark ? const Color(0xFF3A2028) : Journal.berryBg;
+  Color get berryBorder =>
+      this == dark ? const Color(0xFF69414D) : Journal.berryBorder;
+  Color get ochre => this == dark ? const Color(0xFFE5B567) : Journal.ochre;
+  Color get ochreBg => this == dark ? const Color(0xFF382B17) : Journal.ochreBg;
+  Color get ochreBorder =>
+      this == dark ? const Color(0xFF695230) : Journal.ochreBorder;
+  Color get slate => this == dark ? const Color(0xFF86B4D8) : Journal.slate;
+  Color get slateBg => this == dark ? const Color(0xFF1E2E3B) : Journal.slateBg;
+  Color get slateBorder =>
+      this == dark ? const Color(0xFF425C71) : Journal.slateBorder;
+
+  TextStyle get display =>
+      this == dark ? Journal.display.copyWith(color: ink) : Journal.display;
+  TextStyle get dayHeading => this == dark
+      ? Journal.dayHeading.copyWith(color: muted)
+      : Journal.dayHeading;
+  TextStyle get section =>
+      this == dark ? Journal.section.copyWith(color: ink) : Journal.section;
+  TextStyle get entryTitle => this == dark
+      ? Journal.entryTitle.copyWith(color: ink)
+      : Journal.entryTitle;
+  TextStyle get metadata =>
+      this == dark ? Journal.metadata.copyWith(color: muted) : Journal.metadata;
+  TextStyle get time =>
+      this == dark ? Journal.time.copyWith(color: ink) : Journal.time;
+}
+
 class JournalLayout {
   const JournalLayout._();
 
@@ -102,6 +152,7 @@ class JournalHeading extends StatelessWidget {
   final double trailingWidth;
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     final rightPad = trailing == null ? 0.0 : trailingWidth;
     return Stack(children: [
       Column(
@@ -111,8 +162,8 @@ class JournalHeading extends StatelessWidget {
             padding: EdgeInsets.only(right: rightPad),
             child: Text(
               eyebrow,
-              style: const TextStyle(
-                color: Journal.muted,
+              style: TextStyle(
+                color: journal.muted,
                 fontFamily: Journal.bodyFamily,
                 fontFamilyFallback: Journal.bodyFallback,
                 fontSize: 11.5,
@@ -127,14 +178,14 @@ class JournalHeading extends StatelessWidget {
             child: Text(
               title,
               style: bookTitle
-                  ? Journal.display
-                  : const TextStyle(
+                  ? journal.display
+                  : TextStyle(
                       fontFamily: Journal.titleFamily,
                       fontFamilyFallback: Journal.bodyFallback,
                       fontSize: 28,
                       fontWeight: FontWeight.w400,
                       height: 1.28,
-                      color: Journal.ink,
+                      color: journal.ink,
                     ),
             ),
           ),
@@ -170,21 +221,23 @@ class CourseMark extends StatelessWidget {
           dimension: size,
           child: FittedBox(
               child: CustomPaint(
-                  size: const Size.square(40), painter: _CourseSketch(name)))));
+                  size: const Size.square(40),
+                  painter: _CourseSketch(name, Journal.of(context))))));
 }
 
 class _CourseSketch extends CustomPainter {
-  _CourseSketch(this.name);
+  _CourseSketch(this.name, this.journal);
+  final JournalPalette journal;
   final String name;
   @override
   void paint(Canvas canvas, Size size) {
     final pen = Paint()
-      ..color = Journal.ink
+      ..color = journal.ink
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.6
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
-    final fill = Paint()..color = Journal.sage;
+    final fill = Paint()..color = journal.sage;
     canvas.translate(20, 20);
     canvas.rotate(-0.09);
     void line(double x, double y, double a, double b) =>
@@ -238,9 +291,13 @@ class _CourseSketch extends CustomPainter {
         ..lineTo(-10, 14)
         ..close();
       fill.color = [
-        Journal.sage,
-        const Color(0xFFE8DDE6),
-        const Color(0xFFECE3C9),
+        journal.sage,
+        journal == JournalPalette.dark
+            ? journal.berryBg
+            : const Color(0xFFE8DDE6),
+        journal == JournalPalette.dark
+            ? journal.ochreBg
+            : const Color(0xFFECE3C9),
       ][name.runes.fold(0, (int a, b) => a + b) % 3];
       canvas.drawPath(cover, fill);
       canvas.drawPath(cover, pen);
@@ -251,5 +308,6 @@ class _CourseSketch extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_CourseSketch oldDelegate) => oldDelegate.name != name;
+  bool shouldRepaint(_CourseSketch oldDelegate) =>
+      oldDelegate.name != name || oldDelegate.journal != journal;
 }

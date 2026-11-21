@@ -105,8 +105,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 UpdateDownloadBanner(controller: updates),
               if (!hideTabBar)
                 Container(
-                  decoration: const BoxDecoration(
-                    border: Border(top: BorderSide(color: Journal.rule)),
+                  decoration: BoxDecoration(
+                    border: Border(
+                        top: BorderSide(color: Journal.of(context).rule)),
                   ),
                   child: NavigationBar(
                     height: 72,
@@ -203,72 +204,75 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 }
 
 class StudyAssistantTheme {
-  static ThemeData get light {
+  static final light = _build(JournalPalette.light, Brightness.light);
+  static final dark = _build(JournalPalette.dark, Brightness.dark);
+
+  static ThemeData _build(JournalPalette journal, Brightness brightness) {
     final baseScheme = ColorScheme.fromSeed(
-      seedColor: Journal.ink,
-      brightness: Brightness.light,
-      surface: Journal.paper,
-      primary: Journal.ink,
-      secondary: Journal.berry,
+      seedColor: journal.ink,
+      brightness: brightness,
+      surface: journal.paper,
+      primary: journal.ink,
+      secondary: journal.berry,
     ).copyWith(
-      onPrimary: Journal.sheet,
-      secondaryContainer: Journal.sage,
-      onSecondaryContainer: Journal.ink,
-      error: Journal.berry,
-      onError: Journal.sheet,
-      errorContainer: Journal.berryBg,
-      onErrorContainer: Journal.berry,
-      outline: Journal.ruleStrong,
-      outlineVariant: Journal.rule,
-      surfaceContainerHighest: Journal.parchment,
+      onPrimary: journal.sheet,
+      secondaryContainer: journal.sage,
+      onSecondaryContainer: journal.ink,
+      error: journal.berry,
+      onError: journal.sheet,
+      errorContainer: journal.berryBg,
+      onErrorContainer: journal.berry,
+      outline: journal.ruleStrong,
+      outlineVariant: journal.rule,
+      surfaceContainerHighest: journal.parchment,
     );
     return ThemeData(
       colorScheme: baseScheme,
-      scaffoldBackgroundColor: Journal.paper,
+      scaffoldBackgroundColor: journal.paper,
       useMaterial3: true,
       fontFamily: Journal.bodyFamily,
       fontFamilyFallback: Journal.bodyFallback,
-      dividerColor: Journal.rule,
+      dividerColor: journal.rule,
       textTheme: Typography.material2021().black.apply(
             fontFamily: Journal.bodyFamily,
             fontFamilyFallback: Journal.bodyFallback,
-            bodyColor: Journal.ink,
-            displayColor: Journal.ink,
+            bodyColor: journal.ink,
+            displayColor: journal.ink,
           ),
-      appBarTheme: const AppBarTheme(
+      appBarTheme: AppBarTheme(
         centerTitle: false,
         elevation: 0,
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
-        backgroundColor: Journal.paper,
-        foregroundColor: Journal.ink,
-        titleTextStyle: Journal.section,
+        backgroundColor: journal.paper,
+        foregroundColor: journal.ink,
+        titleTextStyle: journal.section,
       ),
       cardTheme: CardThemeData(
-        color: Journal.sheet,
+        color: journal.sheet,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          side: const BorderSide(color: Journal.rule, width: 0.8),
+          side: BorderSide(color: journal.rule, width: 0.8),
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: Journal.parchment,
-        selectedColor: Journal.sage,
-        checkmarkColor: Journal.ink,
+        backgroundColor: journal.parchment,
+        selectedColor: journal.sage,
+        checkmarkColor: journal.ink,
         side: BorderSide.none,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        labelStyle: Journal.metadata.copyWith(
-          color: Journal.ink,
+        labelStyle: journal.metadata.copyWith(
+          color: journal.ink,
           fontWeight: FontWeight.w500,
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: Journal.ink,
-          backgroundColor: Journal.parchment,
+          foregroundColor: journal.ink,
+          backgroundColor: journal.parchment,
           side: BorderSide.none,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -277,8 +281,8 @@ class StudyAssistantTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: Journal.ink,
-          foregroundColor: Journal.sheet,
+          backgroundColor: journal.ink,
+          foregroundColor: journal.sheet,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -287,22 +291,22 @@ class StudyAssistantTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: Journal.sheet,
+        fillColor: journal.sheet,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Journal.rule),
+          borderSide: BorderSide(color: journal.rule),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Journal.rule),
+          borderSide: BorderSide(color: journal.rule),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Journal.ink, width: 1.2),
+          borderSide: BorderSide(color: journal.ink, width: 1.2),
         ),
       ),
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: Journal.paper,
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: journal.paper,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -310,18 +314,18 @@ class StudyAssistantTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: Journal.ink,
-        contentTextStyle: Journal.metadata.copyWith(color: Journal.sheet),
+        backgroundColor: journal.ink,
+        contentTextStyle: journal.metadata.copyWith(color: journal.sheet),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: Journal.sheet,
+        backgroundColor: journal.sheet,
         surfaceTintColor: Colors.transparent,
-        indicatorColor: Journal.sage,
+        indicatorColor: journal.sage,
         iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
               color: states.contains(WidgetState.selected)
-                  ? Journal.ink
-                  : Journal.muted,
+                  ? journal.ink
+                  : journal.muted,
             )),
         labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
               fontFamily: Journal.bodyFamily,
@@ -329,15 +333,15 @@ class StudyAssistantTheme {
               fontSize: 12,
               fontWeight: FontWeight.w600,
               color: states.contains(WidgetState.selected)
-                  ? Journal.ink
-                  : Journal.muted,
+                  ? journal.ink
+                  : journal.muted,
             )),
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: Journal.sheet,
+        backgroundColor: journal.sheet,
         surfaceTintColor: Colors.transparent,
-        titleTextStyle: Journal.section,
-        contentTextStyle: Journal.metadata.copyWith(color: Journal.ink),
+        titleTextStyle: journal.section,
+        contentTextStyle: journal.metadata.copyWith(color: journal.ink),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
     );
