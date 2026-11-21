@@ -359,15 +359,16 @@ class _CalendarScreenState extends State<CalendarScreen>
                                                 color: selected == date
                                                     ? journal.sage
                                                     : null,
-                                                border: date == today
-                                                    ? Border.all(
-                                                        color: journal.accent)
-                                                    : null,
+                                                border: Border.all(
+                                                  color: date == today
+                                                      ? journal.accent
+                                                      : Colors.transparent,
+                                                ),
                                                 borderRadius:
                                                     BorderRadius.circular(8)),
                                             child: Column(
                                                 mainAxisAlignment:
-                                                    MainAxisAlignment.center,
+                                                    MainAxisAlignment.start,
                                                 children: [
                                                   FittedBox(
                                                     fit: BoxFit.scaleDown,
@@ -390,6 +391,14 @@ class _CalendarScreenState extends State<CalendarScreen>
                                                           softWrap: false,
                                                           style: _countStyle),
                                                     )
+                                                  else
+                                                    SizedBox(
+                                                      height: _lineHeight(
+                                                        MediaQuery.textScalerOf(
+                                                            context),
+                                                        _countStyle,
+                                                      ),
+                                                    ),
                                                 ]))));
                               }))
                           ]),
@@ -478,11 +487,12 @@ class _CalendarScreenState extends State<CalendarScreen>
         AssignmentRecoveryScope.queryParameter: scope.queryValue,
       }).toString();
 
-  double _calendarCellHeight(BuildContext context, TextScaler textScaler) {
-    double lineHeight(TextStyle style) =>
-        textScaler.scale(style.fontSize!) * style.height!;
+  double _lineHeight(TextScaler textScaler, TextStyle style) =>
+      textScaler.scale(style.fontSize!) * style.height!;
 
-    final content = lineHeight(_dateStyle) + lineHeight(_countStyle);
+  double _calendarCellHeight(BuildContext context, TextScaler textScaler) {
+    final content = _lineHeight(textScaler, _dateStyle) +
+        _lineHeight(textScaler, _countStyle);
     final chrome = 2 * (_cellBorderWidth + _cellVerticalPadding) + _cellSlack;
     return math.max(48.0, content + chrome);
   }

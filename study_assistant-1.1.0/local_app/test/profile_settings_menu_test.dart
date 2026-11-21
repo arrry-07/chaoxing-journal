@@ -86,7 +86,8 @@ void main() {
       expect(find.text(label), findsOneWidget);
     }
 
-    await tester.scrollUntilVisible(find.text('个人安排'), -180);
+    await tester.ensureVisible(find.text('个人安排'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('个人安排'));
     await tester.pumpAndSettle();
     expect(find.byType(ProfileArrangementsScreen), findsOneWidget);

@@ -121,7 +121,7 @@ class AppearanceControls extends StatelessWidget {
                 size: 22,
               ),
               title: Text('交互音效', style: journal.entryTitle),
-              subtitle: Text('跟随媒体音量，音量为 0 时不响', style: subtitleStyle),
+              subtitle: Text('跟随媒体音量', style: subtitleStyle),
               value: display.soundEnabled,
               enableFeedback: false,
               onChanged: (value) {

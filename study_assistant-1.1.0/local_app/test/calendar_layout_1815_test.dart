@@ -128,6 +128,10 @@ void main() {
       if (scale == 1.0) {
         expect(cell.height, closeTo(48, 0.01));
         expect(
+          tester.getTopLeft(find.text('18')).dy,
+          closeTo(tester.getTopLeft(find.text('19')).dy, 0.01),
+        );
+        expect(
           find.byKey(const ValueKey('calendar-month-inline')),
           findsOneWidget,
         );

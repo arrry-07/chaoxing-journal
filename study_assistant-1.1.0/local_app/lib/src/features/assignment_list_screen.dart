@@ -493,64 +493,101 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text('课业手记', style: journal.display),
-                  Row(mainAxisSize: MainAxisSize.min, children: [
-                    if (plans.isEmpty)
-                      IconButton(
-                          key: const ValueKey('home-plan-entry'),
-                          tooltip: '今日计划',
-                          constraints:
-                              const BoxConstraints(minWidth: 48, minHeight: 48),
-                          onPressed: () => context.push('/plan'),
-                          icon: const Icon(Icons.checklist_rounded)),
-                    IconButton(
-                        enableFeedback: false,
-                        tooltip: '刷新作业',
-                        onPressed: busy ? null : () => refresh(syncAction),
-                        icon: busy
-                            ? reduceMotion
-                                ? Icon(Icons.hourglass_top_rounded,
-                                    size: 20, color: journal.ink)
-                                : SizedBox.square(
-                                    dimension: 20,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2, color: journal.ink))
-                            : const Icon(Icons.sync_rounded)),
-                    if (recoveryScope == null)
-                      IconButton(
-                        key: const ValueKey('home-theme-toggle'),
-                        enableFeedback: false,
-                        tooltip: '切换主题（当前：${store.display.themeMode.label}）',
-                        icon: Icon(switch (store.display.themeMode) {
-                          JournalThemeMode.system =>
-                            Icons.brightness_auto_outlined,
-                          JournalThemeMode.light => Icons.light_mode_outlined,
-                          JournalThemeMode.dark => Icons.dark_mode_outlined,
-                        }),
-                        onPressed: () {
-                          final display = store.display;
-                          final system =
-                              MediaQuery.platformBrightnessOf(context) ==
-                                      Brightness.dark
-                                  ? JournalThemeMode.dark
-                                  : JournalThemeMode.light;
-                          final mode = switch (display.themeMode) {
-                            JournalThemeMode.system =>
-                              system == JournalThemeMode.dark
-                                  ? JournalThemeMode.light
-                                  : JournalThemeMode.dark,
-                            final current when current != system => system,
-                            _ => JournalThemeMode.system,
-                          };
-                          InteractionFeedback.trigger(display);
-                          saveDisplaySetting(context, store,
-                              display.copyWith(themeMode: mode));
-                        },
+                  Builder(builder: (context) {
+                    Widget action(String label, Widget button) => Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            button,
+                            ExcludeSemantics(
+                              child: Text(
+                                label,
+                                style: journal.metadata.copyWith(
+                                  fontSize: 11.5,
+                                  height: 1,
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+
+                    return Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (plans.isEmpty) ...[
+                        action(
+                          '计划',
+                          IconButton(
+                              key: const ValueKey('home-plan-entry'),
+                              tooltip: '今日计划',
+                              constraints: const BoxConstraints(
+                                  minWidth: 48, minHeight: 48),
+                              onPressed: () => context.push('/plan'),
+                              icon: const Icon(Icons.checklist_rounded)),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      action(
+                        '刷新',
+                        IconButton(
+                            enableFeedback: false,
+                            tooltip: '刷新作业',
+                            onPressed: busy ? null : () => refresh(syncAction),
+                            icon: busy
+                                ? reduceMotion
+                                    ? Icon(Icons.hourglass_top_rounded,
+                                        size: 20, color: journal.ink)
+                                    : SizedBox.square(
+                                        dimension: 20,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2, color: journal.ink))
+                                : const Icon(Icons.sync_rounded)),
                       ),
-                    IconButton(
-                        tooltip: '同步详情',
-                        onPressed: () => context.push('/sync'),
-                        icon: const Icon(Icons.more_horiz_rounded)),
-                  ]),
+                      const SizedBox(width: 4),
+                      if (recoveryScope == null) ...[
+                        action(
+                          '主题',
+                          IconButton(
+                            key: const ValueKey('home-theme-toggle'),
+                            enableFeedback: false,
+                            tooltip:
+                                '切换主题（当前：${store.display.themeMode.label}）',
+                            icon: Icon(switch (store.display.themeMode) {
+                              JournalThemeMode.system =>
+                                Icons.brightness_auto_outlined,
+                              JournalThemeMode.light =>
+                                Icons.light_mode_outlined,
+                              JournalThemeMode.dark => Icons.dark_mode_outlined,
+                            }),
+                            onPressed: () {
+                              final display = store.display;
+                              final system =
+                                  MediaQuery.platformBrightnessOf(context) ==
+                                          Brightness.dark
+                                      ? JournalThemeMode.dark
+                                      : JournalThemeMode.light;
+                              final mode = switch (display.themeMode) {
+                                JournalThemeMode.system =>
+                                  system == JournalThemeMode.dark
+                                      ? JournalThemeMode.light
+                                      : JournalThemeMode.dark,
+                                final current when current != system => system,
+                                _ => JournalThemeMode.system,
+                              };
+                              InteractionFeedback.trigger(display);
+                              saveDisplaySetting(context, store,
+                                  display.copyWith(themeMode: mode));
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      action(
+                        '更多',
+                        IconButton(
+                            tooltip: '同步详情',
+                            onPressed: () => context.push('/sync'),
+                            icon: const Icon(Icons.more_horiz_rounded)),
+                      ),
+                    ]);
+                  }),
                 ]),
             const SizedBox(height: 8),
             if (recoveryScope != null) ...[
@@ -1092,7 +1129,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     }
 
     final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 24;
-    final sortWidth = 16 + 6 + labelWidth(sortLabel, sortStyle) + 16;
+    final sortWidth = 17 + 7 + labelWidth(sortLabel, sortStyle) + 24;
 
     Widget buildFilterPill({bool fullWidth = false}) {
       final journal = Journal.of(context);
@@ -1153,7 +1190,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       );
     }
 
-    Widget buildSortButton({double horizontalPad = 6}) {
+    Widget buildSortButton() {
+      final journal = Journal.of(context);
       final message = '当前排序：$sortLabel，打开搜索、筛选与排序';
       void onTap() => _openFilters(options);
       return Semantics(
@@ -1166,25 +1204,33 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             child: Material(
               type: MaterialType.transparency,
               child: InkWell(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(22),
                 onTap: onTap,
                 enableFeedback: false,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 48),
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: horizontalPad),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.swap_vert_rounded,
-                          size: 17, color: Journal.of(context).muted),
-                      const SizedBox(width: 7),
-                      Flexible(
-                        child: Text(
-                          sortLabel,
-                          key: const ValueKey('current-home-sort'),
-                          style: sortStyle,
-                        ),
+                  child: Center(
+                    widthFactor: 1,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: journal.parchment,
+                        borderRadius: BorderRadius.circular(22),
                       ),
-                    ]),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.swap_vert_rounded,
+                            size: 17, color: journal.muted),
+                        const SizedBox(width: 7),
+                        Flexible(
+                          child: Text(
+                            sortLabel,
+                            key: const ValueKey('current-home-sort'),
+                            style: sortStyle,
+                          ),
+                        ),
+                      ]),
+                    ),
                   ),
                 ),
               ),
@@ -1195,10 +1241,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     }
 
     return LayoutBuilder(builder: (context, constraints) {
-      if (filterWidth + sortWidth + 12 <= constraints.maxWidth) {
+      if (filterWidth + sortWidth + 10 <= constraints.maxWidth) {
         return Row(children: [
-          Flexible(child: buildFilterPill(fullWidth: true)),
-          const SizedBox(width: 12),
+          Expanded(child: buildFilterPill(fullWidth: true)),
+          const SizedBox(width: 10),
           buildSortButton(),
         ]);
       }
@@ -1206,7 +1252,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           buildFilterPill(),
-          buildSortButton(horizontalPad: 14),
+          buildSortButton(),
         ],
       );
     });

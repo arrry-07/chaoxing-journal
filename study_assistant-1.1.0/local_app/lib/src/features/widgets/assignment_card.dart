@@ -367,37 +367,72 @@ class AssignmentCard extends StatelessWidget {
           )
         else if (hasCourse)
           Text(a.courseName.trim(), style: journal.entryTitle),
-        if ((hasTitle && hasCourse) || showPlainInlineState) ...[
+        if (!largeText && hasTitle && hasCourse && showPlainInlineState) ...[
           const SizedBox(height: 4),
-          Wrap(
-            spacing: 5,
-            runSpacing: 3,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          Row(
             children: [
-              if (hasTitle && hasCourse)
-                Text(a.courseName.trim(), style: journal.metadata),
-              if (hasTitle && hasCourse && showPlainInlineState)
-                Text(
-                  '·',
-                  style: journal.metadata.copyWith(
-                    color: journal.muted.withValues(alpha: 0.65),
-                  ),
+              Flexible(
+                child: Text(
+                  a.courseName.trim(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: journal.metadata,
                 ),
-              if (showPlainInlineState) Text(state, style: journal.metadata),
-              if (highlightPills.isNotEmpty && !hasSpecialStatePill)
-                ...highlightPills,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                '·',
+                style: journal.metadata.copyWith(
+                  color: journal.muted.withValues(alpha: 0.65),
+                ),
+              ),
+              const SizedBox(width: 5),
+              Text(state, style: journal.metadata),
             ],
           ),
-        ],
-        if (highlightPills.isNotEmpty &&
-            (hasSpecialStatePill || (!hasCourse && !showPlainInlineState))) ...[
-          const SizedBox(height: 5),
-          Wrap(
-            spacing: 6,
-            runSpacing: 5,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: highlightPills,
-          ),
+          if (highlightPills.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Wrap(
+              spacing: 6,
+              runSpacing: 5,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: highlightPills,
+            ),
+          ],
+        ] else ...[
+          if ((hasTitle && hasCourse) || showPlainInlineState) ...[
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 5,
+              runSpacing: 3,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (hasTitle && hasCourse)
+                  Text(a.courseName.trim(), style: journal.metadata),
+                if (hasTitle && hasCourse && showPlainInlineState)
+                  Text(
+                    '·',
+                    style: journal.metadata.copyWith(
+                      color: journal.muted.withValues(alpha: 0.65),
+                    ),
+                  ),
+                if (showPlainInlineState) Text(state, style: journal.metadata),
+                if (highlightPills.isNotEmpty && !hasSpecialStatePill)
+                  ...highlightPills,
+              ],
+            ),
+          ],
+          if (highlightPills.isNotEmpty &&
+              (hasSpecialStatePill ||
+                  (!hasCourse && !showPlainInlineState))) ...[
+            const SizedBox(height: 5),
+            Wrap(
+              spacing: 6,
+              runSpacing: 5,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: highlightPills,
+            ),
+          ],
         ],
         if (extraLines.isNotEmpty) ...[
           const SizedBox(height: 4),
@@ -410,7 +445,7 @@ class AssignmentCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Semantics(

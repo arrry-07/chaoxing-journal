@@ -161,110 +161,156 @@ class _StatsScreenState extends State<StatsScreen> {
               ),
           ];
 
-          Widget legend() => Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (var i = 0; i < 4; i++)
-                    if (i < 3 || stats.unknown > 0)
-                      Builder(
-                        builder: (context) {
-                          final journal = Journal.of(context);
-                          final canTap = stats.counts[i] > 0;
-                          final label = CompletionPieChart.labels[i];
-                          final row = Padding(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 3,
-                              horizontal: 2,
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 7),
-                                  child: Container(
-                                    width: 9,
-                                    height: 9,
-                                    decoration: BoxDecoration(
-                                      color: CompletionPieChart.colorsFor(
-                                          journal)[i],
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
+          Widget legend() => LayoutBuilder(
+                builder: (context, constraints) {
+                  final singleLine = constraints.maxWidth >= 170 &&
+                      !JournalLayout.isLargeText(context);
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < 4; i++)
+                        if (i < 3 || stats.unknown > 0)
+                          Builder(
+                            builder: (context) {
+                              final journal = Journal.of(context);
+                              final canTap = stats.counts[i] > 0;
+                              final label = CompletionPieChart.labels[i];
+                              final dot = Container(
+                                width: 9,
+                                height: 9,
+                                decoration: BoxDecoration(
+                                  color:
+                                      CompletionPieChart.colorsFor(journal)[i],
+                                  shape: BoxShape.circle,
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      Row(
+                              );
+                              final countText = Text(
+                                '${stats.counts[i]} 份',
+                                style: journal.metadata,
+                              );
+                              final sepText = Text(
+                                ' · ',
+                                style: journal.metadata.copyWith(
+                                  color: journal.muted.withValues(alpha: .55),
+                                ),
+                              );
+                              final pctText = Text(
+                                '${stats.percentages[i]}%',
+                                style: journal.metadata.copyWith(
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              );
+                              final row = Padding(
+                                padding: EdgeInsets.symmetric(
+                                  vertical: singleLine ? 5 : 3,
+                                  horizontal: 2,
+                                ),
+                                child: singleLine
+                                    ? Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
                                         children: [
+                                          dot,
+                                          const SizedBox(width: 8),
                                           Expanded(
                                             child: Text(
                                               label,
-                                              style: journal.time,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: journal.entryTitle,
                                             ),
                                           ),
-                                          if (canTap)
+                                          const SizedBox(width: 8),
+                                          countText,
+                                          sepText,
+                                          pctText,
+                                          if (canTap) ...[
+                                            const SizedBox(width: 2),
                                             Icon(
                                               Icons.chevron_right,
                                               size: 16,
                                               color: journal.muted,
                                             ),
+                                          ],
                                         ],
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
+                                      )
+                                    : Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          Flexible(
-                                            child: Text(
-                                              '${stats.counts[i]} 份',
-                                              style: journal.metadata,
-                                            ),
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(top: 7),
+                                            child: dot,
                                           ),
-                                          const SizedBox(width: 8),
-                                          Flexible(
-                                            child: Text(
-                                              '${stats.percentages[i]}%',
-                                              style: journal.metadata,
-                                              textAlign: TextAlign.right,
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.stretch,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Text(
+                                                        label,
+                                                        style: journal.time,
+                                                      ),
+                                                    ),
+                                                    if (canTap)
+                                                      Icon(
+                                                        Icons.chevron_right,
+                                                        size: 16,
+                                                        color: journal.muted,
+                                                      ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 2),
+                                                Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Flexible(child: countText),
+                                                    sepText,
+                                                    pctText,
+                                                  ],
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         ],
                                       ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                          void open() => _openRecords(
-                                context,
-                                scope: LocalRecordScopeFilter.followedStats,
-                                status: _bucketStatusParams[i],
                               );
-                          return Semantics(
-                            button: canTap,
-                            onTap: canTap ? open : null,
-                            label:
-                                '$label ${stats.counts[i]} 份，${stats.percentages[i]}%',
-                            excludeSemantics: true,
-                            child: canTap
-                                ? Material(
-                                    type: MaterialType.transparency,
-                                    child: InkWell(
-                                      borderRadius: BorderRadius.circular(8),
-                                      onTap: open,
-                                      child: row,
-                                    ),
-                                  )
-                                : row,
-                          );
-                        },
-                      ),
-                ],
+                              void open() => _openRecords(
+                                    context,
+                                    scope: LocalRecordScopeFilter.followedStats,
+                                    status: _bucketStatusParams[i],
+                                  );
+                              return Semantics(
+                                button: canTap,
+                                onTap: canTap ? open : null,
+                                label:
+                                    '$label ${stats.counts[i]} 份，${stats.percentages[i]}%',
+                                excludeSemantics: true,
+                                child: canTap
+                                    ? Material(
+                                        type: MaterialType.transparency,
+                                        child: InkWell(
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          onTap: open,
+                                          child: row,
+                                        ),
+                                      )
+                                    : row,
+                              );
+                            },
+                          ),
+                    ],
+                  );
+                },
               );
 
           return Material(

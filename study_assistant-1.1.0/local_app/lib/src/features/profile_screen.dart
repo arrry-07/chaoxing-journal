@@ -40,7 +40,7 @@ class ProfileScreen extends StatelessWidget {
             _ProfileHeader(
               displayName: store.profileDisplayName,
               avatarUrl: store.profileAvatarUrl,
-              accountLabel: store.account ?? '未绑定账号',
+              accountLabel: _maskAccount(store.account),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -341,7 +341,7 @@ class _ProfileHeader extends StatelessWidget {
               const Expanded(
                 child: JournalHeading(
                   '我的手帐',
-                  eyebrow: 'CAMPUS JOURNAL   /   04',
+                  eyebrow: 'CAMPUS JOURNAL   /   PROFILE',
                   bookTitle: true,
                 ),
               ),
@@ -391,6 +391,15 @@ class _ProfileHeader extends StatelessWidget {
       ),
     );
   }
+}
+
+String _maskAccount(String? account) {
+  if (account == null) return '未绑定账号';
+  final trimmed = account.trim();
+  if (RegExp(r'^\d{11}$').hasMatch(trimmed)) {
+    return '${trimmed.substring(0, 3)}****${trimmed.substring(7)}';
+  }
+  return account;
 }
 
 String? _profileAvatarUrl(String? avatarUrl) {

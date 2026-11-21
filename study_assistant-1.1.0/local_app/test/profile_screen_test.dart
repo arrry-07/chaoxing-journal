@@ -590,6 +590,41 @@ void main() {
     }
   });
 
+  testWidgets('profile masks 11-digit mobile accounts while keeping others',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final phoneStore = AssignmentStore(
+      sessionStore: _MemorySessionStore(
+        account: '13974737522',
+        displayName: '测试用户',
+      ),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(phoneStore.dispose);
+    await phoneStore.restoreSession();
+
+    await tester
+        .pumpWidget(MaterialApp(home: ProfileScreen(store: phoneStore)));
+    expect(find.text('139****7522'), findsOneWidget);
+    expect(find.text('13974737522'), findsNothing);
+
+    final plainStore = AssignmentStore(
+      sessionStore: _MemorySessionStore(
+        account: 'student',
+        displayName: '测试用户',
+      ),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(plainStore.dispose);
+    await plainStore.restoreSession();
+
+    await tester
+        .pumpWidget(MaterialApp(home: ProfileScreen(store: plainStore)));
+    expect(find.text('student'), findsOneWidget);
+  });
+
   testWidgets('theme swatch selects light mode and adapts to large text',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -719,13 +754,18 @@ class _FakeExternalLinkService extends ExternalLinkService {
 }
 
 class _MemorySessionStore extends SecureSessionStore {
-  _MemorySessionStore({this.displayName, this.avatarUrl});
+  _MemorySessionStore({
+    this.account = 'student',
+    this.displayName,
+    this.avatarUrl,
+  });
 
+  final String account;
   final String? displayName;
   final String? avatarUrl;
 
   @override
-  Future<String?> readChaoxingAccount() async => 'student';
+  Future<String?> readChaoxingAccount() async => account;
 
   @override
   Future<String?> readChaoxingDisplayName() async => displayName;

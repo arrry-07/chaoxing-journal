@@ -164,12 +164,12 @@ class JournalHeading extends StatelessWidget {
             child: Text(
               eyebrow,
               style: TextStyle(
-                color: journal.muted,
+                color: journal.muted.withValues(alpha: .75),
                 fontFamily: Journal.bodyFamily,
                 fontFamilyFallback: Journal.bodyFallback,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1.4,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 1.6,
               ),
             ),
           ),
