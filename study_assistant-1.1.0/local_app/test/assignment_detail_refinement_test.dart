@@ -6,6 +6,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/app/transient_feedback.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
@@ -142,6 +143,11 @@ void main() {
     expect(openRect.top, greaterThanOrEqualTo(appPadding.top));
     expect(openRect.bottom, lessThanOrEqualTo(safeBottom));
     expect(open.hitTestable(), findsOneWidget);
+    final openButton = tester.widget<FilledButton>(open);
+    expect(
+      openButton.style?.backgroundColor?.resolve(const <WidgetState>{}),
+      Journal.ink,
+    );
     expect(
       find.byKey(const ValueKey('assignment-detail-open-web')).hitTestable(),
       findsOneWidget,
@@ -150,6 +156,13 @@ void main() {
     final last = find.byKey(const ValueKey('assignment-detail-hide'));
     await reveal(last);
     expect(last.hitTestable(), findsOneWidget);
+    final hideTextButton = tester.widget<TextButton>(
+      find.descendant(of: last, matching: find.byType(TextButton)),
+    );
+    expect(
+      hideTextButton.style?.foregroundColor?.resolve(const <WidgetState>{}),
+      Journal.ink,
+    );
     expect(tester.takeException(), isNull);
 
     final back = find.byKey(const ValueKey('assignment-detail-back'));

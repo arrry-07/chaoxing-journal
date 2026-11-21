@@ -841,6 +841,12 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     key: const ValueKey('assignment-detail-open'),
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(50),
+                      backgroundColor: journal.ink,
+                      foregroundColor: journal == JournalPalette.dark
+                          ? journal.paper
+                          : journal.sheet,
+                      disabledBackgroundColor: journal.parchment,
+                      disabledForegroundColor: journal.muted,
                     ),
                     onPressed: _opening || _hiding || _currentUrl == null
                         ? null
@@ -982,7 +988,6 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                       label: sources.length > 1
                           ? '在本机隐藏此$_itemLabel（${sources.length} 条来源）'
                           : '在本机隐藏此$_itemLabel',
-                      foregroundColor: journal.berry,
                     ),
                   ],
                 ],
@@ -1064,14 +1069,12 @@ class _DetailToolButton extends StatelessWidget {
     required this.icon,
     required this.label,
     this.iconSize = 18,
-    this.foregroundColor,
   });
 
   final VoidCallback? onPressed;
   final IconData icon;
   final String label;
   final double iconSize;
-  final Color? foregroundColor;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -1081,7 +1084,7 @@ class _DetailToolButton extends StatelessWidget {
             alignment: Alignment.centerLeft,
             minimumSize: const Size(0, 48),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            foregroundColor: foregroundColor ?? Journal.of(context).ink,
+            foregroundColor: Journal.of(context).ink,
             tapTargetSize: MaterialTapTargetSize.padded,
           ),
           onPressed: onPressed,
@@ -1099,7 +1102,7 @@ class _DetailToolButton extends StatelessWidget {
                   style: Journal.of(context).metadata.copyWith(
                         color: onPressed == null
                             ? Journal.of(context).muted.withValues(alpha: 0.55)
-                            : foregroundColor ?? Journal.of(context).ink,
+                            : Journal.of(context).ink,
                         fontWeight: FontWeight.w500,
                         height: 1.35,
                       ),

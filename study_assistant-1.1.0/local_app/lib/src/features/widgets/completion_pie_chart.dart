@@ -145,24 +145,6 @@ class CompletionRingPainter extends CustomPainter {
         canvas.drawArc(bounds, segment.start, segment.sweep, false, pen);
       }
     }
-    if (activeSegments.length > 1) {
-      final dividerPaint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.2
-        ..strokeCap = StrokeCap.butt
-        ..color = Color.lerp(journal.paper, journal.sheet, .70)!;
-      final innerEdge = radius - thickness / 2 - 0.5;
-      final outerEdge = radius + thickness / 2 + 0.5;
-      for (final segment in activeSegments) {
-        final dx = math.cos(segment.start);
-        final dy = math.sin(segment.start);
-        canvas.drawLine(
-          Offset(center.dx + dx * innerEdge, center.dy + dy * innerEdge),
-          Offset(center.dx + dx * outerEdge, center.dy + dy * outerEdge),
-          dividerPaint,
-        );
-      }
-    }
   }
 
   @override

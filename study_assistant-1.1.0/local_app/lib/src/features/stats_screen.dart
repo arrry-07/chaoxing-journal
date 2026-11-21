@@ -327,13 +327,18 @@ class _StatsScreenState extends State<StatsScreen> {
                 Text('统计范围：已关注课程的课业与账号考试', style: journal.metadata),
                 const SizedBox(height: 6),
                 Wrap(
-                  spacing: 8,
+                  spacing: 6,
                   runSpacing: 6,
                   children: [
                     for (final range in StatsTimeRange.values)
                       ChoiceChip(
                         visualDensity: VisualDensity.compact,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        labelPadding: const EdgeInsets.symmetric(horizontal: 4),
                         label: Text(range.label),
                         selected: _range == range,
                         onSelected: (_) => setState(() => _range = range),

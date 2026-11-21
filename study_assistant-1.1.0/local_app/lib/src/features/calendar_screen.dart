@@ -489,26 +489,104 @@ class _CalendarScreenState extends State<CalendarScreen>
               if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
                 const Divider(height: 24),
                 Text('待核对课业', style: journal.section),
-                if (noDeadlineCount > 0)
-                  TextButton.icon(
-                      key: const ValueKey('calendar-no-deadline-scope'),
-                      onPressed: () => context.go(_recoveryLocation(
-                          AssignmentRecoveryScope.noDeadline)),
-                      icon: const Icon(Icons.event_busy_outlined),
-                      label: Text('无截止日期（$noDeadlineCount）')),
-                if (pendingDeadlineCount > 0)
-                  TextButton.icon(
-                      key: const ValueKey('calendar-deadline-pending-scope'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: journal.ochre,
-                      ),
-                      onPressed: () => context.go(_recoveryLocation(
-                          AssignmentRecoveryScope.deadlinePending)),
-                      icon: const Icon(Icons.help_outline),
-                      label: Text('截止时间未知（$pendingDeadlineCount）')),
+                const SizedBox(height: 10),
+                Card(
+                  margin: EdgeInsets.zero,
+                  color: journal.sheet,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  clipBehavior: Clip.antiAlias,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: BorderSide(color: journal.rule, width: 0.8),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (noDeadlineCount > 0)
+                        _buildRecoveryRow(
+                          key: const ValueKey('calendar-no-deadline-scope'),
+                          icon: Icons.event_busy_outlined,
+                          label: '无截止日期（$noDeadlineCount）',
+                          color: journal.ink,
+                          journal: journal,
+                          onPressed: () => context.go(_recoveryLocation(
+                              AssignmentRecoveryScope.noDeadline)),
+                        ),
+                      if (noDeadlineCount > 0 && pendingDeadlineCount > 0)
+                        Divider(
+                          height: 1,
+                          thickness: 0.8,
+                          indent: 54,
+                          color: journal.rule,
+                        ),
+                      if (pendingDeadlineCount > 0)
+                        _buildRecoveryRow(
+                          key:
+                              const ValueKey('calendar-deadline-pending-scope'),
+                          icon: Icons.help_outline,
+                          label: '截止时间未知（$pendingDeadlineCount）',
+                          color: journal.ochre,
+                          journal: journal,
+                          onPressed: () => context.go(_recoveryLocation(
+                              AssignmentRecoveryScope.deadlinePending)),
+                        ),
+                    ],
+                  ),
+                ),
               ],
             ]);
       });
+
+  Widget _buildRecoveryRow({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required Color color,
+    required JournalPalette journal,
+    required VoidCallback onPressed,
+  }) =>
+      SizedBox(
+        width: double.infinity,
+        child: TextButton(
+          key: key,
+          style: TextButton.styleFrom(
+            foregroundColor: color,
+            alignment: Alignment.centerLeft,
+            minimumSize: const Size(double.infinity, 52),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            shape: const RoundedRectangleBorder(),
+          ),
+          onPressed: onPressed,
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: journal.paper,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: journal.rule, width: 0.8),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 17, color: color),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: journal.entryTitle.copyWith(color: color),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: journal.muted,
+              ),
+            ],
+          ),
+        ),
+      );
 
   String _recoveryLocation(AssignmentRecoveryScope scope) =>
       Uri(path: '/assignments', queryParameters: {
