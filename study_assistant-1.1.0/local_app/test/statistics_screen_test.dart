@@ -99,19 +99,23 @@ void main() {
     ]);
     expect(
       CompletionPieChart.categoryColors[0],
-      JournalPalette.light.accent,
+      const Color(0xFF4B6CB7),
     );
     expect(
       CompletionPieChart.categoryColors[1],
-      Color.lerp(JournalPalette.light.accent, Journal.sheet, .52),
+      const Color(0xFF9EB5E5),
     );
     expect(
       CompletionPieChart.categoryColors[2],
-      Color.lerp(Journal.berry, Journal.sheet, .14),
+      const Color(0xFFD47474),
     );
     expect(
       CompletionPieChart.categoryColors[3],
-      Color.lerp(Journal.muted, Journal.sheet, .52),
+      const Color(0xFFD8DCE2),
+    );
+    expect(
+      CompletionPieChart.colorsFor(JournalPalette.dark).toSet().length,
+      4,
     );
     expect(CompletionPieChart.legendColors, CompletionPieChart.categoryColors);
     expect(CompletionPieChart.ringThickness, 10);

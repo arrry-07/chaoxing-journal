@@ -104,7 +104,7 @@ void main() {
     );
     expect(
       logout.style?.foregroundColor?.resolve(const <WidgetState>{}),
-      Journal.berry,
+      Journal.ink,
     );
     expect(
       logout.style?.backgroundColor?.resolve(const <WidgetState>{}),

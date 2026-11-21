@@ -176,8 +176,8 @@ class _StatsScreenState extends State<StatsScreen> {
                               final canTap = stats.counts[i] > 0;
                               final label = CompletionPieChart.labels[i];
                               final dot = Container(
-                                width: 9,
-                                height: 9,
+                                width: 8,
+                                height: 8,
                                 decoration: BoxDecoration(
                                   color:
                                       CompletionPieChart.colorsFor(journal)[i],

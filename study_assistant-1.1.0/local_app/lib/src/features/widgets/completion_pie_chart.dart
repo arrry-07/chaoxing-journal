@@ -27,20 +27,20 @@ class CompletionPieChart extends StatelessWidget {
   static final categoryColors = colorsFor(JournalPalette.light);
   static final legendColors = categoryColors;
 
-  static List<Color> colorsFor(JournalPalette journal) => [
-        journal.accent,
-        Color.lerp(
-          journal.accent,
-          journal.sheet,
-          journal == JournalPalette.dark ? .40 : .52,
-        )!,
-        Color.lerp(journal.berry, journal.sheet, .14)!,
-        Color.lerp(
-          journal.muted,
-          journal.sheet,
-          journal == JournalPalette.dark ? .60 : .52,
-        )!,
-      ];
+  static List<Color> colorsFor(JournalPalette journal) =>
+      journal == JournalPalette.dark
+          ? const [
+              Color(0xFF7B9AE0),
+              Color(0xFF475E8E),
+              Color(0xFFD97E7E),
+              Color(0xFF42464F),
+            ]
+          : const [
+              Color(0xFF4B6CB7),
+              Color(0xFF9EB5E5),
+              Color(0xFFD47474),
+              Color(0xFFD8DCE2),
+            ];
   static const labels = ['已完成', '待完成', '已逾期', '提交未知'];
 
   @visibleForTesting
@@ -83,11 +83,20 @@ class CompletionPieChart extends StatelessWidget {
             painter: CompletionRingPainter(statistics.counts, journal: journal),
             child: Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Text(uncertain ? '待确认' : '${statistics.percentages[0]}%',
-                    style: journal.section
-                        .copyWith(fontSize: uncertain ? 20 : 30)),
-                const SizedBox(height: 2),
-                Text('完成率', style: journal.metadata),
+                Text(
+                  uncertain ? '待确认' : '${statistics.percentages[0]}%',
+                  style: journal.section.copyWith(
+                    fontSize: uncertain ? 19 : 28,
+                    height: 1.08,
+                    letterSpacing: -0.4,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '完成率',
+                  style: journal.metadata.copyWith(fontSize: 12.5),
+                ),
               ]),
             ),
           ),
@@ -113,15 +122,45 @@ class CompletionRingPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = thickness
       ..strokeCap = StrokeCap.butt
-      ..color = journal.rule;
+      ..color = journal.rule.withValues(alpha: 0.7);
     canvas.drawCircle(center, radius, pen);
+    final innerRadius = radius - thickness / 2 - 4;
+    if (innerRadius > 12) {
+      canvas.drawCircle(
+        center,
+        innerRadius,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.8
+          ..color = journal.rule.withValues(alpha: 0.65),
+      );
+    }
     final colors = CompletionPieChart.colorsFor(journal);
-    for (final segment in CompletionPieChart.segments(counts)) {
+    final activeSegments = CompletionPieChart.segments(counts);
+    for (final segment in activeSegments) {
       pen.color = colors[segment.index];
       if (segment.sweep >= math.pi * 2 - 1e-9) {
         canvas.drawCircle(center, radius, pen);
       } else {
         canvas.drawArc(bounds, segment.start, segment.sweep, false, pen);
+      }
+    }
+    if (activeSegments.length > 1) {
+      final dividerPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2
+        ..strokeCap = StrokeCap.butt
+        ..color = Color.lerp(journal.paper, journal.sheet, .70)!;
+      final innerEdge = radius - thickness / 2 - 0.5;
+      final outerEdge = radius + thickness / 2 + 0.5;
+      for (final segment in activeSegments) {
+        final dx = math.cos(segment.start);
+        final dy = math.sin(segment.start);
+        canvas.drawLine(
+          Offset(center.dx + dx * innerEdge, center.dy + dy * innerEdge),
+          Offset(center.dx + dx * outerEdge, center.dy + dy * outerEdge),
+          dividerPaint,
+        );
       }
     }
   }

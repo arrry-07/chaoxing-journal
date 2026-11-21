@@ -153,7 +153,7 @@ void main() {
     expect(logout.hitTestable(), findsOneWidget);
     expect(t.widget<OutlinedButton>(logout).onPressed, isNotNull);
     final style = t.widget<OutlinedButton>(logout).style!;
-    expect(style.foregroundColor!.resolve({}), Journal.berry);
+    expect(style.foregroundColor!.resolve({}), Journal.ink);
     expect(style.backgroundColor!.resolve({}), Journal.sheet);
     expect(
       style.side!.resolve({}),
