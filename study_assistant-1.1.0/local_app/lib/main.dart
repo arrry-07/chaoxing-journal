@@ -328,6 +328,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             debugShowCheckedModeBanner: false,
             theme: StudyAssistantTheme.light,
             darkTheme: StudyAssistantTheme.dark,
+            themeAnimationDuration: Duration.zero,
             themeMode: switch (_themeMode) {
               JournalThemeMode.system => ThemeMode.system,
               JournalThemeMode.light => ThemeMode.light,

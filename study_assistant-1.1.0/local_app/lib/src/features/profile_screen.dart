@@ -1,4 +1,5 @@
 import 'display_settings_screen.dart';
+import 'widgets/appearance_controls.dart';
 import 'widgets/update_scope.dart';
 import 'widgets/update_dialog.dart';
 import 'open_source_screen.dart';
@@ -68,6 +69,15 @@ class ProfileScreen extends StatelessWidget {
                     padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
                     child: Text('设置', style: journal.section),
                   ),
+                  AppearanceControls(
+                    store: store,
+                    onMore: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => DisplaySettingsScreen(store: store),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   _SettingsCard(
                     title: '学习与同步',
                     accentColor: journal.ink,
@@ -86,14 +96,6 @@ class ProfileScreen extends StatelessWidget {
                         subtitle: '个人待办、考试与每日计划',
                         onTap: () => context.push('/profile/arrangements'),
                       ),
-                      _SettingsTile(
-                          icon: Icons.tune,
-                          title: '显示与小组件',
-                          subtitle: '密度、日期与桌面显示范围',
-                          onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                  builder: (_) =>
-                                      DisplaySettingsScreen(store: store)))),
                       _SettingsTile(
                         icon: Icons.inventory_2_outlined,
                         title: '学习记录',

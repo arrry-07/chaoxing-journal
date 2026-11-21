@@ -1,6 +1,12 @@
 package com.example.studyassistant
 
-import android.content.Context
+import android.app.Activity
+import android.media.AudioManager.STREAM_MUSIC
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.view.HapticFeedbackConstants
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
@@ -10,17 +16,26 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.sin
 
-internal class InteractionSoundBridge(context: Context, messenger: BinaryMessenger) {
-    private val audioManager = context.getSystemService(AudioManager::class.java)
+internal class InteractionSoundBridge(
+    private val activity: Activity,
+    messenger: BinaryMessenger,
+) {
+    private val audioManager = activity.getSystemService(AudioManager::class.java)
+    private val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        activity.getSystemService(VibratorManager::class.java)?.defaultVibrator
+    } else {
+        activity.getSystemService(Vibrator::class.java)
+    }
     private val channel = MethodChannel(messenger, "study_assistant/interaction_sound")
     private val pool = SoundPool.Builder()
         .setMaxStreams(4)
         .setAudioAttributes(
             AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_GAME)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
         )
@@ -32,17 +47,23 @@ internal class InteractionSoundBridge(context: Context, messenger: BinaryMesseng
         pool.setOnLoadCompleteListener { _, id, status ->
             if (status == 0) ready.add(id)
         }
-        val cache = context.cacheDir
-        load(cache, "tap", chirp(28, 2100.0, 900.0, 0.38))
-        load(cache, "pin", chirp(42, 1600.0, 2400.0, 0.44))
-        load(cache, "unpin", chirp(42, 2200.0, 1500.0, 0.36))
+        val cache = activity.cacheDir
+        load(cache, "tap", resonance(18, 260.0, 130.0, 0.24))
+        load(cache, "pin",
+            resonance(12, 220.0, 245.0, 0.22) + resonance(20, 270.0, 340.0, 0.27))
+        load(cache, "unpin",
+            resonance(12, 320.0, 275.0, 0.22) + resonance(20, 245.0, 200.0, 0.25))
         load(cache, "syncDone",
-            chirp(37, 1046.5, 1046.5, 0.30) + chirp(38, 1318.5, 1318.5, 0.34))
-        load(cache, "complete", chirp(55, 1100.0, 1700.0, 0.36))
+            resonance(42, 523.25, 523.25, 0.23, 0.08) +
+                resonance(48, 659.25, 659.25, 0.24, 0.08))
+        load(cache, "complete",
+            resonance(23, 293.66, 293.66, 0.22) + resonance(32, 392.0, 392.0, 0.25))
 
         channel.setMethodCallHandler { call, result ->
-            if (call.method == "play") {
-                play(call.argument<String>("kind"))
+            if (call.method == "feedback") {
+                val kind = call.argument<String>("kind")
+                if (call.argument<Boolean>("sound") == true) runCatching { play(kind) }
+                if (call.argument<Boolean>("haptics") == true) vibrate(kind)
                 result.success(null)
             } else {
                 result.notImplemented()
@@ -51,9 +72,35 @@ internal class InteractionSoundBridge(context: Context, messenger: BinaryMesseng
     }
 
     private fun play(kind: String?) {
-        if (audioManager?.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+        if (audioManager?.ringerMode != AudioManager.RINGER_MODE_NORMAL ||
+            audioManager.getStreamVolume(STREAM_MUSIC) <= 0 ||
+            audioManager.isStreamMute(STREAM_MUSIC)) return
         val id = ids[kind] ?: return
-        if (id in ready) pool.play(id, 0.45f, 0.45f, 1, 0, 1.0f)
+        if (id in ready) pool.play(id, 0.9f, 0.9f, 1, 0, 1.0f)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun vibrate(kind: String?) {
+        val (duration, amplitude) = when (kind) {
+            "tap" -> 12L to 90
+            "pin", "unpin", "syncDone" -> 18L to 125
+            "complete" -> 23L to 150
+            else -> return
+        }
+        val motor = vibrator
+        val requested = runCatching {
+            if (motor == null || !motor.hasVibrator()) return@runCatching false
+            motor.vibrate(VibrationEffect.createOneShot(
+                duration, if (motor.hasAmplitudeControl()) amplitude else VibrationEffect.DEFAULT_AMPLITUDE,
+            ))
+            true
+        }.getOrDefault(false)
+        if (!requested) {
+            activity.window.decorView.performHapticFeedback(
+                HapticFeedbackConstants.KEYBOARD_TAP,
+                HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING,
+            )
+        }
     }
 
     private fun load(cache: File, kind: String, pcm: ShortArray) {
@@ -90,16 +137,36 @@ internal class InteractionSoundBridge(context: Context, messenger: BinaryMesseng
         }.array()
     }
 
-    private fun chirp(ms: Int, startHz: Double, endHz: Double, amplitude: Double): ShortArray {
+    private fun resonance(
+        ms: Int,
+        startHz: Double,
+        endHz: Double,
+        peak: Double,
+        harmonic: Double = 0.0,
+    ): ShortArray {
         val count = SAMPLE_RATE * ms / 1000
+        val samples = DoubleArray(count)
+        val lowPass = 1.0 - exp(-2.0 * PI * 850.0 / SAMPLE_RATE)
         var phase = 0.0
-        return ShortArray(count) { i ->
-            val t = i.toDouble() / count
-            val frequency = startHz + (endHz - startHz) * t
-            phase += 2 * PI * frequency / SAMPLE_RATE
-            val envelope = minOf(t / 0.08, (1 - t) / 0.08, 1.0) * exp(-5.2 * t)
-            (sin(phase) * envelope * amplitude * Short.MAX_VALUE).toInt().toShort()
+        var filtered = 0.0
+        for (i in samples.indices) {
+            val seconds = i.toDouble() / SAMPLE_RATE
+            val progress = i.toDouble() / (count - 1)
+            val frequency = startHz + (endHz - startHz) * progress
+            phase += 2.0 * PI * frequency / SAMPLE_RATE
+            val attack = minOf(seconds / 0.0015, 1.0)
+            val tail = minOf((1.0 - progress) / 0.19, 1.0)
+            val body = (sin(phase) + harmonic * sin(2.0 * phase)) *
+                exp(-18.0 * seconds - 3.2 * progress)
+            val contact = if (seconds < 0.004) {
+                0.24 * sin(2.0 * PI * 320.0 * seconds) *
+                    (1.0 - seconds / 0.004) * exp(-550.0 * seconds)
+            } else 0.0
+            filtered += lowPass * (attack * (body + contact) - filtered)
+            samples[i] = filtered * tail
         }
+        val scale = peak * Short.MAX_VALUE / samples.maxOf { abs(it) }
+        return ShortArray(count) { (samples[it] * scale).toInt().toShort() }
     }
 
     fun close() {

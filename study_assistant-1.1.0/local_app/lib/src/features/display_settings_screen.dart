@@ -3,50 +3,18 @@ import 'package:flutter/material.dart';
 import '../app/journal.dart';
 import '../models/display_preferences.dart';
 import '../services/assignment_store.dart';
-import '../services/interaction_feedback_service.dart';
+import 'widgets/appearance_controls.dart';
 
-class DisplaySettingsScreen extends StatefulWidget {
+class DisplaySettingsScreen extends StatelessWidget {
   const DisplaySettingsScreen({super.key, required this.store});
   final AssignmentStore store;
-  @override
-  State<DisplaySettingsScreen> createState() => _DisplaySettingsScreenState();
-}
-
-class _DisplaySettingsScreenState extends State<DisplaySettingsScreen> {
-  bool saving = false;
-
-  Future<void> save(
-    DisplayPreferences next, {
-    bool previewSound = false,
-    bool previewHaptics = false,
-  }) async {
-    if (saving) return;
-    setState(() => saving = true);
-    try {
-      await widget.store.saveDisplay(next);
-      if (!mounted) return;
-      if ((previewSound || previewHaptics) &&
-          identical(widget.store.display, next)) {
-        InteractionFeedback.trigger(next.copyWith(
-          soundEnabled: previewSound,
-          hapticsEnabled: previewHaptics,
-        ));
-      }
-      if (widget.store.error != null) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(widget.store.error!)));
-      }
-    } finally {
-      if (mounted) setState(() => saving = false);
-    }
-  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-        animation: widget.store,
+        animation: store,
         builder: (context, _) {
           final journal = Journal.of(context);
-          final d = widget.store.display;
+          final d = store.display;
           return Scaffold(
             backgroundColor: journal.paper,
             appBar: AppBar(
@@ -62,36 +30,7 @@ class _DisplaySettingsScreenState extends State<DisplaySettingsScreen> {
                 const SizedBox(height: 8),
                 Text('调整课业时间轴密度与桌面小组件展示范围。', style: journal.metadata),
                 const SizedBox(height: 16),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('外观主题', style: journal.entryTitle),
-                        const SizedBox(height: 12),
-                        SegmentedButton<JournalThemeMode>(
-                          key: const ValueKey('display-theme-mode-selector'),
-                          direction: JournalLayout.isLargeText(context)
-                              ? Axis.vertical
-                              : Axis.horizontal,
-                          expandedInsets: EdgeInsets.zero,
-                          showSelectedIcon: false,
-                          segments: [
-                            for (final mode in JournalThemeMode.values)
-                              ButtonSegment(
-                                  value: mode, label: Text(mode.label)),
-                          ],
-                          selected: {d.themeMode},
-                          onSelectionChanged: saving
-                              ? null
-                              : (modes) =>
-                                  save(d.copyWith(themeMode: modes.single)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                AppearanceControls(store: store),
                 const SizedBox(height: 12),
                 Card(
                   child: Padding(
@@ -112,9 +51,8 @@ class _DisplaySettingsScreenState extends State<DisplaySettingsScreen> {
                             style: journal.metadata,
                           ),
                           value: d.compact,
-                          onChanged: saving
-                              ? null
-                              : (v) => save(d.copyWith(compact: v)),
+                          onChanged: (v) => saveDisplaySetting(context, store,
+                              store.display.copyWith(compact: v)),
                         ),
                         Divider(height: 1, color: journal.rule),
                         SwitchListTile(
@@ -125,37 +63,8 @@ class _DisplaySettingsScreenState extends State<DisplaySettingsScreen> {
                             style: journal.metadata,
                           ),
                           value: d.countdown,
-                          onChanged: saving
-                              ? null
-                              : (v) => save(d.copyWith(countdown: v)),
-                        ),
-                        Divider(height: 1, color: journal.rule),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          enableFeedback: false,
-                          title: const Text('交互音效'),
-                          subtitle: Text(
-                            '点击、置顶、同步和计划完成时播放轻提示音，静音或振动模式下自动停用',
-                            style: journal.metadata,
-                          ),
-                          value: d.soundEnabled,
-                          onChanged: saving
-                              ? null
-                              : (v) => save(d.copyWith(soundEnabled: v),
-                                  previewSound: v),
-                        ),
-                        Divider(height: 1, color: journal.rule),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          enableFeedback: false,
-                          title: const Text('触感反馈'),
-                          subtitle:
-                              Text('关键操作时提供轻微振动', style: journal.metadata),
-                          value: d.hapticsEnabled,
-                          onChanged: saving
-                              ? null
-                              : (v) => save(d.copyWith(hapticsEnabled: v),
-                                  previewHaptics: v),
+                          onChanged: (v) => saveDisplaySetting(context, store,
+                              store.display.copyWith(countdown: v)),
                         ),
                       ],
                     ),
@@ -171,7 +80,7 @@ class _DisplaySettingsScreenState extends State<DisplaySettingsScreen> {
                         Text('桌面小组件', style: journal.entryTitle),
                         const SizedBox(height: 12),
                         DropdownButtonFormField<WidgetRange>(
-                          key: ValueKey('${d.widgetRange.name}-$saving'),
+                          key: ValueKey(d.widgetRange),
                           initialValue: d.widgetRange,
                           isExpanded: true,
                           decoration: const InputDecoration(
@@ -191,13 +100,15 @@ class _DisplaySettingsScreenState extends State<DisplaySettingsScreen> {
                               child: Text('未来7天（含今天）'),
                             ),
                           ],
-                          onChanged: saving
-                              ? null
-                              : (v) {
-                                  if (v != null) {
-                                    save(d.copyWith(widgetRange: v));
-                                  }
-                                },
+                          onChanged: (v) {
+                            if (v != null) {
+                              saveDisplaySetting(
+                                context,
+                                store,
+                                store.display.copyWith(widgetRange: v),
+                              );
+                            }
+                          },
                         ),
                         const SizedBox(height: 12),
                         Text(

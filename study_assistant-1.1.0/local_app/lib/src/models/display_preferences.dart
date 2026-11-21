@@ -6,8 +6,8 @@ enum WidgetRange { all, today, week }
 
 enum JournalThemeMode {
   system('跟随系统'),
-  light('浅色手记'),
-  dark('夜间深色');
+  light('浅色'),
+  dark('深色');
 
   const JournalThemeMode(this.label);
   final String label;

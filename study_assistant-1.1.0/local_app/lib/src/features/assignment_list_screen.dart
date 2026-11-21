@@ -5,6 +5,7 @@ import '../app/journal.dart';
 import '../app/transient_feedback.dart';
 import '../local/chaoxing_local_client.dart';
 import '../models/assignment.dart';
+import '../models/display_preferences.dart';
 import '../models/assignment_sync_progress.dart';
 import '../models/home_filters.dart';
 import '../models/sync_report.dart';
@@ -17,6 +18,7 @@ import '../services/home_course_filter.dart';
 import '../services/home_sync_presentation.dart';
 import '../services/assignment_web_link.dart';
 import '../services/external_link_service.dart';
+import 'widgets/appearance_controls.dart';
 import 'widgets/assignment_card.dart';
 
 /// A calendar recovery view. It is carried in the route query, never in
@@ -513,6 +515,37 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                     child: CircularProgressIndicator(
                                         strokeWidth: 2, color: journal.ink))
                             : const Icon(Icons.sync_rounded)),
+                    if (recoveryScope == null)
+                      IconButton(
+                        key: const ValueKey('home-theme-toggle'),
+                        enableFeedback: false,
+                        tooltip: '切换主题（当前：${store.display.themeMode.label}）',
+                        icon: Icon(switch (store.display.themeMode) {
+                          JournalThemeMode.system =>
+                            Icons.brightness_auto_outlined,
+                          JournalThemeMode.light => Icons.light_mode_outlined,
+                          JournalThemeMode.dark => Icons.dark_mode_outlined,
+                        }),
+                        onPressed: () {
+                          final display = store.display;
+                          final system =
+                              MediaQuery.platformBrightnessOf(context) ==
+                                      Brightness.dark
+                                  ? JournalThemeMode.dark
+                                  : JournalThemeMode.light;
+                          final mode = switch (display.themeMode) {
+                            JournalThemeMode.system =>
+                              system == JournalThemeMode.dark
+                                  ? JournalThemeMode.light
+                                  : JournalThemeMode.dark,
+                            final current when current != system => system,
+                            _ => JournalThemeMode.system,
+                          };
+                          InteractionFeedback.trigger(display);
+                          saveDisplaySetting(context, store,
+                              display.copyWith(themeMode: mode));
+                        },
+                      ),
                     IconButton(
                         tooltip: '同步详情',
                         onPressed: () => context.push('/sync'),

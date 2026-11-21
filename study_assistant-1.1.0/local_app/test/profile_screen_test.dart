@@ -16,6 +16,7 @@ import 'package:study_assistant_mobile/src/features/profile_records_screen.dart'
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/services/app_update_service.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/external_link_service.dart';
@@ -159,7 +160,7 @@ void main() {
     ]);
     addTearDown(router.dispose);
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-    await tester.scrollUntilVisible(find.text('学习记录'), 180);
+    await tester.scrollUntilVisible(find.text('学习记录').hitTestable(), 180);
     await tester.tap(find.text('学习记录'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('已隐藏作业'));
@@ -172,6 +173,35 @@ void main() {
     expect(find.text('暂无隐藏作业'), findsOneWidget);
     expect(store.visibleAssignments.single.id, 'cx:work:1:2:hidden-1');
   });
+  testWidgets('profile exposes appearance controls before learning settings',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(420, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: ProfileScreen(store: store))));
+    expect(tester.getTopLeft(find.text('外观与交互')).dy,
+        lessThan(tester.getTopLeft(find.text('学习与同步')).dy));
+    await tester.tap(find.text('深色'));
+    await tester.pumpAndSettle();
+    expect(store.display.themeMode, JournalThemeMode.dark);
+    await tester.tap(find.text('交互音效'));
+    await tester.pumpAndSettle();
+    expect(store.display.soundEnabled, isFalse);
+    expect(store.display.hapticsEnabled, isTrue);
+    await tester.tap(find.text('更多显示与小组件设置'));
+    await tester.pumpAndSettle();
+    expect(find.text('紧凑密度'), findsOneWidget);
+  });
+
   testWidgets('profile offers learning account synchronization',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -421,7 +451,7 @@ void main() {
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('提醒设置'), findsOneWidget);
     expect(find.text('同步学习通'), findsOneWidget);
-    for (final label in ['个人安排', '显示与小组件', '学习记录']) {
+    for (final label in ['外观与交互', '更多显示与小组件设置', '个人安排', '学习记录']) {
       await tester.scrollUntilVisible(find.text(label), 180);
       expect(find.text(label), findsOneWidget);
     }
@@ -554,9 +584,10 @@ void main() {
       MaterialApp(home: Scaffold(body: ProfileScreen(store: store))),
     );
 
-    expect(find.text('学习与同步'), findsOneWidget);
-    expect(find.text('数据与安全'), findsOneWidget);
-    expect(find.text('关于与更新'), findsOneWidget);
+    for (final title in ['外观与交互', '学习与同步', '数据与安全', '关于与更新']) {
+      await tester.scrollUntilVisible(find.text(title).hitTestable(), 180);
+      expect(find.text(title), findsOneWidget);
+    }
   });
 }
 

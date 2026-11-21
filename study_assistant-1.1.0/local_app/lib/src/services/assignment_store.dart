@@ -977,24 +977,49 @@ class AssignmentStore extends ChangeNotifier {
         }
       });
   DisplayPreferences display = const DisplayPreferences();
-  Future<void> saveDisplay(DisplayPreferences next) => _run(() async {
-        final prefs = await SharedPreferences.getInstance();
-        if (!await prefs.setString('display_preferences_v1', next.encode())) {
-          throw StateError('显示设置未能保存，请重试');
-        }
-        display = next;
-        try {
-          await widgetSnapshotService.saveAssignmentsForContext(
-            display.forWidget(
-                _authenticated ? courseAssignments : <Assignment>[],
-                DateTime.now()),
-            authenticated: _authenticated,
-            range: next.widgetRange,
-          );
-        } catch (_) {
-          throw StateError('显示设置已保存，小组件更新失败，请稍后刷新');
-        }
-      });
+  Future<void>? _displayWrites;
+
+  Future<String?> saveDisplay(DisplayPreferences next) {
+    display = next;
+    // Serialize preference writes independently of coursework operations.
+    final write = (_displayWrites ?? Future<void>.value()).then((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      final previous =
+          DisplayPreferences.decode(prefs.getString('display_preferences_v1'));
+      if (!await prefs.setString('display_preferences_v1', next.encode())) {
+        throw StateError('显示设置未能保存');
+      }
+      return previous.widgetRange != next.widgetRange;
+    });
+    _displayWrites = write.then<void>((_) {}, onError: (Object _) {});
+    notifyListeners();
+    return _finishDisplaySave(next, write);
+  }
+
+  Future<String?> _finishDisplaySave(
+      DisplayPreferences next, Future<bool> write) async {
+    final bool rangeChanged;
+    try {
+      rangeChanged = await write;
+    } catch (_) {
+      return '显示设置未能保存，当前调整仅在本次使用时生效';
+    }
+    if (!rangeChanged || _disposed || display.widgetRange != next.widgetRange) {
+      return null;
+    }
+    try {
+      await widgetSnapshotService.saveAssignmentsForContext(
+        next.forWidget(
+            _authenticated ? courseAssignments : <Assignment>[], _clock()),
+        authenticated: _authenticated,
+        range: next.widgetRange,
+      );
+      return null;
+    } catch (_) {
+      return '显示设置已保存，小组件更新失败，请稍后刷新';
+    }
+  }
+
   List<Assignment> get visibleAssignments =>
       AssignmentQuery.currentDisplay(courseAssignments, DateTime.now());
   AssignmentSyncProgress? _homeSyncProgress;

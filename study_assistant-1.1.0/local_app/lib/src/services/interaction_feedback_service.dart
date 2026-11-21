@@ -16,24 +16,25 @@ class InteractionFeedback {
     DisplayPreferences prefs, {
     InteractionSoundKind kind = InteractionSoundKind.tap,
   }) {
-    if (prefs.hapticsEnabled) {
-      final vibration = switch (kind) {
-        InteractionSoundKind.tap => HapticFeedback.selectionClick(),
-        InteractionSoundKind.pin ||
-        InteractionSoundKind.unpin ||
-        InteractionSoundKind.syncDone =>
-          HapticFeedback.lightImpact(),
-        InteractionSoundKind.complete => HapticFeedback.mediumImpact(),
-      };
-      unawaited(_optional(vibration));
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      if (!prefs.soundEnabled && !prefs.hapticsEnabled) return;
+      unawaited(_optional(_channel.invokeMethod<void>('feedback', {
+        'kind': kind.name,
+        'sound': prefs.soundEnabled,
+        'haptics': prefs.hapticsEnabled,
+      })));
+      return;
     }
-    if (prefs.soundEnabled &&
-        !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android) {
-      unawaited(_optional(
-        _channel.invokeMethod<void>('play', {'kind': kind.name}),
-      ));
-    }
+    if (!prefs.hapticsEnabled) return;
+    final vibration = switch (kind) {
+      InteractionSoundKind.tap => HapticFeedback.selectionClick(),
+      InteractionSoundKind.pin ||
+      InteractionSoundKind.unpin ||
+      InteractionSoundKind.syncDone =>
+        HapticFeedback.lightImpact(),
+      InteractionSoundKind.complete => HapticFeedback.mediumImpact(),
+    };
+    unawaited(_optional(vibration));
   }
 
   static Future<void> _optional(Future<void> feedback) async {

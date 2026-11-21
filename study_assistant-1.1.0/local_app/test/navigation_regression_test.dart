@@ -94,6 +94,18 @@ void main() {
 
     Color? homeHeadingColor() =>
         tester.widget<Text>(find.text('课业手记')).style?.color;
+    final toggle = find.byKey(const ValueKey('home-theme-toggle'));
+    await tester.tap(toggle);
+    await tester.pump();
+    expect(homeHeadingColor(), JournalPalette.dark.ink);
+    expect(Theme.of(tester.element(toggle)).scaffoldBackgroundColor,
+        JournalPalette.dark.paper);
+    await tester.tap(toggle);
+    await tester.pump();
+    expect(homeHeadingColor(), Journal.ink);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(store.display.themeMode, JournalThemeMode.system);
     expect(homeHeadingColor(), Journal.ink);
     dispatcher.platformBrightnessTestValue = Brightness.dark;
     await tester.pumpAndSettle();
