@@ -487,53 +487,40 @@ class _CalendarScreenState extends State<CalendarScreen>
                   );
                 }),
               if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
-                const Divider(height: 24),
-                Text('待核对课业', style: journal.section),
-                const SizedBox(height: 10),
-                Card(
-                  margin: EdgeInsets.zero,
-                  color: journal.sheet,
-                  surfaceTintColor: Colors.transparent,
-                  elevation: 0,
-                  clipBehavior: Clip.antiAlias,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    side: BorderSide(color: journal.rule, width: 0.8),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (noDeadlineCount > 0)
-                        _buildRecoveryRow(
-                          key: const ValueKey('calendar-no-deadline-scope'),
-                          icon: Icons.event_busy_outlined,
-                          label: '无截止日期（$noDeadlineCount）',
-                          color: journal.ink,
-                          journal: journal,
-                          onPressed: () => context.go(_recoveryLocation(
-                              AssignmentRecoveryScope.noDeadline)),
-                        ),
-                      if (noDeadlineCount > 0 && pendingDeadlineCount > 0)
-                        Divider(
-                          height: 1,
-                          thickness: 0.8,
-                          indent: 54,
-                          color: journal.rule,
-                        ),
-                      if (pendingDeadlineCount > 0)
-                        _buildRecoveryRow(
-                          key:
-                              const ValueKey('calendar-deadline-pending-scope'),
-                          icon: Icons.help_outline,
-                          label: '截止时间未知（$pendingDeadlineCount）',
-                          color: journal.ochre,
-                          journal: journal,
-                          onPressed: () => context.go(_recoveryLocation(
-                              AssignmentRecoveryScope.deadlinePending)),
-                        ),
-                    ],
-                  ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 20, bottom: 4),
+                  child: Text('待核对课业', style: journal.section),
                 ),
+                const Divider(height: 1),
+                if (noDeadlineCount > 0)
+                  _buildRecoveryRow(
+                    key: const ValueKey('calendar-no-deadline-scope'),
+                    icon: Icons.event_busy_outlined,
+                    label: '无截止日期',
+                    count: noDeadlineCount,
+                    color: journal.ink,
+                    journal: journal,
+                    onTap: () => context.go(
+                        _recoveryLocation(AssignmentRecoveryScope.noDeadline)),
+                  ),
+                if (noDeadlineCount > 0 && pendingDeadlineCount > 0)
+                  Divider(
+                    height: 1,
+                    thickness: 0.6,
+                    indent: 29,
+                    color: journal.rule,
+                  ),
+                if (pendingDeadlineCount > 0)
+                  _buildRecoveryRow(
+                    key: const ValueKey('calendar-deadline-pending-scope'),
+                    icon: Icons.help_outline_rounded,
+                    label: '截止时间未知',
+                    count: pendingDeadlineCount,
+                    color: journal.ochre,
+                    journal: journal,
+                    onTap: () => context.go(_recoveryLocation(
+                        AssignmentRecoveryScope.deadlinePending)),
+                  ),
               ],
             ]);
       });
@@ -542,48 +529,47 @@ class _CalendarScreenState extends State<CalendarScreen>
     required Key key,
     required IconData icon,
     required String label,
+    required int count,
     required Color color,
     required JournalPalette journal,
-    required VoidCallback onPressed,
+    required VoidCallback onTap,
   }) =>
-      SizedBox(
-        width: double.infinity,
-        child: TextButton(
+      Material(
+        type: MaterialType.transparency,
+        child: InkWell(
           key: key,
-          style: TextButton.styleFrom(
-            foregroundColor: color,
-            alignment: Alignment.centerLeft,
-            minimumSize: const Size(double.infinity, 52),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            shape: const RoundedRectangleBorder(),
-          ),
-          onPressed: onPressed,
-          child: Row(
-            children: [
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: journal.paper,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: journal.rule, width: 0.8),
-                ),
-                alignment: Alignment.center,
-                child: Icon(icon, size: 17, color: color),
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Row(
+                children: [
+                  Icon(icon, size: 19, color: color),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: journal.entryTitle.copyWith(color: color),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$count 项',
+                    style: journal.metadata.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: journal.muted,
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  label,
-                  style: journal.entryTitle.copyWith(color: color),
-                ),
-              ),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: journal.muted,
-              ),
-            ],
+            ),
           ),
         ),
       );

@@ -23,7 +23,9 @@
   - `dart analyze` 与 ASCII `flutter analyze --no-pub` 无问题，全仓 50 组共 471 项 UI 关联测试全通（`cx1830-preview/tests-ui.log`）。双端原签名保数据覆盖：华为 arm64（SHA-256 `9D9D235E...85`，浅/深验收无崩溃并恢复跟随系统与双开关）与 MuMu x86_64（SHA-256 `C4A14DCD...EE`，四页验收无崩溃）。
 - [x] 1.8.23-dev.11+100：修复未提交随堂练习因 `quizDetail2` 缺 `pptUserAttend` 落成「提交状态未知」（改由 `getAnswerResult` 本人 `uid`+活动身份验证）；日历「待核对课业」升级白卡行、统计圆环去白缝并收紧筛选标签回单行、详情页主按钮与隐藏按钮统一为深墨黑。
   - `dart analyze` 与 ASCII `flutter analyze --no-pub` 均 0 告警，全量测试 `+1573 ~1: All tests passed!`（`cx1831-preview/tests-full.log`）。双端原签名保数据覆装并实测同步刷新：华为 arm64（SHA-256 `FB3DCB3A...07`，`随堂练习 30 条 · 0 条待确认`，`提交未知 8→2`，浅/深验收无崩溃并恢复跟随系统与双开关）与 MuMu x86_64（SHA-256 `66D1D062...90`，`提交未知 8→2`，无崩溃）。
-- [ ] 待补验：真实切号/退出与前后台同步交错、考试通知被正式记录接替时的置顶继承
+- [x] 1.8.23-dev.12+101：收口去框与边界补正——首页恢复顶栏与日历「待核对课业」彻底去外框与图标灰盒；`AssignmentStore._pinKey` 迁至 `AssignmentGrouping.examKey` 并兼容旧通知置顶键平滑迁移；加固切号/退出与在途流式预览、排队置顶/隐藏及后台同步恢复（`reconcileExternalSyncState`）。
+  - `dart analyze`、`flutter analyze --no-pub` 均 0 告警，全量测试 `+1580 ~1: All tests passed!`（`cx1832-preview/tests-full.log`）；双端原签名保数据覆装并离线核验日历/恢复顶栏切换与返回无崩溃：华为 arm64（SHA-256 `20595143...18`，浅/深双色验收并恢复跟随系统与双开关）与 MuMu x86_64（SHA-256 `4F974E94...3B`）。
+- [x] 边界补验闭环：考试通知被正式记录接替时的置顶继承与离线「切号/退出 + 前后台同步写租约交错」确定性合成回归已通过（`test/exam_pin_inheritance_and_session_interleave_test.dart`）；主力设备按保数据约束跳过破坏性真机切号清库，不阻塞 `1.8.23` 发版（如需真机多账号切换实测可在隔离环境单补）。
 
 按独立改动随代码更新对应进度。上述版本号为预览计划，实际打包前复核已用构建号及设备安装值。后续听测见 [1.8.23-dev.4 交接](handoffs/2026-11-21-v1.8.23-dev.4主题与真机反馈交接.md)。
 

@@ -606,7 +606,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             const SizedBox(height: 4),
             if (recoveryScope != null) ...[
               _recoveryHeader(context, recoveryScope, items.length),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
             ],
             if (plans.isNotEmpty)
               Padding(
@@ -1064,39 +1064,63 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   }
 
   Widget _recoveryHeader(
-          BuildContext context, AssignmentRecoveryScope scope, int count) =>
-      Card(
-        key: const ValueKey('assignment-recovery-scope'),
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+      BuildContext context, AssignmentRecoveryScope scope, int count) {
+    final journal = Journal.of(context);
+    return Column(
+      key: const ValueKey('assignment-recovery-scope'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Row(children: [
-                Icon(Icons.filter_alt_outlined,
-                    size: 18, color: Journal.of(context).muted),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: Text(scope.label,
-                        style: Journal.of(context).entryTitle)),
-              ]),
-              const SizedBox(height: 4),
-              Text(
-                '共 $count 项',
-                style: Journal.of(context).metadata,
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => _exitRecoveryScope(context),
-                  child: const Text('返回全部'),
+              Icon(Icons.filter_alt_outlined, size: 17, color: journal.muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 2,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      scope.label,
+                      style: journal.entryTitle.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      '· 共 $count 项',
+                      style: journal.metadata.copyWith(
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: journal.ink,
+                  minimumSize: const Size(48, 40),
+                  tapTargetSize: MaterialTapTargetSize.padded,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                ),
+                onPressed: () => _exitRecoveryScope(context),
+                child: const Text('返回全部'),
               ),
             ],
           ),
         ),
-      );
+        const SizedBox(height: 4),
+        Divider(height: 1, thickness: 0.8, color: journal.rule),
+      ],
+    );
+  }
 
   String _deadlineLabel(AssignmentDeadlineFilter filter) => switch (filter) {
         AssignmentDeadlineFilter.all => '全部',
