@@ -217,7 +217,7 @@ class StudyAssistantTheme {
       brightness: brightness,
       surface: journal.paper,
       primary: journal.accent,
-      secondary: journal.berry,
+      secondary: journal.accent,
     ).copyWith(
       onPrimary: onAccent,
       secondaryContainer: journal.sage,
@@ -291,6 +291,11 @@ class StudyAssistantTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: journal.ink,
         ),
       ),
       switchTheme: SwitchThemeData(

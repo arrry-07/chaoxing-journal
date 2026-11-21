@@ -528,7 +528,11 @@ class _StatsScreenState extends State<StatsScreen> {
                                           children: [
                                             Text(
                                               '待完成 ${own.pending} 份',
-                                              style: journal.metadata,
+                                              style: journal.metadata.copyWith(
+                                                color: own.pending > 0
+                                                    ? journal.ink
+                                                    : null,
+                                              ),
                                             ),
                                             Text(
                                               '已逾期 ${own.expired} 份',
@@ -541,12 +545,7 @@ class _StatsScreenState extends State<StatsScreen> {
                                             if (own.unknown > 0)
                                               Text(
                                                 '提交未知 ${own.unknown} 份',
-                                                style:
-                                                    journal.metadata.copyWith(
-                                                  color: own.unknown > 0
-                                                      ? journal.ochre
-                                                      : null,
-                                                ),
+                                                style: journal.metadata,
                                               ),
                                           ],
                                         ),

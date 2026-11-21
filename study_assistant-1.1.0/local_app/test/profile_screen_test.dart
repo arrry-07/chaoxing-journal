@@ -106,6 +106,19 @@ void main() {
       logout.style?.foregroundColor?.resolve(const <WidgetState>{}),
       Journal.berry,
     );
+    expect(
+      logout.style?.backgroundColor?.resolve(const <WidgetState>{}),
+      Journal.sheet,
+    );
+    expect(
+      logout.style?.side?.resolve(const <WidgetState>{}),
+      BorderSide(color: Journal.rule, width: 0.8),
+    );
+    expect(
+      StudyAssistantTheme.light.textButtonTheme.style?.foregroundColor
+          ?.resolve(const <WidgetState>{}),
+      Journal.ink,
+    );
     await tester.tap(find.text('退出登录并清理本机记录'));
     await tester.pumpAndSettle();
     final dangerous = tester.widget<FilledButton>(

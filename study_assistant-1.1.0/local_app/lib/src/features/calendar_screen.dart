@@ -202,6 +202,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                     child: const Text('回今天')),
                 TextButton(
                     onPressed: () => setState(() => selected = null),
+                    style: selected == null
+                        ? TextButton.styleFrom(foregroundColor: journal.accent)
+                        : null,
                     child: const Text('本月')),
                 const Spacer(),
                 IconButton(

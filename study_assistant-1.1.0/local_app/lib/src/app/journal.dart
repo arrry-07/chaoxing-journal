@@ -15,12 +15,12 @@ class Journal {
   static const sageBorder = Color(0xFFC9D6F7);
   static const rule = Color(0xFFE5E5E2);
   static const ruleStrong = Color(0xFFD4D4D0);
-  static const berry = Color(0xFF9F3A4F);
-  static const berryBg = Color(0xFFFBEAEE);
-  static const berryBorder = Color(0xFFEFC2CC);
-  static const ochre = Color(0xFF8A5A12);
-  static const ochreBg = Color(0xFFFBF1DD);
-  static const ochreBorder = Color(0xFFEBD3A4);
+  static const berry = Color(0xFFC53B3B);
+  static const berryBg = Color(0xFFFDF2F2);
+  static const berryBorder = Color(0xFFF3D1D1);
+  static const ochre = Color(0xFF4F5D73);
+  static const ochreBg = Color(0xFFEFF1F5);
+  static const ochreBorder = Color(0xFFD8DEE8);
   static const slate = Color(0xFF3D63DD);
   static const slateBg = Color(0xFFEAF0FD);
   static const slateBorder = Color(0xFFC9D6F7);
@@ -96,14 +96,14 @@ enum JournalPalette {
   Color get rule => this == dark ? const Color(0xFF2E3034) : Journal.rule;
   Color get ruleStrong =>
       this == dark ? const Color(0xFF3A3C41) : Journal.ruleStrong;
-  Color get berry => this == dark ? const Color(0xFFF08A9C) : Journal.berry;
-  Color get berryBg => this == dark ? const Color(0xFF3A2228) : Journal.berryBg;
+  Color get berry => this == dark ? const Color(0xFFEF7A7A) : Journal.berry;
+  Color get berryBg => this == dark ? const Color(0xFF332022) : Journal.berryBg;
   Color get berryBorder =>
-      this == dark ? const Color(0xFF6A3B46) : Journal.berryBorder;
-  Color get ochre => this == dark ? const Color(0xFFE5B567) : Journal.ochre;
-  Color get ochreBg => this == dark ? const Color(0xFF3A2E18) : Journal.ochreBg;
+      this == dark ? const Color(0xFF5C3438) : Journal.berryBorder;
+  Color get ochre => this == dark ? const Color(0xFFA3B1C6) : Journal.ochre;
+  Color get ochreBg => this == dark ? const Color(0xFF262A33) : Journal.ochreBg;
   Color get ochreBorder =>
-      this == dark ? const Color(0xFF6B5530) : Journal.ochreBorder;
+      this == dark ? const Color(0xFF3C424F) : Journal.ochreBorder;
   Color get slate => this == dark ? const Color(0xFF8AA8FF) : Journal.slate;
   Color get slateBg => this == dark ? const Color(0xFF1F2A44) : Journal.slateBg;
   Color get slateBorder =>

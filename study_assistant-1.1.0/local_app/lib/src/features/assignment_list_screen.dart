@@ -1105,9 +1105,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       bool filtersActive,
       HomeSortOrder sortOrder) {
     final journal = Journal.of(context);
-    final actionColor = Theme.of(context).colorScheme.primary;
+    final filterColor = filtersActive ? journal.accent : journal.muted;
     final filterStyle = journal.metadata.copyWith(
-      color: actionColor,
+      color: filterColor,
       fontWeight: FontWeight.w500,
     );
     final sortStyle = journal.metadata.copyWith(
@@ -1172,7 +1172,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                 ? Icons.tune_rounded
                                 : Icons.search_rounded,
                             size: 17,
-                            color: actionColor,
+                            color: filterColor,
                           ),
                           const SizedBox(width: 7),
                           Flexible(

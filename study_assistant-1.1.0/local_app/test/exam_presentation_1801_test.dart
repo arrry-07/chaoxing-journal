@@ -154,9 +154,10 @@ void main() {
     expect(t.widget<OutlinedButton>(logout).onPressed, isNotNull);
     final style = t.widget<OutlinedButton>(logout).style!;
     expect(style.foregroundColor!.resolve({}), Journal.berry);
+    expect(style.backgroundColor!.resolve({}), Journal.sheet);
     expect(
-      style.backgroundColor!.resolve({}),
-      Color.lerp(Journal.sheet, Journal.berryBg, .25),
+      style.side!.resolve({}),
+      BorderSide(color: Journal.rule, width: 0.8),
     );
     await t.tap(logout);
     await t.pumpAndSettle();

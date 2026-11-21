@@ -201,15 +201,14 @@ class ProfileScreen extends StatelessWidget {
                           : () => _confirmLogout(context),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: journal.berry,
-                        side: BorderSide(color: journal.berryBorder),
-                        backgroundColor:
-                            Color.lerp(journal.sheet, journal.berryBg, .25),
+                        side: BorderSide(color: journal.rule, width: 0.8),
+                        backgroundColor: journal.sheet,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 16,
                         ),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       ),
                       child: const Text(

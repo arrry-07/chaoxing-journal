@@ -98,16 +98,20 @@ void main() {
       CompletionPieChart.categoryColors[2],
     ]);
     expect(
+      CompletionPieChart.categoryColors[0],
+      JournalPalette.light.accent,
+    );
+    expect(
       CompletionPieChart.categoryColors[1],
-      Color.lerp(Journal.ochre, Journal.paper, .18),
+      Color.lerp(JournalPalette.light.accent, Journal.sheet, .52),
     );
     expect(
       CompletionPieChart.categoryColors[2],
-      Color.lerp(Journal.berry, Journal.paper, .18),
+      Color.lerp(Journal.berry, Journal.sheet, .14),
     );
     expect(
       CompletionPieChart.categoryColors[3],
-      Color.lerp(Journal.muted, Journal.paper, .12),
+      Color.lerp(Journal.muted, Journal.sheet, .52),
     );
     expect(CompletionPieChart.legendColors, CompletionPieChart.categoryColors);
     expect(CompletionPieChart.ringThickness, 10);
@@ -147,8 +151,16 @@ void main() {
     expect(find.text('已逾期'), findsOneWidget);
     expect(find.text('提交未知'), findsOneWidget);
     expect(
+      t.widget<Text>(find.text('待完成 1 份')).style?.color,
+      Journal.ink,
+    );
+    expect(
+      t.widget<Text>(find.text('已逾期 1 份')).style?.color,
+      Journal.berry,
+    );
+    expect(
       t.widget<Text>(find.text('提交未知 1 份')).style?.color,
-      Journal.ochre,
+      Journal.muted,
     );
     expect(
         find.descendant(

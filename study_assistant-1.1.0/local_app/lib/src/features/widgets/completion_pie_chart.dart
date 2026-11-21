@@ -28,10 +28,18 @@ class CompletionPieChart extends StatelessWidget {
   static final legendColors = categoryColors;
 
   static List<Color> colorsFor(JournalPalette journal) => [
-        Color.lerp(journal.ink, journal.sage, .30)!,
-        Color.lerp(journal.ochre, journal.paper, .18)!,
-        Color.lerp(journal.berry, journal.paper, .18)!,
-        Color.lerp(journal.muted, journal.paper, .12)!,
+        journal.accent,
+        Color.lerp(
+          journal.accent,
+          journal.sheet,
+          journal == JournalPalette.dark ? .40 : .52,
+        )!,
+        Color.lerp(journal.berry, journal.sheet, .14)!,
+        Color.lerp(
+          journal.muted,
+          journal.sheet,
+          journal == JournalPalette.dark ? .60 : .52,
+        )!,
       ];
   static const labels = ['已完成', '待完成', '已逾期', '提交未知'];
 
