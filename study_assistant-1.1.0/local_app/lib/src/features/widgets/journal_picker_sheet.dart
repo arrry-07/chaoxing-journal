@@ -210,12 +210,12 @@ class _JournalPickerSheetBodyState<T>
                           style: journal.metadata,
                         ),
                       )
-                    : Container(
-                        decoration: BoxDecoration(
-                          color: journal.sheet,
+                    : Material(
+                        color: journal.sheet,
+                        shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
-                          border:
-                              Border.all(color: journal.cardBorder, width: 0.8),
+                          side:
+                              BorderSide(color: journal.cardBorder, width: 0.8),
                         ),
                         clipBehavior: Clip.antiAlias,
                         child: ListView.builder(

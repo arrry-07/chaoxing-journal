@@ -431,7 +431,6 @@ class JournalHeading extends StatelessWidget {
 }
 
 // Map subject keywords to quiet single-tone linear icons.
-@visibleForTesting
 IconData courseIconFor(String name) {
   if (RegExp(r'数|微积分|代数|几何|概率|统计|离散').hasMatch(name)) {
     return Icons.functions_rounded;

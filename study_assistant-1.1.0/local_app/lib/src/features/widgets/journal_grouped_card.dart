@@ -39,11 +39,11 @@ class JournalGroupedCard extends StatelessWidget {
       journal.isDark ? 0.24 : 0.30,
     )!;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: backgroundColor ?? journal.sheet,
+    return Material(
+      color: backgroundColor ?? journal.sheet,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(borderRadius),
-        border: Border.all(color: journal.cardBorder, width: 0.8),
+        side: BorderSide(color: journal.cardBorder, width: 0.8),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(

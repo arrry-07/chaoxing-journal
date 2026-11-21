@@ -25,13 +25,17 @@ class AssignmentCard extends StatelessWidget {
       this.inPinnedSection = false,
       this.deadlinePending = false,
       this.previewOnly = false,
-      this.previewSaving = false});
+      this.previewSaving = false,
+      this.contentPadding = EdgeInsets.zero,
+      this.onLongPress});
   final Assignment assignment;
   final List<Assignment> examSources;
   final AssignmentDisplayIndex? displayIndex;
   final DateTime now;
   final VoidCallback onTap;
   final VoidCallback? onOpenAssignment;
+  final VoidCallback? onLongPress;
+  final EdgeInsetsGeometry contentPadding;
   final bool opening;
   final bool showFullDeadline, inPinnedSection, showDivider, enableTapFeedback;
   final bool deadlinePending, previewOnly, previewSaving;
@@ -108,7 +112,8 @@ class AssignmentCard extends StatelessWidget {
         AssignmentQuery.dayKey(d) == AssignmentQuery.dayKey(now);
     final urgent = overdue
         ? '已逾期${now.difference(d!).inDays > 0 ? '${now.difference(d).inDays}天' : ''}'
-        : !a.isExam &&
+        : showFullDeadline &&
+                !a.isExam &&
                 a.isPendingConfirmed &&
                 a.deadlineTrusted &&
                 !a.deadlineReadFailed &&
@@ -199,7 +204,9 @@ class AssignmentCard extends StatelessWidget {
 
     final stateTone = _stateTone(a, bucket);
     final hasSpecialStatePill = stateTone != CourseworkPillTone.neutral;
-    final railTextColor = urgent != null && today
+    final highlightToday =
+        today && !overdue && !a.isCompleted && a.deadlineTrusted;
+    final railTextColor = highlightToday
         ? journal.berry
         : clock.isEmpty
             ? (railLabel == '待定' ? journal.ochre : journal.muted)
@@ -236,7 +243,9 @@ class AssignmentCard extends StatelessWidget {
         for (final line in examLines) Text(line, style: journal.metadata),
       ] else if (showFullDeadline || inPinnedSection || countdown || !hasTime)
         Text(
-          deadline,
+          inPinnedSection && countdown && hasTime
+              ? '$deadline · ${DisplayPreferences.remaining(d, now)}'
+              : deadline,
           style: !hasTime && railLabel == '待定'
               ? journal.metadata.copyWith(
                   color: journal.ochre,
@@ -244,8 +253,6 @@ class AssignmentCard extends StatelessWidget {
                 )
               : journal.metadata,
         ),
-      if (!a.isExam && inPinnedSection && countdown && hasTime)
-        Text(DisplayPreferences.remaining(d, now), style: journal.metadata),
     ];
 
     final hasCourse = a.courseName.trim().isNotEmpty;
@@ -425,101 +432,106 @@ class AssignmentCard extends StatelessWidget {
       ],
     );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Semantics(
-                button: onCardTap != null,
-                onTap: onCardTap,
-                label:
-                    '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${a.isExam ? '$examSemantics${a.exam!.startTrusted || a.exam!.endTrusted ? '，北京时间' : ''}' : hasTime ? '截止 $deadlineDate${countdown ? '，${DisplayPreferences.remaining(d, now)}' : ''}' : deadline}',
-                excludeSemantics: true,
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: InkWell(
-                    enableFeedback: enableTapFeedback,
-                    onTap: onCardTap,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: verticalPad),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(
-                            width: railWidth,
-                            child: deadlinePending && !a.isExam
-                                ? Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: reduceMotion
-                                        ? Icon(
-                                            Icons.hourglass_top_rounded,
-                                            size: 16,
-                                            color: journal.ochre,
-                                            semanticLabel: '正在确认截止时间',
-                                          )
-                                        : SizedBox.square(
-                                            dimension: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
+    return Padding(
+      padding: contentPadding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Semantics(
+                  button: onCardTap != null,
+                  onTap: onCardTap,
+                  label:
+                      '${a.title}，${a.courseName}，$state，${previewOnly ? '${previewSaving ? '正在保存到本机' : '待保存预览'}，' : ''}${urgent == null ? '' : '$urgent，'}${a.isExam ? '$examSemantics${a.exam!.startTrusted || a.exam!.endTrusted ? '，北京时间' : ''}' : hasTime ? '截止 $deadlineDate${countdown ? '，${DisplayPreferences.remaining(d, now)}' : ''}' : deadline}',
+                  excludeSemantics: true,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: InkWell(
+                      enableFeedback: enableTapFeedback,
+                      onTap: onCardTap,
+                      onLongPress: previewOnly ? null : onLongPress,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: verticalPad),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: railWidth,
+                              child: deadlinePending && !a.isExam
+                                  ? Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: reduceMotion
+                                          ? Icon(
+                                              Icons.hourglass_top_rounded,
+                                              size: 16,
                                               color: journal.ochre,
-                                              semanticsLabel: '正在确认截止时间',
+                                              semanticLabel: '正在确认截止时间',
+                                            )
+                                          : SizedBox.square(
+                                              dimension: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: journal.ochre,
+                                                semanticsLabel: '正在确认截止时间',
+                                              ),
                                             ),
-                                          ),
-                                  )
-                                : Text(
-                                    railLabel,
-                                    style: journal.time.copyWith(
-                                      color: railTextColor,
-                                      fontWeight: clock.isEmpty
-                                          ? FontWeight.w500
-                                          : FontWeight.w600,
-                                      fontSize: clock.isEmpty
-                                          ? 14
-                                          : journal.time.fontSize,
+                                    )
+                                  : Text(
+                                      railLabel,
+                                      style: journal.time.copyWith(
+                                        color: railTextColor,
+                                        fontWeight: clock.isEmpty
+                                            ? FontWeight.w500
+                                            : FontWeight.w600,
+                                        fontSize: clock.isEmpty
+                                            ? 14
+                                            : journal.time.fontSize,
+                                      ),
                                     ),
-                                  ),
-                          ),
-                          const SizedBox(width: railGap),
-                          Expanded(child: bodyColumn),
-                        ],
+                            ),
+                            const SizedBox(width: railGap),
+                            Expanded(child: bodyColumn),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-            if (onOpenAssignment != null && !largeText) ...[
-              const SizedBox(width: 4),
-              buildLaunchControl(),
+              if (onOpenAssignment != null && !largeText) ...[
+                const SizedBox(width: 4),
+                buildLaunchControl(),
+              ],
             ],
+          ),
+          if (onOpenAssignment != null && largeText)
+            Padding(
+              padding: EdgeInsets.only(left: contentLeftInset, bottom: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: buildLaunchControl(),
+              ),
+            ),
+          if (showDivider) ...[
+            SizedBox(
+              key: ValueKey('assignment-card-gap-${a.id}'),
+              height: 4,
+            ),
+            Padding(
+              padding: EdgeInsets.only(left: contentLeftInset),
+              child: Divider(
+                height: 1,
+                thickness: 0.8,
+                color: journal.rule,
+              ),
+            ),
           ],
-        ),
-        if (onOpenAssignment != null && largeText)
-          Padding(
-            padding: EdgeInsets.only(left: contentLeftInset, bottom: 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: buildLaunchControl(),
-            ),
-          ),
-        SizedBox(
-          key: ValueKey('assignment-card-gap-${a.id}'),
-          height: 4,
-        ),
-        if (showDivider)
-          Padding(
-            padding: EdgeInsets.only(left: contentLeftInset),
-            child: Divider(
-              height: 1,
-              thickness: 0.8,
-              color: journal.rule,
-            ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
