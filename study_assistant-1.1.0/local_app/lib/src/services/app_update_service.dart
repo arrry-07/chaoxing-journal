@@ -135,7 +135,7 @@ class AppUpdateService {
   Future<UpdateCheckResult> checkConfigured(
           {required int currentVersionCode, CancelToken? cancelToken}) =>
       checkForManualUpdate(
-          currentVersionName: AppVersion.name,
+          currentVersionName: AppVersion.releaseName,
           currentVersionCode: currentVersionCode,
           cancelToken: cancelToken);
 
@@ -183,14 +183,14 @@ class AppUpdateService {
       await cleanupStaleDownloads();
       return _checkManifestWithFallback(
           manifestUrl: stableManifestUrl,
-          currentVersionName: AppVersion.name,
+          currentVersionName: AppVersion.releaseName,
           currentVersionCode: currentVersionCode,
           startupOnly: false,
           githubListReleases: false,
           cancelToken: cancelToken);
     }
     return checkForManualUpdate(
-      currentVersionName: AppVersion.name,
+      currentVersionName: AppVersion.releaseName,
       currentVersionCode: currentVersionCode,
       cancelToken: cancelToken,
     );

@@ -10,12 +10,12 @@ const manifestHash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 String patchVersion() {
-  final parts = AppVersion.name.split('.').map(int.parse).toList();
+  final parts = AppVersion.releaseName.split('.').map(int.parse).toList();
   return '${parts[0]}.${parts[1]}.${parts[2] + 1}';
 }
 
 String iterationVersion() {
-  final parts = AppVersion.name.split('.').map(int.parse).toList();
+  final parts = AppVersion.releaseName.split('.').map(int.parse).toList();
   return '${parts[0]}.${parts[1] + 1}.0';
 }
 
@@ -215,7 +215,7 @@ void main() {
           onRequest: (o, h) => h.resolve(Response(
               requestOptions: o,
               statusCode: 200,
-              data: manifest(versionName: AppVersion.name)))));
+              data: manifest(versionName: AppVersion.releaseName)))));
     final result = await AppUpdateService(
             dio: dio, manifestUrl: 'https://example.org/update.json')
         .checkConfigured(currentVersionCode: 31);
@@ -519,7 +519,7 @@ void main() {
   });
 
   test('older version with a higher versionCode is rejected', () async {
-    final parts = AppVersion.name.split('.').map(int.parse).toList();
+    final parts = AppVersion.releaseName.split('.').map(int.parse).toList();
     final older = '${parts[0]}.${parts[1]}.${parts[2] - 1}';
     final result = await AppUpdateService(
       dio: manifestDio((_) => manifest(versionName: older)),

@@ -4,5 +4,6 @@ class AppVersion {
   static const name = '1.8.22';
   static const code = 89;
 
+  static String get releaseName => name.split('-').first;
   static String get display => '$name ($code)';
 }

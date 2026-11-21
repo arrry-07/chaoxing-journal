@@ -24,12 +24,12 @@ Map<String, dynamic> release(String name,
     };
 
 String nextPatchVersion() {
-  final parts = AppVersion.name.split('.').map(int.parse).toList();
+  final parts = AppVersion.releaseName.split('.').map(int.parse).toList();
   return '${parts[0]}.${parts[1]}.${parts[2] + 1}';
 }
 
 String nextMinorVersion() {
-  final parts = AppVersion.name.split('.').map(int.parse).toList();
+  final parts = AppVersion.releaseName.split('.').map(int.parse).toList();
   return '${parts[0]}.${parts[1] + 1}.0';
 }
 
@@ -63,7 +63,7 @@ void main() {
   test('manual click during startup waits then checks the patch list',
       () async {
     final gate = Completer<void>();
-    final current = AppVersion.name;
+    final current = AppVersion.releaseName;
     final nextPatch = nextPatchVersion();
     final paths = <String>[];
     final dio = Dio()
@@ -111,7 +111,7 @@ void main() {
 
   test('startup automatically offers a non-latest patch without downloading',
       () async {
-    final current = AppVersion.name;
+    final current = AppVersion.releaseName;
     final nextPatch = nextPatchVersion();
     final paths = <String>[];
     final dio = Dio()
