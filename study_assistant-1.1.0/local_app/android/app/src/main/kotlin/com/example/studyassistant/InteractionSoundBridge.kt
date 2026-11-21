@@ -17,6 +17,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.sin
 
@@ -48,27 +49,30 @@ internal class InteractionSoundBridge(
             if (status == 0) ready.add(id)
         }
         val cache = activity.cacheDir
-        load(cache, "tap", tone(28, 1250.0, 6.0, 0.55))
+        load(cache, "tap", tone(60, 800.0, 760.0, 16.0, 0.28))
         load(
             cache,
             "pin",
-            tone(24, 1050.0, 7.0, 0.5) + tone(30, 1400.0, 8.0, 0.55),
+            tone(55, 660.0, 650.0, 18.0, 0.26) +
+                tone(80, 880.0, 870.0, 24.0, 0.28),
         )
         load(
             cache,
             "unpin",
-            tone(30, 1400.0, 8.0, 0.55) + tone(24, 1050.0, 7.0, 0.5),
+            tone(55, 880.0, 870.0, 18.0, 0.26) +
+                tone(80, 660.0, 650.0, 24.0, 0.28),
         )
         load(
             cache,
             "syncDone",
-            tone(80, 1046.5, 35.0, 0.42, 0.2) +
-                tone(130, 1318.5, 45.0, 0.45, 0.2),
+            tone(90, 659.25, 659.25, 30.0, 0.24) +
+                tone(160, 987.77, 987.77, 55.0, 0.26),
         )
         load(
             cache,
             "complete",
-            tone(45, 880.0, 18.0, 0.48) + tone(70, 1174.7, 25.0, 0.5),
+            tone(70, 523.25, 523.25, 22.0, 0.26) +
+                tone(110, 784.0, 784.0, 34.0, 0.28),
         )
 
         channel.setMethodCallHandler { call, result ->
@@ -88,7 +92,7 @@ internal class InteractionSoundBridge(
             audioManager.getStreamVolume(STREAM_MUSIC) <= 0 ||
             audioManager.isStreamMute(STREAM_MUSIC)) return
         val id = ids[kind] ?: return
-        if (id in ready) pool.play(id, 0.9f, 0.9f, 1, 0, 1.0f)
+        if (id in ready) pool.play(id, 0.55f, 0.55f, 1, 0, 1.0f)
     }
 
     @Suppress("DEPRECATION")
@@ -158,21 +162,29 @@ internal class InteractionSoundBridge(
 
     private fun tone(
         ms: Int,
-        hz: Double,
+        startHz: Double,
+        endHz: Double,
         tauMs: Double,
         peak: Double,
-        partial: Double = 0.3,
+        partial: Double = 0.04,
+        attackMs: Double = 5.0,
     ): ShortArray {
         val count = SAMPLE_RATE * ms / 1000
         if (count <= 0) return ShortArray(0)
         val samples = DoubleArray(count)
-        val fadeSamples = SAMPLE_RATE * 0.003
+        val fadeSamples = SAMPLE_RATE * 0.006
         var phase = 0.0
         for (i in samples.indices) {
-            val seconds = i.toDouble() / SAMPLE_RATE
+            val tMs = i * 1000.0 / SAMPLE_RATE
+            val progress = if (count > 1) i.toDouble() / (count - 1) else 0.0
+            val hz = startHz + (endHz - startHz) * progress
             phase += 2.0 * PI * hz / SAMPLE_RATE
-            val attack = minOf(seconds / 0.001, 1.0)
-            val decay = exp(-(seconds * 1000.0) / tauMs)
+            val attack = if (attackMs > 0.0 && tMs < attackMs) {
+                0.5 * (1.0 - cos(PI * tMs / attackMs))
+            } else {
+                1.0
+            }
+            val decay = exp(-tMs / tauMs)
             val release = minOf((count - 1 - i).toDouble() / fadeSamples, 1.0)
             samples[i] = (sin(phase) + partial * sin(2.0 * phase)) *
                 attack * decay * release
@@ -190,6 +202,6 @@ internal class InteractionSoundBridge(
     }
 
     companion object {
-        private const val SAMPLE_RATE = 44_100
+        private const val SAMPLE_RATE = 48_000
     }
 }
