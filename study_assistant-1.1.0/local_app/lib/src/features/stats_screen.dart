@@ -494,15 +494,23 @@ class _StatsScreenState extends State<StatsScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   group.courseKey == null
-                                      ? SizedBox(
+                                      ? Container(
                                           width: 30,
                                           height: 30,
-                                          child: Center(
-                                            child: Icon(
-                                              Icons.description_outlined,
-                                              size: 22,
-                                              color: journal.muted,
+                                          decoration: BoxDecoration(
+                                            color: journal.paper,
+                                            borderRadius:
+                                                BorderRadius.circular(30 * .28),
+                                            border: Border.all(
+                                              color: journal.rule,
+                                              width: 1,
                                             ),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Icon(
+                                            Icons.description_outlined,
+                                            size: 17,
+                                            color: journal.muted,
                                           ),
                                         )
                                       : CourseMark(group.name, size: 30),

@@ -101,9 +101,9 @@ class CourseListScreen extends StatelessWidget {
                             horizontal: 12,
                             vertical: 2,
                           ),
-                          secondary: Icon(
-                            Icons.menu_book_outlined,
-                            color: Journal.of(context).ink,
+                          secondary: CourseMark(
+                            store.courses[i].name,
+                            size: 32,
                           ),
                           title: Text(
                             store.courses[i].name,

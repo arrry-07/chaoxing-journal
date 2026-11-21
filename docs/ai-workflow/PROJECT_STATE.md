@@ -13,6 +13,8 @@
   - 根因：华为勿扰 `ringerMode` 拦截音效、850 Hz 低通导致手机外放听不见、12 ms 振动过短、系统触摸音关闭导致未接入的控件无反馈。`dart analyze` 与 ASCII 目录 `flutter analyze --no-pub` 均无问题，定向 45 项通过；华为 arm64 原签名保数据覆盖（`firstInstallTime=2026-11-11 22:53:16`），`zen_mode=1` 下实测记录应用 `AudioTrack`（44100 Hz）与 `OneShot{mDuration=30, mAmplitude=255}`；主观音色/振感体感与真实刷新成功音待维护者确认。
 - [x] 1.8.23-dev.6+95：柔和纯正弦音效（48 kHz、-5.2 增益）、中性冷白/石墨深色配色与蓝色点缀、系统无衬线正文+文楷大标题、课程字标，以及首页/日历/统计/我的页排版与打码优化。
   - 完整测试 `+1568 ~1: All tests passed!`（`cx1826-preview/tests-full.log`），`dart analyze` 与 ASCII `flutter analyze --no-pub` 均无问题。华为 arm64 原签名保数据覆盖（`firstInstallTime=2026-11-11 22:53:16`，SHA-256 `6ea8c6ee...4d`），`zen_mode=1` 下记录 48 kHz `-5.2` 音轨与 30 ms 振动、无崩溃，浅/深双色 10 张真机截图已取证；MuMu 本轮未在线未安装；主观观感与听感待维护者确认。
+- [x] 1.8.23-dev.7+96：全应用恢复霞鹜文楷、统一「我的」设置卡配色、课程图标改为极简单色线性图标框（含统计与我的课程），并修复首页课程名提前截断留白。
+  - `dart analyze` 与 ASCII `flutter analyze --no-pub` 均无问题，完整测试 `+1569 ~1: All tests passed!`（`cx1827-preview/tests-full.log`）。双端原签名保数据覆盖：华为 arm64（`firstInstallTime=2026-11-11 22:53:16`，SHA-256 `aa79d933...c8`）`zen_mode=1` 下记录 26 条 48 kHz `-5.2` 音轨与 30 ms 振动、无崩溃；MuMu「学习通」`127.0.0.1:16448` x86_64（`firstInstallTime=2026-11-04 19:05:10`，SHA-256 `358aa6e4...15`）记录 6 条 48 kHz `-5.2` 音轨与课业保留、无崩溃，双端截图已取证；主观听感与视觉观感待维护者确认。
 - [ ] 待补验：真实切号/退出与前后台同步交错、考试通知被正式记录接替时的置顶继承
 
 按独立改动随代码更新对应进度。上述版本号为预览计划，实际打包前复核已用构建号及设备安装值。后续听测见 [1.8.23-dev.4 交接](handoffs/2026-11-21-v1.8.23-dev.4主题与真机反馈交接.md)。

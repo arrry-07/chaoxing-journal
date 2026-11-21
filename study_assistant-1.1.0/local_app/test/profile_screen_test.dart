@@ -67,8 +67,8 @@ void main() {
 
     for (final (title, accent, header) in [
       ('学习与同步', Journal.ink, Journal.sage),
-      ('数据与安全', Journal.ochre, Journal.ochreBg),
-      ('关于与更新', Journal.slate, Journal.slateBg),
+      ('数据与安全', Journal.ink, Journal.sage),
+      ('关于与更新', Journal.ink, Journal.sage),
     ]) {
       await tester.scrollUntilVisible(
         find.text(title),

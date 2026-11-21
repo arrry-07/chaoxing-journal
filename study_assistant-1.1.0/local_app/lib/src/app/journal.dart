@@ -26,7 +26,7 @@ class Journal {
   static const slateBorder = Color(0xFFC9D6F7);
 
   static const displayFamily = 'LXGW WenKai Screen';
-  static const bodyFamily = 'sans-serif';
+  static const bodyFamily = displayFamily;
   static const titleFamily = displayFamily;
   static const bodyFallback = ['sans-serif'];
 
@@ -51,14 +51,14 @@ class Journal {
     fontFamilyFallback: bodyFallback,
     fontSize: 19,
     color: ink,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w400,
     height: 1.38,
   );
   static const entryTitle = TextStyle(
     fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
     fontSize: 16,
-    fontWeight: FontWeight.w500,
+    fontWeight: FontWeight.w400,
     height: 1.38,
     color: ink,
   );
@@ -197,21 +197,38 @@ class JournalHeading extends StatelessWidget {
   }
 }
 
-// Render a calm monogram badge keyed deterministically to the course name.
+// Map subject keywords to quiet single-tone line icons matching the settings list.
 @visibleForTesting
-String courseMonogram(String name) {
-  var s = name.trim();
-  final prefix = RegExp(
-    r'^(?:\s+|\d+|\([^)]*\)|（[^）]*）|\[[^\]]*\]|【[^】]*】|[·\-—_:：./]+)',
-  );
-  while (true) {
-    final m = prefix.firstMatch(s);
-    if (m == null) break;
-    s = s.substring(m.end);
+IconData courseIconFor(String name) {
+  if (RegExp(r'数|微积分|代数|几何|概率|统计|离散').hasMatch(name)) {
+    return Icons.functions_rounded;
   }
-  final match = RegExp(r'[\u4e00-\u9fffA-Za-z]').firstMatch(s);
-  if (match == null) return '课';
-  return match.group(0)!.toUpperCase();
+  if (RegExp(r'物理|力学|电磁|光学|天文|电路|模电|数电').hasMatch(name)) {
+    return Icons.bolt_outlined;
+  }
+  if (RegExp(r'化学|生物|医学|实验|药').hasMatch(name)) {
+    return Icons.science_outlined;
+  }
+  if (RegExp(r'计算机|信息|安全|软件|数据|程序|编程|算法|网络|人工智能|AI|ai|Python|Java|C\+\+')
+      .hasMatch(name)) {
+    return Icons.terminal_rounded;
+  }
+  if (RegExp(r'英语|外语|口语|听力|语言|写作|语文|文学').hasMatch(name)) {
+    return Icons.translate_rounded;
+  }
+  if (RegExp(r'史|纲要|马原|毛概|习概|思政|政治|法|哲学|思想').hasMatch(name)) {
+    return Icons.account_balance_outlined;
+  }
+  if (RegExp(r'制图|机械|工程|建筑|设计|艺术|音乐|美术|影视').hasMatch(name)) {
+    return Icons.architecture_outlined;
+  }
+  if (RegExp(r'经济|管理|金融|会计|市场|财务').hasMatch(name)) {
+    return Icons.trending_up_rounded;
+  }
+  if (RegExp(r'体育|运动|健美|武术|篮球|足球|游泳').hasMatch(name)) {
+    return Icons.directions_run_rounded;
+  }
+  return Icons.menu_book_outlined;
 }
 
 class CourseLabel extends StatelessWidget {
@@ -233,47 +250,23 @@ class CourseMark extends StatelessWidget {
   final String name;
   final double size;
 
-  static const _swatches = <(Color bg, Color fg)>[
-    (Color(0xFFE8EEFD), Color(0xFF3456B8)),
-    (Color(0xFFE3F4F1), Color(0xFF1F7A6C)),
-    (Color(0xFFEFEAFB), Color(0xFF6246B5)),
-    (Color(0xFFFBF1DE), Color(0xFF8A5A12)),
-    (Color(0xFFFBE9EE), Color(0xFF9F3A4F)),
-    (Color(0xFFE7F3E6), Color(0xFF3C7A35)),
-    (Color(0xFFECEFF3), Color(0xFF4B5563)),
-    (Color(0xFFE3F1F8), Color(0xFF1F6B8E)),
-  ];
-
   @override
   Widget build(BuildContext context) {
-    final dark = Journal.of(context) == JournalPalette.dark;
-    final pair = _swatches[name.runes.fold(0, (int a, b) => a + b) % 8];
-    final bg = dark
-        ? Color.alphaBlend(
-            pair.$2.withValues(alpha: .22),
-            JournalPalette.dark.sheet,
-          )
-        : pair.$1;
-    final fg = dark ? Color.lerp(pair.$2, Colors.white, .45)! : pair.$2;
+    final journal = Journal.of(context);
     return ExcludeSemantics(
       child: Container(
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: bg,
+          color: journal.paper,
           borderRadius: BorderRadius.circular(size * .28),
+          border: Border.all(color: journal.rule, width: 1),
         ),
         alignment: Alignment.center,
-        child: Text(
-          courseMonogram(name),
-          style: TextStyle(
-            color: fg,
-            fontSize: size * .5,
-            fontWeight: FontWeight.w600,
-            fontFamily: Journal.bodyFamily,
-            fontFamilyFallback: Journal.bodyFallback,
-            height: 1,
-          ),
+        child: Icon(
+          courseIconFor(name),
+          size: size * .56,
+          color: journal.ink,
         ),
       ),
     );

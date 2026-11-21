@@ -369,26 +369,10 @@ class AssignmentCard extends StatelessWidget {
           Text(a.courseName.trim(), style: journal.entryTitle),
         if (!largeText && hasTitle && hasCourse && showPlainInlineState) ...[
           const SizedBox(height: 4),
-          Row(
-            children: [
-              Flexible(
-                child: Text(
-                  a.courseName.trim(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: journal.metadata,
-                ),
-              ),
-              const SizedBox(width: 5),
-              Text(
-                '·',
-                style: journal.metadata.copyWith(
-                  color: journal.muted.withValues(alpha: 0.65),
-                ),
-              ),
-              const SizedBox(width: 5),
-              Text(state, style: journal.metadata),
-            ],
+          _CourseStateLine(
+            course: a.courseName.trim(),
+            state: state,
+            journal: journal,
           ),
           if (highlightPills.isNotEmpty) ...[
             const SizedBox(height: 5),
@@ -536,6 +520,92 @@ class AssignmentCard extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _CourseStateLine extends StatelessWidget {
+  const _CourseStateLine({
+    required this.course,
+    required this.state,
+    required this.journal,
+  });
+
+  final String course;
+  final String state;
+  final JournalPalette journal;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = journal.metadata;
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+
+    double measure(String text) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        maxLines: 1,
+        textDirection: direction,
+        textScaler: scaler,
+      )..layout();
+      final width = painter.width;
+      painter.dispose();
+      return width;
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final dotWidth = measure('·');
+        final stateWidth = measure(state);
+        final suffixWidth = dotWidth + stateWidth + 10.0;
+        final available = (constraints.maxWidth - suffixWidth)
+            .clamp(0.0, constraints.maxWidth);
+
+        var displayCourse = course;
+        if (measure(course) > available - 0.5) {
+          final runes = course.runes.toList();
+          final fitWidth = (available - 1.0).clamp(0.0, available);
+          var low = 1;
+          var high = runes.length;
+          var best = 0;
+          while (low <= high) {
+            final mid = (low + high) ~/ 2;
+            final candidate = '${String.fromCharCodes(runes.take(mid))}…';
+            if (measure(candidate) <= fitWidth) {
+              best = mid;
+              low = mid + 1;
+            } else {
+              high = mid - 1;
+            }
+          }
+          if (best > 0) {
+            displayCourse = '${String.fromCharCodes(runes.take(best))}…';
+          }
+        }
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                displayCourse,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              '·',
+              style: style.copyWith(
+                color: journal.muted.withValues(alpha: 0.65),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(state, style: style),
+          ],
+        );
+      },
     );
   }
 }

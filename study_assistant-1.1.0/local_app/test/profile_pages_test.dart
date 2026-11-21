@@ -9,6 +9,7 @@ import 'package:study_assistant_mobile/src/features/course_list_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -182,7 +183,8 @@ void main() {
     await s.restoreSession();
     await t.pumpWidget(MaterialApp(home: CourseListScreen(store: s)));
     expect(find.byType(SwitchListTile), findsNWidgets(2));
-    expect(find.byIcon(Icons.menu_book_outlined), findsNWidgets(2));
+    expect(find.byType(CourseMark), findsNWidgets(2));
+    expect(find.byIcon(Icons.functions_rounded), findsNWidgets(2));
     expect(find.text('班级 2'), findsOneWidget);
     expect(find.text('班级 3'), findsOneWidget);
     await t.tap(find.byType(SwitchListTile).first);

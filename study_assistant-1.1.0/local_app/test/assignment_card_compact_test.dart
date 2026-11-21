@@ -104,4 +104,59 @@ void main() {
       }
     }
   });
+
+  testWidgets('narrow course-state line omits gap between ellipsis and state',
+      (t) async {
+    await (FontLoader(Journal.bodyFamily)
+          ..addFont(rootBundle.load('assets/type/LXGWWenKaiScreen.ttf')))
+        .load();
+    await (FontLoader('MaterialIcons')
+          ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')))
+        .load();
+    t.view.physicalSize = const Size(290, 600);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+
+    final item = Assignment(
+      id: 'cx:work:1:2:4',
+      title: '电磁学（上）练习三',
+      courseName: '大学物理B（下）',
+      requirementsText: '',
+      status: 'pending',
+      deadlineAt: DateTime.utc(2026, 11, 22, 15, 25),
+      deadlineTrusted: true,
+      lastSyncedAt: DateTime.utc(2026, 11, 21),
+    );
+
+    await t.pumpWidget(
+      MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              AssignmentCard(
+                assignment: item,
+                now: DateTime.utc(2026, 11, 21),
+                showFullDeadline: false,
+                onTap: () {},
+                onOpenAssignment: () {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+
+    expect(t.takeException(), isNull);
+    expect(find.text('待提交'), findsOneWidget);
+    final dot = find.text('·');
+    expect(dot, findsOneWidget);
+    final courseText = find.textContaining('大学物理');
+    expect(courseText, findsOneWidget);
+    final gap = t.getRect(dot).left - t.getRect(courseText).right;
+    expect(gap, lessThan(12.0));
+  });
 }

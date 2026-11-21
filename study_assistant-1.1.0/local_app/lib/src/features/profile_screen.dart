@@ -117,8 +117,8 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   _SettingsCard(
                     title: '数据与安全',
-                    accentColor: journal.ochre,
-                    headerColor: journal.ochreBg,
+                    accentColor: journal.ink,
+                    headerColor: journal.sage,
                     children: [
                       _SettingsTile(
                         icon: Icons.health_and_safety_outlined,
@@ -144,8 +144,8 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   _SettingsCard(
                     title: '关于与更新',
-                    accentColor: journal.slate,
-                    headerColor: journal.slateBg,
+                    accentColor: journal.ink,
+                    headerColor: journal.sage,
                     children: [
                       _SettingsTile(
                         icon: Icons.help_outline,
