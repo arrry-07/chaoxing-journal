@@ -48,16 +48,28 @@ internal class InteractionSoundBridge(
             if (status == 0) ready.add(id)
         }
         val cache = activity.cacheDir
-        load(cache, "tap", resonance(18, 260.0, 130.0, 0.24))
-        load(cache, "pin",
-            resonance(12, 220.0, 245.0, 0.22) + resonance(20, 270.0, 340.0, 0.27))
-        load(cache, "unpin",
-            resonance(12, 320.0, 275.0, 0.22) + resonance(20, 245.0, 200.0, 0.25))
-        load(cache, "syncDone",
-            resonance(42, 523.25, 523.25, 0.23, 0.08) +
-                resonance(48, 659.25, 659.25, 0.24, 0.08))
-        load(cache, "complete",
-            resonance(23, 293.66, 293.66, 0.22) + resonance(32, 392.0, 392.0, 0.25))
+        load(cache, "tap", tone(28, 1250.0, 6.0, 0.55))
+        load(
+            cache,
+            "pin",
+            tone(24, 1050.0, 7.0, 0.5) + tone(30, 1400.0, 8.0, 0.55),
+        )
+        load(
+            cache,
+            "unpin",
+            tone(30, 1400.0, 8.0, 0.55) + tone(24, 1050.0, 7.0, 0.5),
+        )
+        load(
+            cache,
+            "syncDone",
+            tone(80, 1046.5, 35.0, 0.42, 0.2) +
+                tone(130, 1318.5, 45.0, 0.45, 0.2),
+        )
+        load(
+            cache,
+            "complete",
+            tone(45, 880.0, 18.0, 0.48) + tone(70, 1174.7, 25.0, 0.5),
+        )
 
         channel.setMethodCallHandler { call, result ->
             if (call.method == "feedback") {
@@ -72,7 +84,7 @@ internal class InteractionSoundBridge(
     }
 
     private fun play(kind: String?) {
-        if (audioManager?.ringerMode != AudioManager.RINGER_MODE_NORMAL ||
+        if (audioManager == null ||
             audioManager.getStreamVolume(STREAM_MUSIC) <= 0 ||
             audioManager.isStreamMute(STREAM_MUSIC)) return
         val id = ids[kind] ?: return
@@ -82,17 +94,24 @@ internal class InteractionSoundBridge(
     @Suppress("DEPRECATION")
     private fun vibrate(kind: String?) {
         val (duration, amplitude) = when (kind) {
-            "tap" -> 12L to 90
-            "pin", "unpin", "syncDone" -> 18L to 125
-            "complete" -> 23L to 150
+            "tap" -> 30L to 160
+            "pin", "unpin" -> 40L to 200
+            "complete" -> 50L to 200
+            "syncDone" -> 0L to 0
             else -> return
         }
         val motor = vibrator
         val requested = runCatching {
             if (motor == null || !motor.hasVibrator()) return@runCatching false
-            motor.vibrate(VibrationEffect.createOneShot(
-                duration, if (motor.hasAmplitudeControl()) amplitude else VibrationEffect.DEFAULT_AMPLITUDE,
-            ))
+            val effect = if (kind == "syncDone") {
+                VibrationEffect.createWaveform(longArrayOf(0, 30, 60, 30), -1)
+            } else {
+                VibrationEffect.createOneShot(
+                    duration,
+                    if (motor.hasAmplitudeControl()) amplitude else VibrationEffect.DEFAULT_AMPLITUDE,
+                )
+            }
+            motor.vibrate(effect)
             true
         }.getOrDefault(false)
         if (!requested) {
@@ -137,35 +156,30 @@ internal class InteractionSoundBridge(
         }.array()
     }
 
-    private fun resonance(
+    private fun tone(
         ms: Int,
-        startHz: Double,
-        endHz: Double,
+        hz: Double,
+        tauMs: Double,
         peak: Double,
-        harmonic: Double = 0.0,
+        partial: Double = 0.3,
     ): ShortArray {
         val count = SAMPLE_RATE * ms / 1000
+        if (count <= 0) return ShortArray(0)
         val samples = DoubleArray(count)
-        val lowPass = 1.0 - exp(-2.0 * PI * 850.0 / SAMPLE_RATE)
+        val fadeSamples = SAMPLE_RATE * 0.003
         var phase = 0.0
-        var filtered = 0.0
         for (i in samples.indices) {
             val seconds = i.toDouble() / SAMPLE_RATE
-            val progress = i.toDouble() / (count - 1)
-            val frequency = startHz + (endHz - startHz) * progress
-            phase += 2.0 * PI * frequency / SAMPLE_RATE
-            val attack = minOf(seconds / 0.0015, 1.0)
-            val tail = minOf((1.0 - progress) / 0.19, 1.0)
-            val body = (sin(phase) + harmonic * sin(2.0 * phase)) *
-                exp(-18.0 * seconds - 3.2 * progress)
-            val contact = if (seconds < 0.004) {
-                0.24 * sin(2.0 * PI * 320.0 * seconds) *
-                    (1.0 - seconds / 0.004) * exp(-550.0 * seconds)
-            } else 0.0
-            filtered += lowPass * (attack * (body + contact) - filtered)
-            samples[i] = filtered * tail
+            phase += 2.0 * PI * hz / SAMPLE_RATE
+            val attack = minOf(seconds / 0.001, 1.0)
+            val decay = exp(-(seconds * 1000.0) / tauMs)
+            val release = minOf((count - 1 - i).toDouble() / fadeSamples, 1.0)
+            samples[i] = (sin(phase) + partial * sin(2.0 * phase)) *
+                attack * decay * release
         }
-        val scale = peak * Short.MAX_VALUE / samples.maxOf { abs(it) }
+        val maxSample = samples.maxOf { abs(it) }
+        if (maxSample <= 0.0) return ShortArray(count)
+        val scale = peak * Short.MAX_VALUE / maxSample
         return ShortArray(count) { (samples[it] * scale).toInt().toShort() }
     }
 

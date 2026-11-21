@@ -12,12 +12,31 @@ class InteractionFeedback {
 
   static const _channel = MethodChannel('study_assistant/interaction_sound');
 
+  static DisplayPreferences Function()? systemClickPrefs;
+
+  @visibleForTesting
+  static DateTime Function() now = DateTime.now;
+  static DateTime? _last;
+
+  @visibleForTesting
+  static void debugReset() {
+    _last = null;
+    now = DateTime.now;
+  }
+
+  static void systemClick() {
+    final p = systemClickPrefs?.call();
+    if (p != null) trigger(p);
+  }
+
   static void trigger(
     DisplayPreferences prefs, {
     InteractionSoundKind kind = InteractionSoundKind.tap,
+    bool preview = false,
   }) {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       if (!prefs.soundEnabled && !prefs.hapticsEnabled) return;
+      if (!_shouldEmit(kind, preview)) return;
       unawaited(_optional(_channel.invokeMethod<void>('feedback', {
         'kind': kind.name,
         'sound': prefs.soundEnabled,
@@ -26,6 +45,7 @@ class InteractionFeedback {
       return;
     }
     if (!prefs.hapticsEnabled) return;
+    if (!_shouldEmit(kind, preview)) return;
     final vibration = switch (kind) {
       InteractionSoundKind.tap => HapticFeedback.selectionClick(),
       InteractionSoundKind.pin ||
@@ -35,6 +55,18 @@ class InteractionFeedback {
       InteractionSoundKind.complete => HapticFeedback.mediumImpact(),
     };
     unawaited(_optional(vibration));
+  }
+
+  static bool _shouldEmit(InteractionSoundKind kind, bool preview) {
+    final current = now();
+    if (kind == InteractionSoundKind.tap &&
+        !preview &&
+        _last != null &&
+        current.difference(_last!) < const Duration(milliseconds: 90)) {
+      return false;
+    }
+    _last = current;
+    return true;
   }
 
   static Future<void> _optional(Future<void> feedback) async {

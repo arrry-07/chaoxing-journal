@@ -197,7 +197,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.display.soundEnabled, isFalse);
     expect(store.display.hapticsEnabled, isTrue);
-    await tester.tap(find.text('更多显示与小组件设置'));
+    await tester.tap(find.text('显示与小组件'));
     await tester.pumpAndSettle();
     expect(find.text('紧凑密度'), findsOneWidget);
   });
@@ -451,7 +451,7 @@ void main() {
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('提醒设置'), findsOneWidget);
     expect(find.text('同步学习通'), findsOneWidget);
-    for (final label in ['外观与交互', '更多显示与小组件设置', '个人安排', '学习记录']) {
+    for (final label in ['外观与交互', '显示与小组件', '个人安排', '学习记录']) {
       await tester.scrollUntilVisible(find.text(label), 180);
       expect(find.text(label), findsOneWidget);
     }
@@ -588,6 +588,38 @@ void main() {
       await tester.scrollUntilVisible(find.text(title).hitTestable(), 180);
       expect(find.text(title), findsOneWidget);
     }
+  });
+
+  testWidgets('theme swatch selects light mode and adapts to large text',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(360, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(2.0)),
+          child: Scaffold(body: ProfileScreen(store: store)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    await tester.scrollUntilVisible(find.text('浅色'), 180);
+    await tester.tap(find.text('浅色'));
+    await tester.pumpAndSettle();
+    expect(store.display.themeMode, JournalThemeMode.light);
+    expect(tester.takeException(), isNull);
   });
 }
 

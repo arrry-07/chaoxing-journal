@@ -25,6 +25,7 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'src/app/app_deep_links.dart';
 import 'src/app/app_shell.dart';
+import 'src/app/journal_binding.dart';
 import 'src/app/transient_feedback.dart';
 import 'src/app/unsaved_edit_guard.dart';
 import 'src/features/assignment_detail_screen.dart';
@@ -39,6 +40,7 @@ import 'src/features/widgets/update_dialog.dart';
 import 'src/models/display_preferences.dart';
 import 'src/services/assignment_store.dart';
 import 'src/services/background_reminder_gateway.dart';
+import 'src/services/interaction_feedback_service.dart';
 import 'src/services/local_notification_service.dart';
 import 'src/services/local_record_query.dart';
 import 'src/services/reminder_rule_store.dart';
@@ -46,7 +48,7 @@ import 'src/services/secure_session_store.dart';
 import 'src/services/widget_snapshot_service.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  JournalBinding.ensureInitialized();
   LicenseRegistry.addLicense(() async* {
     for (final entry in const {
       'HY': 'assets/licenses/HY.txt',
@@ -73,6 +75,7 @@ Future<void> main() async {
     reminderHistoryEnabled: true,
     nativeReminderDeliveryEnabled: true,
   );
+  InteractionFeedback.systemClickPrefs = () => assignmentStore.display;
 
   await notificationService.initializeSafely();
   await launchRestoredApp(assignmentStore, () {
