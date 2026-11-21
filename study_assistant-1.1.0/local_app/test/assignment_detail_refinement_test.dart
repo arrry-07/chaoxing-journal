@@ -3,6 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/transient_feedback.dart';
@@ -14,6 +15,7 @@ import 'package:study_assistant_mobile/src/local/local_assignment_repository.dar
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -500,7 +502,9 @@ void main() {
     final hide = work('33', '无截止待隐藏作业', null);
     final overdue =
         work('34', '未置顶逾期作业', now.subtract(const Duration(microseconds: 1)));
-    final repository = _PinWriteFailureRepository();
+    final lease = _PinTestLease();
+    final repository =
+        _PinWriteFailureRepository(backgroundReminderGateway: lease);
     final store = _PinTestStore(repository: repository);
     addTearDown(store.dispose);
     await tester.runAsync(() async {
@@ -546,7 +550,12 @@ void main() {
     expect(find.text('置顶失败，请稍后重试。'), findsOneWidget);
     expect(store.isPinned(later), isFalse);
     repository.failPinWrites = false;
+    repository.crossEngineLockEnabled = true;
+    lease.failNextRelease = true;
     await tap(pin);
+    expect(lease.failNextRelease, isFalse);
+    expect(store.isPinned(later), isTrue);
+    expect(store.error, contains('置顶状态已保存'));
     expect(find.text('置顶失败，请稍后重试。'), findsNothing);
     expect(
         find.descendant(of: pin, matching: find.text('已置顶')), findsOneWidget);
@@ -555,6 +564,15 @@ void main() {
     expect(pinHeading, findsOneWidget);
     expect(homeIds(), [later.id, near.id, hide.id, overdue.id]);
     expect(find.text(later.title), findsOneWidget);
+    final card = find.byKey(ValueKey('assignment-${later.id}'));
+    final deadline = later.deadlineAt!.toUtc().add(const Duration(hours: 8));
+    final currentYear = now.toUtc().add(const Duration(hours: 8)).year;
+    final format = DateFormat(
+        deadline.year == currentYear ? 'M月d日 HH:mm' : 'yyyy年M月d日 HH:mm');
+    expect(
+        find.descendant(
+            of: card, matching: find.text('截止 ${format.format(deadline)}')),
+        findsOneWidget);
     expect(tester.getTopLeft(pinHeading).dy,
         lessThan(tester.getTopLeft(find.text(later.title)).dy));
     expect(await tester.runAsync(() => repository.loadPinnedIds(account)),
@@ -742,7 +760,23 @@ class _PinTestStore extends _RefinementStore {
       pendingMutation = super.setAssignmentsHidden(assignmentIds, hidden);
 }
 
+class _PinTestLease extends BackgroundReminderGateway {
+  bool failNextRelease = false;
+
+  @override
+  Future<bool> acquireWriteLease(String owner) async => true;
+
+  @override
+  Future<void> releaseWriteLease(String owner) async {
+    if (!failNextRelease) return;
+    failNextRelease = false;
+    throw StateError('simulated write lease release failure');
+  }
+}
+
 class _PinWriteFailureRepository extends LocalAssignmentRepository {
+  _PinWriteFailureRepository({super.backgroundReminderGateway});
+
   bool failPinWrites = false;
 
   @override

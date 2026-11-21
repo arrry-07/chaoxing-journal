@@ -295,6 +295,27 @@ void main() {
     expect(details, 1);
   });
 
+  testWidgets('a standalone exam card shows both dates for an overnight exam',
+      (tester) async {
+    final exam = _exam('standalone',
+        start: DateTime.utc(2026, 11, 16, 14),
+        end: DateTime.utc(2026, 11, 17, 2));
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentCard(
+          assignment: exam,
+          now: _now,
+          showFullDeadline: true,
+          onTap: () {},
+        ),
+      ),
+    ));
+
+    expect(find.text('22:00'), findsOneWidget);
+    expect(find.text('开考 2026年11月16日 22:00'), findsOneWidget);
+    expect(find.text('结束 2026年11月17日 10:00'), findsOneWidget);
+  });
+
   testWidgets('ended and unconfirmed notice cards keep factual unknown states',
       (tester) async {
     final ended = _exam('ended-card',

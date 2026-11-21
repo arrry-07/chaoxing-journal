@@ -337,13 +337,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         final freshness = _freshnessLabel(sync.summary,
             store.syncReport.lastDataSuccessAt ?? store.lastSyncAt, now);
         final statusText = sync.showCached ? '$freshness · 显示上次记录' : freshness;
-        Widget card(Assignment a) => AssignmentCard(
+        Widget card(Assignment a, {bool pinned = false}) => AssignmentCard(
             key: ValueKey('assignment-${a.id}'),
             assignment: a,
             examSources: examSources,
             displayIndex: displayIndex,
             now: now,
-            showFullDeadline: false,
+            showFullDeadline: pinned,
             compact: store.display.compact,
             countdown: store.display.countdown,
             deadlinePending: store.isHomeDeadlinePending(a.id),
@@ -383,7 +383,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             if (pinned.isNotEmpty) {
               widgets
                   .add(dayHeading('置顶', top: 10, tone: _DayHeadingTone.today));
-              widgets.addAll(pinned.map(card));
+              widgets.addAll(pinned.map((item) => card(item, pinned: true)));
             }
           }
           for (final a in regular) {

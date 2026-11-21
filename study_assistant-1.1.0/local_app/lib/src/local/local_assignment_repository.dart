@@ -30,6 +30,12 @@ class LocalStorageWriteException implements Exception {
   String toString() => message;
 }
 
+/// The operation succeeded, but lease cleanup was not confirmed.
+class LocalStorageLeaseReleaseException extends StateError {
+  LocalStorageLeaseReleaseException(Object error)
+      : super('本机数据已写入，但写租约释放未确认：$error');
+}
+
 class LocalAssignmentRepository {
   LocalAssignmentRepository({
     BackgroundReminderGateway backgroundReminderGateway =
@@ -722,7 +728,7 @@ class LocalAssignmentRepository {
           // the action succeeded, the unconfirmed release is the only failure.
           if (primaryError == null) {
             Error.throwWithStackTrace(
-              StateError('本机数据已写入，但写租约释放未确认：$releaseError'),
+              LocalStorageLeaseReleaseException(releaseError),
               releaseStack,
             );
           }

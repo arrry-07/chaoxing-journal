@@ -844,13 +844,25 @@ class AssignmentStore extends ChangeNotifier {
       } else {
         next.add(key);
       }
-      await repository.savePinnedIds(next, account);
+      await _savePins(next, account, generation);
       if (generation != _generation || _disposed) return;
       _pinnedIds = next;
       _pinsNeedSave = false;
       saved = true;
     });
     return saved;
+  }
+
+  Future<void> _savePins(
+      Set<String> ids, String account, int generation) async {
+    try {
+      await repository.savePinnedIds(ids, account);
+    } on LocalStorageLeaseReleaseException {
+      const warning = '置顶状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
+      if (generation == _generation && !_recoveryWarnings.contains(warning)) {
+        _recoveryWarnings.add(warning);
+      }
+    }
   }
 
   Future<void> _prunePins() async {
@@ -870,7 +882,7 @@ class AssignmentStore extends ChangeNotifier {
     _pinsNeedSave = true;
     final generation = _generation;
     try {
-      await repository.savePinnedIds(_pinnedIds, account);
+      await _savePins(_pinnedIds, account, generation);
       if (generation == _generation) _pinsNeedSave = false;
     } catch (_) {
       // The next successful journal update can retry without restoring pins
