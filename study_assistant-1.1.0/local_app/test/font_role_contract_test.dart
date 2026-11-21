@@ -53,7 +53,7 @@ bool _wrongRole({
   required TextStyle style,
 }) {
   if (title) {
-    return style.fontFamily != Journal.bodyFamily ||
+    return style.fontFamily != Journal.displayFamily ||
         style.fontWeight != FontWeight.w400;
   }
   return style.fontFamily != Journal.bodyFamily;
@@ -100,7 +100,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
       final titleStyle = _renderedStyle(tester, find.text(page.title));
-      expect(titleStyle.fontFamily, Journal.bodyFamily,
+      expect(titleStyle.fontFamily, Journal.displayFamily,
           reason: '${page.title} title family');
       expect(titleStyle.fontWeight, FontWeight.w400,
           reason: '${page.title} title weight');
@@ -143,7 +143,7 @@ void main() {
     );
   });
 
-  testWidgets('settings, form, dialog and bottom navigation use WenKai',
+  testWidgets('settings, form, dialog and bottom navigation use body font',
       (tester) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     tester.view.physicalSize = const Size(420, 900);
@@ -227,7 +227,7 @@ void main() {
     }
   });
 
-  testWidgets('font role contract rejects bold headlines and sans body text',
+  testWidgets('font role contract rejects bold headlines and display body text',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: StudyAssistantTheme.light,
@@ -236,11 +236,11 @@ void main() {
           Text(
             '错误标题',
             style: TextStyle(
-              fontFamily: Journal.bodyFamily,
+              fontFamily: Journal.displayFamily,
               fontWeight: FontWeight.w700,
             ),
           ),
-          Text('错误正文', style: TextStyle(fontFamily: 'sans-serif')),
+          Text('错误正文', style: TextStyle(fontFamily: Journal.displayFamily)),
         ]),
       ),
     ));

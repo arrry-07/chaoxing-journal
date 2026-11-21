@@ -306,7 +306,7 @@ class _SwatchPreview extends StatelessWidget {
       foregroundDecoration: BoxDecoration(
         borderRadius: radius,
         border: Border.all(
-          color: selected ? journal.ink : journal.rule,
+          color: selected ? journal.accent : journal.rule,
           width: selected ? 2 : 1,
         ),
       ),
@@ -374,7 +374,7 @@ class _SelectedBadge extends StatelessWidget {
       width: 18,
       height: 18,
       decoration: BoxDecoration(
-        color: journal.ink,
+        color: journal.accent,
         shape: BoxShape.circle,
         border: Border.all(color: journal.sheet, width: 1),
       ),
@@ -382,7 +382,9 @@ class _SelectedBadge extends StatelessWidget {
       child: Icon(
         Icons.check_rounded,
         size: 12,
-        color: journal.sheet,
+        color: journal == JournalPalette.dark
+            ? JournalPalette.dark.paper
+            : journal.sheet,
       ),
     );
   }

@@ -209,14 +209,17 @@ class StudyAssistantTheme {
   static final dark = _build(JournalPalette.dark, Brightness.dark);
 
   static ThemeData _build(JournalPalette journal, Brightness brightness) {
+    final onAccent = journal == JournalPalette.dark
+        ? JournalPalette.dark.paper
+        : journal.sheet;
     final baseScheme = ColorScheme.fromSeed(
-      seedColor: journal.ink,
+      seedColor: journal.accent,
       brightness: brightness,
       surface: journal.paper,
-      primary: journal.ink,
+      primary: journal.accent,
       secondary: journal.berry,
     ).copyWith(
-      onPrimary: journal.sheet,
+      onPrimary: onAccent,
       secondaryContainer: journal.sage,
       onSecondaryContainer: journal.ink,
       error: journal.berry,
@@ -282,13 +285,19 @@ class StudyAssistantTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: journal.ink,
-          foregroundColor: journal.sheet,
+          backgroundColor: journal.accent,
+          foregroundColor: onAccent,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
         ),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((states) =>
+            states.contains(WidgetState.selected) ? Colors.white : null),
+        trackColor: WidgetStateProperty.resolveWith((states) =>
+            states.contains(WidgetState.selected) ? journal.accent : null),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
@@ -303,7 +312,7 @@ class StudyAssistantTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: journal.ink, width: 1.2),
+          borderSide: BorderSide(color: journal.accent, width: 1.2),
         ),
       ),
       bottomSheetTheme: BottomSheetThemeData(

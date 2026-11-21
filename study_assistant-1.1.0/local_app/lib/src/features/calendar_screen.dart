@@ -361,7 +361,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                                     : null,
                                                 border: date == today
                                                     ? Border.all(
-                                                        color: journal.ink)
+                                                        color: journal.accent)
                                                     : null,
                                                 borderRadius:
                                                     BorderRadius.circular(8)),

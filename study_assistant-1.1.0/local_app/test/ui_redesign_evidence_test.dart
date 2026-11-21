@@ -53,6 +53,9 @@ void main() {
   testWidgets('redesign candidates include real shell, states and text scaling',
       (t) async {
     await initializeDateFormatting('zh_CN');
+    await (FontLoader(Journal.displayFamily)
+          ..addFont(rootBundle.load('assets/type/LXGWWenKaiScreen.ttf')))
+        .load();
     await (FontLoader(Journal.bodyFamily)
           ..addFont(rootBundle.load('assets/type/LXGWWenKaiScreen.ttf')))
         .load();
@@ -229,15 +232,22 @@ void main() {
         await t.pumpAndSettle();
       }
       expect(t.takeException(), isNull, reason: '$scene $width $scale');
-      void checkFont(InlineSpan span, [String? inherited]) {
+      void checkFont(InlineSpan span,
+          [String? inherited, double? inheritedSize]) {
         if (span is! TextSpan) return;
         final family = span.style?.fontFamily ?? inherited;
+        final size = span.style?.fontSize ?? inheritedSize ?? 0;
         if (RegExp(r'[A-Za-z0-9\u4e00-\u9fff]').hasMatch(span.text ?? '')) {
-          expect(family, Journal.bodyFamily,
+          expect(family, anyOf(Journal.bodyFamily, Journal.displayFamily),
               reason: '$scene $width $scale: ${span.text}');
+          if (family == Journal.displayFamily) {
+            expect(size, greaterThanOrEqualTo(28),
+                reason:
+                    '$scene $width $scale display font on small text: ${span.text}');
+          }
         }
         for (final child in span.children ?? <InlineSpan>[]) {
-          checkFont(child, family);
+          checkFont(child, family, size);
         }
       }
 

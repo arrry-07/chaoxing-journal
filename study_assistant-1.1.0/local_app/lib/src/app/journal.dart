@@ -7,27 +7,28 @@ class Journal {
           ? JournalPalette.dark
           : JournalPalette.light;
 
-  static const paper = Color(0xFFF7F5EC);
-  static const sheet = Color(0xFFFFFDF5);
-  static const parchment = Color(0xFFEFECE0);
-  static const ink = Color(0xFF243E34);
-  static const muted = Color(0xFF53645A);
-  static const sage = Color(0xFFDFE8D8);
-  static const sageBorder = Color(0xFFCAD8C3);
-  static const rule = Color(0xFFE4E2D5);
-  static const ruleStrong = Color(0xFFD6D5C7);
-  static const berry = Color(0xFF813E53);
-  static const berryBg = Color(0xFFF6E4E9);
-  static const berryBorder = Color(0xFFE5B8C2);
-  static const ochre = Color(0xFF85530E);
-  static const ochreBg = Color(0xFFFAF0D7);
-  static const ochreBorder = Color(0xFFE8CE9D);
-  static const slate = Color(0xFF244B6B);
-  static const slateBg = Color(0xFFEBF1F6);
-  static const slateBorder = Color(0xFFC5D6E6);
+  static const paper = Color(0xFFF6F6F4);
+  static const sheet = Color(0xFFFFFFFF);
+  static const parchment = Color(0xFFEFEFEC);
+  static const ink = Color(0xFF1F2328);
+  static const muted = Color(0xFF6B7280);
+  static const sage = Color(0xFFEAF0FD);
+  static const sageBorder = Color(0xFFC9D6F7);
+  static const rule = Color(0xFFE5E5E2);
+  static const ruleStrong = Color(0xFFD4D4D0);
+  static const berry = Color(0xFF9F3A4F);
+  static const berryBg = Color(0xFFFBEAEE);
+  static const berryBorder = Color(0xFFEFC2CC);
+  static const ochre = Color(0xFF8A5A12);
+  static const ochreBg = Color(0xFFFBF1DD);
+  static const ochreBorder = Color(0xFFEBD3A4);
+  static const slate = Color(0xFF3D63DD);
+  static const slateBg = Color(0xFFEAF0FD);
+  static const slateBorder = Color(0xFFC9D6F7);
 
-  static const bodyFamily = 'LXGW WenKai Screen';
-  static const titleFamily = bodyFamily;
+  static const displayFamily = 'LXGW WenKai Screen';
+  static const bodyFamily = 'sans-serif';
+  static const titleFamily = displayFamily;
   static const bodyFallback = ['sans-serif'];
 
   static const display = TextStyle(
@@ -39,7 +40,7 @@ class Journal {
     color: ink,
   );
   static const dayHeading = TextStyle(
-    fontFamily: titleFamily,
+    fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
     fontSize: 14,
     fontWeight: FontWeight.w400,
@@ -49,16 +50,16 @@ class Journal {
   static const section = TextStyle(
     fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
-    fontSize: 20,
+    fontSize: 19,
     color: ink,
-    fontWeight: FontWeight.w400,
+    fontWeight: FontWeight.w600,
     height: 1.38,
   );
   static const entryTitle = TextStyle(
     fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
     fontSize: 16,
-    fontWeight: FontWeight.w400,
+    fontWeight: FontWeight.w500,
     height: 1.38,
     color: ink,
   );
@@ -84,30 +85,31 @@ enum JournalPalette {
   light,
   dark;
 
-  Color get paper => this == dark ? const Color(0xFF141A17) : Journal.paper;
-  Color get sheet => this == dark ? const Color(0xFF1C2420) : Journal.sheet;
+  Color get paper => this == dark ? const Color(0xFF17181A) : Journal.paper;
+  Color get sheet => this == dark ? const Color(0xFF202124) : Journal.sheet;
   Color get parchment =>
-      this == dark ? const Color(0xFF232D28) : Journal.parchment;
-  Color get ink => this == dark ? const Color(0xFFE7E5DC) : Journal.ink;
-  Color get muted => this == dark ? const Color(0xFF9AA89F) : Journal.muted;
-  Color get sage => this == dark ? const Color(0xFF28382F) : Journal.sage;
+      this == dark ? const Color(0xFF2A2B2F) : Journal.parchment;
+  Color get ink => this == dark ? const Color(0xFFE6E6E6) : Journal.ink;
+  Color get muted => this == dark ? const Color(0xFF9AA0A6) : Journal.muted;
+  Color get sage => this == dark ? const Color(0xFF26304A) : Journal.sage;
   Color get sageBorder =>
-      this == dark ? const Color(0xFF384D41) : Journal.sageBorder;
-  Color get rule => this == dark ? const Color(0xFF2A342F) : Journal.rule;
+      this == dark ? const Color(0xFF3A4A73) : Journal.sageBorder;
+  Color get rule => this == dark ? const Color(0xFF2E3034) : Journal.rule;
   Color get ruleStrong =>
-      this == dark ? const Color(0xFF36423C) : Journal.ruleStrong;
-  Color get berry => this == dark ? const Color(0xFFE58C9E) : Journal.berry;
-  Color get berryBg => this == dark ? const Color(0xFF3A2028) : Journal.berryBg;
+      this == dark ? const Color(0xFF3A3C41) : Journal.ruleStrong;
+  Color get berry => this == dark ? const Color(0xFFF08A9C) : Journal.berry;
+  Color get berryBg => this == dark ? const Color(0xFF3A2228) : Journal.berryBg;
   Color get berryBorder =>
-      this == dark ? const Color(0xFF69414D) : Journal.berryBorder;
+      this == dark ? const Color(0xFF6A3B46) : Journal.berryBorder;
   Color get ochre => this == dark ? const Color(0xFFE5B567) : Journal.ochre;
-  Color get ochreBg => this == dark ? const Color(0xFF382B17) : Journal.ochreBg;
+  Color get ochreBg => this == dark ? const Color(0xFF3A2E18) : Journal.ochreBg;
   Color get ochreBorder =>
-      this == dark ? const Color(0xFF695230) : Journal.ochreBorder;
-  Color get slate => this == dark ? const Color(0xFF86B4D8) : Journal.slate;
-  Color get slateBg => this == dark ? const Color(0xFF1E2E3B) : Journal.slateBg;
+      this == dark ? const Color(0xFF6B5530) : Journal.ochreBorder;
+  Color get slate => this == dark ? const Color(0xFF8AA8FF) : Journal.slate;
+  Color get slateBg => this == dark ? const Color(0xFF1F2A44) : Journal.slateBg;
   Color get slateBorder =>
-      this == dark ? const Color(0xFF425C71) : Journal.slateBorder;
+      this == dark ? const Color(0xFF3A4A73) : Journal.slateBorder;
+  Color get accent => slate;
 
   TextStyle get display =>
       this == dark ? Journal.display.copyWith(color: ink) : Journal.display;

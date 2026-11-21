@@ -361,7 +361,7 @@ class AssignmentCard extends StatelessWidget {
                 ? journal.entryTitle.copyWith(
                     color: journal == JournalPalette.dark
                         ? journal.muted
-                        : const Color(0xFF36453E),
+                        : const Color(0xFF4B5563),
                   )
                 : journal.entryTitle,
           )
