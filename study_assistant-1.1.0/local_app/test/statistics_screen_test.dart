@@ -10,6 +10,8 @@ import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/local_records_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/completion_pie_chart.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_grouped_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_statistics.dart';
@@ -31,7 +33,7 @@ Assignment work(int id, String status, {DateTime? due}) => Assignment(
 
 void main() {
   testWidgets(
-      'completion ring uses ordered category arcs and keeps 8/2/1 semantics',
+      'minimal overview card shows ratio, multi-segment bar, and 8/2/1 semantics',
       (t) async {
     final semantics = t.ensureSemantics();
     final now = DateTime.utc(2026, 11, 10, 2);
@@ -51,91 +53,54 @@ void main() {
       theme: StudyAssistantTheme.light,
       home: Scaffold(body: StatsScreen(store: store, clock: () => now)),
     ));
+    await t.pumpAndSettle();
 
-    final chart = find.byType(CompletionPieChart);
-    expect(
-      find.descendant(of: chart, matching: find.text('73%')),
-      findsOneWidget,
-    );
-    expect(find.text('73%'), findsNWidgets(2));
-    expect(find.text('18%'), findsOneWidget);
-    expect(find.text('9%'), findsOneWidget);
+    expect(find.text('73%'), findsOneWidget);
+    expect(find.textContaining('8'), findsWidgets);
+    expect(find.textContaining('/ 11'), findsOneWidget);
     expect(find.text('8 份'), findsOneWidget);
     expect(find.text('2 份'), findsOneWidget);
     expect(find.text('1 份'), findsOneWidget);
+    expect(find.text(' · 73%'), findsOneWidget);
+    expect(find.text(' · 18%'), findsOneWidget);
+    expect(find.text(' · 9%'), findsOneWidget);
+
     final courseMark = t.widget<CourseMark>(find.byType(CourseMark));
-    expect(courseMark.size, 30);
+    expect(courseMark.size, 28);
     final pendingNode = t.getSemantics(find.bySemanticsLabel('待完成 2 份，18%'));
     expect(
       pendingNode.getSemanticsData().hasAction(SemanticsAction.tap),
       isTrue,
     );
 
-    final painter = t
-        .widget<CustomPaint>(find.descendant(
-          of: chart,
-          matching: find.byType(CustomPaint),
-        ))
-        .painter as CompletionRingPainter;
-    expect(painter.counts, [8, 2, 1, 0]);
-    final segments = CompletionPieChart.segments(painter.counts);
-    expect(segments.map((segment) => segment.index), [0, 1, 2]);
-    expect(segments[0].start, closeTo(-math.pi / 2, 1e-9));
-    expect(segments[0].sweep, closeTo(8 / 11 * math.pi * 2, 1e-9));
-    expect(
-      segments[1].start,
-      closeTo(-math.pi / 2 + 8 / 11 * math.pi * 2, 1e-9),
+    final overview = t.widget<JournalGroupedCard>(
+      find.byKey(const ValueKey('stats-overview-card')),
     );
-    expect(segments[1].sweep, closeTo(2 / 11 * math.pi * 2, 1e-9));
-    expect(
-      segments[2].start,
-      closeTo(-math.pi / 2 + 10 / 11 * math.pi * 2, 1e-9),
+    expect(overview.backgroundColor, isNull);
+    final overviewMaterial = t.widget<Material>(
+      find
+          .descendant(
+            of: find.byKey(const ValueKey('stats-overview-card')),
+            matching: find.byType(Material),
+          )
+          .first,
     );
-    expect(segments[2].sweep, closeTo(1 / 11 * math.pi * 2, 1e-9));
-    expect(segments.map((segment) => segment.color), [
-      CompletionPieChart.categoryColors[0],
-      CompletionPieChart.categoryColors[1],
-      CompletionPieChart.categoryColors[2],
-    ]);
-    expect(
-      CompletionPieChart.categoryColors[0],
-      const Color(0xFF4B6CB7),
-    );
-    expect(
-      CompletionPieChart.categoryColors[1],
-      const Color(0xFF9EB5E5),
-    );
-    expect(
-      CompletionPieChart.categoryColors[2],
-      const Color(0xFFD47474),
-    );
-    expect(
-      CompletionPieChart.categoryColors[3],
-      const Color(0xFFD8DCE2),
-    );
-    expect(
-      CompletionPieChart.colorsFor(JournalPalette.dark).toSet().length,
-      4,
-    );
-    expect(CompletionPieChart.legendColors, CompletionPieChart.categoryColors);
-    expect(CompletionPieChart.ringThickness, 10);
+    expect(overviewMaterial.color, Journal.sheet);
 
-    final overview =
-        t.widget<Card>(find.byKey(const ValueKey('stats-overview-card')));
-    final course =
-        t.widget<Card>(find.byKey(const ValueKey('stats-course-1:2')));
     expect(
-      overview.color,
-      Color.lerp(Journal.paper, Journal.sheet, .70),
+      find.text('统计范围：已关注课程的课业与账号考试'),
+      findsNothing,
     );
-    expect(
-      course.color,
-      Color.lerp(Journal.paper, Journal.sheet, .50),
-    );
+    await t.tap(find.byTooltip('查看说明'));
+    await t.pumpAndSettle();
+    expect(find.text('统计口径说明'), findsOneWidget);
+    await t.tap(find.text('知道了'));
+    await t.pumpAndSettle();
+
     semantics.dispose();
   });
 
-  testWidgets('legend separates expired from unknown and uses full row width',
+  testWidgets('status rows separate expired from unknown inside one card',
       (t) async {
     final store = AssignmentStore(
         sessionStore: SecureSessionStore(),
@@ -148,34 +113,22 @@ void main() {
       work(2, 'pending', due: DateTime(2000)),
       work(3, 'unknown'),
     ]);
-    await t.pumpWidget(
-        MaterialApp(home: Scaffold(body: StatsScreen(store: store))));
+    await t.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(body: StatsScreen(store: store))));
+    await t.pumpAndSettle();
     expect(find.text('已完成'), findsOneWidget);
     expect(find.text('待完成'), findsOneWidget);
     expect(find.text('已逾期'), findsOneWidget);
     expect(find.text('提交未知'), findsOneWidget);
-    expect(
-      t.widget<Text>(find.text('待完成 1 份')).style?.color,
-      Journal.ink,
-    );
-    expect(
-      t.widget<Text>(find.text('已逾期 1 份')).style?.color,
-      Journal.berry,
-    );
-    expect(
-      t.widget<Text>(find.text('提交未知 1 份')).style?.color,
-      Journal.muted,
-    );
-    expect(
-        find.descendant(
-            of: find.byType(CompletionPieChart), matching: find.text('25%')),
-        findsOneWidget);
-    expect(find.text('完成率'), findsOneWidget);
+    expect(find.text('25%'), findsOneWidget);
     expect(find.text('待提交'), findsNothing);
-    final label = t.getRect(find.text('已完成'));
-    final value = t.getRect(find.text('25%').at(1));
-    expect(value.top, greaterThan(label.top));
-    expect(value.right, greaterThan(740));
+
+    // Course breakdown rows sit inside one grouped white card, not per-row Card boxes.
+    expect(find.byKey(const ValueKey('stats-course-1:2')), findsOneWidget);
+    expect(find.text('待完成 1'), findsOneWidget);
+    expect(find.text('已逾期 1'), findsOneWidget);
+    expect(find.text('未知 1'), findsOneWidget);
   });
 
   for (final scale in [1.0, 2.0]) {
@@ -192,19 +145,14 @@ void main() {
       addTearDown(store.dispose);
       store.replaceAssignmentsForTest([work(0, 'pending'), work(1, 'unknown')]);
       await t.pumpWidget(MaterialApp(
+          theme: StudyAssistantTheme.light,
           builder: (context, child) => MediaQuery(
               data: MediaQuery.of(context)
                   .copyWith(textScaler: TextScaler.linear(scale)),
               child: child!),
           home: Scaffold(body: StatsScreen(store: store))));
+      await t.pumpAndSettle();
       expect(t.takeException(), isNull);
-      if (scale == 2) {
-        expect(t.getRect(find.text('已完成')).top,
-            greaterThan(t.getRect(find.byType(CompletionPieChart)).bottom));
-      } else {
-        expect(t.getRect(find.text('已完成')).left,
-            greaterThan(t.getRect(find.byType(CompletionPieChart)).right));
-      }
       await t.drag(find.byType(ListView), const Offset(0, -1000));
       await t.pumpAndSettle();
       expect(t.takeException(), isNull);
@@ -212,7 +160,27 @@ void main() {
   }
 
   testWidgets(
-      'unknown-only chart does not present a definite zero completion rate',
+      'unknown-only stats do not present a definite zero completion rate',
+      (t) async {
+    final store = AssignmentStore(
+        sessionStore: SecureSessionStore(),
+        notificationService: LocalNotificationService(),
+        widgetSnapshotService: WidgetSnapshotService());
+    addTearDown(store.dispose);
+    store.replaceAssignmentsForTest([work(0, 'unknown')]);
+
+    await t.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(body: StatsScreen(store: store)),
+    ));
+    await t.pumpAndSettle();
+
+    expect(find.text('0%'), findsNothing);
+    expect(find.text('待确认'), findsOneWidget);
+  });
+
+  testWidgets(
+      'unknown-only pie chart helper does not present a definite zero rate',
       (t) async {
     await t.pumpWidget(MaterialApp(
         home: Scaffold(
@@ -227,23 +195,6 @@ void main() {
     expect(segment.color, CompletionPieChart.categoryColors[3]);
   });
 
-  testWidgets('zero completion draws unfinished categories and keeps real 0%',
-      (t) async {
-    final stats = AssignmentStatistics([
-      work(0, 'pending'),
-      work(1, 'pending'),
-      work(2, 'pending', due: DateTime(2000)),
-    ]);
-    await t.pumpWidget(MaterialApp(
-      home: Scaffold(body: CompletionPieChart(statistics: stats)),
-    ));
-    expect(find.text('0%'), findsOneWidget);
-    final segments = CompletionPieChart.segments([0, 2, 1, 0]);
-    expect(segments.map((segment) => segment.index), [1, 2]);
-    expect(segments[0].sweep, closeTo(2 / 3 * math.pi * 2, 1e-9));
-    expect(segments[1].sweep, closeTo(1 / 3 * math.pi * 2, 1e-9));
-  });
-
   test('ring segments skip zero counts and preserve tiny true proportions', () {
     expect(CompletionPieChart.segments([0, 0, 0, 0]), isEmpty);
     final tiny = CompletionPieChart.segments([999, 1, 0, 0]);
@@ -251,7 +202,7 @@ void main() {
     expect(tiny[1].sweep, closeTo(math.pi * 2 / 1000, 1e-9));
   });
 
-  testWidgets('empty statistics keep the original empty card and no chart',
+  testWidgets('empty statistics keep the empty card and no overview bar',
       (t) async {
     final store = AssignmentStore(
         sessionStore: SecureSessionStore(),
@@ -262,12 +213,12 @@ void main() {
       theme: StudyAssistantTheme.light,
       home: Scaffold(body: StatsScreen(store: store)),
     ));
-    expect(find.byType(CompletionPieChart), findsNothing);
+    expect(find.byKey(const ValueKey('stats-overview-card')), findsNothing);
     expect(find.byKey(const ValueKey('stats-empty-card')), findsOneWidget);
     expect(find.text('暂无可统计的作业'), findsOneWidget);
   });
 
-  testWidgets('three primary legends remain visible when unknown is zero',
+  testWidgets('three primary rows remain visible when unknown is zero',
       (t) async {
     final store = AssignmentStore(
         sessionStore: SecureSessionStore(),
@@ -275,19 +226,15 @@ void main() {
         widgetSnapshotService: WidgetSnapshotService());
     addTearDown(store.dispose);
     store.replaceAssignmentsForTest([work(0, 'submitted')]);
-    await t.pumpWidget(
-        MaterialApp(home: Scaffold(body: StatsScreen(store: store))));
+    await t.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(body: StatsScreen(store: store))));
+    await t.pumpAndSettle();
     expect(find.text('已完成'), findsOneWidget);
     expect(find.text('待完成'), findsOneWidget);
     expect(find.text('已逾期'), findsOneWidget);
     expect(find.text('提交未知'), findsNothing);
-    expect(
-        find.descendant(
-            of: find.byType(CompletionPieChart), matching: find.text('100%')),
-        findsOneWidget);
-    final segment = CompletionPieChart.segments([1, 0, 0, 0]).single;
-    expect(segment.index, 0);
-    expect(segment.sweep, closeTo(math.pi * 2, 1e-9));
+    expect(find.text('100%'), findsOneWidget);
     expect(find.text('当前没有待处理的课程'), findsOneWidget);
   });
 
@@ -313,17 +260,18 @@ void main() {
       ),
     ]);
 
-    await t.pumpWidget(
-        MaterialApp(home: Scaffold(body: StatsScreen(store: store))));
+    await t.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(body: StatsScreen(store: store))));
+    await t.pumpAndSettle();
 
     expect(t.takeException(), isNull);
     expect(find.text('账号考试'), findsOneWidget);
-    expect(find.text('共 2 项课业'), findsOneWidget);
     expect(find.byIcon(Icons.description_outlined), findsOneWidget);
   });
 
   testWidgets(
-      'stats range switching and interactive drill-down preserve HomeFilters and keep stats tab highlighted',
+      'stats range switching and interactive drill-down preserve HomeFilters and restore nav on back',
       (t) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     final now = DateTime.utc(2026, 11, 10, 2); // Beijing 10:00
@@ -335,7 +283,7 @@ void main() {
     addTearDown(store.dispose);
     await store.restoreSession();
 
-    final initialFilters = const HomeFilters(
+    const initialFilters = HomeFilters(
       deadline: AssignmentDeadlineFilter.overdue,
       type: AssignmentTypeFilter.exam,
       query: '保留首页搜索',
@@ -407,15 +355,16 @@ void main() {
     );
     await t.pumpAndSettle();
 
-    expect(find.text('共 4 项课业'), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
+    expect(find.textContaining('/ 4'), findsOneWidget);
 
     // Switch to 未来 7 天: includes nearPending + accExam, excludes undatedPending.
     await t.tap(find.text('未来 7 天'));
     await t.pumpAndSettle();
-    expect(find.text('共 2 项课业'), findsOneWidget);
-    expect(find.text('不含 1 项无确定时间课业（切回“全部”可查看）'), findsOneWidget);
+    expect(find.textContaining('/ 2'), findsOneWidget);
+    expect(find.text('不含 1 项无确定时间课业'), findsOneWidget);
 
-    // Drill down via pie legend ('待完成')
+    // Drill down via status row ('待完成')
     await t.tap(find.text('待完成'));
     await t.pumpAndSettle();
     var spec = t
@@ -428,13 +377,13 @@ void main() {
     expect(spec.courseKey, isNull);
     expect(find.byType(LocalRecordsScreen), findsOneWidget);
     expect(find.text('2 条记录'), findsOneWidget);
-    final nav = t.widget<NavigationBar>(find.byType(NavigationBar));
-    expect(nav.selectedIndex, 2);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
 
     // Back to StatsScreen cleanly
     await t.tap(find.byTooltip('返回'));
     await t.pumpAndSettle();
     expect(find.byType(StatsScreen), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
 
     // Drill down from a course row and preserve the course identity.
     await t.scrollUntilVisible(find.text('高等数学与统计课程'), 200);
@@ -454,7 +403,7 @@ void main() {
     // Switch to 未来 30 天 and drill down via 账号考试 card
     await t.tap(find.text('未来 30 天'));
     await t.pumpAndSettle();
-    expect(find.text('共 3 项课业'), findsOneWidget);
+    expect(find.textContaining('/ 3'), findsOneWidget);
 
     final accountExamLabel = find.text('账号考试');
     await Scrollable.ensureVisible(

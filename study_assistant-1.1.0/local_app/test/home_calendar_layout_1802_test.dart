@@ -254,7 +254,10 @@ void main() {
         MaterialApp(home: Scaffold(body: CalendarScreen(store: store))));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-        find.byKey(const ValueKey('calendar-deadline-pending-scope')), 200);
+      find.byKey(const ValueKey('calendar-deadline-pending-scope')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.byKey(const ValueKey('calendar-deadline-pending-scope')),
         findsOneWidget);
     expect(find.textContaining('考试时间未知'), findsNothing);

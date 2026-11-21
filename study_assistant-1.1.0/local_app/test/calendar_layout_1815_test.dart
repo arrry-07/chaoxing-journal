@@ -122,7 +122,7 @@ void main() {
       addTearDown(store.dispose);
       await _pump(tester, store, now: now, scale: scale);
       expect(tester.takeException(), isNull, reason: 'scale $scale');
-      expect(find.byKey(const ValueKey('calendar-count-18')), findsOneWidget);
+      expect(find.byKey(const ValueKey('calendar-dots-18')), findsOneWidget);
       final cell = tester.getSize(_daySemantics(11, 18, today: true));
       expect(cell.height, greaterThanOrEqualTo(48), reason: 'scale $scale');
       if (scale == 1.0) {
@@ -191,6 +191,31 @@ void main() {
     );
     expect(find.text('作业7'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('calendar supports horizontal month swipe and week collapse',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 18, 2);
+    final store = _Store();
+    addTearDown(store.dispose);
+    await _pump(tester, store, now: now, size: const Size(390, 840));
+
+    expect(find.text('2026年11月'), findsOneWidget);
+    final viewport = find.byKey(const ValueKey('calendar-grid-viewport'));
+    final fullGridSize = tester.getSize(viewport);
+
+    // Toggle week collapse: grid shrinks to a single row height.
+    await tester.tap(find.byKey(const ValueKey('calendar-week-toggle')));
+    await tester.pumpAndSettle();
+    final collapsedSize = tester.getSize(viewport);
+    expect(collapsedSize.height, lessThan(fullGridSize.height * 0.4));
+
+    // Expand back to month view and swipe left to December 2026.
+    await tester.tap(find.byKey(const ValueKey('calendar-week-toggle')));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(PageView), const Offset(-300, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('2026年12月'), findsOneWidget);
   });
 
   testWidgets('compact and countdown preferences reach calendar cards',

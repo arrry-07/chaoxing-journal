@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
-import 'package:study_assistant_mobile/src/features/widgets/completion_pie_chart.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
@@ -353,16 +352,17 @@ void main() {
     await t
         .pumpWidget(MaterialApp(home: Scaffold(body: StatsScreen(store: s))));
     expect(find.text('暂无可统计的作业'), findsOneWidget);
-    expect(find.byType(CompletionPieChart), findsNothing);
+    expect(find.byKey(const ValueKey('stats-overview-card')), findsNothing);
     s.replaceAssignmentsForTest([work(0), work(1, status: 'unknown')]);
     s.changed();
-    await t.pump();
+    await t.pumpAndSettle();
     expect(find.text('高等数学2（下） · 分组1'), findsOneWidget);
     expect(find.text('高等数学2（下） · 分组2'), findsOneWidget);
-    expect(find.byType(CompletionPieChart), findsOneWidget);
+    expect(find.byKey(const ValueKey('stats-overview-card')), findsOneWidget);
     s.replaceAssignmentsForTest([work(0, status: 'unknown')]);
     s.changed();
-    await t.pump();
-    expect(find.text('全部状态待确认'), findsOneWidget);
+    await t.pumpAndSettle();
+    expect(find.text('待确认'), findsOneWidget);
+    expect(find.text('0%'), findsNothing);
   });
 }

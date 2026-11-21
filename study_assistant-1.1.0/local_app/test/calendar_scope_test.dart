@@ -334,30 +334,20 @@ void main() {
     final title = tester.getRect(find.text('课业日历'));
     final agendaEntry = tester.getRect(find.text('个人待办与考试'));
     expect(agendaEntry.left, greaterThan(title.right));
-    expect(agendaEntry.center.dy, closeTo(title.center.dy, 2));
     final agendaHeading = find.text('11月18日 · 议程');
     expect(agendaHeading.hitTestable(), findsOneWidget);
-    final calendarCard = find
-        .ancestor(
-          of: find.byKey(const ValueKey('calendar-count-18')),
-          matching: find.byType(Card),
-        )
-        .first;
-    final explanation = find.text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。');
     expect(
-      tester.getTopLeft(explanation).dy,
-      greaterThan(tester.getBottomRight(calendarCard).dy),
+      find.text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。'),
+      findsNothing,
     );
-    expect(
-      tester.getTopLeft(agendaHeading).dy,
-      greaterThan(tester.getTopLeft(explanation).dy),
-    );
+    expect(find.byKey(const ValueKey('calendar-dots-18')), findsOneWidget);
 
-    final count = tester.widget<Text>(
-      find.byKey(const ValueKey('calendar-count-18')),
-    );
-    expect(count.data, '3');
-    expect(count.style?.color, Journal.muted);
+    await tester.tap(find.byTooltip('查看说明'));
+    await tester.pumpAndSettle();
+    expect(find.text('日历统计与圆点说明'), findsOneWidget);
+    expect(find.text('考试按开考日展示，作业与课堂任务按截止日展示，均使用北京时间。'), findsOneWidget);
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
       find.text('手动考试 · 高数考试'),

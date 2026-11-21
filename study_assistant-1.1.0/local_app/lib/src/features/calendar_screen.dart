@@ -4,13 +4,20 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+
 import '../app/journal.dart';
+import '../app/journal_motion.dart';
+import '../models/assignment.dart';
+import '../models/study_notebook.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import 'assignment_list_screen.dart';
-import 'widgets/assignment_card.dart';
 import 'manual_agenda_screen.dart';
+import 'widgets/assignment_card.dart';
+import 'widgets/journal_buttons.dart';
+import 'widgets/journal_grouped_card.dart';
+import 'widgets/journal_info_popover.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({super.key, required this.store, this.clock});
@@ -22,28 +29,24 @@ class CalendarScreen extends StatefulWidget {
 
 class _CalendarScreenState extends State<CalendarScreen>
     with WidgetsBindingObserver {
-  static const _dateStyle = TextStyle(
+  static const int _basePageIndex = 1200;
+  static const TextStyle _dateStyle = TextStyle(
     fontFamily: Journal.bodyFamily,
     fontFamilyFallback: Journal.bodyFallback,
     fontSize: 14,
-    height: 1.4,
+    fontWeight: FontWeight.w500,
+    fontFeatures: [FontFeature.tabularFigures()],
+    height: 1.35,
   );
-  TextStyle get _countStyle => TextStyle(
-        fontFamily: Journal.bodyFamily,
-        fontFamilyFallback: Journal.bodyFallback,
-        fontSize: 11,
-        height: 1.4,
-        color: Journal.of(context).muted,
-      );
-  static const _cellBorderWidth = 1.0;
-  static const _cellVerticalPadding = 2.0;
-  static const _cellSlack = 1.0;
 
   Timer? _clock;
   late DateTime _now;
   late DateTime today;
+  late DateTime _baseMonth;
   late DateTime month;
+  late final PageController _pageController;
   DateTime? selected;
+  bool _weekCollapsed = false;
   bool _refreshing = false;
   String? _refreshMessage;
 
@@ -53,8 +56,10 @@ class _CalendarScreenState extends State<CalendarScreen>
     WidgetsBinding.instance.addObserver(this);
     _now = widget.clock?.call() ?? DateTime.now();
     today = AssignmentQuery.dayKey(_now);
-    month = DateTime(today.year, today.month);
+    _baseMonth = DateTime(today.year, today.month);
+    month = _baseMonth;
     selected = today;
+    _pageController = PageController(initialPage: _basePageIndex);
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!mounted) return;
       setState(() {
@@ -66,6 +71,7 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   @override
   void dispose() {
+    _pageController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _clock?.cancel();
     super.dispose();
@@ -80,10 +86,59 @@ class _CalendarScreenState extends State<CalendarScreen>
     });
   }
 
-  void move(int delta) => setState(() {
-        month = DateTime(month.year, month.month + delta);
-        selected = DateTime(month.year, month.month);
-      });
+  int _pageIndexForMonth(DateTime target) =>
+      _basePageIndex +
+      (target.year - _baseMonth.year) * 12 +
+      (target.month - _baseMonth.month);
+
+  DateTime _monthForPageIndex(int index) =>
+      DateTime(_baseMonth.year, _baseMonth.month + (index - _basePageIndex));
+
+  void move(int delta) {
+    final target = DateTime(month.year, month.month + delta);
+    final targetPage = _pageIndexForMonth(target);
+    setState(() {
+      month = target;
+      selected = DateTime(target.year, target.month);
+    });
+    if (_pageController.hasClients) {
+      if (!JournalMotion.isReducedMotion(context)) {
+        _pageController.animateToPage(
+          targetPage,
+          duration: const Duration(milliseconds: 260),
+          curve: JournalMotion.easeOut,
+        );
+      } else {
+        _pageController.jumpToPage(targetPage);
+      }
+    }
+  }
+
+  void _goToday() {
+    JournalMotion.tap(widget.store.display);
+    final target = DateTime(today.year, today.month);
+    final targetPage = _pageIndexForMonth(target);
+    if (_pageController.hasClients && !JournalMotion.isReducedMotion(context)) {
+      _pageController.animateToPage(
+        targetPage,
+        duration: const Duration(milliseconds: 260),
+        curve: JournalMotion.easeOut,
+      );
+    } else if (_pageController.hasClients) {
+      _pageController.jumpToPage(targetPage);
+    }
+    setState(() {
+      month = target;
+      selected = today;
+    });
+  }
+
+  void _toggleWeekCollapse([bool? collapsed]) {
+    final next = collapsed ?? !_weekCollapsed;
+    if (next == _weekCollapsed) return;
+    JournalMotion.tap(widget.store.display);
+    setState(() => _weekCollapsed = next);
+  }
 
   Future<void> _refresh() async {
     if (_refreshing || widget.store.isLoading) return;
@@ -139,45 +194,61 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-      animation: widget.store,
-      builder: (context, _) {
-        final journal = Journal.of(context);
-        final now = _now;
-        final courseSources = widget.store.courseAssignments;
-        final all = AssignmentQuery.projectDisplay(courseSources);
-        final manual = widget.store.notebook.entries
-            .where((e) => !e.done && e.at != null)
-            .toList();
-        final manualAgenda = manual.where((e) {
-          final d = AssignmentQuery.dayKey(e.at!);
-          return selected == null
-              ? d.year == month.year && d.month == month.month
-              : d == selected;
-        }).toList()
-          ..sort((a, b) => a.at!.compareTo(b.at!));
-        final dated = all
-            .where((assignment) =>
-                AssignmentQuery.isCalendarDated(assignment, now))
-            .toList();
-        final noDeadlineCount = all
-            .where((a) => AssignmentRecoveryScope.noDeadline.matches(a, now))
-            .length;
-        final pendingDeadlineCount = all
-            .where(
-                (a) => AssignmentRecoveryScope.deadlinePending.matches(a, now))
-            .length;
-        final agenda = selected == null
-            ? dated.where((a) {
-                final d = AssignmentQuery.dayKey(a.timelineAt!);
-                return d.year == month.year && d.month == month.month;
-              }).toList()
-            : AssignmentQuery.forDay(all, selected!, {}, now: now);
-        agenda.sort((a, b) => a.timelineAt!.compareTo(b.timelineAt!));
-        final days = DateTime(month.year, month.month + 1, 0).day,
-            leading = month.weekday % 7;
-        final textScaler = MediaQuery.textScalerOf(context);
-        final cellHeight = _calendarCellHeight(context, textScaler);
-        return ListView(
+        animation: widget.store,
+        builder: (context, _) {
+          final journal = Journal.of(context);
+          final now = _now;
+          final courseSources = widget.store.courseAssignments;
+          final all = AssignmentQuery.projectDisplay(courseSources);
+          final manual = widget.store.notebook.entries
+              .where((e) => !e.done && e.at != null)
+              .toList();
+          final manualAgenda = manual.where((e) {
+            final d = AssignmentQuery.dayKey(e.at!);
+            return selected == null
+                ? d.year == month.year && d.month == month.month
+                : d == selected;
+          }).toList()
+            ..sort((a, b) => a.at!.compareTo(b.at!));
+          final dated = all
+              .where((assignment) =>
+                  AssignmentQuery.isCalendarDated(assignment, now))
+              .toList();
+          final noDeadlineCount = all
+              .where((a) => AssignmentRecoveryScope.noDeadline.matches(a, now))
+              .length;
+          final pendingDeadlineCount = all
+              .where((a) =>
+                  AssignmentRecoveryScope.deadlinePending.matches(a, now))
+              .length;
+          final agenda = selected == null
+              ? dated.where((a) {
+                  final d = AssignmentQuery.dayKey(a.timelineAt!);
+                  return d.year == month.year && d.month == month.month;
+                }).toList()
+              : AssignmentQuery.forDay(all, selected!, {}, now: now);
+          agenda.sort((a, b) => a.timelineAt!.compareTo(b.timelineAt!));
+
+          final textScaler = MediaQuery.textScalerOf(context);
+          final cellHeight = _calendarCellHeight(textScaler);
+          final isOffToday = selected != today ||
+              month.year != today.year ||
+              month.month != today.month;
+          final busy = _refreshing || widget.store.isLoading;
+          final syncStatusText = busy
+              ? '正在刷新${widget.store.lastSyncAt == null ? '' : ' · 上次 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'}…'
+              : _refreshMessage ??
+                  (widget.store.lastSyncAt == null
+                      ? '尚未同步 · 当前显示本机记录'
+                      : '上次同步 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}');
+
+          final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
+          final leading = month.weekday % 7;
+          final rowCount = (leading + daysInMonth + 6) ~/ 7;
+          final gridHeight =
+              _weekCollapsed ? cellHeight : rowCount * cellHeight;
+
+          return ListView(
             padding: EdgeInsets.fromLTRB(
               18,
               14,
@@ -189,127 +260,164 @@ class _CalendarScreenState extends State<CalendarScreen>
                 alignment: WrapAlignment.spaceBetween,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 spacing: 8,
+                runSpacing: 6,
                 children: [
                   Text('课业日历', style: journal.display),
-                  TextButton.icon(
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (isOffToday)
+                        JournalPillButton(
+                          label: '回今天',
+                          onPressed: _goToday,
+                        ),
+                      IconButton(
+                        tooltip: '刷新',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: busy ? null : _refresh,
+                        icon: busy
+                            ? JournalMotion.isReducedMotion(context)
+                                ? const Icon(Icons.hourglass_top_rounded,
+                                    size: 20)
+                                : SizedBox.square(
+                                    dimension: 19,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: journal.ink,
+                                    ),
+                                  )
+                            : const Icon(Icons.sync_rounded, size: 21),
                       ),
-                      visualDensity: VisualDensity.compact,
-                      textStyle: journal.metadata.copyWith(
-                        fontSize: 14,
-                        color: journal.ink,
+                      JournalPillButton(
+                        label: '个人待办与考试',
+                        icon: Icons.event_note_outlined,
+                        onPressed: () => context.push('/agenda'),
                       ),
-                    ),
-                    onPressed: () => context.push('/agenda'),
-                    icon: const Icon(Icons.event_note_outlined, size: 18),
-                    label: const Text('个人待办与考试'),
+                    ],
                   ),
                 ],
               ),
-              Row(children: [
-                TextButton(
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    onPressed: () => setState(() {
-                          month = DateTime(today.year, today.month);
-                          selected = today;
-                        }),
-                    child: const Text('回今天')),
-                TextButton(
-                    onPressed: () => setState(() => selected = null),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      visualDensity: VisualDensity.compact,
-                      foregroundColor:
-                          selected == null ? journal.accent : journal.ink,
-                    ),
-                    child: const Text('本月')),
-                const Spacer(),
-                IconButton(
-                    tooltip: '刷新',
-                    visualDensity: VisualDensity.compact,
-                    onPressed:
-                        _refreshing || widget.store.isLoading ? null : _refresh,
-                    icon: _refreshing || widget.store.isLoading
-                        ? MediaQuery.disableAnimationsOf(context)
-                            ? const Icon(Icons.hourglass_top_rounded, size: 20)
-                            : const SizedBox.square(
-                                dimension: 20,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                        : const Icon(Icons.sync))
-              ]),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  _refreshing || widget.store.isLoading
-                      ? '正在刷新${widget.store.lastSyncAt == null ? '' : '；上次成功 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'}…'
-                      : _refreshMessage ??
-                          (widget.store.lastSyncAt == null
-                              ? '尚未成功同步；当前仅显示本机已有记录'
-                              : '上次成功同步 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _refreshMessage?.contains('失败') == true
-                        ? Theme.of(context).colorScheme.error
-                        : journal.muted,
-                  ),
+              const SizedBox(height: 2),
+              Text(
+                syncStatusText,
+                style: journal.metadata.copyWith(
+                  color: _refreshMessage?.contains('失败') == true
+                      ? journal.berry
+                      : journal.muted,
                 ),
               ),
-              Card(
-                  margin: EdgeInsets.zero,
-                  child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Column(children: [
-                        Builder(builder: (context) {
-                          final previous = IconButton(
-                            tooltip: '上个月',
-                            onPressed: () => move(-1),
-                            icon: const Icon(Icons.chevron_left),
-                          );
-                          final next = IconButton(
-                            tooltip: '下个月',
-                            onPressed: () => move(1),
-                            icon: const Icon(Icons.chevron_right),
-                          );
-                          final label = Text(
-                            DateFormat('yyyy年M月').format(month),
-                            maxLines: 1,
-                            softWrap: false,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: Journal.of(context).section,
-                          );
-                          return LayoutBuilder(builder: (context, constraints) {
+              const SizedBox(height: 12),
+              GestureDetector(
+                onVerticalDragEnd: (details) {
+                  final v = details.primaryVelocity ?? 0;
+                  if (v < -220) {
+                    _toggleWeekCollapse(true);
+                  } else if (v > 220) {
+                    _toggleWeekCollapse(false);
+                  }
+                },
+                child: JournalGroupedCard(
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
+                  children: [
+                    Column(
+                      children: [
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final monthLabelText =
+                                DateFormat('yyyy年M月').format(month);
+                            final label = Text(
+                              monthLabelText,
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: journal.section.copyWith(
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ],
+                              ),
+                            );
                             final painter = TextPainter(
                               text: TextSpan(
-                                text: DateFormat('yyyy年M月').format(month),
-                                style: Journal.of(context).section,
-                              ),
+                                  text: monthLabelText, style: journal.section),
                               textDirection: Directionality.of(context),
                               textScaler: textScaler,
                             )..layout();
                             final labelWidth = painter.width;
                             painter.dispose();
-                            if (labelWidth + 96 <= constraints.maxWidth) {
+
+                            final monthPill = GestureDetector(
+                              onTap: () {
+                                JournalMotion.tap(widget.store.display);
+                                setState(() => selected = null);
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 9, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: selected == null
+                                      ? journal.sage
+                                      : journal.parchment,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: selected == null
+                                        ? journal.sageBorder
+                                        : Colors.transparent,
+                                    width: 0.8,
+                                  ),
+                                ),
+                                child: Text(
+                                  '本月',
+                                  style: journal.pillLabel.copyWith(
+                                    fontSize: 12,
+                                    color: selected == null && journal.isDark
+                                        ? journal.accent
+                                        : journal.ink,
+                                  ),
+                                ),
+                              ),
+                            );
+
+                            const infoBtn = JournalInfoButton(
+                              title: '日历统计与圆点说明',
+                              items: [
+                                '蓝色圆点表示当天有待交或待确认课业，珊瑚红圆点表示考试或已逾期，中性灰点表示个人待办。',
+                                '考试按开考日展示，作业与课堂任务按截止日展示，均使用北京时间。',
+                                '左右滑动可切换月份；上滑日历可收拢为单周视图。',
+                              ],
+                            );
+
+                            final previous = IconButton(
+                              tooltip: '上个月',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                  minWidth: 34, minHeight: 36),
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () => move(-1),
+                              icon: const Icon(Icons.chevron_left_rounded),
+                            );
+                            final next = IconButton(
+                              tooltip: '下个月',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                  minWidth: 34, minHeight: 36),
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () => move(1),
+                              icon: const Icon(Icons.chevron_right_rounded),
+                            );
+
+                            if (labelWidth + 155 <= constraints.maxWidth) {
                               return Row(
                                 key: const ValueKey('calendar-month-inline'),
                                 children: [
                                   previous,
                                   Expanded(child: label),
                                   next,
+                                  const SizedBox(width: 2),
+                                  monthPill,
+                                  infoBtn,
                                 ],
                               );
                             }
@@ -319,130 +427,142 @@ class _CalendarScreenState extends State<CalendarScreen>
                                 Row(
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,
-                                  children: [previous, next],
+                                  children: [
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [previous, next],
+                                    ),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [monthPill, infoBtn],
+                                    ),
+                                  ],
                                 ),
-                                label,
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: label,
+                                ),
                               ],
                             );
-                          });
-                        }),
-                        Row(children: [
-                          for (final label in [
-                            '日',
-                            '一',
-                            '二',
-                            '三',
-                            '四',
-                            '五',
-                            '六'
-                          ])
-                            Expanded(
+                          },
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            for (final label in [
+                              '日',
+                              '一',
+                              '二',
+                              '三',
+                              '四',
+                              '五',
+                              '六',
+                            ])
+                              Expanded(
                                 child: Center(
-                                    child: Text(label,
-                                        style: TextStyle(
-                                            fontSize: 13,
-                                            color: journal.muted))))
-                        ]),
-                        const Divider(height: 9, indent: 8, endIndent: 8),
-                        for (var row = 0;
-                            row < (leading + days + 6) ~/ 7;
-                            row++)
-                          Row(children: [
-                            for (var col = 0; col < 7; col++)
-                              Expanded(child: Builder(builder: (context) {
-                                final journal = Journal.of(context);
-                                final day = row * 7 + col - leading + 1;
-                                if (day < 1 || day > days) {
-                                  return SizedBox(height: cellHeight);
-                                }
-                                final date =
-                                        DateTime(month.year, month.month, day),
-                                    items = AssignmentQuery.forDay(
-                                        all,
-                                        DateTime(month.year, month.month, day),
-                                        {},
-                                        now: now);
-                                final unknown = items
-                                    .where((a) =>
-                                        !a.isExam && !a.isPendingConfirmed)
-                                    .length;
-                                final exams =
-                                    items.where((a) => a.isExam).length;
-                                final personalCount = manual
-                                    .where((e) =>
-                                        AssignmentQuery.dayKey(e.at!) == date)
-                                    .length;
-                                return Semantics(
-                                    label:
-                                        '${month.month}月$day日${date == today ? '，今天' : ''}，${items.length - unknown - exams}份待交，$unknown份待确认，$exams项考试或考试通知，$personalCount项个人安排',
-                                    selected: selected == date,
-                                    button: true,
-                                    onTap: () =>
-                                        setState(() => selected = date),
-                                    excludeSemantics: true,
-                                    child: InkWell(
-                                        onTap: () =>
-                                            setState(() => selected = date),
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Container(
-                                            height: cellHeight,
-                                            padding: const EdgeInsets.symmetric(
-                                                vertical: _cellVerticalPadding),
-                                            decoration: BoxDecoration(
-                                                color: selected == date
-                                                    ? journal.sage
-                                                    : null,
-                                                border: Border.all(
-                                                  color: date == today
-                                                      ? journal.accent
-                                                      : Colors.transparent,
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(8)),
-                                            child: Column(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment.start,
-                                                children: [
-                                                  FittedBox(
-                                                    fit: BoxFit.scaleDown,
-                                                    child: Text(
-                                                      '$day',
-                                                      maxLines: 1,
-                                                      softWrap: false,
-                                                      style: _dateStyle,
-                                                    ),
-                                                  ),
-                                                  if (items.isNotEmpty ||
-                                                      personalCount > 0)
-                                                    FittedBox(
-                                                      fit: BoxFit.scaleDown,
-                                                      child: Text(
-                                                          '${items.length + personalCount}',
-                                                          key: ValueKey(
-                                                              'calendar-count-$day'),
-                                                          maxLines: 1,
-                                                          softWrap: false,
-                                                          style: _countStyle),
-                                                    )
-                                                  else
-                                                    SizedBox(
-                                                      height: _lineHeight(
-                                                        MediaQuery.textScalerOf(
-                                                            context),
-                                                        _countStyle,
-                                                      ),
-                                                    ),
-                                                ]))));
-                              }))
-                          ]),
-                      ]))),
-              Padding(
-                padding: EdgeInsets.only(top: 10, bottom: 2),
-                child: Text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。',
-                    style: TextStyle(fontSize: 12, color: journal.muted)),
+                                  child: Text(
+                                    label,
+                                    style: journal.metadata.copyWith(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Divider(
+                          height: 0.6,
+                          thickness: 0.6,
+                          indent: 6,
+                          endIndent: 6,
+                          color: journal.divider,
+                        ),
+                        const SizedBox(height: 4),
+                        AnimatedContainer(
+                          key: const ValueKey('calendar-grid-viewport'),
+                          duration: JournalMotion.duration(
+                            context,
+                            const Duration(milliseconds: 240),
+                          ),
+                          curve: JournalMotion.easeOut,
+                          height: gridHeight,
+                          clipBehavior: Clip.hardEdge,
+                          decoration: const BoxDecoration(),
+                          child: OverflowBox(
+                            minHeight: cellHeight,
+                            maxHeight: rowCount * cellHeight,
+                            alignment: Alignment.topCenter,
+                            child: SizedBox(
+                              height: rowCount * cellHeight,
+                              child: PageView.builder(
+                                controller: _pageController,
+                                onPageChanged: (index) {
+                                  final nextMonth = _monthForPageIndex(index);
+                                  if (nextMonth.year == month.year &&
+                                      nextMonth.month == month.month) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    month = nextMonth;
+                                    if (selected != null) {
+                                      selected = (nextMonth.year ==
+                                                  today.year &&
+                                              nextMonth.month == today.month)
+                                          ? today
+                                          : DateTime(nextMonth.year,
+                                              nextMonth.month, 1);
+                                    }
+                                  });
+                                },
+                                itemBuilder: (context, index) {
+                                  final pageMonth = _monthForPageIndex(index);
+                                  return _buildMonthGrid(
+                                    context,
+                                    pageMonth: pageMonth,
+                                    all: all,
+                                    manual: manual,
+                                    now: now,
+                                    cellHeight: cellHeight,
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                        Semantics(
+                          button: true,
+                          label: _weekCollapsed ? '展开月视图' : '收拢为周视图',
+                          onTap: () => _toggleWeekCollapse(),
+                          excludeSemantics: true,
+                          child: InkWell(
+                            key: const ValueKey('calendar-week-toggle'),
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () => _toggleWeekCollapse(),
+                            child: SizedBox(
+                              height: 20,
+                              width: double.infinity,
+                              child: Center(
+                                child: Container(
+                                  width: 28,
+                                  height: 3.5,
+                                  decoration: BoxDecoration(
+                                    color: journal.ruleStrong,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
               Padding(
-                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                padding: const EdgeInsets.only(top: 18, bottom: 8, left: 2),
                 child: Text(
                   selected == null
                       ? '本月议程'
@@ -450,85 +570,284 @@ class _CalendarScreenState extends State<CalendarScreen>
                   style: journal.section,
                 ),
               ),
-              const Divider(height: 1),
               if (agenda.isEmpty && manualAgenda.isEmpty)
-                Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child:
-                        Text(widget.store.syncReport.phase == SyncPhase.failed
-                            ? '本次读取失败，请到同步详情重试'
-                            : widget.store.lastSyncAt == null && all.isEmpty
-                                ? '尚未获取作业，请先同步'
-                                : '所选范围没有已知日期的课业')),
-              for (final a in agenda)
-                AssignmentCard(
-                    assignment: a,
-                    examSources: courseSources,
-                    displayIndex: widget.store.homeDisplayIndex,
-                    now: now,
-                    compact: widget.store.display.compact,
-                    countdown: widget.store.display.countdown,
-                    showFullDeadline: false,
-                    onTap: () => context
-                        .push('/assignments/${Uri.encodeComponent(a.id)}')),
-              for (final e in manualAgenda)
-                Builder(builder: (context) {
-                  final journal = Journal.of(context);
-                  final exam = e.kind == 'exam';
-                  final accent = exam ? journal.slate : journal.ink;
-                  final label = exam ? '手动考试' : '个人待办';
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(
-                      exam ? Icons.school_outlined : Icons.event_note_outlined,
-                      color: accent,
+                JournalGroupedCard(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                  children: [
+                    Text(
+                      widget.store.syncReport.phase == SyncPhase.failed
+                          ? '本次读取失败，请到同步详情重试'
+                          : widget.store.lastSyncAt == null && all.isEmpty
+                              ? '尚未获取作业，请先同步'
+                              : '所选范围没有已知日期的课业',
+                      style: journal.metadata.copyWith(fontSize: 13.5),
                     ),
-                    title: Text(
-                      '$label · ${e.title}',
-                      style: journal.entryTitle.copyWith(color: accent),
-                    ),
-                    subtitle: Text(manualTime(e.at)),
-                    onTap: () => context.push('/agenda'),
-                  );
-                }),
+                  ],
+                )
+              else
+                JournalGroupedCard(
+                  dividerIndent: 16,
+                  children: [
+                    for (final a in agenda)
+                      AssignmentCard(
+                        assignment: a,
+                        examSources: courseSources,
+                        displayIndex: widget.store.homeDisplayIndex,
+                        now: now,
+                        compact: widget.store.display.compact,
+                        countdown: widget.store.display.countdown,
+                        showFullDeadline: false,
+                        showDivider: false,
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 14),
+                        onTap: () => context
+                            .push('/assignments/${Uri.encodeComponent(a.id)}'),
+                      ),
+                    for (final e in manualAgenda)
+                      _buildManualAgendaRow(context, e, journal),
+                  ],
+                ),
               if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
                 Padding(
-                  padding: const EdgeInsets.only(top: 20, bottom: 4),
+                  padding: const EdgeInsets.only(top: 20, bottom: 8, left: 2),
                   child: Text('待核对课业', style: journal.section),
                 ),
-                const Divider(height: 1),
-                if (noDeadlineCount > 0)
-                  _buildRecoveryRow(
-                    key: const ValueKey('calendar-no-deadline-scope'),
-                    icon: Icons.event_busy_outlined,
-                    label: '无截止日期',
-                    count: noDeadlineCount,
-                    color: journal.ink,
-                    journal: journal,
-                    onTap: () => context.go(
-                        _recoveryLocation(AssignmentRecoveryScope.noDeadline)),
-                  ),
-                if (noDeadlineCount > 0 && pendingDeadlineCount > 0)
-                  Divider(
-                    height: 1,
-                    thickness: 0.6,
-                    indent: 29,
-                    color: journal.rule,
-                  ),
-                if (pendingDeadlineCount > 0)
-                  _buildRecoveryRow(
-                    key: const ValueKey('calendar-deadline-pending-scope'),
-                    icon: Icons.help_outline_rounded,
-                    label: '截止时间未知',
-                    count: pendingDeadlineCount,
-                    color: journal.ochre,
-                    journal: journal,
-                    onTap: () => context.go(_recoveryLocation(
-                        AssignmentRecoveryScope.deadlinePending)),
-                  ),
+                JournalGroupedCard(
+                  dividerIndent: 48,
+                  children: [
+                    if (noDeadlineCount > 0)
+                      _buildRecoveryRow(
+                        key: const ValueKey('calendar-no-deadline-scope'),
+                        icon: Icons.event_busy_outlined,
+                        label: '无截止日期',
+                        count: noDeadlineCount,
+                        color: journal.ink,
+                        journal: journal,
+                        onTap: () => context.go(_recoveryLocation(
+                            AssignmentRecoveryScope.noDeadline)),
+                      ),
+                    if (pendingDeadlineCount > 0)
+                      _buildRecoveryRow(
+                        key: const ValueKey('calendar-deadline-pending-scope'),
+                        icon: Icons.help_outline_rounded,
+                        label: '截止时间未知',
+                        count: pendingDeadlineCount,
+                        color: journal.ochre,
+                        journal: journal,
+                        onTap: () => context.go(_recoveryLocation(
+                            AssignmentRecoveryScope.deadlinePending)),
+                      ),
+                  ],
+                ),
               ],
-            ]);
-      });
+            ],
+          );
+        },
+      );
+
+  Widget _buildMonthGrid(
+    BuildContext context, {
+    required DateTime pageMonth,
+    required List<Assignment> all,
+    required List<ManualEntry> manual,
+    required DateTime now,
+    required double cellHeight,
+  }) {
+    final days = DateTime(pageMonth.year, pageMonth.month + 1, 0).day;
+    final leading = pageMonth.weekday % 7;
+    final totalRows = (leading + days + 6) ~/ 7;
+
+    int activeRow = 0;
+    if (_weekCollapsed) {
+      final anchorDay = (selected != null &&
+              selected!.year == pageMonth.year &&
+              selected!.month == pageMonth.month)
+          ? selected!.day
+          : (today.year == pageMonth.year && today.month == pageMonth.month)
+              ? today.day
+              : 1;
+      activeRow = ((leading + anchorDay - 1) ~/ 7).clamp(0, totalRows - 1);
+    }
+
+    final rowIndices =
+        _weekCollapsed ? [activeRow] : [for (var r = 0; r < totalRows; r++) r];
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final row in rowIndices)
+          Row(
+            children: [
+              for (var col = 0; col < 7; col++)
+                Expanded(
+                  child: _buildDayCell(
+                    context,
+                    pageMonth: pageMonth,
+                    day: row * 7 + col - leading + 1,
+                    daysInMonth: days,
+                    all: all,
+                    manual: manual,
+                    now: now,
+                    cellHeight: cellHeight,
+                  ),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _buildDayCell(
+    BuildContext context, {
+    required DateTime pageMonth,
+    required int day,
+    required int daysInMonth,
+    required List<Assignment> all,
+    required List<ManualEntry> manual,
+    required DateTime now,
+    required double cellHeight,
+  }) {
+    if (day < 1 || day > daysInMonth) {
+      return SizedBox(height: cellHeight);
+    }
+    final journal = Journal.of(context);
+    final date = DateTime(pageMonth.year, pageMonth.month, day);
+    final items = AssignmentQuery.forDay(all, date, {}, now: now);
+    final unknown =
+        items.where((a) => !a.isExam && !a.isPendingConfirmed).length;
+    final exams = items.where((a) => a.isExam).length;
+    final overdueCount = items
+        .where((a) =>
+            AssignmentQuery.timelineBucketAt(a, now) ==
+            AssignmentDeadlineBucket.overdue)
+        .length;
+    final personalCount =
+        manual.where((e) => AssignmentQuery.dayKey(e.at!) == date).length;
+    final isSelected = selected == date;
+    final isToday = date == today;
+
+    final dots = <Color>[];
+    if (exams > 0 || overdueCount > 0) dots.add(journal.berry);
+    if (items.length - exams > 0 && dots.length < 3) dots.add(journal.accent);
+    if (personalCount > 0 && dots.length < 3) dots.add(journal.muted);
+    if (dots.length == 1 && (items.length + personalCount) >= 2) {
+      dots.add(dots.first);
+    }
+
+    final circleSize =
+        (MediaQuery.textScalerOf(context).scale(14) * 1.9).clamp(32.0, 46.0);
+    return Semantics(
+      label:
+          '${pageMonth.month}月$day日${isToday ? '，今天' : ''}，${items.length - unknown - exams}份待交，$unknown份待确认，$exams项考试或考试通知，$personalCount项个人安排',
+      selected: isSelected,
+      button: true,
+      onTap: () {
+        JournalMotion.tap(widget.store.display);
+        setState(() => selected = date);
+      },
+      excludeSemantics: true,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: () {
+            JournalMotion.tap(widget.store.display);
+            setState(() => selected = date);
+          },
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            height: cellHeight,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: JournalMotion.duration(
+                    context,
+                    const Duration(milliseconds: 160),
+                  ),
+                  curve: JournalMotion.easeOut,
+                  width: circleSize,
+                  height: circleSize,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isSelected ? journal.accent : Colors.transparent,
+                    border: !isSelected && isToday
+                        ? Border.all(color: journal.accent, width: 1.3)
+                        : null,
+                  ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '$day',
+                      maxLines: 1,
+                      softWrap: false,
+                      style: _dateStyle.copyWith(
+                        color: isSelected
+                            ? journal.onPrimaryFill
+                            : isToday
+                                ? journal.accent
+                                : journal.ink,
+                        fontWeight: isSelected || isToday
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                SizedBox(
+                  height: 6,
+                  child: dots.isEmpty
+                      ? const SizedBox.shrink()
+                      : Row(
+                          key: ValueKey('calendar-dots-$day'),
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (var i = 0; i < dots.length; i++) ...[
+                              if (i > 0) const SizedBox(width: 2.5),
+                              Container(
+                                width: 4.5,
+                                height: 4.5,
+                                decoration: BoxDecoration(
+                                  color: dots[i],
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildManualAgendaRow(
+      BuildContext context, ManualEntry e, JournalPalette journal) {
+    final exam = e.kind == 'exam';
+    final accent = exam ? journal.slate : journal.ink;
+    final label = exam ? '手动考试' : '个人待办';
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      leading: Icon(
+        exam ? Icons.school_outlined : Icons.event_note_outlined,
+        size: 20,
+        color: accent,
+      ),
+      title: Text(
+        '$label · ${e.title}',
+        style: journal.entryTitle.copyWith(color: accent),
+      ),
+      subtitle: Text(manualTime(e.at), style: journal.metadata),
+      trailing:
+          Icon(Icons.chevron_right_rounded, size: 19, color: journal.muted),
+      onTap: () => context.push('/agenda'),
+    );
+  }
 
   Widget _buildRecoveryRow({
     required Key key,
@@ -543,16 +862,15 @@ class _CalendarScreenState extends State<CalendarScreen>
         type: MaterialType.transparency,
         child: InkWell(
           key: key,
-          borderRadius: BorderRadius.circular(8),
           onTap: onTap,
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 48),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
               child: Row(
                 children: [
                   Icon(icon, size: 19, color: color),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       label,
@@ -584,13 +902,8 @@ class _CalendarScreenState extends State<CalendarScreen>
         AssignmentRecoveryScope.queryParameter: scope.queryValue,
       }).toString();
 
-  double _lineHeight(TextScaler textScaler, TextStyle style) =>
-      textScaler.scale(style.fontSize!) * style.height!;
-
-  double _calendarCellHeight(BuildContext context, TextScaler textScaler) {
-    final content = _lineHeight(textScaler, _dateStyle) +
-        _lineHeight(textScaler, _countStyle);
-    final chrome = 2 * (_cellBorderWidth + _cellVerticalPadding) + _cellSlack;
-    return math.max(48.0, content + chrome);
+  double _calendarCellHeight(TextScaler textScaler) {
+    final circleSize = (textScaler.scale(14) * 1.9).clamp(32.0, 46.0);
+    return math.max(48.0, circleSize + 16.0);
   }
 }
