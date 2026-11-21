@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app/journal.dart';
 import '../models/display_preferences.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 
 class DisplaySettingsScreen extends StatefulWidget {
   const DisplaySettingsScreen({super.key, required this.store});
@@ -14,11 +15,24 @@ class DisplaySettingsScreen extends StatefulWidget {
 class _DisplaySettingsScreenState extends State<DisplaySettingsScreen> {
   bool saving = false;
 
-  Future<void> save(DisplayPreferences next) async {
+  Future<void> save(
+    DisplayPreferences next, {
+    bool previewSound = false,
+    bool previewHaptics = false,
+  }) async {
+    if (saving) return;
     setState(() => saving = true);
     try {
       await widget.store.saveDisplay(next);
-      if (mounted && widget.store.error != null) {
+      if (!mounted) return;
+      if ((previewSound || previewHaptics) &&
+          identical(widget.store.display, next)) {
+        InteractionFeedback.trigger(next.copyWith(
+          soundEnabled: previewSound,
+          hapticsEnabled: previewHaptics,
+        ));
+      }
+      if (widget.store.error != null) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(widget.store.error!)));
       }
@@ -114,6 +128,34 @@ class _DisplaySettingsScreenState extends State<DisplaySettingsScreen> {
                           onChanged: saving
                               ? null
                               : (v) => save(d.copyWith(countdown: v)),
+                        ),
+                        Divider(height: 1, color: journal.rule),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          enableFeedback: false,
+                          title: const Text('交互音效'),
+                          subtitle: Text(
+                            '点击、置顶、同步和计划完成时播放轻提示音，静音或振动模式下自动停用',
+                            style: journal.metadata,
+                          ),
+                          value: d.soundEnabled,
+                          onChanged: saving
+                              ? null
+                              : (v) => save(d.copyWith(soundEnabled: v),
+                                  previewSound: v),
+                        ),
+                        Divider(height: 1, color: journal.rule),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          enableFeedback: false,
+                          title: const Text('触感反馈'),
+                          subtitle:
+                              Text('关键操作时提供轻微振动', style: journal.metadata),
+                          value: d.hapticsEnabled,
+                          onChanged: saving
+                              ? null
+                              : (v) => save(d.copyWith(hapticsEnabled: v),
+                                  previewHaptics: v),
                         ),
                       ],
                     ),

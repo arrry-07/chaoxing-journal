@@ -10,6 +10,7 @@ import '../models/home_filters.dart';
 import '../models/sync_report.dart';
 import '../models/personal_workspace.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import '../services/assignment_query.dart';
 import '../services/exam_schedule_presentation.dart';
 import '../services/home_course_filter.dart';
@@ -234,6 +235,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     }
     setState(() => _refreshing = true);
     final before = store.syncReport;
+    final epoch = store.accountEpoch;
     try {
       final attempted = await act(action);
       if (!mounted || !attempted) return;
@@ -243,6 +245,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           report.phase == SyncPhase.running) {
         feedback('刷新未完成，请查看同步详情', details: true);
       } else if (report.phase == SyncPhase.success) {
+        if (epoch == store.accountEpoch) {
+          InteractionFeedback.trigger(store.display,
+              kind: InteractionSoundKind.syncDone);
+        }
         feedback(store.error == null ? '作业已更新' : '作业已更新，本机服务需要处理',
             details: store.error != null);
       } else if (report.phase == SyncPhase.partial) {
@@ -347,6 +353,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             now: now,
             showFullDeadline: false,
             showDivider: false,
+            enableTapFeedback: false,
             inPinnedSection: pinned,
             compact: store.display.compact,
             countdown: store.display.countdown,
@@ -359,6 +366,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 : () => openAssignment(a.id),
             opening: _openingAssignments.contains(a.id),
             onTap: () {
+              InteractionFeedback.trigger(store.display);
               final path = '/assignments/${Uri.encodeComponent(a.id)}';
               final scope = recoveryScope == null
                   ? ''
@@ -493,6 +501,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                           onPressed: () => context.push('/plan'),
                           icon: const Icon(Icons.checklist_rounded)),
                     IconButton(
+                        enableFeedback: false,
                         tooltip: '刷新作业',
                         onPressed: busy ? null : () => refresh(syncAction),
                         icon: busy
@@ -762,6 +771,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
               onTap: onRemove,
+              enableFeedback: false,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 child: Align(
@@ -870,6 +880,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         TextButton(
           style: TextButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            enableFeedback: false,
             minimumSize: const Size(48, 48),
             tapTargetSize: MaterialTapTargetSize.padded,
             foregroundColor: Journal.of(context).muted,
@@ -1066,6 +1077,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               child: InkWell(
                 borderRadius: BorderRadius.circular(22),
                 onTap: onTap,
+                enableFeedback: false,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
                     minHeight: 48,
@@ -1123,6 +1135,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               child: InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: onTap,
+                enableFeedback: false,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 48),
                   child: Padding(
@@ -1203,10 +1216,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         store.account != expectedAccount) {
       return;
     }
-    if (!saved) feedback('搜索、筛选与排序未能保存，请重试；原偏好已保留');
+    if (saved) {
+      InteractionFeedback.trigger(store.display);
+    } else {
+      feedback('搜索、筛选与排序未能保存，请重试；原偏好已保留');
+    }
   }
 
   Future<void> _openFilters(List<HomeCourseFilterOption> courseOptions) async {
+    InteractionFeedback.trigger(store.display);
     final openingEpoch = store.accountEpoch;
     final openingAccount = store.account;
     final controller = TextEditingController(text: _query);
@@ -1376,6 +1394,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                               deadline: deadline,
                               type: type,
                               sortOrder: sortOrder)),
+                      style: FilledButton.styleFrom(enableFeedback: false),
                       child: const Text('应用'),
                     ),
                   ],

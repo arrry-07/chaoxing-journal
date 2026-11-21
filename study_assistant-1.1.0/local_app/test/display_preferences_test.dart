@@ -1,3 +1,5 @@
+import 'package:flutter/services.dart';
+import 'package:study_assistant_mobile/src/services/interaction_feedback_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/display_settings_screen.dart';
@@ -38,14 +40,60 @@ void main() {
     final legacy = DisplayPreferences.decode(
         '{"compact":true,"countdown":true,"range":"week"}');
     expect(legacy.themeMode, JournalThemeMode.system);
-    final restored = DisplayPreferences.decode(
-        legacy.copyWith(themeMode: JournalThemeMode.dark).encode());
+    expect(legacy.soundEnabled, isTrue);
+    expect(legacy.hapticsEnabled, isTrue);
+    final restored = DisplayPreferences.decode(legacy
+        .copyWith(
+            themeMode: JournalThemeMode.dark,
+            soundEnabled: false,
+            hapticsEnabled: false)
+        .encode());
     expect(restored.themeMode, JournalThemeMode.dark);
+    expect(restored.soundEnabled, isFalse);
+    expect(restored.hapticsEnabled, isFalse);
     expect(restored.compact, isTrue);
     expect(restored.countdown, isTrue);
     expect(restored.widgetRange, WidgetRange.week);
     expect(DisplayPreferences.decode('{"themeMode":"future"}').themeMode,
         JournalThemeMode.system);
+  });
+
+  testWidgets('interaction sound and haptics can be enabled independently',
+      (t) async {
+    final messenger = t.binding.defaultBinaryMessenger;
+    const sound = MethodChannel('study_assistant/interaction_sound');
+    final sounds = <String>[];
+    final haptics = <String>[];
+    messenger.setMockMethodCallHandler(sound, (call) async {
+      expect(call.method, 'play');
+      sounds.add((call.arguments as Map)['kind'] as String);
+      return null;
+    });
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'HapticFeedback.vibrate') {
+        haptics.add(call.arguments as String);
+      }
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(sound, null);
+      messenger.setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    InteractionFeedback.trigger(
+      const DisplayPreferences(hapticsEnabled: false),
+      kind: InteractionSoundKind.pin,
+    );
+    InteractionFeedback.trigger(
+      const DisplayPreferences(soundEnabled: false),
+      kind: InteractionSoundKind.complete,
+    );
+    InteractionFeedback.trigger(
+      const DisplayPreferences(soundEnabled: false, hapticsEnabled: false),
+    );
+    await t.pump();
+    expect(sounds, ['pin']);
+    expect(haptics, ['HapticFeedbackType.mediumImpact']);
   });
 
   test('widget ranges use trusted exam timeline rather than work deadline', () {

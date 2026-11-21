@@ -19,22 +19,29 @@ class DisplayPreferences {
     this.countdown = false,
     this.widgetRange = WidgetRange.all,
     this.themeMode = JournalThemeMode.system,
+    this.soundEnabled = true,
+    this.hapticsEnabled = true,
   });
   final bool compact, countdown;
   final WidgetRange widgetRange;
   final JournalThemeMode themeMode;
+  final bool soundEnabled, hapticsEnabled;
 
   DisplayPreferences copyWith({
     bool? compact,
     bool? countdown,
     WidgetRange? widgetRange,
     JournalThemeMode? themeMode,
+    bool? soundEnabled,
+    bool? hapticsEnabled,
   }) =>
       DisplayPreferences(
         compact: compact ?? this.compact,
         countdown: countdown ?? this.countdown,
         widgetRange: widgetRange ?? this.widgetRange,
         themeMode: themeMode ?? this.themeMode,
+        soundEnabled: soundEnabled ?? this.soundEnabled,
+        hapticsEnabled: hapticsEnabled ?? this.hapticsEnabled,
       );
 
   String encode() => jsonEncode({
@@ -42,6 +49,8 @@ class DisplayPreferences {
         'countdown': countdown,
         'range': widgetRange.name,
         'themeMode': themeMode.name,
+        'sound': soundEnabled,
+        'haptics': hapticsEnabled,
       });
 
   factory DisplayPreferences.decode(String? raw) {
@@ -58,6 +67,8 @@ class DisplayPreferences {
           (mode) => mode.name == j['themeMode'],
           orElse: () => JournalThemeMode.system,
         ),
+        soundEnabled: j['sound'] != false,
+        hapticsEnabled: j['haptics'] != false,
       );
     } catch (_) {
       return const DisplayPreferences();

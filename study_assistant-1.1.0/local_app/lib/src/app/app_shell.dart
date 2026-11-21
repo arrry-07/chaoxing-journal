@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import 'journal.dart';
 import 'unsaved_edit_guard.dart';
 import 'transient_feedback.dart';
@@ -148,20 +149,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Future<void> _selectDestination(int index) async {
     Future<void> go() async {
-      switch (index) {
-        case 0:
-          context.go('/assignments');
-          break;
-        case 1:
-          context.go('/calendar');
-          break;
-        case 2:
-          context.go('/stats');
-          break;
-        case 3:
-          context.go('/profile');
-          break;
+      final router = GoRouter.of(context);
+      final from = router.routeInformationProvider.value.uri.path;
+      final to = switch (index) {
+        0 => '/assignments',
+        1 => '/calendar',
+        2 => '/stats',
+        3 => '/profile',
+        _ => null,
+      };
+      if (to == null) return;
+      if (to != from) {
+        InteractionFeedback.trigger(widget.assignmentStore.display);
       }
+      router.go(to);
     }
 
     final guard = _leaveGuard;

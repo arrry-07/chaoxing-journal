@@ -21,6 +21,7 @@ class AssignmentCard extends StatelessWidget {
       this.countdown = false,
       this.showFullDeadline = true,
       this.showDivider = true,
+      this.enableTapFeedback = true,
       this.inPinnedSection = false,
       this.deadlinePending = false,
       this.previewOnly = false,
@@ -32,7 +33,7 @@ class AssignmentCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onOpenAssignment;
   final bool opening;
-  final bool showFullDeadline, inPinnedSection, showDivider;
+  final bool showFullDeadline, inPinnedSection, showDivider, enableTapFeedback;
   final bool deadlinePending, previewOnly, previewSaving;
   final bool compact, countdown;
 
@@ -421,6 +422,7 @@ class AssignmentCard extends StatelessWidget {
                 child: Material(
                   type: MaterialType.transparency,
                   child: InkWell(
+                    enableFeedback: enableTapFeedback,
                     onTap: onCardTap,
                     borderRadius: BorderRadius.circular(10),
                     child: Padding(

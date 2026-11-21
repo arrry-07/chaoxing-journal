@@ -5,6 +5,7 @@ import '../app/journal.dart';
 import '../models/assignment.dart';
 import '../models/personal_workspace.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import '../services/assignment_query.dart';
 import '../services/rule_planning_service.dart';
 import 'widgets/data_recovery_warning.dart';
@@ -29,12 +30,18 @@ class _DailyPlanState extends State<DailyPlanScreen> {
   }
 
   Future<void> update(
-      List<DailyPlanItem> Function(List<DailyPlanItem>) action) async {
+    List<DailyPlanItem> Function(List<DailyPlanItem>) action, {
+    bool completing = false,
+  }) async {
     if (busy) return;
     setState(() => busy = true);
     final ok = await widget.store
         .savePersonal((w) => w.withPlans(action(w.plans)), epoch);
     if (mounted) {
+      if (ok && completing && epoch == widget.store.accountEpoch) {
+        InteractionFeedback.trigger(widget.store.display,
+            kind: InteractionSoundKind.complete);
+      }
       setState(() {
         busy = false;
         message = widget.store.saveFeedback(
@@ -279,17 +286,20 @@ class _DailyPlanState extends State<DailyPlanScreen> {
                 Column(children: [
                   CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
+                      enableFeedback: false,
                       value: p.done,
                       onChanged: busy
                           ? null
-                          : (v) => update((items) => items
-                              .map((q) => q.day == day &&
-                                      q.assignmentId == p.assignmentId
-                                  ? DailyPlanItem(
-                                      q.assignmentId, q.day, q.minutes,
-                                      done: v ?? false)
-                                  : q)
-                              .toList()),
+                          : (v) => update(
+                              (items) => items
+                                  .map((q) => q.day == day &&
+                                          q.assignmentId == p.assignmentId
+                                      ? DailyPlanItem(
+                                          q.assignmentId, q.day, q.minutes,
+                                          done: v ?? false)
+                                      : q)
+                                  .toList(),
+                              completing: v == true && !p.done),
                       title: Text(
                           widget.store.findAssignment(p.assignmentId)?.title ??
                               '本机未找到此作业，请同步核对'),

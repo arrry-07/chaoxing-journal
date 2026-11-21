@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../models/assignment.dart';
 import '../services/assignment_grouping.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import '../services/assignment_query.dart';
 import '../services/exam_schedule_presentation.dart';
 import '../services/assignment_web_link.dart';
@@ -195,6 +196,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     final store = widget.store;
     final accountEpoch = store.accountEpoch;
     final wasPinned = store.isPinned(assignment);
+    final routeId = widget.assignmentId;
     setState(() {
       _togglingPin = true;
       if (_actionMessageTarget == _DetailNoticeTarget.pin) {
@@ -209,14 +211,18 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
       saved = false;
     }
     if (!mounted) return;
+    final current = widget.store == store &&
+        store.accountEpoch == accountEpoch &&
+        widget.assignmentId == routeId;
+    if (saved && current) {
+      InteractionFeedback.trigger(store.display,
+          kind: store.isPinned(assignment)
+              ? InteractionSoundKind.pin
+              : InteractionSoundKind.unpin);
+    }
     setState(() {
       _togglingPin = false;
-      if (saved ||
-          widget.store != store ||
-          store.accountEpoch != accountEpoch ||
-          widget.assignmentId != assignment.id) {
-        return;
-      }
+      if (saved || !current) return;
       _actionMessage = wasPinned ? '取消置顶失败，请稍后重试。' : '置顶失败，请稍后重试。';
       _actionMessageTarget = _DetailNoticeTarget.pin;
     });
@@ -559,6 +565,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                         TextButton.icon(
                           key: const ValueKey('assignment-detail-pin'),
                           style: TextButton.styleFrom(
+                            enableFeedback: false,
                             padding: const EdgeInsets.symmetric(horizontal: 10),
                             minimumSize: const Size(48, 48),
                             foregroundColor:
