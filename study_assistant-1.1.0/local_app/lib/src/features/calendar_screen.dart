@@ -178,7 +178,12 @@ class _CalendarScreenState extends State<CalendarScreen>
         final textScaler = MediaQuery.textScalerOf(context);
         final cellHeight = _calendarCellHeight(context, textScaler);
         return ListView(
-            padding: const EdgeInsets.fromLTRB(18, 14, 18, 24),
+            padding: EdgeInsets.fromLTRB(
+              18,
+              14,
+              18,
+              JournalLayout.floatingNavClearance(context),
+            ),
             children: [
               Wrap(
                 alignment: WrapAlignment.spaceBetween,

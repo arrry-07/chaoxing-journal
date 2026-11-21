@@ -317,7 +317,12 @@ class _StatsScreenState extends State<StatsScreen> {
             type: MaterialType.transparency,
             child: ListView(
               key: const PageStorageKey('stats-list'),
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+              padding: EdgeInsets.fromLTRB(
+                18,
+                14,
+                18,
+                JournalLayout.floatingNavClearance(context),
+              ),
               children: [
                 const JournalHeading(
                   '课业统计',

@@ -5,7 +5,9 @@ import 'src/features/assignment_changes_screen.dart';
 import 'src/features/backup_screen.dart';
 import 'src/features/course_study_hub_screen.dart';
 import 'src/features/daily_plan_screen.dart';
+import 'src/features/display_settings_screen.dart';
 import 'src/features/manual_agenda_screen.dart';
+import 'src/features/open_source_screen.dart';
 import 'src/features/term_archives_screen.dart';
 import 'src/features/personal_work_screen.dart';
 import 'src/features/profile_arrangements_screen.dart';
@@ -26,6 +28,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'src/app/app_deep_links.dart';
 import 'src/app/app_shell.dart';
 import 'src/app/journal_binding.dart';
+import 'src/app/journal_motion.dart';
 import 'src/app/transient_feedback.dart';
 import 'src/app/unsaved_edit_guard.dart';
 import 'src/features/assignment_detail_screen.dart';
@@ -331,7 +334,9 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             debugShowCheckedModeBanner: false,
             theme: StudyAssistantTheme.light,
             darkTheme: StudyAssistantTheme.dark,
-            themeAnimationDuration: Duration.zero,
+            themeAnimationDuration:
+                JournalMotion.themeTransitionDuration(context),
+            themeAnimationCurve: JournalMotion.easeOut,
             themeMode: switch (_themeMode) {
               JournalThemeMode.system => ThemeMode.system,
               JournalThemeMode.light => ThemeMode.light,
@@ -477,6 +482,14 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             GoRoute(
               path: '/profile/records',
               builder: (_, __) => ProfileRecordsScreen(store: assignmentStore),
+            ),
+            GoRoute(
+              path: '/profile/display',
+              builder: (_, __) => DisplaySettingsScreen(store: assignmentStore),
+            ),
+            GoRoute(
+              path: '/open-source',
+              builder: (_, __) => const OpenSourceScreen(),
             ),
             GoRoute(
               path: '/course-hub',

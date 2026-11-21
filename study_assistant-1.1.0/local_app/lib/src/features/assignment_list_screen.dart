@@ -486,7 +486,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           key: PageStorageKey(recoveryScope == null
               ? 'home-list'
               : 'home-recovery-${recoveryScope.queryValue}'),
-          padding: const EdgeInsets.fromLTRB(18, 14, 18, 32),
+          padding: EdgeInsets.fromLTRB(
+            18,
+            14,
+            18,
+            JournalLayout.floatingNavClearance(context),
+          ),
           children: [
             Wrap(
                 alignment: WrapAlignment.spaceBetween,

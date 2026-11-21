@@ -71,11 +71,18 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   AppearanceControls(
                     store: store,
-                    onMore: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => DisplaySettingsScreen(store: store),
-                      ),
-                    ),
+                    onMore: () {
+                      final router = GoRouter.maybeOf(context);
+                      if (router != null) {
+                        router.push('/profile/display');
+                      } else {
+                        Navigator.of(context, rootNavigator: true).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => DisplaySettingsScreen(store: store),
+                          ),
+                        );
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
                   _SettingsCard(
@@ -162,13 +169,23 @@ class ProfileScreen extends StatelessWidget {
                         onTap: () => _showAbout(context),
                       ),
                       _SettingsTile(
-                          icon: Icons.description_outlined,
-                          title: '开源许可',
-                          subtitle: '查看应用使用的开源组件及许可证',
-                          compactSubtitle: true,
-                          onTap: () => Navigator.of(context).push(
+                        icon: Icons.description_outlined,
+                        title: '开源许可',
+                        subtitle: '查看应用使用的开源组件及许可证',
+                        compactSubtitle: true,
+                        onTap: () {
+                          final router = GoRouter.maybeOf(context);
+                          if (router != null) {
+                            router.push('/open-source');
+                          } else {
+                            Navigator.of(context, rootNavigator: true).push(
                               MaterialPageRoute<void>(
-                                  builder: (_) => const OpenSourceScreen()))),
+                                builder: (_) => const OpenSourceScreen(),
+                              ),
+                            );
+                          }
+                        },
+                      ),
                       _SettingsTile(
                         icon: Icons.system_update_alt,
                         title: '检查更新',
@@ -217,7 +234,7 @@ class ProfileScreen extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 28),
+                  SizedBox(height: JournalLayout.floatingNavClearance(context)),
                 ],
               ),
             ),

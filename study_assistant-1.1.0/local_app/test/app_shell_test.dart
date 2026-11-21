@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_picker_sheet.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -11,7 +13,8 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
-  testWidgets('bottom navigation uses home calendar stats and profile',
+  testWidgets(
+      'floating bottom navigation uses 4 primary tabs and hides on secondary routes',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     final store = AssignmentStore(
@@ -45,6 +48,10 @@ void main() {
               path: '/profile',
               builder: (context, state) => const Text('我的页'),
             ),
+            GoRoute(
+              path: '/courses',
+              builder: (context, state) => const Text('我的课程二级页'),
+            ),
           ],
         ),
       ],
@@ -54,6 +61,8 @@ void main() {
     await tester.pumpWidget(MaterialApp.router(
         theme: StudyAssistantTheme.light, routerConfig: router));
 
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
+    expect(find.byType(JournalNavIcon), findsNWidgets(4));
     expect(find.text('首页'), findsOneWidget);
     expect(find.text('日历'), findsOneWidget);
     expect(find.text('统计'), findsOneWidget);
@@ -63,33 +72,81 @@ void main() {
 
     const labels = ['首页', '日历', '统计', '我的'];
     const pages = ['首页内容', '日历页', '统计页', '我的页'];
-    const icons = [
-      (Icons.assignment_outlined, Icons.assignment),
-      (Icons.calendar_today_outlined, Icons.calendar_today),
-      (Icons.bar_chart_outlined, Icons.bar_chart),
-      (Icons.person_outline, Icons.person),
-    ];
-    // Include both entering and leaving statistics, and returning to home.
     for (final selected in [0, 1, 2, 3, 2, 0]) {
       await tester.tap(find.text(labels[selected]));
       await tester.pumpAndSettle();
       expect(find.text(pages[selected]), findsOneWidget);
       expect(
-          tester
-              .widget<NavigationBar>(find.byType(NavigationBar))
-              .selectedIndex,
-          selected);
+        tester
+            .widget<JournalFloatingNavBar>(find.byType(JournalFloatingNavBar))
+            .selectedIndex,
+        selected,
+      );
       for (var i = 0; i < labels.length; i++) {
         final color = i == selected ? Journal.ink : Journal.muted;
         final label = tester.widget<RichText>(find.descendant(
             of: find.text(labels[i]), matching: find.byType(RichText)));
         expect(label.text.style?.color, color, reason: '${labels[i]} label');
-        final icon = find.byIcon(i == selected ? icons[i].$2 : icons[i].$1);
-        final glyph = tester.widget<RichText>(
-            find.descendant(of: icon, matching: find.byType(RichText)));
-        expect(glyph.text.style?.color, color, reason: '${labels[i]} icon');
+        final icon = tester.widget<JournalNavIcon>(
+          find.byType(JournalNavIcon).at(i),
+        );
+        expect(icon.selected, i == selected);
+        expect(icon.color, color, reason: '${labels[i]} icon');
       }
     }
+
+    router.push('/courses');
+    await tester.pumpAndSettle();
+    expect(find.text('我的课程二级页'), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
+
+    router.pop();
+    await tester.pumpAndSettle();
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
+  });
+
+  testWidgets('JournalPickerSheet supports search filtering and selection',
+      (tester) async {
+    String? picked;
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: ElevatedButton(
+              onPressed: () async {
+                picked = await showJournalPickerSheet<String>(
+                  context,
+                  title: '选择课程',
+                  selectedValue: 'a',
+                  searchable: true,
+                  options: const [
+                    JournalPickerOption(value: 'a', label: '高等数学'),
+                    JournalPickerOption(value: 'b', label: '大学物理'),
+                    JournalPickerOption(value: 'c', label: '计算机网络'),
+                  ],
+                );
+              },
+              child: const Text('打开抽屉'),
+            ),
+          ),
+        ),
+      ),
+    ));
+
+    await tester.tap(find.text('打开抽屉'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择课程'), findsOneWidget);
+    expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), '物理');
+    await tester.pumpAndSettle();
+    expect(find.text('高等数学'), findsNothing);
+    expect(find.text('大学物理'), findsOneWidget);
+
+    await tester.tap(find.text('大学物理'));
+    await tester.pumpAndSettle();
+    expect(picked, 'b');
   });
 }
 
