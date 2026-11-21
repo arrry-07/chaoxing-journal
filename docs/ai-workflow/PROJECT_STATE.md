@@ -4,7 +4,7 @@
 
 ## dev 当前迭代进度（1.8.24-dev）
 
-- [ ] 暂无进行中改动，下一轮预览从 `1.8.24-dev.1+103` 起步。
+- [x] Android 构建工具链与噪音治理：升级 Gradle 8.14.2 / AGP 8.11.1 / Kotlin 2.2.20、迁移 Kotlin `compilerOptions` DSL 并设置 `kotlin.incremental=false` 根治跨盘符缓存异常，核实 `lib/` 零 `CupertinoIcons` 引用；下一轮预览从 `1.8.24-dev.1+103` 起步。
 
 按独立改动随代码更新对应进度；当前无活跃交接或待执行计划。
 
