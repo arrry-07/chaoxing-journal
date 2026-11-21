@@ -21,7 +21,7 @@ class ProfileMenuCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
               child: Text(
                 title,
-                style: Journal.entryTitle,
+                style: Journal.of(context).entryTitle,
               ),
             ),
             for (var index = 0; index < children.length; index++) ...[
@@ -54,17 +54,19 @@ class ProfileMenuTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListTile(
-        leading: Icon(icon, color: Journal.ink),
+        leading: Icon(icon, color: Journal.of(context).ink),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
         subtitle: subtitle == null ? null : Text(subtitle!),
         subtitleTextStyle: compactSubtitle
             ? Theme.of(context).textTheme.bodySmall?.copyWith(
                   fontSize: 12,
                   height: 1.4,
-                  color: Journal.muted,
+                  color: Journal.of(context).muted,
                 )
             : null,
-        trailing: onTap == null ? null : Icon(trailing, color: Journal.muted),
+        trailing: onTap == null
+            ? null
+            : Icon(trailing, color: Journal.of(context).muted),
         onTap: onTap,
       );
 }

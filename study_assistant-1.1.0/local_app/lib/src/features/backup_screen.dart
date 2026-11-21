@@ -189,15 +189,15 @@ class _BackupScreenState extends State<BackupScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        backgroundColor: Journal.paper,
+        backgroundColor: Journal.of(context).paper,
         appBar: AppBar(title: const Text('加密备份')),
         body: SafeArea(
             child: ListView(padding: const EdgeInsets.all(20), children: [
-          const Text('给课业记录留一份副本', style: Journal.section),
+          Text('给课业记录留一份副本', style: Journal.of(context).section),
           const SizedBox(height: 8),
-          const Text(
+          Text(
               '备份当前账号的作业、课程、计划、个人清单备注、手动安排、学期快照与提醒设置。登录凭据、个人资料、作业访问签名、说明正文和本地文件关联不导出；手动添加的资料链接会随加密备份保存。',
-              style: Journal.metadata),
+              style: Journal.of(context).metadata),
           const SizedBox(height: 24),
           TextField(
               controller: _password,
@@ -231,7 +231,7 @@ class _BackupScreenState extends State<BackupScreen> {
               icon: const Icon(Icons.folder_open),
               label: const Text('选择备份并预览')),
           const SizedBox(height: 12),
-          const Text('忘记口令无法恢复。请将备份文件与口令分开保管。', style: Journal.metadata),
+          Text('忘记口令无法恢复。请将备份文件与口令分开保管。', style: Journal.of(context).metadata),
           if (_busy)
             const Padding(
                 padding: EdgeInsets.symmetric(vertical: 16),
@@ -242,21 +242,21 @@ class _BackupScreenState extends State<BackupScreen> {
                 child: Text(_message!, semanticsLabel: _message)),
           if (_preview case final snapshot?) ...[
             const Divider(height: 40),
-            const Text('恢复预览', style: Journal.section),
+            Text('恢复预览', style: Journal.of(context).section),
             const SizedBox(height: 8),
             Text(
                 '所属账号：$_previewAccount（已与本机核对）\n备份日期：${snapshot.createdAt.toLocal().toString().substring(0, 19)}\n作业 ${snapshot.records.length} 条 · 隐藏 ${snapshot.hidden.length} 条\n课程 ${snapshot.courses.length} 门 · 不关注 ${snapshot.unfollowed.length} 门',
-                style: Journal.metadata),
+                style: Journal.of(context).metadata),
             const SizedBox(height: 12),
             Text(
                 '提醒：${snapshot.reminderOffsets.map((m) => "$m 分钟前").join("、")}\n备份的自动同步间隔：${snapshot.autoSyncIntervalMinutes == 0 ? "关闭" : "${snapshot.autoSyncIntervalMinutes} 分钟"}。恢复保留本机自动同步设置。',
-                style: Journal.metadata),
+                style: Journal.of(context).metadata),
             const SizedBox(height: 12),
             Text(
                 '个人备注 ${snapshot.personal.work.length} 份 · 计划 ${snapshot.personal.plans.length} 项。手动安排 ${snapshot.notebook.entries.length} 项 · 学期快照 ${snapshot.notebook.terms.length} 份。个人记录仅补缺，摘要设置保持本机当前值；文件关联不迁移。',
-                style: Journal.metadata),
-            const Text('现有记录保持不变。补入的作业需同步确认状态与截止时间，确认前不会安排提醒。预览10分钟后失效。',
-                style: Journal.metadata),
+                style: Journal.of(context).metadata),
+            Text('现有记录保持不变。补入的作业需同步确认状态与截止时间，确认前不会安排提醒。预览10分钟后失效。',
+                style: Journal.of(context).metadata),
             const SizedBox(height: 16),
             FilledButton(
                 onPressed: _busy ? null : _restore,

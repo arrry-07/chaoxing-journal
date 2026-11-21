@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_changes_screen.dart';
 import 'package:study_assistant_mobile/src/features/course_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/daily_plan_screen.dart';
@@ -100,12 +101,13 @@ void main() {
     expect(find.text('截止调整'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    // 2. CourseListScreen preserves Icons.menu_book_outlined & SwitchListTile
+    // 2. CourseListScreen displays CourseMark & SwitchListTile
     await tester.pumpWidget(wrap(CourseListScreen(store: store)));
     await tester.pumpAndSettle();
     expect(find.text('我的课程'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('高等数学（一）'), 150);
-    expect(find.byIcon(Icons.menu_book_outlined), findsOneWidget);
+    expect(find.byType(CourseMark), findsOneWidget);
+    expect(find.byIcon(Icons.functions_rounded), findsOneWidget);
     expect(find.byType(SwitchListTile), findsOneWidget);
     expect(tester.takeException(), isNull);
 

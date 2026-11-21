@@ -20,6 +20,8 @@ class AssignmentCard extends StatelessWidget {
       this.compact = false,
       this.countdown = false,
       this.showFullDeadline = true,
+      this.showDivider = true,
+      this.enableTapFeedback = true,
       this.inPinnedSection = false,
       this.deadlinePending = false,
       this.previewOnly = false,
@@ -31,7 +33,7 @@ class AssignmentCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onOpenAssignment;
   final bool opening;
-  final bool showFullDeadline, inPinnedSection;
+  final bool showFullDeadline, inPinnedSection, showDivider, enableTapFeedback;
   final bool deadlinePending, previewOnly, previewSaving;
   final bool compact, countdown;
 
@@ -97,6 +99,7 @@ class AssignmentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     final a = assignment, d = a.timelineAt;
     final bucket = AssignmentQuery.timelineBucketAt(a, now);
     final overdue = bucket == AssignmentDeadlineBucket.overdue;
@@ -185,7 +188,7 @@ class AssignmentCard extends StatelessWidget {
             ? '—'
             : '待定';
     final timeMeasure = TextPainter(
-        text: const TextSpan(text: '00:00', style: Journal.time),
+        text: TextSpan(text: '00:00', style: journal.time),
         textDirection: Directionality.of(context),
         textScaler: MediaQuery.textScalerOf(context))
       ..layout();
@@ -197,10 +200,10 @@ class AssignmentCard extends StatelessWidget {
     final stateTone = _stateTone(a, bucket);
     final hasSpecialStatePill = stateTone != CourseworkPillTone.neutral;
     final railTextColor = urgent != null && today
-        ? Journal.berry
+        ? journal.berry
         : clock.isEmpty
-            ? (railLabel == '待定' ? Journal.ochre : Journal.muted)
-            : (overdue ? Journal.muted : Journal.ink.withValues(alpha: 0.88));
+            ? (railLabel == '待定' ? journal.ochre : journal.muted)
+            : (overdue ? journal.muted : journal.ink.withValues(alpha: 0.88));
 
     final highlightPills = <Widget>[
       if (state.isNotEmpty && hasSpecialStatePill)
@@ -227,22 +230,22 @@ class AssignmentCard extends StatelessWidget {
       if (a.isExam) ...[
         if (clock.isEmpty || inPinnedSection)
           for (final line in examSchedule?.cardTimeLines ?? const <String>[])
-            Text(line, style: Journal.metadata),
+            Text(line, style: journal.metadata),
         if (examSchedule?.yearUnconfirmed == true)
-          const Text('年份待确认', style: Journal.metadata),
-        for (final line in examLines) Text(line, style: Journal.metadata),
+          Text('年份待确认', style: journal.metadata),
+        for (final line in examLines) Text(line, style: journal.metadata),
       ] else if (showFullDeadline || inPinnedSection || countdown || !hasTime)
         Text(
           deadline,
           style: !hasTime && railLabel == '待定'
-              ? Journal.metadata.copyWith(
-                  color: Journal.ochre,
+              ? journal.metadata.copyWith(
+                  color: journal.ochre,
                   fontWeight: FontWeight.w600,
                 )
-              : Journal.metadata,
+              : journal.metadata,
         ),
       if (!a.isExam && inPinnedSection && countdown && hasTime)
-        Text(DisplayPreferences.remaining(d, now), style: Journal.metadata),
+        Text(DisplayPreferences.remaining(d, now), style: journal.metadata),
     ];
 
     final hasCourse = a.courseName.trim().isNotEmpty;
@@ -268,21 +271,22 @@ class AssignmentCard extends StatelessWidget {
                 : '打开作业';
 
     Widget buildLaunchControl() {
+      final journal = Journal.of(context);
       final enabled = !previewOnly && !opening && onOpenAssignment != null;
       final iconWidget = opening && !reduceMotion
-          ? const SizedBox.square(
+          ? SizedBox.square(
               dimension: 15,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                color: Journal.ink,
+                color: journal.ink,
               ),
             )
           : Icon(
               opening ? Icons.hourglass_top_rounded : Icons.open_in_new_rounded,
               size: 18,
               color: enabled
-                  ? Journal.muted.withValues(alpha: 0.9)
-                  : Journal.muted.withValues(alpha: 0.45),
+                  ? journal.muted.withValues(alpha: 0.9)
+                  : journal.muted.withValues(alpha: 0.45),
             );
 
       if (largeText) {
@@ -302,7 +306,7 @@ class AssignmentCard extends StatelessWidget {
                 minimumSize: const Size(48, 48),
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                backgroundColor: Journal.parchment,
+                backgroundColor: journal.parchment,
                 side: BorderSide.none,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
@@ -312,8 +316,8 @@ class AssignmentCard extends StatelessWidget {
               label: ExcludeSemantics(
                 child: Text(
                   shortOpenLabel,
-                  style: Journal.metadata.copyWith(
-                    color: enabled ? Journal.ink : Journal.muted,
+                  style: journal.metadata.copyWith(
+                    color: enabled ? journal.ink : journal.muted,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -341,8 +345,8 @@ class AssignmentCard extends StatelessWidget {
       );
     }
 
-    final verticalPad = compact ? 9.0 : 13.0;
-    const railGap = 10.0;
+    final verticalPad = compact ? 8.5 : 12.0;
+    const railGap = 12.0;
     final contentLeftInset = railWidth + railGap;
 
     final bodyColumn = Column(
@@ -354,42 +358,65 @@ class AssignmentCard extends StatelessWidget {
             maxLines: largeText ? null : 2,
             overflow: largeText ? null : TextOverflow.ellipsis,
             style: overdue
-                ? Journal.entryTitle.copyWith(color: const Color(0xFF36453E))
-                : Journal.entryTitle,
+                ? journal.entryTitle.copyWith(
+                    color: journal == JournalPalette.dark
+                        ? journal.muted
+                        : const Color(0xFF4B5563),
+                  )
+                : journal.entryTitle,
           )
         else if (hasCourse)
-          Text(a.courseName.trim(), style: Journal.entryTitle),
-        if ((hasTitle && hasCourse) || showPlainInlineState) ...[
+          Text(a.courseName.trim(), style: journal.entryTitle),
+        if (!largeText && hasTitle && hasCourse && showPlainInlineState) ...[
           const SizedBox(height: 4),
-          Wrap(
-            spacing: 5,
-            runSpacing: 3,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              if (hasTitle && hasCourse)
-                Text(a.courseName.trim(), style: Journal.metadata),
-              if (hasTitle && hasCourse && showPlainInlineState)
-                Text(
-                  '·',
-                  style: Journal.metadata.copyWith(
-                    color: Journal.muted.withValues(alpha: 0.65),
+          _CourseStateLine(
+            course: a.courseName.trim(),
+            state: state,
+            journal: journal,
+          ),
+          if (highlightPills.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Wrap(
+              spacing: 6,
+              runSpacing: 5,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: highlightPills,
+            ),
+          ],
+        ] else ...[
+          if ((hasTitle && hasCourse) || showPlainInlineState) ...[
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 5,
+              runSpacing: 3,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (hasTitle && hasCourse)
+                  Text(a.courseName.trim(), style: journal.metadata),
+                if (hasTitle && hasCourse && showPlainInlineState)
+                  Text(
+                    '·',
+                    style: journal.metadata.copyWith(
+                      color: journal.muted.withValues(alpha: 0.65),
+                    ),
                   ),
-                ),
-              if (showPlainInlineState) Text(state, style: Journal.metadata),
-              if (highlightPills.isNotEmpty && !hasSpecialStatePill)
-                ...highlightPills,
-            ],
-          ),
-        ],
-        if (highlightPills.isNotEmpty &&
-            (hasSpecialStatePill || (!hasCourse && !showPlainInlineState))) ...[
-          const SizedBox(height: 5),
-          Wrap(
-            spacing: 6,
-            runSpacing: 5,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: highlightPills,
-          ),
+                if (showPlainInlineState) Text(state, style: journal.metadata),
+                if (highlightPills.isNotEmpty && !hasSpecialStatePill)
+                  ...highlightPills,
+              ],
+            ),
+          ],
+          if (highlightPills.isNotEmpty &&
+              (hasSpecialStatePill ||
+                  (!hasCourse && !showPlainInlineState))) ...[
+            const SizedBox(height: 5),
+            Wrap(
+              spacing: 6,
+              runSpacing: 5,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: highlightPills,
+            ),
+          ],
         ],
         if (extraLines.isNotEmpty) ...[
           const SizedBox(height: 4),
@@ -402,7 +429,7 @@ class AssignmentCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Semantics(
@@ -414,6 +441,7 @@ class AssignmentCard extends StatelessWidget {
                 child: Material(
                   type: MaterialType.transparency,
                   child: InkWell(
+                    enableFeedback: enableTapFeedback,
                     onTap: onCardTap,
                     borderRadius: BorderRadius.circular(10),
                     child: Padding(
@@ -427,31 +455,31 @@ class AssignmentCard extends StatelessWidget {
                                 ? Align(
                                     alignment: Alignment.centerLeft,
                                     child: reduceMotion
-                                        ? const Icon(
+                                        ? Icon(
                                             Icons.hourglass_top_rounded,
                                             size: 16,
-                                            color: Journal.ochre,
+                                            color: journal.ochre,
                                             semanticLabel: '正在确认截止时间',
                                           )
-                                        : const SizedBox.square(
+                                        : SizedBox.square(
                                             dimension: 16,
                                             child: CircularProgressIndicator(
                                               strokeWidth: 2,
-                                              color: Journal.ochre,
+                                              color: journal.ochre,
                                               semanticsLabel: '正在确认截止时间',
                                             ),
                                           ),
                                   )
                                 : Text(
                                     railLabel,
-                                    style: Journal.time.copyWith(
+                                    style: journal.time.copyWith(
                                       color: railTextColor,
                                       fontWeight: clock.isEmpty
                                           ? FontWeight.w500
                                           : FontWeight.w600,
                                       fontSize: clock.isEmpty
                                           ? 14
-                                          : Journal.time.fontSize,
+                                          : journal.time.fontSize,
                                     ),
                                   ),
                           ),
@@ -482,15 +510,104 @@ class AssignmentCard extends StatelessWidget {
           key: ValueKey('assignment-card-gap-${a.id}'),
           height: 4,
         ),
-        Padding(
-          padding: EdgeInsets.only(left: contentLeftInset),
-          child: const Divider(
-            height: 1,
-            thickness: 0.8,
-            color: Journal.rule,
+        if (showDivider)
+          Padding(
+            padding: EdgeInsets.only(left: contentLeftInset),
+            child: Divider(
+              height: 1,
+              thickness: 0.8,
+              color: journal.rule,
+            ),
           ),
-        ),
       ],
+    );
+  }
+}
+
+class _CourseStateLine extends StatelessWidget {
+  const _CourseStateLine({
+    required this.course,
+    required this.state,
+    required this.journal,
+  });
+
+  final String course;
+  final String state;
+  final JournalPalette journal;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = journal.metadata;
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+
+    double measure(String text) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        maxLines: 1,
+        textDirection: direction,
+        textScaler: scaler,
+      )..layout();
+      final width = painter.width;
+      painter.dispose();
+      return width;
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final dotWidth = measure('·');
+        final stateWidth = measure(state);
+        final suffixWidth = dotWidth + stateWidth + 10.0;
+        final available = (constraints.maxWidth - suffixWidth)
+            .clamp(0.0, constraints.maxWidth);
+
+        var displayCourse = course;
+        if (measure(course) > available - 0.5) {
+          final runes = course.runes.toList();
+          final fitWidth = (available - 1.0).clamp(0.0, available);
+          var low = 1;
+          var high = runes.length;
+          var best = 0;
+          while (low <= high) {
+            final mid = (low + high) ~/ 2;
+            final candidate = '${String.fromCharCodes(runes.take(mid))}…';
+            if (measure(candidate) <= fitWidth) {
+              best = mid;
+              low = mid + 1;
+            } else {
+              high = mid - 1;
+            }
+          }
+          if (best > 0) {
+            final raw = String.fromCharCodes(runes.take(best)).trimRight();
+            final trimmed = raw.replaceFirst(RegExp(r'[（(\[【《「『·\-—\s]+$'), '');
+            displayCourse = trimmed.isEmpty ? '$raw…' : '$trimmed…';
+          }
+        }
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                displayCourse,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              '·',
+              style: style.copyWith(
+                color: journal.muted.withValues(alpha: 0.65),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text(state, style: style),
+          ],
+        );
+      },
     );
   }
 }

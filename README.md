@@ -6,11 +6,11 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.8.22+89](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.22/chaoxing-journal-1.8.22.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.22) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.8.23+102](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.23/chaoxing-journal-1.8.23.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.23) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
-**1.8.22+89 已正式发布。**课业详情可置顶至首页，已提交、隐藏或退出未完成目录后自动退顶。有开始时间但截止待确认的待交课业纳入「未逾期」。按时间近到远时排在七天内与更远的有日期课业之间，远到近时排在有日期课业之后。首页本年作业日期省略年份，跨年保留年份，并按北京时间显示「今天」「明天」。详情保留完整年份。历次变更见[版本记录](CHANGELOG.md)。
+**1.8.23+102 已正式发布。**新增跟随系统、浅色与深色主题即时切换，以及可独立开关的柔和交互音效与触感短振；修复未提交随堂练习误显「提交状态未知」的问题；精修首页恢复顶栏与日历待核对课业无框排版，并补齐同身份考试通知置顶继承与切号/前后台同步交错保护。历次变更见[版本记录](CHANGELOG.md)。
 
 ## 功能
 
@@ -35,20 +35,20 @@
 
 ## 下载安装
 
-**当前正式包为 1.8.22（89）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**当前正式包为 1.8.23（102）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.8.22.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.22/chaoxing-journal-1.8.22.apk)。发布说明及校验文件见 [1.8.22 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.22)。
+1. [下载 chaoxing-journal-1.8.23.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.23/chaoxing-journal-1.8.23.apk)。发布说明及校验文件见 [1.8.23 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.23)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到 1.8.22？</summary>
+<summary>已经安装：如何升级到 1.8.23？</summary>
 
 1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版继续把 manual 小索引更新到 GitHub 同版本正式包，stable 保持 1.8.0，APK 批量镜像点仍由维护者单独选择。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
-正式包使用 `com.example.studyassistant.journal` 包名，是非 debuggable 的 Release 构建，但证书沿用维护者既有的 Android Debug 体验证书（证书主题仍为 Android Debug）；这不是生产或应用商店签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.22 继续沿用既有包名与体验证书。
+正式包使用 `com.example.studyassistant.journal` 包名，是非 debuggable 的 Release 构建，但证书沿用维护者既有的 Android Debug 体验证书（证书主题仍为 Android Debug）；这不是生产或应用商店签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.23 继续沿用既有包名与体验证书。
 
 ## 使用边界
 

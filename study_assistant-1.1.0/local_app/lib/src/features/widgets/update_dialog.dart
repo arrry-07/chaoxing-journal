@@ -193,7 +193,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           _ => update == null ? '应用更新' : '发现新版本',
         };
         return Dialog(
-            backgroundColor: Journal.sheet,
+            backgroundColor: Journal.of(context).sheet,
             insetPadding:
                 const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
             shape:
@@ -201,6 +201,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
             child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: LayoutBuilder(builder: (context, bounds) {
+                  final journal = Journal.of(context);
                   final compact = bounds.maxHeight < 520 ||
                       MediaQuery.textScalerOf(context).scale(14) > 21;
                   final body = Column(
@@ -208,33 +209,33 @@ class _UpdateDialogState extends State<UpdateDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(title,
-                            style: Journal.section.copyWith(fontSize: 23)),
+                            style: journal.section.copyWith(fontSize: 23)),
                         const SizedBox(height: 16),
                         if (update != null) ...[
                           Text(
                               '当前版本 ${AppVersion.display} → ${update.versionName}',
-                              style: Journal.entryTitle),
+                              style: journal.entryTitle),
                           if (update.apkSize != null) ...[
                             const SizedBox(height: 4),
                             Text(
                                 '安装包大小 ${(update.apkSize! / 1048576).toStringAsFixed(1)} MB',
-                                style: Journal.metadata),
+                                style: journal.metadata),
                           ],
                           const SizedBox(height: 16),
                         ] else ...[
                           Text('当前版本 ${AppVersion.display}',
-                              style: Journal.metadata),
+                              style: journal.metadata),
                           const SizedBox(height: 12),
                         ],
                         if (task.message != title)
                           Semantics(
                               liveRegion: !task.downloading,
                               child: Text(task.message,
-                                  style: Journal.metadata.copyWith(
+                                  style: journal.metadata.copyWith(
                                       color: phase == UpdatePhase.failed ||
                                               checkFailed
-                                          ? Journal.berry
-                                          : Journal.muted))),
+                                          ? journal.berry
+                                          : journal.muted))),
                         if (task.busy) ...[
                           const SizedBox(height: 16),
                           ClipRRect(
@@ -248,19 +249,19 @@ class _UpdateDialogState extends State<UpdateDialog> {
                             const SizedBox(height: 8),
                             Text(
                                 '${task.progress == null ? '' : '${(task.progress! * 100).floor()}% · '}${task.transferSummary}',
-                                style: Journal.metadata),
+                                style: journal.metadata),
                           ],
                         ],
                         if (task.downloading) ...[
                           const SizedBox(height: 12),
-                          const Text('收起后可继续使用应用；下载完成后再确认安装。',
-                              style: Journal.metadata),
+                          Text('收起后可继续使用应用；下载完成后再确认安装。',
+                              style: journal.metadata),
                         ],
                         if (update != null &&
                             !task.downloading &&
                             update.releaseNotes.isNotEmpty) ...[
                           const SizedBox(height: 20),
-                          Text('更新内容', style: Journal.entryTitle),
+                          Text('更新内容', style: journal.entryTitle),
                           const SizedBox(height: 8),
                           ConstrainedBox(
                               constraints: BoxConstraints(
@@ -269,8 +270,8 @@ class _UpdateDialogState extends State<UpdateDialog> {
                                   child: SingleChildScrollView(
                                       primary: false,
                                       child: Text(update.releaseNotes,
-                                          style: Journal.metadata
-                                              .copyWith(color: Journal.ink))))),
+                                          style: journal.metadata
+                                              .copyWith(color: journal.ink))))),
                         ],
                         if (update != null &&
                             !task.busy &&
@@ -278,15 +279,14 @@ class _UpdateDialogState extends State<UpdateDialog> {
                           const SizedBox(height: 16),
                           ExpansionTile(
                               tilePadding: EdgeInsets.zero,
-                              title:
-                                  const Text('下载选项', style: Journal.metadata),
+                              title: Text('下载选项', style: journal.metadata),
                               children: [
                                 SwitchListTile.adaptive(
                                     contentPadding: EdgeInsets.zero,
-                                    title: const Text('尝试多连接加速',
-                                        style: Journal.metadata),
+                                    title: Text('尝试多连接加速',
+                                        style: journal.metadata),
                                     subtitle: Text('下载较慢时可尝试，速度取决于网络。',
-                                        style: Journal.metadata
+                                        style: journal.metadata
                                             .copyWith(fontSize: 12)),
                                     value: task.service.parallelDownloads,
                                     onChanged: (v) => setState(() =>

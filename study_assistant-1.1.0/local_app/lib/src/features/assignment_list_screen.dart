@@ -5,17 +5,20 @@ import '../app/journal.dart';
 import '../app/transient_feedback.dart';
 import '../local/chaoxing_local_client.dart';
 import '../models/assignment.dart';
+import '../models/display_preferences.dart';
 import '../models/assignment_sync_progress.dart';
 import '../models/home_filters.dart';
 import '../models/sync_report.dart';
 import '../models/personal_workspace.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import '../services/assignment_query.dart';
 import '../services/exam_schedule_presentation.dart';
 import '../services/home_course_filter.dart';
 import '../services/home_sync_presentation.dart';
 import '../services/assignment_web_link.dart';
 import '../services/external_link_service.dart';
+import 'widgets/appearance_controls.dart';
 import 'widgets/assignment_card.dart';
 
 /// A calendar recovery view. It is carried in the route query, never in
@@ -167,17 +170,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
   void feedback(String message, {bool details = false}) {
     if (!mounted) return;
+    final journal = Journal.of(context);
     _feedback.show(
         context,
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          backgroundColor: Journal.ink,
+          backgroundColor: journal.ink,
           content: Text(message,
-              style: Journal.metadata.copyWith(color: Journal.sheet)),
+              style: journal.metadata.copyWith(color: journal.sheet)),
           action: details
               ? SnackBarAction(
                   label: '查看详情',
-                  textColor: Journal.sheet,
+                  textColor: journal.sheet,
                   onPressed: () {
                     _feedback.dismiss();
                     if (mounted) context.push('/sync?expand=issues');
@@ -233,6 +237,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     }
     setState(() => _refreshing = true);
     final before = store.syncReport;
+    final epoch = store.accountEpoch;
     try {
       final attempted = await act(action);
       if (!mounted || !attempted) return;
@@ -242,6 +247,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           report.phase == SyncPhase.running) {
         feedback('刷新未完成，请查看同步详情', details: true);
       } else if (report.phase == SyncPhase.success) {
+        if (epoch == store.accountEpoch) {
+          InteractionFeedback.trigger(store.display,
+              kind: InteractionSoundKind.syncDone);
+        }
         feedback(store.error == null ? '作业已更新' : '作业已更新，本机服务需要处理',
             details: store.error != null);
       } else if (report.phase == SyncPhase.partial) {
@@ -272,6 +281,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: store,
       builder: (context, _) {
+        final journal = Journal.of(context);
         final busy = _refreshing ||
             store.isLoading ||
             store.syncReport.phase == SyncPhase.running;
@@ -344,6 +354,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             displayIndex: displayIndex,
             now: now,
             showFullDeadline: false,
+            showDivider: false,
+            enableTapFeedback: false,
             inPinnedSection: pinned,
             compact: store.display.compact,
             countdown: store.display.countdown,
@@ -356,6 +368,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 : () => openAssignment(a.id),
             opening: _openingAssignments.contains(a.id),
             onTap: () {
+              InteractionFeedback.trigger(store.display);
               final path = '/assignments/${Uri.encodeComponent(a.id)}';
               final scope = recoveryScope == null
                   ? ''
@@ -383,7 +396,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             }
             if (pinned.isNotEmpty) {
               widgets
-                  .add(dayHeading('置顶', top: 10, tone: _DayHeadingTone.today));
+                  .add(dayHeading('置顶', top: 14, tone: _DayHeadingTone.today));
               widgets.addAll(pinned.map((item) => card(item, pinned: true)));
             }
           }
@@ -450,16 +463,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
               widgets.add(dayHeading(
                 heading,
-                top: widgets.isEmpty ? 10 : 14,
+                top: widgets.isEmpty ? 14 : 22,
                 tone: tone,
                 badge: tierBadge,
               ));
             }
             previous = effectiveKey;
-            final row = card(a);
-            widgets.add(widgets.isEmpty
-                ? Padding(padding: const EdgeInsets.only(top: 8), child: row)
-                : row);
+            widgets.add(card(a));
           }
           return widgets;
         }
@@ -482,45 +492,128 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 alignment: WrapAlignment.spaceBetween,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  const Text('课业手记', style: Journal.display),
-                  Row(mainAxisSize: MainAxisSize.min, children: [
-                    if (plans.isEmpty)
-                      IconButton(
-                          key: const ValueKey('home-plan-entry'),
-                          tooltip: '今日计划',
-                          constraints:
-                              const BoxConstraints(minWidth: 48, minHeight: 48),
-                          onPressed: () => context.push('/plan'),
-                          icon: const Icon(Icons.checklist_rounded)),
-                    IconButton(
-                        tooltip: '刷新作业',
-                        onPressed: busy ? null : () => refresh(syncAction),
-                        icon: busy
-                            ? reduceMotion
-                                ? const Icon(Icons.hourglass_top_rounded,
-                                    size: 20, color: Journal.ink)
-                                : const SizedBox.square(
-                                    dimension: 20,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2, color: Journal.ink))
-                            : const Icon(Icons.sync_rounded)),
-                    IconButton(
-                        tooltip: '同步详情',
-                        onPressed: () => context.push('/sync'),
-                        icon: const Icon(Icons.more_horiz_rounded)),
-                  ]),
+                  Text('课业手记', style: journal.display),
+                  Builder(builder: (context) {
+                    Widget action(String label, Widget button) => Stack(
+                          alignment: Alignment.topCenter,
+                          children: [
+                            button,
+                            Positioned(
+                              bottom: 2,
+                              child: IgnorePointer(
+                                child: ExcludeSemantics(
+                                  child: Text(
+                                    label,
+                                    style: journal.metadata.copyWith(
+                                      fontSize: 11,
+                                      height: 1,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+
+                    return Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (plans.isEmpty)
+                        action(
+                          '计划',
+                          IconButton(
+                              key: const ValueKey('home-plan-entry'),
+                              tooltip: '今日计划',
+                              padding: const EdgeInsets.only(bottom: 12),
+                              iconSize: 21,
+                              constraints: const BoxConstraints(
+                                  minWidth: 48, minHeight: 48),
+                              onPressed: () => context.push('/plan'),
+                              icon: const Icon(Icons.checklist_rounded)),
+                        ),
+                      action(
+                        '刷新',
+                        IconButton(
+                            enableFeedback: false,
+                            tooltip: '刷新作业',
+                            padding: const EdgeInsets.only(bottom: 12),
+                            iconSize: 21,
+                            constraints: const BoxConstraints(
+                                minWidth: 48, minHeight: 48),
+                            onPressed: busy ? null : () => refresh(syncAction),
+                            icon: busy
+                                ? reduceMotion
+                                    ? Icon(Icons.hourglass_top_rounded,
+                                        size: 19, color: journal.ink)
+                                    : SizedBox.square(
+                                        dimension: 19,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2, color: journal.ink))
+                                : const Icon(Icons.sync_rounded)),
+                      ),
+                      if (recoveryScope == null)
+                        action(
+                          '主题',
+                          IconButton(
+                            key: const ValueKey('home-theme-toggle'),
+                            enableFeedback: false,
+                            padding: const EdgeInsets.only(bottom: 12),
+                            iconSize: 21,
+                            constraints: const BoxConstraints(
+                                minWidth: 48, minHeight: 48),
+                            tooltip:
+                                '切换主题（当前：${store.display.themeMode.label}）',
+                            icon: Icon(switch (store.display.themeMode) {
+                              JournalThemeMode.system =>
+                                Icons.brightness_auto_outlined,
+                              JournalThemeMode.light =>
+                                Icons.light_mode_outlined,
+                              JournalThemeMode.dark => Icons.dark_mode_outlined,
+                            }),
+                            onPressed: () {
+                              final display = store.display;
+                              final system =
+                                  MediaQuery.platformBrightnessOf(context) ==
+                                          Brightness.dark
+                                      ? JournalThemeMode.dark
+                                      : JournalThemeMode.light;
+                              final mode = switch (display.themeMode) {
+                                JournalThemeMode.system =>
+                                  system == JournalThemeMode.dark
+                                      ? JournalThemeMode.light
+                                      : JournalThemeMode.dark,
+                                final current when current != system => system,
+                                _ => JournalThemeMode.system,
+                              };
+                              InteractionFeedback.trigger(display);
+                              saveDisplaySetting(context, store,
+                                  display.copyWith(themeMode: mode));
+                            },
+                          ),
+                        ),
+                      action(
+                        '更多',
+                        IconButton(
+                            tooltip: '同步详情',
+                            padding: const EdgeInsets.only(bottom: 12),
+                            iconSize: 21,
+                            constraints: const BoxConstraints(
+                                minWidth: 48, minHeight: 48),
+                            onPressed: () => context.push('/sync'),
+                            icon: const Icon(Icons.more_horiz_rounded)),
+                      ),
+                    ]);
+                  }),
                 ]),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             if (recoveryScope != null) ...[
               _recoveryHeader(context, recoveryScope, items.length),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
             ],
             if (plans.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: Journal.sage.withValues(alpha: 0.55),
+                    color: journal.sage.withValues(alpha: 0.55),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Material(
@@ -535,20 +628,20 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 8),
                           child: Row(children: [
-                            const Icon(Icons.checklist_rounded,
-                                size: 18, color: Journal.ink),
+                            Icon(Icons.checklist_rounded,
+                                size: 18, color: journal.ink),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 '今日计划 · 已完成${plans.where((p) => p.done).length}/${plans.length}',
-                                style: Journal.metadata.copyWith(
-                                  color: Journal.ink,
+                                style: journal.metadata.copyWith(
+                                  color: journal.ink,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ),
-                            const Icon(Icons.chevron_right_rounded,
-                                color: Journal.muted),
+                            Icon(Icons.chevron_right_rounded,
+                                color: journal.muted),
                           ]),
                         ),
                       ),
@@ -565,7 +658,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     : () => context.push('/sync?expand=issues'),
                 borderRadius: BorderRadius.circular(8),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
+                  constraints: BoxConstraints(
+                    minHeight: sync.action == HomeSyncAction.none ? 24 : 48,
+                  ),
                   child: Semantics(
                     liveRegion: true,
                     button: sync.action != HomeSyncAction.none,
@@ -579,26 +674,26 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                 : Icons.schedule_rounded,
                         size: 15,
                         color: store.syncReport.phase == SyncPhase.failed
-                            ? Journal.berry
+                            ? journal.berry
                             : store.syncReport.phase == SyncPhase.partial
-                                ? Journal.ochre
-                                : Journal.muted,
+                                ? journal.ochre
+                                : journal.muted,
                       ),
                       const SizedBox(width: 6),
                       Expanded(
                           child: ExcludeSemantics(
                               child:
-                                  Text(statusText, style: Journal.metadata))),
+                                  Text(statusText, style: journal.metadata))),
                       if (sync.action != HomeSyncAction.none)
-                        const Icon(Icons.chevron_right_rounded,
-                            size: 18, color: Journal.muted),
+                        Icon(Icons.chevron_right_rounded,
+                            size: 18, color: journal.muted),
                     ]),
                   ),
                 ),
               ),
             ),
             if (recoveryScope == null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               _homeActions(context, options, filtersActive, sortOrder),
               AnimatedSize(
                 duration: JournalLayout.motionDuration(context),
@@ -621,11 +716,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ClipRRect(
                       borderRadius: BorderRadius.circular(2),
                       child: reduceMotion
-                          ? Container(height: 3, color: Journal.sageBorder)
-                          : const LinearProgressIndicator(
+                          ? Container(height: 3, color: journal.sageBorder)
+                          : LinearProgressIndicator(
                               minHeight: 3,
-                              backgroundColor: Journal.parchment,
-                              color: Journal.ink,
+                              backgroundColor: journal.parchment,
+                              color: journal.ink,
                             ),
                     ),
                     const SizedBox(height: 6),
@@ -633,7 +728,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       liveRegion: true,
                       child: Text(
                         _syncProgressLabel(store),
-                        style: Journal.metadata.copyWith(color: Journal.ink),
+                        style: journal.metadata.copyWith(color: journal.ink),
                       ),
                     ),
                   ],
@@ -642,11 +737,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             if (recoveryScope == null &&
                 _courseKey != null &&
                 !displayAssignments.any((a) => a.courseKey == _courseKey))
-              const Padding(
+              Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
-                      style: Journal.metadata)),
+                      style: journal.metadata)),
             if (sortedItems.isNotEmpty) ...[
+              if (recoveryScope == null) const SizedBox(height: 16),
               ...timeline(sortedItems),
             ] else if (recoveryScope != null) ...[
               _emptyStateCard(
@@ -718,21 +814,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             Container(
               width: 48,
               height: 48,
-              decoration: const BoxDecoration(
-                color: Journal.parchment,
+              decoration: BoxDecoration(
+                color: Journal.of(context).parchment,
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,
-              child: Icon(icon, size: 22, color: Journal.muted),
+              child: Icon(icon, size: 22, color: Journal.of(context).muted),
             ),
             const SizedBox(height: 14),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: Journal.metadata.copyWith(
-                color: Journal.ink,
-                fontSize: 14.5,
-              ),
+              style: Journal.of(context).metadata.copyWith(
+                    color: Journal.of(context).ink,
+                    fontSize: 14.5,
+                  ),
             ),
             if (actions.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -761,6 +857,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
               onTap: onRemove,
+              enableFeedback: false,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 child: Align(
@@ -769,9 +866,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   heightFactor: 1,
                   child: Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Journal.sage,
+                      color: Journal.of(context).sage,
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Row(
@@ -782,16 +879,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             text,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: Journal.metadata.copyWith(
-                              fontSize: 12,
-                              color: Journal.ink,
-                              fontWeight: FontWeight.w600,
-                            ),
+                            style: Journal.of(context).metadata.copyWith(
+                                  fontSize: 12,
+                                  color: Journal.of(context).ink,
+                                  fontWeight: FontWeight.w600,
+                                ),
                           ),
                         ),
                         const SizedBox(width: 4),
-                        const Icon(Icons.close_rounded,
-                            size: 14, color: Journal.ink),
+                        Icon(Icons.close_rounded,
+                            size: 14, color: Journal.of(context).ink),
                       ],
                     ),
                   ),
@@ -869,9 +966,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         TextButton(
           style: TextButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            enableFeedback: false,
             minimumSize: const Size(48, 48),
             tapTargetSize: MaterialTapTargetSize.padded,
-            foregroundColor: Journal.muted,
+            foregroundColor: Journal.of(context).muted,
           ),
           onPressed: () => _saveFilters(
             HomeFilters(sortOrder: _sortOrder),
@@ -890,13 +988,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _DayHeadingTone tone = _DayHeadingTone.normal,
     String? badge,
   }) {
+    final journal = Journal.of(context);
     final textColor = switch (tone) {
-      _DayHeadingTone.overdue => Journal.berry,
-      _DayHeadingTone.undated => Journal.ochre,
-      _DayHeadingTone.today => Journal.ink,
-      _DayHeadingTone.normal => Journal.muted,
+      _DayHeadingTone.overdue => journal.berry,
+      _DayHeadingTone.undated => journal.ochre,
+      _DayHeadingTone.today => journal.ink,
+      _DayHeadingTone.normal => journal.muted,
     };
-    final baseStyle = Journal.dayHeading.copyWith(
+    final baseStyle = journal.dayHeading.copyWith(
       color: textColor,
       fontSize: 14.5,
     );
@@ -922,72 +1021,106 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             style: baseStyle,
           );
     return Padding(
-      padding: EdgeInsets.only(top: top + 6, bottom: 2),
-      child: Row(
+      padding: EdgeInsets.only(top: top, bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Flexible(
-            child: labelWidget,
-          ),
-          if (badge != null) ...[
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              decoration: BoxDecoration(
-                color: tone == _DayHeadingTone.overdue
-                    ? Journal.berryBg
-                    : Journal.sage,
-                borderRadius: BorderRadius.circular(10),
+          Row(
+            children: [
+              Flexible(
+                child: labelWidget,
               ),
-              child: Text(
-                badge,
-                style: Journal.metadata.copyWith(
-                  fontSize: 11,
-                  height: 1.2,
-                  fontWeight: FontWeight.w600,
-                  color: tone == _DayHeadingTone.overdue
-                      ? Journal.berry
-                      : Journal.ink,
+              if (badge != null) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: tone == _DayHeadingTone.overdue
+                        ? journal.berryBg
+                        : journal.sage,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    badge,
+                    style: journal.metadata.copyWith(
+                      fontSize: 11,
+                      height: 1.2,
+                      fontWeight: FontWeight.w600,
+                      color: tone == _DayHeadingTone.overdue
+                          ? journal.berry
+                          : journal.ink,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ],
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          Divider(height: 1, thickness: 0.8, color: journal.rule),
         ],
       ),
     );
   }
 
   Widget _recoveryHeader(
-          BuildContext context, AssignmentRecoveryScope scope, int count) =>
-      Card(
-        key: const ValueKey('assignment-recovery-scope'),
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+      BuildContext context, AssignmentRecoveryScope scope, int count) {
+    final journal = Journal.of(context);
+    return Column(
+      key: const ValueKey('assignment-recovery-scope'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Row(children: [
-                const Icon(Icons.filter_alt_outlined,
-                    size: 18, color: Journal.muted),
-                const SizedBox(width: 8),
-                Expanded(child: Text(scope.label, style: Journal.entryTitle)),
-              ]),
-              const SizedBox(height: 4),
-              Text(
-                '共 $count 项',
-                style: Journal.metadata,
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => _exitRecoveryScope(context),
-                  child: const Text('返回全部'),
+              Icon(Icons.filter_alt_outlined, size: 17, color: journal.muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 2,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      scope.label,
+                      style: journal.entryTitle.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      '· 共 $count 项',
+                      style: journal.metadata.copyWith(
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: journal.ink,
+                  minimumSize: const Size(48, 40),
+                  tapTargetSize: MaterialTapTargetSize.padded,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                ),
+                onPressed: () => _exitRecoveryScope(context),
+                child: const Text('返回全部'),
               ),
             ],
           ),
         ),
-      );
+        const SizedBox(height: 4),
+        Divider(height: 1, thickness: 0.8, color: journal.rule),
+      ],
+    );
+  }
 
   String _deadlineLabel(AssignmentDeadlineFilter filter) => switch (filter) {
         AssignmentDeadlineFilter.all => '全部',
@@ -1011,13 +1144,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       List<HomeCourseFilterOption> options,
       bool filtersActive,
       HomeSortOrder sortOrder) {
-    final actionColor = Theme.of(context).colorScheme.primary;
-    final filterStyle = Journal.metadata.copyWith(
-      color: actionColor,
+    final journal = Journal.of(context);
+    final filterColor = filtersActive ? journal.accent : journal.muted;
+    final filterStyle = journal.metadata.copyWith(
+      color: filterColor,
       fontWeight: FontWeight.w500,
     );
-    final sortStyle = Journal.metadata.copyWith(
-      color: Journal.muted,
+    final sortStyle = journal.metadata.copyWith(
+      color: journal.muted,
       fontWeight: FontWeight.w500,
     );
     final scaler = MediaQuery.textScalerOf(context);
@@ -1034,10 +1168,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       return width;
     }
 
-    final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 28;
-    final sortWidth = 16 + 6 + labelWidth(sortLabel, sortStyle) + 16;
+    final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 24;
+    final sortWidth = 17 + 7 + labelWidth(sortLabel, sortStyle) + 24;
 
     Widget buildFilterPill({bool fullWidth = false}) {
+      final journal = Journal.of(context);
       final message = filtersActive ? '已筛选，打开搜索与期限筛选' : '搜索与筛选';
       void onTap() => _openFilters(options);
       return Semantics(
@@ -1052,6 +1187,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               child: InkWell(
                 borderRadius: BorderRadius.circular(22),
                 onTap: onTap,
+                enableFeedback: false,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
                     minHeight: 48,
@@ -1062,9 +1198,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     widthFactor: fullWidth ? null : 1,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 9),
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: filtersActive ? Journal.sage : Journal.parchment,
+                        color: filtersActive ? journal.sage : journal.parchment,
                         borderRadius: BorderRadius.circular(22),
                       ),
                       child: Row(
@@ -1076,7 +1212,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                 ? Icons.tune_rounded
                                 : Icons.search_rounded,
                             size: 17,
-                            color: actionColor,
+                            color: filterColor,
                           ),
                           const SizedBox(width: 7),
                           Flexible(
@@ -1094,7 +1230,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       );
     }
 
-    Widget buildSortButton({double horizontalPad = 6}) {
+    Widget buildSortButton() {
+      final journal = Journal.of(context);
       final message = '当前排序：$sortLabel，打开搜索、筛选与排序';
       void onTap() => _openFilters(options);
       return Semantics(
@@ -1107,24 +1244,33 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             child: Material(
               type: MaterialType.transparency,
               child: InkWell(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(22),
                 onTap: onTap,
+                enableFeedback: false,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 48),
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: horizontalPad),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.swap_vert_rounded,
-                          size: 17, color: Journal.muted),
-                      const SizedBox(width: 7),
-                      Flexible(
-                        child: Text(
-                          sortLabel,
-                          key: const ValueKey('current-home-sort'),
-                          style: sortStyle,
-                        ),
+                  child: Center(
+                    widthFactor: 1,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: journal.parchment,
+                        borderRadius: BorderRadius.circular(22),
                       ),
-                    ]),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.swap_vert_rounded,
+                            size: 17, color: journal.muted),
+                        const SizedBox(width: 7),
+                        Flexible(
+                          child: Text(
+                            sortLabel,
+                            key: const ValueKey('current-home-sort'),
+                            style: sortStyle,
+                          ),
+                        ),
+                      ]),
+                    ),
                   ),
                 ),
               ),
@@ -1135,10 +1281,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     }
 
     return LayoutBuilder(builder: (context, constraints) {
-      if (filterWidth + sortWidth + 12 <= constraints.maxWidth) {
+      if (filterWidth + sortWidth + 10 <= constraints.maxWidth) {
         return Row(children: [
-          Flexible(child: buildFilterPill(fullWidth: true)),
-          const SizedBox(width: 12),
+          Expanded(child: buildFilterPill(fullWidth: true)),
+          const SizedBox(width: 10),
           buildSortButton(),
         ]);
       }
@@ -1146,7 +1292,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           buildFilterPill(),
-          buildSortButton(horizontalPad: 14),
+          buildSortButton(),
         ],
       );
     });
@@ -1189,10 +1335,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         store.account != expectedAccount) {
       return;
     }
-    if (!saved) feedback('搜索、筛选与排序未能保存，请重试；原偏好已保留');
+    if (saved) {
+      InteractionFeedback.trigger(store.display);
+    } else {
+      feedback('搜索、筛选与排序未能保存，请重试；原偏好已保留');
+    }
   }
 
   Future<void> _openFilters(List<HomeCourseFilterOption> courseOptions) async {
+    InteractionFeedback.trigger(store.display);
     final openingEpoch = store.accountEpoch;
     final openingAccount = store.account;
     final controller = TextEditingController(text: _query);
@@ -1221,12 +1372,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     height: 4,
                     margin: const EdgeInsets.only(bottom: 14),
                     decoration: BoxDecoration(
-                      color: Journal.ruleStrong,
+                      color: Journal.of(context).ruleStrong,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
-                Text('搜索、筛选与排序', style: Journal.section),
+                Text('搜索、筛选与排序', style: Journal.of(context).section),
                 const SizedBox(height: 16),
                 TextField(
                   controller: controller,
@@ -1291,10 +1442,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                           option.label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Journal.metadata.copyWith(
-                            fontSize: 14,
-                            color: Journal.ink,
-                          ),
+                          style: Journal.of(context).metadata.copyWith(
+                                fontSize: 14,
+                                color: Journal.of(context).ink,
+                              ),
                         ),
                       ),
                   ],
@@ -1362,6 +1513,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                               deadline: deadline,
                               type: type,
                               sortOrder: sortOrder)),
+                      style: FilledButton.styleFrom(enableFeedback: false),
                       child: const Text('应用'),
                     ),
                   ],
@@ -1423,20 +1575,20 @@ class _CourseOptionLabel extends StatelessWidget {
             option.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Journal.metadata.copyWith(
-              fontSize: 14,
-              color: Journal.ink,
-            ),
+            style: Journal.of(context).metadata.copyWith(
+                  fontSize: 14,
+                  color: Journal.of(context).ink,
+                ),
           ),
           if (option.showClass)
             Text(
               option.classLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Journal.metadata.copyWith(
-                fontSize: 12,
-                color: Journal.muted,
-              ),
+              style: Journal.of(context).metadata.copyWith(
+                    fontSize: 12,
+                    color: Journal.of(context).muted,
+                  ),
             ),
         ],
       );

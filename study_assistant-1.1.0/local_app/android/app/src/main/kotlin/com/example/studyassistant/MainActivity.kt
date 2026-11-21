@@ -23,6 +23,7 @@ class MainActivity : FlutterActivity() {
         UNAVAILABLE("unavailable"),
     }
 
+    private var interactionSoundBridge: InteractionSoundBridge? = null
     private var backupBridge: BackupBridge? = null
     private var personalFileBridge: PersonalFileBridge? = null
     private var verificationBrowser: VerificationBrowser? = null
@@ -37,8 +38,15 @@ class MainActivity : FlutterActivity() {
         verificationBrowser = null
         super.onDestroy()
     }
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        interactionSoundBridge?.close()
+        interactionSoundBridge = null
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        interactionSoundBridge = InteractionSoundBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         BackgroundReminderBridge.attach(flutterEngine, this)
         personalFileBridge = PersonalFileBridge(this,
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/personal_files"))

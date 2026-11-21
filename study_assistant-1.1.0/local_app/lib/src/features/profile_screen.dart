@@ -1,4 +1,5 @@
 import 'display_settings_screen.dart';
+import 'widgets/appearance_controls.dart';
 import 'widgets/update_scope.dart';
 import 'widgets/update_dialog.dart';
 import 'open_source_screen.dart';
@@ -32,13 +33,14 @@ class ProfileScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) {
+        final journal = Journal.of(context);
         return ListView(
           padding: EdgeInsets.zero,
           children: [
             _ProfileHeader(
               displayName: store.profileDisplayName,
               avatarUrl: store.profileAvatarUrl,
-              accountLabel: store.account ?? '未绑定账号',
+              accountLabel: _maskAccount(store.account),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -47,10 +49,10 @@ class ProfileScreen extends StatelessWidget {
                 children: [
                   Card(
                     key: const ValueKey('profile-group-courses'),
-                    color: Color.lerp(Journal.sheet, Journal.sage, .35),
+                    color: Color.lerp(journal.sheet, journal.sage, .35),
                     clipBehavior: Clip.antiAlias,
                     child: IconTheme.merge(
-                      data: const IconThemeData(color: Journal.ink),
+                      data: IconThemeData(color: journal.ink),
                       child: _SettingsTile(
                         icon: Icons.school_outlined,
                         title: '我的课程',
@@ -63,14 +65,23 @@ class ProfileScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
-                    child: Text('设置', style: Journal.section),
+                    child: Text('设置', style: journal.section),
                   ),
+                  AppearanceControls(
+                    store: store,
+                    onMore: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => DisplaySettingsScreen(store: store),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   _SettingsCard(
                     title: '学习与同步',
-                    accentColor: Journal.ink,
-                    headerColor: Journal.sage,
+                    accentColor: journal.ink,
+                    headerColor: journal.sage,
                     children: [
                       _SettingsTile(
                         icon: Icons.sync,
@@ -85,14 +96,6 @@ class ProfileScreen extends StatelessWidget {
                         subtitle: '个人待办、考试与每日计划',
                         onTap: () => context.push('/profile/arrangements'),
                       ),
-                      _SettingsTile(
-                          icon: Icons.tune,
-                          title: '显示与小组件',
-                          subtitle: '密度、日期与桌面显示范围',
-                          onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                  builder: (_) =>
-                                      DisplaySettingsScreen(store: store)))),
                       _SettingsTile(
                         icon: Icons.inventory_2_outlined,
                         title: '学习记录',
@@ -114,8 +117,8 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   _SettingsCard(
                     title: '数据与安全',
-                    accentColor: Journal.ochre,
-                    headerColor: Journal.ochreBg,
+                    accentColor: journal.ink,
+                    headerColor: journal.sage,
                     children: [
                       _SettingsTile(
                         icon: Icons.health_and_safety_outlined,
@@ -141,8 +144,8 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   _SettingsCard(
                     title: '关于与更新',
-                    accentColor: Journal.slate,
-                    headerColor: Journal.slateBg,
+                    accentColor: journal.ink,
+                    headerColor: journal.sage,
                     children: [
                       _SettingsTile(
                         icon: Icons.help_outline,
@@ -197,16 +200,15 @@ class ProfileScreen extends StatelessWidget {
                           ? null
                           : () => _confirmLogout(context),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: Journal.berry,
-                        side: const BorderSide(color: Journal.berryBorder),
-                        backgroundColor:
-                            Color.lerp(Journal.sheet, Journal.berryBg, .25),
+                        foregroundColor: journal.ink,
+                        side: BorderSide(color: journal.rule, width: 0.8),
+                        backgroundColor: journal.sheet,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 16,
                         ),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       ),
                       child: const Text(
@@ -247,8 +249,8 @@ class ProfileScreen extends StatelessWidget {
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, 'logout'),
             style: FilledButton.styleFrom(
-              backgroundColor: Journal.berry,
-              foregroundColor: Journal.sheet,
+              backgroundColor: Journal.of(context).berry,
+              foregroundColor: Journal.of(context).sheet,
             ),
             child: const Text('退出并清理本机记录'),
           ),
@@ -327,47 +329,43 @@ class _ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     final url = _profileAvatarUrl(avatarUrl);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 22, 16, 22),
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Expanded(
-                child: JournalHeading(
-                  '我的手帐',
-                  eyebrow: 'CAMPUS JOURNAL   /   04',
-                  bookTitle: true,
-                ),
-              ),
-              IconButton(
-                tooltip: '打开提醒设置',
-                onPressed: () => context.push('/reminders'),
-                icon: const Icon(Icons.tune_rounded),
-              ),
-            ],
+          const JournalHeading(
+            '我的手帐',
+            bookTitle: true,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           Row(
             children: [
-              CircleAvatar(
-                radius: 25,
-                backgroundColor: Journal.sage,
-                child: url == null
-                    ? const Icon(Icons.face_outlined)
-                    : ClipOval(
-                        child: Image.network(
-                          url,
-                          width: 50,
-                          height: 50,
-                          fit: BoxFit.cover,
-                          headers: _profileAvatarHeaders(url),
-                          errorBuilder: (_, __, ___) =>
-                              const Icon(Icons.face_outlined),
+              Container(
+                padding: const EdgeInsets.all(1.5),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: journal.rule, width: 1),
+                ),
+                child: CircleAvatar(
+                  radius: 24,
+                  backgroundColor: journal.sage,
+                  child: url == null
+                      ? const Icon(Icons.face_outlined)
+                      : ClipOval(
+                          child: Image.network(
+                            url,
+                            width: 48,
+                            height: 48,
+                            fit: BoxFit.cover,
+                            headers: _profileAvatarHeaders(url),
+                            errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.face_outlined),
+                          ),
                         ),
-                      ),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -388,6 +386,15 @@ class _ProfileHeader extends StatelessWidget {
       ),
     );
   }
+}
+
+String _maskAccount(String? account) {
+  if (account == null) return '未绑定账号';
+  final trimmed = account.trim();
+  if (RegExp(r'^\d{11}$').hasMatch(trimmed)) {
+    return '${trimmed.substring(0, 3)}****${trimmed.substring(7)}';
+  }
+  return account;
 }
 
 String? _profileAvatarUrl(String? avatarUrl) {
@@ -437,7 +444,8 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = Color.lerp(Journal.ink, accentColor, .50)!;
+    final journal = Journal.of(context);
+    final foreground = Color.lerp(journal.ink, accentColor, .50)!;
     return Card(
       clipBehavior: Clip.antiAlias,
       child: IconTheme.merge(
@@ -448,11 +456,11 @@ class _SettingsCard extends StatelessWidget {
             Container(
               key: ValueKey('profile-group-$title'),
               width: double.infinity,
-              color: Color.lerp(Journal.sheet, headerColor, .35),
+              color: Color.lerp(journal.sheet, headerColor, .35),
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
               child: Text(
                 title,
-                style: Journal.section.copyWith(
+                style: journal.section.copyWith(
                   color: foreground,
                   fontSize: 17,
                 ),
@@ -491,15 +499,16 @@ class _SettingsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     return ListTile(
       leading: Icon(icon, color: IconTheme.of(context).color, size: 22),
-      title: Text(title, style: Journal.entryTitle),
+      title: Text(title, style: journal.entryTitle),
       subtitle: subtitle == null ? null : Text(subtitle!),
       subtitleTextStyle: compactSubtitle
           ? Theme.of(context).textTheme.bodySmall?.copyWith(
                 fontSize: 12,
                 height: 1.4,
-                color: Journal.muted,
+                color: journal.muted,
               )
           : null,
       trailing: trailingOnPressed != null
@@ -509,7 +518,7 @@ class _SettingsTile extends StatelessWidget {
               icon: Icon(trailing))
           : onTap == null
               ? null
-              : Icon(trailing, color: Journal.muted),
+              : Icon(trailing, color: journal.muted),
       onTap: onTap,
     );
   }

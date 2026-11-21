@@ -14,12 +14,12 @@ class OpenSourceScreen extends StatelessWidget {
               onPressed: () => Navigator.of(context).maybePop()),
           title: const Text('开源许可')),
       body: ListView(padding: const EdgeInsets.all(20), children: [
-        const Text('一起构成这本手记', style: Journal.section),
+        Text('一起构成这本手记', style: Journal.of(context).section),
         const SizedBox(height: 12),
         const Text(
             '学习通课业手记使用了一些开放源代码的项目，用于界面、作业读取和本机提醒。保留作者的版权与许可声明，是对这些贡献的尊重，也是使用它们时应遵守的约定。'),
         const SizedBox(height: 24),
-        const Text('应用与查询参考', style: Journal.section),
+        Text('应用与查询参考', style: Journal.of(context).section),
         _license(context, 'HY / study_assistant', '应用基础 · MIT 许可证',
             'assets/licenses/HY.txt'),
         _license(context, 'xuexitong-cli', '课程班级与正式作业查询参考 · MIT 许可证',
@@ -27,7 +27,7 @@ class OpenSourceScreen extends StatelessWidget {
         _license(context, 'lpinyin', '中文课程与作业名称拼音排序 · BSD 2-Clause 许可证',
             'assets/licenses/lpinyin.txt'),
         const SizedBox(height: 16),
-        const Text('字体与基础组件', style: Journal.section),
+        Text('字体与基础组件', style: Journal.of(context).section),
         const ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text('霞鹜文楷 · LXGW WenKai Screen'),

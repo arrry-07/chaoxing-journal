@@ -10,7 +10,9 @@
 
 ## 日常开发与正式发布
 
-- 日常在 `dev` 工作。每项独立改动通过定向检查后单独提交，同一提交更新 [dev 进度](docs/ai-workflow/PROJECT_STATE.md#dev-当前迭代进度)。按维护者指示或明确同步需求推送 `origin/dev`。
+- 日常在 `dev` 工作。每项独立改动通过定向检查后单独提交（功能迭代同步更新 [dev 进度](docs/ai-workflow/PROJECT_STATE.md#dev-当前迭代进度)），随后自动轻量推送 `origin/dev`（无需重复确认），细则见[日常推送门禁](docs/ai-workflow/VALIDATION.md#dev-日常推送门禁)。
+- 推送 `origin/dev` 前必查 `git status` 与本次提交 Diff，严禁纳入凭据、Cookie、账号响应、敏感日志、`docs/feedback/`、`scripts/demo-video/`、个人材料或 `.apk` 等大体积二进制；仅推 `dev` 到 `origin/dev`，严禁顺手合入 `main`、建正式 PR 或打正式 Tag（正式发版须等明确指令）。
+- 推送完成后，在最终回复末尾固定附两行供代码走查：最新 `origin/dev` 提交号（完整 SHA 与简短信息），以及对比链接 `https://github.com/arrry-07/chaoxing-journal/compare/main...dev` 与核心修改文件的 `dev` 直达链接。
 - 本地快检使用缓存依赖，按需运行改动文件的 `dart format`、`flutter analyze --no-pub` 和 `flutter test --no-pub <相关测试文件>`。如需跳过 SDK 更新检查，在 Flutter 子命令前加 `--no-version-check`。
 - 修改课业、时间信任或首页筛选时，读[学习通参考实现](docs/guides/开发与贡献.md#学习通参考实现)与[首页课业行为约束](docs/guides/开发与贡献.md#首页课业排序长期约束)。确认逾期在双向时间排序中始终置底，保留 `FB-005` 回归。
 - 第三方 API、版本兼容或升级先查锁文件（Flutter 用 `pubspec.lock`），再用 Context7 核对对应版本文档。项目内部逻辑直接检查本地源码和测试。

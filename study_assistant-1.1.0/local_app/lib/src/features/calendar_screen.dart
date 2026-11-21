@@ -28,13 +28,13 @@ class _CalendarScreenState extends State<CalendarScreen>
     fontSize: 14,
     height: 1.4,
   );
-  static const _countStyle = TextStyle(
-    fontFamily: Journal.bodyFamily,
-    fontFamilyFallback: Journal.bodyFallback,
-    fontSize: 11,
-    height: 1.4,
-    color: Journal.muted,
-  );
+  TextStyle get _countStyle => TextStyle(
+        fontFamily: Journal.bodyFamily,
+        fontFamilyFallback: Journal.bodyFallback,
+        fontSize: 11,
+        height: 1.4,
+        color: Journal.of(context).muted,
+      );
   static const _cellBorderWidth = 1.0;
   static const _cellVerticalPadding = 2.0;
   static const _cellSlack = 1.0;
@@ -141,6 +141,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
+        final journal = Journal.of(context);
         final now = _now;
         final courseSources = widget.store.courseAssignments;
         final all = AssignmentQuery.projectDisplay(courseSources);
@@ -177,23 +178,41 @@ class _CalendarScreenState extends State<CalendarScreen>
         final textScaler = MediaQuery.textScalerOf(context);
         final cellHeight = _calendarCellHeight(context, textScaler);
         return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 24),
             children: [
               Wrap(
                 alignment: WrapAlignment.spaceBetween,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 spacing: 8,
                 children: [
-                  const Text('课业日历', style: Journal.display),
+                  Text('课业日历', style: journal.display),
                   TextButton.icon(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      textStyle: journal.metadata.copyWith(
+                        fontSize: 14,
+                        color: journal.ink,
+                      ),
+                    ),
                     onPressed: () => context.push('/agenda'),
-                    icon: const Icon(Icons.event_note_outlined),
+                    icon: const Icon(Icons.event_note_outlined, size: 18),
                     label: const Text('个人待办与考试'),
                   ),
                 ],
               ),
               Row(children: [
                 TextButton(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
                     onPressed: () => setState(() {
                           month = DateTime(today.year, today.month);
                           selected = today;
@@ -201,10 +220,20 @@ class _CalendarScreenState extends State<CalendarScreen>
                     child: const Text('回今天')),
                 TextButton(
                     onPressed: () => setState(() => selected = null),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor:
+                          selected == null ? journal.accent : journal.ink,
+                    ),
                     child: const Text('本月')),
                 const Spacer(),
                 IconButton(
                     tooltip: '刷新',
+                    visualDensity: VisualDensity.compact,
                     onPressed:
                         _refreshing || widget.store.isLoading ? null : _refresh,
                     icon: _refreshing || widget.store.isLoading
@@ -218,7 +247,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                         : const Icon(Icons.sync))
               ]),
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: 6),
                 child: Text(
                   _refreshing || widget.store.isLoading
                       ? '正在刷新${widget.store.lastSyncAt == null ? '' : '；上次成功 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'}…'
@@ -230,7 +259,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                     fontSize: 12,
                     color: _refreshMessage?.contains('失败') == true
                         ? Theme.of(context).colorScheme.error
-                        : Journal.muted,
+                        : journal.muted,
                   ),
                 ),
               ),
@@ -256,13 +285,13 @@ class _CalendarScreenState extends State<CalendarScreen>
                             softWrap: false,
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.center,
-                            style: Journal.section,
+                            style: Journal.of(context).section,
                           );
                           return LayoutBuilder(builder: (context, constraints) {
                             final painter = TextPainter(
                               text: TextSpan(
                                 text: DateFormat('yyyy年M月').format(month),
-                                style: Journal.section,
+                                style: Journal.of(context).section,
                               ),
                               textDirection: Directionality.of(context),
                               textScaler: textScaler,
@@ -305,9 +334,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                             Expanded(
                                 child: Center(
                                     child: Text(label,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                             fontSize: 13,
-                                            color: Journal.muted))))
+                                            color: journal.muted))))
                         ]),
                         const Divider(height: 9, indent: 8, endIndent: 8),
                         for (var row = 0;
@@ -316,6 +345,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                           Row(children: [
                             for (var col = 0; col < 7; col++)
                               Expanded(child: Builder(builder: (context) {
+                                final journal = Journal.of(context);
                                 final day = row * 7 + col - leading + 1;
                                 if (day < 1 || day > days) {
                                   return SizedBox(height: cellHeight);
@@ -355,17 +385,18 @@ class _CalendarScreenState extends State<CalendarScreen>
                                                 vertical: _cellVerticalPadding),
                                             decoration: BoxDecoration(
                                                 color: selected == date
-                                                    ? Journal.sage
+                                                    ? journal.sage
                                                     : null,
-                                                border: date == today
-                                                    ? Border.all(
-                                                        color: Journal.ink)
-                                                    : null,
+                                                border: Border.all(
+                                                  color: date == today
+                                                      ? journal.accent
+                                                      : Colors.transparent,
+                                                ),
                                                 borderRadius:
                                                     BorderRadius.circular(8)),
                                             child: Column(
                                                 mainAxisAlignment:
-                                                    MainAxisAlignment.center,
+                                                    MainAxisAlignment.start,
                                                 children: [
                                                   FittedBox(
                                                     fit: BoxFit.scaleDown,
@@ -388,14 +419,22 @@ class _CalendarScreenState extends State<CalendarScreen>
                                                           softWrap: false,
                                                           style: _countStyle),
                                                     )
+                                                  else
+                                                    SizedBox(
+                                                      height: _lineHeight(
+                                                        MediaQuery.textScalerOf(
+                                                            context),
+                                                        _countStyle,
+                                                      ),
+                                                    ),
                                                 ]))));
                               }))
                           ]),
                       ]))),
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(top: 10, bottom: 2),
                 child: Text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。',
-                    style: TextStyle(fontSize: 12, color: Journal.muted)),
+                    style: TextStyle(fontSize: 12, color: journal.muted)),
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 12, bottom: 4),
@@ -403,7 +442,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                   selected == null
                       ? '本月议程'
                       : '${DateFormat('M月d日').format(selected!)} · 议程',
-                  style: Journal.section,
+                  style: journal.section,
                 ),
               ),
               const Divider(height: 1),
@@ -429,8 +468,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                         .push('/assignments/${Uri.encodeComponent(a.id)}')),
               for (final e in manualAgenda)
                 Builder(builder: (context) {
+                  final journal = Journal.of(context);
                   final exam = e.kind == 'exam';
-                  final accent = exam ? Journal.slate : Journal.ink;
+                  final accent = exam ? journal.slate : journal.ink;
                   final label = exam ? '手动考试' : '个人待办';
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -440,46 +480,111 @@ class _CalendarScreenState extends State<CalendarScreen>
                     ),
                     title: Text(
                       '$label · ${e.title}',
-                      style: Journal.entryTitle.copyWith(color: accent),
+                      style: journal.entryTitle.copyWith(color: accent),
                     ),
                     subtitle: Text(manualTime(e.at)),
                     onTap: () => context.push('/agenda'),
                   );
                 }),
               if (noDeadlineCount > 0 || pendingDeadlineCount > 0) ...[
-                const Divider(height: 24),
-                const Text('待核对课业', style: Journal.section),
+                Padding(
+                  padding: const EdgeInsets.only(top: 20, bottom: 4),
+                  child: Text('待核对课业', style: journal.section),
+                ),
+                const Divider(height: 1),
                 if (noDeadlineCount > 0)
-                  TextButton.icon(
-                      key: const ValueKey('calendar-no-deadline-scope'),
-                      onPressed: () => context.go(_recoveryLocation(
-                          AssignmentRecoveryScope.noDeadline)),
-                      icon: const Icon(Icons.event_busy_outlined),
-                      label: Text('无截止日期（$noDeadlineCount）')),
+                  _buildRecoveryRow(
+                    key: const ValueKey('calendar-no-deadline-scope'),
+                    icon: Icons.event_busy_outlined,
+                    label: '无截止日期',
+                    count: noDeadlineCount,
+                    color: journal.ink,
+                    journal: journal,
+                    onTap: () => context.go(
+                        _recoveryLocation(AssignmentRecoveryScope.noDeadline)),
+                  ),
+                if (noDeadlineCount > 0 && pendingDeadlineCount > 0)
+                  Divider(
+                    height: 1,
+                    thickness: 0.6,
+                    indent: 29,
+                    color: journal.rule,
+                  ),
                 if (pendingDeadlineCount > 0)
-                  TextButton.icon(
-                      key: const ValueKey('calendar-deadline-pending-scope'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Journal.ochre,
-                      ),
-                      onPressed: () => context.go(_recoveryLocation(
-                          AssignmentRecoveryScope.deadlinePending)),
-                      icon: const Icon(Icons.help_outline),
-                      label: Text('截止时间未知（$pendingDeadlineCount）')),
+                  _buildRecoveryRow(
+                    key: const ValueKey('calendar-deadline-pending-scope'),
+                    icon: Icons.help_outline_rounded,
+                    label: '截止时间未知',
+                    count: pendingDeadlineCount,
+                    color: journal.ochre,
+                    journal: journal,
+                    onTap: () => context.go(_recoveryLocation(
+                        AssignmentRecoveryScope.deadlinePending)),
+                  ),
               ],
             ]);
       });
+
+  Widget _buildRecoveryRow({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required int count,
+    required Color color,
+    required JournalPalette journal,
+    required VoidCallback onTap,
+  }) =>
+      Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: key,
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Row(
+                children: [
+                  Icon(icon, size: 19, color: color),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: journal.entryTitle.copyWith(color: color),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$count 项',
+                    style: journal.metadata.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: journal.muted,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
 
   String _recoveryLocation(AssignmentRecoveryScope scope) =>
       Uri(path: '/assignments', queryParameters: {
         AssignmentRecoveryScope.queryParameter: scope.queryValue,
       }).toString();
 
-  double _calendarCellHeight(BuildContext context, TextScaler textScaler) {
-    double lineHeight(TextStyle style) =>
-        textScaler.scale(style.fontSize!) * style.height!;
+  double _lineHeight(TextScaler textScaler, TextStyle style) =>
+      textScaler.scale(style.fontSize!) * style.height!;
 
-    final content = lineHeight(_dateStyle) + lineHeight(_countStyle);
+  double _calendarCellHeight(BuildContext context, TextScaler textScaler) {
+    final content = _lineHeight(textScaler, _dateStyle) +
+        _lineHeight(textScaler, _countStyle);
     final chrome = 2 * (_cellBorderWidth + _cellVerticalPadding) + _cellSlack;
     return math.max(48.0, content + chrome);
   }

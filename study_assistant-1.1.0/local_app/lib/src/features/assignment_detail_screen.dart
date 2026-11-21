@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../models/assignment.dart';
 import '../services/assignment_grouping.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import '../services/assignment_query.dart';
 import '../services/exam_schedule_presentation.dart';
 import '../services/assignment_web_link.dart';
@@ -195,6 +196,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     final store = widget.store;
     final accountEpoch = store.accountEpoch;
     final wasPinned = store.isPinned(assignment);
+    final routeId = widget.assignmentId;
     setState(() {
       _togglingPin = true;
       if (_actionMessageTarget == _DetailNoticeTarget.pin) {
@@ -209,14 +211,18 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
       saved = false;
     }
     if (!mounted) return;
+    final current = widget.store == store &&
+        store.accountEpoch == accountEpoch &&
+        widget.assignmentId == routeId;
+    if (saved && current) {
+      InteractionFeedback.trigger(store.display,
+          kind: store.isPinned(assignment)
+              ? InteractionSoundKind.pin
+              : InteractionSoundKind.unpin);
+    }
     setState(() {
       _togglingPin = false;
-      if (saved ||
-          widget.store != store ||
-          store.accountEpoch != accountEpoch ||
-          widget.assignmentId != assignment.id) {
-        return;
-      }
+      if (saved || !current) return;
       _actionMessage = wasPinned ? '取消置顶失败，请稍后重试。' : '置顶失败，请稍后重试。';
       _actionMessageTarget = _DetailNoticeTarget.pin;
     });
@@ -329,6 +335,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     return AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
+        final journal = Journal.of(context);
         final original = widget.store.findAnyAssignment(widget.assignmentId);
         final sourceGroup = original == null
             ? null
@@ -456,7 +463,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
         final statusWidgets = <Widget>[
           if (statusLabel.isNotEmpty &&
               statusTone == CourseworkPillTone.neutral)
-            Text(statusLabel, style: Journal.metadata),
+            Text(statusLabel, style: journal.metadata),
           if (statusLabel.isNotEmpty &&
               statusTone != CourseworkPillTone.neutral)
             CourseworkStatusPill(
@@ -532,7 +539,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
             _actionMessageTarget == _DetailNoticeTarget.restore;
 
         return Material(
-          color: Journal.paper,
+          color: journal.paper,
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 540),
@@ -558,10 +565,11 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                         TextButton.icon(
                           key: const ValueKey('assignment-detail-pin'),
                           style: TextButton.styleFrom(
+                            enableFeedback: false,
                             padding: const EdgeInsets.symmetric(horizontal: 10),
                             minimumSize: const Size(48, 48),
                             foregroundColor:
-                                pinned ? Journal.ink : Journal.muted,
+                                pinned ? journal.ink : journal.muted,
                           ),
                           onPressed: _togglingPin || _hiding
                               ? null
@@ -583,7 +591,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                   const SizedBox(height: 8),
                   Material(
                     key: const ValueKey('assignment-detail-sheet'),
-                    color: Journal.sheet,
+                    color: journal.sheet,
                     borderRadius: BorderRadius.circular(14),
                     clipBehavior: Clip.antiAlias,
                     child: Padding(
@@ -595,7 +603,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                             Text(
                               displayCourse,
                               key: const ValueKey('assignment-detail-course'),
-                              style: Journal.metadata,
+                              style: journal.metadata,
                             ),
                             const SizedBox(height: 4),
                           ],
@@ -603,7 +611,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                             Text(
                               displayTitle,
                               key: const ValueKey('assignment-detail-title'),
-                              style: Journal.section.copyWith(
+                              style: journal.section.copyWith(
                                 fontSize: 22,
                                 height: 1.36,
                                 fontWeight: FontWeight.w700,
@@ -621,10 +629,10 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                           ],
                           if (hasTimeLine) ...[
                             const SizedBox(height: 10),
-                            const Divider(
+                            Divider(
                               height: 1,
                               thickness: 0.8,
-                              color: Journal.rule,
+                              color: journal.rule,
                             ),
                             const SizedBox(height: 10),
                             Row(
@@ -636,7 +644,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                     Icons.schedule_rounded,
                                     size: 18,
                                     color:
-                                        overdue ? Journal.berry : Journal.muted,
+                                        overdue ? journal.berry : journal.muted,
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -645,7 +653,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                     timeText,
                                     key: const ValueKey(
                                         'assignment-detail-time'),
-                                    style: Journal.time.copyWith(
+                                    style: journal.time.copyWith(
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
@@ -664,7 +672,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                 vertical: 9,
                               ),
                               decoration: BoxDecoration(
-                                color: Journal.ochreBg,
+                                color: journal.ochreBg,
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Column(
@@ -676,8 +684,8 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                     if (i > 0) const SizedBox(height: 4),
                                     Text(
                                       verificationNotes[i],
-                                      style: Journal.metadata.copyWith(
-                                        color: Journal.ochre,
+                                      style: journal.metadata.copyWith(
+                                        color: journal.ochre,
                                         fontSize: 13,
                                       ),
                                     ),
@@ -700,8 +708,8 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                     const EdgeInsets.only(bottom: 2),
                                 title: Text(
                                   '未核实的时间记录',
-                                  style: Journal.metadata.copyWith(
-                                    color: Journal.ink,
+                                  style: journal.metadata.copyWith(
+                                    color: journal.ink,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -714,7 +722,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                             const EdgeInsets.only(bottom: 4),
                                         child: Text(
                                           line,
-                                          style: Journal.metadata,
+                                          style: journal.metadata,
                                         ),
                                       ),
                                     ),
@@ -722,7 +730,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                     alignment: Alignment.centerLeft,
                                     child: Text(
                                       '时间记录尚未核实，仅供参考，不作为当前考试安排。以上时间均为北京时间。',
-                                      style: Journal.metadata.copyWith(
+                                      style: journal.metadata.copyWith(
                                         fontSize: 12.5,
                                       ),
                                     ),
@@ -740,7 +748,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Journal.parchment,
+                        color: journal.parchment,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Column(
@@ -748,17 +756,17 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                         children: [
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: const [
+                            children: [
                               Icon(
                                 Icons.visibility_off_outlined,
-                                color: Journal.muted,
+                                color: journal.muted,
                                 size: 20,
                               ),
                               SizedBox(width: 10),
                               Expanded(
                                 child: Text(
                                   '当前课业已在本机隐藏，不参与首页、日历、统计、小组件与提醒',
-                                  style: Journal.metadata,
+                                  style: journal.metadata,
                                 ),
                               ),
                             ],
@@ -766,7 +774,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                           const SizedBox(height: 10),
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
-                              backgroundColor: Journal.sheet,
+                              backgroundColor: journal.sheet,
                             ),
                             onPressed: _hiding || _opening || _refreshing
                                 ? null
@@ -788,8 +796,8 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     Text(
                       cleanRequirements,
                       key: const ValueKey('assignment-detail-requirements'),
-                      style: Journal.metadata.copyWith(
-                        color: Journal.ink,
+                      style: journal.metadata.copyWith(
+                        color: journal.ink,
                         fontSize: 14.5,
                         height: 1.55,
                       ),
@@ -803,8 +811,8 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                       childrenPadding: const EdgeInsets.only(bottom: 8),
                       title: Text(
                         '来源记录 · ${sources.length} 条',
-                        style: Journal.metadata.copyWith(
-                          color: Journal.ink,
+                        style: journal.metadata.copyWith(
+                          color: journal.ink,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -833,6 +841,12 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     key: const ValueKey('assignment-detail-open'),
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(50),
+                      backgroundColor: journal.ink,
+                      foregroundColor: journal == JournalPalette.dark
+                          ? journal.paper
+                          : journal.sheet,
+                      disabledBackgroundColor: journal.parchment,
+                      disabledForegroundColor: journal.muted,
                     ),
                     onPressed: _opening || _hiding || _currentUrl == null
                         ? null
@@ -862,14 +876,14 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                   const SizedBox(height: 10),
                   Text(
                     '将在学习通内打开$_itemLabel网页；也可主动选择浏览器打开，可能需要另行登录。返回后可刷新核对提交状态。',
-                    style: Journal.metadata.copyWith(fontSize: 12.5),
+                    style: journal.metadata.copyWith(fontSize: 12.5),
                   ),
                   if (_currentUrl == null) ...[
                     const SizedBox(height: 6),
                     Text(
                       '$_itemLabel链接暂不可用，请刷新信息；尚未开放时请稍后重试。',
-                      style: Journal.metadata.copyWith(
-                        color: Journal.ochre,
+                      style: journal.metadata.copyWith(
+                        color: journal.ochre,
                         fontSize: 12.5,
                       ),
                     ),
@@ -882,16 +896,16 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     ),
                   ],
                   const SizedBox(height: 18),
-                  const Divider(
+                  Divider(
                     height: 1,
                     thickness: 0.8,
-                    color: Journal.rule,
+                    color: journal.rule,
                   ),
                   const SizedBox(height: 16),
                   Text(
                     '手记工具',
-                    style: Journal.metadata.copyWith(
-                      color: Journal.ink,
+                    style: journal.metadata.copyWith(
+                      color: journal.ink,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -924,16 +938,16 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     ],
                   ),
                   const SizedBox(height: 18),
-                  const Divider(
+                  Divider(
                     height: 1,
                     thickness: 0.8,
-                    color: Journal.rule,
+                    color: journal.rule,
                   ),
                   const SizedBox(height: 16),
                   Text(
                     '记录管理',
-                    style: Journal.metadata.copyWith(
-                      color: Journal.ink,
+                    style: journal.metadata.copyWith(
+                      color: journal.ink,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -974,7 +988,6 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                       label: sources.length > 1
                           ? '在本机隐藏此$_itemLabel（${sources.length} 条来源）'
                           : '在本机隐藏此$_itemLabel',
-                      foregroundColor: Journal.berry,
                     ),
                   ],
                 ],
@@ -998,17 +1011,17 @@ class _DetailActionNotice extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
-          color: Journal.sage.withValues(alpha: 0.65),
+          color: Journal.of(context).sage.withValues(alpha: 0.65),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Semantics(
           liveRegion: true,
           child: Text(
             message,
-            style: Journal.metadata.copyWith(
-              color: Journal.ink,
-              fontWeight: FontWeight.w600,
-            ),
+            style: Journal.of(context).metadata.copyWith(
+                  color: Journal.of(context).ink,
+                  fontWeight: FontWeight.w600,
+                ),
           ),
         ),
       );
@@ -1056,14 +1069,12 @@ class _DetailToolButton extends StatelessWidget {
     required this.icon,
     required this.label,
     this.iconSize = 18,
-    this.foregroundColor = Journal.ink,
   });
 
   final VoidCallback? onPressed;
   final IconData icon;
   final String label;
   final double iconSize;
-  final Color foregroundColor;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -1073,7 +1084,7 @@ class _DetailToolButton extends StatelessWidget {
             alignment: Alignment.centerLeft,
             minimumSize: const Size(0, 48),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            foregroundColor: foregroundColor,
+            foregroundColor: Journal.of(context).ink,
             tapTargetSize: MaterialTapTargetSize.padded,
           ),
           onPressed: onPressed,
@@ -1088,13 +1099,13 @@ class _DetailToolButton extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: Journal.metadata.copyWith(
-                    color: onPressed == null
-                        ? Journal.muted.withValues(alpha: 0.55)
-                        : foregroundColor,
-                    fontWeight: FontWeight.w500,
-                    height: 1.35,
-                  ),
+                  style: Journal.of(context).metadata.copyWith(
+                        color: onPressed == null
+                            ? Journal.of(context).muted.withValues(alpha: 0.55)
+                            : Journal.of(context).ink,
+                        fontWeight: FontWeight.w500,
+                        height: 1.35,
+                      ),
                 ),
               ),
             ],

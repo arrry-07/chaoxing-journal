@@ -15,7 +15,7 @@ const githubApkUrl =
     'v9.0.0/chaoxing-journal-9.0.0.apk';
 
 String nextPatchVersion() {
-  final parts = AppVersion.name.split('.').map(int.parse).toList();
+  final parts = AppVersion.releaseName.split('.').map(int.parse).toList();
   return '${parts[0]}.${parts[1]}.${parts[2] + 1}';
 }
 
@@ -89,7 +89,7 @@ void main() {
             requestOptions: options,
             statusCode: 200,
             data: manifest(
-              versionName: AppVersion.name,
+              versionName: AppVersion.releaseName,
               versionCode: AppVersion.code,
             ),
           ));
@@ -127,10 +127,10 @@ void main() {
             statusCode: 200,
             data: options.uri.host == 'raw.giteeusercontent.com'
                 ? manifest(
-                    versionName: AppVersion.name,
+                    versionName: AppVersion.releaseName,
                     versionCode: AppVersion.code,
                   )
-                : [release(versionName: AppVersion.name)],
+                : [release(versionName: AppVersion.releaseName)],
           ));
         },
       ));
@@ -296,7 +296,7 @@ void main() {
           statusCode: 200,
           data: options.uri.host == 'raw.giteeusercontent.com'
               ? manifest(
-                  versionName: AppVersion.name,
+                  versionName: AppVersion.releaseName,
                   versionCode: AppVersion.code,
                 )
               : [release(versionName: newer)],
@@ -320,7 +320,7 @@ void main() {
           statusCode: 200,
           data: options.uri.host == 'raw.giteeusercontent.com'
               ? manifest(
-                  versionName: AppVersion.name,
+                  versionName: AppVersion.releaseName,
                   versionCode: AppVersion.code,
                 )
               : [release(versionName: newer)],
@@ -435,7 +435,7 @@ void main() {
   });
 
   test('a newer Gitee version wins over an older GitHub release', () async {
-    final parts = AppVersion.name.split('.').map(int.parse).toList();
+    final parts = AppVersion.releaseName.split('.').map(int.parse).toList();
     final nextMinor = '${parts[0]}.${parts[1] + 1}.0';
     final dio = Dio(BaseOptions(validateStatus: (_) => true))
       ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
@@ -494,7 +494,7 @@ void main() {
           requestOptions: options,
           statusCode: 200,
           data: manifest(
-            versionName: AppVersion.name,
+            versionName: AppVersion.releaseName,
             versionCode: AppVersion.code,
           ),
         ));

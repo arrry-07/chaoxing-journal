@@ -37,6 +37,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
+        final journal = Journal.of(context);
         final horizontalPadding =
             MediaQuery.sizeOf(context).width < 360 ? 20.0 : 32.0;
         final canLogin = _chaoxingAccount.text.trim().isNotEmpty &&
@@ -45,7 +46,7 @@ class _LoginScreenState extends State<LoginScreen> {
             !widget.store.isLoading;
 
         return Scaffold(
-          backgroundColor: Journal.paper,
+          backgroundColor: journal.paper,
           body: SafeArea(
             child: ListView(
               padding: EdgeInsets.fromLTRB(
@@ -57,13 +58,13 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 Text(
                   '学习通登录',
-                  style: Journal.section.copyWith(fontSize: 26),
+                  style: journal.section.copyWith(fontSize: 26),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   '使用学习通账号同步课程作业和截止时间。',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Journal.muted,
+                        color: journal.muted,
                       ),
                 ),
                 const SizedBox(height: 18),
@@ -81,10 +82,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   constraints: const BoxConstraints(minHeight: 48),
                   child: FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor: canLogin ? Journal.ink : Journal.sage,
-                      foregroundColor: Journal.sheet,
-                      disabledBackgroundColor: Journal.sage,
-                      disabledForegroundColor: Journal.muted,
+                      backgroundColor:
+                          canLogin ? journal.accent : journal.parchment,
+                      foregroundColor: journal == JournalPalette.dark
+                          ? journal.paper
+                          : journal.sheet,
+                      disabledBackgroundColor: journal.parchment,
+                      disabledForegroundColor: journal.muted,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -154,14 +158,15 @@ class _AgreementPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 14, 12, 16),
       decoration: BoxDecoration(
-        color: Journal.sheet,
+        color: journal.sheet,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Journal.ink.withValues(alpha: 0.055),
+            color: journal.ink.withValues(alpha: 0.055),
             blurRadius: 18,
             offset: const Offset(0, 7),
           ),
@@ -181,13 +186,13 @@ class _AgreementPanel extends StatelessWidget {
                   materialTapTargetSize: MaterialTapTargetSize.padded,
                   visualDensity: VisualDensity.standard,
                   shape: const CircleBorder(),
-                  checkColor: Journal.sheet,
+                  checkColor: journal.sheet,
                   fillColor: WidgetStateProperty.resolveWith((states) =>
                       states.contains(WidgetState.selected)
-                          ? Journal.ink
-                          : Journal.sage),
+                          ? Journal.of(context).ink
+                          : Journal.of(context).sage),
                   side: BorderSide(
-                    color: Journal.rule,
+                    color: journal.rule,
                     width: 1,
                   ),
                   onChanged:
@@ -206,16 +211,16 @@ class _AgreementPanel extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(vertical: 13.5),
                         child: Text(
                           '我已阅读并同意',
-                          style: Journal.metadata.copyWith(
-                            color: Journal.ink,
+                          style: journal.metadata.copyWith(
+                            color: journal.ink,
                             fontWeight: FontWeight.w600,
                             fontSize: 14.5,
                             height: 1.45,
                           ),
                         ),
                       ),
-                      _link(AgreementKind.service),
-                      _link(AgreementKind.privacy),
+                      _link(context, AgreementKind.service),
+                      _link(context, AgreementKind.privacy),
                     ],
                   ),
                 ),
@@ -226,10 +231,10 @@ class _AgreementPanel extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(48, 12, 0, 0),
             child: Text(
               '课程与作业数据保存在本机。',
-              style: Journal.metadata.copyWith(
+              style: journal.metadata.copyWith(
                 fontSize: 13.5,
                 height: 1.58,
-                color: Journal.muted,
+                color: journal.muted,
               ),
             ),
           ),
@@ -238,7 +243,7 @@ class _AgreementPanel extends StatelessWidget {
     );
   }
 
-  Widget _link(AgreementKind kind) => Semantics(
+  Widget _link(BuildContext context, AgreementKind kind) => Semantics(
         container: true,
         button: true,
         link: true,
@@ -247,20 +252,21 @@ class _AgreementPanel extends StatelessWidget {
         child: ExcludeSemantics(
           child: TextButton(
             style: TextButton.styleFrom(
-              foregroundColor: Journal.ink,
+              foregroundColor: Journal.of(context).ink,
               minimumSize: const Size(48, 48),
               padding: EdgeInsets.zero,
               tapTargetSize: MaterialTapTargetSize.padded,
               visualDensity: VisualDensity.standard,
-              textStyle: Journal.metadata.copyWith(
-                color: Journal.ink,
-                fontWeight: FontWeight.w600,
-                fontSize: 14.5,
-                height: 1.45,
-                decoration: TextDecoration.underline,
-                decorationColor: Journal.ink.withValues(alpha: 0.72),
-                decorationThickness: 1,
-              ),
+              textStyle: Journal.of(context).metadata.copyWith(
+                    color: Journal.of(context).ink,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14.5,
+                    height: 1.45,
+                    decoration: TextDecoration.underline,
+                    decorationColor:
+                        Journal.of(context).ink.withValues(alpha: 0.72),
+                    decorationThickness: 1,
+                  ),
             ),
             onPressed: enabled ? () => onOpen(kind) : null,
             child: Text('《${kind.title}》'),
@@ -322,26 +328,27 @@ class _ChaoxingForm extends StatelessWidget {
           controller: account,
           onChanged: (_) => onChanged(),
           textInputAction: TextInputAction.next,
-          decoration: _fieldDecoration('账号'),
+          decoration: _fieldDecoration(context, '账号'),
         ),
         const SizedBox(height: 12),
         TextField(
           controller: password,
           onChanged: (_) => onChanged(),
           obscureText: true,
-          decoration: _fieldDecoration('密码'),
+          decoration: _fieldDecoration(context, '密码'),
         ),
       ],
     );
   }
 }
 
-InputDecoration _fieldDecoration(String hint) {
+InputDecoration _fieldDecoration(BuildContext context, String hint) {
+  final journal = Journal.of(context);
   return InputDecoration(
     hintText: hint,
-    hintStyle: Journal.metadata,
+    hintStyle: journal.metadata,
     filled: true,
-    fillColor: Journal.sheet,
+    fillColor: journal.sheet,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(12),

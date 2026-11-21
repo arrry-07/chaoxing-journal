@@ -29,10 +29,11 @@ class UpdateDownloadBanner extends StatelessWidget {
             ? '${controller.message}${progress == null ? '' : ' · ${(progress * 100).floor()}%'}'
             : controller.message;
         return Material(
-          color: Journal.sage,
+          color: Journal.of(context).sage,
           child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
               child: LayoutBuilder(builder: (context, constraints) {
+                final journal = Journal.of(context);
                 final status = Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -40,8 +41,8 @@ class UpdateDownloadBanner extends StatelessWidget {
                       Semantics(
                           liveRegion: !controller.downloading,
                           child: Text(label,
-                              style: Journal.metadata
-                                  .copyWith(color: Journal.ink))),
+                              style: journal.metadata
+                                  .copyWith(color: journal.ink))),
                       if (controller.downloading) ...[
                         const SizedBox(height: 8),
                         LinearProgressIndicator(value: progress, minHeight: 3),

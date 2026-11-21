@@ -18,9 +18,10 @@ class AgreementScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     final sections = kind == AgreementKind.service ? _service : _privacy;
     return Scaffold(
-      backgroundColor: Journal.paper,
+      backgroundColor: journal.paper,
       appBar: AppBar(title: Text(kind.title)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -30,7 +31,7 @@ class AgreementScreen extends StatelessWidget {
             for (final section in sections) ...[
               Semantics(
                 header: true,
-                child: Text(section.$1, style: Journal.section),
+                child: Text(section.$1, style: journal.section),
               ),
               const SizedBox(height: 10),
               SelectableText(section.$2, style: const TextStyle(height: 1.7)),

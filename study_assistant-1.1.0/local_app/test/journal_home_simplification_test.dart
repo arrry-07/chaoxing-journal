@@ -81,7 +81,7 @@ void main() {
     expect(AssignmentQuery.nextActionable(s.courseAssignments, now: now)?.title,
         '下一份作业');
     final list = find.byType(Scrollable).first;
-    for (var i = 4; i >= 0; i--) {
+    for (var i = 0; i < 5; i++) {
       await t.scrollUntilVisible(find.text('过去作业$i'), 200, scrollable: list);
       expect(find.text('过去作业$i'), findsOneWidget);
     }

@@ -17,6 +17,7 @@ class WidgetSnapshotService {
   static const _totalCountKey = 'assignment_total_count';
   static const _rangeLabelKey = 'assignment_range_label';
 
+  Future<void>? _snapshotWrites;
   bool _pendingAuthenticated = true;
   WidgetRange _pendingRange = WidgetRange.all;
   int? _pendingTotalCount;
@@ -68,16 +69,20 @@ class WidgetSnapshotService {
     List<Assignment> assignments, {
     bool authenticated = true,
     WidgetRange range = WidgetRange.all,
-  }) async {
-    _pendingAuthenticated = authenticated;
-    _pendingRange = range;
-    try {
-      await saveAssignments(assignments);
-    } finally {
-      _pendingAuthenticated = true;
-      _pendingRange = WidgetRange.all;
-      _pendingTotalCount = null;
-    }
+  }) {
+    final write = (_snapshotWrites ?? Future<void>.value()).then((_) async {
+      _pendingAuthenticated = authenticated;
+      _pendingRange = range;
+      try {
+        await saveAssignments(assignments);
+      } finally {
+        _pendingAuthenticated = true;
+        _pendingRange = WidgetRange.all;
+        _pendingTotalCount = null;
+      }
+    });
+    _snapshotWrites = write.then<void>((_) {}, onError: (Object _) {});
+    return write;
   }
 
   Future<void> saveAssignments(List<Assignment> assignments) {

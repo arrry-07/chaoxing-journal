@@ -155,6 +155,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
     Assignment primary,
     DateTime now,
   ) {
+    final journal = Journal.of(context);
     final bucket = AssignmentStatistics.classify(primary, now);
     final label = switch (bucket) {
       AssignmentStatBucket.expired => '已逾期',
@@ -171,38 +172,39 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
     return switch (bucket) {
       AssignmentStatBucket.completed => (
           label: label,
-          bg: Journal.sage,
-          fg: Journal.ink,
+          bg: journal.sage,
+          fg: journal.ink,
         ),
       AssignmentStatBucket.expired => (
           label: label,
-          bg: Journal.berry.withValues(alpha: 0.12),
-          fg: Journal.berry,
+          bg: journal.berry.withValues(alpha: 0.12),
+          fg: journal.berry,
         ),
       AssignmentStatBucket.pending => (
           label: label,
-          bg: Journal.paper,
-          fg: Journal.ink,
+          bg: journal.paper,
+          fg: journal.ink,
         ),
       AssignmentStatBucket.unknown => (
           label: label,
-          bg: Journal.paper,
-          fg: Journal.muted,
+          bg: journal.paper,
+          fg: journal.muted,
         ),
     };
   }
 
   Widget _pill(String text, {required Color bg, required Color fg}) {
+    final journal = Journal.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Journal.rule),
+        border: Border.all(color: journal.rule),
       ),
       child: Text(
         text,
-        style: Journal.metadata.copyWith(
+        style: journal.metadata.copyWith(
           fontSize: 12,
           color: fg,
           fontWeight: FontWeight.w600,
@@ -233,6 +235,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: widget.store,
         builder: (context, _) {
+          final journal = Journal.of(context);
           final now = _now;
           final result = LocalRecordQuery.query(widget.store, _spec, now);
           final selectedCourseKey = result.courseOptions
@@ -241,10 +244,10 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
               : null;
 
           return Scaffold(
-            backgroundColor: Journal.paper,
+            backgroundColor: journal.paper,
             appBar: AppBar(
               toolbarHeight: 40,
-              backgroundColor: Journal.paper,
+              backgroundColor: journal.paper,
               leading: IconButton(
                 tooltip: '返回',
                 icon: const Icon(Icons.arrow_back),
@@ -300,7 +303,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                 if (_spec.category == LocalRecordCategory.coursework &&
                     _spec.isStatsScoped) ...[
                   Card(
-                    color: Journal.sage.withValues(alpha: 0.45),
+                    color: journal.sage.withValues(alpha: 0.45),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
@@ -314,7 +317,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                           Text(
                             _scopeBannerSummary(result),
                             style:
-                                Journal.metadata.copyWith(color: Journal.ink),
+                                journal.metadata.copyWith(color: journal.ink),
                           ),
                           TextButton.icon(
                             style: TextButton.styleFrom(
@@ -424,7 +427,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                 const SizedBox(height: 10),
                 Text(
                   '${result.count} 条记录',
-                  style: Journal.metadata,
+                  style: journal.metadata,
                 ),
                 const SizedBox(height: 8),
                 if (result.count == 0)
@@ -447,7 +450,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                                     ? '当前筛选条件下没有课业记录'
                                     : '本机暂未保存课业记录',
                             },
-                            style: Journal.entryTitle,
+                            style: journal.entryTitle,
                           ),
                           if (_spec.category ==
                                   LocalRecordCategory.coursework &&
@@ -488,6 +491,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
     Assignment a,
     DateTime now,
   ) {
+    final journal = Journal.of(context);
     final badge = _statusBadge(a, now);
     final title = a.title.trim().isNotEmpty ? a.title.trim() : a.courseName;
     return Padding(
@@ -507,11 +511,11 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: Journal.entryTitle),
+                      Text(title, style: journal.entryTitle),
                       if (a.courseName.trim().isNotEmpty &&
                           a.title.trim().isNotEmpty) ...[
                         const SizedBox(height: 3),
-                        Text(a.courseName.trim(), style: Journal.metadata),
+                        Text(a.courseName.trim(), style: journal.metadata),
                       ],
                       const SizedBox(height: 8),
                       Wrap(
@@ -524,7 +528,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                       const SizedBox(height: 6),
                       Text(
                         '来源：${a.source.name} · 读取：${DateFormat('yyyy-MM-dd HH:mm').format(AssignmentQuery.beijing(a.lastSyncedAt))}',
-                        style: Journal.metadata,
+                        style: journal.metadata,
                       ),
                     ],
                   ),
@@ -542,6 +546,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
     CourseworkGroup group,
     DateTime now,
   ) {
+    final journal = Journal.of(context);
     final primary = group.primary;
     final badge = _statusBadge(primary, now);
     final title = primary.title.trim().isNotEmpty
@@ -567,7 +572,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: Journal.entryTitle),
+                      Text(title, style: journal.entryTitle),
                       if (primary.courseName.trim().isNotEmpty &&
                           primary.title.trim().isNotEmpty) ...[
                         const SizedBox(height: 2),
@@ -575,7 +580,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                           primary.clazzId == null || primary.clazzId!.isEmpty
                               ? primary.courseName.trim()
                               : '${primary.courseName.trim()} · 班级 ${primary.clazzId}',
-                          style: Journal.metadata,
+                          style: journal.metadata,
                         ),
                       ],
                       const SizedBox(height: 4),
@@ -584,16 +589,16 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                         runSpacing: 4,
                         children: [
                           if (group.hidden)
-                            _pill('已隐藏', bg: Journal.paper, fg: Journal.muted),
+                            _pill('已隐藏', bg: journal.paper, fg: journal.muted),
                           _pill(badge.label, bg: badge.bg, fg: badge.fg),
                         ],
                       ),
                       const SizedBox(height: 3),
-                      Text(timeText, style: Journal.metadata),
+                      Text(timeText, style: journal.metadata),
                       const SizedBox(height: 2),
                       Text(
                         '来源：${group.sourceLabel} · 读取：${DateFormat('yyyy-MM-dd HH:mm').format(AssignmentQuery.beijing(primary.lastSyncedAt))}',
-                        style: Journal.metadata,
+                        style: journal.metadata,
                       ),
                     ],
                   ),

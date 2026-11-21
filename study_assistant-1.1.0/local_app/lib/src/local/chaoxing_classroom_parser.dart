@@ -142,16 +142,28 @@ class ChaoxingClassroomParser {
     checkIdentity(active, seed, requireActivity: true, requireCourse: true);
     final answer = responseData(answerPayload);
     checkIdentity(answer, seed);
+    var answerHasActivity = false;
     for (final key in ['active', 'pptActive']) {
       if (answer[key] != null) {
         checkIdentity(_map(answer[key]), seed,
             requireActivity: true, requireCourse: true);
+        answerHasActivity = true;
       }
     }
-    final hasPersonalIdentity =
+    final detailAttendIdentity =
         _personalIdentity(_map(detail['pptUserAttend']), seed, currentUid);
-    _personalIdentity(_map(answer['pptUserAttend']), seed, currentUid);
+    final answerAttendIdentity =
+        _personalIdentity(_map(answer['pptUserAttend']), seed, currentUid);
     _checkUid(answer, currentUid);
+    // Unsubmitted quizzes omit pptUserAttend in quizDetail2 while
+    // getAnswerResult still returns uid, matching active identity, and
+    // isAnswered=false.
+    final answerUidMatched = _matchesUid(answer, currentUid);
+    final answerActivityMatched = answerHasActivity ||
+        _text(answer['activeId'] ?? answer['activeid']) == seed.activityId;
+    final hasPersonalIdentity = detailAttendIdentity ||
+        answerAttendIdentity ||
+        (answerUidMatched && answerActivityMatched);
     final answered = answer['isAnswered'];
     final status = hasPersonalIdentity && answered is bool
         ? (answered ? 'submitted' : 'pending')
@@ -246,6 +258,14 @@ class ChaoxingClassroomParser {
         throw const FormatException('classroomPersonalIdentity');
       }
     }
+  }
+
+  static bool _matchesUid(Map<String, dynamic> data, String? uid) {
+    if (uid == null) return false;
+    for (final key in ['uid', 'puid', 'userId']) {
+      if (_text(data[key]) == uid) return true;
+    }
+    return false;
   }
 
   static String _submission(Map<String, dynamic> row) {

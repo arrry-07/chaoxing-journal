@@ -24,35 +24,36 @@ class CourseworkStatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     final palette = switch (tone) {
       CourseworkPillTone.overdue => (
-          fg: Journal.berry,
-          bg: Journal.berryBg,
+          fg: journal.berry,
+          bg: journal.berryBg,
           defaultIcon: Icons.warning_amber_rounded,
         ),
       CourseworkPillTone.urgentToday => (
-          fg: Journal.berry,
-          bg: Journal.berryBg,
+          fg: journal.berry,
+          bg: journal.berryBg,
           defaultIcon: Icons.schedule_rounded,
         ),
       CourseworkPillTone.unconfirmed => (
-          fg: Journal.ochre,
-          bg: Journal.ochreBg,
+          fg: journal.ochre,
+          bg: journal.ochreBg,
           defaultIcon: Icons.help_outline_rounded,
         ),
       CourseworkPillTone.exam => (
-          fg: Journal.slate,
-          bg: Journal.slateBg,
+          fg: journal.slate,
+          bg: journal.slateBg,
           defaultIcon: Icons.school_outlined,
         ),
       CourseworkPillTone.completed => (
-          fg: Journal.ink,
-          bg: Journal.sage,
+          fg: journal.ink,
+          bg: journal.sage,
           defaultIcon: Icons.check_circle_outline_rounded,
         ),
       CourseworkPillTone.neutral => (
-          fg: Journal.muted,
-          bg: Journal.parchment,
+          fg: journal.muted,
+          bg: journal.parchment,
           defaultIcon: null,
         ),
     };
@@ -73,7 +74,7 @@ class CourseworkStatusPill extends StatelessWidget {
           Flexible(
             child: Text(
               label,
-              style: Journal.metadata.copyWith(
+              style: journal.metadata.copyWith(
                 fontSize: 11.5,
                 height: 1.25,
                 fontWeight: FontWeight.w600,

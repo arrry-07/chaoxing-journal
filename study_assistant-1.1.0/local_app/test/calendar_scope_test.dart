@@ -207,12 +207,26 @@ void main() {
     await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: CalendarScreen(store: store))));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('截止时间未知（6）'), 200,
+    final noDeadlineRow =
+        find.byKey(const ValueKey('calendar-no-deadline-scope'));
+    final pendingRow =
+        find.byKey(const ValueKey('calendar-deadline-pending-scope'));
+    await tester.scrollUntilVisible(pendingRow, 200,
         scrollable: find.byType(Scrollable).first);
 
     expect(find.text('待核对课业'), findsOneWidget);
-    expect(find.text('无截止日期（1）'), findsOneWidget);
-    expect(find.text('截止时间未知（6）'), findsOneWidget);
+    expect(noDeadlineRow, findsOneWidget);
+    expect(find.descendant(of: noDeadlineRow, matching: find.text('无截止日期')),
+        findsOneWidget);
+    expect(find.descendant(of: noDeadlineRow, matching: find.text('1 项')),
+        findsOneWidget);
+    expect(pendingRow, findsOneWidget);
+    expect(find.descendant(of: pendingRow, matching: find.text('截止时间未知')),
+        findsOneWidget);
+    expect(find.descendant(of: pendingRow, matching: find.text('6 项')),
+        findsOneWidget);
+    expect(find.ancestor(of: pendingRow, matching: find.byType(Card)),
+        findsNothing);
     expect(find.text('保留但不可信的日期'), findsNothing);
     expect(find.text('读取失败后保留的日期'), findsNothing);
     expect(find.text('状态未知但有日期'), findsNothing);
@@ -250,11 +264,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(CalendarScreen), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('截止时间未知（1）'), 200,
+    final pendingRow =
+        find.byKey(const ValueKey('calendar-deadline-pending-scope'));
+    await tester.scrollUntilVisible(pendingRow, 200,
         scrollable: find.byType(Scrollable).first);
-    await tester.ensureVisible(find.text('截止时间未知（1）'));
+    await tester.ensureVisible(pendingRow);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('截止时间未知（1）'));
+    await tester.tap(pendingRow);
     await tester.pumpAndSettle();
 
     expect(find.byType(AssignmentListScreen), findsOneWidget);
@@ -379,21 +395,36 @@ void main() {
       Journal.ink,
     );
 
+    final pendingRow =
+        find.byKey(const ValueKey('calendar-deadline-pending-scope'));
     await tester.scrollUntilVisible(
-      find.text('截止时间未知（1）'),
+      pendingRow,
       220,
       scrollable: find.byType(Scrollable).first,
     );
-    final pending = tester.widget<TextButton>(
-      find.ancestor(
-        of: find.text('截止时间未知（1）'),
-        matching: find.byType(TextButton),
+    final pendingLabel = tester.widget<Text>(
+      find.descendant(
+        of: pendingRow,
+        matching: find.text('截止时间未知'),
       ),
     );
-    expect(
-      pending.style?.foregroundColor?.resolve(const <WidgetState>{}),
-      Journal.ochre,
+    expect(pendingLabel.style?.color, Journal.ochre);
+    final pendingIcon = tester.widget<Icon>(
+      find.descendant(
+        of: pendingRow,
+        matching: find.byIcon(Icons.help_outline_rounded),
+      ),
     );
+    expect(pendingIcon.color, Journal.ochre);
+    final pendingCount = tester.widget<Text>(
+      find.descendant(
+        of: pendingRow,
+        matching: find.text('1 项'),
+      ),
+    );
+    expect(pendingCount.style?.color, Journal.muted);
+    expect(find.ancestor(of: pendingRow, matching: find.byType(Card)),
+        findsNothing);
   });
 
   testWidgets('calendar month heading stays on one line at 320dp and 2x text',

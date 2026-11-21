@@ -190,6 +190,10 @@ void main() {
     final header = find.byKey(const ValueKey('assignment-recovery-scope'));
     expect(
         find.descendant(of: header, matching: find.text('考试')), findsOneWidget);
+    expect(
+        find.ancestor(of: header, matching: find.byType(Card)), findsNothing);
+    expect(
+        find.descendant(of: header, matching: find.byType(Card)), findsNothing);
     expect(find.text('unknown'), findsOneWidget);
     expect(find.text('dated'), findsOneWidget);
     expect(find.text('work'), findsNothing);
@@ -198,6 +202,46 @@ void main() {
     expect(header, findsNothing);
     expect(store.homeFilters.encode(), saved);
     expect(store.saves, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'recovery scope header stays compact without overflow at 320dp and 2x text',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = _Store([_work('uncertain')]);
+    addTearDown(store.dispose);
+    final router = GoRouter(
+      initialLocation:
+          '/assignments?${AssignmentRecoveryScope.queryParameter}=${AssignmentRecoveryScope.deadlinePending.queryValue}',
+      routes: [
+        GoRoute(
+          path: '/assignments',
+          builder: (_, __) =>
+              Scaffold(body: AssignmentListScreen(store: store)),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MediaQuery(
+      data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+      child: MaterialApp.router(routerConfig: router),
+    ));
+    await tester.pumpAndSettle();
+    final header = find.byKey(const ValueKey('assignment-recovery-scope'));
+    expect(header, findsOneWidget);
+    expect(find.descendant(of: header, matching: find.text('截止时间未知')),
+        findsOneWidget);
+    expect(find.textContaining('共 1 项'), findsOneWidget);
+    expect(find.text('返回全部').hitTestable(), findsOneWidget);
+    expect(
+        find.ancestor(of: header, matching: find.byType(Card)), findsNothing);
+    expect(
+        find.descendant(of: header, matching: find.byType(Card)), findsNothing);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

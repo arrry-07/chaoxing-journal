@@ -1,3 +1,9 @@
+import 'dart:async';
+
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:study_assistant_mobile/src/services/interaction_feedback_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/display_settings_screen.dart';
@@ -10,6 +16,7 @@ import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/widget_snapshot.dart';
 
 class _CourseSession extends SecureSessionStore {
   @override
@@ -21,11 +28,20 @@ class _CourseSession extends SecureSessionStore {
 }
 
 class _Widgets extends WidgetSnapshotService {
-  List<Assignment> items = [];
+  List<WidgetSnapshotItem> items = [];
+  int saves = 0;
   @override
-  Future<void> saveAssignments(List<Assignment> assignments) async {
-    items = assignments;
+  Future<void> saveSnapshot(List<WidgetSnapshotItem> snapshots) async {
+    saves++;
+    items = snapshots;
   }
+}
+
+class _BlockedJournal extends LocalAssignmentRepository {
+  final read = Completer<List<Assignment>>();
+
+  @override
+  Future<List<Assignment>> loadJournal() => read.future;
 }
 
 AssignmentStore store() => AssignmentStore(
@@ -33,6 +49,137 @@ AssignmentStore store() => AssignmentStore(
     notificationService: LocalNotificationService(),
     widgetSnapshotService: _Widgets());
 void main() {
+  test('legacy display preferences follow system and preserve other choices',
+      () {
+    final legacy = DisplayPreferences.decode(
+        '{"compact":true,"countdown":true,"range":"week"}');
+    expect(legacy.themeMode, JournalThemeMode.system);
+    expect(legacy.soundEnabled, isTrue);
+    expect(legacy.hapticsEnabled, isTrue);
+    final restored = DisplayPreferences.decode(legacy
+        .copyWith(
+            themeMode: JournalThemeMode.dark,
+            soundEnabled: false,
+            hapticsEnabled: false)
+        .encode());
+    expect(restored.themeMode, JournalThemeMode.dark);
+    expect(restored.soundEnabled, isFalse);
+    expect(restored.hapticsEnabled, isFalse);
+    expect(restored.compact, isTrue);
+    expect(restored.countdown, isTrue);
+    expect(restored.widgetRange, WidgetRange.week);
+    expect(DisplayPreferences.decode('{"themeMode":"future"}').themeMode,
+        JournalThemeMode.system);
+  });
+
+  test('theme updates while journal operations wait', () async {
+    SharedPreferences.setMockInitialValues({});
+    final repository = _BlockedJournal();
+    final widgets = _Widgets();
+    final s = AssignmentStore(
+      sessionStore: SecureSessionStore(),
+      notificationService: LocalNotificationService(),
+      widgetSnapshotService: widgets,
+      repository: repository,
+    );
+    addTearDown(s.dispose);
+    final sync = s.refreshAssignments();
+    await Future<void>.delayed(Duration.zero);
+    expect(s.isLoading, isTrue);
+    final seen = <JournalThemeMode>[];
+    s.addListener(() => seen.add(s.display.themeMode));
+    final saved =
+        s.saveDisplay(s.display.copyWith(themeMode: JournalThemeMode.dark));
+    try {
+      expect(seen, [JournalThemeMode.dark]);
+      await saved.timeout(const Duration(seconds: 1));
+      expect(widgets.saves, 0);
+    } finally {
+      repository.read.complete([]);
+      await sync;
+      await saved;
+    }
+  });
+
+  testWidgets('interaction sound and haptics can be enabled independently',
+      (t) async {
+    InteractionFeedback.debugReset();
+    addTearDown(InteractionFeedback.debugReset);
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      final messenger = t.binding.defaultBinaryMessenger;
+      const sound = MethodChannel('study_assistant/interaction_sound');
+      final feedback = <Map<dynamic, dynamic>>[];
+      messenger.setMockMethodCallHandler(sound, (call) async {
+        expect(call.method, 'feedback');
+        feedback.add(call.arguments as Map);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(sound, null));
+
+      InteractionFeedback.trigger(
+        const DisplayPreferences(hapticsEnabled: false),
+        kind: InteractionSoundKind.pin,
+      );
+      InteractionFeedback.trigger(
+        const DisplayPreferences(soundEnabled: false),
+        kind: InteractionSoundKind.complete,
+      );
+      InteractionFeedback.trigger(
+        const DisplayPreferences(soundEnabled: false, hapticsEnabled: false),
+      );
+      await t.pump();
+      expect(feedback, [
+        {'kind': 'pin', 'sound': true, 'haptics': false},
+        {'kind': 'complete', 'sound': false, 'haptics': true},
+      ]);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('tap feedback debounces within 90ms unless preview or other kind',
+      (t) async {
+    InteractionFeedback.debugReset();
+    addTearDown(InteractionFeedback.debugReset);
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      final messenger = t.binding.defaultBinaryMessenger;
+      const sound = MethodChannel('study_assistant/interaction_sound');
+      final calls = <String>[];
+      messenger.setMockMethodCallHandler(sound, (call) async {
+        calls.add((call.arguments as Map)['kind'] as String);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(sound, null));
+
+      var clock = DateTime(2026, 11, 21, 18, 0, 0);
+      InteractionFeedback.now = () => clock;
+      const prefs = DisplayPreferences();
+
+      // Same timestamp: two taps emit once.
+      InteractionFeedback.trigger(prefs);
+      InteractionFeedback.trigger(prefs);
+      expect(calls, ['tap']);
+
+      // Tap followed by preview: true emits twice.
+      InteractionFeedback.trigger(prefs, preview: true);
+      expect(calls, ['tap', 'tap']);
+
+      // Advancing clock by 100ms allows tap again.
+      clock = clock.add(const Duration(milliseconds: 100));
+      InteractionFeedback.trigger(prefs);
+      expect(calls, ['tap', 'tap', 'tap']);
+
+      // Tap followed immediately by pin emits twice.
+      InteractionFeedback.trigger(prefs, kind: InteractionSoundKind.pin);
+      await t.pump();
+      expect(calls, ['tap', 'tap', 'tap', 'pin']);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
   test('widget ranges use trusted exam timeline rather than work deadline', () {
     final now = DateTime.utc(2026, 11, 16, 2);
     Assignment exam(String id, DateTime start,
@@ -78,6 +225,7 @@ void main() {
     final s = store();
     addTearDown(s.dispose);
     await t.pumpWidget(MaterialApp(home: DisplaySettingsScreen(store: s)));
+    await t.ensureVisible(find.text('紧凑密度'));
     await t.tap(find.text('紧凑密度'));
     await t.pumpAndSettle();
     expect(s.display.compact, true);
@@ -86,7 +234,19 @@ void main() {
         DisplayPreferences.decode(prefs.getString('display_preferences_v1'))
             .compact,
         true);
-    expect((s.widgetSnapshotService as _Widgets).items, isEmpty);
+    final widgets = s.widgetSnapshotService as _Widgets;
+    expect(widgets.saves, 0);
+    await s.saveDisplay(s.display.copyWith(widgetRange: WidgetRange.week));
+    await s.saveDisplay(s.display.copyWith(soundEnabled: false));
+    await s.saveDisplay(s.display.copyWith(hapticsEnabled: false));
+    expect(widgets.saves, 1);
+    expect(widgets.items, isEmpty);
+    expect(widgets.lastSavedAuthenticated, isFalse);
+    final restored =
+        DisplayPreferences.decode(prefs.getString('display_preferences_v1'));
+    expect(restored.widgetRange, WidgetRange.week);
+    expect(restored.soundEnabled, isFalse);
+    expect(restored.hapticsEnabled, isFalse);
   });
   testWidgets(
       'course filter uses class identity and preserves stored assignments',
