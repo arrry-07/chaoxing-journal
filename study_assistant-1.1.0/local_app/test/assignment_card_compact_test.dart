@@ -156,6 +156,8 @@ void main() {
     expect(dot, findsOneWidget);
     final courseText = find.textContaining('大学物理');
     expect(courseText, findsOneWidget);
+    expect(t.widget<Text>(courseText).data, isNot(contains('（…')));
+    expect(t.widget<Text>(courseText).data, isNot(contains('(…')));
     final gap = t.getRect(dot).left - t.getRect(courseText).right;
     expect(gap, lessThan(12.0));
   });

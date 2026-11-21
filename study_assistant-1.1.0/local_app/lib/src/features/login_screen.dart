@@ -82,9 +82,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   constraints: const BoxConstraints(minHeight: 48),
                   child: FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor: canLogin ? journal.ink : journal.sage,
-                      foregroundColor: journal.sheet,
-                      disabledBackgroundColor: journal.sage,
+                      backgroundColor:
+                          canLogin ? journal.accent : journal.parchment,
+                      foregroundColor: journal == JournalPalette.dark
+                          ? journal.paper
+                          : journal.sheet,
+                      disabledBackgroundColor: journal.parchment,
                       disabledForegroundColor: journal.muted,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),

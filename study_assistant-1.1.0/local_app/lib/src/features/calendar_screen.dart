@@ -178,7 +178,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         final textScaler = MediaQuery.textScalerOf(context);
         final cellHeight = _calendarCellHeight(context, textScaler);
         return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 24),
             children: [
               Wrap(
                 alignment: WrapAlignment.spaceBetween,
@@ -187,14 +187,32 @@ class _CalendarScreenState extends State<CalendarScreen>
                 children: [
                   Text('课业日历', style: journal.display),
                   TextButton.icon(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      textStyle: journal.metadata.copyWith(
+                        fontSize: 14,
+                        color: journal.ink,
+                      ),
+                    ),
                     onPressed: () => context.push('/agenda'),
-                    icon: const Icon(Icons.event_note_outlined),
+                    icon: const Icon(Icons.event_note_outlined, size: 18),
                     label: const Text('个人待办与考试'),
                   ),
                 ],
               ),
               Row(children: [
                 TextButton(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
                     onPressed: () => setState(() {
                           month = DateTime(today.year, today.month);
                           selected = today;
@@ -202,13 +220,20 @@ class _CalendarScreenState extends State<CalendarScreen>
                     child: const Text('回今天')),
                 TextButton(
                     onPressed: () => setState(() => selected = null),
-                    style: selected == null
-                        ? TextButton.styleFrom(foregroundColor: journal.accent)
-                        : null,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor:
+                          selected == null ? journal.accent : journal.ink,
+                    ),
                     child: const Text('本月')),
                 const Spacer(),
                 IconButton(
                     tooltip: '刷新',
+                    visualDensity: VisualDensity.compact,
                     onPressed:
                         _refreshing || widget.store.isLoading ? null : _refresh,
                     icon: _refreshing || widget.store.isLoading
@@ -222,7 +247,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                         : const Icon(Icons.sync))
               ]),
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: 6),
                 child: Text(
                   _refreshing || widget.store.isLoading
                       ? '正在刷新${widget.store.lastSyncAt == null ? '' : '；上次成功 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'}…'

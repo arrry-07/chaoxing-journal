@@ -579,7 +579,9 @@ class _CourseStateLine extends StatelessWidget {
             }
           }
           if (best > 0) {
-            displayCourse = '${String.fromCharCodes(runes.take(best))}…';
+            final raw = String.fromCharCodes(runes.take(best)).trimRight();
+            final trimmed = raw.replaceFirst(RegExp(r'[（(\[【《「『·\-—\s]+$'), '');
+            displayCourse = trimmed.isEmpty ? '$raw…' : '$trimmed…';
           }
         }
 

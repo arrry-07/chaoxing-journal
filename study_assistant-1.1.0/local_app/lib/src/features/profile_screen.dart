@@ -329,47 +329,43 @@ class _ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     final url = _profileAvatarUrl(avatarUrl);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 22, 16, 22),
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Expanded(
-                child: JournalHeading(
-                  '我的手帐',
-                  eyebrow: 'CAMPUS JOURNAL   /   PROFILE',
-                  bookTitle: true,
-                ),
-              ),
-              IconButton(
-                tooltip: '打开提醒设置',
-                onPressed: () => context.push('/reminders'),
-                icon: const Icon(Icons.tune_rounded),
-              ),
-            ],
+          const JournalHeading(
+            '我的手帐',
+            bookTitle: true,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           Row(
             children: [
-              CircleAvatar(
-                radius: 25,
-                backgroundColor: Journal.of(context).sage,
-                child: url == null
-                    ? const Icon(Icons.face_outlined)
-                    : ClipOval(
-                        child: Image.network(
-                          url,
-                          width: 50,
-                          height: 50,
-                          fit: BoxFit.cover,
-                          headers: _profileAvatarHeaders(url),
-                          errorBuilder: (_, __, ___) =>
-                              const Icon(Icons.face_outlined),
+              Container(
+                padding: const EdgeInsets.all(1.5),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: journal.rule, width: 1),
+                ),
+                child: CircleAvatar(
+                  radius: 24,
+                  backgroundColor: journal.sage,
+                  child: url == null
+                      ? const Icon(Icons.face_outlined)
+                      : ClipOval(
+                          child: Image.network(
+                            url,
+                            width: 48,
+                            height: 48,
+                            fit: BoxFit.cover,
+                            headers: _profileAvatarHeaders(url),
+                            errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.face_outlined),
+                          ),
                         ),
-                      ),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(

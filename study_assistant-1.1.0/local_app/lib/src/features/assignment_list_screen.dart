@@ -494,16 +494,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 children: [
                   Text('课业手记', style: journal.display),
                   Builder(builder: (context) {
-                    Widget action(String label, Widget button) => Column(
-                          mainAxisSize: MainAxisSize.min,
+                    Widget action(String label, Widget button) => Stack(
+                          alignment: Alignment.topCenter,
                           children: [
                             button,
-                            ExcludeSemantics(
-                              child: Text(
-                                label,
-                                style: journal.metadata.copyWith(
-                                  fontSize: 11.5,
-                                  height: 1,
+                            Positioned(
+                              bottom: 2,
+                              child: IgnorePointer(
+                                child: ExcludeSemantics(
+                                  child: Text(
+                                    label,
+                                    style: journal.metadata.copyWith(
+                                      fontSize: 11,
+                                      height: 1,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -511,42 +516,49 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                         );
 
                     return Row(mainAxisSize: MainAxisSize.min, children: [
-                      if (plans.isEmpty) ...[
+                      if (plans.isEmpty)
                         action(
                           '计划',
                           IconButton(
                               key: const ValueKey('home-plan-entry'),
                               tooltip: '今日计划',
+                              padding: const EdgeInsets.only(bottom: 12),
+                              iconSize: 21,
                               constraints: const BoxConstraints(
                                   minWidth: 48, minHeight: 48),
                               onPressed: () => context.push('/plan'),
                               icon: const Icon(Icons.checklist_rounded)),
                         ),
-                        const SizedBox(width: 4),
-                      ],
                       action(
                         '刷新',
                         IconButton(
                             enableFeedback: false,
                             tooltip: '刷新作业',
+                            padding: const EdgeInsets.only(bottom: 12),
+                            iconSize: 21,
+                            constraints: const BoxConstraints(
+                                minWidth: 48, minHeight: 48),
                             onPressed: busy ? null : () => refresh(syncAction),
                             icon: busy
                                 ? reduceMotion
                                     ? Icon(Icons.hourglass_top_rounded,
-                                        size: 20, color: journal.ink)
+                                        size: 19, color: journal.ink)
                                     : SizedBox.square(
-                                        dimension: 20,
+                                        dimension: 19,
                                         child: CircularProgressIndicator(
                                             strokeWidth: 2, color: journal.ink))
                                 : const Icon(Icons.sync_rounded)),
                       ),
-                      const SizedBox(width: 4),
-                      if (recoveryScope == null) ...[
+                      if (recoveryScope == null)
                         action(
                           '主题',
                           IconButton(
                             key: const ValueKey('home-theme-toggle'),
                             enableFeedback: false,
+                            padding: const EdgeInsets.only(bottom: 12),
+                            iconSize: 21,
+                            constraints: const BoxConstraints(
+                                minWidth: 48, minHeight: 48),
                             tooltip:
                                 '切换主题（当前：${store.display.themeMode.label}）',
                             icon: Icon(switch (store.display.themeMode) {
@@ -577,19 +589,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             },
                           ),
                         ),
-                        const SizedBox(width: 4),
-                      ],
                       action(
                         '更多',
                         IconButton(
                             tooltip: '同步详情',
+                            padding: const EdgeInsets.only(bottom: 12),
+                            iconSize: 21,
+                            constraints: const BoxConstraints(
+                                minWidth: 48, minHeight: 48),
                             onPressed: () => context.push('/sync'),
                             icon: const Icon(Icons.more_horiz_rounded)),
                       ),
                     ]);
                   }),
                 ]),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             if (recoveryScope != null) ...[
               _recoveryHeader(context, recoveryScope, items.length),
               const SizedBox(height: 12),
@@ -644,7 +658,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     : () => context.push('/sync?expand=issues'),
                 borderRadius: BorderRadius.circular(8),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
+                  constraints: BoxConstraints(
+                    minHeight: sync.action == HomeSyncAction.none ? 24 : 48,
+                  ),
                   child: Semantics(
                     liveRegion: true,
                     button: sync.action != HomeSyncAction.none,
@@ -677,7 +693,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               ),
             ),
             if (recoveryScope == null) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 6),
               _homeActions(context, options, filtersActive, sortOrder),
               AnimatedSize(
                 duration: JournalLayout.motionDuration(context),

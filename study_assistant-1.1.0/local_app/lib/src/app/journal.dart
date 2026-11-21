@@ -142,12 +142,12 @@ class JournalLayout {
 class JournalHeading extends StatelessWidget {
   const JournalHeading(this.title,
       {super.key,
-      required this.eyebrow,
+      this.eyebrow,
       this.bookTitle = false,
       this.trailing,
       this.trailingWidth = 48});
   final String title;
-  final String eyebrow;
+  final String? eyebrow;
   final bool bookTitle;
   final Widget? trailing;
   final double trailingWidth;
@@ -155,25 +155,28 @@ class JournalHeading extends StatelessWidget {
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
     final rightPad = trailing == null ? 0.0 : trailingWidth;
+    final hasEyebrow = eyebrow != null && eyebrow!.trim().isNotEmpty;
     return Stack(children: [
       Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: EdgeInsets.only(right: rightPad),
-            child: Text(
-              eyebrow,
-              style: TextStyle(
-                color: journal.muted.withValues(alpha: .75),
-                fontFamily: Journal.bodyFamily,
-                fontFamilyFallback: Journal.bodyFallback,
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                letterSpacing: 1.6,
+          if (hasEyebrow) ...[
+            Padding(
+              padding: EdgeInsets.only(right: rightPad),
+              child: Text(
+                eyebrow!,
+                style: TextStyle(
+                  color: journal.muted.withValues(alpha: .75),
+                  fontFamily: Journal.bodyFamily,
+                  fontFamilyFallback: Journal.bodyFallback,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: 1.6,
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 4),
+            const SizedBox(height: 4),
+          ],
           Padding(
             padding: EdgeInsets.only(right: rightPad),
             child: Text(

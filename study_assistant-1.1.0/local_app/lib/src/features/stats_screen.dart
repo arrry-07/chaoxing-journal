@@ -317,11 +317,10 @@ class _StatsScreenState extends State<StatsScreen> {
             type: MaterialType.transparency,
             child: ListView(
               key: const PageStorageKey('stats-list'),
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
               children: [
                 const JournalHeading(
                   '课业统计',
-                  eyebrow: 'CAMPUS JOURNAL   /   STATISTICS',
                   bookTitle: true,
                 ),
                 const SizedBox(height: 4),
@@ -523,25 +522,25 @@ class _StatsScreenState extends State<StatsScreen> {
                                         Text(name, style: journal.entryTitle),
                                         const SizedBox(height: 3),
                                         Wrap(
-                                          spacing: 16,
+                                          spacing: 14,
                                           runSpacing: 4,
                                           children: [
-                                            Text(
-                                              '待完成 ${own.pending} 份',
-                                              style: journal.metadata.copyWith(
-                                                color: own.pending > 0
-                                                    ? journal.ink
-                                                    : null,
+                                            if (own.pending > 0)
+                                              Text(
+                                                '待完成 ${own.pending} 份',
+                                                style:
+                                                    journal.metadata.copyWith(
+                                                  color: journal.ink,
+                                                ),
                                               ),
-                                            ),
-                                            Text(
-                                              '已逾期 ${own.expired} 份',
-                                              style: journal.metadata.copyWith(
-                                                color: own.expired > 0
-                                                    ? journal.berry
-                                                    : null,
+                                            if (own.expired > 0)
+                                              Text(
+                                                '已逾期 ${own.expired} 份',
+                                                style:
+                                                    journal.metadata.copyWith(
+                                                  color: journal.berry,
+                                                ),
                                               ),
-                                            ),
                                             if (own.unknown > 0)
                                               Text(
                                                 '提交未知 ${own.unknown} 份',

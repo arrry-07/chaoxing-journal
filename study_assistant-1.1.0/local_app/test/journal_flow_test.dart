@@ -72,7 +72,15 @@ void main() {
         routerConfig: router,
       ),
     );
-    await t.tap(find.byTooltip('打开提醒设置'));
+    final reminderRow = find.widgetWithText(ListTile, '提醒设置');
+    await t.scrollUntilVisible(
+      reminderRow,
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await t.ensureVisible(reminderRow);
+    await t.pumpAndSettle();
+    await t.tap(reminderRow);
     await t.pumpAndSettle();
     final choice = find.text('提前 10 分钟');
     await t.ensureVisible(choice);

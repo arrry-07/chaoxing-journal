@@ -1,7 +1,7 @@
 name: study_assistant_mobile
 description: 学习通作业提醒本地版 App。
 publish_to: "none"
-version: 1.8.23-dev.9+98
+version: 1.8.23-dev.10+99
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
