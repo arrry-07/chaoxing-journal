@@ -38,16 +38,25 @@ def main(argv: list[str] | None = None) -> int:
         if part
     ]
     files = [
-        str(repo / p)
+        str((repo / p).relative_to(root))
         for p in paths
         if p.endswith(".dart") and (repo / p).is_relative_to(root) and (repo / p).is_file()
     ]
     if files:
         dart_cmd = shutil.which("dart.bat") or shutil.which("dart") or "dart"
-        subprocess.run(
-            [dart_cmd, "format", "--output=none", "--set-exit-if-changed", *files],
-            check=True,
-        )
+        batch_size = 40
+        for i in range(0, len(files), batch_size):
+            subprocess.run(
+                [
+                    dart_cmd,
+                    "format",
+                    "--output=none",
+                    "--set-exit-if-changed",
+                    *files[i : i + batch_size],
+                ],
+                cwd=root,
+                check=True,
+            )
     return 0
 
 
