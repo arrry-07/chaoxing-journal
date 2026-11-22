@@ -13,6 +13,7 @@ import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/models/reminder_rule_limits.dart';
+import 'package:study_assistant_mobile/src/services/reminder_rule_store.dart';
 
 Assignment record(String id, String title) => Assignment(
       id: id,
@@ -542,6 +543,19 @@ void main() {
       };
       expect(() => BackupSnapshot.decode(jsonEncode(badTerms)),
           throwsFormatException);
+    });
+
+    test(
+        'Phase 4B restored custom reminder rules are preserved instead of overwritten by new default preset',
+        () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('reminder_offsets_minutes', ['90', '15']);
+      final customSnapshot = await repo.createBackupSnapshot('alice');
+      expect(customSnapshot.reminderOffsets, [90, 15]);
+
+      await prefs.remove('reminder_offsets_minutes');
+      await repo.restoreBackupSnapshot(customSnapshot, 'alice');
+      expect(await ReminderRuleStore().loadOffsetsMinutes(), [90, 15]);
     });
   });
 }

@@ -793,6 +793,63 @@ void main() {
         tz.TZDateTime(shanghai, 2026, 11, 21, 0, 30).toUtc(),
       );
     });
+
+    test(
+        'Phase 4B intensive preset schedules unique sorted slots and replaces cleanly on gentle switch',
+        () {
+      final shanghai = tz.getLocation('Asia/Shanghai');
+      final now = tz.TZDateTime(shanghai, 2026, 11, 18, 12, 0);
+      final due = tz.TZDateTime(shanghai, 2026, 11, 21, 18, 0);
+      final work = _assignment(id: 'cx:work:1:2:preset', deadline: due);
+
+      final intensivePlan = AssignmentReminderPlanner.planAfterSync(
+        accountHash: 'account-hash',
+        sessionEpoch: 1,
+        assignments: [work],
+        hiddenAssignmentIds: const {},
+        unfollowedCourseKeys: const {},
+        knownAssignmentIds: {work.id},
+        sentNewAssignmentIds: const {},
+        baselineCompleted: true,
+        completeSync: true,
+        detectNewAssignments: false,
+        newAssignmentReminderEnabled: false,
+        reminderOffsetsMinutes: const [2880, 1440, 720, 360, 120, 60, 30],
+        now: now,
+        location: shanghai,
+      );
+      // 06:00 (720m before 18:00) shifts to 07:30, all 7 remain distinct chronologically.
+      expect(intensivePlan.deadlineEvents.map((e) => e.notifyAt.toUtc()), [
+        tz.TZDateTime(shanghai, 2026, 11, 19, 18, 0).toUtc(),
+        tz.TZDateTime(shanghai, 2026, 11, 20, 18, 0).toUtc(),
+        tz.TZDateTime(shanghai, 2026, 11, 21, 7, 30).toUtc(),
+        tz.TZDateTime(shanghai, 2026, 11, 21, 12, 0).toUtc(),
+        tz.TZDateTime(shanghai, 2026, 11, 21, 16, 0).toUtc(),
+        tz.TZDateTime(shanghai, 2026, 11, 21, 17, 0).toUtc(),
+        tz.TZDateTime(shanghai, 2026, 11, 21, 17, 30).toUtc(),
+      ]);
+
+      final gentlePlan = AssignmentReminderPlanner.planAfterSync(
+        accountHash: 'account-hash',
+        sessionEpoch: 1,
+        assignments: [work],
+        hiddenAssignmentIds: const {},
+        unfollowedCourseKeys: const {},
+        knownAssignmentIds: {work.id},
+        sentNewAssignmentIds: const {},
+        baselineCompleted: true,
+        completeSync: true,
+        detectNewAssignments: false,
+        newAssignmentReminderEnabled: false,
+        reminderOffsetsMinutes: const [1440, 180],
+        now: now,
+        location: shanghai,
+      );
+      expect(gentlePlan.deadlineEvents.map((e) => e.notifyAt.toUtc()), [
+        tz.TZDateTime(shanghai, 2026, 11, 20, 18, 0).toUtc(),
+        tz.TZDateTime(shanghai, 2026, 11, 21, 15, 0).toUtc(),
+      ]);
+    });
   });
 }
 

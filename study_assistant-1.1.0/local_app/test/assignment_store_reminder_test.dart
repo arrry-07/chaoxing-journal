@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
+import 'package:study_assistant_mobile/src/services/reminder_rule_store.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
@@ -59,6 +60,38 @@ void main() {
 
       expect(await store.setLocallyCompleted(pending, false), isTrue);
       expect(notificationService.lastScheduledIds, [pending.id]);
+    },
+  );
+
+  test(
+    'Phase 4B new user uses recommended preset while existing stored rules survive restart',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final notificationService = _RecordingNotificationService();
+      final freshStore = AssignmentStore(
+        sessionStore: _MemorySessionStore(account: 'student'),
+        notificationService: notificationService,
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+      );
+      addTearDown(freshStore.dispose);
+      await freshStore.restoreSession();
+      expect(
+        freshStore.reminderOffsetsMinutes,
+        ReminderFrequencyPreset.recommended.offsetsMinutes,
+      );
+
+      // Existing legacy default [1440, 180, 30] must remain untouched across restore.
+      SharedPreferences.setMockInitialValues({
+        'reminder_offsets_minutes': ['1440', '180', '30'],
+      });
+      final legacyStore = AssignmentStore(
+        sessionStore: _MemorySessionStore(account: 'student'),
+        notificationService: _RecordingNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+      );
+      addTearDown(legacyStore.dispose);
+      await legacyStore.restoreSession();
+      expect(legacyStore.reminderOffsetsMinutes, [1440, 180, 30]);
     },
   );
 }

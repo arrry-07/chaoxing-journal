@@ -2,11 +2,11 @@
 
 <a id="dev-当前迭代进度"></a>
 
-## dev 当前迭代进度（阶段四 `4A` 已过本地与 Gradle 门禁；下一步 `4B–4C` 与 MuMu 验收）
+## dev 当前迭代进度（阶段四 `4A–4B` 已过门禁；下一步 `4C` 与 MuMu 验收）
 
 - **1.8.25+114 已正式发布收口**（PR `#62` / `233a8b0`，收口 `f25dc57`），八维方案 Phase 0–2 已归档。当前预览版 `1.8.26-dev.3+117` 已过阶段三 MuMu 实测（正式目标版本待定）。
 - [x] **阶段一至阶段三已全部完成并过 MuMu 实测**（`1.8.26-dev.1+115` / `dev.2+116` / `dev.3+117`）：详见[总迭代方案](../plans/2026-11-22-v1.8.25-产品与体验分期升级方案.md)。
-- [ ] **阶段四（`4A–4C` Android 冲刺提醒）推进中**：`4A` 夜间静音排程/穿透/SQLite v8/静默通知与原生二次校验已过 13 组 271 项 Dart 与 Android `:app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest`（仪器用例待隔离设备/CI 执行）；下一步推进 `4B` 频率三档、`4C` `assignment_deadlines_v2` 渠道与测试按钮及阶段四 MuMu 验收。
+- [ ] **阶段四（`4A–4C` Android 冲刺提醒）推进中**：`4A` 夜间静音/穿透/SQLite v8（13 组 271 项 Dart + Android Gradle）与 `4B` 频率三档预设（8 组 128 项 Dart）已通过门禁；下一步推进 `4C` `assignment_deadlines_v2` 渠道与测试按钮及阶段四 MuMu 验收（`androidTest` 仪器用例待隔离设备/CI 执行）。
 
 ## 最近 2 个正式发布版本
 

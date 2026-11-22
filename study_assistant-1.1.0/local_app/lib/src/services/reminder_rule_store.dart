@@ -1,14 +1,59 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/reminder_rule_limits.dart';
 
+enum ReminderFrequencyPreset {
+  gentle(
+    label: '温和',
+    description: '提前 1 天、3 小时',
+    offsetsMinutes: [1440, 180],
+  ),
+  recommended(
+    label: '推荐冲刺',
+    description: '提前 1 天、12 / 6 / 3 / 1 小时与 30 分钟',
+    offsetsMinutes: [1440, 720, 360, 180, 60, 30],
+  ),
+  intensive(
+    label: '极致死线',
+    description: '提前 2 天、1 天、12 / 6 / 2 / 1 小时与 30 分钟',
+    offsetsMinutes: [2880, 1440, 720, 360, 120, 60, 30],
+  );
+
+  const ReminderFrequencyPreset({
+    required this.label,
+    required this.description,
+    required this.offsetsMinutes,
+  });
+
+  final String label;
+  final String description;
+  final List<int> offsetsMinutes;
+}
+
 class ReminderRuleStore {
-  static const defaultOffsetsMinutes = [1440, 180, 30];
+  static const defaultOffsetsMinutes = [1440, 720, 360, 180, 60, 30];
   static const _key = 'reminder_offsets_minutes';
 
-  Future<List<int>> loadOffsetsMinutes() async {
-    final prefs = await SharedPreferences.getInstance();
+  static ReminderFrequencyPreset? matchPreset(Iterable<int> offsets) {
+    final normalized = offsets.where((item) => item > 0).toSet();
+    if (normalized.isEmpty ||
+        offsets.any(
+            (item) => item < 1 || item > ReminderRuleLimits.maxOffsetMinutes)) {
+      return null;
+    }
+    for (final preset in ReminderFrequencyPreset.values) {
+      final target = preset.offsetsMinutes.toSet();
+      if (normalized.length == target.length &&
+          normalized.every(target.contains)) {
+        return preset;
+      }
+    }
+    return null;
+  }
+
+  Future<List<int>> loadOffsetsMinutes({SharedPreferences? prefs}) async {
+    final store = prefs ?? await SharedPreferences.getInstance();
     return normalizeStoredOffsets(
-      prefs
+      store
           .getStringList(_key)
           ?.map((item) => int.tryParse(item))
           .whereType<int>()

@@ -1030,6 +1030,110 @@ void main() {
     expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
     expect(find.textContaining('夜间静音时段提醒'), findsOneWidget);
   });
+
+  testWidgets(
+      'Phase 4B presets: brand-new defaults to recommended, existing rules kept, preset atomic save & failure rollback',
+      (tester) async {
+    // 1. Brand-new user with empty prefs loads 推荐冲刺 [1440, 720, 360, 180, 60, 30].
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final notifications = _NoopNotificationService();
+    final brandNewStore = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: notifications,
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(brandNewStore.dispose);
+    await brandNewStore.restoreSession();
+    expect(brandNewStore.reminderOffsetsMinutes, [1440, 720, 360, 180, 60, 30]);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ReminderSettingsScreen(assignmentStore: brandNewStore),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('当前：推荐冲刺'), findsOneWidget);
+    expect(
+      tester
+          .widget<ChoiceChip>(
+            find.byKey(const ValueKey('reminder-preset-recommended')),
+          )
+          .selected,
+      isTrue,
+    );
+    expect(find.byKey(const ValueKey('reminder-preset-reset')), findsNothing);
+
+    // Tap 温和 -> saves once with [1440, 180].
+    notifications.assignmentsScheduled = 0;
+    final gentle = find.byKey(const ValueKey('reminder-preset-gentle'));
+    await Scrollable.ensureVisible(tester.element(gentle), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(gentle);
+    await tester.pumpAndSettle();
+    expect(brandNewStore.reminderOffsetsMinutes, [1440, 180]);
+    expect(notifications.assignmentsScheduled, 1);
+    expect(find.text('当前：温和'), findsOneWidget);
+
+    // Edit checkbox manually -> switches label to 自定义 and exposes 恢复默认.
+    final checkTen = find.widgetWithText(CheckboxListTile, '提前 10 分钟');
+    await scrollTo(tester, checkTen);
+    await Scrollable.ensureVisible(tester.element(checkTen), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(checkTen);
+    await tester.pumpAndSettle();
+    expect(brandNewStore.reminderOffsetsMinutes, [1440, 180, 10]);
+    expect(find.textContaining('当前：自定义'), findsOneWidget);
+    final resetBtn = find.byKey(const ValueKey('reminder-preset-reset'));
+    expect(resetBtn, findsOneWidget);
+    await Scrollable.ensureVisible(tester.element(resetBtn), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(resetBtn);
+    await tester.pumpAndSettle();
+    expect(brandNewStore.reminderOffsetsMinutes, [1440, 720, 360, 180, 60, 30]);
+    expect(find.text('当前：推荐冲刺'), findsOneWidget);
+
+    // 2. Existing user [1440, 180, 30] is preserved without auto-rewrite.
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'reminder_offsets_minutes': ['1440', '180', '30'],
+    });
+    final existingStore = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(existingStore.dispose);
+    await existingStore.restoreSession();
+    expect(existingStore.reminderOffsetsMinutes, [1440, 180, 30]);
+
+    // 3. Atomic preset save failure rolls back UI selection.
+    final gated = await _gatedStore();
+    addTearDown(gated.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ReminderSettingsScreen(assignmentStore: gated),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final intensive = find.byKey(const ValueKey('reminder-preset-intensive'));
+    await Scrollable.ensureVisible(tester.element(intensive), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(intensive);
+    await tester.pump();
+    expect(gated.calls, hasLength(1));
+    expect(
+      gated.calls.single.toSet(),
+      ReminderFrequencyPreset.intensive.offsetsMinutes.toSet(),
+    );
+    gated.gate.complete(false);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('保存失败'), findsOneWidget);
+    expect(
+      tester.widget<ChoiceChip>(intensive).selected,
+      isFalse,
+    );
+  });
 }
 
 Future<AssignmentStore> _launchApp(WidgetTester tester, String location) async {

@@ -684,6 +684,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
             .toList()
           ..sort((a, b) => b.compareTo(a));
         final needsReview = ReminderRuleStore.requiresReview(_offsets.toList());
+        final activePreset = ReminderRuleStore.matchPreset(_offsets);
 
         return Scaffold(
           backgroundColor: journal.paper,
@@ -724,6 +725,66 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                 ],
                 dividerIndent: 16,
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                activePreset == null
+                                    ? '当前：自定义（${_offsets.length} 条）'
+                                    : '当前：${activePreset.label}',
+                                key: const ValueKey(
+                                  'reminder-preset-mode-label',
+                                ),
+                                style: journal.entryTitle,
+                              ),
+                            ),
+                            if (activePreset !=
+                                ReminderFrequencyPreset.recommended)
+                              TextButton(
+                                key: const ValueKey('reminder-preset-reset'),
+                                onPressed: _saving
+                                    ? null
+                                    : () => _applyPreset(
+                                          ReminderFrequencyPreset.recommended,
+                                        ),
+                                child: const Text('恢复默认'),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final preset in ReminderFrequencyPreset.values)
+                              ChoiceChip(
+                                key: ValueKey('reminder-preset-${preset.name}'),
+                                label: Text(preset.label),
+                                selected: activePreset == preset,
+                                onSelected: _saving
+                                    ? null
+                                    : (selected) {
+                                        if (selected &&
+                                            activePreset != preset) {
+                                          _applyPreset(preset);
+                                        }
+                                      },
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          activePreset?.description ?? '已按你的选择自由增减；点击上方档位可一键切换',
+                          style: journal.metadata,
+                        ),
+                      ],
+                    ),
+                  ),
                   for (final item in _presetOffsets.entries)
                     CheckboxListTile(
                       value: _offsets.contains(item.key),
@@ -999,7 +1060,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
 
   Future<void> _applyOffsetMutation(Set<int> next) async {
     // Safeguard 1: ReminderRuleStore.normalizeOffsets([]) resets to default
-    // [1440, 180, 30]; block removing the final remaining offset explicitly.
+    // [1440, 720, 360, 180, 60, 30]; block removing the final offset here.
     if (next.isEmpty) {
       _showMessage('至少保留 1 个提前提醒时间');
       return;
@@ -1095,6 +1156,11 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     if (_saving) return;
     final next = Set<int>.of(_offsets)..remove(offset);
     unawaited(_applyOffsetMutation(next));
+  }
+
+  void _applyPreset(ReminderFrequencyPreset preset) {
+    if (_saving) return;
+    unawaited(_applyOffsetMutation(preset.offsetsMinutes.toSet()));
   }
 
   void _addCustomOffset() {
