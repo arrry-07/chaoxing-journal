@@ -633,31 +633,58 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
             assignment.deadlineLabel,
         ];
         final hasTimeLine = assignment.isExam ? examLines.isNotEmpty : true;
-        final String timeText;
-        if (assignment.isExam) {
-          timeText = '${examLines.join('\n')}${hasExamTime ? '\n（北京时间）' : ''}';
-        } else {
-          String fullBeijingTime(DateTime value) =>
-              '${DateFormat('yyyy年M月d日 HH:mm', 'zh_CN').format(AssignmentQuery.beijing(value))}（北京时间）';
-
-          final start = assignment.availableFromAt;
-          final startText = assignment.availableFromText?.trim() ?? '';
-          final deadline = assignment.deadlineAt;
-          final deadlinePrefix =
-              !assignment.deadlineTrusted || assignment.deadlineReadFailed
-                  ? '历史截止（未核实） '
-                  : '截止：';
-          timeText = [
-            if (start != null)
-              '开始：${fullBeijingTime(start)}'
-            else if (startText.isNotEmpty)
-              '开始：$startText',
-            if (deadline != null)
-              '$deadlinePrefix${fullBeijingTime(deadline)}'
-            else
-              assignment.deadlineLabel,
-          ].join('\n');
-        }
+        final workStart = assignment.availableFromAt;
+        final workStartText = assignment.availableFromText?.trim() ?? '';
+        final workDeadline = assignment.deadlineAt;
+        final hasWorkBeijingTime =
+            !assignment.isExam && (workStart != null || workDeadline != null);
+        final workTimeRows = assignment.isExam
+            ? const <({
+                IconData icon,
+                Color iconColor,
+                String label,
+                String value,
+              })>[]
+            : <({
+                IconData icon,
+                Color iconColor,
+                String label,
+                String value,
+              })>[
+                if (workStart != null)
+                  (
+                    icon: Icons.play_circle_outline_rounded,
+                    iconColor: journal.muted,
+                    label: '开始',
+                    value: DateFormat('yyyy年M月d日 HH:mm', 'zh_CN')
+                        .format(AssignmentQuery.beijing(workStart)),
+                  )
+                else if (workStartText.isNotEmpty)
+                  (
+                    icon: Icons.play_circle_outline_rounded,
+                    iconColor: journal.muted,
+                    label: '开始',
+                    value: workStartText,
+                  ),
+                if (workDeadline != null)
+                  (
+                    icon: Icons.schedule_rounded,
+                    iconColor: overdue ? journal.berry : journal.muted,
+                    label: !assignment.deadlineTrusted ||
+                            assignment.deadlineReadFailed
+                        ? '历史截止（未核实）'
+                        : '截止',
+                    value: DateFormat('yyyy年M月d日 HH:mm', 'zh_CN')
+                        .format(AssignmentQuery.beijing(workDeadline)),
+                  )
+                else
+                  (
+                    icon: Icons.schedule_rounded,
+                    iconColor: journal.muted,
+                    label: '截止',
+                    value: assignment.deadlineLabel,
+                  ),
+              ];
         final pinTarget = original != null &&
                 !isHidden &&
                 AssignmentRecoveryScope.of(context) == null &&
@@ -807,30 +834,74 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                 ],
                               )
                             else
-                              Row(
+                              Column(
+                                key: const ValueKey('assignment-detail-time'),
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2),
-                                    child: Icon(
-                                      Icons.schedule_rounded,
-                                      size: 18,
-                                      color: overdue
-                                          ? journal.berry
-                                          : journal.muted,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      timeText,
-                                      key: const ValueKey(
-                                          'assignment-detail-time'),
-                                      style: journal.time.copyWith(
-                                        fontWeight: FontWeight.w600,
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          '时间安排',
+                                          style: journal.metadata.copyWith(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
                                       ),
-                                    ),
+                                      if (hasWorkBeijingTime)
+                                        Text(
+                                          '北京时间',
+                                          style: journal.metadata.copyWith(
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                    ],
                                   ),
+                                  const SizedBox(height: 8),
+                                  for (var i = 0;
+                                      i < workTimeRows.length;
+                                      i++) ...[
+                                    if (i > 0) const SizedBox(height: 8),
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 2),
+                                          child: Icon(
+                                            workTimeRows[i].icon,
+                                            size: 17,
+                                            color: workTimeRows[i].iconColor,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                workTimeRows[i].label,
+                                                style:
+                                                    journal.metadata.copyWith(
+                                                  fontSize: 12.5,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 1),
+                                              Text(
+                                                workTimeRows[i].value,
+                                                style: journal.time.copyWith(
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ],
                               ),
                           ],
@@ -1069,7 +1140,13 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                   const SizedBox(height: 16),
                   JournalPrimaryButton(
                     buttonKey: const ValueKey('assignment-detail-open'),
-                    height: 50,
+                    height: 46,
+                    backgroundColor: journal.isDark
+                        ? journal.primaryFill
+                        : const Color(0xFF34322F),
+                    foregroundColor: journal.isDark
+                        ? journal.onPrimaryFill
+                        : const Color(0xFFFFF7EC),
                     onPressed: _opening || _hiding || _currentUrl == null
                         ? null
                         : _openAssignment,
@@ -1080,15 +1157,27 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                             ? '在学习通内查看$_itemLabel'
                             : '在学习通内打开作业',
                   ),
-                  const SizedBox(height: 8),
-                  JournalSecondaryButton(
-                    buttonKey: const ValueKey('assignment-detail-open-web'),
-                    height: 48,
-                    onPressed: _opening || _hiding || _currentUrl == null
-                        ? null
-                        : _openWeb,
-                    icon: Icons.open_in_browser_rounded,
-                    label: _opening ? '正在请求浏览器…' : '打开$_itemLabel网页',
+                  const SizedBox(height: 6),
+                  Center(
+                    child: TextButton.icon(
+                      key: const ValueKey('assignment-detail-open-web'),
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        foregroundColor: journal.ink,
+                        disabledForegroundColor: journal.muted,
+                        textStyle: journal.metadata.copyWith(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      onPressed: _opening || _hiding || _currentUrl == null
+                          ? null
+                          : _openWeb,
+                      icon: const Icon(Icons.open_in_browser_rounded, size: 17),
+                      label: Text(_opening ? '正在请求浏览器…' : '打开$_itemLabel网页'),
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Padding(

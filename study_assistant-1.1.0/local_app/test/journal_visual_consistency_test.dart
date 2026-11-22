@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
@@ -83,5 +85,79 @@ void main() {
       await t.tap(find.text(a.title));
       expect(taps, 1);
     }
+  });
+
+  group('Phase 1A semantic vermilion & secondary readability', () {
+    double linearChannel(double c) => c <= 0.03928
+        ? c / 12.92
+        : math.pow((c + 0.055) / 1.055, 2.4).toDouble();
+
+    double luminance(Color color) =>
+        0.2126 * linearChannel(color.r) +
+        0.7152 * linearChannel(color.g) +
+        0.0722 * linearChannel(color.b);
+
+    double contrastRatio(Color fg, Color bg) {
+      final l1 = luminance(fg);
+      final l2 = luminance(bg);
+      return (math.max(l1, l2) + 0.05) / (math.min(l1, l2) + 0.05);
+    }
+
+    test('JournalPalette syncs vermilion and muted tokens across light & dark',
+        () {
+      const light = JournalPalette.light;
+      const dark = JournalPalette.dark;
+
+      expect(Journal.berry, const Color(0xFFB5493A));
+      expect(Journal.berryBg, const Color(0xFFFBF2EF));
+      expect(Journal.berryBorder, const Color(0xFFECD0C8));
+      expect(Journal.muted, const Color(0xFF4E545C));
+
+      expect(light.berry, Journal.berry);
+      expect(light.berryBg, Journal.berryBg);
+      expect(light.berryBorder, Journal.berryBorder);
+      expect(light.muted, Journal.muted);
+
+      expect(dark.berry, const Color(0xFFE27D70));
+      expect(dark.berryBg, const Color(0xFF342222));
+      expect(dark.berryBorder, const Color(0xFF61403C));
+      expect(dark.muted, const Color(0xFFBAB5AC));
+
+      expect(
+          contrastRatio(light.berry, light.berryBg), greaterThanOrEqualTo(4.5));
+      expect(
+          contrastRatio(light.berry, light.sheet), greaterThanOrEqualTo(4.5));
+      expect(
+          contrastRatio(light.muted, light.paper), greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(light.muted, light.parchment),
+          greaterThanOrEqualTo(4.5));
+
+      expect(
+          contrastRatio(dark.berry, dark.berryBg), greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(dark.berry, dark.sheet), greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(dark.muted, dark.paper), greaterThanOrEqualTo(4.5));
+      expect(
+          contrastRatio(dark.muted, dark.parchment), greaterThanOrEqualTo(4.5));
+
+      final copied = light.copyWith(
+        berryBorder: const Color(0xFF112233),
+        berryBg: const Color(0xFF445566),
+        muted: const Color(0xFF778899),
+      );
+      expect(copied.berryBorder, const Color(0xFF112233));
+      expect(copied.berryBg, const Color(0xFF445566));
+      expect(copied.muted, const Color(0xFF778899));
+      expect(copied, isNot(equals(light)));
+      expect(copied.dayHeading.color, const Color(0xFF778899));
+      expect(copied.metadata.color, const Color(0xFF778899));
+
+      final mid = light.lerp(dark, 0.5);
+      expect(
+        mid.berryBorder,
+        Color.lerp(light.berryBorder, dark.berryBorder, 0.5),
+      );
+      expect(mid.berryBg, Color.lerp(light.berryBg, dark.berryBg, 0.5));
+      expect(mid.muted, Color.lerp(light.muted, dark.muted, 0.5));
+    });
   });
 }

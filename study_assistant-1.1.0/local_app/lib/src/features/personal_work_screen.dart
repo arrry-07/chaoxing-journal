@@ -143,8 +143,7 @@ class _PersonalWorkState extends State<PersonalWorkScreen> {
                         Semantics(
                             liveRegion: true,
                             child: Text(validationError!,
-                                style: TextStyle(
-                                    color: Theme.of(c).colorScheme.error)))
+                                style: TextStyle(color: Journal.of(c).berry)))
                     ])),
                     actions: [
                       TextButton(

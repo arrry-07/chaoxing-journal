@@ -14,6 +14,8 @@ class JournalPrimaryButton extends StatelessWidget {
     this.destructive = false,
     this.expanded = true,
     this.height = 48.0,
+    this.backgroundColor,
+    this.foregroundColor,
   });
 
   final Key? buttonKey;
@@ -24,13 +26,16 @@ class JournalPrimaryButton extends StatelessWidget {
   final bool destructive;
   final bool expanded;
   final double height;
+  final Color? backgroundColor;
+  final Color? foregroundColor;
 
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
     final enabled = onPressed != null && !loading;
-    final bg = destructive ? journal.berry : journal.primaryFill;
-    final fg = destructive ? journal.onPrimaryFill : journal.onPrimaryFill;
+    final bg =
+        backgroundColor ?? (destructive ? journal.berry : journal.primaryFill);
+    final fg = foregroundColor ?? journal.onPrimaryFill;
 
     final child = loading
         ? SizedBox.square(

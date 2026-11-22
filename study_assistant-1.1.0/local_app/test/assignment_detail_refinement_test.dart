@@ -143,16 +143,22 @@ void main() {
     final openRect = tester.getRect(open);
     expect(openRect.top, greaterThanOrEqualTo(appPadding.top));
     expect(openRect.bottom, lessThanOrEqualTo(safeBottom));
+    expect(openRect.height, greaterThanOrEqualTo(46));
     expect(open.hitTestable(), findsOneWidget);
     final openButton = tester.widget<FilledButton>(open);
     expect(
       openButton.style?.backgroundColor?.resolve(const <WidgetState>{}),
-      Journal.ink,
+      const Color(0xFF34322F),
     );
     expect(
-      find.byKey(const ValueKey('assignment-detail-open-web')).hitTestable(),
-      findsOneWidget,
+      openButton.style?.foregroundColor?.resolve(const <WidgetState>{}),
+      const Color(0xFFFFF7EC),
     );
+    final openWeb = find.byKey(const ValueKey('assignment-detail-open-web'));
+    await reveal(openWeb);
+    expect(openWeb.hitTestable(), findsOneWidget);
+    expect(tester.widget<TextButton>(openWeb), isA<TextButton>());
+    expect(tester.getSize(openWeb).height, greaterThanOrEqualTo(48));
 
     final last = find.byKey(const ValueKey('assignment-detail-hide'));
     await reveal(last);
@@ -222,9 +228,21 @@ void main() {
 
     final time = find.byKey(const ValueKey('assignment-detail-time'));
     expect(
-      tester.widget<Text>(time).data,
-      '开始：2026年11月18日 00:30（北京时间）\n'
-      '截止：2026年11月19日 12:00（北京时间）',
+        find.descendant(of: time, matching: find.text('时间安排')), findsOneWidget);
+    expect(
+        find.descendant(of: time, matching: find.text('北京时间')), findsOneWidget);
+    expect(find.textContaining('（北京时间）'), findsNothing);
+    expect(
+        find.descendant(of: time, matching: find.text('开始')), findsOneWidget);
+    expect(
+      find.descendant(of: time, matching: find.text('2026年11月18日 00:30')),
+      findsOneWidget,
+    );
+    expect(
+        find.descendant(of: time, matching: find.text('截止')), findsOneWidget);
+    expect(
+      find.descendant(of: time, matching: find.text('2026年11月19日 12:00')),
+      findsOneWidget,
     );
     expect(find.byKey(const ValueKey('assignment-detail-pin')), findsNothing);
 
@@ -455,9 +473,22 @@ void main() {
         if (entry.key == 'unconfirmed') {
           final time = find.byKey(const ValueKey('assignment-detail-time'));
           await reveal(time);
+          expect(find.descendant(of: time, matching: find.text('时间安排')),
+              findsOneWidget);
+          expect(find.descendant(of: time, matching: find.text('北京时间')),
+              findsOneWidget);
+          expect(find.textContaining('（北京时间）'), findsNothing);
+          expect(find.descendant(of: time, matching: find.text('开始')),
+              findsOneWidget);
+          expect(find.descendant(of: time, matching: find.text('11月18日（原文）')),
+              findsOneWidget);
           expect(
-            tester.widget<Text>(time).data,
-            '开始：11月18日（原文）\n历史截止（未核实） 2026年11月24日 12:00（北京时间）',
+            find.descendant(of: time, matching: find.text('历史截止（未核实）')),
+            findsOneWidget,
+          );
+          expect(
+            find.descendant(of: time, matching: find.text('2026年11月24日 12:00')),
+            findsOneWidget,
           );
           final verification =
               find.byKey(const ValueKey('assignment-detail-verification'));
@@ -788,6 +819,144 @@ void main() {
     expect(metadataOnly.body, isEmpty);
     expect(metadataOnly.trimmedRedundantLines, isTrue);
 
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'normal detail stacks time label/value at 360dp 1.0/1.5x and styles actions for light/dark',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    addTearDown(tester.view.reset);
+    final now = DateTime.utc(2026, 11, 18, 4);
+    final openItem = Assignment(
+      id: 'cx:work:1:2:11',
+      courseName: '软件工程实践',
+      title: '阶段一常规作业排版验证',
+      availableFromAt: DateTime.utc(2026, 11, 17, 16, 30),
+      deadlineAt: now.add(const Duration(days: 1)),
+      requirementsText: '按模板完成阶段分析说明。',
+      status: 'pending',
+      submitUrl:
+          'https://mooc1.chaoxing.com/work/task?courseId=1&classId=2&workId=11&enc=sample',
+      lastSyncedAt: now,
+    );
+    final disabledItem = Assignment(
+      id: 'cx:work:1:2:1a-disabled',
+      courseName: '软件工程实践',
+      title: '无链接作业禁用状态验证',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      submitUrl: null,
+      lastSyncedAt: now,
+    );
+    final store = _RefinementStore()
+      ..replaceAssignmentsForTest([openItem, disabledItem]);
+    addTearDown(store.dispose);
+
+    for (final mode in [
+      (dark: false, theme: StudyAssistantTheme.light),
+      (dark: true, theme: StudyAssistantTheme.dark),
+    ]) {
+      for (final scale in [1.0, 1.5]) {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(360, 800);
+        await tester.pumpWidget(MaterialApp(
+          theme: mode.theme,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(scale)),
+            child: child!,
+          ),
+          home: Scaffold(
+            body: AssignmentDetailScreen(
+              key: ValueKey('1a-${mode.dark}-$scale'),
+              store: store,
+              assignmentId: openItem.id,
+              clock: () => now,
+            ),
+          ),
+        ));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull,
+            reason: 'dark=${mode.dark} scale=$scale');
+
+        final time = find.byKey(const ValueKey('assignment-detail-time'));
+        expect(find.descendant(of: time, matching: find.text('北京时间')),
+            findsOneWidget);
+        expect(find.textContaining('（北京时间）'), findsNothing);
+        expect(
+          tester.getTopLeft(find.text('开始')).dy,
+          lessThan(tester.getTopLeft(find.text('2026年11月18日 00:30')).dy),
+        );
+        expect(
+          tester.getTopLeft(find.text('截止')).dy,
+          lessThan(tester.getTopLeft(find.text('2026年11月19日 12:00')).dy),
+        );
+
+        final open = find.byKey(const ValueKey('assignment-detail-open'));
+        final scroll = find.byType(Scrollable).first;
+        await tester.scrollUntilVisible(open, 200, scrollable: scroll);
+        await tester.pumpAndSettle();
+        final openButton = tester.widget<FilledButton>(open);
+        expect(openButton.onPressed, isNotNull);
+        expect(
+          openButton.style?.backgroundColor?.resolve(const <WidgetState>{}),
+          mode.dark ? JournalPalette.dark.primaryFill : const Color(0xFF34322F),
+        );
+        expect(
+          openButton.style?.foregroundColor?.resolve(const <WidgetState>{}),
+          mode.dark
+              ? JournalPalette.dark.onPrimaryFill
+              : const Color(0xFFFFF7EC),
+        );
+        expect(tester.getSize(open).height, greaterThanOrEqualTo(46));
+
+        final web = find.byKey(const ValueKey('assignment-detail-open-web'));
+        await tester.scrollUntilVisible(web, 120, scrollable: scroll);
+        await tester.pumpAndSettle();
+        final webButton = tester.widget<TextButton>(web);
+        expect(webButton.onPressed, isNotNull);
+        expect(
+          find.descendant(
+            of: web,
+            matching: find.byIcon(Icons.open_in_browser_rounded),
+          ),
+          findsOneWidget,
+        );
+        final webRect = tester.getRect(web);
+        expect((webRect.center.dx - 180).abs(), lessThanOrEqualTo(2.0));
+      }
+    }
+
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 800);
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(
+        body: AssignmentDetailScreen(
+          key: const ValueKey('1a-disabled'),
+          store: store,
+          assignmentId: disabledItem.id,
+          clock: () => now,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final timeDisabled = find.byKey(const ValueKey('assignment-detail-time'));
+    expect(find.descendant(of: timeDisabled, matching: find.text('北京时间')),
+        findsNothing);
+    expect(find.descendant(of: timeDisabled, matching: find.text('无截止日期')),
+        findsOneWidget);
+    final openDisabled = find.byKey(const ValueKey('assignment-detail-open'));
+    await tester.scrollUntilVisible(openDisabled, 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(openDisabled).onPressed, isNull);
+    final webDisabled =
+        find.byKey(const ValueKey('assignment-detail-open-web'));
+    expect(tester.widget<TextButton>(webDisabled).onPressed, isNull);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

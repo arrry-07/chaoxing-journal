@@ -313,7 +313,7 @@ class AssignmentCard extends StatelessWidget {
               opening ? Icons.hourglass_top_rounded : Icons.open_in_new_rounded,
               size: 18,
               color: enabled
-                  ? journal.muted.withValues(alpha: 0.9)
+                  ? journal.muted
                   : journal.muted.withValues(alpha: 0.45),
             );
 
@@ -436,9 +436,7 @@ class AssignmentCard extends StatelessWidget {
                 if (hasTitle && hasCourse && showPlainInlineState)
                   Text(
                     '·',
-                    style: journal.metadata.copyWith(
-                      color: journal.muted.withValues(alpha: 0.65),
-                    ),
+                    style: journal.metadata,
                   ),
                 if (showPlainInlineState) Text(state, style: journal.metadata),
                 if (highlightPills.isNotEmpty && !hasSpecialStatePill)
@@ -646,12 +644,7 @@ class _CourseStateLine extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 5),
-            Text(
-              '·',
-              style: style.copyWith(
-                color: journal.muted.withValues(alpha: 0.65),
-              ),
-            ),
+            Text('·', style: style),
             const SizedBox(width: 5),
             Text(state, style: style),
           ],

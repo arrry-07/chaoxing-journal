@@ -13,14 +13,15 @@ class Journal {
   static const sheet = Color(0xFFFFFFFF);
   static const parchment = Color(0xFFEFEFEA);
   static const ink = Color(0xFF1F2328);
-  static const muted = Color(0xFF6B7280);
+  static const muted = Color(0xFF4E545C);
   static const sage = Color(0xFFEAF0FD);
   static const sageBorder = Color(0xFFC9D6F7);
   static const rule = Color(0xFFE6E5E0);
   static const ruleStrong = Color(0xFFD6D5CE);
   static const divider = Color(0xFFECEBE6);
-  static const berry = Color(0xFFC53B3B);
-  static const berryBg = Color(0xFFFDF2F2);
+  static const berry = Color(0xFFB5493A);
+  static const berryBg = Color(0xFFFBF2EF);
+  static const berryBorder = Color(0xFFECD0C8);
   static const ochre = Color(0xFF4F5D73);
   static const ochreBg = Color(0xFFEFF2F6);
   static const ochreBorder = Color(0xFFD8DEE8);
@@ -137,6 +138,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     required this.divider,
     required this.berry,
     required this.berryBg,
+    required this.berryBorder,
     required this.ochre,
     required this.ochreBg,
     required this.ochreBorder,
@@ -165,6 +167,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     divider: Journal.divider,
     berry: Journal.berry,
     berryBg: Journal.berryBg,
+    berryBorder: Journal.berryBorder,
     ochre: Journal.ochre,
     ochreBg: Journal.ochreBg,
     ochreBorder: Journal.ochreBorder,
@@ -185,15 +188,16 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     ink: Color(0xFFEAE6DF),
     primaryFill: Color(0xFFEAE6DF),
     onPrimaryFill: Color(0xFF1A1917),
-    muted: Color(0xFFA09B93),
+    muted: Color(0xFFBAB5AC),
     sage: Color(0xFF252B3B),
     sageBorder: Color(0xFF3D4C6E),
     rule: Color(0xFF32302B),
     ruleStrong: Color(0xFF403E38),
     cardBorder: Color(0x14FFF8EB),
     divider: Color(0x10FFF8EB),
-    berry: Color(0xFFE8827D),
+    berry: Color(0xFFE27D70),
     berryBg: Color(0xFF342222),
+    berryBorder: Color(0xFF61403C),
     ochre: Color(0xFFAEBACB),
     ochreBg: Color(0xFF272B32),
     ochreBorder: Color(0xFF3D434F),
@@ -221,6 +225,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
   final Color divider;
   final Color berry;
   final Color berryBg;
+  final Color berryBorder;
   final Color ochre;
   final Color ochreBg;
   final Color ochreBorder;
@@ -245,24 +250,15 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
 
   Color get sectionHeaderFill => Color.lerp(sheet, parchment, 0.34)!;
 
-  TextStyle get display =>
-      isDark ? Journal.display.copyWith(color: ink) : Journal.display;
-  TextStyle get pageTitle =>
-      isDark ? Journal.pageTitle.copyWith(color: ink) : Journal.pageTitle;
-  TextStyle get dayHeading =>
-      isDark ? Journal.dayHeading.copyWith(color: muted) : Journal.dayHeading;
-  TextStyle get section =>
-      isDark ? Journal.section.copyWith(color: ink) : Journal.section;
-  TextStyle get entryTitle =>
-      isDark ? Journal.entryTitle.copyWith(color: ink) : Journal.entryTitle;
-  TextStyle get metadata =>
-      isDark ? Journal.metadata.copyWith(color: muted) : Journal.metadata;
-  TextStyle get time =>
-      isDark ? Journal.time.copyWith(color: ink) : Journal.time;
-  TextStyle get statHero =>
-      isDark ? Journal.statHero.copyWith(color: ink) : Journal.statHero;
-  TextStyle get pillLabel =>
-      isDark ? Journal.pillLabel.copyWith(color: ink) : Journal.pillLabel;
+  TextStyle get display => Journal.display.copyWith(color: ink);
+  TextStyle get pageTitle => Journal.pageTitle.copyWith(color: ink);
+  TextStyle get dayHeading => Journal.dayHeading.copyWith(color: muted);
+  TextStyle get section => Journal.section.copyWith(color: ink);
+  TextStyle get entryTitle => Journal.entryTitle.copyWith(color: ink);
+  TextStyle get metadata => Journal.metadata.copyWith(color: muted);
+  TextStyle get time => Journal.time.copyWith(color: ink);
+  TextStyle get statHero => Journal.statHero.copyWith(color: ink);
+  TextStyle get pillLabel => Journal.pillLabel.copyWith(color: ink);
 
   @override
   JournalPalette copyWith({
@@ -283,6 +279,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     Color? divider,
     Color? berry,
     Color? berryBg,
+    Color? berryBorder,
     Color? ochre,
     Color? ochreBg,
     Color? ochreBorder,
@@ -310,6 +307,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         divider: divider ?? this.divider,
         berry: berry ?? this.berry,
         berryBg: berryBg ?? this.berryBg,
+        berryBorder: berryBorder ?? this.berryBorder,
         ochre: ochre ?? this.ochre,
         ochreBg: ochreBg ?? this.ochreBg,
         ochreBorder: ochreBorder ?? this.ochreBorder,
@@ -343,6 +341,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
       divider: Color.lerp(divider, other.divider, t)!,
       berry: Color.lerp(berry, other.berry, t)!,
       berryBg: Color.lerp(berryBg, other.berryBg, t)!,
+      berryBorder: Color.lerp(berryBorder, other.berryBorder, t)!,
       ochre: Color.lerp(ochre, other.ochre, t)!,
       ochreBg: Color.lerp(ochreBg, other.ochreBg, t)!,
       ochreBorder: Color.lerp(ochreBorder, other.ochreBorder, t)!,
@@ -363,11 +362,28 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
           paper == other.paper &&
           sheet == other.sheet &&
           ink == other.ink &&
+          primaryFill == other.primaryFill &&
+          onPrimaryFill == other.onPrimaryFill &&
+          muted == other.muted &&
           slate == other.slate &&
-          berry == other.berry;
+          berry == other.berry &&
+          berryBg == other.berryBg &&
+          berryBorder == other.berryBorder;
 
   @override
-  int get hashCode => Object.hash(isDark, paper, sheet, ink, slate, berry);
+  int get hashCode => Object.hash(
+        isDark,
+        paper,
+        sheet,
+        ink,
+        primaryFill,
+        onPrimaryFill,
+        muted,
+        slate,
+        berry,
+        berryBg,
+        berryBorder,
+      );
 }
 
 class JournalLayout {
