@@ -546,9 +546,22 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             successAt: store.lastSyncAt,
             serviceWarning: store.error != null &&
                 store.syncReport.phase == SyncPhase.success);
-        final freshness = _freshnessLabel(sync.summary,
-            store.syncReport.lastDataSuccessAt ?? store.lastSyncAt, now);
-        final statusText = sync.showCached ? '$freshness · 显示上次记录' : freshness;
+        final dueSummary = HomeDueSummary.from(
+          catalogAssignments,
+          now: now,
+          index: displayIndex,
+        );
+        final showDueSummary = recoveryScope == null &&
+            (catalogAssignments.isNotEmpty ||
+                displayAssignments.isNotEmpty ||
+                store.syncReport.phase == SyncPhase.success ||
+                store.syncReport.lastDataSuccessAt != null ||
+                store.lastSyncAt != null);
+        final statusText = sync.gentle && sync.action == HomeSyncAction.retry
+            ? '${sync.summary} · 重试'
+            : sync.showCached
+                ? '${sync.summary} · 显示上次记录'
+                : sync.summary;
         final reduceMotion = MediaQuery.disableAnimationsOf(context);
         final syncAction = sync.action == HomeSyncAction.login ||
                 sync.action == HomeSyncAction.verify
@@ -931,50 +944,181 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               );
             }),
             const SizedBox(height: 2),
-            Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                key: const ValueKey('home-sync-status'),
-                onTap: sync.action == HomeSyncAction.none
-                    ? null
-                    : () => context.push('/sync?expand=issues'),
-                borderRadius: BorderRadius.circular(8),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: sync.action == HomeSyncAction.none ? 22 : 48,
-                  ),
-                  child: Semantics(
-                    liveRegion: true,
-                    button: sync.action != HomeSyncAction.none,
-                    label: statusText,
-                    child: Row(children: [
-                      Icon(
-                        store.syncReport.phase == SyncPhase.failed
-                            ? Icons.error_outline_rounded
-                            : store.syncReport.phase == SyncPhase.partial
-                                ? Icons.info_outline_rounded
-                                : Icons.schedule_rounded,
-                        size: 14.5,
-                        color: store.syncReport.phase == SyncPhase.failed
-                            ? journal.berry
-                            : store.syncReport.phase == SyncPhase.partial
-                                ? journal.ochre
-                                : journal.muted,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: ExcludeSemantics(
-                          child: Text(statusText, style: journal.metadata),
+            LayoutBuilder(builder: (context, constraints) {
+              final nearDueActive =
+                  _deadlineFilter == AssignmentDeadlineFilter.next7Days;
+              final compactSummary = constraints.maxWidth <= 360 ||
+                  JournalLayout.isLargeText(context);
+              final summaryLabel = dueSummary.label(compact: compactSummary);
+              final statusIcon = sync.gentle
+                  ? Icons.wifi_off_rounded
+                  : store.syncReport.phase == SyncPhase.failed
+                      ? Icons.error_outline_rounded
+                      : store.syncReport.phase == SyncPhase.partial
+                          ? Icons.info_outline_rounded
+                          : Icons.schedule_rounded;
+              final statusColor = sync.gentle
+                  ? journal.muted
+                  : store.syncReport.phase == SyncPhase.failed
+                      ? journal.berry
+                      : store.syncReport.phase == SyncPhase.partial
+                          ? journal.ochre
+                          : journal.muted;
+              final VoidCallback? onSyncTap =
+                  sync.gentle && sync.action == HomeSyncAction.retry
+                      ? (busy ? null : () => refresh(HomeSyncAction.retry))
+                      : sync.action == HomeSyncAction.none
+                          ? null
+                          : () => context.push('/sync?expand=issues');
+              final showChevron =
+                  sync.action != HomeSyncAction.none && !sync.gentle;
+
+              final scaler = MediaQuery.textScalerOf(context);
+              final direction = Directionality.of(context);
+              double measureWidth(String text, TextStyle style) {
+                final painter = TextPainter(
+                  text: TextSpan(text: text, style: style),
+                  textScaler: scaler,
+                  textDirection: direction,
+                )..layout();
+                final width = painter.width.ceilToDouble();
+                painter.dispose();
+                return width;
+              }
+
+              final summaryStyle = journal.metadata.copyWith(
+                color: nearDueActive
+                    ? journal.accent
+                    : dueSummary.dueToday > 0
+                        ? journal.berry
+                        : journal.muted,
+                fontWeight: nearDueActive || dueSummary.dueToday > 0
+                    ? FontWeight.w600
+                    : FontWeight.w400,
+              );
+              final leftWidth = 14.5 +
+                  5.0 +
+                  measureWidth(statusText, journal.metadata) +
+                  (showChevron ? 18.0 : 0.0) +
+                  4.0;
+              final rightWidth = showDueSummary
+                  ? measureWidth(summaryLabel, summaryStyle) + 4.0
+                  : 0.0;
+              final fitsSingleRow = !showDueSummary ||
+                  (leftWidth + rightWidth + 6.0 <= constraints.maxWidth);
+
+              final statusControl = Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  key: const ValueKey('home-sync-status'),
+                  onTap: onSyncTap,
+                  borderRadius: BorderRadius.circular(8),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight:
+                          onSyncTap == null ? (showDueSummary ? 40 : 22) : 48,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Semantics(
+                        liveRegion: true,
+                        button: onSyncTap != null,
+                        label: statusText,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(statusIcon, size: 14.5, color: statusColor),
+                            const SizedBox(width: 5),
+                            Flexible(
+                              fit: FlexFit.loose,
+                              child: ExcludeSemantics(
+                                child: Text(
+                                  statusText,
+                                  style: journal.metadata,
+                                ),
+                              ),
+                            ),
+                            if (showChevron)
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: 18,
+                                color: journal.muted,
+                              ),
+                          ],
                         ),
                       ),
-                      if (sync.action != HomeSyncAction.none)
-                        Icon(Icons.chevron_right_rounded,
-                            size: 18, color: journal.muted),
-                    ]),
+                    ),
                   ),
                 ),
-              ),
-            ),
+              );
+
+              final summaryControl = !showDueSummary
+                  ? null
+                  : Material(
+                      type: MaterialType.transparency,
+                      child: InkWell(
+                        key: const ValueKey('home-due-summary'),
+                        onTap: () {
+                          final nextDeadline = nearDueActive
+                              ? AssignmentDeadlineFilter.all
+                              : AssignmentDeadlineFilter.next7Days;
+                          unawaited(_saveFilters(
+                            HomeFilters(
+                              query: _query,
+                              courseKey: _courseKey,
+                              deadline: nextDeadline,
+                              type: _typeFilter,
+                              sortOrder: _sortOrder,
+                            ),
+                            store.accountEpoch,
+                            store.account,
+                          ));
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 40),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            child: Semantics(
+                              button: true,
+                              label: '$summaryLabel，点击筛选7天内临期课业',
+                              child: ExcludeSemantics(
+                                child: Center(
+                                  widthFactor: 1,
+                                  child: Text(
+                                    summaryLabel,
+                                    style: summaryStyle,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+
+              if (fitsSingleRow) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Flexible(fit: FlexFit.loose, child: statusControl),
+                    if (summaryControl != null) ...[
+                      const Spacer(),
+                      const SizedBox(width: 6),
+                      summaryControl,
+                    ],
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  statusControl,
+                  if (summaryControl != null) summaryControl,
+                ],
+              );
+            }),
             if (recoveryScope != null) ...[
               const SizedBox(height: 6),
               _recoveryHeader(context, recoveryScope, items.length),
@@ -1755,14 +1899,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       return '${progress.stageLabel}，已处理 ${progress.resolvedCount} 项详情';
     }
     return progress.stageLabel;
-  }
-
-  String _freshnessLabel(String summary, DateTime? updatedAt, DateTime now) {
-    if (updatedAt != null &&
-        now.difference(updatedAt) >= const Duration(hours: 24)) {
-      return '$summary · 超过24小时未更新';
-    }
-    return summary;
   }
 
   Future<void> _saveFilters(

@@ -150,10 +150,7 @@ void main() {
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
     await t.pumpAndSettle();
 
-    final updated = now.subtract(const Duration(hours: 25)).toLocal();
-    final freshness =
-        '${updated.hour.toString().padLeft(2, '0')}:${updated.minute.toString().padLeft(2, '0')} 更新 · 超过24小时未更新';
-    expect(find.text(freshness), findsOneWidget);
+    expect(find.text('1天前更新'), findsOneWidget);
 
     await t.tap(find.text('搜索与筛选'));
     await t.pumpAndSettle();
