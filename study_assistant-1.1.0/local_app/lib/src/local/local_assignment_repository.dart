@@ -78,6 +78,11 @@ class LocalAssignmentRepository {
   static const _courseworkStateKey = 'local_coursework_state_v1';
   static const _courseworkRecoveryWarning =
       '部分个人课业状态无法读取，原始数据已保留备份；本次以空状态临时显示，请勿覆盖原数据。';
+  static const _acknowledgedDeadlineChangesKey =
+      'acknowledged_deadline_changes_v1';
+  static const _maxAcknowledgedDeadlineChanges = 300;
+  static const _acknowledgedDeadlineRecoveryWarning =
+      '部分时间变更已读状态无法读取，原始数据已保留备份；本次以未确认状态临时显示，请勿覆盖原数据。';
   static const _maxAdditionalRecoveryBackups = 3;
   static const _maxRecoveryValueBytes = 4 * 1024 * 1024;
   static const _recoveryWriteFailedWarning =
@@ -127,6 +132,9 @@ class LocalAssignmentRepository {
     '${_pinnedV2Key}_recovery_backups',
     '${_courseworkStateKey}_recovery_backup',
     '${_courseworkStateKey}_recovery_backups',
+    _acknowledgedDeadlineChangesKey,
+    '${_acknowledgedDeadlineChangesKey}_recovery_backup',
+    '${_acknowledgedDeadlineChangesKey}_recovery_backups',
     '${_noticesKey}_recovery_backup',
     '${_noticesKey}_recovery_backups',
     '${_chaptersKey}_recovery_backup',
@@ -258,6 +266,72 @@ class LocalAssignmentRepository {
         _checkOwner(prefs, account);
         await writeCourseworkStateInPrefs(prefs, state);
       });
+
+  static Set<String> _decodeAcknowledgedDeadlineChanges(String raw) {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map || decoded['version'] != 1 || decoded['ids'] is! List) {
+      throw const FormatException('时间变更确认状态格式无效');
+    }
+    final ids = <String>{};
+    for (final item in decoded['ids'] as List) {
+      if (item is! String || item.trim().isEmpty) {
+        throw const FormatException('时间变更确认标识无效');
+      }
+      ids.add(item.trim());
+    }
+    return ids;
+  }
+
+  static String _encodeAcknowledgedDeadlineChanges(
+      Iterable<String> orderedIds) {
+    final unique = <String>[];
+    final seen = <String>{};
+    for (final raw in orderedIds) {
+      final id = raw.trim();
+      if (id.isEmpty || !seen.add(id)) continue;
+      unique.add(id);
+      if (unique.length >= _maxAcknowledgedDeadlineChanges) break;
+    }
+    return jsonEncode({'version': 1, 'ids': unique});
+  }
+
+  Future<Set<String>> readAcknowledgedDeadlineChangeIdsInPrefs(
+    SharedPreferences prefs,
+  ) =>
+      _readProtected(
+        prefs,
+        _acknowledgedDeadlineChangesKey,
+        _decodeAcknowledgedDeadlineChanges,
+        () => <String>{},
+        _acknowledgedDeadlineRecoveryWarning,
+      );
+
+  Future<Set<String>> loadAcknowledgedDeadlineChangeIds(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return readAcknowledgedDeadlineChangeIdsInPrefs(prefs);
+      });
+
+  Future<void> writeAcknowledgedDeadlineChangeIdsInPrefs(
+    SharedPreferences prefs,
+    Iterable<String> orderedIds,
+  ) async {
+    await _protectExisting(
+      prefs,
+      _acknowledgedDeadlineChangesKey,
+      _decodeAcknowledgedDeadlineChanges,
+      _acknowledgedDeadlineRecoveryWarning,
+    );
+    final raw = _encodeAcknowledgedDeadlineChanges(orderedIds);
+    _decodeAcknowledgedDeadlineChanges(raw);
+    await _writeVerified(
+      prefs,
+      _acknowledgedDeadlineChangesKey,
+      raw,
+      '时间变更确认状态保存失败',
+    );
+  }
 
   Future<StudyNotebook> loadNotebook() => _serialized(() async {
         final p = await SharedPreferences.getInstance();

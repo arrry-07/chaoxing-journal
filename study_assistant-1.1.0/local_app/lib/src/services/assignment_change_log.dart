@@ -19,7 +19,9 @@ class AssignmentChangeLog {
 
   Future<void> record(List<Assignment> previous, List<Assignment> current,
       Set<String> observedIds,
-      {bool completeSync = true, SharedPreferences? prefs}) async {
+      {bool completeSync = true,
+      SharedPreferences? prefs,
+      DateTime? at}) async {
     final p = prefs ?? await SharedPreferences.getInstance();
     final raw = p.getString(key);
     final initialized = raw != null &&
@@ -27,7 +29,7 @@ class AssignmentChangeLog {
     final old = await load(prefs: p);
     final delta = initialized
         ? AssignmentChange.compare(
-            previous, current, observedIds, DateTime.now())
+            previous, current, observedIds, at ?? DateTime.now())
         : <AssignmentChange>[];
     if (!await p.setString(
         key,

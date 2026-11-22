@@ -8,6 +8,7 @@ import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart'
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/assignment_change.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -515,6 +516,53 @@ void main() {
       cards.map((c) => c.assignment.title).toList(),
       ['未确认但设了未来手动截止', '已过手动截止的作业'],
     );
+  });
+
+  testWidgets(
+      'Phase 2D home card shows 时间变更 pill for advance deadline and clears after acknowledgment or local completion',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final session = f.Session()..account = 'home-alert-student';
+    final work = _work(
+      'adv',
+      title: '教师提前截止的作业',
+      course: '编译原理',
+      due: now.add(const Duration(days: 1)),
+    );
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('home-alert-student');
+    await repo.mergeAndSave([work], completeSync: true);
+    final store = _PinTimelineStore(sessionStore: session, clock: () => now);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final event = AssignmentChange(
+      assignmentId: work.id,
+      title: work.title,
+      courseName: work.courseName,
+      kind: AssignmentChangeKind.deadline,
+      at: now,
+      before: now.add(const Duration(days: 5)).toIso8601String(),
+      after: now.add(const Duration(days: 1)).toIso8601String(),
+      beforeDeadlineUtc: now.add(const Duration(days: 5)),
+      afterDeadlineUtc: now.add(const Duration(days: 1)),
+    );
+    store.changes = [event];
+
+    await _mountRoutedHomeWithClock(tester, store, () => now);
+    expect(find.text('时间变更'), findsOneWidget);
+
+    await store.setLocallyCompleted(work, true);
+    await tester.pumpAndSettle();
+    expect(find.text('时间变更'), findsNothing);
+
+    await store.setLocallyCompleted(work, false);
+    await tester.pumpAndSettle();
+    expect(find.text('时间变更'), findsOneWidget);
+
+    expect(
+        await store.acknowledgeDeadlineAlert(event.effectiveChangeId), isTrue);
+    await tester.pumpAndSettle();
+    expect(find.text('时间变更'), findsNothing);
   });
 }
 

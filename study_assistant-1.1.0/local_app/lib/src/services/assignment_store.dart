@@ -677,6 +677,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   List<AssignmentChange> changes = [];
+  Set<String> _acknowledgedDeadlineChangeIds = <String>{};
   String? returnCheckMessage;
   String? _visitedAssignment;
   int? _visitGeneration;
@@ -873,6 +874,7 @@ class AssignmentStore extends ChangeNotifier {
           observedIds,
           completeSync: completeSync,
           prefs: prefs,
+          at: _clock(),
         );
         return changeLog.load(prefs: prefs);
       });
@@ -1041,6 +1043,77 @@ class AssignmentStore extends ChangeNotifier {
       CourseworkDeadline.isLocallyCompleted(assignment, _courseworkState);
   bool isEffectivelyCompleted(Assignment assignment) =>
       assignment.isCompleted || isLocallyCompleted(assignment);
+
+  AssignmentChange? latestDeadlineChangeFor(Assignment assignment) {
+    for (final event in changes) {
+      if (event.assignmentId == assignment.id &&
+          event.kind == AssignmentChangeKind.deadline) {
+        return event;
+      }
+    }
+    return null;
+  }
+
+  AssignmentChange? activeDeadlineAlertFor(Assignment assignment) {
+    if (_journalRestoreFailed ||
+        changes.isEmpty ||
+        isEffectivelyCompleted(assignment)) {
+      return null;
+    }
+    final latest = latestDeadlineChangeFor(assignment);
+    if (latest == null || !latest.isAdvanceDeadlineAlert) return null;
+    if (_acknowledgedDeadlineChangeIds.contains(latest.effectiveChangeId)) {
+      return null;
+    }
+    return latest;
+  }
+
+  Future<bool> acknowledgeDeadlineAlert(String changeId) async {
+    final normalized = changeId.trim();
+    if (normalized.isEmpty) return false;
+    if (_acknowledgedDeadlineChangeIds.contains(normalized)) return true;
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    var nextSet = <String>{..._acknowledgedDeadlineChangeIds, normalized};
+    try {
+      await _runScopedWrite(snap, (prefs) async {
+        final durable =
+            await repository.readAcknowledgedDeadlineChangeIdsInPrefs(prefs);
+        final merged = <String>{
+          ..._acknowledgedDeadlineChangeIds,
+          ...durable,
+        };
+        final nextOrdered = <String>[
+          normalized,
+          for (final c in changes)
+            if (merged.contains(c.effectiveChangeId) &&
+                c.effectiveChangeId != normalized)
+              c.effectiveChangeId,
+          for (final id in merged)
+            if (id != normalized) id,
+        ];
+        nextSet = nextOrdered.take(300).toSet();
+        await repository.writeAcknowledgedDeadlineChangeIdsInPrefs(
+          prefs,
+          nextOrdered,
+        );
+      });
+    } on StaleSessionWriteException {
+      return false;
+    } on LocalStorageLeaseReleaseException {
+      const warning = '时间变更提醒确认状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
+      if (snap.generation == _generation &&
+          !_recoveryWarnings.contains(warning)) {
+        _recoveryWarnings.add(warning);
+      }
+    } catch (_) {
+      return false;
+    }
+    if (!_isSessionCurrent(snap)) return false;
+    _acknowledgedDeadlineChangeIds = nextSet;
+    notifyListeners();
+    return true;
+  }
 
   Future<bool> _mutateCourseworkState(
     _SessionSnapshot snap,
@@ -1864,6 +1937,7 @@ class AssignmentStore extends ChangeNotifier {
     _isChapterSyncing = false;
     _chapterSyncProgressText = null;
     changes = [];
+    _acknowledgedDeadlineChangeIds = <String>{};
     _assignments.clear();
     _hiddenAssignments = [];
     _courses = [];
@@ -2115,6 +2189,13 @@ class AssignmentStore extends ChangeNotifier {
     await stage('作业变化', () async {
       changes = await changeLog.load();
     });
+    await stage('时间变更确认状态', () async {
+      final account = _account;
+      if (_authenticated && account != null) {
+        _acknowledgedDeadlineChangeIds =
+            await repository.loadAcknowledgedDeadlineChangeIds(account);
+      }
+    });
   }
 
   Future<void> loginChaoxing({
@@ -2292,6 +2373,7 @@ class AssignmentStore extends ChangeNotifier {
             _unfollowed.clear();
             _pinned = const PinnedAssignments.empty();
             _courseworkState = const LocalCourseworkState.empty();
+            _acknowledgedDeadlineChangeIds = <String>{};
             _pinsNeedSave = false;
             _courseNotices = CourseNoticeCollection();
             _courseChapters = CourseChapterCatalog();
@@ -3275,6 +3357,7 @@ class AssignmentStore extends ChangeNotifier {
     _pendingReturnConfirmation = null;
     returnCheckMessage = null;
     changes = [];
+    _acknowledgedDeadlineChangeIds = <String>{};
     await _run(() async {
       if (logoutGen != _generation || _disposed) return;
       final accountHash = _accountHash;
@@ -3386,6 +3469,7 @@ class AssignmentStore extends ChangeNotifier {
       _pendingReturnConfirmation = null;
       returnCheckMessage = null;
       changes = [];
+      _acknowledgedDeadlineChangeIds = <String>{};
       repository.recoveryWarning = null;
       await _reconcileBackgroundControls();
       if (logoutGen != _generation || _disposed) return;

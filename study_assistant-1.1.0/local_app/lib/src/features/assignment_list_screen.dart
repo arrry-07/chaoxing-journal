@@ -641,6 +641,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               countdown: store.display.countdown,
               deadlinePending:
                   preview ? false : store.isHomeDeadlinePending(a.id),
+              hasDeadlineAlert:
+                  preview ? false : store.activeDeadlineAlertFor(a) != null,
               previewOnly: preview ? false : previewOnly,
               previewSaving: !preview &&
                   store.homeSyncProgress?.stage == AssignmentSyncStage.saving,

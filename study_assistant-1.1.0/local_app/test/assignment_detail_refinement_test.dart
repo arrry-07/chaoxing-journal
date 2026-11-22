@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,11 +12,13 @@ import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/app/transient_feedback.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
+import 'package:study_assistant_mobile/src/features/personal_work_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/features/widgets/coursework_status_pill.dart';
 import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/assignment_change.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
@@ -1220,6 +1224,211 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+      'detail hides empty personal note preview, shows verbatim note and steps at 320x640@2x, and opens personal editor',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.devicePixelRatio = 2;
+    tester.view.physicalSize = const Size(640, 1280);
+    addTearDown(tester.view.reset);
+
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final work = Assignment(
+      id: 'cx:work:1:2:201',
+      courseName: '高等数学',
+      title: '第七章习题整理',
+      deadlineAt: now.add(const Duration(days: 2)),
+      requirementsText: '提交纸质扫描 PDF。',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('detail-2d-note');
+    await repo.mergeAndSave([work], completeSync: true);
+    final store = _RefinementStore(
+      repository: repo,
+      sessionStore: _DetailMemorySession('detail-2d-note'),
+      notificationService: _DetailNoopNotifications(),
+      widgetSnapshotService: _DetailNoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    Future<GoRouter> mountDetail(String tag) async {
+      final router = _router(
+        store,
+        clock: () => now,
+        initialLocation: '/assignments/${Uri.encodeComponent(work.id)}',
+      );
+      await tester.pumpWidget(MaterialApp.router(
+        key: ValueKey('note-$tag'),
+        theme: StudyAssistantTheme.light,
+        routerConfig: router,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      return router;
+    }
+
+    // Empty personal workspace renders no preview placeholder.
+    final emptyRouter = await mountDetail('empty');
+    addTearDown(emptyRouter.dispose);
+    expect(
+      find.byKey(const ValueKey('assignment-detail-personal-preview')),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+
+    // Save note & checklist -> shows compact preview with count and opens /personal/:id.
+    const verbatimNote = '第3题 记得附<边界条件>与公式推导过程！';
+    expect(
+      await store.savePersonal(
+        (w) => w.withWork(
+          work.id,
+          const PersonalWork(
+            note: verbatimNote,
+            steps: [
+              PersonalStep('整理公式', done: true),
+              PersonalStep('扫描签字', done: true),
+              PersonalStep('最终检查', done: false),
+            ],
+          ),
+        ),
+        store.accountEpoch,
+      ),
+      isTrue,
+    );
+    final populatedRouter = await mountDetail('populated');
+    addTearDown(populatedRouter.dispose);
+    final preview =
+        find.byKey(const ValueKey('assignment-detail-personal-preview'));
+    expect(preview, findsOneWidget);
+    expect(find.descendant(of: preview, matching: find.text('清单 2/3')),
+        findsOneWidget);
+    final noteWidget = tester.widget<Text>(
+      find.descendant(of: preview, matching: find.text(verbatimNote)),
+    );
+    expect(noteWidget.maxLines, 2);
+    expect(noteWidget.overflow, TextOverflow.ellipsis);
+    expect(tester.takeException(), isNull);
+
+    await tester.ensureVisible(preview);
+    await tester.tap(preview);
+    await tester.pumpAndSettle();
+    expect(find.byType(PersonalWorkScreen), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'detail shows Beijing deadline alert with 待确认 fallback, keeps it during visit while persisting ack, and preserves alert on ack write failure',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.devicePixelRatio = 2;
+    tester.view.physicalSize = const Size(640, 1280);
+    addTearDown(tester.view.reset);
+
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final newDue = DateTime.utc(2026, 11, 21, 10); // Beijing 11-21 18:00
+    final work = Assignment(
+      id: 'cx:work:1:2:202',
+      courseName: '离散数学',
+      title: '图论作业提前截止测试',
+      deadlineAt: newDue,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final repo = _FailingAckDetailRepository();
+    await repo.activateAccount('detail-2d-alert');
+    await repo.mergeAndSave([work], completeSync: true);
+    final prefs = await SharedPreferences.getInstance();
+    final event1 = AssignmentChange(
+      assignmentId: work.id,
+      title: work.title,
+      courseName: work.courseName,
+      kind: AssignmentChangeKind.deadline,
+      at: now,
+      before: '',
+      after: newDue.toIso8601String(),
+      beforeDeadlineUtc: null,
+      afterDeadlineUtc: newDue,
+    );
+    await prefs.setString(
+      'assignment_changes_v1',
+      jsonEncode({
+        'version': 1,
+        'initialized': true,
+        'events': [event1.toJson()],
+      }),
+    );
+
+    final store = _RefinementStore(
+      repository: repo,
+      sessionStore: _DetailMemorySession('detail-2d-alert'),
+      notificationService: _DetailNoopNotifications(),
+      widgetSnapshotService: _DetailNoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    Future<GoRouter> mountDetail(String tag) async {
+      final router = _router(
+        store,
+        clock: () => now,
+        initialLocation: '/assignments/${Uri.encodeComponent(work.id)}',
+      );
+      await tester.pumpWidget(MaterialApp.router(
+        key: ValueKey('alert-$tag'),
+        theme: StudyAssistantTheme.light,
+        routerConfig: router,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      return router;
+    }
+
+    // Write failure keeps Home alert active and shows banner again next open.
+    repo.failAckWrites = true;
+    final failedRouter = await mountDetail('fail');
+    addTearDown(failedRouter.dispose);
+    expect(
+      find.byKey(const ValueKey('assignment-detail-deadline-alert')),
+      findsOneWidget,
+    );
+    expect(
+        find.textContaining('原截止：待确认 → 新截止：2026年11月21日 18:00'), findsOneWidget);
+    expect(store.activeDeadlineAlertFor(work)?.effectiveChangeId,
+        event1.effectiveChangeId);
+    expect(tester.takeException(), isNull);
+
+    // Succeeding persist retains banner during visit but marks store acknowledged,
+    // and reopening hides the confirmed banner.
+    repo.failAckWrites = false;
+    final passRouter = await mountDetail('pass');
+    addTearDown(passRouter.dispose);
+    expect(
+      find.byKey(const ValueKey('assignment-detail-deadline-alert')),
+      findsOneWidget,
+    );
+    expect(store.activeDeadlineAlertFor(work), isNull);
+
+    final reopenRouter = await mountDetail('reopen');
+    addTearDown(reopenRouter.dispose);
+    expect(
+      find.byKey(const ValueKey('assignment-detail-deadline-alert')),
+      findsNothing,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 GoRouter _router(
@@ -1244,6 +1453,13 @@ GoRouter _router(
                 store: store,
                 assignmentId: state.pathParameters['id']!,
                 clock: clock,
+              ),
+            ),
+            GoRoute(
+              path: '/personal/:id',
+              builder: (_, state) => PersonalWorkScreen(
+                store: store,
+                assignmentId: state.pathParameters['id']!,
               ),
             ),
           ],
@@ -1441,4 +1657,17 @@ class _DetailNoopNotifications extends LocalNotificationService {
 class _DetailNoopWidgetSnapshotService extends WidgetSnapshotService {
   @override
   Future<void> saveAssignments(List<Assignment> assignments) async {}
+}
+
+class _FailingAckDetailRepository extends LocalAssignmentRepository {
+  bool failAckWrites = false;
+
+  @override
+  Future<void> writeAcknowledgedDeadlineChangeIdsInPrefs(
+    SharedPreferences prefs,
+    Iterable<String> orderedIds,
+  ) async {
+    if (failAckWrites) throw StateError('ack save failed');
+    await super.writeAcknowledgedDeadlineChangeIdsInPrefs(prefs, orderedIds);
+  }
 }

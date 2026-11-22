@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
 import 'package:study_assistant_mobile/src/models/course_notice.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
@@ -397,6 +398,200 @@ void main() {
     expect(store.courseworkGroups.single.sourceCount, 4);
     expect(store.statsAssignments.single.id, formal.id);
   });
+
+  test(
+      'deadline alert tracks official advance/unknown->72h per account, ignores manual/extension/backup/fail, and preserves unacknowledged on write error',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    var now = DateTime.utc(2026, 11, 20, 4);
+    final client = _MutableSyncClient([
+      Assignment(
+        id: 'cx:work:1:2:10',
+        courseName: '操作系统',
+        title: '实验报告一',
+        deadlineAt: now.add(const Duration(days: 5)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:work:1:2:11',
+        courseName: '计算机网络',
+        title: '抓包实验',
+        deadlineAt: null,
+        deadlineTrusted: false,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+    ]);
+    final repo = _FailingAckRepository();
+    AssignmentStore makeBoundStore(String account) => AssignmentStore(
+          sessionStore: _MemorySessionStore(account: account, password: 'pw'),
+          notificationService: _NoopNotificationService(),
+          widgetSnapshotService: _NoopWidgetSnapshotService(),
+          repository: repo,
+          chaoxingClient: client,
+          clock: () => now,
+        );
+
+    var store = makeBoundStore('student-a');
+    await store.restoreSession();
+    // Baseline sync creates no alerts.
+    await store.syncAssignments();
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:10')!),
+        isNull);
+
+    // Manual deadline change does not trigger teacher advance alert.
+    expect(
+      await store.setManualDeadline(
+        store.findAssignment('cx:work:1:2:11')!,
+        now.add(const Duration(hours: 12)),
+      ),
+      isTrue,
+    );
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:11')!),
+        isNull);
+
+    // Failed sync & backup restore do not trigger alerts.
+    client.shouldFail = true;
+    await store.syncAssignments();
+    client.shouldFail = false;
+    final backup = BackupSnapshot.create(
+      owner: BackupSnapshot.ownerFor('student-a'),
+      createdAt: now,
+      records: [
+        Assignment(
+          id: 'cx:work:1:2:99',
+          courseName: '备份课',
+          title: '旧备份作业',
+          deadlineAt: now.add(const Duration(hours: 10)),
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: now,
+        ),
+      ],
+      hidden: const {},
+      courses: const [],
+      unfollowed: const {},
+      reminderOffsets: const [120],
+      autoSyncIntervalMinutes: 60,
+      personal: PersonalWorkspace(),
+      notebook: StudyNotebook(),
+    );
+    expect(await store.restoreLocalBackup(backup), isTrue);
+    expect(store.changes, isEmpty);
+
+    // Next sync: 10 is moved earlier (+5d -> +2d); 11 gets unknown->within 72h.
+    now = now.add(const Duration(hours: 1));
+    client.nextAssignments = [
+      Assignment(
+        id: 'cx:work:1:2:10',
+        courseName: '操作系统',
+        title: '实验报告一',
+        deadlineAt: now.add(const Duration(days: 2)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:work:1:2:11',
+        courseName: '计算机网络',
+        title: '抓包实验',
+        deadlineAt: now.add(const Duration(hours: 36)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+    ];
+    await store.syncAssignments();
+    final hw10 = store.findAssignment('cx:work:1:2:10')!;
+    final hw11 = store.findAssignment('cx:work:1:2:11')!;
+    final alert10 = store.activeDeadlineAlertFor(hw10);
+    final alert11 = store.activeDeadlineAlertFor(hw11);
+    expect(alert10, isNotNull);
+    expect(alert11, isNotNull);
+
+    // Persistence failure leaves badge unacknowledged.
+    repo.failAckWrites = true;
+    expect(await store.acknowledgeDeadlineAlert(alert10!.effectiveChangeId),
+        isFalse);
+    expect(store.activeDeadlineAlertFor(hw10)?.effectiveChangeId,
+        alert10.effectiveChangeId);
+    repo.failAckWrites = false;
+
+    // Succeeding persist hides alert across cold restart of same account.
+    expect(await store.acknowledgeDeadlineAlert(alert10.effectiveChangeId),
+        isTrue);
+    expect(store.activeDeadlineAlertFor(hw10), isNull);
+    store.dispose();
+
+    store = makeBoundStore('student-a');
+    await store.restoreSession();
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:10')!),
+        isNull);
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:11')!),
+        isNotNull);
+
+    // Later official advance event on 10 requires fresh confirmation; extension clears it.
+    now = now.add(const Duration(hours: 2));
+    client.nextAssignments = [
+      Assignment(
+        id: 'cx:work:1:2:10',
+        courseName: '操作系统',
+        title: '实验报告一',
+        deadlineAt: now.add(const Duration(hours: 18)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+    ];
+    await store.syncAssignments();
+    final alert10Second =
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:10')!);
+    expect(alert10Second, isNotNull);
+    expect(alert10Second!.effectiveChangeId, isNot(alert10.effectiveChangeId));
+
+    // Teacher extending 10 cancels urgent advance alert.
+    now = now.add(const Duration(hours: 1));
+    client.nextAssignments = [
+      Assignment(
+        id: 'cx:work:1:2:10',
+        courseName: '操作系统',
+        title: '实验报告一',
+        deadlineAt: now.add(const Duration(days: 6)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+    ];
+    await store.syncAssignments();
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:10')!),
+        isNull);
+
+    // Account switch isolates change acks & logs.
+    client.nextAssignments = const [];
+    await store.loginChaoxing(
+        account: 'student-b', password: 'pw', agreementAccepted: true);
+    expect(store.account, 'student-b');
+    expect(store.changes, isEmpty);
+    await store.loginChaoxing(
+        account: 'student-a', password: 'pw', agreementAccepted: true);
+    expect(store.account, 'student-a');
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:10')!),
+        isNull);
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:11')!),
+        isNotNull);
+    store.dispose();
+  });
 }
 
 Assignment _assignment({required String id, required String title}) {
@@ -566,11 +761,28 @@ class _MemorySessionStore extends SecureSessionStore {
     this.password,
   });
 
-  @override
-  Future<void> clear() async {}
+  String? account;
+  String? password;
 
-  final String? account;
-  final String? password;
+  @override
+  Future<void> saveChaoxingAccount({
+    required String account,
+    required String password,
+    String? displayName,
+    String? avatarUrl,
+  }) async {
+    this.account = account;
+    this.password = password;
+  }
+
+  @override
+  Future<void> clear() async {
+    account = null;
+    password = null;
+  }
+
+  @override
+  Future<void> clearWebSession() async {}
 
   @override
   Future<String?> readChaoxingAccount() async => account;
@@ -605,4 +817,37 @@ class _NoopNotificationService extends LocalNotificationService {
 class _NoopWidgetSnapshotService extends WidgetSnapshotService {
   @override
   Future<void> saveAssignments(List<Assignment> assignments) async {}
+}
+
+class _MutableSyncClient extends ChaoxingLocalClient {
+  _MutableSyncClient(this.nextAssignments);
+
+  List<Assignment> nextAssignments;
+  bool shouldFail = false;
+
+  @override
+  Future<ChaoxingLoginResult> login({
+    required String account,
+    required String password,
+  }) async =>
+      const ChaoxingLoginResult(success: true);
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    if (shouldFail) throw StateError('模拟读取失败');
+    return nextAssignments;
+  }
+}
+
+class _FailingAckRepository extends LocalAssignmentRepository {
+  bool failAckWrites = false;
+
+  @override
+  Future<void> writeAcknowledgedDeadlineChangeIdsInPrefs(
+    SharedPreferences prefs,
+    Iterable<String> orderedIds,
+  ) async {
+    if (failAckWrites) throw StateError('模拟确认状态写入失败');
+    await super.writeAcknowledgedDeadlineChangeIdsInPrefs(prefs, orderedIds);
+  }
 }

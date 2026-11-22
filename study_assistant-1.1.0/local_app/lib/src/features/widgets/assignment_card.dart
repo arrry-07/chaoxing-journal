@@ -28,6 +28,7 @@ class AssignmentCard extends StatelessWidget {
       this.inPinnedSection = false,
       this.dragHandle,
       this.deadlinePending = false,
+      this.hasDeadlineAlert = false,
       this.previewOnly = false,
       this.previewSaving = false,
       this.contentPadding = EdgeInsets.zero,
@@ -44,7 +45,7 @@ class AssignmentCard extends StatelessWidget {
   final EdgeInsetsGeometry contentPadding;
   final bool opening;
   final bool showFullDeadline, inPinnedSection, showDivider, enableTapFeedback;
-  final bool deadlinePending, previewOnly, previewSaving;
+  final bool deadlinePending, hasDeadlineAlert, previewOnly, previewSaving;
   final bool compact, countdown;
 
   static final DateFormat _clockFormat = DateFormat('HH:mm');
@@ -302,6 +303,12 @@ class AssignmentCard extends StatelessWidget {
           label: '手动',
           tone: CourseworkPillTone.neutral,
           icon: Icons.edit_calendar_outlined,
+        ),
+      if (hasDeadlineAlert && !a.isCompleted)
+        const CourseworkStatusPill(
+          label: '时间变更',
+          tone: CourseworkPillTone.urgentToday,
+          icon: Icons.update_rounded,
         ),
       if (previewOnly)
         CourseworkStatusPill(

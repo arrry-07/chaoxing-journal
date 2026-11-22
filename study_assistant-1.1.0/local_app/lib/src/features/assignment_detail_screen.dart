@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../models/assignment.dart';
+import '../models/assignment_change.dart';
+import '../models/personal_workspace.dart';
 import '../services/assignment_grouping.dart';
 import '../services/assignment_store.dart';
 import '../services/coursework_deadline.dart';
@@ -155,6 +157,8 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   _DetailNoticeTarget? _actionMessageTarget;
   Timer? _clock;
   late DateTime _now;
+  AssignmentChange? _presentedDeadlineAlert;
+  final Set<String> _attemptedAckChangeIds = <String>{};
 
   @override
   void initState() {
@@ -162,6 +166,16 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     WidgetsBinding.instance.addObserver(this);
     _now = widget.clock?.call() ?? DateTime.now();
     _clock = Timer.periodic(const Duration(minutes: 1), (_) => _refreshClock());
+  }
+
+  @override
+  void didUpdateWidget(covariant AssignmentDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.assignmentId != widget.assignmentId ||
+        oldWidget.store != widget.store) {
+      _presentedDeadlineAlert = null;
+      _attemptedAckChangeIds.clear();
+    }
   }
 
   void _refreshClock() {
@@ -688,6 +702,44 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
               courseworkEntry,
             );
         final effectivelyCompleted = assignment.isCompleted || localDoneOnly;
+        final latestDeadlineChange =
+            widget.store.latestDeadlineChangeFor(assignment);
+        final liveDeadlineAlert = effectivelyCompleted
+            ? null
+            : widget.store.activeDeadlineAlertFor(assignment);
+        final displayDeadlineAlert = effectivelyCompleted ||
+                (_presentedDeadlineAlert != null &&
+                    latestDeadlineChange != null &&
+                    latestDeadlineChange.effectiveChangeId !=
+                        _presentedDeadlineAlert!.effectiveChangeId &&
+                    liveDeadlineAlert == null)
+            ? null
+            : (liveDeadlineAlert ?? _presentedDeadlineAlert);
+        if (liveDeadlineAlert != null) {
+          final changeId = liveDeadlineAlert.effectiveChangeId;
+          if (_presentedDeadlineAlert?.effectiveChangeId != changeId ||
+              !_attemptedAckChangeIds.contains(changeId)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              _presentedDeadlineAlert = liveDeadlineAlert;
+              if (_attemptedAckChangeIds.add(changeId)) {
+                unawaited(widget.store.acknowledgeDeadlineAlert(changeId));
+              }
+            });
+          }
+        }
+        final directPersonal = widget.store.personal.work[widget.assignmentId];
+        final fallbackPersonal =
+            directPersonal == null && assignment.id != widget.assignmentId
+                ? widget.store.personal.work[assignment.id]
+                : null;
+        final personalTargetId =
+            directPersonal != null ? widget.assignmentId : assignment.id;
+        final personalWork = directPersonal ?? fallbackPersonal;
+        final notePreviewText = personalWork?.note.trim() ?? '';
+        final personalSteps = personalWork?.steps ?? const <PersonalStep>[];
+        final showPersonalPreview = personalWork != null &&
+            (notePreviewText.isNotEmpty || personalSteps.isNotEmpty);
         final resolvedDeadline = assignment.isExam
             ? null
             : CourseworkDeadline.resolveEntry(assignment, courseworkEntry);
@@ -1177,6 +1229,12 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                 ],
                               ),
                           ],
+                          if (displayDeadlineAlert != null) ...[
+                            const SizedBox(height: 12),
+                            _DetailDeadlineAlertBanner(
+                              alert: displayDeadlineAlert,
+                            ),
+                          ],
                           if (verificationNotes.isNotEmpty) ...[
                             const SizedBox(height: 12),
                             Container(
@@ -1283,6 +1341,14 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                       ),
                     ),
                   ),
+                  if (showPersonalPreview) ...[
+                    const SizedBox(height: 12),
+                    _DetailPersonalNotePreviewCard(
+                      targetAssignmentId: personalTargetId,
+                      note: notePreviewText,
+                      steps: personalSteps,
+                    ),
+                  ],
                   if (isHidden) ...[
                     const SizedBox(height: 16),
                     Container(
@@ -1764,6 +1830,210 @@ class _RawNoticeTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DetailDeadlineAlertBanner extends StatelessWidget {
+  const _DetailDeadlineAlertBanner({required this.alert});
+
+  final AssignmentChange alert;
+
+  static String _formatBeijing(DateTime utcTime) =>
+      DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(utcTime));
+
+  @override
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    final beforeUtc = alert.effectiveBeforeUtc;
+    final afterUtc = alert.effectiveAfterUtc;
+    final oldLabel = beforeUtc == null ? '待确认' : _formatBeijing(beforeUtc);
+    final newLabel = afterUtc == null ? '待确认' : _formatBeijing(afterUtc);
+    final headline = beforeUtc == null ? '时间变更：官方截止已明确' : '时间变更：官方截止已提前';
+    return Container(
+      key: const ValueKey('assignment-detail-deadline-alert'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: journal.berryBg.withValues(
+          alpha: journal.isDark ? 0.65 : 0.85,
+        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: journal.berryBorder,
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(
+              Icons.update_rounded,
+              size: 16,
+              color: journal.berry,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  headline,
+                  style: journal.metadata.copyWith(
+                    color: journal.berry,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '原截止：$oldLabel → 新截止：$newLabel（北京时间）',
+                  style: journal.metadata.copyWith(
+                    color: journal.ink,
+                    fontSize: 12.5,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DetailPersonalNotePreviewCard extends StatelessWidget {
+  const _DetailPersonalNotePreviewCard({
+    required this.targetAssignmentId,
+    required this.note,
+    required this.steps,
+  });
+
+  final String targetAssignmentId;
+  final String note;
+  final List<PersonalStep> steps;
+
+  @override
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    final doneSteps = steps.where((s) => s.done).length;
+    return Material(
+      key: const ValueKey('assignment-detail-personal-preview'),
+      color: journal.sheet,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: journal.cardBorder, width: 0.8),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => GoRouter.maybeOf(context)?.push(
+          '/personal/${Uri.encodeComponent(targetAssignmentId)}',
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(
+                    Icons.edit_note_rounded,
+                    size: 19,
+                    color: journal.accent,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            '个人便签',
+                            style: journal.metadata.copyWith(
+                              color: journal.ink,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (steps.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 1.5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: journal.parchment,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '清单 $doneSteps/${steps.length}',
+                                style: journal.metadata.copyWith(
+                                  fontSize: 11.5,
+                                  color: journal.muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (note.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          note,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: journal.metadata.copyWith(
+                            color: journal.ink,
+                            fontSize: 13.5,
+                            height: 1.45,
+                          ),
+                        ),
+                      ] else if (steps.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          steps
+                              .firstWhere(
+                                (s) => !s.done,
+                                orElse: () => steps.first,
+                              )
+                              .text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: journal.metadata.copyWith(
+                            color: journal.muted,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: journal.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
