@@ -37,6 +37,10 @@ class ChaoxingChapterParser {
     if (html.contains('没有此页面访问权限')) {
       throw StateError('chapterAccessDenied');
     }
+    if (!CourseChapterSnapshot.isValidIdentityToken(course.courseId) ||
+        !CourseChapterSnapshot.isValidIdentityToken(course.clazzId)) {
+      return null;
+    }
     final hasMarkers = html.contains('chapter_item') ||
         html.contains('catalog_name') ||
         html.contains('已完成任务点') ||
@@ -106,7 +110,7 @@ class ChaoxingChapterParser {
         if (mp != null) {
           final parsed = int.tryParse(mp[1]!) ?? 1;
           state = ChapterTaskState.pendingPoints;
-          pending = parsed > 0 ? parsed : 1;
+          pending = parsed.clamp(1, ChapterNode.maxPendingPoints);
         } else if (seg.contains('暂未开放')) {
           state = ChapterTaskState.locked;
         } else {
@@ -125,29 +129,46 @@ class ChaoxingChapterParser {
 
     events.sort((a, b) => a.offset.compareTo(b.offset));
 
-    final seenIds = <String, int>{};
+    final seenBaseIds = <String, int>{};
+    final sectionIds = <String>{};
     final nodes = <ChapterNode>[];
     for (final ev in events) {
       if (nodes.length >= CourseChapterSnapshot.maxNodes) break;
-      final baseId =
-          'cx:chapter:${course.courseId}:${course.clazzId}:${ev.level}:${ev.code}';
-      final seq = (seenIds[baseId] ?? 0) + 1;
-      seenIds[baseId] = seq;
-      final sectionId = seq == 1 ? baseId : '$baseId#$seq';
+      final code = _truncate(ev.code, ChapterNode.maxCodeLength).trim();
+      final title = _truncate(ev.title, ChapterNode.maxTitleLength).trim();
+      if (code.isEmpty || title.isEmpty) continue;
+      final baseId = _truncate(
+        'cx:chapter:${course.courseId}:${course.clazzId}:${ev.level}:$code',
+        ChapterNode.maxSectionIdLength,
+      );
+      var seq = seenBaseIds[baseId] ?? 0;
+      late String sectionId;
+      // Reserving room for the suffix can make distinct base IDs collide.
+      do {
+        seq++;
+        final suffix = seq == 1 ? '' : '#$seq';
+        final prefix =
+            _truncate(baseId, ChapterNode.maxSectionIdLength - suffix.length);
+        sectionId = '$prefix$suffix';
+      } while (!sectionIds.add(sectionId));
+      seenBaseIds[baseId] = seq;
       nodes.add(ChapterNode(
         sectionId: sectionId,
         level: ev.level,
-        code: ev.code.length > 60 ? ev.code.substring(0, 60) : ev.code,
-        title: ev.title.length > 500 ? ev.title.substring(0, 500) : ev.title,
+        code: code,
+        title: title,
         state: ev.state,
         pendingPoints: ev.pending,
       ));
     }
 
+    final courseName =
+        _truncate(course.courseName, CourseChapterSnapshot.maxCourseNameLength)
+            .trim();
     return CourseChapterSnapshot(
       courseId: course.courseId,
       clazzId: course.clazzId,
-      courseName: course.courseName,
+      courseName: courseName.isEmpty ? '未命名课程' : courseName,
       completedPoints: completed,
       totalPoints: total,
       progressTrusted: progressTrusted,
@@ -155,4 +176,7 @@ class ChaoxingChapterParser {
       lastSyncedAt: now ?? DateTime.now(),
     );
   }
+
+  static String _truncate(String value, int maxLength) =>
+      value.length > maxLength ? value.substring(0, maxLength) : value;
 }

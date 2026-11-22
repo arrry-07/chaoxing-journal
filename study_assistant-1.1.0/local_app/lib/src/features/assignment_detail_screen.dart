@@ -432,7 +432,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                 if (source.title.trim().isNotEmpty) Text(source.title),
                 const SizedBox(height: 8),
                 Text(
-                  '读取时间：${DateFormat('yyyy-MM-dd HH:mm').format(source.lastSyncedAt)}',
+                  '读取时间：${DateFormat('yyyy-MM-dd HH:mm').format(source.lastSyncedAt.toLocal())}',
                 ),
                 if (source.requirementsText.trim().isNotEmpty) ...[
                   const SizedBox(height: 8),
@@ -1053,7 +1053,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                     '${_sourceType(source)} · ${source.statusLabel}',
                                   ),
                                   subtitle: Text(
-                                    '读取 ${DateFormat('yyyy-MM-dd HH:mm').format(source.lastSyncedAt)}',
+                                    '读取 ${DateFormat('yyyy-MM-dd HH:mm').format(source.lastSyncedAt.toLocal())}',
                                   ),
                                   trailing: TextButton(
                                     onPressed: () => _showSourceDetail(source),

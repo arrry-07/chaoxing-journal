@@ -175,6 +175,30 @@ void main() {
   });
 
   group('ReminderHistoryScreen regressions', () {
+    testWidgets('deduplicates records scheduled at the same UTC/local instant',
+        (tester) async {
+      final target = DateTime(2026, 11, 18, 14);
+      final store = _ScreenTestStore()
+        ..onLoadHistory = (_) async => ReminderHistoryPage(
+              items: [
+                _historyItem(id: 2, scheduledAt: target),
+                _historyItem(id: 1, scheduledAt: target.toUtc()),
+              ],
+              snapshotMaxId: 2,
+              nextBeforeId: null,
+              checkedAt: target,
+              historyGeneration: 1,
+            );
+      addTearDown(store.dispose);
+      await tester.pumpWidget(
+        MaterialApp(home: ReminderHistoryScreen(store: store)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('目标 11月18日 14:00'), findsOneWidget);
+      expect(find.textContaining('目标 11月18日'), findsOneWidget);
+    });
+
     testWidgets('switching category mid-load discards stale response',
         (tester) async {
       final firstLoad = Completer<ReminderHistoryPage>();

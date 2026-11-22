@@ -1,5 +1,6 @@
 import '../models/assignment.dart';
 import '../models/personal_workspace.dart';
+import 'assignment_query.dart';
 
 /// Reasons describe a preview, never platform submission or an actual schedule.
 enum PlanningReason {
@@ -105,12 +106,13 @@ class RulePlanningService {
             selectedIds.contains(a.id) &&
             a.isInAssignmentScope &&
             !a.isCompleted &&
+            !AssignmentQuery.isExamEnded(a, now) &&
             !hiddenIds.contains(a.id) &&
             !unfollowedCourseKeys.contains(a.courseKey) &&
             !existing.contains(a.id))
         .toList()
       ..sort((a, b) {
-        final x = a.deadlineAt, y = b.deadlineAt;
+        final x = a.timelineAt, y = b.timelineAt;
         final order = x == null
             ? (y == null ? 0 : 1)
             : y == null
@@ -120,14 +122,14 @@ class RulePlanningService {
       });
     final targetStart = DateTime.parse('${day}T00:00:00+08:00');
     for (final a in candidates) {
-      final d = a.deadlineAt;
+      final d = a.timelineAt;
       final minutes = estimates[a.id];
       final PlanningReason? reason;
       if (!a.isPendingConfirmed) {
         reason = PlanningReason.statusUnknown;
-      } else if (a.deadlineReadFailed) {
+      } else if (!a.isExam && a.deadlineReadFailed) {
         reason = PlanningReason.deadlineReadFailed;
-      } else if (!a.deadlineTrusted) {
+      } else if (!a.timelineTrusted) {
         reason = PlanningReason.deadlineUntrusted;
       } else if (d == null) {
         reason = PlanningReason.noDeadline;

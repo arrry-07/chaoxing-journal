@@ -1,4 +1,5 @@
 import 'chaoxing_ai_practice_parser.dart';
+import 'chaoxing_param_helper.dart';
 import '../models/assignment.dart';
 
 /// Read-only classroom metadata. Lifecycle status never proves submission.
@@ -217,9 +218,10 @@ class ChaoxingClassroomParser {
 
   static void checkIdentity(Map<String, dynamic> data, Assignment seed,
       {bool requireActivity = false, bool requireCourse = false}) {
-    void check(List<String> keys, String expected, bool required) {
-      final values = keys.map((key) => _text(data[key])).whereType<String>();
-      if ((required && values.isEmpty) || values.any((v) => v != expected)) {
+    void check(Set<String> keys, String expected, bool required) {
+      final actual = ChaoxingParamHelper.singleMapValue(data, keys);
+      if (actual != expected &&
+          (required || ChaoxingParamHelper.hasAnyKey(data, keys))) {
         throw const FormatException('classroomIdentity');
       }
     }
@@ -227,14 +229,18 @@ class ChaoxingClassroomParser {
     // Official quiz metadata currently omits courseId. Its activity and class
     // must match the independently enumerated course; any supplied courseId
     // must still match it.
-    check(['courseId', 'courseid'], seed.courseId!, false);
-    check(['classId', 'classid', 'clazzId', 'clazzid'], seed.clazzId!,
-        requireCourse);
-    check([
-      'activeId', 'activeid',
+    check(ChaoxingParamHelper.courseIdKeys, seed.courseId!, false);
+    check(ChaoxingParamHelper.clazzIdKeys, seed.clazzId!, requireCourse);
+    final activityIds = [
+      data['activeId'],
+      data['activeid'],
       // id on attendance and group rows identifies the row itself.
-      if (requireActivity) 'id',
-    ], seed.activityId!, requireActivity);
+      if (requireActivity) data['id'],
+    ].map(_text).whereType<String>();
+    if ((requireActivity && activityIds.isEmpty) ||
+        activityIds.any((id) => id != seed.activityId!)) {
+      throw const FormatException('classroomIdentity');
+    }
     if (data['activeType'] != null &&
         _integer(data['activeType']) != seed.activityType) {
       throw const FormatException('classroomType');

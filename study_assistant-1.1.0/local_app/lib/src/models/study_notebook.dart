@@ -12,7 +12,7 @@ DateTime? notebookDate(dynamic value) {
       date.toUtc().toIso8601String() != raw) {
     PersonalWorkspace.bad();
   }
-  return date;
+  return date.toLocal();
 }
 
 class ManualEntry {
@@ -160,7 +160,7 @@ class TermArchive {
       TermArchive(
           id: id,
           label: label,
-          createdAt: DateTime.now().toUtc(),
+          createdAt: DateTime.now(),
           rows: [
             for (final a in rows)
               ArchivedAssignment(

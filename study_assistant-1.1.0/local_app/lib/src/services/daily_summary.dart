@@ -19,7 +19,7 @@ class DailySummary {
     for (var i = 0; result.length < 7; i++) {
       final local = DateTime.utc(beijing.year, beijing.month, beijing.day + i,
           personal.summaryHour, personal.summaryMinute);
-      final at = local.subtract(const Duration(hours: 8));
+      final at = local.subtract(const Duration(hours: 8)).toLocal();
       if (!at.isAfter(now)) continue;
       final day = PersonalWorkspace.dayKey(at);
       final due = rows.where((a) {

@@ -18,6 +18,7 @@ import 'chaoxing_classroom_parser.dart';
 import 'chaoxing_exam_parser.dart';
 import 'chaoxing_exam_visibility.dart';
 import 'chaoxing_notice_parser.dart';
+import 'chaoxing_param_helper.dart';
 
 part 'chaoxing_exam_client.dart';
 
@@ -1787,8 +1788,11 @@ class ChaoxingLocalClient {
                 target.host.endsWith('.chaoxing.com') &&
                 const ['/mooc2/work/list', '/mooc-ans/work/list']
                     .contains(target.path) &&
-                (q['courseId'] ?? q['courseid']) == course.courseId &&
-                (q['classId'] ?? q['clazzId'] ?? q['clazzid']) ==
+                ChaoxingParamHelper.singleQueryValue(
+                        target, ChaoxingParamHelper.courseIdKeys) ==
+                    course.courseId &&
+                ChaoxingParamHelper.singleQueryValue(
+                        target, ChaoxingParamHelper.clazzIdKeys) ==
                     course.clazzId &&
                 q['enc']?.isNotEmpty == true) {
               return target;
@@ -1870,6 +1874,13 @@ class ChaoxingLocalClient {
         verificationProbe: verificationProbe);
   }
 
+  static bool _matchesOptionalWorkIdentity(
+      Uri uri, Set<String> keys, String expected) {
+    final value = ChaoxingParamHelper.singleQueryValue(uri, keys);
+    return value == expected ||
+        (value == null && !ChaoxingParamHelper.hasAnyQueryValue(uri, keys));
+  }
+
   Future<({List<Assignment> rows, Map<String, DateTime> starts})>
       _readV3FormalHomework(ChaoxingCourseRef course,
           {required int generation,
@@ -1938,21 +1949,20 @@ class ChaoxingLocalClient {
                 url.host.endsWith('.chaoxing.com')) {
               url = url.replace(scheme: 'https', port: 443);
             }
-            final id = url?.queryParameters['workId'] ??
-                url?.queryParameters['taskrefId'];
-            final linkedCourse = url?.queryParameters['courseId'] ??
-                url?.queryParameters['courseid'];
-            final linkedClass = url?.queryParameters['classId'] ??
-                url?.queryParameters['clazzId'] ??
-                url?.queryParameters['clazzid'];
+            final id = url == null
+                ? null
+                : ChaoxingParamHelper.singleQueryValue(
+                    url, ChaoxingParamHelper.workIdKeys);
             if (url == null ||
                 url.scheme != 'https' ||
                 !url.host.endsWith('.chaoxing.com') ||
                 id == null ||
                 id.isEmpty ||
                 !url.path.contains('/work/') ||
-                (linkedCourse != null && linkedCourse != course.courseId) ||
-                (linkedClass != null && linkedClass != course.clazzId)) {
+                !_matchesOptionalWorkIdentity(
+                    url, ChaoxingParamHelper.courseIdKeys, course.courseId) ||
+                !_matchesOptionalWorkIdentity(
+                    url, ChaoxingParamHelper.clazzIdKeys, course.clazzId)) {
               throw const SyncReadException(SyncIssue(
                   SyncIssueKind.schemaChanged, '正式作业详情身份无法确认',
                   stage: 'workList'));
@@ -1984,7 +1994,7 @@ class ChaoxingLocalClient {
                 start >= 946684800000 &&
                 start <= 4102444800000) {
               starts['cx:work:${course.courseId}:${course.clazzId}:$id'] =
-                  DateTime.fromMillisecondsSinceEpoch(start, isUtc: true);
+                  DateTime.fromMillisecondsSinceEpoch(start);
             }
             final trusted =
                 end != null && (end >= 946684800000 && end <= 4102444800000);
@@ -2134,12 +2144,10 @@ class ChaoxingLocalClient {
           true) {
         cache[key] = response!;
         _sessionHasPcExamCredential = true;
-        final cId =
-            uri.queryParameters['courseid'] ?? uri.queryParameters['courseId'];
-        final clzId = uri.queryParameters['clazzid'] ??
-            uri.queryParameters['clazzId'] ??
-            uri.queryParameters['classid'] ??
-            uri.queryParameters['classId'];
+        final cId = ChaoxingParamHelper.singleQueryValue(
+            uri, ChaoxingParamHelper.courseIdKeys);
+        final clzId = ChaoxingParamHelper.singleQueryValue(
+            uri, ChaoxingParamHelper.clazzIdKeys);
         if (cId != null && clzId != null) {
           _syncExamEntryCourses?.add('$cId:$clzId');
         }

@@ -845,7 +845,10 @@ class AssignmentQuery {
         final r = right.displayAt;
         if (l == null && r != null) return 1;
         if (r == null && l != null) return -1;
-        if (l != null && r != null && l != r) return l.compareTo(r);
+        if (l != null && r != null) {
+          final time = l.compareTo(r);
+          if (time != 0) return time;
+        }
         return left.compareNameKeys(right, order);
       }
       final group =

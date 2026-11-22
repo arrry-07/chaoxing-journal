@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import '../models/assignment.dart';
 import 'chaoxing_api_parser.dart';
-import 'chaoxing_assignment_parser.dart';
+import 'chaoxing_param_helper.dart';
 
 /// List-only parsing. Scores, paper links and question content are discarded.
 class ChaoxingExamParser {
@@ -39,7 +39,7 @@ class ChaoxingExamParser {
           ?.replaceAll('&amp;', '&');
   static DateTime? chinaTime(String raw) {
     final m = RegExp(
-            r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?')
+            r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?(?![\d:：])')
         .firstMatch(raw);
     if (m == null) return null;
     final n = [for (var i = 1; i <= 6; i++) int.parse(m[i] ?? '0')];
@@ -55,12 +55,12 @@ class ChaoxingExamParser {
     return wall.subtract(const Duration(hours: 8)).toLocal();
   }
 
-  static List<DateTime> times(String raw) =>
-      RegExp(r'\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}:\d{2}(?::\d{2})?')
-          .allMatches(text(raw))
-          .map((m) => chinaTime(m[0]!))
-          .whereType<DateTime>()
-          .toList();
+  static List<DateTime> times(String raw) => RegExp(
+          r'\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?:[:：]\d{2})?(?![\d:：])')
+      .allMatches(text(raw))
+      .map((m) => chinaTime(m[0]!))
+      .whereType<DateTime>()
+      .toList();
   static String personalStatus(String raw) {
     final v = text(raw).replaceAll(RegExp(r'\s+'), '');
     if (const {'完成', '已完成', '已交卷', '已提交', '待批阅', '已批阅', '已批改'}.contains(v)) {
@@ -160,8 +160,7 @@ class ChaoxingExamParser {
       final data = attr(m[1]!, 'data');
       if (data == null) continue;
       final u = Uri.tryParse(data);
-      final q = u?.queryParameters;
-      final id = q?['taskrefId'];
+      final id = u?.queryParameters['taskrefId'];
       final cells =
           RegExp(r'<td\b[^>]*>(.*?)</td>', caseSensitive: false, dotAll: true)
               .allMatches(m[2]!)
@@ -169,8 +168,12 @@ class ChaoxingExamParser {
       if (u == null ||
           u.path != '/exam/phone/task-exam' ||
           (u.hasAuthority && !u.host.endsWith('.chaoxing.com')) ||
-          q?['courseId'] != course.courseId ||
-          q?['classId'] != course.clazzId ||
+          ChaoxingParamHelper.singleQueryValue(
+                  u, ChaoxingParamHelper.courseIdKeys) !=
+              course.courseId ||
+          ChaoxingParamHelper.singleQueryValue(
+                  u, ChaoxingParamHelper.examClazzIdKeys) !=
+              course.clazzId ||
           id == null ||
           !RegExp(r'^\d+$').hasMatch(id) ||
           cells.length < 3 ||
@@ -200,12 +203,13 @@ class ChaoxingExamParser {
   /// PC rows are accepted only with matching hidden course/class identities.
   static ({List<Assignment> rows, int total, int skipped, int observed})?
       coursePc(String html, ChaoxingCourseRef course, {DateTime? now}) {
-    for (final entry
-        in {'courseId': course.courseId, 'classId': course.clazzId}.entries) {
-      if (ChaoxingAssignmentParser.hiddenValue(html, entry.key) !=
-          entry.value) {
-        return null;
-      }
+    if (ChaoxingParamHelper.hiddenInputValue(
+                html, ChaoxingParamHelper.courseIdKeys) !=
+            course.courseId ||
+        ChaoxingParamHelper.hiddenInputValue(
+                html, ChaoxingParamHelper.examClazzIdKeys) !=
+            course.clazzId) {
+      return null;
     }
     final totalMatch =
         RegExp(r'Math\.ceil\(\s*(\d+)\s*/\s*9\s*\)').firstMatch(html);
@@ -284,21 +288,6 @@ class ChaoxingExamParser {
     return (rows: rows, total: total, skipped: skipped, observed: observed);
   }
 
-  static String? _singleQueryValue(Uri uri, List<String> names) {
-    String? value;
-    for (final entry in uri.queryParametersAll.entries) {
-      if (!names.any((name) => name.toLowerCase() == entry.key.toLowerCase())) {
-        continue;
-      }
-      if (entry.value.length != 1) return null;
-      final next = entry.value.single.trim();
-      if (next.isEmpty) return null;
-      if (value != null && value != next) return null;
-      value = next;
-    }
-    return value;
-  }
-
   static bool _safeAccountIdentity(String value) =>
       RegExp(r'^[0-9A-Za-z_-]+$').hasMatch(value);
 
@@ -353,9 +342,11 @@ class ChaoxingExamParser {
     if (uris.length != 1) return null;
     final outer = uris.single;
 
-    final moocId = _singleQueryValue(outer, ['moocId', 'moocid']);
-    final clazzId = _singleQueryValue(outer, ['clazzid', 'clazzId']);
-    final refer = _singleQueryValue(outer, ['refer']);
+    final moocId = ChaoxingParamHelper.singleQueryValue(
+        outer, ChaoxingParamHelper.moocIdKeys);
+    final clazzId = ChaoxingParamHelper.singleQueryValue(
+        outer, ChaoxingParamHelper.examClazzIdKeys);
+    final refer = ChaoxingParamHelper.singleQueryValue(outer, const {'refer'});
     if (moocId == null ||
         clazzId == null ||
         refer == null ||
@@ -376,10 +367,12 @@ class ChaoxingExamParser {
       return null;
     }
 
-    final courseId = _singleQueryValue(inner, ['courseId', 'courseid']);
-    final classId =
-        _singleQueryValue(inner, ['classId', 'classid', 'clazzId', 'clazzid']);
-    final examId = _singleQueryValue(inner, ['examId', 'examid']);
+    final courseId = ChaoxingParamHelper.singleQueryValue(
+        inner, ChaoxingParamHelper.courseIdKeys);
+    final classId = ChaoxingParamHelper.singleQueryValue(
+        inner, ChaoxingParamHelper.examClazzIdKeys);
+    final examId = ChaoxingParamHelper.singleQueryValue(
+        inner, ChaoxingParamHelper.examIdKeys);
     if (courseId == null ||
         classId == null ||
         examId == null ||
@@ -666,7 +659,7 @@ class ChaoxingExamParser {
     final raw = item['sendTime'];
     if (raw is! String) return null;
     final match = RegExp(
-            r'^(20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?)(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?$')
+            r'^(20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?)(?:\s+(\d{1,2}[:：]\d{2}(?:[:：]\d{2})?))?$')
         .firstMatch(raw.trim());
     if (match == null) return null;
     final time = chinaTime('${match[1]} ${match[2] ?? '00:00'}');
@@ -696,14 +689,14 @@ class ChaoxingExamParser {
 
   static DateTime? _yearlessNoticeTime(String? raw, DateTime anchor) {
     if (raw == null ||
-        !RegExp(r'^\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?::\d{2})?$')
+        !RegExp(r'^\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?:[:：]\d{2})?$')
             .hasMatch(raw.trim())) {
       return null;
     }
     const beijingOffset = Duration(hours: 8);
     final anchorDay = DateTime.utc(anchor.year, anchor.month, anchor.day);
     for (final year in [anchor.year, anchor.year - 1, anchor.year + 1]) {
-      final time = chinaTime('$year-${raw.trim().replaceAll('：', ':')}');
+      final time = chinaTime('$year-${raw.trim()}');
       if (time == null) continue;
       final wall = time.toUtc().add(beijingOffset);
       final dayOffset =
@@ -780,9 +773,12 @@ class ChaoxingExamParser {
     for (final wrapper in attachments) {
       final card = wrapper is Map ? wrapper['att_web'] : null;
       if (card is! Map || card['examOrWork'] != 'exam') continue;
-      final course = card['courseId']?.toString(),
-          clazz = card['clazzId']?.toString(),
-          id = card['examOrWorkId']?.toString();
+      final course = ChaoxingParamHelper.singleMapValue(
+          card, ChaoxingParamHelper.courseIdKeys);
+      final clazz = ChaoxingParamHelper.singleMapValue(
+          card, ChaoxingParamHelper.examClazzIdKeys);
+      final id =
+          ChaoxingParamHelper.singleMapValue(card, const {'examorworkid'});
       if ([course, clazz, id]
           .any((v) => v == null || !RegExp(r'^[1-9]\d*$').hasMatch(v))) {
         continue;
@@ -872,7 +868,9 @@ class ChaoxingExamParser {
   }
 
   /// Join only explicit course/class/exam identities, preserving notice IDs.
-  static List<Assignment> enrichNotices(List<Assignment> rows) {
+  static List<Assignment> enrichNotices(List<Assignment> rows,
+      {DateTime? now}) {
+    final effectiveNow = now ?? DateTime.now();
     final exams = {
       for (final a in rows)
         if (a.hasExamIdentity &&
@@ -895,47 +893,13 @@ class ChaoxingExamParser {
       if (k == null) return a;
       final current = exams[k];
       final info = a.exam!;
-      final ownStart =
+      var ownStart =
           info.noticeStartAt ?? (info.startTrusted ? info.startAt : null);
-      final ownEnd = info.noticeEndAt ?? (info.endTrusted ? info.endAt : null);
+      var ownEnd = info.noticeEndAt ?? (info.endTrusted ? info.endAt : null);
       var start = info.startAt, end = info.endAt;
       var startTrusted = info.startTrusted, endTrusted = info.endTrusted;
       var location = info.location, duration = info.durationMinutes;
       var courseName = a.courseName;
-      if (current != null) {
-        final ref = current.exam!;
-        final changed = (startTrusted &&
-                ref.startTrusted &&
-                start != null &&
-                ref.startAt != null &&
-                !start.isAtSameMomentAs(ref.startAt!)) ||
-            (endTrusted &&
-                ref.endTrusted &&
-                end != null &&
-                ref.endAt != null &&
-                !end.isAtSameMomentAs(ref.endAt!));
-        final newerNoticeThanCurrent = a.publishedAt != null &&
-            a.publishedAt!.isAfter(current.lastSyncedAt);
-        if (!(changed && newerNoticeThanCurrent)) {
-          if (ref.startTrusted) {
-            start = ref.startAt;
-            startTrusted = true;
-          }
-          if (ref.endTrusted) {
-            end = ref.endAt;
-            endTrusted = true;
-          }
-          if (changed && !ref.startTrusted) startTrusted = false;
-          if (changed && !ref.endTrusted) endTrusted = false;
-          if (ref.location.isNotEmpty) {
-            location = ref.location;
-          } else if (changed && location.isNotEmpty) {
-            location = '通知原地点：$location（已改期，请核对）';
-          }
-        }
-        duration = ref.durationMinutes ?? duration;
-        courseName = current.courseName;
-      }
       final others = (peers[k] ?? const <Assignment>[])
           .where((p) => !identical(p, a))
           .toList();
@@ -971,6 +935,53 @@ class ChaoxingExamParser {
           end = range.endAt;
           endTrusted = true;
         }
+        final peerStart = ownStart ?? range.startAt!;
+        final peerEnd = ownEnd ?? range.endAt!;
+        if (!peerEnd.isBefore(peerStart)) {
+          ownStart = peerStart;
+          ownEnd = peerEnd;
+        }
+      }
+      var preserveNewerNotice = false;
+      if (current != null) {
+        final ref = current.exam!;
+        final changed = (startTrusted &&
+                ref.startTrusted &&
+                start != null &&
+                ref.startAt != null &&
+                !start.isAtSameMomentAs(ref.startAt!)) ||
+            (endTrusted &&
+                ref.endTrusted &&
+                end != null &&
+                ref.endAt != null &&
+                !end.isAtSameMomentAs(ref.endAt!));
+        final newerNoticeThanCurrent =
+            a.publishedAt?.isAfter(current.lastSyncedAt) ?? false;
+        preserveNewerNotice = changed && newerNoticeThanCurrent;
+        if (preserveNewerNotice) {
+          duration ??= ref.durationMinutes;
+        } else {
+          if (ref.startTrusted) {
+            start = ref.startAt;
+            startTrusted = true;
+          }
+          if (ref.endTrusted) {
+            end = ref.endAt;
+            endTrusted = true;
+          }
+          if (changed && !ref.startTrusted) startTrusted = false;
+          if (changed && !ref.endTrusted) endTrusted = false;
+          duration = ref.durationMinutes ?? duration;
+          if (ref.location.isNotEmpty) {
+            location = ref.location;
+          } else if (changed &&
+              location.isNotEmpty &&
+              !location.startsWith('通知原地点：') &&
+              !location.startsWith('新通知地点：')) {
+            location = '通知原地点：$location（已改期，请核对）';
+          }
+        }
+        courseName = current.courseName;
       }
       final locations = others
           .map((p) => p.exam!.location)
@@ -1001,8 +1012,10 @@ class ChaoxingExamParser {
           endTrusted: endTrusted && ordered,
           durationMinutes: duration,
           location: location,
-          lifecycle: current?.exam?.lifecycle ??
-              lifecycle('', start, end, DateTime.now()),
+          lifecycle: preserveNewerNotice
+              ? lifecycle('', start, end, effectiveNow)
+              : current?.exam?.lifecycle ??
+                  lifecycle('', start, end, effectiveNow),
           noticeOnly: true,
           noticeStartAt: ownStart,
           noticeEndAt: ownEnd);
@@ -1012,10 +1025,13 @@ class ChaoxingExamParser {
           deadlineAt: end,
           clearDeadlineAt: end == null,
           deadlineTrusted: next.endTrusted,
-          status: current?.status ?? a.status,
-          availability: current?.availability ?? a.availability,
-          title: current?.title ?? a.title,
-          clearCompletedAt: current?.isCompleted != true);
+          status: preserveNewerNotice ? a.status : current?.status ?? a.status,
+          availability: preserveNewerNotice
+              ? a.availability
+              : current?.availability ?? a.availability,
+          title: preserveNewerNotice ? a.title : current?.title ?? a.title,
+          clearCompletedAt:
+              preserveNewerNotice || current?.isCompleted != true);
     }).toList();
   }
 
@@ -1028,7 +1044,7 @@ class ChaoxingExamParser {
     }
     if (raw == null) return false;
     final m = RegExp(
-            r'^(\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2})[:：](\d{2})(?::(\d{2}))?$')
+            r'^(\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?$')
         .firstMatch(raw.trim());
     if (m == null) return false;
     final wall = reference.toUtc().add(const Duration(hours: 8));

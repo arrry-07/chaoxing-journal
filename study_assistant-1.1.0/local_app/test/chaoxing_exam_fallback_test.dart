@@ -358,6 +358,75 @@ void main() {
         SyncSourcePhase.failed);
   });
 
+  for (final classKey in ['classId', 'classid', 'cLaZzId']) {
+    test('phone exam rows accept class alias $classKey', () {
+      final html = _phoneRow('未开始').replaceFirst('classId=', '$classKey=');
+      final page = ChaoxingExamParser.phone(html, _course);
+      expect(page?.rows.map((row) => row.id), ['cx:exam:7:11:99']);
+    });
+  }
+
+  for (final extra in ['clazzId=12', 'classId=11']) {
+    test('phone exam rejects ambiguous class query $extra', () {
+      final html =
+          _phoneRow('未开始').replaceFirst('classId=11', 'classId=11&amp;$extra');
+      expect(ChaoxingExamParser.phone(html, _course), isNull);
+    });
+  }
+
+  test('phone exam ignores blank class occurrences', () {
+    final html = _phoneRow('未开始')
+        .replaceFirst('classId=11', 'classId=11&amp;classId=%20');
+    expect(ChaoxingExamParser.phone(html, _course)?.rows.single.clazzId, '11');
+  });
+
+  test('PC exams accept class identity from case-insensitive hidden names', () {
+    const html = '<input type="hidden" name="CoUrSeId" value="7">'
+        '<input type="hidden" name="cLaZzId" value="11"><div>暂无考试</div>';
+    final page = ChaoxingExamParser.coursePc(html, _course);
+    expect(page?.total, 0);
+  });
+
+  test('PC exams reject conflicting hidden class aliases', () {
+    const html = '<input id="courseId" value="7">'
+        '<input id="classId" value="11"><input name="clazzId" value="12">'
+        '<div>暂无考试</div>';
+    expect(ChaoxingExamParser.coursePc(html, _course), isNull);
+  });
+
+  for (final outerKey in ['classId', 'classid', 'cLaSsId']) {
+    test('account go link resolves outer class alias $outerKey', () {
+      final row = _accountGoRow(
+        title: '合成考试',
+        time: '2026-06-09 21:30 至 2026-06-09 23:10',
+        moocId: '101',
+        clazzId: '202',
+        examId: '9001',
+      ).replaceFirst('clazzid=202', '$outerKey=202');
+      final page = ChaoxingExamParser.account(
+        '<table class="dataTable"><tr><th>作答状态</th></tr>$row</table>'
+        '<script>page.showPage(0/12+1,Math.ceil(1/12));</script>',
+      );
+      expect(page?.rows.map((row) => row.id), ['cx:exam:101:202:9001']);
+    });
+  }
+
+  test('account go link rejects conflicting outer class aliases', () {
+    final row = _accountGoRow(
+      title: '合成考试',
+      time: '2026-06-09 21:30 至 2026-06-09 23:10',
+      moocId: '101',
+      clazzId: '202',
+      examId: '9001',
+    ).replaceFirst('clazzid=202', 'clazzid=202&amp;classId=203');
+    final page = ChaoxingExamParser.account(
+      '<table class="dataTable"><tr><th>作答状态</th></tr>$row</table>'
+      '<script>page.showPage(0/12+1,Math.ceil(1/12));</script>',
+    );
+    expect(page!.rows, isEmpty);
+    expect(page.skippedWithoutId, 1);
+  });
+
   test('coursePc accepts valid empty page without Math.ceil pagination script',
       () {
     const html =

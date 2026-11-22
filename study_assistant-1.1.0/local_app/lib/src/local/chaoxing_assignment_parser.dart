@@ -164,7 +164,7 @@ class ChaoxingAssignmentParser {
 
   static _ParsedDeadline? _extractDeadline(String cleanText, DateTime now) {
     final absolute = RegExp(
-            r'(?:截止(?:时间)?|结束时间)\s*[:：]?\s*((?:20\d{2}[-/年])?\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}:\d{2}(?::\d{2})?)')
+            r'(?:截止(?:时间)?|结束时间)\s*[:：]?\s*((?:20\d{2}[-/年])?\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?:[:：]\d{2})?)')
         .firstMatch(cleanText)?[1];
     if (absolute != null) {
       final value = _parseChinaTime(absolute, now);
@@ -311,9 +311,10 @@ class ChaoxingAssignmentParser {
   }
 
   static DateTime? _parseChinaTime(String raw, DateTime now) {
+    final normalized = raw.trim().replaceAll('：', ':');
     final m = RegExp(
             r'^(?:(20\d\d)[-/年])?(\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2}):(\d\d)(?::(\d\d))?$')
-        .firstMatch(raw);
+        .firstMatch(normalized);
     if (m == null) return null;
     final year = int.tryParse(m[1] ?? '');
     if (year == null) return null;
@@ -452,8 +453,7 @@ class ChaoxingAssignmentParser {
     var startEvidenceConflict = false;
     if (start != null) {
       if (RegExp(r'^20\d{2}[-/年]').hasMatch(start)) {
-        availableFrom =
-            _parseChinaTime(start.replaceAll('：', ':'), now ?? DateTime.now());
+        availableFrom = _parseChinaTime(start, now ?? DateTime.now());
         if (availableFrom != null &&
             startedAt != null &&
             availableFrom.toUtc().millisecondsSinceEpoch ~/ 60000 !=
@@ -523,19 +523,25 @@ class ChaoxingAssignmentParser {
           availableFromText: start,
           startEvidenceConflict: startEvidenceConflict);
     }
+    final parsedAt = now ?? DateTime.now();
+    final month = int.parse(parts[2]!);
+    final day = int.parse(parts[3]!);
+    final time = '${parts[4]}:${parts[5]}:${parts[6] ?? '00'}';
+    DateTime? deadlineInYear(int year) =>
+        _parseChinaTime('$year-$month-$day $time', parsedAt);
+
     var year = int.tryParse(parts[1] ?? '');
     if (year == null && start != null && !startEvidenceConflict) {
       DateTime? matchedStart;
       if (RegExp(r'^20\d{2}[-/年]').hasMatch(start)) {
-        matchedStart =
-            _parseChinaTime(start.replaceAll('：', ':'), now ?? DateTime.now());
+        matchedStart = _parseChinaTime(start, parsedAt);
       } else if (startedAt != null) {
         // Only the same work's absolute start can disambiguate a yearless
         // period. Match the displayed start to the minute in Beijing time;
         // current date, course term and upload tokens are not evidence.
         final absoluteStart = startedAt.toUtc().add(const Duration(hours: 8));
-        final visibleStart = _parseChinaTime(
-            '${absoluteStart.year}-$start', now ?? DateTime.now());
+        final visibleStart =
+            _parseChinaTime('${absoluteStart.year}-$start', parsedAt);
         if (visibleStart != null &&
             visibleStart.toUtc().millisecondsSinceEpoch ~/ 60000 ==
                 startedAt.toUtc().millisecondsSinceEpoch ~/ 60000) {
@@ -543,12 +549,20 @@ class ChaoxingAssignmentParser {
         }
       }
       if (matchedStart != null) {
-        year = matchedStart.toUtc().add(const Duration(hours: 8)).year;
-        final candidate = _parseChinaTime(
-            '$year-${parts[2]}-${parts[3]} ${parts[4]}:${parts[5]}:${parts[6] ?? '00'}',
-            now ?? DateTime.now());
+        final startBeijing = matchedStart.toUtc().add(const Duration(hours: 8));
+        year = startBeijing.year;
+        final candidate = deadlineInYear(year);
         if (candidate != null && candidate.isBefore(matchedStart)) {
           year++;
+        } else if (candidate == null &&
+            month == 2 &&
+            day == 29 &&
+            startBeijing.month > 2) {
+          // Only a start past February can roll an invalid leap day forward.
+          final nextLeapDay = deadlineInYear(year + 1);
+          if (nextLeapDay != null && !nextLeapDay.isBefore(matchedStart)) {
+            year++;
+          }
         }
       }
     }
@@ -560,10 +574,8 @@ class ChaoxingAssignmentParser {
           availableFromText: start,
           startEvidenceConflict: startEvidenceConflict);
     }
-    final normalized =
-        '$year-${parts[2]}-${parts[3]} ${parts[4]}:${parts[5]}:${parts[6] ?? '00'}';
     return DeadlineEvidence(
-        deadlineAt: _parseChinaTime(normalized, now ?? DateTime.now()),
+        deadlineAt: deadlineInYear(year),
         rawText: raw,
         availableFromAt: availableFrom,
         availableFromText: start,

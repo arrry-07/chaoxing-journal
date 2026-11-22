@@ -167,12 +167,18 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
       final merged = reset ? <ReminderHistoryItem>[] : [..._items];
       for (final item in page.items) {
         final previous = merged.isEmpty ? null : merged.last;
+        final oldScheduled = previous?.scheduledAt;
+        final newScheduled = item.scheduledAt;
+        final sameSchedule = oldScheduled == null
+            ? newScheduled == null
+            : newScheduled != null &&
+                oldScheduled.isAtSameMomentAs(newScheduled);
         final same = previous != null &&
             previous.logicalKey == item.logicalKey &&
             previous.category == item.category &&
             previous.stage == item.stage &&
             previous.reasonCode == item.reasonCode &&
-            previous.scheduledAt == item.scheduledAt;
+            sameSchedule;
         if (!same) merged.add(item);
       }
       setState(() {
@@ -264,7 +270,7 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
         : reminderReasonLabels[item.reasonCode] ?? '其他原因';
     final at = item.scheduledAt == null
         ? null
-        : '目标 ${DateFormat('M月d日 HH:mm').format(item.scheduledAt!)}';
+        : '目标 ${DateFormat('M月d日 HH:mm').format(item.scheduledAt!.toLocal())}';
     return [
       stage,
       if (at != null) at,
@@ -317,7 +323,7 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '查询时间 ${DateFormat('yyyy-MM-dd HH:mm:ss').format(_checkedAt!)}',
+                  '查询时间 ${DateFormat('yyyy-MM-dd HH:mm:ss').format(_checkedAt!.toLocal())}',
                   style: journal.metadata.copyWith(fontSize: 12),
                 ),
               ),

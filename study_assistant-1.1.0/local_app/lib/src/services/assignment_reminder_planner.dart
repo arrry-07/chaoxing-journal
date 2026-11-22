@@ -227,9 +227,10 @@ class AssignmentReminderPlanner {
       }
       final deadline = _trustedDeadline(assignment);
       if (deadline == null || !deadline.isAfter(now)) continue;
+      final localDeadline = deadline.toLocal();
       final byTime = <DateTime, List<int>>{};
       for (final offset in reminderOffsetsMinutes.where((value) => value > 0)) {
-        final original = deadline.subtract(Duration(minutes: offset));
+        final original = localDeadline.subtract(Duration(minutes: offset));
         final shifted = original.hour < DaytimeCheckPolicy.startHour
             ? DateTime(
                 original.year,

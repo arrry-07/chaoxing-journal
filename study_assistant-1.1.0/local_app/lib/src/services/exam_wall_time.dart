@@ -50,11 +50,11 @@ class ExamWallTime {
         local.minute != minute) {
       return null;
     }
-    return local.subtract(const Duration(hours: 8));
+    return local.subtract(const Duration(hours: 8)).toLocal();
   }
 
   static final _pattern = RegExp(
-      r'(?<!\d)(?:(\d{4})[-/年])?(\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?![\d:])');
+      r'(?<!\d)(?:(\d{4})[-/年])?(\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?(?![\d:：])');
 
   static List<ExamWallTime> read(String text) {
     final result = <ExamWallTime>[];

@@ -938,7 +938,7 @@ class LocalAssignmentRepository {
         hidden,
         foreignOnly
             ? null
-            : DateTime.tryParse(prefs.getString(_oldSync) ?? ''));
+            : DateTime.tryParse(prefs.getString(_oldSync) ?? '')?.toLocal());
     await _save(state);
     for (final key in [_oldItems, _oldHidden, _oldSync]) {
       await prefs.remove(key);

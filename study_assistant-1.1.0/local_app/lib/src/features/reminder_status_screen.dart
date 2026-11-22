@@ -303,7 +303,7 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '查询时间 ${DateFormat('yyyy-MM-dd HH:mm:ss').format(explanation.checkedAt)}',
+                    '查询时间 ${DateFormat('yyyy-MM-dd HH:mm:ss').format(explanation.checkedAt.toLocal())}',
                     style: journal.metadata,
                   ),
                 ],
@@ -454,14 +454,14 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
           if (category.nextScheduledAt != null) ...[
             const SizedBox(height: 8),
             Text(
-              '下一次计划：${DateFormat('M月d日 HH:mm').format(category.nextScheduledAt!)}',
+              '下一次计划：${DateFormat('M月d日 HH:mm').format(category.nextScheduledAt!.toLocal())}',
               style: journal.time,
             ),
           ],
           if (category.evidenceAt != null) ...[
             const SizedBox(height: 4),
             Text(
-              '系统排期证据：${DateFormat('M月d日 HH:mm:ss').format(category.evidenceAt!)}',
+              '系统排期证据：${DateFormat('M月d日 HH:mm:ss').format(category.evidenceAt!.toLocal())}',
               style: journal.metadata,
             ),
           ],

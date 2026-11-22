@@ -295,6 +295,78 @@ void main() {
         [today, tomorrow, unknown]);
   });
 
+  group('widget ranges and exams that started before Beijing midnight', () {
+    // Start and now share a UTC date, but span two Beijing dates.
+    final start = DateTime.utc(2026, 11, 16, 15, 30);
+    final now = DateTime.utc(2026, 11, 16, 16, 30);
+    final tomorrow = DateTime.utc(2026, 11, 17, 17, 30);
+
+    Assignment exam(
+      String id, {
+      String lifecycle = 'scheduled',
+      DateTime? endAt,
+      bool endTrusted = false,
+      int? durationMinutes,
+    }) =>
+        Assignment(
+          id: 'cx:exam:1:2:$id',
+          source: AssignmentSource.exam,
+          title: id,
+          courseName: '课程',
+          deadlineAt: null,
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: now,
+          exam: ExamInfo(
+            examId: id,
+            courseId: '1',
+            clazzId: '2',
+            lifecycle: lifecycle,
+            startAt: start,
+            startTrusted: true,
+            endAt: endAt,
+            endTrusted: endTrusted,
+            durationMinutes: durationMinutes,
+          ),
+        );
+
+    for (final range in [WidgetRange.today, WidgetRange.week]) {
+      test('${range.name} keeps cross-day exams still in progress', () {
+        final rows = [
+          exam('1', endAt: tomorrow, endTrusted: true),
+          exam('2', lifecycle: 'inProgress'),
+          exam('3', durationMinutes: 120),
+        ];
+        final display = DisplayPreferences(widgetRange: range);
+        expect(display.forWidget(rows, now).map((a) => a.title),
+            unorderedEquals(['1', '2', '3']));
+      });
+    }
+
+    test('ended or cancelled status overrides ongoing exam evidence', () {
+      final rows = [
+        exam('1', lifecycle: 'ended', endAt: tomorrow, endTrusted: true),
+        exam('2', lifecycle: 'cancelled', durationMinutes: 120),
+        exam('3', lifecycle: 'inProgress', endAt: now, endTrusted: true),
+      ];
+      for (final range in WidgetRange.values) {
+        final display = DisplayPreferences(widgetRange: range);
+        expect(display.forWidget(rows, now), isEmpty, reason: range.name);
+      }
+    });
+
+    test('an untrusted end or elapsed duration does not extend the range', () {
+      final rows = [
+        exam('1', endAt: tomorrow),
+        exam('2', durationMinutes: 30),
+      ];
+      for (final range in [WidgetRange.today, WidgetRange.week]) {
+        final display = DisplayPreferences(widgetRange: range);
+        expect(display.forWidget(rows, now), isEmpty, reason: range.name);
+      }
+    });
+  });
+
   testWidgets('settings save and restore without publishing logged-out records',
       (t) async {
     SharedPreferences.setMockInitialValues({});

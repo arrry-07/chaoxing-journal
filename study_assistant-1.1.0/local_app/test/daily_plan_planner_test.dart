@@ -7,12 +7,32 @@ import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/daily_plan_screen.dart';
+import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 
 import 'review_core_remediation_test.dart' as f;
+
+Assignment _exam(DateTime start, DateTime end, {bool startTrusted = true}) =>
+    f.sample('exam').copyWith(
+          id: 'cx:exam:1:2:exam',
+          source: AssignmentSource.exam,
+          title: '模拟考试',
+          deadlineAt: end,
+          exam: ExamInfo(
+            examId: 'exam',
+            courseId: '1',
+            clazzId: '2',
+            startAt: start,
+            endAt: end,
+            startTrusted: startTrusted,
+            endTrusted: true,
+            lifecycle: 'scheduled',
+          ),
+        );
 
 Future<AssignmentStore> _setup(f.Session session,
     {f.Notifications? notifications}) async {
@@ -67,6 +87,19 @@ Future<void> _scrollPlannerTo(WidgetTester tester, Finder finder) async {
     scrollable: plannerScrollable,
   );
   await tester.pumpAndSettle();
+}
+
+Future<({Completer<void> gate, Future<bool> save})> _pauseReminderRuleSave(
+  WidgetTester tester,
+  AssignmentStore store,
+  f.Notifications notifications,
+) async {
+  final gate = notifications.gate = Completer<void>();
+  final started = notifications.started = Completer<void>();
+  final save = store.saveReminderRule([7]);
+  await tester.pump();
+  expect(started.isCompleted, isTrue);
+  return (gate: gate, save: save);
 }
 
 void main() {
@@ -129,21 +162,25 @@ void main() {
     expect(store.personal.plans.single.minutes, 25);
   });
 
-  Future<void> openPlanner(WidgetTester tester, AssignmentStore store) async {
+  Future<void> pumpPlanScreen(
+      WidgetTester tester, AssignmentStore store) async {
     tester.view.physicalSize = const Size(800, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(MaterialApp(home: DailyPlanScreen(store: store)));
+  }
+
+  Future<void> openPlanner(WidgetTester tester, AssignmentStore store,
+      {String assignmentId = 'cx:work:1:2:shared'}) async {
+    await pumpPlanScreen(tester, store);
     await tester.tap(find.text('安排学习时间'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('planning-budget')), '60');
-    await tester.tap(
-        find.byKey(const ValueKey('planning-candidate-cx:work:1:2:shared')));
+    await tester.tap(find.byKey(ValueKey('planning-candidate-$assignmentId')));
     await tester.pump();
     await tester.enterText(
-        find.byKey(const ValueKey('planning-estimate-cx:work:1:2:shared')),
-        '25');
+        find.byKey(ValueKey('planning-estimate-$assignmentId')), '25');
   }
 
   testWidgets('planner explains three sections with a fixed example',
@@ -390,6 +427,56 @@ void main() {
     expect(find.textContaining('未设置截止时间'), findsNothing);
   });
 
+  for (final startTrusted in [true, false]) {
+    final description =
+        startTrusted ? 'the opening time' : 'an uncertain start';
+
+    testWidgets('manual add shows $description for an exam', (tester) async {
+      final store = await _setup(f.Session());
+      addTearDown(store.dispose);
+      final start = DateTime.now().toUtc().add(const Duration(days: 2));
+      final end = start.add(const Duration(hours: 2));
+      store.replaceAssignmentsForTest([
+        _exam(start, end, startTrusted: startTrusted),
+      ]);
+      await pumpPlanScreen(tester, store);
+      await tester.tap(find.text('添加作业到计划'));
+      await tester.pumpAndSettle();
+
+      final opening = DateFormat('MM-dd HH:mm').format(start.toLocal());
+      expect(find.text('模拟考试'), findsOneWidget);
+      expect(find.textContaining(startTrusted ? '开考 $opening' : '开考时间待确认'),
+          findsOneWidget);
+      expect(find.textContaining('截止 '), findsNothing);
+    });
+
+    testWidgets('planner candidate shows $description for an exam',
+        (tester) async {
+      final store = await _setup(f.Session());
+      addTearDown(store.dispose);
+      final start = DateTime.now().toUtc().add(const Duration(days: 2));
+      final end = start.add(const Duration(hours: 2));
+      final exam = _exam(start, end, startTrusted: startTrusted);
+      store.replaceAssignmentsForTest([exam]);
+      await pumpPlanScreen(tester, store);
+      await tester.tap(find.text('安排学习时间'));
+      await tester.pumpAndSettle();
+
+      final opening = DateFormat('yyyy年M月d日 HH:mm')
+          .format(start.add(const Duration(hours: 8)));
+      final candidate = find.byKey(ValueKey('planning-candidate-${exam.id}'));
+      expect(candidate, findsOneWidget);
+      expect(
+        find.descendant(
+          of: candidate,
+          matching:
+              find.textContaining(startTrusted ? '开考 $opening' : '开考时间待确认'),
+        ),
+        findsOneWidget,
+      );
+    });
+  }
+
   testWidgets('regenerating uses a newly failed deadline read', (tester) async {
     final store = await _setup(f.Session());
     addTearDown(store.dispose);
@@ -449,12 +536,7 @@ void main() {
       await openPlanner(tester, store);
       await tester.tap(find.byKey(const ValueKey('planning-generate')));
       await tester.pumpAndSettle();
-      n.gate = Completer<void>();
-      final gate = n.gate!;
-      n.started = Completer<void>();
-      final earlier = store.savePersonal((w) => w, store.accountEpoch);
-      await tester.pump();
-      expect(n.started!.isCompleted, true);
+      final earlier = await _pauseReminderRuleSave(tester, store, n);
       await tester.tap(find.byKey(const ValueKey('planning-save')));
       await tester.pump();
       Future<void>? leaving;
@@ -465,9 +547,9 @@ void main() {
         store.replaceAssignmentsForTest(
             [f.sample('shared', status: 'submitted')]);
       }
-      gate.complete();
+      earlier.gate.complete();
       await tester.pumpAndSettle();
-      await earlier;
+      expect(await earlier.save, isTrue);
       if (leaving != null) await leaving;
       expect(store.personal.plans, isEmpty);
       expect(
@@ -508,6 +590,70 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.personal.plans.map((p) => p.assignmentId), ['another-task']);
     expect(find.textContaining('重新生成安排'), findsWidgets);
+  });
+
+  for (final queued in [false, true]) {
+    testWidgets(
+        '${queued ? 'queued confirmation' : 'confirmation'} rejects a shifted exam start with the same end',
+        (tester) async {
+      final notifications = f.Notifications();
+      final store = await _setup(f.Session(), notifications: notifications);
+      addTearDown(store.dispose);
+      final start = DateTime.now().toUtc().add(const Duration(days: 2));
+      final end = start.add(const Duration(hours: 2));
+      final exam = _exam(start, end);
+      store.replaceAssignmentsForTest([exam]);
+      await openPlanner(tester, store, assignmentId: exam.id);
+      await tester.tap(find.byKey(const ValueKey('planning-generate')));
+      await tester.pumpAndSettle();
+      expect(find.text('加入当天计划'), findsOneWidget);
+
+      void shiftStart() => store.replaceAssignmentsForTest([
+            _exam(start.add(const Duration(minutes: 30)), end),
+          ]);
+
+      final confirm = find.byKey(const ValueKey('planning-save'));
+      if (queued) {
+        final earlier =
+            await _pauseReminderRuleSave(tester, store, notifications);
+        await tester.tap(confirm);
+        await tester.pump();
+        shiftStart();
+        earlier.gate.complete();
+        await tester.pumpAndSettle();
+        expect(await earlier.save, isTrue);
+      } else {
+        shiftStart();
+        await tester.tap(confirm);
+        await tester.pumpAndSettle();
+      }
+
+      expect(store.personal.plans, isEmpty);
+      final message = queued ? '作业或当天计划已变化' : '作业信息已变化';
+      expect(find.text('$message，请重新生成安排'), findsOneWidget);
+    });
+  }
+
+  testWidgets(
+      'confirmation accepts the same exam times refreshed as local time',
+      (tester) async {
+    final store = await _setup(f.Session());
+    addTearDown(store.dispose);
+    final start = DateTime.now().toUtc().add(const Duration(days: 2));
+    final end = start.add(const Duration(hours: 2));
+    final exam = _exam(start, end);
+    store.replaceAssignmentsForTest([exam]);
+    await openPlanner(tester, store, assignmentId: exam.id);
+    await tester.tap(find.byKey(const ValueKey('planning-generate')));
+    await tester.pumpAndSettle();
+    expect(find.text('加入当天计划'), findsOneWidget);
+
+    store.replaceAssignmentsForTest([_exam(start.toLocal(), end.toLocal())]);
+    await tester.tap(find.byKey(const ValueKey('planning-save')));
+    await tester.pumpAndSettle();
+
+    expect(store.personal.plans.map((plan) => plan.assignmentId), [exam.id]);
+    expect(find.text('已加入当天计划'), findsOneWidget);
   });
 
   testWidgets('rule planner previews and saves only explicitly confirmed work',

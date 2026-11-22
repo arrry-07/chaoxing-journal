@@ -31,7 +31,8 @@ void main() {
     expect((await r.loadNotebook()).entries, isEmpty);
     await expectLater(r.saveNotebook(n, 'A'), throwsStateError);
     await r.activateAccount('A');
-    expect((await r.loadNotebook()).entries.single.at, DateTime.utc(2030));
+    expect((await r.loadNotebook()).entries.single.at,
+        DateTime.utc(2030).toLocal());
   });
   test('snapshot excludes source access links and file associations', () {
     final archive = TermArchive.capture(
