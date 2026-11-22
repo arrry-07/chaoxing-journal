@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
 import 'package:study_assistant_mobile/src/services/assignment_query.dart';
+import 'package:study_assistant_mobile/src/services/coursework_deadline.dart';
 
 Assignment _sortRecord(
   String workId, {
@@ -1062,6 +1064,148 @@ void main() {
         sourceRecords: sources,
       ),
       [later, formal],
+    );
+  });
+
+  test('Phase 2B CourseworkDeadline projection and FB-005 manual overdue order',
+      () {
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final untrustedWork = _sortRecord(
+      'm1',
+      courseName: '计算机网络',
+      title: '实验一',
+      deadlineAt: null,
+      trusted: false,
+    );
+    final confirmedNoLimit = _sortRecord(
+      'nolimit',
+      courseName: '计算机网络',
+      title: '长期练习',
+      deadlineAt: null,
+      trusted: true,
+    );
+    final trustedOfficial = _sortRecord(
+      'official',
+      courseName: '计算机网络',
+      title: '正式截止',
+      deadlineAt: now.add(const Duration(days: 5)),
+      trusted: true,
+    );
+    final exam = Assignment(
+      id: 'cx:exam:1:2:9',
+      source: AssignmentSource.exam,
+      courseName: '计算机网络',
+      title: '期中考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: const ExamInfo(
+        examId: '9',
+        courseId: '1',
+        clazzId: '2',
+      ),
+    );
+
+    expect(CourseworkDeadline.canSetManualDeadline(untrustedWork), isTrue);
+    expect(CourseworkDeadline.canSetManualDeadline(confirmedNoLimit), isFalse);
+    expect(CourseworkDeadline.canSetManualDeadline(trustedOfficial), isFalse);
+    expect(CourseworkDeadline.canSetManualDeadline(exam), isFalse);
+
+    final manualFuture = now.add(const Duration(days: 2));
+    final manualPast = now.subtract(const Duration(hours: 2));
+    expect(
+      CourseworkDeadline.resolve(untrustedWork, manualFuture),
+      CourseworkDeadline(
+        at: manualFuture,
+        source: CourseworkDeadlineSource.manual,
+      ),
+    );
+    expect(
+      CourseworkDeadline.resolve(confirmedNoLimit, manualFuture),
+      isNull,
+    );
+    expect(
+      CourseworkDeadline.resolve(trustedOfficial, manualFuture),
+      CourseworkDeadline(
+        at: trustedOfficial.deadlineAt!,
+        source: CourseworkDeadlineSource.official,
+      ),
+    );
+    // Once taken over, subsequent transient read failure cannot resurrect stale manual value.
+    expect(
+      CourseworkDeadline.resolve(
+        untrustedWork.copyWith(deadlineReadFailed: true),
+        manualFuture,
+        officialTakenOver: true,
+      ),
+      isNull,
+    );
+
+    // Same UTC minute equality independent of timezone offset / seconds.
+    expect(
+      CourseworkDeadline.sameUtcMinute(
+        DateTime.utc(2026, 11, 25, 15, 59, 0),
+        DateTime.utc(2026, 11, 25, 15, 59, 42),
+      ),
+      isTrue,
+    );
+
+    // Filter + FB-005 bidirectional overdue placement with manual past deadline.
+    final pastWork = _sortRecord(
+      'past-manual',
+      courseName: '高等数学',
+      title: '手动已过作业',
+      deadlineAt: null,
+      trusted: false,
+    );
+    final state = LocalCourseworkState()
+        .withManualDeadline(
+          CourseworkDeadline.keyFor(untrustedWork),
+          const [],
+          manualFuture,
+        )
+        .withManualDeadline(
+          CourseworkDeadline.keyFor(pastWork),
+          const [],
+          manualPast,
+        );
+    final items = [pastWork, trustedOfficial, untrustedWork];
+    expect(
+      AssignmentQuery.filterHome(
+        items,
+        deadline: AssignmentDeadlineFilter.next7Days,
+        now: now,
+        coursework: state,
+      ).map((a) => a.title),
+      unorderedEquals(['实验一', '正式截止']),
+    );
+    expect(
+      AssignmentQuery.filterHome(
+        items,
+        deadline: AssignmentDeadlineFilter.overdue,
+        now: now,
+        coursework: state,
+      ).single.title,
+      '手动已过作业',
+    );
+    expect(
+      AssignmentQuery.sortHome(
+        items,
+        HomeSortOrder.deadlineAsc,
+        now: now,
+        coursework: state,
+      ).map((a) => a.title),
+      ['实验一', '正式截止', '手动已过作业'],
+    );
+    expect(
+      AssignmentQuery.sortHome(
+        items,
+        HomeSortOrder.deadlineDesc,
+        now: now,
+        coursework: state,
+      ).map((a) => a.title),
+      ['正式截止', '实验一', '手动已过作业'],
     );
   });
 }

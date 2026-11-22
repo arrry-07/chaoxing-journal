@@ -17,6 +17,7 @@ import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/account_identity.dart';
 import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/coursework_deadline.dart';
 import 'package:study_assistant_mobile/src/services/background_check_settings.dart';
 import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
 import 'package:study_assistant_mobile/src/services/daily_summary.dart';
@@ -1085,6 +1086,161 @@ void main() {
       ),
       isTrue,
     );
+  });
+
+  test(
+      'Phase 2B background worker reads manual deadline and handles same/different/failed transitions cleanly',
+      () async {
+    final anchor = DateTime.now().toUtc();
+    final now = DateTime.utc(anchor.year, anchor.month, anchor.day, 2);
+    final daytimeClock = todayAt(10);
+    SharedPreferences.setMockInitialValues({
+      'background_check_enabled_v1': true,
+      'background_check_interval_minutes_v1': 240,
+      'notification_listener_enabled_v1': false,
+      'new_assignment_reminder_enabled_v1': true,
+      'background_check_legacy_migration_v1': true,
+    });
+    final repo = LocalAssignmentRepository(
+      backgroundReminderGateway: _FakeGateway(),
+    );
+    await repo.activateAccount('student');
+
+    final workSame = Assignment(
+      id: 'cx:work:1:2:same',
+      courseName: '计算机网络',
+      title: '同分官方接管作业',
+      deadlineAt: null,
+      deadlineTrusted: false,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final workDiff = Assignment(
+      id: 'cx:work:1:2:diff',
+      courseName: '计算机网络',
+      title: '异分官方接管作业',
+      deadlineAt: null,
+      deadlineTrusted: false,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final manualSameAt =
+        now.add(const Duration(days: 2, hours: 13, minutes: 59));
+    final manualDiffAt =
+        now.add(const Duration(days: 3, hours: 13, minutes: 59));
+    final officialDiffAt =
+        now.add(const Duration(days: 5, hours: 13, minutes: 59));
+
+    final gateway = _FakeGateway();
+    final client = _ClientQueue([
+      // Sync 1: still untrusted -> manual values survive.
+      [
+        workSame.copyWith(lastSyncedAt: now.add(const Duration(minutes: 1))),
+        workDiff.copyWith(lastSyncedAt: now.add(const Duration(minutes: 1))),
+      ],
+      // Sync 2: trusted official arrives: same UTC minute clears; different marks overtaken.
+      [
+        workSame.copyWith(
+          deadlineAt: manualSameAt.add(const Duration(seconds: 40)),
+          deadlineTrusted: true,
+          lastSyncedAt: now.add(const Duration(minutes: 2)),
+        ),
+        workDiff.copyWith(
+          deadlineAt: officialDiffAt,
+          deadlineTrusted: true,
+          lastSyncedAt: now.add(const Duration(minutes: 2)),
+        ),
+      ],
+      // Sync 3: detail request transiently fails -> stale manual values must NEVER resurrect.
+      [
+        workSame.copyWith(
+          deadlineReadFailed: true,
+          deadlineTrusted: true,
+          deadlineAt: manualSameAt.add(const Duration(seconds: 40)),
+          lastSyncedAt: now.add(const Duration(minutes: 3)),
+        ),
+        workDiff.copyWith(
+          deadlineReadFailed: true,
+          deadlineTrusted: true,
+          deadlineAt: officialDiffAt,
+          lastSyncedAt: now.add(const Duration(minutes: 3)),
+        ),
+      ],
+    ]);
+
+    final store = _store(
+      gateway: gateway,
+      client: client,
+      notifications: _NoopNotificationService()..legacyMigrationComplete = true,
+      clock: () => daytimeClock,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.repository
+        .mergeAndSave([workSame, workDiff], completeSync: true);
+    await store.refreshAssignments();
+
+    expect(await store.setManualDeadline(workSame, manualSameAt), isTrue);
+    expect(await store.setManualDeadline(workDiff, manualDiffAt), isTrue);
+
+    // Separate background-mode store reads persisted LocalCourseworkState and schedules alarms!
+    final bgGateway = _FakeGateway()
+      ..baseline = true
+      ..baselinedSources = {'courseWork'}
+      ..known = {workSame.id, workDiff.id};
+    final bgStore = _store(
+      gateway: bgGateway,
+      client: client,
+      manageBackgroundSchedule: false,
+      notifications: _NoopNotificationService()..legacyMigrationComplete = true,
+      clock: () => daytimeClock,
+    );
+    addTearDown(bgStore.dispose);
+    await bgStore.restoreSession();
+    final bgResult = await bgStore.runBackgroundAutomaticCheck(
+      BackgroundSyncTrigger.daytime,
+    );
+    expect(bgResult.success, isTrue);
+    expect(
+      bgGateway.plans.last.deadlineEvents.map((e) => e.assignmentId).toSet(),
+      {workSame.id, workDiff.id},
+    );
+
+    // Foreground Sync 2: same UTC minute silently clears; different marks overtaken.
+    await store.syncAssignments();
+    final syncedSame = store.findAssignment(workSame.id)!;
+    final syncedDiff = store.findAssignment(workDiff.id)!;
+    expect(store.manualDeadlineFor(syncedSame), isNull);
+    expect(store.courseworkEntryFor(syncedDiff)!.officialTakenOver, isTrue);
+    expect(
+      store.effectiveDeadlineFor(syncedDiff),
+      CourseworkDeadline(
+        at: officialDiffAt,
+        source: CourseworkDeadlineSource.official,
+      ),
+    );
+
+    // Foreground Sync 3: detail temporarily fails -> stale manual values stay inactive.
+    await store.syncAssignments();
+    final failedSame = store.findAssignment(workSame.id)!;
+    final failedDiff = store.findAssignment(workDiff.id)!;
+    expect(store.manualDeadlineFor(failedSame), isNull);
+    expect(store.effectiveDeadlineFor(failedDiff), isNull);
+    expect(store.courseworkEntryFor(failedDiff)!.officialTakenOver, isTrue);
+
+    // Account switch isolates personal manual deadlines completely.
+    final otherSession = _MemorySessionStore()..account = 'student-b';
+    final otherStore = _store(
+      gateway: _FakeGateway(),
+      client: _ClientQueue([[]]),
+      session: otherSession,
+      clock: () => daytimeClock,
+    );
+    addTearDown(otherStore.dispose);
+    await otherStore.restoreSession();
+    expect(otherStore.courseworkState.isEmpty, isTrue);
   });
 }
 

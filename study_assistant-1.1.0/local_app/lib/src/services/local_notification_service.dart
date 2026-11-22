@@ -10,7 +10,9 @@ import 'package:timezone/data/latest.dart' as timezone_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../models/assignment.dart';
+import '../models/local_coursework_state.dart';
 import 'assignment_reminder_planner.dart';
+import 'coursework_deadline.dart';
 import 'reminder_rule_store.dart';
 import 'daily_summary.dart';
 import '../models/personal_workspace.dart';
@@ -30,6 +32,7 @@ class LocalNotificationService {
   String? lastWarning;
   List<ReminderScheduleOutcome> lastScheduleOutcomes = const [];
   bool showDetails = false;
+  LocalCourseworkState courseworkState = const LocalCourseworkState.empty();
   static const assignmentChannel = 'assignment_deadlines';
   static const assignmentUpdatesChannel = 'assignment_updates';
   static const summaryChannel = 'daily_summary';
@@ -536,7 +539,13 @@ class LocalNotificationService {
     lastScheduleOutcomes = const [];
     await _ensurePluginInitialized();
     final now = DateTime.now();
-    final desired = DailySummary.build(assignments, personal, now, lastSync);
+    final desired = DailySummary.build(
+      assignments,
+      personal,
+      now,
+      lastSync,
+      coursework: courseworkState,
+    );
     if (desired.isNotEmpty) await _ensureAndroidChannel(summaryChannel);
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1681,13 +1690,19 @@ class LocalNotificationService {
       final schedules = <(Assignment, int)>[];
       final seen = <String>{};
       final now = DateTime.now();
-      for (final assignment in assignments.where((item) =>
-          AssignmentReminderSnapshot(
-                  assignment: item, hidden: false, followed: true)
-              .eligibleAt(now))) {
+      for (final assignment
+          in assignments.where((item) => AssignmentReminderSnapshot(
+                assignment: item,
+                hidden: false,
+                followed: true,
+                courseworkEntry:
+                    CourseworkDeadline.entryFor(item, courseworkState),
+              ).eligibleAt(now))) {
+        final anchor = assignment.isExam
+            ? assignment.reminderAnchorAt
+            : CourseworkDeadline.resolveFor(assignment, courseworkState)?.at;
         for (final offset in offsets) {
-          final at =
-              assignment.reminderAnchorAt?.subtract(Duration(minutes: offset));
+          final at = anchor?.subtract(Duration(minutes: offset));
           if (at == null || !at.isAfter(now)) continue;
           if (!seen.add('${assignment.id}:$offset')) {
             throw StateError('作业提醒存在重复标识，请重新同步后重试');
@@ -1718,8 +1733,10 @@ class LocalNotificationService {
     int offset,
     int notificationId,
   ) async {
-    final notifyAt =
-        assignment.reminderAnchorAt?.subtract(Duration(minutes: offset));
+    final anchor = assignment.isExam
+        ? assignment.reminderAnchorAt
+        : CourseworkDeadline.resolveFor(assignment, courseworkState)?.at;
+    final notifyAt = anchor?.subtract(Duration(minutes: offset));
     if (notifyAt == null || notifyAt.difference(DateTime.now()).isNegative) {
       return;
     }

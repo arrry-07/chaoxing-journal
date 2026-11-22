@@ -1,6 +1,8 @@
 import '../models/assignment.dart';
+import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
 import 'assignment_reminder_planner.dart';
+import 'coursework_deadline.dart';
 
 class SummaryNotice {
   const SummaryNotice(this.id, this.at, this.body);
@@ -11,8 +13,13 @@ class SummaryNotice {
 
 class DailySummary {
   static const baseId = 1900000000;
-  static List<SummaryNotice> build(List<Assignment> rows,
-      PersonalWorkspace personal, DateTime now, DateTime? synced) {
+  static List<SummaryNotice> build(
+    List<Assignment> rows,
+    PersonalWorkspace personal,
+    DateTime now,
+    DateTime? synced, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
     if (!personal.summaryEnabled) return [];
     final beijing = now.toUtc().add(const Duration(hours: 8));
     final result = <SummaryNotice>[];
@@ -24,9 +31,12 @@ class DailySummary {
       final day = PersonalWorkspace.dayKey(at);
       final due = rows.where((a) {
         if (a.isExam) return false;
-        final bucket = a.deadlineBucketAt(now);
+        final entry = CourseworkDeadline.entryFor(a, coursework);
+        final bucket = CourseworkDeadline.bucketAt(a, now, entry: entry);
+        final resolved = CourseworkDeadline.resolveEntry(a, entry);
         return bucket == AssignmentDeadlineBucket.notExpiredWithDeadline &&
-            PersonalWorkspace.dayKey(a.deadlineAt!) == day;
+            resolved != null &&
+            PersonalWorkspace.dayKey(resolved.at) == day;
       }).length;
       final exams = rows
           .where((a) =>

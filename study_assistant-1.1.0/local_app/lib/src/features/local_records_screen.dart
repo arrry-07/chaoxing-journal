@@ -160,6 +160,15 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
       }
       return '考试时间待确认';
     }
+    final resolved = AssignmentQuery.effectiveDeadline(
+      primary,
+      coursework: widget.store.courseworkState,
+    );
+    if (resolved != null && resolved.isManual) {
+      final formatted = DateFormat('yyyy年M月d日 HH:mm')
+          .format(AssignmentQuery.beijing(resolved.at));
+      return '手动截止 $formatted（官方待确认）';
+    }
     final deadline = primary.deadlineAt;
     if (deadline == null) {
       return primary.deadlineLabel;

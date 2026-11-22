@@ -1,4 +1,5 @@
 import '../models/assignment.dart';
+import '../models/local_coursework_state.dart';
 import '../models/sync_report.dart';
 import 'assignment_query.dart';
 
@@ -183,6 +184,7 @@ class HomeDueSummary {
     List<Assignment> catalogAssignments, {
     required DateTime now,
     AssignmentDisplayIndex? index,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) {
     final todayDay = AssignmentQuery.dayKey(now);
     final day3End = DateTime(todayDay.year, todayDay.month, todayDay.day + 2);
@@ -209,15 +211,13 @@ class HomeDueSummary {
           AssignmentQuery.isArchivedClassroomPractice(assignment, now)) {
         continue;
       }
-      final deadline = assignment.deadlineAt;
-      if (deadline == null ||
-          !assignment.deadlineTrusted ||
-          assignment.deadlineReadFailed) {
-        continue;
-      }
+      final resolved =
+          AssignmentQuery.effectiveDeadline(assignment, coursework: coursework);
+      if (resolved == null) continue;
+      final deadline = resolved.at;
       final dueDay = AssignmentQuery.dayKey(deadline);
       if (assignment.isCompleted) {
-        if (dueDay == todayDay) completedToday++;
+        if (dueDay == todayDay && resolved.isOfficial) completedToday++;
         continue;
       }
       if (!assignment.isPendingConfirmed ||

@@ -924,4 +924,64 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     }
   });
+
+  testWidgets(
+      'Phase 2B calendar places manual deadline on Beijing day and shows manual label',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    SharedPreferences.setMockInitialValues({});
+    final now = DateTime.utc(2026, 11, 20, 2); // 10:00 Beijing
+    // Cross-day UTC instant: 2026-11-24T16:30:00Z == 2026-11-25 00:30 Beijing (Los Angeles still Nov 24 08:30!).
+    final beijingNov25 = DateTime.utc(2026, 11, 24, 16, 30);
+    final unknownWork = _assignment(
+      'manual-cal',
+      title: '未确认截止日历实验',
+      deadlineAt: null,
+      trusted: false,
+    );
+    final session = _Session();
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('A');
+    await repo.mergeAndSave([unknownWork], completeSync: true);
+    final store = _makeStore(session);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    expect(
+      AssignmentQuery.groupCalendarByDay(
+        [unknownWork],
+        now,
+        coursework: store.courseworkState,
+      ),
+      isEmpty,
+    );
+
+    expect(await store.setManualDeadline(unknownWork, beijingNov25), isTrue);
+
+    final byDay = AssignmentQuery.groupCalendarByDay(
+      [unknownWork],
+      now,
+      coursework: store.courseworkState,
+    );
+    expect(byDay.keys.single, DateTime(2026, 11, 25));
+    expect(byDay[DateTime(2026, 11, 25)]!.single.id, unknownWork.id);
+
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 950);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(body: CalendarScreen(store: store, clock: () => now)),
+    ));
+    await tester.pumpAndSettle();
+
+    // Tap day 25 on calendar grid.
+    await tester.tap(find.text('25').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('未确认截止日历实验'), findsOneWidget);
+    expect(find.text('手动'), findsOneWidget);
+    expect(find.textContaining('官方待确认'), findsOneWidget);
+    expect(find.text('00:30'), findsOneWidget);
+  });
 }

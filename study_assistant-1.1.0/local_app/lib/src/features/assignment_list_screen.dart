@@ -12,6 +12,7 @@ import '../models/assignment.dart';
 import '../models/assignment_sync_progress.dart';
 import '../models/display_preferences.dart';
 import '../models/home_filters.dart';
+import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
@@ -65,7 +66,11 @@ enum AssignmentRecoveryScope {
 
   /// Retained historical dates remain visible here even though the trusted
   /// calendar grid excludes them.
-  bool matches(Assignment assignment, DateTime now) {
+  bool matches(
+    Assignment assignment,
+    DateTime now, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
     if (AssignmentQuery.isArchivedPastTerm(assignment, now)) return false;
     if (assignment.isExam) {
       return this == examUnknown &&
@@ -76,10 +81,12 @@ enum AssignmentRecoveryScope {
       return false;
     }
     return switch (this) {
-      noDeadline => AssignmentQuery.timelineBucketAt(assignment, now) ==
+      noDeadline => AssignmentQuery.timelineBucketAt(assignment, now,
+              coursework: coursework) ==
           AssignmentDeadlineBucket.confirmedNoDeadline,
       examUnknown => false,
-      deadlinePending => AssignmentQuery.timelineBucketAt(assignment, now) ==
+      deadlinePending => AssignmentQuery.timelineBucketAt(assignment, now,
+              coursework: coursework) ==
           AssignmentDeadlineBucket.unconfirmed,
     };
   }
@@ -541,6 +548,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           ],
           selectedCourseKey: _courseKey,
         );
+        final coursework = store.courseworkState;
         final items = recoveryScope == null
             ? AssignmentQuery.filterHome(
                 catalogAssignments,
@@ -551,9 +559,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 includeHistorical: false,
                 index: displayIndex,
                 now: now,
+                coursework: coursework,
               )
             : displayAssignments
-                .where((assignment) => recoveryScope.matches(assignment, now))
+                .where((assignment) => recoveryScope.matches(
+                      assignment,
+                      now,
+                      coursework: coursework,
+                    ))
                 .toList();
         final sortOrder = _sortOrder;
         final sortedItems = AssignmentQuery.sortHome(
@@ -563,6 +576,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           sourceRecords: catalogAssignments,
           displayIndex: displayIndex,
           prioritizeStartOnly: recoveryScope == null,
+          coursework: coursework,
         );
         final today = PersonalWorkspace.dayKey(now);
         final plans =
@@ -581,6 +595,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           catalogAssignments,
           now: now,
           index: displayIndex,
+          coursework: coursework,
         );
         final showDueSummary = recoveryScope == null &&
             (catalogAssignments.isNotEmpty ||
@@ -612,6 +627,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               assignment: a,
               examSources: examSources,
               displayIndex: displayIndex,
+              courseworkEntry: store.courseworkEntryFor(a),
               now: now,
               showFullDeadline: false,
               showDivider: false,
@@ -755,9 +771,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 if (a.isExam) {
                   return a.exam?.startTrusted == true ? a.exam!.startAt : null;
                 }
-                return a.deadlineTrusted && !a.deadlineReadFailed
-                    ? a.deadlineAt
-                    : null;
+                return AssignmentQuery.effectiveDeadline(
+                  a,
+                  coursework: coursework,
+                )?.at;
               }
 
               int compareAutoPinned(Assignment left, Assignment right) {
@@ -800,7 +817,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               DateTime(todayDay.year, todayDay.month, todayDay.day + 1);
 
           for (final a in regular) {
-            final bucket = AssignmentQuery.timelineBucketAt(a, now);
+            final bucket = AssignmentQuery.timelineBucketAt(
+              a,
+              now,
+              coursework: coursework,
+            );
             final isOverdue = bucket == AssignmentDeadlineBucket.overdue;
             DateTime? badgeDay;
             String? key;
@@ -816,18 +837,25 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   (a.timelineTrusted || recoveryScope != null)) {
                 badgeDay = AssignmentQuery.dayKey(start);
               }
-            } else if (a.timelineAt != null &&
-                a.timelineTrusted &&
-                !a.deadlineReadFailed) {
-              final day = AssignmentQuery.dayKey(a.timelineAt!);
-              badgeDay = day;
-              final showYear =
-                  recoveryScope != null || day.year != todayDay.year;
-              key =
-                  '${showYear ? '' : 'work:'}${day.year}:${day.month}:${day.day}';
-              heading =
-                  '${showYear ? '${day.year}年' : ''}${day.month}月${day.day}日 '
-                  '周${'一二三四五六日'[day.weekday - 1]}';
+            } else {
+              final resolvedWorkAt = AssignmentQuery.displayTimelineAt(
+                a,
+                records: examSources,
+                index: displayIndex,
+                now: now,
+                coursework: coursework,
+              );
+              if (resolvedWorkAt != null) {
+                final day = AssignmentQuery.dayKey(resolvedWorkAt);
+                badgeDay = day;
+                final showYear =
+                    recoveryScope != null || day.year != todayDay.year;
+                key =
+                    '${showYear ? '' : 'work:'}${day.year}:${day.month}:${day.day}';
+                heading =
+                    '${showYear ? '${day.year}年' : ''}${day.month}月${day.day}日 '
+                    '周${'一二三四五六日'[day.weekday - 1]}';
+              }
             }
             if (heading == null && recoveryScope == null) {
               if (!a.isExam &&

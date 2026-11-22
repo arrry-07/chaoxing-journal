@@ -1,4 +1,6 @@
 import '../models/assignment.dart';
+import '../models/local_coursework_state.dart';
+import 'coursework_deadline.dart';
 import 'daytime_check_policy.dart';
 import 'assignment_query.dart';
 
@@ -9,22 +11,34 @@ class AssignmentReminderSnapshot {
     required this.assignment,
     required this.hidden,
     required this.followed,
+    this.courseworkEntry,
   });
 
   final Assignment assignment;
   final bool hidden;
   final bool followed;
+  final LocalCourseworkEntry? courseworkEntry;
 
   String get eventKind => assignment.isExam ? 'examStart' : 'deadline';
+
+  CourseworkDeadline? get _resolvedDeadline => assignment.isExam
+      ? null
+      : CourseworkDeadline.resolveEntry(assignment, courseworkEntry);
 
   // The reminder DTO's historical deadlineAt field carries the event anchor.
   // Assignment.deadlineAt continues to mean the exam's end time.
   DateTime? get anchorAt =>
-      assignment.isExam ? assignment.reminderAnchorAt : assignment.deadlineAt;
+      assignment.isExam ? assignment.reminderAnchorAt : _resolvedDeadline?.at;
 
   bool get anchorTrusted => assignment.isExam
       ? assignment.exam!.startTrusted
-      : assignment.deadlineTrusted;
+      : (assignment.deadlineTrusted && !assignment.deadlineReadFailed) ||
+          _resolvedDeadline?.isManual == true;
+
+  bool get _anchorReadFailed =>
+      !assignment.isExam &&
+      assignment.deadlineReadFailed &&
+      _resolvedDeadline == null;
 
   bool get _examCanRemind =>
       !assignment.isExam ||
@@ -49,7 +63,8 @@ class AssignmentReminderSnapshot {
           anchorAt != null &&
           anchorAt!.isAfter(now);
     }
-    final bucket = assignment.deadlineBucketAt(now);
+    final bucket =
+        CourseworkDeadline.bucketAt(assignment, now, entry: courseworkEntry);
     return bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
         bucket == AssignmentDeadlineBucket.confirmedNoDeadline;
   }
@@ -61,8 +76,7 @@ class AssignmentReminderSnapshot {
         'eventKind': eventKind,
         'deadlineAt': anchorAt?.toUtc().toIso8601String(),
         'deadlineTrusted': anchorTrusted,
-        'deadlineReadFailed':
-            !assignment.isExam && assignment.deadlineReadFailed,
+        'deadlineReadFailed': _anchorReadFailed,
         'status': assignment.availability == AssignmentAvailability.available &&
                 _examCanRemind
             ? assignment.status
@@ -160,6 +174,7 @@ class AssignmentReminderPlanner {
     required DateTime now,
     Set<String>? baselinedSources,
     Set<String> completedSourceKeys = const {},
+    LocalCourseworkState courseworkState = const LocalCourseworkState.empty(),
   }) {
     final snapshots = assignments
         .where((assignment) => assignment.hasCourseTaskIdentity)
@@ -167,6 +182,8 @@ class AssignmentReminderPlanner {
               assignment: assignment,
               hidden: hiddenAssignmentIds.contains(assignment.id),
               followed: !unfollowedCourseKeys.contains(assignment.courseKey),
+              courseworkEntry:
+                  CourseworkDeadline.entryFor(assignment, courseworkState),
             ))
         .toList()
       ..sort(
@@ -199,7 +216,7 @@ class AssignmentReminderPlanner {
             previousKnown.contains(assignment.id) ||
             sentNewAssignmentIds.contains(assignment.id) ||
             !snapshot.eligibleAt(now) ||
-            _deadlinePassed(assignment, now)) {
+            _deadlinePassed(snapshot, now)) {
           continue;
         }
         newEvents.add(AssignmentReminderEvent(
@@ -209,7 +226,7 @@ class AssignmentReminderPlanner {
           courseName: assignment.courseName,
           title: assignment.title,
           notifyAt: now,
-          deadlineAt: _trustedDeadline(assignment),
+          deadlineAt: _trustedDeadline(snapshot),
           eventKind: snapshot.eventKind,
           batchId: batchId,
         ));
@@ -221,11 +238,15 @@ class AssignmentReminderPlanner {
       final assignment = snapshot.assignment;
       if (!snapshot.eligibleAt(now) ||
           (!assignment.isExam &&
-              assignment.deadlineBucketAt(now) !=
+              CourseworkDeadline.bucketAt(
+                    assignment,
+                    now,
+                    entry: snapshot.courseworkEntry,
+                  ) !=
                   AssignmentDeadlineBucket.notExpiredWithDeadline)) {
         continue;
       }
-      final deadline = _trustedDeadline(assignment);
+      final deadline = _trustedDeadline(snapshot);
       if (deadline == null || !deadline.isAfter(now)) continue;
       final localDeadline = deadline.toLocal();
       final byTime = <DateTime, List<int>>{};
@@ -270,16 +291,20 @@ class AssignmentReminderPlanner {
     );
   }
 
-  static bool _deadlinePassed(Assignment assignment, DateTime now) {
-    final deadline = _trustedDeadline(assignment);
+  static bool _deadlinePassed(
+      AssignmentReminderSnapshot snapshot, DateTime now) {
+    final deadline = _trustedDeadline(snapshot);
     return deadline != null && !deadline.isAfter(now);
   }
 
-  static DateTime? _trustedDeadline(Assignment assignment) => assignment.isExam
-      ? assignment.reminderAnchorAt
-      : assignment.deadlineTrusted && !assignment.deadlineReadFailed
-          ? assignment.deadlineAt
-          : null;
+  static DateTime? _trustedDeadline(AssignmentReminderSnapshot snapshot) {
+    final assignment = snapshot.assignment;
+    if (assignment.isExam) return assignment.reminderAnchorAt;
+    return CourseworkDeadline.resolveEntry(
+      assignment,
+      snapshot.courseworkEntry,
+    )?.at;
+  }
 
   static String _deadlineEventId(
     String accountHash,

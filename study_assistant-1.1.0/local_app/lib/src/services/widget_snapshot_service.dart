@@ -6,6 +6,7 @@ import 'package:home_widget/home_widget.dart';
 import '../app/app_deep_links.dart';
 import '../models/assignment.dart';
 import '../models/display_preferences.dart';
+import '../models/local_coursework_state.dart';
 import '../models/widget_snapshot.dart';
 import 'assignment_query.dart';
 
@@ -21,6 +22,10 @@ class WidgetSnapshotService {
   bool _pendingAuthenticated = true;
   WidgetRange _pendingRange = WidgetRange.all;
   int? _pendingTotalCount;
+  LocalCourseworkState _pendingCoursework = const LocalCourseworkState.empty();
+
+  /// Account-scoped local coursework overrides applied during widget sync.
+  LocalCourseworkState courseworkState = const LocalCourseworkState.empty();
 
   @visibleForTesting
   bool lastSavedAuthenticated = true;
@@ -73,12 +78,14 @@ class WidgetSnapshotService {
     final write = (_snapshotWrites ?? Future<void>.value()).then((_) async {
       _pendingAuthenticated = authenticated;
       _pendingRange = range;
+      _pendingCoursework = courseworkState;
       try {
         await saveAssignments(assignments);
       } finally {
         _pendingAuthenticated = true;
         _pendingRange = WidgetRange.all;
         _pendingTotalCount = null;
+        _pendingCoursework = const LocalCourseworkState.empty();
       }
     });
     _snapshotWrites = write.then<void>((_) {}, onError: (Object _) {});
@@ -87,7 +94,10 @@ class WidgetSnapshotService {
 
   Future<void> saveAssignments(List<Assignment> assignments) {
     final now = DateTime.now();
-    final groups = AssignmentQuery.home(assignments, now, {});
+    final coursework =
+        _pendingCoursework.isNotEmpty ? _pendingCoursework : courseworkState;
+    final groups =
+        AssignmentQuery.home(assignments, now, {}, coursework: coursework);
     final pending = [
       ...groups.near,
       ...groups.far,
@@ -101,7 +111,17 @@ class WidgetSnapshotService {
     lastSavedRangeLabel = rangeLabel(_pendingRange);
     final items = pending.take(6).map(
       (assignment) {
-        final bucket = AssignmentQuery.timelineBucketAt(assignment, now);
+        final bucket = AssignmentQuery.timelineBucketAt(
+          assignment,
+          now,
+          coursework: coursework,
+        );
+        final resolvedAt = assignment.isExam
+            ? assignment.timelineAt
+            : AssignmentQuery.effectiveDeadline(
+                assignment,
+                coursework: coursework,
+              )?.at;
         final hasTrustedTime =
             bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
                 bucket == AssignmentDeadlineBucket.overdue;
@@ -109,14 +129,14 @@ class WidgetSnapshotService {
           assignmentId: assignment.id,
           title: assignment.title,
           courseName: assignment.courseName,
-          deadlineAt: hasTrustedTime ? assignment.timelineAt : null,
+          deadlineAt: hasTrustedTime ? resolvedAt : null,
           remainingText: switch (bucket) {
             AssignmentDeadlineBucket.overdue => '已逾期',
             AssignmentDeadlineBucket.notExpiredWithDeadline => assignment.isExam
                 ? (assignment.timelineAt!.isAfter(now)
                     ? '距开考 ${_remainingText(assignment.timelineAt!, now)}'
                     : '已开考')
-                : _remainingText(assignment.timelineAt!, now),
+                : _remainingText(resolvedAt!, now),
             AssignmentDeadlineBucket.confirmedNoDeadline =>
               assignment.deadlineLabel,
             AssignmentDeadlineBucket.unconfirmed => assignment.isExam
@@ -131,7 +151,7 @@ class WidgetSnapshotService {
                   !assignment.timelineAt!.isAfter(now)
               ? 'normal'
               : _urgencyLevel(
-                  hasTrustedTime ? assignment.timelineAt : null,
+                  hasTrustedTime ? resolvedAt : null,
                   now,
                 ),
           deepLinkUrl: AppDeepLinks.assignmentUri(assignment.id),

@@ -1,10 +1,12 @@
 import '../models/assignment.dart';
+import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
 import '../models/reminder_history.dart';
 import '../models/study_notebook.dart';
 import 'assignment_reminder_planner.dart';
 import 'assignment_query.dart';
 import 'background_reminder_gateway.dart';
+import 'coursework_deadline.dart';
 import 'daily_summary.dart';
 import 'daytime_check_policy.dart';
 
@@ -25,10 +27,12 @@ class ReminderExplanationService {
     required ReminderHealth? health,
     required PluginScheduleEvidenceSnapshot? pluginEvidence,
     required List<String> queryWarnings,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
     bool healthQueryFailed = false,
     bool pluginQueryFailed = false,
     bool subjectQueryFailed = false,
   }) {
+    final primaryEntry = CourseworkDeadline.entryFor(primary, coursework);
     final categories = <ReminderCategoryExplanation>[];
     final sourceIds = sources.map((item) => item.id).toSet();
     final snapshots = [
@@ -37,6 +41,7 @@ class ReminderExplanationService {
           assignment: source,
           hidden: groupHidden || hiddenAssignmentIds.contains(source.id),
           followed: !unfollowedCourseKeys.contains(source.courseKey),
+          courseworkEntry: CourseworkDeadline.entryFor(source, coursework),
         ),
     ];
     final qualification = _assignmentQualification(
@@ -45,6 +50,7 @@ class ReminderExplanationService {
       snapshots: snapshots,
       groupHidden: groupHidden,
       now: now,
+      primaryEntry: primaryEntry,
     );
 
     final hasPendingNewNative = evidence?.nativeEvents.any(
@@ -117,27 +123,30 @@ class ReminderExplanationService {
     );
 
     final anchorCategory = primary.isExam ? 'examStart' : 'deadline';
-    final anchor = _anchor(primary);
+    final anchor = _anchor(primary, entry: primaryEntry);
     final deadlineSystem = _systemReasons(
       health,
       health?.assignmentChannel,
       healthQueryFailed: healthQueryFailed,
     );
+    final resolvedDeadline = primary.isExam
+        ? null
+        : CourseworkDeadline.resolveEntry(primary, primaryEntry);
     final canComputeDeadlineAnchor = primary.isExam
         ? (primary.hasExamIdentity &&
             primary.exam!.startTrusted &&
             !primary.exam!.noticeOnly &&
             primary.exam!.lifecycle == 'scheduled')
         : (primary.isPendingConfirmed &&
-            primary.deadlineTrusted &&
-            !primary.deadlineReadFailed);
+            ((primary.deadlineTrusted && !primary.deadlineReadFailed) ||
+                resolvedDeadline?.isManual == true));
     final anchorReasons = <String>[
       ...qualification,
       if (anchor == null && canComputeDeadlineAnchor) 'noDeadline',
       if (anchor != null && !anchor.isAfter(now)) 'anchorPassed',
       ...deadlineSystem,
     ];
-    final planned = _nextPlanned(primary, offsets, now);
+    final planned = _nextPlanned(primary, offsets, now, entry: primaryEntry);
     if (anchor != null &&
         anchor.isAfter(now) &&
         planned == null &&
@@ -155,7 +164,8 @@ class ReminderExplanationService {
             planned != null &&
             (primary.isExam
                 ? primary.exam!.startTrusted
-                : primary.deadlineTrusted && !primary.deadlineReadFailed),
+                : (primary.deadlineTrusted && !primary.deadlineReadFailed) ||
+                    resolvedDeadline?.isManual == true),
         plannedAt: planned,
         evidence: evidence,
         plugin: pluginEvidence,
@@ -170,7 +180,8 @@ class ReminderExplanationService {
       ),
     );
     final expiredDeadline = !primary.isExam &&
-        primary.deadlineBucketAt(now) == AssignmentDeadlineBucket.overdue;
+        CourseworkDeadline.bucketAt(primary, now, entry: primaryEntry) ==
+            AssignmentDeadlineBucket.overdue;
     final plannerReasons = <String>[
       if (offsets.isEmpty) 'reminderDisabled',
       if (expiredDeadline) 'anchorPassed',
@@ -344,6 +355,7 @@ class ReminderExplanationService {
     required List<AssignmentReminderSnapshot> snapshots,
     required bool groupHidden,
     required DateTime now,
+    LocalCourseworkEntry? primaryEntry,
   }) {
     if (groupHidden || snapshots.every((item) => item.hidden)) {
       return const ['hidden'];
@@ -373,22 +385,31 @@ class ReminderExplanationService {
       }
     } else {
       if (!primary.isPendingConfirmed) return const ['statusUnknown'];
-      if (!primary.deadlineTrusted) return const ['deadlineUnknown'];
-      if (primary.deadlineReadFailed) return const ['deadlineReadFailed'];
-      if (primary.deadlineAt == null) return const ['noDeadline'];
+      final resolved = CourseworkDeadline.resolveEntry(primary, primaryEntry);
+      if (resolved == null) {
+        if (!primary.deadlineTrusted) return const ['deadlineUnknown'];
+        if (primary.deadlineReadFailed) return const ['deadlineReadFailed'];
+        if (primary.deadlineAt == null) return const ['noDeadline'];
+      }
     }
     return const [];
   }
 
-  static DateTime? _anchor(Assignment assignment) =>
-      assignment.isExam ? assignment.reminderAnchorAt : assignment.deadlineAt;
+  static DateTime? _anchor(
+    Assignment assignment, {
+    LocalCourseworkEntry? entry,
+  }) =>
+      assignment.isExam
+          ? assignment.reminderAnchorAt
+          : CourseworkDeadline.resolveEntry(assignment, entry)?.at;
 
   static DateTime? _nextPlanned(
     Assignment assignment,
     List<int> offsets,
-    DateTime now,
-  ) {
-    final anchor = _anchor(assignment)?.toLocal();
+    DateTime now, {
+    LocalCourseworkEntry? entry,
+  }) {
+    final anchor = _anchor(assignment, entry: entry)?.toLocal();
     if (anchor == null) return null;
     final values = <DateTime>[];
     for (final offset in offsets) {

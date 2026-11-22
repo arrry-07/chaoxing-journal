@@ -210,11 +210,16 @@ class _CalendarScreenState extends State<CalendarScreen>
         builder: (context, _) {
           final journal = Journal.of(context);
           final now = _now;
+          final coursework = widget.store.courseworkState;
           final courseSources = widget.store.courseAssignments;
           final displayIndex = widget.store.homeDisplayIndex;
           final all = AssignmentQuery.projectDisplay(courseSources,
               index: displayIndex);
-          final assignmentsByDay = AssignmentQuery.groupCalendarByDay(all, now);
+          final assignmentsByDay = AssignmentQuery.groupCalendarByDay(
+            all,
+            now,
+            coursework: coursework,
+          );
           final manualByDay = <DateTime, List<ManualEntry>>{};
           for (final entry in widget.store.notebook.entries) {
             final at = entry.at;
@@ -226,11 +231,18 @@ class _CalendarScreenState extends State<CalendarScreen>
             entries.sort((a, b) => a.at!.compareTo(b.at!));
           }
           final noDeadlineCount = all
-              .where((a) => AssignmentRecoveryScope.noDeadline.matches(a, now))
+              .where((a) => AssignmentRecoveryScope.noDeadline.matches(
+                    a,
+                    now,
+                    coursework: coursework,
+                  ))
               .length;
           final pendingDeadlineCount = all
-              .where((a) =>
-                  AssignmentRecoveryScope.deadlinePending.matches(a, now))
+              .where((a) => AssignmentRecoveryScope.deadlinePending.matches(
+                    a,
+                    now,
+                    coursework: coursework,
+                  ))
               .length;
           final selectedDay = selected;
           final List<Assignment> agenda;
@@ -666,6 +678,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                         assignment: a,
                         examSources: courseSources,
                         displayIndex: displayIndex,
+                        courseworkEntry: widget.store.courseworkEntryFor(a),
                         now: now,
                         compact: widget.store.display.compact,
                         countdown: widget.store.display.countdown,
@@ -789,9 +802,10 @@ class _CalendarScreenState extends State<CalendarScreen>
     final unknown =
         items.where((a) => !a.isExam && !a.isPendingConfirmed).length;
     final exams = items.where((a) => a.isExam).length;
+    final coursework = widget.store.courseworkState;
     final overdueCount = items
         .where((a) =>
-            AssignmentQuery.timelineBucketAt(a, now) ==
+            AssignmentQuery.timelineBucketAt(a, now, coursework: coursework) ==
             AssignmentDeadlineBucket.overdue)
         .length;
     final personalCount = manualByDay[date]?.length ?? 0;

@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
 import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/services/backup_service.dart';
 
@@ -123,6 +124,15 @@ void main() {
       ),
       'alice',
     );
+    final manualAt = DateTime.utc(2027, 1, 3, 15, 59);
+    await repository.saveCourseworkState(
+      LocalCourseworkState().withManualDeadline(
+        'cx:work:synthetic-course:class:1',
+        const [],
+        manualAt,
+      ),
+      'alice',
+    );
     final snapshot = await repository.createBackupSnapshot('alice');
     final service = BackupService();
 
@@ -153,6 +163,13 @@ void main() {
       'cx:work:synthetic-course:class:1',
       'cx:work:other:2:9',
     ]);
+    expect(
+      restored.courseworkState
+          .entryForAliases(const ['cx:work:synthetic-course:class:1'])!
+          .manualDeadlineAt!
+          .toUtc(),
+      manualAt,
+    );
 
     await expectLater(
       service.decrypt(envelope, 'wrong-password'),

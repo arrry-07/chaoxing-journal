@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../models/assignment.dart';
 import '../services/assignment_grouping.dart';
 import '../services/assignment_store.dart';
+import '../services/coursework_deadline.dart';
 import '../services/interaction_feedback_service.dart';
 import '../services/assignment_query.dart';
 import '../services/exam_schedule_presentation.dart';
@@ -149,6 +150,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   final _links = ExternalLinkService();
   bool _opening = false, _hiding = false, _refreshing = false;
   bool _togglingPin = false;
+  bool _savingManualDeadline = false;
   String? _actionMessage;
   _DetailNoticeTarget? _actionMessageTarget;
   Timer? _clock;
@@ -348,6 +350,97 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     });
   }
 
+  Future<void> _pickManualDeadline(
+    Assignment assignment, {
+    DateTime? existing,
+  }) async {
+    if (_savingManualDeadline) return;
+    final store = widget.store;
+    final epoch = store.accountEpoch;
+    final routeId = widget.assignmentId;
+    final beijing = AssignmentQuery.beijing(existing ?? _now);
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime(beijing.year, beijing.month, beijing.day),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2200, 12, 31),
+    );
+    if (!mounted || pickedDate == null) return;
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: existing != null
+          ? TimeOfDay(hour: beijing.hour, minute: beijing.minute)
+          : const TimeOfDay(hour: 23, minute: 59),
+    );
+    if (!mounted || pickedTime == null) return;
+    final utcInstant = DateTime.utc(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      pickedTime.hour,
+      pickedTime.minute,
+    ).subtract(const Duration(hours: 8));
+    setState(() {
+      _savingManualDeadline = true;
+      if (_actionMessageTarget == _DetailNoticeTarget.manual) {
+        _actionMessage = null;
+        _actionMessageTarget = null;
+      }
+    });
+    var saved = false;
+    try {
+      saved = await store.setManualDeadline(assignment, utcInstant.toLocal());
+    } catch (_) {
+      saved = false;
+    }
+    if (!mounted) return;
+    final current = widget.store == store &&
+        store.accountEpoch == epoch &&
+        widget.assignmentId == routeId;
+    if (saved && current) {
+      InteractionFeedback.trigger(store.display);
+    }
+    setState(() {
+      _savingManualDeadline = false;
+      if (!current) return;
+      _actionMessage = saved ? '已保存手动截止时间，官方截止仍待确认。' : '手动截止时间保存失败，请稍后重试。';
+      _actionMessageTarget = _DetailNoticeTarget.manual;
+    });
+  }
+
+  Future<void> _clearManualDeadline(Assignment assignment) async {
+    if (_savingManualDeadline) return;
+    final store = widget.store;
+    final epoch = store.accountEpoch;
+    final routeId = widget.assignmentId;
+    setState(() {
+      _savingManualDeadline = true;
+      if (_actionMessageTarget == _DetailNoticeTarget.manual) {
+        _actionMessage = null;
+        _actionMessageTarget = null;
+      }
+    });
+    var cleared = false;
+    try {
+      cleared = await store.setManualDeadline(assignment, null);
+    } catch (_) {
+      cleared = false;
+    }
+    if (!mounted) return;
+    final current = widget.store == store &&
+        store.accountEpoch == epoch &&
+        widget.assignmentId == routeId;
+    if (cleared && current) {
+      InteractionFeedback.trigger(store.display);
+    }
+    setState(() {
+      _savingManualDeadline = false;
+      if (!current) return;
+      _actionMessage = cleared ? '已清除手动截止记录。' : '清除手动截止失败，请稍后重试。';
+      _actionMessageTarget = _DetailNoticeTarget.manual;
+    });
+  }
+
   Future<void> _hide() async {
     if (_hiding) return;
     setState(() {
@@ -543,18 +636,35 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
           if (exam != null && exam.endAt != null && !exam.endTrusted)
             '结束（未核实） ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(exam.endAt!))}',
         ];
-        final bucket = AssignmentQuery.timelineBucketAt(assignment, _now);
+        final courseworkTarget = original ?? assignment;
+        final courseworkEntry = assignment.isExam
+            ? null
+            : widget.store.courseworkEntryFor(courseworkTarget);
+        final resolvedDeadline = assignment.isExam
+            ? null
+            : CourseworkDeadline.resolveEntry(assignment, courseworkEntry);
+        final manualAt = courseworkEntry?.manualDeadlineAt;
+        final hasActiveManual = resolvedDeadline?.isManual == true;
+        final canEditManual = !assignment.isExam &&
+            CourseworkDeadline.canSetManualDeadline(assignment);
+        final effectiveAt =
+            assignment.isExam ? assignment.timelineAt : resolvedDeadline?.at;
+        final bucket = assignment.isExam
+            ? AssignmentQuery.timelineBucketAt(assignment, _now)
+            : CourseworkDeadline.bucketAt(
+                assignment,
+                _now,
+                entry: courseworkEntry,
+              );
         final overdue = bucket == AssignmentDeadlineBucket.overdue;
-        final today = assignment.timelineAt != null &&
+        final today = effectiveAt != null &&
             bucket != AssignmentDeadlineBucket.unconfirmed &&
-            AssignmentQuery.dayKey(assignment.timelineAt!) ==
-                AssignmentQuery.dayKey(_now);
+            AssignmentQuery.dayKey(effectiveAt) == AssignmentQuery.dayKey(_now);
         final urgentLabel = overdue
-            ? '已逾期${_now.difference(assignment.timelineAt!).inDays > 0 ? '${_now.difference(assignment.timelineAt!).inDays}天' : ''}'
+            ? '${hasActiveManual ? '手动截止已过' : '已逾期'}${_now.difference(effectiveAt!).inDays > 0 ? '${_now.difference(effectiveAt).inDays}天' : ''}'
             : !assignment.isExam &&
                     assignment.isPendingConfirmed &&
-                    assignment.deadlineTrusted &&
-                    !assignment.deadlineReadFailed &&
+                    resolvedDeadline != null &&
                     today
                 ? '今天截止'
                 : null;
@@ -567,8 +677,9 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                 ? CourseworkPillTone.completed
                 : (bucket == AssignmentDeadlineBucket.unconfirmed ||
                         assignment.status == 'unknown' ||
-                        !assignment.deadlineTrusted ||
-                        assignment.deadlineReadFailed)
+                        (!hasActiveManual &&
+                            (!assignment.deadlineTrusted ||
+                                assignment.deadlineReadFailed)))
                     ? CourseworkPillTone.unconfirmed
                     : CourseworkPillTone.neutral;
         final cleanRequirements = assignment.requirementsText.trim();
@@ -604,6 +715,12 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
               label: statusLabel,
               tone: statusTone,
             ),
+          if (hasActiveManual)
+            const CourseworkStatusPill(
+              label: '手动截止',
+              tone: CourseworkPillTone.neutral,
+              icon: Icons.edit_calendar_outlined,
+            ),
           if (urgentLabel != null)
             CourseworkStatusPill(
               label: urgentLabel,
@@ -622,9 +739,11 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
             schedule!.verificationNote!
           else if (unverified)
             '部分信息尚未核实',
+          if (hasActiveManual) '官方截止仍待确认，当前日历与提醒已按手动截止投影。',
           if (!assignment.isExam &&
               !assignment.deadlineTrusted &&
-              assignment.deadlineAt != null)
+              assignment.deadlineAt != null &&
+              !hasActiveManual)
             '历史截止时间待确认，不参与日历和提醒',
           if (showRawDeadline) assignment.deadlineRawText!,
           if (!assignment.isExam &&
@@ -636,8 +755,8 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
         final workStart = assignment.availableFromAt;
         final workStartText = assignment.availableFromText?.trim() ?? '';
         final workDeadline = assignment.deadlineAt;
-        final hasWorkBeijingTime =
-            !assignment.isExam && (workStart != null || workDeadline != null);
+        final hasWorkBeijingTime = !assignment.isExam &&
+            (workStart != null || workDeadline != null || manualAt != null);
         final workTimeRows = assignment.isExam
             ? const <({
                 IconData icon,
@@ -669,7 +788,9 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                 if (workDeadline != null)
                   (
                     icon: Icons.schedule_rounded,
-                    iconColor: overdue ? journal.berry : journal.muted,
+                    iconColor: !hasActiveManual && overdue
+                        ? journal.berry
+                        : journal.muted,
                     label: !assignment.deadlineTrusted ||
                             assignment.deadlineReadFailed
                         ? '历史截止（未核实）'
@@ -684,7 +805,19 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     label: '截止',
                     value: assignment.deadlineLabel,
                   ),
+                if (manualAt != null)
+                  (
+                    icon: Icons.edit_calendar_outlined,
+                    iconColor: hasActiveManual && overdue
+                        ? journal.berry
+                        : journal.ink,
+                    label: hasActiveManual ? '手动截止（官方待确认）' : '手动旧记录（已被官方接管）',
+                    value: DateFormat('yyyy年M月d日 HH:mm', 'zh_CN')
+                        .format(AssignmentQuery.beijing(manualAt)),
+                  ),
               ];
+        final showManualNotice = _actionMessage != null &&
+            _actionMessageTarget == _DetailNoticeTarget.manual;
         final pinTarget = original != null &&
                 !isHidden &&
                 AssignmentRecoveryScope.of(context) == null &&
@@ -900,6 +1033,85 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                           ),
                                         ),
                                       ],
+                                    ),
+                                  ],
+                                  if (!assignment.isExam &&
+                                      (canEditManual || manualAt != null)) ...[
+                                    const SizedBox(height: 10),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 6,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      children: [
+                                        if (canEditManual)
+                                          OutlinedButton.icon(
+                                            key: const ValueKey(
+                                                'assignment-set-manual-deadline'),
+                                            style: OutlinedButton.styleFrom(
+                                              minimumSize: const Size(48, 48),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 8),
+                                              foregroundColor: journal.ink,
+                                              backgroundColor:
+                                                  journal.parchment,
+                                              side: BorderSide(
+                                                color: journal.cardBorder,
+                                                width: 0.8,
+                                              ),
+                                            ),
+                                            onPressed: _savingManualDeadline ||
+                                                    _refreshing ||
+                                                    _hiding
+                                                ? null
+                                                : () => _pickManualDeadline(
+                                                      courseworkTarget,
+                                                      existing: manualAt,
+                                                    ),
+                                            icon: const Icon(
+                                              Icons.edit_calendar_outlined,
+                                              size: 17,
+                                            ),
+                                            label: Text(hasActiveManual
+                                                ? '修改手动截止'
+                                                : '手动设置截止时间'),
+                                          ),
+                                        if (manualAt != null)
+                                          TextButton.icon(
+                                            key: const ValueKey(
+                                                'assignment-clear-manual-deadline'),
+                                            style: TextButton.styleFrom(
+                                              minimumSize: const Size(48, 48),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 8),
+                                              foregroundColor: journal.berry,
+                                            ),
+                                            onPressed: _savingManualDeadline ||
+                                                    _refreshing ||
+                                                    _hiding
+                                                ? null
+                                                : () => _clearManualDeadline(
+                                                    courseworkTarget),
+                                            icon: const Icon(
+                                                Icons.clear_rounded,
+                                                size: 17),
+                                            label: Text(hasActiveManual
+                                                ? '清除手动截止'
+                                                : '清除手动旧记录'),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                  if (showManualNotice) ...[
+                                    const SizedBox(height: 8),
+                                    _DetailActionNotice(
+                                      key: const ValueKey(
+                                          'assignment-manual-deadline-result'),
+                                      message: _actionMessage!,
                                     ),
                                   ],
                                 ],
@@ -1311,7 +1523,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   }
 }
 
-enum _DetailNoticeTarget { opening, records, restore, pin }
+enum _DetailNoticeTarget { opening, records, restore, pin, manual }
 
 class _DetailActionNotice extends StatelessWidget {
   const _DetailActionNotice({super.key, required this.message});

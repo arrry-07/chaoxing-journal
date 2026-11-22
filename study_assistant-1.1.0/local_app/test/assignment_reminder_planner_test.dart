@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
 import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.dart';
+import 'package:study_assistant_mobile/src/services/coursework_deadline.dart';
 
 void main() {
   final now = DateTime(2026, 11, 11, 9);
@@ -422,6 +424,111 @@ void main() {
     expect(run().deadlineEvents.single.eventId,
         run().deadlineEvents.single.eventId);
   });
+
+  test(
+      'Phase 2B planner uses manual deadline, skips manual past, and rebuilds cleanly on official takeover without resurrection',
+      () {
+    final now = DateTime.utc(2026, 11, 20, 4); // 12:00 Beijing
+    final untrusted = Assignment(
+      id: 'cx:work:1:2:m1',
+      courseName: '计算机网络',
+      title: '手工时间作业',
+      deadlineAt: null,
+      deadlineTrusted: false,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final pastWork = Assignment(
+      id: 'cx:work:1:2:m-past',
+      courseName: '计算机网络',
+      title: '手动已过作业',
+      deadlineAt: null,
+      deadlineTrusted: false,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final manualAt = now.add(const Duration(days: 2));
+    final pastAt = now.subtract(const Duration(hours: 2));
+    final coursework = LocalCourseworkState()
+        .withManualDeadline(
+            CourseworkDeadline.keyFor(untrusted), const [], manualAt)
+        .withManualDeadline(
+            CourseworkDeadline.keyFor(pastWork), const [], pastAt);
+
+    final manualPlan = _plan(
+      now: now,
+      assignments: [untrusted, pastWork],
+      known: {untrusted.id, pastWork.id},
+      baseline: true,
+      complete: true,
+      offsets: [60],
+      coursework: coursework,
+    );
+    expect(
+      manualPlan.deadlineEvents.map((e) => e.assignmentId).toList(),
+      [untrusted.id],
+    );
+    expect(manualPlan.deadlineEvents.single.deadlineAt!.toUtc(), manualAt);
+    expect(
+      manualPlan.snapshots
+          .singleWhere((s) => s.assignment.id == untrusted.id)
+          .toJson(),
+      containsPair('deadlineTrusted', true),
+    );
+    expect(
+      manualPlan.snapshots
+          .singleWhere((s) => s.assignment.id == untrusted.id)
+          .toJson(),
+      containsPair('deadlineReadFailed', false),
+    );
+
+    // Trusted official deadline takes over with a different timestamp -> new eventId replaces old alarm.
+    final officialAt = now.add(const Duration(days: 4));
+    final officialWork = untrusted.copyWith(
+      deadlineAt: officialAt,
+      deadlineTrusted: true,
+      deadlineReadFailed: false,
+    );
+    final reconciled = CourseworkDeadline.reconcileWithAssignments(
+      coursework,
+      [officialWork, pastWork],
+    );
+    expect(
+      reconciled
+          .entryForAliases(CourseworkDeadline.aliasesFor(officialWork))!
+          .officialTakenOver,
+      isTrue,
+    );
+    final officialPlan = _plan(
+      now: now,
+      assignments: [officialWork],
+      known: {untrusted.id},
+      baseline: true,
+      complete: true,
+      offsets: [60],
+      coursework: reconciled,
+    );
+    expect(officialPlan.deadlineEvents.single.deadlineAt!.toUtc(), officialAt);
+    expect(
+      officialPlan.deadlineEvents.single.eventId,
+      isNot(manualPlan.deadlineEvents.single.eventId),
+    );
+
+    // Subsequent temporary detail failure must NOT resurrect stale manual deadline alarms.
+    final failedAfterTakeover = officialWork.copyWith(deadlineReadFailed: true);
+    final failedPlan = _plan(
+      now: now,
+      assignments: [failedAfterTakeover],
+      known: {untrusted.id},
+      baseline: true,
+      complete: true,
+      offsets: [60],
+      coursework: reconciled,
+    );
+    expect(failedPlan.deadlineEvents, isEmpty);
+  });
 }
 
 AssignmentReminderPlan _plan({
@@ -438,6 +545,7 @@ AssignmentReminderPlan _plan({
   bool detectNew = true,
   Set<String>? baselinedSources,
   Set<String> completedSourceKeys = const {},
+  LocalCourseworkState coursework = const LocalCourseworkState.empty(),
 }) =>
     AssignmentReminderPlanner.planAfterSync(
       accountHash: 'account-hash',
@@ -455,6 +563,7 @@ AssignmentReminderPlan _plan({
       newAssignmentReminderEnabled: newEnabled,
       reminderOffsetsMinutes: offsets,
       now: now,
+      courseworkState: coursework,
     );
 
 Assignment _assignment({

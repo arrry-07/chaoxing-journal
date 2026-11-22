@@ -90,13 +90,21 @@ class _DailyPlanState extends State<DailyPlanScreen> {
                     : '开考时间待确认';
                 return '${a.courseName} · $startText';
               }
-              final overdue = a.isOverdueAt(now);
-              final deadlineText = a.deadlineAt != null &&
-                      a.deadlineTrusted &&
-                      !a.deadlineReadFailed
-                  ? '截止 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(a.deadlineAt!))}'
+              final coursework = widget.store.courseworkState;
+              final bucket = AssignmentQuery.timelineBucketAt(
+                a,
+                now,
+                coursework: coursework,
+              );
+              final resolved = AssignmentQuery.effectiveDeadline(
+                a,
+                coursework: coursework,
+              );
+              final overdue = bucket == AssignmentDeadlineBucket.overdue;
+              final deadlineText = resolved != null
+                  ? '${resolved.isManual ? '手动截止 ' : '截止 '}${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(resolved.at))}'
                   : a.deadlineLabel;
-              return '${a.courseName} · ${overdue ? '$deadlineText · 已逾期' : deadlineText}';
+              return '${a.courseName} · ${overdue ? '$deadlineText · ${resolved?.isManual == true ? '手动截止已过' : '已逾期'}' : deadlineText}';
             }(),
             keywords: a.courseName,
             icon: courseIconFor(a.courseName),
@@ -854,10 +862,12 @@ class _PlannerSheetState extends State<_PlannerSheet> {
           ? '开考 ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(time))}'
           : '开考时间待确认';
     } else {
-      timeText = time != null &&
-              assignment.deadlineTrusted &&
-              !assignment.deadlineReadFailed
-          ? '截止 ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(time))}'
+      final resolved = AssignmentQuery.effectiveDeadline(
+        assignment,
+        coursework: widget.store.courseworkState,
+      );
+      timeText = resolved != null
+          ? '${resolved.isManual ? '手动截止 ' : '截止 '}${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(resolved.at))}'
           : assignment.deadlineLabel;
     }
     return CheckboxListTile(

@@ -4,6 +4,7 @@ import 'assignment.dart';
 import 'course.dart';
 import 'course_chapter_progress.dart';
 import 'course_notice.dart';
+import 'local_coursework_state.dart';
 import 'personal_workspace.dart';
 import 'pinned_assignments.dart';
 import 'reminder_rule_limits.dart';
@@ -26,7 +27,8 @@ class BackupSnapshot {
       Map<String, String> courseTaskKeys,
       this.notices,
       this.chapters,
-      this.pinned)
+      this.pinned,
+      this.courseworkState)
       : records = List.unmodifiable(records),
         hidden = Set.unmodifiable(hidden),
         courses = List.unmodifiable(courses),
@@ -49,6 +51,7 @@ class BackupSnapshot {
   final CourseNoticeCollection notices;
   final CourseChapterCatalog chapters;
   final PinnedAssignments pinned;
+  final LocalCourseworkState courseworkState;
   static String ownerFor(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
 
@@ -74,8 +77,13 @@ class BackupSnapshot {
     CourseNoticeCollection notices,
     CourseChapterCatalog chapters,
     PinnedAssignments pinned,
+    LocalCourseworkState courseworkState,
   ) {
-    if (pinned.isNotEmpty || pinned.manuallyOrdered) return 8;
+    if (pinned.isNotEmpty ||
+        pinned.manuallyOrdered ||
+        courseworkState.isNotEmpty) {
+      return 8;
+    }
     if (records.any(_hasPortableTimeEvidence)) return 7;
     if (notices.items.isNotEmpty || chapters.byCourse.isNotEmpty) return 6;
     return 5;
@@ -139,15 +147,19 @@ class BackupSnapshot {
       StudyNotebook? notebook,
       CourseNoticeCollection? notices,
       CourseChapterCatalog? chapters,
-      PinnedAssignments? pinned}) {
+      PinnedAssignments? pinned,
+      LocalCourseworkState? courseworkState}) {
     final effectiveNotices = notices ?? CourseNoticeCollection();
     final effectiveChapters = chapters ?? CourseChapterCatalog();
     final effectivePinned = pinned ?? const PinnedAssignments.empty();
+    final effectiveCoursework =
+        courseworkState ?? const LocalCourseworkState.empty();
     final version = _schemaVersion(
       records,
       effectiveNotices,
       effectiveChapters,
       effectivePinned,
+      effectiveCoursework,
     );
     return BackupSnapshot.decode(jsonEncode({
       'schema': version,
@@ -156,6 +168,8 @@ class BackupSnapshot {
       if (version >= 6) 'notices': effectiveNotices.toJson(portable: true),
       if (version >= 6) 'chapters': effectiveChapters.toJson(portable: true),
       if (version >= 8) 'pinned': effectivePinned.toJson(),
+      if (version >= 8 && effectiveCoursework.isNotEmpty)
+        'courseworkState': effectiveCoursework.toJson(),
       'owner': owner,
       'createdAt': createdAt.toUtc().toIso8601String(),
       'records': records
@@ -171,7 +185,8 @@ class BackupSnapshot {
   }
 
   String encode() {
-    final version = _schemaVersion(records, notices, chapters, pinned);
+    final version =
+        _schemaVersion(records, notices, chapters, pinned, courseworkState);
     return jsonEncode({
       'schema': version,
       'notebook': notebook.toJson(),
@@ -179,6 +194,8 @@ class BackupSnapshot {
       if (version >= 6) 'notices': notices.toJson(portable: true),
       if (version >= 6) 'chapters': chapters.toJson(portable: true),
       if (version >= 8) 'pinned': pinned.toJson(),
+      if (version >= 8 && courseworkState.isNotEmpty)
+        'courseworkState': courseworkState.toJson(),
       'owner': owner,
       'createdAt': createdAt.toUtc().toIso8601String(),
       'records': records
@@ -240,12 +257,16 @@ class BackupSnapshot {
     final decoded = jsonDecode(plaintext);
     final version = decoded is Map ? decoded['schema'] : null;
     if (version is! int || !{1, 2, 3, 4, 5, 6, 7, 8}.contains(version)) _bad();
+    final hasCourseworkState = version >= 8 &&
+        decoded is Map &&
+        decoded.containsKey('courseworkState');
     final j = _map(decoded, {
       if (version >= 2) 'personal',
       if (version >= 3) 'notebook',
       if (version >= 6) 'notices',
       if (version >= 6) 'chapters',
       if (version >= 8) 'pinned',
+      if (hasCourseworkState) 'courseworkState',
       'schema',
       'owner',
       'createdAt',
@@ -396,6 +417,9 @@ class BackupSnapshot {
     final decodedPinned = version < 8
         ? const PinnedAssignments.empty()
         : PinnedAssignments.fromJson(j['pinned'], strict: true);
+    final decodedCoursework = !hasCourseworkState
+        ? const LocalCourseworkState.empty()
+        : LocalCourseworkState.fromJson(j['courseworkState'], strict: true);
     return BackupSnapshot._(
         owner,
         _date(j['createdAt']),
@@ -412,7 +436,8 @@ class BackupSnapshot {
         courseTaskKeys,
         cleanNotices,
         cleanChapters,
-        decodedPinned);
+        decodedPinned,
+        decodedCoursework);
   }
 
   static ExamInfo? _exam(dynamic value) {

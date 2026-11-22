@@ -7,6 +7,7 @@ import 'package:shared_preferences_platform_interface/shared_preferences_platfor
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
+import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/models/reminder_rule_limits.dart';
@@ -362,6 +363,88 @@ void main() {
           'manuallyOrdered': true,
         };
       expect(() => BackupSnapshot.decode(jsonEncode(badDup)),
+          throwsFormatException);
+    });
+
+    test(
+        'Phase 2B schema 8 optional courseworkState backward compatible, merges cleanly, and rejects malformed entries',
+        () async {
+      // Old 2A schema 8 without courseworkState decodes cleanly as empty.
+      await repo.savePinnedAssignments(
+        PinnedAssignments(keys: ['cx:work:1:2:3'], manuallyOrdered: true),
+        'alice',
+      );
+      final schema8WithoutCoursework = await repo.createBackupSnapshot('alice');
+      final raw2A =
+          jsonDecode(schema8WithoutCoursework.encode()) as Map<String, dynamic>;
+      expect(raw2A['schema'], 8);
+      expect(raw2A.containsKey('courseworkState'), isFalse);
+      expect(BackupSnapshot.decode(jsonEncode(raw2A)).courseworkState.isEmpty,
+          isTrue);
+
+      // Export schema 8 with manualDeadlineAt & officialTakenOver.
+      final manualAt = DateTime.utc(2026, 12, 5, 15, 59);
+      final localState = LocalCourseworkState()
+          .withManualDeadline('cx:work:1:2:9', const [], manualAt)
+          .withEntry(
+            'cx:work:1:2:10',
+            const [],
+            LocalCourseworkEntry(
+              manualDeadlineAt: DateTime.utc(2026, 12, 6, 12),
+              officialTakenOver: true,
+            ),
+          );
+      await repo.saveCourseworkState(localState, 'alice');
+      final withCoursework = await repo.createBackupSnapshot('alice');
+      final raw2B = jsonDecode(withCoursework.encode()) as Map<String, dynamic>;
+      expect(raw2B['schema'], 8);
+      expect(raw2B.containsKey('courseworkState'), isTrue);
+
+      // Restore keeps local existing entries and fills missing ones without promoting trust.
+      final overrideAt = DateTime.utc(2026, 12, 7, 10);
+      await repo.saveCourseworkState(
+        LocalCourseworkState()
+            .withManualDeadline('cx:work:1:2:9', const [], overrideAt),
+        'alice',
+      );
+      await repo.restoreBackupSnapshot(withCoursework, 'alice');
+      final restored = await repo.loadCourseworkState('alice');
+      expect(
+        restored
+            .entryForAliases(const ['cx:work:1:2:9'])!
+            .manualDeadlineAt!
+            .toUtc(),
+        overrideAt,
+      );
+      expect(
+        restored.entryForAliases(const ['cx:work:1:2:10'])!.officialTakenOver,
+        isTrue,
+      );
+
+      // Malformed / URL / bad-timezone entries rejected strictly.
+      final badUrl = Map<String, dynamic>.from(raw2B)
+        ..['courseworkState'] = {
+          'entries': {
+            'https://mooc1.chaoxing.com/work?enc=secret': {
+              'manualDeadlineAt': manualAt.toIso8601String(),
+              'officialTakenOver': false,
+            },
+          },
+        };
+      expect(() => BackupSnapshot.decode(jsonEncode(badUrl)),
+          throwsFormatException);
+
+      final badExtra = Map<String, dynamic>.from(raw2B)
+        ..['courseworkState'] = {
+          'entries': {
+            'cx:work:1:2:9': {
+              'manualDeadlineAt': manualAt.toIso8601String(),
+              'officialTakenOver': false,
+              'extra': 1,
+            },
+          },
+        };
+      expect(() => BackupSnapshot.decode(jsonEncode(badExtra)),
           throwsFormatException);
     });
   });

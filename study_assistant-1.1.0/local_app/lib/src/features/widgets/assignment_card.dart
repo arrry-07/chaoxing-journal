@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import '../../app/journal.dart';
 import '../../models/assignment.dart';
+import '../../models/local_coursework_state.dart';
 import '../../services/assignment_query.dart';
+import '../../services/coursework_deadline.dart';
 import '../../services/exam_schedule_presentation.dart';
 import 'coursework_status_pill.dart';
 
@@ -16,6 +18,7 @@ class AssignmentCard extends StatelessWidget {
       this.onOpenAssignment,
       this.examSources = const [],
       this.displayIndex,
+      this.courseworkEntry,
       this.opening = false,
       this.compact = false,
       this.countdown = false,
@@ -32,6 +35,7 @@ class AssignmentCard extends StatelessWidget {
   final Assignment assignment;
   final List<Assignment> examSources;
   final AssignmentDisplayIndex? displayIndex;
+  final LocalCourseworkEntry? courseworkEntry;
   final DateTime now;
   final VoidCallback onTap;
   final VoidCallback? onOpenAssignment;
@@ -143,13 +147,16 @@ class AssignmentCard extends StatelessWidget {
     ];
   }
 
-  CourseworkPillTone _stateTone(Assignment a, AssignmentDeadlineBucket bucket) {
+  CourseworkPillTone _stateTone(
+    Assignment a,
+    AssignmentDeadlineBucket bucket, {
+    bool hasManualDeadline = false,
+  }) {
     if (a.isExam) return CourseworkPillTone.exam;
     if (a.isCompleted) return CourseworkPillTone.completed;
     if (bucket == AssignmentDeadlineBucket.unconfirmed ||
         a.status == 'unknown' ||
-        !a.deadlineTrusted ||
-        a.deadlineReadFailed) {
+        (!hasManualDeadline && (!a.deadlineTrusted || a.deadlineReadFailed))) {
       return CourseworkPillTone.unconfirmed;
     }
     return CourseworkPillTone.neutral;
@@ -158,19 +165,24 @@ class AssignmentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
-    final a = assignment, d = a.timelineAt;
-    final bucket = AssignmentQuery.timelineBucketAt(a, now);
+    final a = assignment;
+    final resolvedDeadline =
+        a.isExam ? null : CourseworkDeadline.resolveEntry(a, courseworkEntry);
+    final isManualDeadline = resolvedDeadline?.isManual == true;
+    final d = a.isExam ? a.timelineAt : resolvedDeadline?.at;
+    final bucket = a.isExam
+        ? AssignmentQuery.timelineBucketAt(a, now)
+        : CourseworkDeadline.bucketAt(a, now, entry: courseworkEntry);
     final overdue = bucket == AssignmentDeadlineBucket.overdue;
     final today = d != null &&
         bucket != AssignmentDeadlineBucket.unconfirmed &&
         AssignmentQuery.dayKey(d) == AssignmentQuery.dayKey(now);
     final urgent = overdue
-        ? '已逾期${now.difference(d!).inDays > 0 ? '${now.difference(d).inDays}天' : ''}'
+        ? '${isManualDeadline ? '手动截止已过' : '已逾期'}${now.difference(d!).inDays > 0 ? '${now.difference(d).inDays}天' : ''}'
         : showFullDeadline &&
                 !a.isExam &&
                 a.isPendingConfirmed &&
-                a.deadlineTrusted &&
-                !a.deadlineReadFailed &&
+                resolvedDeadline != null &&
                 today
             ? '今天截止'
             : null;
@@ -220,24 +232,28 @@ class AssignmentCard extends StatelessWidget {
             .format(beijingDeadline);
     final deadline = deadlinePending
         ? '正在确认截止时间'
-        : a.deadlineReadFailed
-            ? d == null
-                ? withStart('截止时间待确认')
-                : '截止 $deadlineDate · ${a.deadlineLabel}'
-            : bucket == AssignmentDeadlineBucket.unconfirmed &&
-                    d == null &&
-                    a.deadlineTrusted &&
-                    !a.deadlineReadFailed
-                ? withStart('截止信息待确认')
-                : !a.deadlineTrusted
-                    ? withStart(a.deadlineLabel)
-                    : d == null
-                        ? withStart('无截止日期')
-                        : countdown && !inPinnedSection
-                            ? DisplayPreferences.remaining(d, now)
-                            : '截止 $deadlineDate';
+        : isManualDeadline
+            ? countdown && !inPinnedSection
+                ? '手动 ${DisplayPreferences.remaining(d!, now)} · 官方待确认'
+                : '手动截止 $deadlineDate · 官方待确认'
+            : a.deadlineReadFailed
+                ? (a.deadlineAt == null
+                    ? withStart('截止时间待确认')
+                    : '截止 ${DateFormat(inPinnedSection && AssignmentQuery.beijing(a.deadlineAt!).year != AssignmentQuery.beijing(now).year ? 'yyyy年M月d日 HH:mm' : 'M月d日 HH:mm').format(AssignmentQuery.beijing(a.deadlineAt!))} · ${a.deadlineLabel}')
+                : bucket == AssignmentDeadlineBucket.unconfirmed &&
+                        d == null &&
+                        a.deadlineTrusted &&
+                        !a.deadlineReadFailed
+                    ? withStart('截止信息待确认')
+                    : !a.deadlineTrusted
+                        ? withStart(a.deadlineLabel)
+                        : d == null
+                            ? withStart('无截止日期')
+                            : countdown && !inPinnedSection
+                                ? DisplayPreferences.remaining(d, now)
+                                : '截止 $deadlineDate';
     final hasTime =
-        d != null && a.timelineTrusted && (a.isExam || !a.deadlineReadFailed);
+        d != null && (a.isExam ? a.timelineTrusted : resolvedDeadline != null);
     final clock = hasTime
         ? _clockFormat.format(AssignmentQuery.beijing(d))
         : examSchedule?.timeline?.clock ?? '';
@@ -256,16 +272,18 @@ class AssignmentCard extends StatelessWidget {
     final largeText = JournalLayout.isLargeText(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
-    final stateTone = _stateTone(a, bucket);
+    final stateTone =
+        _stateTone(a, bucket, hasManualDeadline: isManualDeadline);
     final hasSpecialStatePill = stateTone != CourseworkPillTone.neutral;
-    final highlightToday =
-        today && !overdue && !a.isCompleted && a.deadlineTrusted;
+    final highlightToday = today &&
+        !overdue &&
+        !a.isCompleted &&
+        (a.isExam ? a.timelineTrusted : resolvedDeadline != null);
     final pinUrgent = inPinnedSection &&
         !overdue &&
         !a.isCompleted &&
-        a.deadlineTrusted &&
-        (a.isExam || !a.deadlineReadFailed) &&
         d != null &&
+        (a.isExam ? a.timelineTrusted : resolvedDeadline != null) &&
         (today || d.difference(now) <= const Duration(hours: 48));
     final railTextColor = (highlightToday || pinUrgent)
         ? journal.berry
@@ -278,6 +296,12 @@ class AssignmentCard extends StatelessWidget {
         CourseworkStatusPill(
           label: state,
           tone: stateTone,
+        ),
+      if (isManualDeadline)
+        const CourseworkStatusPill(
+          label: '手动',
+          tone: CourseworkPillTone.neutral,
+          icon: Icons.edit_calendar_outlined,
         ),
       if (previewOnly)
         CourseworkStatusPill(
@@ -302,7 +326,11 @@ class AssignmentCard extends StatelessWidget {
         if (examSchedule?.yearUnconfirmed == true)
           Text('年份待确认', style: journal.metadata),
         for (final line in examLines) Text(line, style: journal.metadata),
-      ] else if (showFullDeadline || inPinnedSection || countdown || !hasTime)
+      ] else if (showFullDeadline ||
+          inPinnedSection ||
+          countdown ||
+          !hasTime ||
+          isManualDeadline)
         Text(
           inPinnedSection && countdown && hasTime
               ? '$deadline · ${DisplayPreferences.remaining(d, now)}'
@@ -432,10 +460,7 @@ class AssignmentCard extends StatelessWidget {
     );
 
     Widget buildPinnedRail() {
-      if (d == null ||
-          !hasTime ||
-          !a.deadlineTrusted ||
-          (!a.isExam && a.deadlineReadFailed)) {
+      if (d == null || !hasTime) {
         return Text(
           railLabel,
           style: journal.time.copyWith(
@@ -455,7 +480,9 @@ class AssignmentCard extends StatelessWidget {
           : dueDay == tomorrowDay
               ? '明天'
               : '${beijingD.month}/${beijingD.day}';
-      final remLabel = overdue ? '已逾期' : _compactRemaining(d, now);
+      final remLabel = overdue
+          ? (isManualDeadline ? '手动已过' : '已逾期')
+          : _compactRemaining(d, now);
       final dateColor = pinUrgent ? journal.berry : journal.muted;
       final clockColor =
           pinUrgent ? journal.berry : (overdue ? journal.muted : journal.ink);

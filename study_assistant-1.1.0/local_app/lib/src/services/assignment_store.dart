@@ -36,10 +36,12 @@ import 'daily_summary.dart';
 import 'daytime_check_policy.dart';
 import '../models/assignment_change.dart';
 import '../models/backup_snapshot.dart';
+import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
 import '../models/pinned_assignments.dart';
 import '../models/reminder_history.dart';
 import '../models/study_notebook.dart';
+import 'coursework_deadline.dart';
 import 'reminder_explanation.dart';
 
 class BackgroundCheckResult {
@@ -944,6 +946,7 @@ class AssignmentStore extends ChangeNotifier {
   List<Assignment> get assignments => List.unmodifiable(_assignments);
   final Set<String> _unfollowed = {};
   PinnedAssignments _pinned = const PinnedAssignments.empty();
+  LocalCourseworkState _courseworkState = const LocalCourseworkState.empty();
   bool _pinsNeedSave = false;
   bool _journalRestoreFailed = false;
 
@@ -957,6 +960,108 @@ class AssignmentStore extends ChangeNotifier {
   PinnedAssignments get pinnedAssignments => _pinned;
   List<String> get pinnedKeys => _pinned.keys;
   bool get hasManualPinOrder => _pinned.manuallyOrdered;
+  LocalCourseworkState get courseworkState => _courseworkState;
+  LocalCourseworkEntry? courseworkEntryFor(Assignment assignment) =>
+      CourseworkDeadline.entryFor(assignment, _courseworkState);
+  CourseworkDeadline? effectiveDeadlineFor(Assignment assignment) =>
+      CourseworkDeadline.resolveEntry(
+          assignment, courseworkEntryFor(assignment));
+  DateTime? manualDeadlineFor(Assignment assignment) =>
+      courseworkEntryFor(assignment)?.manualDeadlineAt;
+
+  Future<bool> setManualDeadline(Assignment assignment, DateTime? at) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null || assignment.isExam) {
+      return false;
+    }
+    if (at != null && !CourseworkDeadline.canSetManualDeadline(assignment)) {
+      return false;
+    }
+    var saved = false;
+    await _run(() async {
+      if (!_isSessionCurrent(snap)) return;
+      final current = findAnyAssignment(assignment.id) ?? assignment;
+      if (at != null && !CourseworkDeadline.canSetManualDeadline(current)) {
+        return;
+      }
+      final key = CourseworkDeadline.keyFor(current);
+      final aliases = CourseworkDeadline.aliasesFor(current);
+      final next = _courseworkState.withManualDeadline(key, aliases, at);
+      if (next == _courseworkState) {
+        saved = true;
+        return;
+      }
+      await _markReminderMutationPending();
+      if (!_isSessionCurrent(snap)) return;
+      try {
+        await _runScopedWrite(
+          snap,
+          (prefs) => repository.writeCourseworkStateInPrefs(prefs, next),
+        );
+      } on StaleSessionWriteException {
+        return;
+      } on LocalStorageLeaseReleaseException {
+        const warning = '手动截止状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
+        if (snap.generation == _generation &&
+            !_recoveryWarnings.contains(warning)) {
+          _recoveryWarnings.add(warning);
+        }
+      } catch (_) {
+        return;
+      }
+      if (!_isSessionCurrent(snap)) return;
+      _courseworkState = next;
+      _invalidateHomeDisplayIndex();
+      saved = true;
+      await _afterAssignmentsChanged(
+        updateSummary: true,
+        updateManual: false,
+        updateWidget: true,
+      );
+      if (_isSessionCurrent(snap)) notifyListeners();
+    });
+    return saved;
+  }
+
+  Future<void> _reconcileCourseworkState() async {
+    final snap = _captureSession();
+    if (!snap.authenticated ||
+        snap.account == null ||
+        _journalRestoreFailed ||
+        repository.recoveryWarning != null ||
+        _courseworkState.isEmpty) {
+      return;
+    }
+    final reconciled = CourseworkDeadline.reconcileWithAssignments(
+      _courseworkState,
+      [..._assignments, ..._hiddenAssignments],
+    );
+    if (reconciled == _courseworkState) return;
+    try {
+      await _runScopedWrite(
+        snap,
+        (prefs) => repository.writeCourseworkStateInPrefs(prefs, reconciled),
+      );
+    } on StaleSessionWriteException {
+      return;
+    } on LocalStorageLeaseReleaseException {
+      const warning = '个人截止状态已同步清理，本机写入通道释放未确认，请稍后重试其他写入';
+      if (snap.generation == _generation &&
+          !_recoveryWarnings.contains(warning)) {
+        _recoveryWarnings.add(warning);
+      }
+    } catch (_) {
+      const warning = '部分个人截止状态同步整理未能保存，请稍后重试';
+      if (snap.generation == _generation &&
+          !_recoveryWarnings.contains(warning)) {
+        _recoveryWarnings.add(warning);
+      }
+      return;
+    }
+    if (!_isSessionCurrent(snap)) return;
+    _courseworkState = reconciled;
+    _invalidateHomeDisplayIndex();
+  }
 
   Set<String> _pinAliases(Assignment assignment) {
     final key = _pinKey(assignment);
@@ -1309,18 +1414,25 @@ class AssignmentStore extends ChangeNotifier {
         display.widgetRange != next.widgetRange) {
       return null;
     }
+    final effectiveCoursework = snap.authenticated
+        ? _courseworkState
+        : const LocalCourseworkState.empty();
     final items = next.forWidget(
       snap.authenticated ? courseAssignments : <Assignment>[],
       _clock(),
+      coursework: effectiveCoursework,
     );
     try {
       await _runScopedWrite(
         snap,
-        (_) => widgetSnapshotService.saveAssignmentsForContext(
-          items,
-          authenticated: snap.authenticated,
-          range: next.widgetRange,
-        ),
+        (_) {
+          widgetSnapshotService.courseworkState = effectiveCoursework;
+          return widgetSnapshotService.saveAssignmentsForContext(
+            items,
+            authenticated: snap.authenticated,
+            range: next.widgetRange,
+          );
+        },
       );
       return null;
     } on StaleSessionWriteException {
@@ -1622,6 +1734,7 @@ class AssignmentStore extends ChangeNotifier {
     _courses = [];
     _unfollowed.clear();
     _pinned = const PinnedAssignments.empty();
+    _courseworkState = const LocalCourseworkState.empty();
     _pinsNeedSave = false;
     _journalRestoreFailed = false;
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
@@ -1674,6 +1787,12 @@ class AssignmentStore extends ChangeNotifier {
       final account = _account;
       if (_manageBackgroundSchedule && _authenticated && account != null) {
         _pinned = await repository.loadPinnedAssignments(account);
+      }
+    });
+    await stage('个人课业状态', () async {
+      final account = _account;
+      if (_authenticated && account != null) {
+        _courseworkState = await repository.loadCourseworkState(account);
       }
     });
     await stage('提醒设置', () async {
@@ -2030,6 +2149,7 @@ class AssignmentStore extends ChangeNotifier {
             _courses = [];
             _unfollowed.clear();
             _pinned = const PinnedAssignments.empty();
+            _courseworkState = const LocalCourseworkState.empty();
             _pinsNeedSave = false;
             _courseNotices = CourseNoticeCollection();
             _courseChapters = CourseChapterCatalog();
@@ -2338,6 +2458,8 @@ class AssignmentStore extends ChangeNotifier {
     if (generation != _generation || _disposed) return;
     _journalRestoreFailed = false;
     _invalidateHomeDisplayIndex();
+    await _reconcileCourseworkState();
+    if (generation != _generation || _disposed) return;
     final durableSyncAt = await repository.lastSyncAt();
     if (generation != _generation || _disposed) return;
     _lastSyncAt = durableSyncAt;
@@ -2667,6 +2789,7 @@ class AssignmentStore extends ChangeNotifier {
               '[AssignmentStore] reconcileSyncReport: ${error.runtimeType}');
         }
       }
+      _courseworkState = await repository.loadCourseworkState(account);
       await _reloadJournal();
       reconciled = true;
     });
@@ -3108,6 +3231,7 @@ class AssignmentStore extends ChangeNotifier {
       _courses = [];
       _unfollowed.clear();
       _pinned = const PinnedAssignments.empty();
+      _courseworkState = const LocalCourseworkState.empty();
       _pinsNeedSave = false;
       _invalidateHomeDisplayIndex();
       syncReport = const SyncReport();
@@ -3179,6 +3303,10 @@ class AssignmentStore extends ChangeNotifier {
         _serviceWarnings.add(_privacyCleanupMessage(error));
       }
     }
+    final effectiveCoursework = snap.authenticated
+        ? _courseworkState
+        : const LocalCourseworkState.empty();
+    notificationService.courseworkState = effectiveCoursework;
     if (!_privacyCleanupPending) {
       if (updateAssignmentReminders) {
         if (_nativeReminderAvailable && _authenticated) {
@@ -3253,16 +3381,23 @@ class AssignmentStore extends ChangeNotifier {
     if (!_isSessionCurrent(snap) || !updateWidget) {
       return manualRescheduleSucceeded;
     }
-    final widgetItems = display.forWidget(scoped, DateTime.now());
+    final widgetItems = display.forWidget(
+      scoped,
+      DateTime.now(),
+      coursework: effectiveCoursework,
+    );
     if (_manageBackgroundSchedule) {
       try {
         await _runScopedWrite(
           snap,
-          (_) => widgetSnapshotService.saveAssignmentsForContext(
-            widgetItems,
-            authenticated: snap.authenticated,
-            range: display.widgetRange,
-          ),
+          (_) {
+            widgetSnapshotService.courseworkState = effectiveCoursework;
+            return widgetSnapshotService.saveAssignmentsForContext(
+              widgetItems,
+              authenticated: snap.authenticated,
+              range: display.widgetRange,
+            );
+          },
         );
       } on StaleSessionWriteException {
         return manualRescheduleSucceeded;
@@ -3275,11 +3410,14 @@ class AssignmentStore extends ChangeNotifier {
       try {
         await _runScopedWrite(
           snap,
-          (_) => widgetSnapshotService.saveAssignmentsForContext(
-            widgetItems,
-            authenticated: true,
-            range: display.widgetRange,
-          ),
+          (_) {
+            widgetSnapshotService.courseworkState = effectiveCoursework;
+            return widgetSnapshotService.saveAssignmentsForContext(
+              widgetItems,
+              authenticated: true,
+              range: display.widgetRange,
+            );
+          },
         );
       } on StaleSessionWriteException {
         return manualRescheduleSucceeded;
@@ -3572,6 +3710,7 @@ class AssignmentStore extends ChangeNotifier {
         health: health,
         pluginEvidence: plugin,
         queryWarnings: warnings,
+        coursework: _courseworkState,
         healthQueryFailed: healthQueryFailed,
         pluginQueryFailed: pluginQueryFailed,
         subjectQueryFailed: subjectQueryFailed,
@@ -3599,6 +3738,9 @@ class AssignmentStore extends ChangeNotifier {
         _authenticated ? personal : PersonalWorkspace(),
         now,
         _lastSyncAt,
+        coursework: _authenticated
+            ? _courseworkState
+            : const LocalCourseworkState.empty(),
       );
       return ReminderExplanationService.forSummary(
         personal: _authenticated ? personal : PersonalWorkspace(),
@@ -3702,6 +3844,7 @@ class AssignmentStore extends ChangeNotifier {
           _backgroundCheckSettings.newAssignmentReminderEnabled,
       reminderOffsetsMinutes: _reminderOffsetsMinutes,
       now: now,
+      courseworkState: _courseworkState,
     );
     final result = await backgroundReminderGateway.applyPlan(
       accountHash: accountHash,

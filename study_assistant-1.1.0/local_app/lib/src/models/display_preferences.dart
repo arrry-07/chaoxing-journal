@@ -1,6 +1,7 @@
 import 'dart:convert';
 import '../services/assignment_query.dart';
 import 'assignment.dart';
+import 'local_coursework_state.dart';
 
 enum WidgetRange { all, today, week }
 
@@ -75,19 +76,23 @@ class DisplayPreferences {
     }
   }
 
-  List<Assignment> forWidget(List<Assignment> items, DateTime now) {
+  List<Assignment> forWidget(
+    List<Assignment> items,
+    DateTime now, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
     final display = AssignmentQuery.currentDisplay(items, now);
     if (widgetRange == WidgetRange.all) return display;
     final today = AssignmentQuery.dayKey(now);
     final days = widgetRange == WidgetRange.today ? 1 : 7;
     final end = DateTime(today.year, today.month, today.day + days);
     return display.where((a) {
-      final timelineAt = a.timelineAt;
-      if (AssignmentQuery.timelineBucketAt(a, now) !=
+      final timelineAt = a.isExam
+          ? a.timelineAt
+          : AssignmentQuery.effectiveDeadline(a, coursework: coursework)?.at;
+      if (AssignmentQuery.timelineBucketAt(a, now, coursework: coursework) !=
               AssignmentDeadlineBucket.notExpiredWithDeadline ||
-          timelineAt == null ||
-          !a.timelineTrusted ||
-          (!a.isExam && a.deadlineReadFailed)) {
+          timelineAt == null) {
         return false;
       }
       final startDay = AssignmentQuery.dayKey(timelineAt);

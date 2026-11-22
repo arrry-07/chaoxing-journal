@@ -9,6 +9,7 @@ import '../models/course.dart';
 import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
 import '../models/backup_snapshot.dart';
+import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
 import '../models/pinned_assignments.dart';
 import '../models/study_notebook.dart';
@@ -16,6 +17,7 @@ import '../models/home_filters.dart';
 import '../services/reminder_rule_store.dart';
 import '../services/background_reminder_gateway.dart';
 import '../services/background_check_settings.dart';
+import '../services/coursework_deadline.dart';
 
 /// A journal or course write could not be confirmed against durable storage.
 ///
@@ -73,6 +75,9 @@ class LocalAssignmentRepository {
   static const _pinnedV2Key = 'pinned_assignments_v2';
   static const _pinnedRecoveryWarning =
       '部分置顶记录无法读取，原始数据已保留备份；本次以空列表临时显示，请勿覆盖原数据。';
+  static const _courseworkStateKey = 'local_coursework_state_v1';
+  static const _courseworkRecoveryWarning =
+      '部分个人课业状态无法读取，原始数据已保留备份；本次以空状态临时显示，请勿覆盖原数据。';
   static const _maxAdditionalRecoveryBackups = 3;
   static const _maxRecoveryValueBytes = 4 * 1024 * 1024;
   static const _recoveryWriteFailedWarning =
@@ -108,6 +113,7 @@ class LocalAssignmentRepository {
     _homeFiltersKey,
     _pinnedKey,
     _pinnedV2Key,
+    _courseworkStateKey,
     _noticesKey,
     _chaptersKey,
     '${_key}_recovery_backup',
@@ -119,6 +125,8 @@ class LocalAssignmentRepository {
     '${_notebookKey}_recovery_backups',
     '${_pinnedV2Key}_recovery_backup',
     '${_pinnedV2Key}_recovery_backups',
+    '${_courseworkStateKey}_recovery_backup',
+    '${_courseworkStateKey}_recovery_backups',
     '${_noticesKey}_recovery_backup',
     '${_noticesKey}_recovery_backups',
     '${_chaptersKey}_recovery_backup',
@@ -209,6 +217,47 @@ class LocalAssignmentRepository {
 
   Future<void> savePinnedIds(Set<String> ids, String account) =>
       savePinnedAssignments(PinnedAssignments.fromLegacyV1(ids), account);
+
+  Future<LocalCourseworkState> _readCourseworkState(SharedPreferences prefs) =>
+      _readProtected(
+        prefs,
+        _courseworkStateKey,
+        LocalCourseworkState.decode,
+        LocalCourseworkState.empty,
+        _courseworkRecoveryWarning,
+      );
+
+  Future<void> writeCourseworkStateInPrefs(
+    SharedPreferences prefs,
+    LocalCourseworkState state,
+  ) async {
+    await _protectExisting(
+      prefs,
+      _courseworkStateKey,
+      LocalCourseworkState.decode,
+      _courseworkRecoveryWarning,
+    );
+    final raw = state.encode();
+    LocalCourseworkState.decode(raw);
+    await _writeVerified(prefs, _courseworkStateKey, raw, '个人课业状态保存失败');
+  }
+
+  Future<LocalCourseworkState> loadCourseworkState(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return _readCourseworkState(prefs);
+      });
+
+  Future<void> saveCourseworkState(
+    LocalCourseworkState state,
+    String account,
+  ) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        await writeCourseworkStateInPrefs(prefs, state);
+      });
 
   Future<StudyNotebook> loadNotebook() => _serialized(() async {
         final p = await SharedPreferences.getInstance();
@@ -445,7 +494,8 @@ class LocalAssignmentRepository {
               CourseChapterCatalog.new,
               '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
             ),
-            pinned: await _readPinnedAssignments(prefs));
+            pinned: await _readPinnedAssignments(prefs),
+            courseworkState: await _readCourseworkState(prefs));
         if (recoveryWarning != null) {
           throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
         }
@@ -585,6 +635,15 @@ class LocalAssignmentRepository {
             final localPins = await _readPinnedAssignments(prefs);
             final mergedPins = localPins.mergeBackup(validated.pinned);
             await _writePinnedAssignments(prefs, mergedPins);
+          }
+          if (validated.courseworkState.isNotEmpty) {
+            final localCoursework = await _readCourseworkState(prefs);
+            final mergedCoursework =
+                CourseworkDeadline.reconcileWithAssignments(
+              localCoursework.mergeBackup(validated.courseworkState),
+              state.byId.values,
+            );
+            await writeCourseworkStateInPrefs(prefs, mergedCoursework);
           }
           await _require(prefs.remove(_switchKey));
           return true;

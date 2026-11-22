@@ -3,7 +3,9 @@ import 'package:lpinyin/lpinyin.dart';
 import '../local/chaoxing_exam_parser.dart';
 import '../models/assignment.dart';
 import '../models/home_filters.dart';
+import '../models/local_coursework_state.dart';
 import 'assignment_grouping.dart';
+import 'coursework_deadline.dart';
 import 'exam_wall_time.dart';
 
 export '../models/home_filters.dart'
@@ -92,9 +94,18 @@ int _nameGroupRank(AssignmentDeadlineBucket bucket) => switch (bucket) {
     };
 
 class _PreparedAssignment {
-  _PreparedAssignment(this.assignment, this.index, DateTime now, this.displayAt,
-      {DateTime? displayEndAt})
-      : bucket = AssignmentQuery.timelineBucketAt(assignment, now),
+  _PreparedAssignment(
+    this.assignment,
+    this.index,
+    DateTime now,
+    this.displayAt, {
+    DateTime? displayEndAt,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  })  : bucket = AssignmentQuery.timelineBucketAt(
+          assignment,
+          now,
+          coursework: coursework,
+        ),
         _nearLimit = now.add(const Duration(days: 7)),
         elapsedNotice = assignment.exam?.startTrusted == false &&
             assignment.exam?.endTrusted == false &&
@@ -394,6 +405,12 @@ class AssignmentQuery {
     return ranges.length == 1 ? ranges.single : null;
   }
 
+  static CourseworkDeadline? effectiveDeadline(
+    Assignment assignment, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) =>
+      CourseworkDeadline.resolveFor(assignment, coursework);
+
   /// A display-only opening time used to mix exams and coursework in list
   /// order. Yearless notices use the current Beijing year without promoting
   /// trust, writing a timestamp, or scheduling a reminder.
@@ -402,11 +419,10 @@ class AssignmentQuery {
     List<Assignment> records = const [],
     AssignmentDisplayIndex? index,
     required DateTime now,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) {
     if (!assignment.isExam) {
-      return assignment.timelineTrusted && !assignment.deadlineReadFailed
-          ? assignment.timelineAt
-          : null;
+      return effectiveDeadline(assignment, coursework: coursework)?.at;
     }
     final exam = assignment.exam!;
     if (exam.startTrusted && exam.startAt != null) return exam.startAt;
@@ -629,19 +645,33 @@ class AssignmentQuery {
       (!a.timelineTrusted || a.timelineAt == null);
 
   static List<Assignment> calendarDisplay(
-          List<Assignment> records, DateTime now) =>
-      projectDisplay(records).where((a) => isCalendarDated(a, now)).toList();
+    List<Assignment> records,
+    DateTime now, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) =>
+      projectDisplay(records)
+          .where((a) => isCalendarDated(a, now, coursework: coursework))
+          .toList();
 
-  static bool _hasTrustedPendingDeadline(Assignment assignment) =>
+  static bool _hasTrustedPendingDeadline(
+    Assignment assignment, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) =>
       assignment.isPendingConfirmed &&
-      assignment.timelineTrusted &&
-      (assignment.isExam || !assignment.deadlineReadFailed);
+      effectiveDeadline(assignment, coursework: coursework) != null;
 
   /// Exams are placed by their opening time. An exam ending is not evidence
   /// that this student submitted it, nor does opening make it overdue.
   static AssignmentDeadlineBucket timelineBucketAt(
-      Assignment assignment, DateTime now) {
-    if (!assignment.isExam) return assignment.deadlineBucketAt(now);
+    Assignment assignment,
+    DateTime now, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
+    if (!assignment.isExam) {
+      return coursework.isEmpty
+          ? assignment.deadlineBucketAt(now)
+          : CourseworkDeadline.bucketAt(assignment, now, state: coursework);
+    }
     if (assignment.isCompleted) return AssignmentDeadlineBucket.completed;
     final exam = assignment.exam;
     if (exam == null ||
@@ -667,19 +697,26 @@ class AssignmentQuery {
           assignment.isExam && assignment.exam?.noticeOnly == true,
       };
 
-  static bool isCalendarDated(Assignment assignment, DateTime now) {
+  static bool isCalendarDated(
+    Assignment assignment,
+    DateTime now, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
     if ((!assignment.isExam && assignment.isCompleted) ||
-        isArchivedPastTerm(assignment, now) ||
-        !assignment.timelineTrusted ||
-        assignment.timelineAt == null) {
+        isArchivedPastTerm(assignment, now)) {
       return false;
     }
     if (assignment.isExam) {
+      if (!assignment.timelineTrusted || assignment.timelineAt == null) {
+        return false;
+      }
       final pastDay = dayKey(assignment.timelineAt!).isBefore(dayKey(now));
       return (!assignment.isCompleted && !isExamEnded(assignment, now)) ||
           pastDay;
     }
-    final bucket = assignment.deadlineBucketAt(now);
+    final resolved = effectiveDeadline(assignment, coursework: coursework);
+    if (resolved == null) return false;
+    final bucket = timelineBucketAt(assignment, now, coursework: coursework);
     return bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
         bucket == AssignmentDeadlineBucket.overdue;
   }
@@ -718,6 +755,7 @@ class AssignmentQuery {
     Set<String> followed = const {},
     AssignmentDisplayIndex? index,
     required DateTime now,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) {
     final needle = query.trim().toLowerCase();
     final sourceRecords =
@@ -738,12 +776,17 @@ class AssignmentQuery {
           !a.courseName.toLowerCase().contains(needle)) {
         return false;
       }
-      final due =
-          displayTimelineAt(a, records: sourceRecords, index: index, now: now);
-      final bucket = timelineBucketAt(a, now);
+      final due = displayTimelineAt(
+        a,
+        records: sourceRecords,
+        index: index,
+        now: now,
+        coursework: coursework,
+      );
+      final bucket = timelineBucketAt(a, now, coursework: coursework);
       final trusted = a.isExam
           ? !historical && a.exam!.startTrusted && a.exam!.startAt != null
-          : _hasTrustedPendingDeadline(a);
+          : _hasTrustedPendingDeadline(a, coursework: coursework);
       return switch (deadline) {
         AssignmentDeadlineFilter.all => true,
         AssignmentDeadlineFilter.next7Days => trusted &&
@@ -772,17 +815,24 @@ class AssignmentQuery {
   }
 
   /// Recommendation is independent of the user's chronological list order.
-  static Assignment? nextActionable(List<Assignment> records,
-      {required DateTime now}) {
-    final eligible = currentDisplay(scope(records, {}), now)
-        .where((a) =>
-            a.isPendingConfirmed &&
-            a.timelineTrusted &&
-            (a.isExam || !a.deadlineReadFailed) &&
-            a.timelineAt != null &&
-            a.timelineAt!.isAfter(now))
-        .toList();
-    return sortHome(eligible, HomeSortOrder.deadlineAsc, now: now).firstOrNull;
+  static Assignment? nextActionable(
+    List<Assignment> records, {
+    required DateTime now,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
+    final eligible = currentDisplay(scope(records, {}), now).where((a) {
+      if (!a.isPendingConfirmed) return false;
+      final at = a.isExam
+          ? (a.timelineTrusted ? a.timelineAt : null)
+          : effectiveDeadline(a, coursework: coursework)?.at;
+      return at != null && at.isAfter(now);
+    }).toList();
+    return sortHome(
+      eligible,
+      HomeSortOrder.deadlineAsc,
+      now: now,
+      coursework: coursework,
+    ).firstOrNull;
   }
 
   static List<Assignment> sortHome(
@@ -792,6 +842,7 @@ class AssignmentQuery {
     List<Assignment> sourceRecords = const [],
     AssignmentDisplayIndex? displayIndex,
     bool prioritizeStartOnly = true,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) {
     if (order == HomeSortOrder.grouped) {
       return List<Assignment>.of(records);
@@ -803,13 +854,19 @@ class AssignmentQuery {
           records[index],
           index,
           now,
-          displayTimelineAt(records[index],
-              records: sources, index: displayIndex, now: now),
+          displayTimelineAt(
+            records[index],
+            records: sources,
+            index: displayIndex,
+            now: now,
+            coursework: coursework,
+          ),
           displayEndAt: records[index].exam?.startTrusted == false &&
                   records[index].exam?.endTrusted == false
               ? displayTimelineEndAt(records[index],
                   records: sources, index: displayIndex, now: now)
               : null,
+          coursework: coursework,
         ),
     ];
     prepared.sort((left, right) {
@@ -860,10 +917,14 @@ class AssignmentQuery {
   }
 
   static HomeAssignmentGroups home(
-      List<Assignment> records, DateTime now, Set<String> followed) {
+    List<Assignment> records,
+    DateTime now,
+    Set<String> followed, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
     final g = HomeAssignmentGroups();
     for (final a in currentDisplay(scope(records, followed), now)) {
-      switch (timelineBucketAt(a, now)) {
+      switch (timelineBucketAt(a, now, coursework: coursework)) {
         case AssignmentDeadlineBucket.completed:
           break;
         case AssignmentDeadlineBucket.unconfirmed:
@@ -873,7 +934,9 @@ class AssignmentQuery {
         case AssignmentDeadlineBucket.overdue:
           g.overdue.add(a);
         case AssignmentDeadlineBucket.notExpiredWithDeadline:
-          final deadline = a.timelineAt!;
+          final deadline =
+              displayTimelineAt(a, now: now, coursework: coursework) ??
+                  a.timelineAt!;
           if (deadline.isAfter(now.add(const Duration(days: 30)))) {
             g.far.add(a);
           } else {
@@ -882,19 +945,33 @@ class AssignmentQuery {
       }
     }
     for (final list in [g.near, g.far]) {
-      final sorted = sortHome(list, HomeSortOrder.deadlineAsc, now: now);
+      final sorted = sortHome(
+        list,
+        HomeSortOrder.deadlineAsc,
+        now: now,
+        coursework: coursework,
+      );
       list
         ..clear()
         ..addAll(sorted);
     }
     for (final list in [g.uncertain, g.noDeadline]) {
-      final sorted = sortHome(list, HomeSortOrder.courseName, now: now);
+      final sorted = sortHome(
+        list,
+        HomeSortOrder.courseName,
+        now: now,
+        coursework: coursework,
+      );
       list
         ..clear()
         ..addAll(sorted);
     }
-    final sortedOverdue =
-        sortHome(g.overdue, HomeSortOrder.deadlineAsc, now: now);
+    final sortedOverdue = sortHome(
+      g.overdue,
+      HomeSortOrder.deadlineAsc,
+      now: now,
+      coursework: coursework,
+    );
     g.overdue
       ..clear()
       ..addAll(sortedOverdue);
@@ -904,26 +981,47 @@ class AssignmentQuery {
   /// Groups already projected calendar records by their Beijing date key.
   static Map<DateTime, List<Assignment>> groupCalendarByDay(
     List<Assignment> displayRecords,
-    DateTime now,
-  ) {
+    DateTime now, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
     final byDay = <DateTime, List<Assignment>>{};
     for (final assignment in displayRecords) {
       if (!assignment.isInAssignmentScope ||
-          !isCalendarDated(assignment, now)) {
+          !isCalendarDated(assignment, now, coursework: coursework)) {
         continue;
       }
-      final day = dayKey(assignment.timelineAt!);
+      final at =
+          displayTimelineAt(assignment, now: now, coursework: coursework) ??
+              assignment.timelineAt!;
+      final day = dayKey(at);
       (byDay[day] ??= []).add(assignment);
     }
     for (final items in byDay.values) {
-      items.sort(_compareCalendarItems);
+      items.sort((a, b) => _compareCalendarItems(a, b, coursework: coursework));
     }
     return byDay;
   }
 
-  static int _compareCalendarItems(Assignment a, Assignment b) {
-    final time = a.timelineAt!.compareTo(b.timelineAt!);
-    return time != 0 ? time : Assignment.compareByDeadline(a, b);
+  static int _compareCalendarItems(
+    Assignment a,
+    Assignment b, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
+    final la = a.isExam
+        ? a.timelineAt
+        : effectiveDeadline(a, coursework: coursework)?.at;
+    final rb = b.isExam
+        ? b.timelineAt
+        : effectiveDeadline(b, coursework: coursework)?.at;
+    if (la != null && rb != null) {
+      final time = la.compareTo(rb);
+      if (time != 0) return time;
+    } else if (la != null) {
+      return -1;
+    } else if (rb != null) {
+      return 1;
+    }
+    return Assignment.compareByDeadline(a, b);
   }
 
   static List<Assignment> forDay(
@@ -931,11 +1029,16 @@ class AssignmentQuery {
     DateTime day,
     Set<String> followed, {
     required DateTime now,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) =>
       projectDisplay(scope(records, followed)).where((assignment) {
-        return isCalendarDated(assignment, now) &&
-            dayKey(assignment.timelineAt!) ==
-                DateTime(day.year, day.month, day.day);
+        if (!isCalendarDated(assignment, now, coursework: coursework)) {
+          return false;
+        }
+        final at =
+            displayTimelineAt(assignment, now: now, coursework: coursework) ??
+                assignment.timelineAt!;
+        return dayKey(at) == DateTime(day.year, day.month, day.day);
       }).toList()
-        ..sort(_compareCalendarItems);
+        ..sort((a, b) => _compareCalendarItems(a, b, coursework: coursework));
 }

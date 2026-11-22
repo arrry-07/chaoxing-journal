@@ -16,7 +16,10 @@ import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
+import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
+import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -961,6 +964,175 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+      'Phase 2B detail manual deadline picker, gate boundaries, past label, and official takeover clear',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final now = DateTime.utc(2026, 11, 20, 4); // 12:00 Beijing
+    const account = 'detail-2b-student';
+    final session = _DetailMemorySession(account);
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount(account);
+
+    final untrustedWork = Assignment(
+      id: 'cx:work:1:2:untrusted',
+      courseName: '计算机网络',
+      title: '官方截止待确认作业',
+      deadlineAt: null,
+      deadlineTrusted: false,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final noDeadlineWork = Assignment(
+      id: 'cx:work:1:2:nolimit',
+      courseName: '计算机网络',
+      title: '确认无截止日期作业',
+      deadlineAt: null,
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final trustedWork = Assignment(
+      id: 'cx:work:1:2:trusted',
+      courseName: '计算机网络',
+      title: '可信官方截止作业',
+      deadlineAt: now.add(const Duration(days: 6)),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final takenOverWork = Assignment(
+      id: 'cx:work:1:2:taken',
+      courseName: '计算机网络',
+      title: '被官方接管对比作业',
+      deadlineAt: DateTime.utc(2026, 11, 28, 15, 59),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    await repo.mergeAndSave(
+      [untrustedWork, noDeadlineWork, trustedWork, takenOverWork],
+      completeSync: true,
+    );
+    await repo.saveCourseworkState(
+      LocalCourseworkState().withEntry(
+        takenOverWork.id,
+        const [],
+        LocalCourseworkEntry(
+          manualDeadlineAt: DateTime.utc(2026, 11, 24, 15, 59),
+          officialTakenOver: true,
+        ),
+      ),
+      account,
+    );
+
+    final store = _RefinementStore(
+      repository: repo,
+      sessionStore: session,
+      notificationService: _DetailNoopNotifications(),
+      widgetSnapshotService: _DetailNoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    Future<void> mountDetail(String id, {String keyTag = ''}) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 900);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: AssignmentDetailScreen(
+            key: ValueKey('detail-$id-$keyTag'),
+            store: store,
+            assignmentId: id,
+            clock: () => now,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    // Confirmed no-deadline & trusted official show NO manual set button.
+    await mountDetail(noDeadlineWork.id);
+    expect(find.byKey(const ValueKey('assignment-set-manual-deadline')),
+        findsNothing);
+    expect(find.byKey(const ValueKey('assignment-clear-manual-deadline')),
+        findsNothing);
+
+    await mountDetail(trustedWork.id);
+    expect(find.byKey(const ValueKey('assignment-set-manual-deadline')),
+        findsNothing);
+
+    // Untrusted work shows set button -> pick date (Nov 25) + time (default 23:59) -> saves cleanly.
+    await mountDetail(untrustedWork.id);
+    final setBtn = find.byKey(const ValueKey('assignment-set-manual-deadline'));
+    expect(setBtn, findsOneWidget);
+    expect(find.text('手动设置截止时间'), findsOneWidget);
+    await tester.ensureVisible(setBtn);
+    await tester.tap(setBtn);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('25'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('手动截止'), findsOneWidget);
+    expect(find.text('手动截止（官方待确认）'), findsOneWidget);
+    expect(find.text('2026年11月25日 23:59'), findsOneWidget);
+    expect(find.text('修改手动截止'), findsOneWidget);
+    expect(find.text('清除手动截止'), findsOneWidget);
+    expect(
+      store.manualDeadlineFor(untrustedWork)!.toUtc(),
+      DateTime.utc(2026, 11, 25, 15, 59),
+    );
+
+    // Clear manual deadline removes manual row and restores default state.
+    final clearBtn =
+        find.byKey(const ValueKey('assignment-clear-manual-deadline'));
+    await tester.ensureVisible(clearBtn);
+    await tester.tap(clearBtn);
+    await tester.pumpAndSettle();
+    expect(store.manualDeadlineFor(untrustedWork), isNull);
+    expect(find.text('手动设置截止时间'), findsOneWidget);
+
+    // Past manual deadline renders distinct '手动截止已过'.
+    expect(
+      await store.setManualDeadline(
+        untrustedWork,
+        now.subtract(const Duration(hours: 2)),
+      ),
+      isTrue,
+    );
+    await mountDetail(untrustedWork.id, keyTag: 'past');
+    expect(find.text('手动截止已过'), findsOneWidget);
+
+    // Taken-over work displays both official & old manual side by side with clear-only action.
+    await mountDetail(takenOverWork.id);
+    expect(find.byKey(const ValueKey('assignment-set-manual-deadline')),
+        findsNothing);
+    expect(find.text('2026年11月28日 23:59'), findsOneWidget);
+    expect(find.text('手动旧记录（已被官方接管）'), findsOneWidget);
+    expect(find.text('2026年11月24日 23:59'), findsOneWidget);
+    final clearOldBtn =
+        find.byKey(const ValueKey('assignment-clear-manual-deadline'));
+    expect(clearOldBtn, findsOneWidget);
+    expect(find.text('清除手动旧记录'), findsOneWidget);
+    await tester.ensureVisible(clearOldBtn);
+    await tester.tap(clearOldBtn);
+    await tester.pumpAndSettle();
+    expect(store.manualDeadlineFor(takenOverWork), isNull);
+    expect(find.text('手动旧记录（已被官方接管）'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 GoRouter _router(
@@ -1099,13 +1271,87 @@ class _PinWriteFailureRepository extends LocalAssignmentRepository {
 }
 
 class _RefinementStore extends AssignmentStore {
-  _RefinementStore({super.repository})
-      : super(
-          sessionStore: SecureSessionStore(),
-          notificationService: LocalNotificationService(),
-          widgetSnapshotService: WidgetSnapshotService(),
+  _RefinementStore({
+    super.repository,
+    SecureSessionStore? sessionStore,
+    LocalNotificationService? notificationService,
+    WidgetSnapshotService? widgetSnapshotService,
+  }) : super(
+          sessionStore: sessionStore ?? SecureSessionStore(),
+          notificationService:
+              notificationService ?? LocalNotificationService(),
+          widgetSnapshotService:
+              widgetSnapshotService ?? WidgetSnapshotService(),
         );
 
   @override
   Future<bool> runDueAutoSync({DateTime? now}) async => false;
+}
+
+class _DetailMemorySession extends SecureSessionStore {
+  _DetailMemorySession(this.account);
+
+  String? account;
+  String? password = 'pw';
+
+  @override
+  Future<void> saveChaoxingAccount({
+    required String account,
+    required String password,
+    String? displayName,
+    String? avatarUrl,
+  }) async {
+    this.account = account;
+    this.password = password;
+  }
+
+  @override
+  Future<String?> readChaoxingAccount() async => account;
+
+  @override
+  Future<String?> readChaoxingPassword() async => password;
+
+  @override
+  Future<String?> readChaoxingDisplayName() async => '细节验证';
+
+  @override
+  Future<String?> readChaoxingAvatarUrl() async => null;
+
+  @override
+  Future<void> clear() async {
+    account = null;
+    password = null;
+  }
+
+  @override
+  Future<void> clearWebSession() async {}
+}
+
+class _DetailNoopNotifications extends LocalNotificationService {
+  @override
+  Future<bool> isLegacyAssignmentMigrationComplete() async => true;
+
+  @override
+  Future<void> removeLegacyAssignmentSchedules() async {}
+
+  @override
+  Future<void> cancelPrivateSchedules() async {}
+
+  @override
+  Future<void> rescheduleManual(List<ManualEntry> items) async {}
+
+  @override
+  Future<void> rescheduleSummary(List<Assignment> items,
+      PersonalWorkspace personal, DateTime? lastSync) async {}
+
+  @override
+  Future<void> rescheduleAssignments(
+    List<Assignment> assignments, {
+    List<int>? offsetsMinutes,
+  }) async {}
+}
+
+class _DetailNoopWidgetSnapshotService extends WidgetSnapshotService {
+  @override
+  Future<void> saveAssignments(List<Assignment> assignments) async {}
 }

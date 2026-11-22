@@ -6,6 +6,7 @@ import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
@@ -459,6 +460,61 @@ void main() {
         [unknown.courseTaskKey, far.courseTaskKey, today.courseTaskKey],
       );
     });
+  });
+
+  testWidgets(
+      'Phase 2B home card displays manual label with official pending and keeps manual overdue at bottom',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 20, 4); // 12:00 Beijing
+    final session = f.Session()..account = 'home-manual-student';
+    final futureUntrusted = _work(
+      'future-m',
+      title: '未确认但设了未来手动截止',
+      course: '离散数学',
+      due: null,
+      trusted: false,
+    );
+    final pastUntrusted = _work(
+      'past-m',
+      title: '已过手动截止的作业',
+      course: '算法设计',
+      due: null,
+      trusted: false,
+    );
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('home-manual-student');
+    await repo
+        .mergeAndSave([futureUntrusted, pastUntrusted], completeSync: true);
+    final store = _PinTimelineStore(sessionStore: session, clock: () => now);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    expect(
+      await store.setManualDeadline(
+        futureUntrusted,
+        now.add(const Duration(days: 1)),
+      ),
+      isTrue,
+    );
+    expect(
+      await store.setManualDeadline(
+        pastUntrusted,
+        now.subtract(const Duration(hours: 3)),
+      ),
+      isTrue,
+    );
+
+    await _mountRoutedHomeWithClock(tester, store, () => now);
+    expect(find.text('手动'), findsNWidgets(2));
+    expect(find.textContaining('官方待确认'), findsNWidgets(2));
+    expect(find.text('手动截止已过'), findsOneWidget);
+    expect(find.text('已逾期置底'), findsOneWidget);
+
+    final cards =
+        tester.widgetList<AssignmentCard>(find.byType(AssignmentCard)).toList();
+    expect(
+      cards.map((c) => c.assignment.title).toList(),
+      ['未确认但设了未来手动截止', '已过手动截止的作业'],
+    );
   });
 }
 
