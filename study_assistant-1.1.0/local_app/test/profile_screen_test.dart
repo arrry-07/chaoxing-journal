@@ -59,16 +59,16 @@ void main() {
 
     final courses = tester
         .widget<Card>(find.byKey(const ValueKey('profile-group-courses')));
-    expect(courses.color, Color.lerp(Journal.sheet, Journal.sage, .35));
+    expect(courses.color, JournalPalette.light.sheet);
     expect(
       tester.widget<Icon>(find.byIcon(Icons.school_outlined)).color,
       Journal.ink,
     );
 
-    for (final (title, accent, header) in [
-      ('学习与同步', Journal.ink, Journal.sage),
-      ('数据与安全', Journal.ink, Journal.sage),
-      ('关于与更新', Journal.ink, Journal.sage),
+    for (final (title, accent) in [
+      ('学习与同步', Journal.ink),
+      ('数据与安全', Journal.ink),
+      ('关于与更新', Journal.ink),
     ]) {
       await tester.scrollUntilVisible(
         find.text(title),
@@ -81,7 +81,10 @@ void main() {
       expect(titleText.style?.color, foreground);
       final headerBox = tester
           .widget<Container>(find.byKey(ValueKey('profile-group-$title')));
-      expect(headerBox.color, Color.lerp(Journal.sheet, header, .35));
+      expect(
+        (headerBox.decoration as BoxDecoration?)?.color,
+        JournalPalette.light.sectionHeaderFill,
+      );
       if (title == '数据与安全') {
         final healthIcon = find.byIcon(Icons.notifications_none_rounded);
         expect(tester.widget<Icon>(healthIcon).color, foreground);

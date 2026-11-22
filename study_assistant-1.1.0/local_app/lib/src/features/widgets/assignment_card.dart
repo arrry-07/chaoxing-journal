@@ -355,8 +355,14 @@ class AssignmentCard extends StatelessWidget {
     final verticalPad = compact ? 8.5 : 12.0;
     const railGap = 10.0;
     final contentLeftInset = railWidth + railGap;
+    final contentRight =
+        contentPadding.resolve(Directionality.of(context)).right;
     final hasInlineLaunch = onOpenAssignment != null && !largeText;
-    final titlePadding = EdgeInsets.only(right: hasInlineLaunch ? 36 : 0);
+    final titlePadding = EdgeInsets.only(
+      right: hasInlineLaunch
+          ? (54.0 - contentRight).clamp(0.0, 54.0).toDouble()
+          : 0.0,
+    );
 
     final bodyColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

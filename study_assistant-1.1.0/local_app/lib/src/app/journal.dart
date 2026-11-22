@@ -29,7 +29,7 @@ class Journal {
 
   static const displayFamily = 'LXGW WenKai Screen';
   static const titleFamily = displayFamily;
-  static const bodyFamily = 'sans-serif';
+  static const bodyFamily = displayFamily;
   static const bodyFallback = [
     'HarmonyOS Sans SC',
     'MiSans',
@@ -59,7 +59,7 @@ class Journal {
     fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
     fontSize: 13.5,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w400,
     height: 1.35,
     fontFeatures: [FontFeature.tabularFigures()],
     color: muted,
@@ -76,7 +76,7 @@ class Journal {
     fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
     fontSize: 15.5,
-    fontWeight: FontWeight.w500,
+    fontWeight: FontWeight.w400,
     height: 1.38,
     color: ink,
   );
@@ -92,7 +92,7 @@ class Journal {
     fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
     fontSize: 14.5,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w400,
     height: 1.3,
     fontFeatures: [FontFeature.tabularFigures()],
     color: ink,
@@ -110,7 +110,7 @@ class Journal {
     fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
     fontSize: 12.5,
-    fontWeight: FontWeight.w500,
+    fontWeight: FontWeight.w400,
     height: 1.2,
     fontFeatures: [FontFeature.tabularFigures()],
     color: ink,

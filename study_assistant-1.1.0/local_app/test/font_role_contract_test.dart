@@ -62,8 +62,10 @@ bool _wrongRole({
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('main page headings use WenKai while UI copy uses sans-serif',
+  testWidgets('main page headings and UI copy use WenKai across the app',
       (tester) async {
+    expect(Journal.titleFamily, 'LXGW WenKai Screen');
+    expect(Journal.bodyFamily, 'LXGW WenKai Screen');
     await initializeDateFormatting('zh_CN');
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     tester.view.physicalSize = const Size(420, 900);
@@ -119,8 +121,7 @@ void main() {
     );
   });
 
-  testWidgets(
-      'settings, inputs, dialogs and floating navigation use modern sans-serif',
+  testWidgets('settings, inputs, dialogs and floating navigation use WenKai',
       (tester) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     tester.view.physicalSize = const Size(420, 900);
@@ -204,7 +205,7 @@ void main() {
     }
   });
 
-  testWidgets('font role contract rejects bold headlines and WenKai body copy',
+  testWidgets('font role contract rejects bold headlines and sans body text',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: StudyAssistantTheme.light,
@@ -217,7 +218,7 @@ void main() {
               fontWeight: FontWeight.w700,
             ),
           ),
-          Text('错误正文', style: TextStyle(fontFamily: Journal.titleFamily)),
+          Text('错误正文', style: TextStyle(fontFamily: 'sans-serif')),
         ]),
       ),
     ));
