@@ -24,6 +24,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
+import 'src/app/app_back_navigation_policy.dart';
 import 'src/app/app_deep_links.dart';
 import 'src/app/app_shell.dart';
 import 'src/app/journal_binding.dart';
@@ -204,11 +205,15 @@ class StudyAssistantApp extends StatefulWidget {
     required this.assignmentStore,
     required this.notificationService,
     this.updateController,
+    this.clock,
+    this.onExitApp,
   });
 
   final AssignmentStore assignmentStore;
   final LocalNotificationService notificationService;
   final AppUpdateController? updateController;
+  final DateTime Function()? clock;
+  final Future<void> Function()? onExitApp;
 
   @override
   State<StudyAssistantApp> createState() => _StudyAssistantAppState();
@@ -220,6 +225,11 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _leaveGuard = UnsavedEditGuard();
   final _notificationFeedback = TransientFeedbackController();
+  final _overlayResetSignal = OverlayResetNotifier();
+  late final AppNavigationObserver _rootNavObserver =
+      AppNavigationObserver(_overlayResetSignal.markChanged);
+  late final AppNavigationObserver _shellNavObserver =
+      AppNavigationObserver(_overlayResetSignal.markChanged);
   late final GoRouter _router;
   late final AppUpdateController _updates;
   bool _pendingUpdatePrompt = false;
@@ -318,6 +328,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     WidgetsBinding.instance.removeObserver(this);
     assignmentStore.removeListener(_handleStoreChanged);
     _notificationFeedback.dispose();
+    _overlayResetSignal.dispose();
     if (widget.updateController == null) _updates.dispose();
     _router.dispose();
     widget.notificationService.setPayloadHandler(null);
@@ -355,6 +366,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
         platformUri != null && AppDeepLinks.isOwnedNotificationUri(platformUri);
     return GoRouter(
       navigatorKey: _navigatorKey,
+      observers: [_rootNavObserver],
       refreshListenable: assignmentStore.authListenable,
       // go_router 14.8.1 _effectiveInitialLocation rebuilds an empty-path
       // platform URI as Uri(path: '/', queryParameters: {}). That loses the
@@ -375,9 +387,13 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
           ),
         ),
         ShellRoute(
+          observers: [_shellNavObserver],
           builder: (_, __, child) => AppShell(
             assignmentStore: assignmentStore,
             leaveGuard: _leaveGuard,
+            clock: widget.clock,
+            onExitApp: widget.onExitApp,
+            overlayResetListenable: _overlayResetSignal,
             child: child,
           ),
           routes: [

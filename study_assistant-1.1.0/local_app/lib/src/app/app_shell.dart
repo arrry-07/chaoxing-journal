@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/widgets/journal_floating_nav_bar.dart';
 import '../features/widgets/update_scope.dart';
 import '../services/assignment_store.dart';
+import 'app_back_navigation_policy.dart';
 import 'journal.dart';
 import 'journal_motion.dart';
 import 'transient_feedback.dart';
@@ -17,11 +19,17 @@ class AppShell extends StatefulWidget {
     required this.assignmentStore,
     required this.child,
     this.leaveGuard,
+    this.clock,
+    this.onExitApp,
+    this.overlayResetListenable,
   });
 
   final AssignmentStore assignmentStore;
   final Widget child;
   final UnsavedEditGuard? leaveGuard;
+  final DateTime Function()? clock;
+  final Future<void> Function()? onExitApp;
+  final Listenable? overlayResetListenable;
 
   static const Set<String> primaryTabPaths = {
     '/assignments',
@@ -65,10 +73,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   UnsavedEditGuard? _leaveGuard;
   GoRouter? _boundRouter;
   Listenable? _routerListenable;
+  late AppBackNavigationPolicy _backPolicy;
+  final _exitFeedback = TransientFeedbackController();
+  bool _handlingRootBack = false;
+  String? _lastKnownUri;
+  late int _lastAccountEpoch;
+  String? _lastAccountHash;
+  bool? _lastRouteIsCurrent;
 
   @override
   void initState() {
     super.initState();
+    _backPolicy = AppBackNavigationPolicy(clock: widget.clock);
+    _lastAccountEpoch = widget.assignmentStore.accountEpoch;
+    _lastAccountHash = widget.assignmentStore.accountHash;
+    widget.assignmentStore.addListener(_handleStoreIdentityChange);
+    widget.overlayResetListenable?.addListener(_handleOverlayReset);
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.assignmentStore.runDueAutoSync();
@@ -76,21 +96,79 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   @override
+  void didUpdateWidget(covariant AppShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.clock != widget.clock) {
+      _backPolicy = AppBackNavigationPolicy(clock: widget.clock);
+    }
+    if (oldWidget.assignmentStore != widget.assignmentStore) {
+      oldWidget.assignmentStore.removeListener(_handleStoreIdentityChange);
+      _lastAccountEpoch = widget.assignmentStore.accountEpoch;
+      _lastAccountHash = widget.assignmentStore.accountHash;
+      widget.assignmentStore.addListener(_handleStoreIdentityChange);
+      _resetExitWindow();
+    }
+    if (oldWidget.overlayResetListenable != widget.overlayResetListenable) {
+      oldWidget.overlayResetListenable?.removeListener(_handleOverlayReset);
+      widget.overlayResetListenable?.addListener(_handleOverlayReset);
+      _resetExitWindow();
+    }
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _leaveGuard = widget.leaveGuard ?? UnsavedEditGuardScope.maybeOf(context);
+    final isCurrent = ModalRoute.of(context)?.isCurrent ?? true;
+    if (_lastRouteIsCurrent != null && _lastRouteIsCurrent != isCurrent) {
+      _resetExitWindow();
+    }
+    _lastRouteIsCurrent = isCurrent;
   }
 
   @override
   void dispose() {
     _returnTimer?.cancel();
+    widget.assignmentStore.removeListener(_handleStoreIdentityChange);
+    widget.overlayResetListenable?.removeListener(_handleOverlayReset);
+    _routerListenable?.removeListener(_handleRouteChange);
+    _exitFeedback.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _resetExitWindow() {
+    _backPolicy.resetExitWindow();
+    _exitFeedback.dismiss();
+  }
+
+  void _handleOverlayReset() {
+    _backPolicy.resetExitWindow();
+    if (mounted) _exitFeedback.dismiss();
+  }
+
+  void _handleStoreIdentityChange() {
+    final epoch = widget.assignmentStore.accountEpoch;
+    final hash = widget.assignmentStore.accountHash;
+    if (epoch == _lastAccountEpoch && hash == _lastAccountHash) return;
+    _lastAccountEpoch = epoch;
+    _lastAccountHash = hash;
+    _resetExitWindow();
+  }
+
+  void _handleRouteChange() {
+    final router = _boundRouter;
+    if (router == null) return;
+    final nextUri = AppShell.currentUriOf(router).toString();
+    if (nextUri == _lastKnownUri) return;
+    _lastKnownUri = nextUri;
+    _resetExitWindow();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      _resetExitWindow();
       _returnTimer?.cancel();
       _returnTimer = Timer(const Duration(milliseconds: 600), () async {
         await widget.assignmentStore.checkReturnedAssignment();
@@ -106,11 +184,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final router = GoRouter.of(context);
     if (!identical(_boundRouter, router)) {
+      _routerListenable?.removeListener(_handleRouteChange);
       _boundRouter = router;
       _routerListenable = Listenable.merge([
         router.routerDelegate,
         router.routeInformationProvider,
       ]);
+      _lastKnownUri = AppShell.currentUriOf(router).toString();
+      _routerListenable!.addListener(_handleRouteChange);
     }
     return ListenableBuilder(
       listenable: _routerListenable!,
@@ -120,70 +201,145 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ? resolved
             : GoRouterState.of(context).matchedLocation;
         final showTabBar = AppShell.primaryTabPaths.contains(location);
+        final canPopRoute = router.canPop();
         final updates = AppUpdateScope.maybeOf(context);
 
-        return Scaffold(
-          extendBody: showTabBar,
-          body: SafeArea(bottom: !showTabBar, child: widget.child),
-          bottomNavigationBar: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AnimatedBuilder(
-                  animation: widget.assignmentStore,
-                  builder: (context, _) {
-                    final message = widget.assignmentStore.returnCheckMessage;
-                    if (message == null) return const SizedBox.shrink();
-                    final epoch = widget.assignmentStore.accountEpoch;
-                    return TimedReturnCheck(
-                      key: ValueKey((epoch, message)),
-                      message: message,
-                      onDismiss: () {
-                        if (widget.assignmentStore.accountEpoch == epoch &&
-                            widget.assignmentStore.returnCheckMessage ==
-                                message) {
-                          widget.assignmentStore.dismissReturnCheck();
-                        }
-                      },
-                    );
-                  },
-                ),
-                if (updates != null) UpdateDownloadBanner(controller: updates),
-                AnimatedSwitcher(
-                  duration: JournalMotion.duration(
-                    context,
-                    const Duration(milliseconds: 200),
+        return PopScope(
+          canPop: canPopRoute,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            unawaited(_handleRootBack(router));
+          },
+          child: Scaffold(
+            extendBody: showTabBar,
+            body: SafeArea(bottom: !showTabBar, child: widget.child),
+            bottomNavigationBar: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedBuilder(
+                    animation: widget.assignmentStore,
+                    builder: (context, _) {
+                      final message = widget.assignmentStore.returnCheckMessage;
+                      if (message == null) return const SizedBox.shrink();
+                      final epoch = widget.assignmentStore.accountEpoch;
+                      return TimedReturnCheck(
+                        key: ValueKey((epoch, message)),
+                        message: message,
+                        onDismiss: () {
+                          if (widget.assignmentStore.accountEpoch == epoch &&
+                              widget.assignmentStore.returnCheckMessage ==
+                                  message) {
+                            widget.assignmentStore.dismissReturnCheck();
+                          }
+                        },
+                      );
+                    },
                   ),
-                  // Leaving a primary tab removes the bar at once: an outgoing
-                  // bar would keep reserving layout height for 200ms and then
-                  // make the pushed page jump when it finally disappeared.
-                  reverseDuration: Duration.zero,
-                  switchInCurve: JournalMotion.easeOut,
-                  switchOutCurve: JournalMotion.easeOut,
-                  transitionBuilder: (child, animation) => SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, 0.35),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: FadeTransition(opacity: animation, child: child),
+                  if (updates != null)
+                    UpdateDownloadBanner(controller: updates),
+                  AnimatedSwitcher(
+                    duration: JournalMotion.duration(
+                      context,
+                      const Duration(milliseconds: 200),
+                    ),
+                    // Leaving a primary tab removes the bar at once: an outgoing
+                    // bar would keep reserving layout height for 200ms and then
+                    // make the pushed page jump when it finally disappeared.
+                    reverseDuration: Duration.zero,
+                    switchInCurve: JournalMotion.easeOut,
+                    switchOutCurve: JournalMotion.easeOut,
+                    transitionBuilder: (child, animation) => SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0, 0.35),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: FadeTransition(opacity: animation, child: child),
+                    ),
+                    child: showTabBar
+                        ? JournalFloatingNavBar(
+                            key: const ValueKey('journal-floating-nav'),
+                            selectedIndex: _indexFor(location),
+                            onSelected: (index) =>
+                                unawaited(_selectDestination(index)),
+                          )
+                        : const SizedBox.shrink(
+                            key: ValueKey('journal-floating-nav-hidden'),
+                          ),
                   ),
-                  child: showTabBar
-                      ? JournalFloatingNavBar(
-                          key: const ValueKey('journal-floating-nav'),
-                          selectedIndex: _indexFor(location),
-                          onSelected: (index) =>
-                              unawaited(_selectDestination(index)),
-                        )
-                      : const SizedBox.shrink(
-                          key: ValueKey('journal-floating-nav-hidden'),
-                        ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
       },
+    );
+  }
+
+  Future<void> _handleRootBack(GoRouter router) async {
+    if (_handlingRootBack || !mounted) return;
+    _handlingRootBack = true;
+    final epoch = widget.assignmentStore.accountEpoch;
+    try {
+      final currentUri = AppShell.currentUriOf(router);
+      final canPop = router.canPop();
+      final action = _backPolicy.decide(
+        currentUri: currentUri,
+        canPopNavigator: canPop,
+      );
+      switch (action) {
+        case AppBackAction.popNavigator:
+          if (canPop) await router.routerDelegate.popRoute();
+          return;
+        case AppBackAction.goHome:
+          await _navigateHomeOnBack(router, epoch);
+          return;
+        case AppBackAction.armHomeExit:
+          _showExitArmFeedback();
+          return;
+        case AppBackAction.exitApp:
+          _exitFeedback.dismiss();
+          final exit = widget.onExitApp ?? SystemNavigator.pop;
+          await exit();
+          return;
+      }
+    } finally {
+      _handlingRootBack = false;
+    }
+  }
+
+  Future<void> _navigateHomeOnBack(GoRouter router, int epoch) async {
+    void goHome() {
+      if (!mounted || widget.assignmentStore.accountEpoch != epoch) return;
+      _resetExitWindow();
+      router.go('/assignments');
+    }
+
+    final guard = _leaveGuard;
+    if (guard == null) {
+      goHome();
+      return;
+    }
+    await guard.navigate(
+      isCurrent: () => mounted && widget.assignmentStore.accountEpoch == epoch,
+      action: goHome,
+    );
+  }
+
+  void _showExitArmFeedback() {
+    if (!mounted) return;
+    final journal = Journal.of(context);
+    _exitFeedback.show(
+      context,
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: journal.ink,
+        content: Text(
+          '再滑一次退出课业手记',
+          style: journal.metadata.copyWith(color: journal.onPrimaryFill),
+        ),
+      ),
     );
   }
 
@@ -200,6 +356,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       };
       if (to == null) return;
       if (to != from) {
+        _resetExitWindow();
         JournalMotion.tap(widget.assignmentStore.display);
       }
       router.go(to);
