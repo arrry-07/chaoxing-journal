@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../app/app_version.dart';
 import '../../app/journal.dart';
+import '../../app/transient_feedback.dart';
 import '../../services/app_update_controller.dart';
 import '../../services/app_update_service.dart';
 import '../../services/external_link_service.dart';
@@ -82,8 +83,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
       if (!opened) throw StateError('browser unavailable');
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('无法打开浏览器，请稍后重试')));
+        showJournalMessage(context, '无法打开浏览器，请稍后重试');
       }
     }
   }

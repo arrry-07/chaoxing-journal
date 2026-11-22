@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../app/journal.dart';
+import '../app/transient_feedback.dart';
 import '../local/chaoxing_local_client.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_store.dart';
@@ -438,8 +439,6 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       };
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showJournalMessage(context, message);
   }
 }

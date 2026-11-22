@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../services/assignment_store.dart';
 import 'agreement_screen.dart';
+import 'widgets/journal_buttons.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
@@ -78,37 +79,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   _LoginErrorCard(message: widget.store.error!),
                 ],
                 const SizedBox(height: 22),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor:
-                          canLogin ? journal.primaryFill : journal.parchment,
-                      foregroundColor: journal.onPrimaryFill,
-                      disabledBackgroundColor: journal.parchment,
-                      disabledForegroundColor: journal.muted,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    onPressed: canLogin ? _login : null,
-                    child: widget.store.isLoading
-                        ? SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: journal.onPrimaryFill,
-                            ),
-                          )
-                        : const Text(
-                            '登录学习通',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                  ),
+                JournalPrimaryButton(
+                  label: '登录学习通',
+                  loading: widget.store.isLoading,
+                  onPressed: canLogin ? _login : null,
                 ),
                 const SizedBox(height: 22),
                 _AgreementPanel(

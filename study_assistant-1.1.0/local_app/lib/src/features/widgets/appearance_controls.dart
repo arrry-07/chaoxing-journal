@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/journal.dart';
+import '../../app/transient_feedback.dart';
 import '../../models/display_preferences.dart';
 import '../../services/assignment_store.dart';
 import '../../services/interaction_feedback_service.dart';
@@ -9,7 +10,7 @@ Future<void> saveDisplaySetting(BuildContext context, AssignmentStore store,
     DisplayPreferences next) async {
   final error = await store.saveDisplay(next);
   if (error != null && context.mounted && identical(store.display, next)) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    showJournalMessage(context, error);
   }
 }
 

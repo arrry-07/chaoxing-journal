@@ -266,21 +266,27 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
             JournalGroupedCard(
               padding: const EdgeInsets.all(16),
               children: [
-                Semantics(
-                  liveRegion: true,
-                  child: Text(
-                    _error!,
-                    style: journal.metadata.copyWith(color: journal.berry),
-                  ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _error!,
+                        style: journal.metadata.copyWith(color: journal.berry),
+                      ),
+                    ),
+                    if (explanation == null) ...[
+                      const SizedBox(height: 12),
+                      JournalSecondaryButton(
+                        label: '重新查询',
+                        expanded: false,
+                        onPressed: _loading ? null : () => _load(force: true),
+                      ),
+                    ],
+                  ],
                 ),
-                if (explanation == null) ...[
-                  const SizedBox(height: 12),
-                  JournalSecondaryButton(
-                    label: '重新查询',
-                    expanded: false,
-                    onPressed: _loading ? null : () => _load(force: true),
-                  ),
-                ],
               ],
             ),
             const SizedBox(height: 12),
@@ -317,14 +323,21 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
                 title: '部分证据未读取',
                 padding: const EdgeInsets.all(16),
                 children: [
-                  for (final warning in explanation.queryWarnings)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        '· $warning',
-                        style: journal.metadata.copyWith(color: journal.ochre),
-                      ),
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final warning in explanation.queryWarnings)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text(
+                            '· $warning',
+                            style:
+                                journal.metadata.copyWith(color: journal.ochre),
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ],

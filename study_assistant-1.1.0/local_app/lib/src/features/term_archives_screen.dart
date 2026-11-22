@@ -283,26 +283,33 @@ class TermArchiveDetail extends StatelessWidget {
                       JournalGroupedCard(
                         padding: const EdgeInsets.all(16),
                         children: [
-                          Text(
-                            '只读快照 · ${manualTime(term.createdAt)}',
-                            style: journal.entryTitle,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '作业 ${term.rows.length} 份 · 已完成 ${term.rows.where((r) => r.completed).length} 份 · 提交未知 ${term.rows.where((r) => r.status == 'unknown').length} 份',
-                            style:
-                                journal.metadata.copyWith(color: journal.ink),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '个人安排 ${term.entries.length} 项 · 计划 ${term.plans.length} 项 · 预计总计 $estimatedMinutes 分钟',
-                            style:
-                                journal.metadata.copyWith(color: journal.ink),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '预计耗时来自手动填写，平台状态为保存时的本机记录。',
-                            style: journal.metadata.copyWith(fontSize: 12.5),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '只读快照 · ${manualTime(term.createdAt)}',
+                                style: journal.entryTitle,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '作业 ${term.rows.length} 份 · 已完成 ${term.rows.where((r) => r.completed).length} 份 · 提交未知 ${term.rows.where((r) => r.status == 'unknown').length} 份',
+                                style: journal.metadata
+                                    .copyWith(color: journal.ink),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '个人安排 ${term.entries.length} 项 · 计划 ${term.plans.length} 项 · 预计总计 $estimatedMinutes 分钟',
+                                style: journal.metadata
+                                    .copyWith(color: journal.ink),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '预计耗时来自手动填写，平台状态为保存时的本机记录。',
+                                style:
+                                    journal.metadata.copyWith(fontSize: 12.5),
+                              ),
+                            ],
                           ),
                         ],
                       ),

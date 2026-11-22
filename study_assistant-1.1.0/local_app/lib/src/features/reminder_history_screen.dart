@@ -360,20 +360,27 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
                           child: JournalGroupedCard(
                             padding: const EdgeInsets.all(20),
                             children: [
-                              Semantics(
-                                liveRegion: true,
-                                child: Text(
-                                  _error!,
-                                  textAlign: TextAlign.center,
-                                  style: journal.metadata
-                                      .copyWith(color: journal.berry),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              OutlinedButton(
-                                onPressed:
-                                    _loading ? null : () => _load(reset: true),
-                                child: const Text('重试'),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Semantics(
+                                    liveRegion: true,
+                                    child: Text(
+                                      _error!,
+                                      textAlign: TextAlign.center,
+                                      style: journal.metadata
+                                          .copyWith(color: journal.berry),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  OutlinedButton(
+                                    onPressed: _loading
+                                        ? null
+                                        : () => _load(reset: true),
+                                    child: const Text('重试'),
+                                  ),
+                                ],
                               ),
                             ],
                           ),

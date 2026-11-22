@@ -28,7 +28,12 @@ class AgreementScreen extends StatelessWidget {
         title: Text(kind.title),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          10,
+          16,
+          28 + MediaQuery.paddingOf(context).bottom,
+        ),
         children: [
           for (var i = 0; i < sections.length; i++) ...[
             if (i > 0) const SizedBox(height: 12),

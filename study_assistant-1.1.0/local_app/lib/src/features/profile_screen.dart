@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 
 import '../app/app_version.dart';
 import '../app/journal.dart';
+import '../app/transient_feedback.dart';
 import '../services/app_update_service.dart';
 import '../services/assignment_store.dart';
 import '../services/external_link_service.dart';
@@ -195,8 +196,7 @@ class ProfileScreen extends StatelessWidget {
                           await Clipboard.setData(
                               const ClipboardData(text: _githubUrl));
                           if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('链接已复制')));
+                            showJournalMessage(context, '链接已复制');
                           }
                         },
                         trailingOnPressed: () => _openGithub(context),
@@ -285,20 +285,15 @@ class ProfileScreen extends StatelessWidget {
   }
 
   void _showLogoutFailure(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('退出未完成，请稍后重试；本机记录可能尚未全部清理')),
-    );
+    showJournalMessage(context, '退出未完成，请稍后重试；本机记录可能尚未全部清理');
   }
 
   Future<void> _openGithub(BuildContext context, {bool issues = false}) async {
-    final messenger = ScaffoldMessenger.of(context);
     final opened = await (externalLinkService ?? ExternalLinkService()).openUrl(
       issues ? '$_githubUrl/issues' : _githubUrl,
     );
-    if (!opened) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('无法打开 GitHub 链接，请检查浏览器或网络')),
-      );
+    if (!opened && context.mounted) {
+      showJournalMessage(context, '无法打开 GitHub 链接，请检查浏览器或网络');
     }
   }
 

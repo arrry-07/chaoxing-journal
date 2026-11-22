@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 class Journal {
@@ -242,6 +244,17 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
 
   Color get accent => slate;
 
+  /// Action text on the inverted (ink-filled) snackbar. Dark mode inverts the
+  /// fill to warm ivory, so the action needs a deep blue to stay >= 4.5:1.
+  Color get snackActionColor => isDark ? const Color(0xFF2B4EB8) : slateBg;
+
+  /// Segmented control track/thumb: the thumb must read as raised above the
+  /// track in both themes (dark: lighter elevated thumb on a deeper track).
+  Color get segmentTrack => isDark ? const Color(0xFF21201D) : parchment;
+  Color get segmentThumb => isDark ? sheetElevated : sheet;
+  Border? get segmentBorder =>
+      isDark ? Border.all(color: cardBorder, width: 0.7) : null;
+
   Color get sectionHeaderFill => Color.lerp(sheet, parchment, 0.34)!;
 
   TextStyle get display =>
@@ -380,8 +393,17 @@ class JournalLayout {
 
   static const double floatingNavHeight = 62.0;
 
-  static double floatingNavClearance(BuildContext context) =>
-      MediaQuery.paddingOf(context).bottom + 94.0;
+  /// Bottom inset that keeps the last row clear of the floating nav bar.
+  /// Inside AppShell (`Scaffold.extendBody`) `padding.bottom` already includes
+  /// the nav bar and any banners above it, so only a small gap is added; when
+  /// a tab is rendered standalone the device inset plus 94dp is the floor.
+  static double floatingNavClearance(BuildContext context) {
+    final media = MediaQuery.of(context);
+    return math.max(
+      media.padding.bottom + 14.0,
+      media.viewPadding.bottom + 94.0,
+    );
+  }
 
   static bool isLargeText(BuildContext context) =>
       MediaQuery.textScalerOf(context).scale(14) >= 19.5;

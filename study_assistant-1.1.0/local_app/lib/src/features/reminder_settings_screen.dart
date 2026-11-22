@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../app/journal.dart';
 import '../app/journal_motion.dart';
+import '../app/transient_feedback.dart';
 import '../models/reminder_rule_limits.dart';
 import '../services/assignment_store.dart';
 import '../services/background_reminder_gateway.dart';
@@ -1249,9 +1250,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(message)));
+    showJournalMessage(context, message);
   }
 
   String _labelFor(int offsetMinutes) {

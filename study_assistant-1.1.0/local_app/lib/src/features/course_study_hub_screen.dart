@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../app/journal.dart';
 import '../app/journal_motion.dart';
+import '../app/transient_feedback.dart';
 import '../models/course.dart';
 import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
@@ -124,9 +125,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    showJournalMessage(context, message);
   }
 
   Future<DateTime?> _pickDateTime({DateTime? initial}) async {
@@ -939,8 +938,9 @@ class _StudyHubTabBar extends StatelessWidget {
             curve: JournalMotion.easeOut,
             padding: const EdgeInsets.symmetric(vertical: 9),
             decoration: BoxDecoration(
-              color: active ? journal.sheet : Colors.transparent,
+              color: active ? journal.segmentThumb : Colors.transparent,
               borderRadius: BorderRadius.circular(11),
+              border: active ? journal.segmentBorder : null,
               boxShadow: active
                   ? [
                       BoxShadow(
@@ -972,8 +972,9 @@ class _StudyHubTabBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
-        color: journal.parchment,
+        color: journal.segmentTrack,
         borderRadius: BorderRadius.circular(14),
+        border: journal.segmentBorder,
       ),
       child: Row(
         children: [

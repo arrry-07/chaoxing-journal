@@ -150,6 +150,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     context,
                     const Duration(milliseconds: 200),
                   ),
+                  // Leaving a primary tab removes the bar at once: an outgoing
+                  // bar would keep reserving layout height for 200ms and then
+                  // make the pushed page jump when it finally disappeared.
+                  reverseDuration: Duration.zero,
                   switchInCurve: JournalMotion.easeOut,
                   switchOutCurve: JournalMotion.easeOut,
                   transitionBuilder: (child, animation) => SlideTransition(
@@ -234,6 +238,16 @@ class StudyAssistantTheme {
       outline: journal.ruleStrong,
       outlineVariant: journal.rule,
       surfaceContainerHighest: journal.parchment,
+      // Seeded tonal surfaces drift toward cold blue-grey; pin every container
+      // tier to the paper palette so Material 3 pickers/menus stay warm.
+      onSurface: journal.ink,
+      onSurfaceVariant: journal.muted,
+      surfaceDim: journal.paper,
+      surfaceBright: journal.sheetElevated,
+      surfaceContainerLowest: journal.paper,
+      surfaceContainerLow: journal.sheet,
+      surfaceContainer: journal.sheet,
+      surfaceContainerHigh: journal.sheetElevated,
     );
 
     final baseText = Typography.material2021().black.apply(
@@ -312,7 +326,7 @@ class StudyAssistantTheme {
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) =>
             states.contains(WidgetState.selected)
-                ? Colors.white
+                ? journal.onPrimaryFill
                 : journal.muted),
         trackColor: WidgetStateProperty.resolveWith((states) =>
             states.contains(WidgetState.selected)
@@ -328,7 +342,7 @@ class StudyAssistantTheme {
             states.contains(WidgetState.selected)
                 ? journal.accent
                 : Colors.transparent),
-        checkColor: WidgetStateProperty.all(Colors.white),
+        checkColor: WidgetStateProperty.all(journal.onPrimaryFill),
         side: BorderSide(color: journal.ruleStrong, width: 1.4),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
       ),
@@ -361,7 +375,7 @@ class StudyAssistantTheme {
         contentTextStyle: journal.metadata.copyWith(
           color: journal.onPrimaryFill,
         ),
-        actionTextColor: journal.isDark ? journal.slate : journal.slateBg,
+        actionTextColor: journal.snackActionColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
       dialogTheme: DialogThemeData(
@@ -369,6 +383,44 @@ class StudyAssistantTheme {
         surfaceTintColor: Colors.transparent,
         titleTextStyle: journal.section,
         contentTextStyle: journal.metadata.copyWith(color: journal.ink),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+      datePickerTheme: DatePickerThemeData(
+        backgroundColor: journal.sheetElevated,
+        surfaceTintColor: Colors.transparent,
+        headerBackgroundColor: journal.sheetElevated,
+        headerForegroundColor: journal.ink,
+        dividerColor: journal.divider,
+        todayForegroundColor: WidgetStateProperty.resolveWith((states) =>
+            states.contains(WidgetState.selected)
+                ? journal.onPrimaryFill
+                : journal.accent),
+        todayBorder: BorderSide(color: journal.accent),
+        dayForegroundColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return journal.onPrimaryFill;
+          }
+          if (states.contains(WidgetState.disabled)) {
+            return journal.muted.withValues(alpha: 0.5);
+          }
+          return journal.ink;
+        }),
+        dayBackgroundColor: WidgetStateProperty.resolveWith((states) =>
+            states.contains(WidgetState.selected) ? journal.accent : null),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+      timePickerTheme: TimePickerThemeData(
+        backgroundColor: journal.sheetElevated,
+        dialBackgroundColor: journal.parchment,
+        hourMinuteColor: WidgetStateColor.resolveWith((states) =>
+            states.contains(WidgetState.selected)
+                ? journal.sage
+                : journal.parchment),
+        hourMinuteTextColor: WidgetStateColor.resolveWith((states) =>
+            states.contains(WidgetState.selected)
+                ? journal.accent
+                : journal.ink),
+        dayPeriodBorderSide: BorderSide(color: journal.ruleStrong),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
     );

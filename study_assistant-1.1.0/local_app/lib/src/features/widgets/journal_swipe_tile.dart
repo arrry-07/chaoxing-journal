@@ -49,7 +49,11 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
   static const double _maxDrag = 108.0;
 
   late final AnimationController _snapController;
+  // Displayed (rubber-banded) offset and the raw finger travel behind it.
+  // Damping is always derived from the raw value; feeding the displayed value
+  // back into the damping made the tile creep backwards on slow forward drags.
   double _offset = 0.0;
+  double _rawOffset = 0.0;
   bool _crossedRight = false;
   bool _crossedLeft = false;
 
@@ -59,8 +63,27 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
     _snapController = AnimationController.unbounded(vsync: this)
       ..addListener(() {
         if (!mounted) return;
-        setState(() => _offset = _snapController.value);
+        setState(() {
+          _offset = _snapController.value;
+          _rawOffset = _offset;
+        });
       });
+  }
+
+  @override
+  void didUpdateWidget(JournalSwipeTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The revealed action may disappear (item completed, pin no longer
+    // allowed, tile disabled) while the tile is open: never leave it stuck.
+    final lostRight = _offset > 0 && widget.rightAction == null;
+    final lostLeft = _offset < 0 && widget.leftAction == null;
+    if (!widget.enabled || lostRight || lostLeft) {
+      _snapController.stop();
+      _offset = 0.0;
+      _rawOffset = 0.0;
+      _crossedRight = false;
+      _crossedLeft = false;
+    }
   }
 
   @override
@@ -77,9 +100,20 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
     return damped * sign;
   }
 
+  double _undoRubberBand(double displayed, double threshold) {
+    final absVal = displayed.abs();
+    if (absVal <= threshold) return displayed;
+    final raw = threshold + (absVal - threshold) / 0.42;
+    return displayed.isNegative ? -raw : raw;
+  }
+
   void _handleDragStart(DragStartDetails details) {
     if (!widget.enabled) return;
     _snapController.stop();
+    _rawOffset = _undoRubberBand(
+      _offset,
+      _offset >= 0 ? _rightThreshold : _leftThreshold,
+    );
     _crossedRight = false;
     _crossedLeft = false;
   }
@@ -87,9 +121,10 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
   void _handleDragUpdate(DragUpdateDetails details) {
     if (!widget.enabled) return;
     final delta = details.primaryDelta ?? 0.0;
-    var nextRaw = _offset + delta;
+    var nextRaw = _rawOffset + delta;
     if (nextRaw > 0 && widget.rightAction == null) nextRaw = 0;
     if (nextRaw < 0 && widget.leftAction == null) nextRaw = 0;
+    _rawOffset = nextRaw;
 
     final nextOffset = nextRaw >= 0
         ? _applyRubberBand(nextRaw, _rightThreshold, 1.0)
@@ -131,8 +166,10 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
   }
 
   void _snapBack(double velocity) {
+    if (!mounted) return;
     _crossedRight = false;
     _crossedLeft = false;
+    _rawOffset = 0.0;
     if (_offset.abs() < 0.5) {
       setState(() => _offset = 0.0);
       return;
@@ -235,6 +272,7 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
               ),
             ),
           Transform.translate(
+            key: const ValueKey('journal-swipe-foreground'),
             offset: Offset(_offset, 0),
             child: ColoredBox(
               color: _offset.abs() > 0.5 ? journal.sheet : Colors.transparent,

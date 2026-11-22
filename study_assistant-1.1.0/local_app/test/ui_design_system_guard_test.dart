@@ -103,6 +103,58 @@ Directory _resolveFeaturesDir() {
   );
 }
 
+List<File> _dartFiles(Directory dir) => dir
+    .listSync(recursive: true)
+    .whereType<File>()
+    .where((f) => f.path.endsWith('.dart'))
+    .toList()
+  ..sort((a, b) => a.path.compareTo(b.path));
+
+/// Source text between an opening bracket (already consumed at [start]) and
+/// its matching closer.
+String _balancedArgs(String source, int start) {
+  var depth = 1;
+  var i = start;
+  while (i < source.length && depth > 0) {
+    final c = source[i];
+    if ('([{'.contains(c)) depth++;
+    if (')]}'.contains(c)) depth--;
+    i++;
+  }
+  return source.substring(start, i - 1);
+}
+
+/// Top-level comma-separated items of a list literal opened at [start].
+List<String> _directListItems(String source, int start) {
+  final items = <String>[];
+  var depth = 1;
+  var itemStart = start;
+  for (var i = start; i < source.length; i++) {
+    final c = source[i];
+    if ('([{'.contains(c)) {
+      depth++;
+    } else if (')]}'.contains(c)) {
+      depth--;
+      if (depth == 0) {
+        items.add(source.substring(itemStart, i));
+        break;
+      }
+    } else if (c == ',' && depth == 1) {
+      items.add(source.substring(itemStart, i));
+      itemStart = i + 1;
+    }
+  }
+  return items.map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+}
+
+bool _isSpacerItem(String item) {
+  if (RegExp(r'^(?:const\s+)?SizedBox\(').hasMatch(item)) return true;
+  final spread =
+      RegExp(r'^(?:if\s*\([^\[]*\)\s*)?\.\.\.\s*\[').firstMatch(item);
+  if (spread == null) return false;
+  return _directListItems(item, spread.end).any(_isSpacerItem);
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -144,6 +196,56 @@ void main() {
         violations,
         isEmpty,
         reason: 'UI design-system static contract violated:\n'
+            '${violations.join('\n')}',
+      );
+    });
+
+    test('pages route snackbars through the shared feedback entry points', () {
+      final featuresDir = _resolveFeaturesDir();
+      final violations = <String>[];
+      for (final file in _dartFiles(featuresDir)) {
+        final lines = file.readAsLinesSync();
+        for (var i = 0; i < lines.length; i++) {
+          final trimmed = lines[i].trimLeft();
+          if (trimmed.startsWith('//')) continue;
+          if (trimmed.contains('showSnackBar(')) {
+            violations.add('${file.path}:${i + 1}: $trimmed');
+          }
+        }
+      }
+      expect(
+        violations,
+        isEmpty,
+        reason: 'Use showJournalMessage or TransientFeedbackController:\n'
+            '${violations.join('\n')}',
+      );
+    });
+
+    test('JournalGroupedCard children never include bare spacers', () {
+      // The card inserts a divider between direct children, so a SizedBox
+      // spacer there draws stray rules; free-form content goes in one Column.
+      final featuresDir = _resolveFeaturesDir();
+      final violations = <String>[];
+      for (final file in _dartFiles(featuresDir)) {
+        final source = file.readAsStringSync();
+        for (final call in RegExp(r'JournalGroupedCard\(').allMatches(source)) {
+          final args = _balancedArgs(source, call.end);
+          final children = RegExp(r'\bchildren:\s*(?:const\s*)?\[').firstMatch(
+            args,
+          );
+          if (children == null) continue;
+          final items = _directListItems(args, children.end);
+          if (items.any(_isSpacerItem)) {
+            final line =
+                '\n'.allMatches(source.substring(0, call.start)).length;
+            violations.add('${file.path}:${line + 1}');
+          }
+        }
+      }
+      expect(
+        violations,
+        isEmpty,
+        reason: 'Wrap free-form card content in a single Column:\n'
             '${violations.join('\n')}',
       );
     });

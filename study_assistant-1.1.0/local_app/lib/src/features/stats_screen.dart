@@ -456,34 +456,39 @@ class _StatsScreenState extends State<StatsScreen> {
     final name =
         '${group.name}${same.length > 1 ? ' · 分组${same.indexOf(group) + 1}' : ''}';
     final largeText = JournalLayout.isLargeText(context);
-    final pills = Wrap(
-      spacing: 5,
-      runSpacing: 4,
-      alignment: largeText ? WrapAlignment.start : WrapAlignment.end,
-      children: [
-        if (own.pending > 0)
-          _CourseStatPill(
-            text: '待完成 ${own.pending}',
-            fg: journal.ink,
-            bg: journal.parchment,
-            journal: journal,
-          ),
-        if (own.expired > 0)
-          _CourseStatPill(
-            text: '已逾期 ${own.expired}',
-            fg: journal.berry,
-            bg: journal.berryBg,
-            journal: journal,
-          ),
-        if (own.unknown > 0)
-          _CourseStatPill(
-            text: '未知 ${own.unknown}',
-            fg: journal.muted,
-            bg: journal.parchment,
-            journal: journal,
-          ),
-      ],
-    );
+    final pillTexts = [
+      if (own.pending > 0) '待完成 ${own.pending}',
+      if (own.expired > 0) '已逾期 ${own.expired}',
+      if (own.unknown > 0) '未知 ${own.unknown}',
+    ];
+    Widget pillsFor({required bool stacked}) => Wrap(
+          spacing: 5,
+          runSpacing: 4,
+          alignment: stacked ? WrapAlignment.start : WrapAlignment.end,
+          children: [
+            if (own.pending > 0)
+              _CourseStatPill(
+                text: '待完成 ${own.pending}',
+                fg: journal.ink,
+                bg: journal.parchment,
+                journal: journal,
+              ),
+            if (own.expired > 0)
+              _CourseStatPill(
+                text: '已逾期 ${own.expired}',
+                fg: journal.berry,
+                bg: journal.berryBg,
+                journal: journal,
+              ),
+            if (own.unknown > 0)
+              _CourseStatPill(
+                text: '未知 ${own.unknown}',
+                fg: journal.muted,
+                bg: journal.parchment,
+                journal: journal,
+              ),
+          ],
+        );
 
     return InkWell(
       key: ValueKey('stats-course-${group.courseKey ?? group.scope.name}'),
@@ -511,29 +516,48 @@ class _StatsScreenState extends State<StatsScreen> {
                 : CourseMark(group.name, size: 28),
             const SizedBox(width: 8),
             Expanded(
-              child: largeText
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(name, style: journal.entryTitle),
+              child: LayoutBuilder(builder: (context, constraints) {
+                const minNameWidth = 96.0;
+                const gap = 6.0;
+                final pillsWidth = _CourseStatPill.estimateRowWidth(
+                  context,
+                  pillTexts,
+                  spacing: 5,
+                );
+                final stacked = largeText ||
+                    constraints.maxWidth - gap - pillsWidth < minNameWidth;
+                if (stacked) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name, style: journal.entryTitle),
+                      if (pillTexts.isNotEmpty) ...[
                         const SizedBox(height: 6),
-                        pills,
+                        pillsFor(stacked: true),
                       ],
-                    )
-                  : Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: journal.entryTitle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(flex: 0, child: pills),
-                      ],
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: journal.entryTitle,
+                      ),
                     ),
+                    const SizedBox(width: gap),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: constraints.maxWidth - gap - minNameWidth,
+                      ),
+                      child: pillsFor(stacked: false),
+                    ),
+                  ],
+                );
+              }),
             ),
             const SizedBox(width: 4),
             Icon(
@@ -561,21 +585,47 @@ class _CourseStatPill extends StatelessWidget {
   final Color bg;
   final JournalPalette journal;
 
+  static const _padding = EdgeInsets.symmetric(horizontal: 6.5, vertical: 3);
+
+  static TextStyle _style(JournalPalette journal) => journal.pillLabel.copyWith(
+        fontSize: 11.5,
+        fontWeight: FontWeight.w600,
+      );
+
+  /// Measured width of a single-line row of pills at the current text scale.
+  static double estimateRowWidth(
+    BuildContext context,
+    List<String> texts, {
+    required double spacing,
+  }) {
+    if (texts.isEmpty) return 0;
+    final journal = Journal.of(context);
+    final scaler = MediaQuery.textScalerOf(context);
+    var total = spacing * (texts.length - 1);
+    for (final text in texts) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: _style(journal)),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      total += painter.width + _padding.horizontal;
+      painter.dispose();
+    }
+    return total;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
+      padding: _padding,
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Text(
         text,
-        style: journal.pillLabel.copyWith(
-          fontSize: 11.5,
-          color: fg,
-          fontWeight: FontWeight.w600,
-        ),
+        style: _style(journal).copyWith(color: fg),
       ),
     );
   }
@@ -596,11 +646,9 @@ class _StatsRangeSegmentedBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
-        color: journal.isDark ? const Color(0xFF21201D) : journal.parchment,
+        color: journal.segmentTrack,
         borderRadius: BorderRadius.circular(14),
-        border: journal.isDark
-            ? Border.all(color: journal.cardBorder, width: 0.7)
-            : null,
+        border: journal.segmentBorder,
       ),
       child: Row(
         children: [
@@ -617,14 +665,10 @@ class _StatsRangeSegmentedBar extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   decoration: BoxDecoration(
                     color: selected == range
-                        ? (journal.isDark
-                            ? journal.sheetElevated
-                            : journal.sheet)
+                        ? journal.segmentThumb
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(11),
-                    border: selected == range && journal.isDark
-                        ? Border.all(color: journal.cardBorder, width: 0.7)
-                        : null,
+                    border: selected == range ? journal.segmentBorder : null,
                     boxShadow: selected == range
                         ? [
                             BoxShadow(

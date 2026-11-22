@@ -31,6 +31,7 @@ class CalendarScreen extends StatefulWidget {
 class _CalendarScreenState extends State<CalendarScreen>
     with WidgetsBindingObserver {
   static const int _basePageIndex = 1200;
+  static const int _maxWeekRows = 6;
   static const TextStyle _dateStyle = TextStyle(
     fontFamily: Journal.bodyFamily,
     fontFamilyFallback: Journal.bodyFallback,
@@ -544,11 +545,14 @@ class _CalendarScreenState extends State<CalendarScreen>
                         clipBehavior: Clip.hardEdge,
                         decoration: const BoxDecoration(),
                         child: OverflowBox(
+                          // Neighbouring months may need up to six rows while
+                          // they slide in; render that full height and let the
+                          // animated viewport clip to the current month.
                           minHeight: cellHeight,
-                          maxHeight: rowCount * cellHeight,
+                          maxHeight: _maxWeekRows * cellHeight,
                           alignment: Alignment.topCenter,
                           child: SizedBox(
-                            height: rowCount * cellHeight,
+                            height: _maxWeekRows * cellHeight,
                             child: PageView.builder(
                               controller: _pageController,
                               onPageChanged: (index) {

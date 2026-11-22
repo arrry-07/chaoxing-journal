@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../app/app_version.dart';
 import '../app/journal.dart';
+import '../app/transient_feedback.dart';
 import '../services/app_update_service.dart';
 import '../services/external_link_service.dart';
 import 'widgets/journal_buttons.dart';
@@ -151,8 +152,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
 
   bool validateProblem() {
     if (problem.text.trim().isNotEmpty) return true;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('请先描述遇到的问题')));
+    showJournalMessage(context, '请先描述遇到的问题');
     return false;
   }
 
@@ -160,8 +160,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     if (!validateProblem()) return;
     await Clipboard.setData(ClipboardData(text: feedbackBody()));
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('反馈内容已复制，尚未发送')));
+      showJournalMessage(context, '反馈内容已复制，尚未发送');
     }
   }
 
@@ -173,9 +172,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     );
     if (!mounted) return;
     if (opened) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已打开邮件草稿，请在邮箱中确认发送')),
-      );
+      showJournalMessage(context, '已打开邮件草稿，请在邮箱中确认发送');
       return;
     }
     await showModalBottomSheet<void>(
@@ -231,9 +228,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                   );
                   if (sheetContext.mounted) Navigator.pop(sheetContext);
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('收件地址已复制')),
-                    );
+                    showJournalMessage(context, '收件地址已复制');
                   }
                 },
                 child: const Text('复制收件地址'),
@@ -265,24 +260,30 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
           JournalGroupedCard(
             padding: const EdgeInsets.all(16),
             children: [
-              TextField(
-                controller: problem,
-                minLines: 3,
-                maxLines: 8,
-                decoration: const InputDecoration(
-                  labelText: '遇到了什么问题？',
-                  alignLabelWithHint: true,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: steps,
-                minLines: 2,
-                maxLines: 6,
-                decoration: const InputDecoration(
-                  labelText: '怎样出现的？（选填）',
-                  alignLabelWithHint: true,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: problem,
+                    minLines: 3,
+                    maxLines: 8,
+                    decoration: const InputDecoration(
+                      labelText: '遇到了什么问题？',
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: steps,
+                    minLines: 2,
+                    maxLines: 6,
+                    decoration: const InputDecoration(
+                      labelText: '怎样出现的？（选填）',
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -310,9 +311,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
               final ok = await links
                   .openUrl('${AppUpdateService.repositoryUrl}/issues');
               if (!ok && context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('无法打开反馈页面，请先复制保存')),
-                );
+                showJournalMessage(context, '无法打开反馈页面，请先复制保存');
               }
             },
             child: const Text('打开 GitHub 反馈页面'),

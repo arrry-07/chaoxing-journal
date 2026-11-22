@@ -216,7 +216,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         action: effectiveAction != null && effectiveLabel != null
             ? SnackBarAction(
                 label: effectiveLabel,
-                textColor: journal.isDark ? journal.slate : journal.slateBg,
                 onPressed: effectiveAction,
               )
             : null,
@@ -650,6 +649,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               if (previewOnly) return buildCardWidget(a, pinned: pinned);
 
               return JournalSwipeTile(
+                key: ValueKey('swipe-${a.id}'),
                 displayPrefs: store.display,
                 rightAction: a.isCompleted
                     ? null
