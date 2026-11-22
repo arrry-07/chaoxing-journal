@@ -81,12 +81,17 @@ class BackupSnapshot {
     String? retainedKey, {
     required bool includeTimeEvidence,
   }) {
+    // Portable backups keep strict schema 5/6/7 exam keys and re-derive
+    // yearless notice anchors on live re-sync without promoting restored trust.
+    final examJson = a.exam?.toJson();
+    examJson?.remove('noticeStartAt');
+    examJson?.remove('noticeEndAt');
     return {
       'id': a.id,
       'source': a.source.name,
       'activityType': a.activityType,
       'availability': a.availability.name,
-      'exam': a.exam?.toJson(),
+      'exam': examJson,
       'courseTaskKey': a.source == AssignmentSource.classroomActivity
           ? a.courseTaskKey ?? retainedKey
           : null,

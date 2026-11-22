@@ -13,7 +13,9 @@ fi
 
 zero_oid="0000000000000000000000000000000000000000"
 while read -r _local_ref local_sha _remote_ref remote_sha; do
-  [ -n "${local_sha:-}" ] || continue
+  local_sha=$(printf '%s' "${local_sha:-}" | tr -d '\r')
+  remote_sha=$(printf '%s' "${remote_sha:-}" | tr -d '\r')
+  [ -n "$local_sha" ] || continue
   [ "$local_sha" != "$zero_oid" ] || continue
   commit_sha=$(git rev-parse "${local_sha}^{commit}" 2>/dev/null || printf '%s' "$local_sha")
   if [ "$remote_sha" != "$zero_oid" ]; then

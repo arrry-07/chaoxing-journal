@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_exam_parser.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
@@ -469,5 +470,73 @@ void main() {
     await expectLater(
         repo.restoreBackupSnapshot(_backup([_exam()]), 'another-owner'),
         throwsStateError);
+  });
+
+  test(
+      'enriched yearless exam notices export and restore cleanly without notice anchor fields',
+      () {
+    final formal = ChaoxingExamParser.make(
+      id: '99',
+      title: '合成期末考试',
+      courseId: '7',
+      clazzId: '11',
+      status: 'pending',
+      now: DateTime.utc(2026, 6, 10),
+      start: DateTime.utc(2026, 6, 10, 0),
+      end: DateTime.utc(2026, 6, 10, 2),
+    );
+    final noticePayload = {
+      'status': true,
+      'notices': {
+        'list': [
+          {
+            'uuid': 'opaque:yearless-backup',
+            'title': '考试通知',
+            'content': '考试时间：06-10 08:00 至 06-10 10:00',
+            'attachment': jsonEncode([
+              {
+                'attachmentType': 15,
+                'att_web': {
+                  'examOrWork': 'exam',
+                  'examOrWorkId': 99,
+                  'courseId': 7,
+                  'clazzId': 11,
+                  'title': '合成期末考试',
+                  'url':
+                      'https://mooc1-api.chaoxing.com/examApi/intoexamorwork?taskrefId=99&courseId=7&classId=11&workOrExam=exam',
+                }
+              }
+            ]),
+            'sendTime': '2025-06-09 12:00:00',
+          }
+        ]
+      }
+    };
+    final anchoredNotice = ChaoxingExamParser.notices(noticePayload,
+            now: DateTime.utc(2026, 6, 10))!
+        .rows
+        .single;
+    final enriched = ChaoxingExamParser.enrichNotices([formal, anchoredNotice]);
+    final enrichedNotice = enriched.last;
+    expect(enrichedNotice.exam!.noticeStartAt, isNotNull);
+    expect(enrichedNotice.exam!.noticeEndAt, isNotNull);
+
+    final encoded = _backup(enriched).encode();
+    final raw = jsonDecode(encoded) as Map<String, dynamic>;
+    final examMaps = (raw['records'] as List)
+        .map((r) => (r as Map<String, dynamic>)['exam'] as Map<String, dynamic>)
+        .toList();
+    for (final examMap in examMaps) {
+      expect(examMap.containsKey('noticeStartAt'), isFalse);
+      expect(examMap.containsKey('noticeEndAt'), isFalse);
+    }
+
+    final restored = BackupSnapshot.decode(encoded);
+    final restoredNotice =
+        restored.records.singleWhere((r) => r.exam?.noticeOnly == true);
+    expect(restoredNotice.exam!.startTrusted, isFalse);
+    expect(restoredNotice.exam!.endTrusted, isFalse);
+    expect(restoredNotice.exam!.noticeStartAt, isNull);
+    expect(restoredNotice.exam!.noticeEndAt, isNull);
   });
 }
