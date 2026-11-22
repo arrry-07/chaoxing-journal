@@ -197,6 +197,54 @@ class _WidgetHubClient extends ChaoxingLocalClient {
       );
 }
 
+class _LargeHubClient extends _WidgetHubClient {
+  @override
+  List<CourseNotice> get lastFetchedNotices => [
+        for (var i = 1; i <= 80; i++)
+          CourseNotice(
+            id: 'cx:notice:${i.toRadixString(16).padLeft(64, '0')}',
+            courseId: '10',
+            clazzId: '20',
+            courseName: '人工智能导论',
+            senderName: '王教授',
+            title: '批次通知 $i',
+            summary: '请查看课程通知正文。',
+            publishedAt: DateTime.utc(2030, 5, 20, 12, 80 - i),
+            publishedTrusted: true,
+            lastSyncedAt: DateTime.utc(2030, 5, 21),
+          ),
+      ];
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    final assignments = await super.fetchAssignments();
+    courses = [
+      ...courses,
+      for (var i = 2; i <= 40; i++)
+        ChaoxingCourseRef(
+          courseId: '${100 + i}',
+          clazzId: '20',
+          courseName: '章节课程 $i',
+        ),
+    ];
+    succeededCourses = courses.length;
+    sourceResults = [
+      SyncSourceResult(
+        source: 'courseWork',
+        phase: SyncSourcePhase.success,
+        succeededCourses: courses.length,
+      ),
+      SyncSourceResult(
+        source: 'courseNotice',
+        phase: SyncSourcePhase.success,
+        succeededCourses: courses.length,
+        recordCount: 80,
+      ),
+    ];
+    return assignments;
+  }
+}
+
 class _NoticeScopeHubClient extends ChaoxingLocalClient {
   @override
   bool get needsSessionInitialization => false;
@@ -390,6 +438,20 @@ class _HubNetworkFixture {
     }));
 }
 
+Future<AssignmentStore> _syncHub(ChaoxingLocalClient client) async {
+  SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+  final store = AssignmentStore(
+    sessionStore: _TestSessionStore(),
+    notificationService: _TestNotificationService(),
+    widgetSnapshotService: _TestWidgetSnapshotService(),
+    chaoxingClient: client,
+  );
+  addTearDown(store.dispose);
+  await store.restoreSession();
+  await store.syncAssignments();
+  return store;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -456,6 +518,160 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.courseNotices.items.every((n) => n.localRead), isTrue);
   }, timeout: const Timeout(Duration(seconds: 15)));
+
+  testWidgets('notice search waits for the latest input before filtering',
+      (tester) async {
+    final store = await _syncHub(_NoticeScopeHubClient());
+    await tester.pumpWidget(
+      MaterialApp(home: CourseStudyHubScreen(store: store)),
+    );
+    await tester.pumpAndSettle();
+
+    final search = find.byType(TextField);
+    final first = find.text('已关联通知一');
+    final second = find.text('已关联通知二');
+    expect(first, findsOneWidget);
+    expect(second, findsOneWidget);
+
+    await tester.enterText(search, '通知一');
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(first, findsOneWidget);
+    expect(second, findsOneWidget, reason: '首个输入后的 50ms 仍显示原结果');
+
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.enterText(search, '通知二');
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(first, findsOneWidget);
+    expect(second, findsOneWidget, reason: '旧输入到期时仍应等待新输入');
+
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(first, findsNothing);
+    expect(second, findsOneWidget);
+  });
+
+  testWidgets('clearing notice search restores results immediately',
+      (tester) async {
+    final store = await _syncHub(_NoticeScopeHubClient());
+    await tester.pumpWidget(
+      MaterialApp(home: CourseStudyHubScreen(store: store)),
+    );
+    await tester.pumpAndSettle();
+
+    final search = find.byType(TextField);
+    final clear = find.byTooltip('清除搜索');
+    final first = find.text('已关联通知一');
+    final second = find.text('已关联通知二');
+    await tester.enterText(search, '无匹配通知');
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(first, findsNothing);
+    expect(second, findsNothing);
+
+    await tester.enterText(search, '通知一');
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(clear);
+    await tester.pump();
+    expect(tester.widget<TextField>(search).controller!.text, isEmpty);
+    expect(clear, findsNothing);
+    expect(first, findsOneWidget);
+    expect(second, findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(first, findsOneWidget);
+    expect(second, findsOneWidget);
+  });
+
+  testWidgets('unmounting the hub cancels a pending notice search',
+      (tester) async {
+    final store = await _syncHub(_NoticeScopeHubClient());
+    await tester.pumpWidget(
+      MaterialApp(home: CourseStudyHubScreen(store: store)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '通知一');
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(find.byType(CourseStudyHubScreen), findsNothing);
+    expect(tester.takeException(), isNull);
+    // End before the debounce expires so the binding detects an orphaned timer.
+  });
+
+  testWidgets('80 notices build the last row only when scrolled into range',
+      (tester) async {
+    final store = await _syncHub(_LargeHubClient());
+    expect(store.courseNotices.items, hasLength(80));
+    await tester.pumpWidget(
+      MaterialApp(home: CourseStudyHubScreen(store: store)),
+    );
+    await tester.pumpAndSettle();
+
+    final first = find.text('批次通知 1');
+    final last = find.text('批次通知 80');
+    expect(first.hitTestable(), findsOneWidget);
+    final lastInitiallyBuilt = last.evaluate().isNotEmpty;
+
+    await tester.scrollUntilVisible(
+      last,
+      350,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(last.hitTestable(), findsOneWidget);
+    expect(first.hitTestable(), findsNothing);
+    expect(lastInitiallyBuilt, isFalse, reason: '首屏不应构建第 80 条通知');
+  });
+
+  testWidgets('chapter courses load lazily and keep an expanded course usable',
+      (tester) async {
+    final store = await _syncHub(_LargeHubClient());
+    expect(store.courses, hasLength(40));
+    expect(await store.syncCourseChapters(courseKey: '10:20'), isTrue);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CourseStudyHubScreen(store: store, initialTab: 'chapters'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final first = find.text('人工智能导论');
+    final courseKey = find.byKey(const ValueKey('chapter-course-10:20'));
+    final last = find.text('章节课程 40');
+    final section = find.text('1.2 反向传播');
+    final scrollable = find.byType(Scrollable).first;
+    expect(first.hitTestable(), findsOneWidget);
+    expect(courseKey, findsOneWidget);
+    expect(section, findsNothing);
+    final lastInitiallyBuilt = last.evaluate().isNotEmpty;
+
+    await tester.tap(first);
+    await tester.pumpAndSettle();
+    expect(section.hitTestable(), findsOneWidget);
+    await tester.scrollUntilVisible(last, 350, scrollable: scrollable);
+    await tester.pumpAndSettle();
+    expect(last.hitTestable(), findsOneWidget);
+    expect(first.hitTestable(), findsNothing);
+
+    await tester.scrollUntilVisible(first, -350, scrollable: scrollable);
+    await tester.pumpAndSettle();
+    expect(courseKey, findsOneWidget);
+    expect(section, findsOneWidget, reason: '滚出缓存区后再返回仍应展开');
+    final addTodo = find.text('设待办');
+    await tester.ensureVisible(addTodo);
+    await tester.pumpAndSettle();
+    expect(addTodo.hitTestable(), findsOneWidget);
+    await tester.tap(addTodo);
+    await tester.pumpAndSettle();
+    final picker = find.byType(DatePickerDialog);
+    expect(picker, findsOneWidget);
+    await tester.tap(find.descendant(
+      of: picker,
+      matching: find.textContaining(RegExp(r'^cancel$', caseSensitive: false)),
+    ));
+    await tester.pumpAndSettle();
+    expect(store.notebook.entries.single.title, '[章节任务点] 1.2 反向传播');
+    expect(find.text('已加待办'), findsOneWidget);
+    expect(lastInitiallyBuilt, isFalse, reason: '首屏不应构建第 40 门课程');
+  });
 
   testWidgets('empty course directory still offers the inbox scope',
       (tester) async {
@@ -691,6 +907,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('《人工智能导论》实验提交说明'), findsOneWidget);
     await tester.enterText(find.byType(TextField), '不存在关键词');
+    await tester.pump(const Duration(milliseconds: 250));
     await tester.pumpAndSettle();
     expect(find.text('当前筛选条件下没有匹配的通知。'), findsOneWidget);
     await tester.tap(find.byTooltip('清除搜索'));

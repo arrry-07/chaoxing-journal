@@ -901,6 +901,31 @@ class AssignmentQuery {
     return g;
   }
 
+  /// Groups already projected calendar records by their Beijing date key.
+  static Map<DateTime, List<Assignment>> groupCalendarByDay(
+    List<Assignment> displayRecords,
+    DateTime now,
+  ) {
+    final byDay = <DateTime, List<Assignment>>{};
+    for (final assignment in displayRecords) {
+      if (!assignment.isInAssignmentScope ||
+          !isCalendarDated(assignment, now)) {
+        continue;
+      }
+      final day = dayKey(assignment.timelineAt!);
+      (byDay[day] ??= []).add(assignment);
+    }
+    for (final items in byDay.values) {
+      items.sort(_compareCalendarItems);
+    }
+    return byDay;
+  }
+
+  static int _compareCalendarItems(Assignment a, Assignment b) {
+    final time = a.timelineAt!.compareTo(b.timelineAt!);
+    return time != 0 ? time : Assignment.compareByDeadline(a, b);
+  }
+
   static List<Assignment> forDay(
     List<Assignment> records,
     DateTime day,
@@ -912,8 +937,5 @@ class AssignmentQuery {
             dayKey(assignment.timelineAt!) ==
                 DateTime(day.year, day.month, day.day);
       }).toList()
-        ..sort((a, b) {
-          final time = a.timelineAt!.compareTo(b.timelineAt!);
-          return time != 0 ? time : Assignment.compareByDeadline(a, b);
-        });
+        ..sort(_compareCalendarItems);
 }

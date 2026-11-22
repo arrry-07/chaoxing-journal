@@ -636,7 +636,7 @@ void main() {
           due: _now.subtract(const Duration(hours: 2)));
       expect(AssignmentQuery.displayTimelineAt(endOnly, now: _now), isNull);
       expect(AssignmentQuery.displayTimelineEndAt(endOnly, now: _now),
-          _now.subtract(const Duration(hours: 1)));
+          _now.subtract(const Duration(hours: 1)).toLocal());
       for (final order in [
         HomeSortOrder.deadlineAsc,
         HomeSortOrder.deadlineDesc

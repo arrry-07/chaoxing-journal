@@ -16,6 +16,7 @@ import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
+import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -58,6 +59,13 @@ class _AuthenticatedStore extends AssignmentStore {
 
   @override
   Future<bool> runDueAutoSync({DateTime? now}) async => false;
+}
+
+class _CalendarPreviewStore extends _AuthenticatedStore {
+  _CalendarPreviewStore(this.homeCatalogAssignments);
+
+  @override
+  final List<Assignment> homeCatalogAssignments;
 }
 
 AssignmentStore _makeStore(_Session session) => AssignmentStore(
@@ -137,6 +145,96 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues(
       {'auto_sync_interval_minutes': 0}));
 
+  test('calendar grouping matches forDay for 30 cross-month days', () {
+    final now = DateTime.utc(2026, 11, 30, 15, 58);
+    final days = [
+      for (var i = 0; i < 30; i++) DateTime(2026, 11, 20 + i),
+    ];
+    final beforeMidnight = DateTime.utc(2026, 11, 30, 15, 59);
+    final midnight = DateTime.utc(2026, 11, 30, 16);
+    final displayRecords = AssignmentQuery.projectDisplay([
+      for (var i = 0; i < days.length; i++)
+        if (i % 5 != 4) ...[
+          _assignment('late-$i',
+              title: 'First by title only',
+              deadlineAt: DateTime.utc(2026, 11, 20 + i, 12)),
+          _assignment('tie-z-$i',
+              title: 'Same title',
+              deadlineAt: DateTime.utc(2026, 11, 20 + i, 1)),
+          _assignment('tie-a-$i',
+              title: 'Same title',
+              deadlineAt: DateTime.utc(2026, 11, 20 + i, 1)),
+        ],
+      _assignment('before-midnight',
+          title: 'Before Beijing midnight', deadlineAt: beforeMidnight),
+      _assignment('midnight', title: 'Beijing midnight', deadlineAt: midnight),
+      _assignment('untrusted',
+          title: 'Untrusted deadline', deadlineAt: midnight, trusted: false),
+      _assignment('read-failed',
+          title: 'Retained deadline', deadlineAt: midnight, failed: true),
+      _assignment('submitted',
+          title: 'Submitted', deadlineAt: midnight, status: 'submitted'),
+      _assignment('undated', title: 'No deadline'),
+      Assignment(
+        id: 'manual:out-of-scope',
+        source: AssignmentSource.manual,
+        courseName: 'Personal',
+        title: 'Out of assignment scope',
+        deadlineAt: midnight,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:exam:c:k:101',
+        courseName: 'Course',
+        title: 'Cross-midnight exam',
+        deadlineAt: DateTime.utc(2026, 12, 1, 17),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+        exam: ExamInfo(
+          examId: '101',
+          courseId: 'c',
+          clazzId: 'k',
+          startAt: midnight,
+          endAt: DateTime.utc(2026, 12, 1, 17),
+          startTrusted: true,
+          endTrusted: true,
+          lifecycle: 'scheduled',
+        ),
+      ),
+    ]);
+
+    final grouped = AssignmentQuery.groupCalendarByDay(displayRecords, now);
+    final nonemptyDays = <DateTime>[];
+    for (final day in days) {
+      final expected =
+          AssignmentQuery.forDay(displayRecords, day, {}, now: now);
+      if (expected.isNotEmpty) nonemptyDays.add(day);
+      expect(
+        (grouped[day] ?? const <Assignment>[]).map((a) => a.toJson()).toList(),
+        equals(expected.map((a) => a.toJson()).toList()),
+        reason: 'Beijing date ${day.toIso8601String()}',
+      );
+    }
+    expect(grouped.keys, unorderedEquals(nonemptyDays));
+    expect(grouped[DateTime(2026, 11, 30)]!.map((a) => a.id), [
+      'cx:work:c:k:tie-a-10',
+      'cx:work:c:k:tie-z-10',
+      'cx:work:c:k:late-10',
+      'cx:work:c:k:before-midnight',
+    ]);
+    expect(grouped[DateTime(2026, 12, 1)]!.map((a) => a.id), [
+      'cx:work:c:k:midnight',
+      'cx:exam:c:k:101',
+      'cx:work:c:k:tie-a-11',
+      'cx:work:c:k:tie-z-11',
+      'cx:work:c:k:late-11',
+    ]);
+    expect(grouped, isNot(contains(DateTime(2026, 12, 19))));
+  });
+
   test('recoveryScopeClassificationSeparatesNoDeadlineAndUntrustedDates', () {
     final now = DateTime.now();
     final untrusted = _assignment('untrusted',
@@ -174,6 +272,187 @@ void main() {
         AssignmentRecoveryScope.deadlinePending.matches(trusted, now), isFalse);
     expect(
         AssignmentRecoveryScope.deadlinePending.matches(clear, now), isFalse);
+  });
+
+  testWidgets('calendar keeps Beijing month-boundary selection and agenda',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(420, 900);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final store = _makeStore(_Session());
+    addTearDown(store.dispose);
+    final now = DateTime.utc(2026, 11, 30, 15, 58);
+    final beforeMidnight = DateTime.utc(2026, 11, 30, 15, 59);
+    final midnight = DateTime.utc(2026, 11, 30, 16);
+    store.replaceAssignmentsForTest([
+      _assignment('november', title: '十一月作业', deadlineAt: beforeMidnight),
+      _assignment('december', title: '十二月作业', deadlineAt: midnight),
+      _assignment('december-later',
+          title: '十二月后续作业', deadlineAt: DateTime.utc(2026, 12, 3)),
+    ]);
+    store.notebook = StudyNotebook(entries: [
+      ManualEntry(
+        id: 'december-later',
+        title: '十二月稍后安排',
+        kind: 'todo',
+        at: midnight.add(const Duration(minutes: 1)),
+      ),
+      ManualEntry(
+        id: 'november',
+        title: '十一月安排',
+        kind: 'todo',
+        at: beforeMidnight,
+      ),
+      ManualEntry(
+        id: 'december-first',
+        title: '十二月跨月安排',
+        kind: 'todo',
+        at: midnight,
+      ),
+      ManualEntry(
+        id: 'december-done',
+        title: '十二月已完成安排',
+        kind: 'todo',
+        at: DateTime.utc(2026, 12, 3),
+        done: true,
+      ),
+    ]);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(body: CalendarScreen(store: store, clock: () => now)),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('11月30日 · 议程'), findsOneWidget);
+    expect(find.byKey(const ValueKey('calendar-dots-30')), findsOneWidget);
+    expect(find.text('十一月作业'), findsOneWidget);
+    expect(find.text('个人待办 · 十一月安排'), findsOneWidget);
+    expect(find.text('十二月作业'), findsNothing);
+
+    await tester.tap(find.byTooltip('下个月'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('12月1日 · 议程'), findsOneWidget);
+    expect(find.byKey(const ValueKey('calendar-dots-1')), findsOneWidget);
+    expect(find.text('十二月作业'), findsOneWidget);
+    expect(find.text('十一月作业'), findsNothing);
+    expect(find.text('个人待办 · 十一月安排'), findsNothing);
+    final firstManual = find.text('个人待办 · 十二月跨月安排');
+    final laterManual = find.text('个人待办 · 十二月稍后安排');
+    for (final row in [firstManual, laterManual]) {
+      await tester.scrollUntilVisible(row, 180,
+          scrollable: find.byType(Scrollable).first);
+    }
+    expect(tester.getTopLeft(firstManual).dy,
+        lessThan(tester.getTopLeft(laterManual).dy));
+
+    final emptyDay = find.descendant(
+      of: find.byKey(const ValueKey('calendar-grid-viewport')),
+      matching: find.text('2'),
+    );
+    await tester.ensureVisible(emptyDay);
+    await tester.pumpAndSettle();
+    await tester.tap(emptyDay);
+    await tester.pumpAndSettle();
+
+    expect(find.text('12月2日 · 议程'), findsOneWidget);
+    expect(find.text('所选范围没有已知日期的课业'), findsOneWidget);
+    expect(find.text('十二月作业'), findsNothing);
+    expect(firstManual, findsNothing);
+
+    final monthPill = find.text('本月');
+    await tester.ensureVisible(monthPill);
+    await tester.pumpAndSettle();
+    await tester.tap(monthPill);
+    await tester.pumpAndSettle();
+
+    expect(find.text('本月议程'), findsOneWidget);
+    final firstAssignment = find.text('十二月作业');
+    final laterAssignment = find.text('十二月后续作业');
+    await tester.scrollUntilVisible(laterAssignment, 180,
+        scrollable: find.byType(Scrollable).first);
+    expect(tester.getTopLeft(firstAssignment).dy,
+        lessThan(tester.getTopLeft(laterAssignment).dy));
+    await tester.scrollUntilVisible(laterManual, 180,
+        scrollable: find.byType(Scrollable).first);
+    expect(tester.getTopLeft(firstManual).dy,
+        lessThan(tester.getTopLeft(laterManual).dy));
+    expect(find.text('十一月作业'), findsNothing);
+    expect(find.text('个人待办 · 十一月安排'), findsNothing);
+    expect(find.text('个人待办 · 十二月已完成安排'), findsNothing);
+  });
+
+  testWidgets('calendar cells reuse the display projection for their month',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    final now = DateTime.utc(2026, 11, 30, 15, 58);
+    final store = _makeStore(_Session());
+    addTearDown(store.dispose);
+    store.replaceAssignmentsForTest([
+      _assignment('month-end',
+          title: '月底作业', deadlineAt: DateTime.utc(2026, 11, 30, 15, 59)),
+    ]);
+    AssignmentQuery.debugResetDisplayCaches();
+    addTearDown(AssignmentQuery.debugResetDisplayCaches);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: CalendarScreen(store: store, clock: () => now)),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('calendar-dots-30')), findsOneWidget);
+    expect(
+      AssignmentQuery.debugProjectionBuildCount,
+      0,
+      reason: 'Persisted calendar rows should use the matching home index.',
+    );
+  });
+
+  testWidgets('calendar keeps persisted dates during a home sync preview',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(420, 900);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.utc(2026, 11, 30, 15, 58);
+    final dueToday = DateTime.utc(2026, 11, 30, 15, 59);
+    final store = _CalendarPreviewStore([
+      _assignment('persisted',
+          title: '预览中的改期作业', deadlineAt: DateTime.utc(2026, 11, 30, 16)),
+      _assignment('preview-only', title: '预览独有作业', deadlineAt: dueToday),
+    ])
+      ..replaceAssignmentsForTest([
+        _assignment('persisted', title: '持久化作业', deadlineAt: dueToday),
+      ]);
+    addTearDown(store.dispose);
+    AssignmentQuery.debugResetDisplayCaches();
+    addTearDown(AssignmentQuery.debugResetDisplayCaches);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: CalendarScreen(store: store, clock: () => now)),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('calendar-dots-30')), findsOneWidget);
+    expect(find.text('持久化作业'), findsOneWidget);
+    expect(find.text('预览独有作业'), findsNothing);
+    expect(AssignmentQuery.debugProjectionBuildCount, 1);
+
+    await tester.tap(find.text('本月'));
+    await tester.pumpAndSettle();
+    expect(find.text('持久化作业'), findsOneWidget);
+    expect(find.text('预览独有作业'), findsNothing);
+    expect(AssignmentQuery.debugProjectionBuildCount, 1);
+
+    await tester.tap(find.byTooltip('下个月'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('calendar-dots-1')), findsNothing);
+    expect(find.text('预览中的改期作业'), findsNothing);
+    expect(AssignmentQuery.debugProjectionBuildCount, 1);
   });
 
   testWidgets('calendarExposesRetainedUntrustedDeadlines', (tester) async {

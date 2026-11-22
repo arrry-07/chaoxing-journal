@@ -435,34 +435,24 @@ class JournalHeading extends StatelessWidget {
 }
 
 // Map subject keywords to quiet single-tone linear icons.
+final _courseIconRules = <(RegExp, IconData)>[
+  (RegExp(r'数|微积分|代数|几何|概率|统计|离散'), Icons.functions_rounded),
+  (RegExp(r'物理|力学|电磁|光学|天文|电路|模电|数电'), Icons.bolt_outlined),
+  (RegExp(r'化学|生物|医学|实验|药'), Icons.science_outlined),
+  (
+    RegExp(r'计算机|信息|安全|软件|数据|程序|编程|算法|网络|人工智能|AI|ai|Python|Java|C\+\+'),
+    Icons.terminal_rounded
+  ),
+  (RegExp(r'英语|外语|口语|听力|语言|写作|语文|文学'), Icons.translate_rounded),
+  (RegExp(r'史|纲要|马原|毛概|习概|思政|政治|法|哲学|思想'), Icons.account_balance_outlined),
+  (RegExp(r'制图|机械|工程|建筑|设计|艺术|音乐|美术|影视'), Icons.architecture_outlined),
+  (RegExp(r'经济|管理|金融|会计|市场|财务'), Icons.trending_up_rounded),
+  (RegExp(r'体育|运动|健美|武术|篮球|足球|游泳'), Icons.directions_run_rounded),
+];
+
 IconData courseIconFor(String name) {
-  if (RegExp(r'数|微积分|代数|几何|概率|统计|离散').hasMatch(name)) {
-    return Icons.functions_rounded;
-  }
-  if (RegExp(r'物理|力学|电磁|光学|天文|电路|模电|数电').hasMatch(name)) {
-    return Icons.bolt_outlined;
-  }
-  if (RegExp(r'化学|生物|医学|实验|药').hasMatch(name)) {
-    return Icons.science_outlined;
-  }
-  if (RegExp(r'计算机|信息|安全|软件|数据|程序|编程|算法|网络|人工智能|AI|ai|Python|Java|C\+\+')
-      .hasMatch(name)) {
-    return Icons.terminal_rounded;
-  }
-  if (RegExp(r'英语|外语|口语|听力|语言|写作|语文|文学').hasMatch(name)) {
-    return Icons.translate_rounded;
-  }
-  if (RegExp(r'史|纲要|马原|毛概|习概|思政|政治|法|哲学|思想').hasMatch(name)) {
-    return Icons.account_balance_outlined;
-  }
-  if (RegExp(r'制图|机械|工程|建筑|设计|艺术|音乐|美术|影视').hasMatch(name)) {
-    return Icons.architecture_outlined;
-  }
-  if (RegExp(r'经济|管理|金融|会计|市场|财务').hasMatch(name)) {
-    return Icons.trending_up_rounded;
-  }
-  if (RegExp(r'体育|运动|健美|武术|篮球|足球|游泳').hasMatch(name)) {
-    return Icons.directions_run_rounded;
+  for (final (pattern, icon) in _courseIconRules) {
+    if (pattern.hasMatch(name)) return icon;
   }
   return Icons.menu_book_outlined;
 }

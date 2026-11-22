@@ -15,6 +15,7 @@ import '../services/local_record_query.dart';
 import 'widgets/assignment_card.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_picker_sheet.dart';
+import 'widgets/journal_sliver_grouped_card.dart';
 
 class LocalRecordsScreen extends StatefulWidget {
   const LocalRecordsScreen({
@@ -35,6 +36,7 @@ class LocalRecordsScreen extends StatefulWidget {
 class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
   late LocalRecordFilterSpec _spec;
   late final TextEditingController _searchController;
+  Timer? _searchDebounce;
   Timer? _clock;
   late DateTime _now;
   String? _accountHash;
@@ -63,16 +65,16 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
     _accountHash = nextHash;
     _accountEpoch = nextEpoch;
     if (!mounted) return;
-    setState(() {
-      _searchController.clear();
-      _spec = const LocalRecordFilterSpec();
-    });
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    setState(() => _spec = const LocalRecordFilterSpec());
   }
 
   @override
   void didUpdateWidget(covariant LocalRecordsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.store, widget.store)) {
+    final storeChanged = !identical(oldWidget.store, widget.store);
+    if (storeChanged) {
       oldWidget.store.removeListener(_handleIdentityChanged);
       _accountHash = widget.store.accountHash;
       _accountEpoch = widget.store.accountEpoch;
@@ -80,17 +82,19 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
     }
     final oldInit = oldWidget.initialFilter;
     final nextInit = widget.initialFilter;
-    if (oldInit.from != nextInit.from ||
+    final filterChanged = oldInit.from != nextInit.from ||
         oldInit.category != nextInit.category ||
         oldInit.status != nextInit.status ||
         oldInit.scope != nextInit.scope ||
         oldInit.courseKey != nextInit.courseKey ||
         oldInit.timeRange != nextInit.timeRange ||
         oldInit.query != nextInit.query ||
-        oldInit.sort != nextInit.sort) {
-      _spec = nextInit;
-      if (_searchController.text != nextInit.query) {
-        _searchController.text = nextInit.query;
+        oldInit.sort != nextInit.sort;
+    if (filterChanged) _spec = nextInit;
+    if (storeChanged || filterChanged) {
+      _searchDebounce?.cancel();
+      if (_searchController.text != _spec.query) {
+        _searchController.text = _spec.query;
       }
     }
   }
@@ -99,8 +103,26 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
   void dispose() {
     widget.store.removeListener(_handleIdentityChanged);
     _clock?.cancel();
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged(String query) {
+    _searchDebounce?.cancel();
+    if (query == _spec.query) return;
+    _searchDebounce = Timer(const Duration(milliseconds: 200), () {
+      setState(() => _spec = _spec.copyWith(query: query));
+    });
+  }
+
+  void _clearSearch({bool resetFilters = false}) {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    setState(() {
+      _spec =
+          resetFilters ? _spec.resetToAllLocal() : _spec.copyWith(query: '');
+    });
   }
 
   void _handleBack(BuildContext context) {
@@ -211,17 +233,13 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
     );
   }
 
-  String _scopeBannerSummary(LocalRecordQueryResult result) {
+  String _scopeBannerSummary(Map<String, String> courseLabels) {
     final parts = <String>[
       if (_spec.scope != LocalRecordScopeFilter.allLocal) _spec.scope.label,
       if (_spec.timeRange != StatsTimeRange.all) _spec.timeRange.label,
       if (_spec.status != LocalRecordStatusFilter.all) _spec.status.label,
       if (_spec.courseKey != null)
-        result.courseOptions
-                .where((option) => option.courseKey == _spec.courseKey)
-                .map((option) => option.label)
-                .firstOrNull ??
-            _spec.courseKey!,
+        courseLabels[_spec.courseKey] ?? _spec.courseKey!,
     ];
     if (parts.isEmpty) {
       return '当前从课业统计进入明细视图';
@@ -244,22 +262,227 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
           final journal = Journal.of(context);
           final now = _now;
           final result = LocalRecordQuery.query(widget.store, _spec, now);
-          final selectedCourseKey = result.courseOptions
-                  .any((option) => option.courseKey == _spec.courseKey)
+          final courseLabels = {
+            for (final option in result.courseOptions)
+              option.courseKey: option.label,
+          };
+          final selectedCourseKey = courseLabels.containsKey(_spec.courseKey)
               ? _spec.courseKey
               : null;
-          final selectedCourseLabel = selectedCourseKey == null
-              ? '全部课程'
-              : result.courseOptions
-                      .where((o) => o.courseKey == selectedCourseKey)
-                      .firstOrNull
-                      ?.label ??
-                  '全部课程';
+          final selectedCourseLabel = courseLabels[selectedCourseKey] ?? '全部课程';
           final duplicateCourseNames = <String>{
             for (final opt in result.courseOptions)
               if (opt.label.contains(' · 班级 '))
                 opt.label.split(' · 班级 ').first.trim(),
           };
+
+          final header = Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final category in LocalRecordCategory.values) ...[
+                      ChoiceChip(
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        label: Text(category.label),
+                        selected: _spec.category == category,
+                        onSelected: (_) => setState(
+                          () => _spec = _spec.copyWith(category: category),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (_spec.category == LocalRecordCategory.coursework &&
+                  _spec.isStatsScoped) ...[
+                JournalGroupedCard(
+                  backgroundColor: Color.lerp(
+                    journal.sheet,
+                    journal.sage,
+                    journal.isDark ? 0.28 : 0.36,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  children: [
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          _scopeBannerSummary(courseLabels),
+                          style: journal.metadata.copyWith(color: journal.ink),
+                        ),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            minimumSize: const Size(0, 32),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: () => _clearSearch(resetFilters: true),
+                          icon: const Icon(Icons.restart_alt_rounded, size: 16),
+                          label: const Text('查看全部本机记录'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+              ],
+              Row(
+                children: [
+                  Expanded(
+                    child: ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: _searchController,
+                      builder: (context, value, _) => TextField(
+                        controller: _searchController,
+                        onChanged: _onSearchChanged,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 11,
+                          ),
+                          hintText: '搜索标题或课程',
+                          prefixIcon:
+                              const Icon(Icons.search_rounded, size: 19),
+                          suffixIcon: value.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: '清除搜索',
+                                  icon:
+                                      const Icon(Icons.close_rounded, size: 18),
+                                  onPressed: _clearSearch,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_spec.category == LocalRecordCategory.coursework) ...[
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 146),
+                      child: JournalFilterPill(
+                        key: ValueKey(
+                          'records-course-${selectedCourseKey ?? 'all'}-${_spec.scope.name}-${result.courseOptions.length}',
+                        ),
+                        label: selectedCourseLabel,
+                        active: selectedCourseKey != null,
+                        onTap: () async {
+                          final picked = await showJournalPickerSheet<String>(
+                            context,
+                            title: '按课程筛选',
+                            selectedValue: selectedCourseKey ?? '',
+                            searchable: result.courseOptions.length > 5,
+                            searchHint: '搜索课程名称...',
+                            displayPrefs: widget.store.display,
+                            options: [
+                              const JournalPickerOption(
+                                value: '',
+                                label: '全部课程',
+                              ),
+                              for (final option in result.courseOptions)
+                                JournalPickerOption(
+                                  value: option.courseKey,
+                                  label: option.label,
+                                  icon: courseIconFor(option.label),
+                                ),
+                            ],
+                          );
+                          if (picked == null || !mounted) return;
+                          setState(
+                            () => picked.isEmpty
+                                ? _spec = _spec.copyWith(clearCourseKey: true)
+                                : _spec = _spec.copyWith(courseKey: picked),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              if (_spec.category == LocalRecordCategory.coursework) ...[
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (final status in LocalRecordStatusFilter.values) ...[
+                        ChoiceChip(
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          label: Text(status.label),
+                          selected: _spec.status == status,
+                          onSelected: (_) => setState(
+                            () => _spec = _spec.copyWith(status: status),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.only(left: 2),
+                child: Text(
+                  '${result.count} 条记录',
+                  style: journal.metadata,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (result.count == 0)
+                JournalGroupedCard(
+                  padding: const EdgeInsets.all(18),
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          switch (_spec.category) {
+                            LocalRecordCategory.hidden => '暂无隐藏作业',
+                            LocalRecordCategory.otherSources => '暂无历史与其他来源记录',
+                            LocalRecordCategory.coursework =>
+                              _spec.isStatsScoped ||
+                                      _spec.query.isNotEmpty ||
+                                      _spec.status !=
+                                          LocalRecordStatusFilter.all ||
+                                      _spec.courseKey != null
+                                  ? '当前筛选条件下没有课业记录'
+                                  : '本机暂未保存课业记录',
+                          },
+                          style: journal.entryTitle,
+                        ),
+                        if (_spec.category == LocalRecordCategory.coursework &&
+                            !_spec.isStatsScoped &&
+                            (_spec.query.isNotEmpty ||
+                                _spec.status != LocalRecordStatusFilter.all ||
+                                _spec.courseKey != null)) ...[
+                          const SizedBox(height: 8),
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                            ),
+                            onPressed: () => _clearSearch(resetFilters: true),
+                            child: const Text('查看全部本机记录'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+            ],
+          );
 
           return Scaffold(
             backgroundColor: journal.paper,
@@ -298,248 +521,39 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                 ),
               ],
             ),
-            body: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-              children: [
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      for (final category in LocalRecordCategory.values) ...[
-                        ChoiceChip(
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          label: Text(category.label),
-                          selected: _spec.category == category,
-                          onSelected: (_) => setState(
-                            () => _spec = _spec.copyWith(category: category),
+            body: CustomScrollView(
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+                  sliver: SliverMainAxisGroup(
+                    slivers: [
+                      SliverToBoxAdapter(child: header),
+                      if (result.otherSources.isNotEmpty)
+                        JournalSliverGroupedCard(
+                          dividerIndent: 52,
+                          itemCount: result.otherSources.length,
+                          itemBuilder: (context, index) => _buildOtherSourceRow(
+                            context,
+                            result.otherSources[index],
+                            now,
+                            journal,
+                          ),
+                        )
+                      else if (result.groups.isNotEmpty)
+                        JournalSliverGroupedCard(
+                          dividerIndent: 52,
+                          itemCount: result.groups.length,
+                          itemBuilder: (context, index) => _buildGroupRow(
+                            context,
+                            result.groups[index],
+                            now,
+                            journal,
+                            duplicateCourseNames: duplicateCourseNames,
                           ),
                         ),
-                        const SizedBox(width: 8),
-                      ],
                     ],
                   ),
                 ),
-                const SizedBox(height: 10),
-                if (_spec.category == LocalRecordCategory.coursework &&
-                    _spec.isStatsScoped) ...[
-                  JournalGroupedCard(
-                    backgroundColor: Color.lerp(
-                      journal.sheet,
-                      journal.sage,
-                      journal.isDark ? 0.28 : 0.36,
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
-                    children: [
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            _scopeBannerSummary(result),
-                            style:
-                                journal.metadata.copyWith(color: journal.ink),
-                          ),
-                          TextButton.icon(
-                            style: TextButton.styleFrom(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 6),
-                              minimumSize: const Size(0, 32),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() => _spec = _spec.resetToAllLocal());
-                            },
-                            icon:
-                                const Icon(Icons.restart_alt_rounded, size: 16),
-                            label: const Text('查看全部本机记录'),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: (value) => setState(
-                            () => _spec = _spec.copyWith(query: value)),
-                        decoration: InputDecoration(
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 11,
-                          ),
-                          hintText: '搜索标题或课程',
-                          prefixIcon:
-                              const Icon(Icons.search_rounded, size: 19),
-                          suffixIcon: _spec.query.isEmpty
-                              ? null
-                              : IconButton(
-                                  tooltip: '清除搜索',
-                                  icon:
-                                      const Icon(Icons.close_rounded, size: 18),
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(
-                                      () => _spec = _spec.copyWith(query: ''),
-                                    );
-                                  },
-                                ),
-                        ),
-                      ),
-                    ),
-                    if (_spec.category == LocalRecordCategory.coursework) ...[
-                      const SizedBox(width: 8),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 146),
-                        child: JournalFilterPill(
-                          key: ValueKey(
-                            'records-course-${selectedCourseKey ?? 'all'}-${_spec.scope.name}-${result.courseOptions.length}',
-                          ),
-                          label: selectedCourseLabel,
-                          active: selectedCourseKey != null,
-                          onTap: () async {
-                            final picked = await showJournalPickerSheet<String>(
-                              context,
-                              title: '按课程筛选',
-                              selectedValue: selectedCourseKey ?? '',
-                              searchable: result.courseOptions.length > 5,
-                              searchHint: '搜索课程名称...',
-                              displayPrefs: widget.store.display,
-                              options: [
-                                const JournalPickerOption(
-                                  value: '',
-                                  label: '全部课程',
-                                ),
-                                for (final option in result.courseOptions)
-                                  JournalPickerOption(
-                                    value: option.courseKey,
-                                    label: option.label,
-                                    icon: courseIconFor(option.label),
-                                  ),
-                              ],
-                            );
-                            if (picked == null || !mounted) return;
-                            setState(
-                              () => picked.isEmpty
-                                  ? _spec = _spec.copyWith(clearCourseKey: true)
-                                  : _spec = _spec.copyWith(courseKey: picked),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                if (_spec.category == LocalRecordCategory.coursework) ...[
-                  const SizedBox(height: 8),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        for (final status
-                            in LocalRecordStatusFilter.values) ...[
-                          ChoiceChip(
-                            visualDensity: VisualDensity.compact,
-                            materialTapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
-                            label: Text(status.label),
-                            selected: _spec.status == status,
-                            onSelected: (_) => setState(
-                              () => _spec = _spec.copyWith(status: status),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 10),
-                Padding(
-                  padding: const EdgeInsets.only(left: 2),
-                  child: Text(
-                    '${result.count} 条记录',
-                    style: journal.metadata,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                if (result.count == 0)
-                  JournalGroupedCard(
-                    padding: const EdgeInsets.all(18),
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            switch (_spec.category) {
-                              LocalRecordCategory.hidden => '暂无隐藏作业',
-                              LocalRecordCategory.otherSources => '暂无历史与其他来源记录',
-                              LocalRecordCategory.coursework =>
-                                _spec.isStatsScoped ||
-                                        _spec.query.isNotEmpty ||
-                                        _spec.status !=
-                                            LocalRecordStatusFilter.all ||
-                                        _spec.courseKey != null
-                                    ? '当前筛选条件下没有课业记录'
-                                    : '本机暂未保存课业记录',
-                            },
-                            style: journal.entryTitle,
-                          ),
-                          if (_spec.category ==
-                                  LocalRecordCategory.coursework &&
-                              !_spec.isStatsScoped &&
-                              (_spec.query.isNotEmpty ||
-                                  _spec.status != LocalRecordStatusFilter.all ||
-                                  _spec.courseKey != null)) ...[
-                            const SizedBox(height: 8),
-                            TextButton(
-                              style: TextButton.styleFrom(
-                                padding: EdgeInsets.zero,
-                              ),
-                              onPressed: () {
-                                _searchController.clear();
-                                setState(() => _spec = _spec.resetToAllLocal());
-                              },
-                              child: const Text('查看全部本机记录'),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  )
-                else if (_spec.category == LocalRecordCategory.otherSources)
-                  JournalGroupedCard(
-                    dividerIndent: 52,
-                    children: [
-                      for (final assignment in result.otherSources)
-                        _buildOtherSourceRow(context, assignment, now, journal),
-                    ],
-                  )
-                else
-                  JournalGroupedCard(
-                    dividerIndent: 52,
-                    children: [
-                      for (final group in result.groups)
-                        _buildGroupRow(
-                          context,
-                          group,
-                          now,
-                          journal,
-                          duplicateCourseNames: duplicateCourseNames,
-                        ),
-                    ],
-                  ),
               ],
             ),
           );

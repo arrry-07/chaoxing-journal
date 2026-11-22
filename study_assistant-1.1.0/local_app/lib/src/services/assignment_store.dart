@@ -1274,8 +1274,12 @@ class AssignmentStore extends ChangeNotifier {
   List<Assignment> get homeCatalogAssignments {
     if (_homeCatalogCache != null) return _homeCatalogCache!;
     if (_homePreviewAssignments.isEmpty) {
-      final next = List<Assignment>.unmodifiable(
-          AssignmentQuery.scope(courseAssignments, {}));
+      final sources = courseAssignments;
+      // The store's own snapshot is already scoped and immutable. Overrides
+      // keep the same filtering and snapshot semantics as before.
+      final next = identical(sources, _courseworkSourcesCache)
+          ? sources
+          : List<Assignment>.unmodifiable(AssignmentQuery.scope(sources, {}));
       _homeCatalogCache = next;
       return next;
     }

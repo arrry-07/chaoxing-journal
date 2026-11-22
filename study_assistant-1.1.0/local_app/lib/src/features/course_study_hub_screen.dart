@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -16,6 +18,7 @@ import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_info_popover.dart';
 import 'widgets/journal_picker_sheet.dart';
+import 'widgets/journal_sliver_grouped_card.dart';
 
 class CourseStudyHubScreen extends StatefulWidget {
   const CourseStudyHubScreen({
@@ -59,6 +62,8 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   String? _selectedCourseKey;
   bool _pendingChaptersOnly = false;
   late final TextEditingController _searchController;
+  String _searchQuery = '';
+  Timer? _searchDebounce;
   String? _accountHash;
   int _accountEpoch = 0;
 
@@ -88,7 +93,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       _selectedCourseKey = null;
       _noticeScope = _NoticeScope.linked;
       _noticeFilter = _NoticeFilter.all;
-      _searchController.clear();
+      _resetNoticeSearch();
     });
   }
 
@@ -120,8 +125,24 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   @override
   void dispose() {
     widget.store.removeListener(_handleIdentityChanged);
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _updateNoticeSearch(String text) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 200), () {
+      _searchDebounce = null;
+      setState(() => _searchQuery = text.trim().toLowerCase());
+    });
+  }
+
+  void _resetNoticeSearch() {
+    _searchDebounce?.cancel();
+    _searchDebounce = null;
+    _searchController.clear();
+    _searchQuery = '';
   }
 
   void _showSnack(String message) {
@@ -251,9 +272,11 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                   scheduleClose();
                   return const SizedBox.shrink();
                 }
-                final linked = latest.linkedManualEntryId != null &&
-                    widget.store.notebook.entries
-                        .any((e) => e.id == latest.linkedManualEntryId);
+                final manualEntryIds = {
+                  for (final entry in widget.store.notebook.entries) entry.id,
+                };
+                final linked =
+                    manualEntryIds.contains(latest.linkedManualEntryId);
                 final timeText = latest.publishedAt == null
                     ? '发布时间待确认'
                     : DateFormat(
@@ -517,31 +540,68 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
               ),
             ],
           ),
-          body: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
-            children: [
-              if (widget.store.recoveryWarning case final warning?) ...[
-                DataRecoveryWarning(warning: warning),
-                const SizedBox(height: 12),
-              ],
-              _StudyHubTabBar(
-                tab: _tab,
-                unreadCount: widget.store.unreadCourseNoticeCount,
-                pendingSectionCount: widget.store.pendingChapterSectionCount,
-                onChanged: (next) {
-                  JournalMotion.tap(widget.store.display);
-                  setState(() => _tab = next);
-                },
+          body: CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+                sliver: SliverMainAxisGroup(
+                  slivers: [
+                    SliverList.list(
+                      children: [
+                        if (widget.store.recoveryWarning
+                            case final warning?) ...[
+                          DataRecoveryWarning(warning: warning),
+                          const SizedBox(height: 12),
+                        ],
+                        _StudyHubTabBar(
+                          tab: _tab,
+                          unreadCount: widget.store.unreadCourseNoticeCount,
+                          pendingSectionCount:
+                              widget.store.pendingChapterSectionCount,
+                          onChanged: (next) {
+                            JournalMotion.tap(widget.store.display);
+                            setState(() => _tab = next);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ),
+                    if (_tab == 'notices')
+                      ..._buildNoticesTab(
+                          context, notices, scoped, scopedUnread)
+                    else
+                      ..._buildChaptersTab(context),
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-              if (_tab == 'notices')
-                ..._buildNoticesTab(context, notices, scoped, scopedUnread)
-              else
-                ..._buildChaptersTab(context),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildNoticeSearch() {
+    return ListenableBuilder(
+      listenable: _searchController,
+      builder: (context, _) => TextField(
+        controller: _searchController,
+        decoration: InputDecoration(
+          hintText: '搜索标题、正文或发布人',
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          prefixIcon: const Icon(Icons.search_rounded, size: 19),
+          suffixIcon: _searchController.text.trim().isEmpty
+              ? null
+              : IconButton(
+                  tooltip: '清除搜索',
+                  onPressed: () => setState(_resetNoticeSearch),
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                ),
+        ),
+        onChanged: _updateNoticeSearch,
+      ),
     );
   }
 
@@ -552,7 +612,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     int scopedUnread,
   ) {
     final journal = Journal.of(context);
-    final query = _searchController.text.trim().toLowerCase();
+    final query = _searchQuery;
     final courseOptions = <String, String>{};
     for (final c in widget.store.courses) {
       courseOptions[c.key] = c.name;
@@ -595,32 +655,10 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       return true;
     }).toList();
 
-    return [
+    final controls = <Widget>[
       Row(
         children: [
-          Expanded(
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: '搜索标题、正文或发布人',
-                isDense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-                prefixIcon: const Icon(Icons.search_rounded, size: 19),
-                suffixIcon: query.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: '清除搜索',
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {});
-                        },
-                        icon: const Icon(Icons.close_rounded, size: 18),
-                      ),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-          ),
+          Expanded(child: _buildNoticeSearch()),
           const SizedBox(width: 8),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 146),
@@ -704,27 +742,31 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         ],
       ),
       const SizedBox(height: 12),
+    ];
+
+    return [
+      SliverList.list(children: controls),
       if (filtered.isEmpty)
-        JournalGroupedCard(
-          padding: const EdgeInsets.all(18),
-          children: [
-            Text(
-              notices.isEmpty
-                  ? '暂无课程通知记录，点击右上角同步图标读取。'
-                  : scoped.isEmpty
-                      ? '当前通知范围内没有记录，可切换到「收件箱」查看平台消息。'
-                      : '当前筛选条件下没有匹配的通知。',
-              style: journal.metadata,
-            ),
-          ],
+        SliverToBoxAdapter(
+          child: JournalGroupedCard(
+            padding: const EdgeInsets.all(18),
+            children: [
+              Text(
+                notices.isEmpty
+                    ? '暂无课程通知记录，点击右上角同步图标读取。'
+                    : scoped.isEmpty
+                        ? '当前通知范围内没有记录，可切换到「收件箱」查看平台消息。'
+                        : '当前筛选条件下没有匹配的通知。',
+                style: journal.metadata,
+              ),
+            ],
+          ),
         )
       else
-        JournalGroupedCard(
-          dividerIndent: 16,
-          children: [
-            for (final notice in filtered)
-              _buildNoticeTile(context, notice, journal),
-          ],
+        JournalSliverGroupedCard(
+          itemCount: filtered.length,
+          itemBuilder: (context, index) =>
+              _buildNoticeTile(context, filtered[index], journal),
         ),
     ];
   }
@@ -809,6 +851,9 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     final journal = Journal.of(context);
     final courses = widget.store.courses;
     final catalog = widget.store.courseChapters;
+    final manualEntryIds = {
+      for (final entry in widget.store.notebook.entries) entry.id,
+    };
     final nameCounts = <String, int>{};
     for (final c in courses) {
       final n = c.name.trim();
@@ -821,7 +866,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         ...courses,
     ];
 
-    return [
+    final controls = <Widget>[
       if (widget.store.isChapterSyncing) ...[
         JournalGroupedCard(
           padding: const EdgeInsets.all(14),
@@ -865,29 +910,36 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         ),
       ],
       const SizedBox(height: 12),
+    ];
+
+    return [
+      SliverList.list(children: controls),
       if (targetCourses.isEmpty)
-        JournalGroupedCard(
-          padding: const EdgeInsets.all(18),
-          children: [
-            Text(
-              '暂无课程资料，请先前往「同步学习通」同步课程列表。',
-              style: journal.metadata,
-            ),
-          ],
+        SliverToBoxAdapter(
+          child: JournalGroupedCard(
+            padding: const EdgeInsets.all(18),
+            children: [
+              Text(
+                '暂无课程资料，请先前往「同步学习通」同步课程列表。',
+                style: journal.metadata,
+              ),
+            ],
+          ),
         )
       else
-        JournalGroupedCard(
-          dividerIndent: 16,
-          children: [
-            for (final course in targetCourses)
-              _buildChapterCourseExpansion(
-                context,
-                course: course,
-                catalog: catalog,
-                duplicateName: (nameCounts[course.name.trim()] ?? 0) > 1,
-                journal: journal,
-              ),
-          ],
+        JournalSliverGroupedCard(
+          itemCount: targetCourses.length,
+          itemBuilder: (context, index) {
+            final course = targetCourses[index];
+            return _buildChapterCourseExpansion(
+              context,
+              course: course,
+              catalog: catalog,
+              manualEntryIds: manualEntryIds,
+              duplicateName: (nameCounts[course.name.trim()] ?? 0) > 1,
+              journal: journal,
+            );
+          },
         ),
     ];
   }
@@ -896,6 +948,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     BuildContext context, {
     required CourseRef course,
     required CourseChapterCatalog catalog,
+    required Set<String> manualEntryIds,
     required bool duplicateName,
     required JournalPalette journal,
   }) {
@@ -914,6 +967,8 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
           }).toList();
 
     return Theme(
+      // The ancestor stores expansion while the tile retains its row key.
+      key: PageStorageKey((_accountHash, _accountEpoch, course.key)),
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         key: ValueKey('chapter-course-${course.key}'),
@@ -980,9 +1035,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                     ),
                   ),
                   trailing: node.state == ChapterTaskState.pendingPoints
-                      ? (node.linkedManualEntryId != null &&
-                              widget.store.notebook.entries
-                                  .any((e) => e.id == node.linkedManualEntryId)
+                      ? (manualEntryIds.contains(node.linkedManualEntryId)
                           ? TextButton(
                               onPressed: () => context.push('/agenda'),
                               child: const Text('已加待办'),
