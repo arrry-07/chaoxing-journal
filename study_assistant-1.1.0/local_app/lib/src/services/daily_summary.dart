@@ -93,7 +93,8 @@ class ReminderHealth {
       this.pending,
       this.summaryPending,
       this.manualPending,
-      this.scheduleRecoveryPending = false});
+      this.scheduleRecoveryPending = false,
+      this.queryErrors = const []});
 
   final bool? notifications, exact;
   final ReminderChannelHealth? assignmentChannel,
@@ -102,6 +103,7 @@ class ReminderHealth {
       manualChannel;
   final int? pending, summaryPending, manualPending;
   final bool scheduleRecoveryPending;
+  final List<String> queryErrors;
 
   // Missing, unsupported and failed channel checks must not collapse to false.
   bool? get channelEnabled => assignmentChannel?.enabled;

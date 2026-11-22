@@ -196,7 +196,11 @@ class LocalNotificationService {
       return await _legacyMigrationChannel
               .invokeMethod<bool>('isMigrationComplete') ??
           false;
-    } catch (_) {
+    } on PlatformException catch (error) {
+      debugPrint('[Notification] legacyMigrationStatus: ${error.runtimeType}');
+      return false;
+    } on MissingPluginException catch (error) {
+      debugPrint('[Notification] legacyMigrationStatus: ${error.runtimeType}');
       return false;
     }
   }
@@ -386,29 +390,29 @@ class LocalNotificationService {
   }
 
   Future<ReminderHealth> inspectHealth() async {
-    bool? allowed, exact;
-    int? pending, summary, manual;
-    var scheduleRecoveryPending = true;
-    try {
-      scheduleRecoveryPending = await hasPendingScheduleRecovery();
-    } catch (_) {
-      scheduleRecoveryPending = true;
-    }
-    final channels = await _inspectChannelHealth();
+    final errors = <String>[];
+    final scheduleRecoveryPending = await _healthQuery(
+          _readScheduleRecovery,
+          errors,
+          '提醒排期恢复状态读取失败',
+        ) ??
+        true;
+    final channels = await _inspectChannelHealth(errors);
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
-    try {
-      allowed = await android?.areNotificationsEnabled();
-    } catch (_) {}
-    try {
-      exact = await android?.canScheduleExactNotifications();
-    } catch (_) {}
-    try {
-      final list = await _plugin.pendingNotificationRequests();
-      pending = list.where((n) => n.payload?.startsWith('a:') ?? false).length;
-      summary = list.where((n) => n.payload == 'd:summary').length;
-      manual = list.where((n) => n.payload?.startsWith('p:') ?? false).length;
-    } catch (_) {}
+    final allowed = android == null
+        ? null
+        : await _healthQuery(
+            android.areNotificationsEnabled, errors, '通知权限读取失败');
+    final exact = android == null
+        ? null
+        : await _healthQuery(
+            android.canScheduleExactNotifications, errors, '精确闹钟权限读取失败');
+    final pending = await _healthQuery(
+      _plugin.pendingNotificationRequests,
+      errors,
+      '系统待投递提醒读取失败',
+    );
     return ReminderHealth(
         notifications: allowed,
         exact: exact,
@@ -416,10 +420,29 @@ class LocalNotificationService {
         assignmentUpdatesChannel: channels.$2,
         summaryChannel: channels.$3,
         manualChannel: channels.$4,
-        pending: pending,
-        summaryPending: summary,
-        manualPending: manual,
-        scheduleRecoveryPending: scheduleRecoveryPending);
+        pending:
+            pending?.where((n) => n.payload?.startsWith('a:') ?? false).length,
+        summaryPending: pending?.where((n) => n.payload == 'd:summary').length,
+        manualPending:
+            pending?.where((n) => n.payload?.startsWith('p:') ?? false).length,
+        scheduleRecoveryPending: scheduleRecoveryPending,
+        queryErrors: List.unmodifiable(errors));
+  }
+
+  Future<T?> _healthQuery<T>(
+    Future<T?> Function() read,
+    List<String> errors,
+    String message,
+  ) async {
+    try {
+      final value = await read();
+      if (value == null) errors.add(message);
+      return value;
+    } catch (error) {
+      errors.add(message);
+      debugPrint('[ReminderHealth] $message (${error.runtimeType})');
+      return null;
+    }
   }
 
   Future<PluginScheduleEvidenceSnapshot> readScheduleEvidence() async {
@@ -485,10 +508,16 @@ class LocalNotificationService {
               const NotificationDetails(
                   android: AndroidNotificationDetails(
                       assignmentChannel, '作业截止提醒',
-                      importance: Importance.high, priority: Priority.high)),
+                      importance: Importance.high,
+                      priority: Priority.high,
+                      visibility: NotificationVisibility.private)),
               payload: 't:notification-test');
           return true;
-        } catch (_) {
+        } on PlatformException catch (error) {
+          debugPrint('[Notification] showTest: ${error.runtimeType}');
+          return false;
+        } on MissingPluginException catch (error) {
+          debugPrint('[Notification] showTest: ${error.runtimeType}');
           return false;
         }
       });
@@ -628,7 +657,11 @@ class LocalNotificationService {
         ));
       }
       return records;
-    } catch (_) {
+    } on FormatException catch (error) {
+      debugPrint('[Notification] summaryEvidence: ${error.runtimeType}');
+      return const [];
+    } on TypeError catch (error) {
+      debugPrint('[Notification] summaryEvidence: ${error.runtimeType}');
       return const [];
     }
   }
@@ -659,7 +692,8 @@ class LocalNotificationService {
   Future<void> initializeSafely({NotificationPayloadHandler? onPayload}) async {
     try {
       await initialize(onPayload: onPayload);
-    } catch (_) {
+    } catch (error) {
+      debugPrint('[Notification] initialize: ${error.runtimeType}');
       lastWarning ??= '提醒初始化失败，请检查系统通知设置';
     }
   }
@@ -695,44 +729,42 @@ class LocalNotificationService {
   }
 
   Future<bool> hasPendingScheduleRecovery() async {
+    try {
+      return await _readScheduleRecovery();
+    } on Exception catch (error) {
+      // When recovery state is unreadable, retain the pending indicator.
+      debugPrint('[Notification] scheduleRecoveryState: ${error.runtimeType}');
+      return true;
+    } on TypeError catch (error) {
+      debugPrint('[Notification] scheduleRecoveryState: ${error.runtimeType}');
+      return true;
+    }
+  }
+
+  Future<bool> _readScheduleRecovery() async {
     final prefs = await SharedPreferences.getInstance();
     final activeIdsByCategory = <String, Set<int>>{};
     for (final category in _scheduleCategories) {
-      try {
-        if (prefs.getString(_journalKey(category)) != null) return true;
-        activeIdsByCategory[category] = _readActiveIds(prefs, category).toSet();
-      } catch (_) {
-        // A damaged active-ID manifest is also a recovery condition. Do not
-        // silently report a healthy schedule when privacy cleanup can no
-        // longer identify notifications that have already been delivered.
+      if (prefs.getString(_journalKey(category)) != null) return true;
+      activeIdsByCategory[category] = _readActiveIds(prefs, category).toSet();
+    }
+    final pending = await _plugin.pendingNotificationRequests();
+    for (final item in pending) {
+      if (item.id < 2000000000) continue;
+      final category = _scheduleCategoryForPayload(item.payload);
+      if (category != null &&
+          !activeIdsByCategory[category]!.contains(item.id)) {
         return true;
       }
     }
-    try {
-      final pending = await _plugin.pendingNotificationRequests();
-      for (final item in pending) {
-        if (item.id < 2000000000) continue;
-        final category = _scheduleCategoryForPayload(item.payload);
-        if (category != null &&
-            !activeIdsByCategory[category]!.contains(item.id)) {
-          return true;
-        }
+    final active = await _plugin.getActiveNotifications();
+    for (final item in active) {
+      final id = item.id;
+      if (id == null || id < 2000000000) continue;
+      final category = _scheduleCategoryForPayload(item.payload);
+      if (category != null && !activeIdsByCategory[category]!.contains(id)) {
+        return true;
       }
-    } catch (_) {
-      return true;
-    }
-    try {
-      final active = await _plugin.getActiveNotifications();
-      for (final item in active) {
-        final id = item.id;
-        if (id == null || id < 2000000000) continue;
-        final category = _scheduleCategoryForPayload(item.payload);
-        if (category != null && !activeIdsByCategory[category]!.contains(id)) {
-          return true;
-        }
-      }
-    } catch (_) {
-      return true;
     }
     return false;
   }
@@ -1587,7 +1619,7 @@ class LocalNotificationService {
         ReminderChannelHealth,
         ReminderChannelHealth,
         ReminderChannelHealth
-      )> _inspectChannelHealth() async {
+      )> _inspectChannelHealth(List<String> errors) async {
     const unsupported =
         ReminderChannelHealth(ReminderChannelStatus.unsupported);
     const failed = ReminderChannelHealth(ReminderChannelStatus.queryFailed);
@@ -1595,12 +1627,11 @@ class LocalNotificationService {
       return (unsupported, unsupported, unsupported, unsupported);
     }
 
-    final int? sdkInt;
-    try {
-      sdkInt = await _permissionsChannel.invokeMethod<int>('getAndroidSdkInt');
-    } catch (_) {
-      return (failed, failed, failed, failed);
-    }
+    final sdkInt = await _healthQuery(
+      () => _permissionsChannel.invokeMethod<int>('getAndroidSdkInt'),
+      errors,
+      'Android 系统版本读取失败',
+    );
     if (sdkInt == null) return (failed, failed, failed, failed);
     if (sdkInt < 26) {
       return (unsupported, unsupported, unsupported, unsupported);
@@ -1608,32 +1639,35 @@ class LocalNotificationService {
 
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
-    if (android == null) return (failed, failed, failed, failed);
-    try {
-      final channels = await android.getNotificationChannels();
-      if (channels == null) return (failed, failed, failed, failed);
-      ReminderChannelHealth status(String id) {
-        final channel = channels.where((item) => item.id == id).firstOrNull;
-        if (channel == null) {
-          return const ReminderChannelHealth(ReminderChannelStatus.missing);
-        }
-        return ReminderChannelHealth(
-          channel.importance == Importance.none
-              ? ReminderChannelStatus.disabled
-              : ReminderChannelStatus.enabled,
-          importance: channel.importance.value,
-        );
-      }
-
-      return (
-        status(assignmentChannel),
-        status(assignmentUpdatesChannel),
-        status(summaryChannel),
-        status(manualChannel),
-      );
-    } catch (_) {
+    if (android == null) {
+      errors.add('通知渠道状态读取失败');
       return (failed, failed, failed, failed);
     }
+    final channels = await _healthQuery(
+      android.getNotificationChannels,
+      errors,
+      '通知渠道状态读取失败',
+    );
+    if (channels == null) return (failed, failed, failed, failed);
+    ReminderChannelHealth status(String id) {
+      final channel = channels.where((item) => item.id == id).firstOrNull;
+      if (channel == null) {
+        return const ReminderChannelHealth(ReminderChannelStatus.missing);
+      }
+      return ReminderChannelHealth(
+        channel.importance == Importance.none
+            ? ReminderChannelStatus.disabled
+            : ReminderChannelStatus.enabled,
+        importance: channel.importance.value,
+      );
+    }
+
+    return (
+      status(assignmentChannel),
+      status(assignmentUpdatesChannel),
+      status(summaryChannel),
+      status(manualChannel),
+    );
   }
 
   Future<void> rescheduleAssignments(
@@ -1760,9 +1794,7 @@ class LocalNotificationService {
             importance: Importance.high,
             priority: Priority.high,
             category: AndroidNotificationCategory.reminder,
-            visibility: showDetails
-                ? NotificationVisibility.public
-                : NotificationVisibility.private,
+            visibility: NotificationVisibility.private,
             ticker: title,
           ),
           iOS: DarwinNotificationDetails(
@@ -1778,7 +1810,8 @@ class LocalNotificationService {
             UILocalNotificationDateInterpretation.absoluteTime,
         payload: payload,
       );
-    } catch (_) {
+    } on PlatformException catch (error) {
+      debugPrint('[Notification] schedule: ${error.runtimeType}');
       if (mode == AndroidScheduleMode.exactAllowWhileIdle) {
         await _trySchedule(
           id: id,

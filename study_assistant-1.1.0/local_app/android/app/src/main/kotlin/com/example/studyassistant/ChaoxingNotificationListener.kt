@@ -23,29 +23,28 @@ class ChaoxingNotificationListener : NotificationListenerService() {
         val signalKey = sha256(posted.key)
         val postTime = posted.postTime
         NativeReceiverExecutor.executeAsync {
-            val database = ReminderDatabase.get(appContext)
-            val account = database.activeAccount() ?: return@executeAsync
-            if (!account.active || !account.listenerEnabled) return@executeAsync
-            val version = runCatching {
-                database.recordSignal(
+            try {
+                val database = ReminderDatabase.get(appContext)
+                val account = database.activeAccount() ?: return@executeAsync
+                if (!account.active || !account.listenerEnabled) return@executeAsync
+                val version = database.recordSignal(
                     account.accountHash,
                     account.sessionEpoch,
                     signalKey,
                     postTime,
                 )
-            }.getOrNull() ?: return@executeAsync
-            if (version <= account.pendingSignalVersion) return@executeAsync
-            val enqueue = BackgroundWorkScheduler.scheduleNotificationCheck(
-                appContext,
-                database,
-                account.accountHash,
-                version,
-            )
-            if (enqueue.state == NotificationEnqueueState.FAILED) {
-                Log.w(
-                    "ChaoxingNotificationListener",
-                    "notification_signal_enqueue_failed:${enqueue.reasonCode}",
+                if (version <= account.pendingSignalVersion) return@executeAsync
+                val enqueue = BackgroundWorkScheduler.scheduleNotificationCheck(
+                    appContext,
+                    database,
+                    account.accountHash,
+                    version,
                 )
+                if (enqueue.state == NotificationEnqueueState.FAILED) {
+                    Log.w(TAG, "notification_signal_enqueue_failed:${enqueue.reasonCode}")
+                }
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "notification_signal_processing_failed:${error.javaClass.simpleName}")
             }
         }
     }
@@ -55,4 +54,7 @@ class ChaoxingNotificationListener : NotificationListenerService() {
             .digest(value.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
 
+    companion object {
+        private const val TAG = "ChaoxingNotificationListener"
+    }
 }

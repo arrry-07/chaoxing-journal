@@ -7,7 +7,7 @@ import java.time.ZonedDateTime
 object NativeReminderPolicy {
     const val DAYTIME_START_HOUR = 8
 
-    fun isInDaytimeWindow(instant: Instant, zone: ZoneId): Boolean =
+    fun isInDaytimeWindow(instant: Instant, zone: ZoneId = ZoneId.systemDefault()): Boolean =
         instant.atZone(zone).hour >= DAYTIME_START_HOUR
 
     fun nextWindowStart(
@@ -15,9 +15,13 @@ object NativeReminderPolicy {
         zone: ZoneId = ZoneId.systemDefault(),
     ): Instant {
         val local = now.atZone(zone)
-        val today = local.toLocalDate().atStartOfDay(zone)
-            .plusHours(DAYTIME_START_HOUR.toLong())
-        return if (local.isBefore(today)) today.toInstant() else today.plusDays(1).toInstant()
+        val date = local.toLocalDate()
+        val today = date.atTime(DAYTIME_START_HOUR, 0).atZone(zone)
+        return if (local.isBefore(today)) {
+            today.toInstant()
+        } else {
+            date.plusDays(1).atTime(DAYTIME_START_HOUR, 0).atZone(zone).toInstant()
+        }
     }
 
     /**
@@ -27,8 +31,7 @@ object NativeReminderPolicy {
     fun moveToDaytime(instant: Instant, zone: ZoneId = ZoneId.systemDefault()): Instant {
         val local = instant.atZone(zone)
         if (local.hour >= DAYTIME_START_HOUR) return instant
-        return local.toLocalDate().atStartOfDay(zone)
-            .plusHours(DAYTIME_START_HOUR.toLong())
+        return local.toLocalDate().atTime(DAYTIME_START_HOUR, 0).atZone(zone)
             .toInstant()
     }
 

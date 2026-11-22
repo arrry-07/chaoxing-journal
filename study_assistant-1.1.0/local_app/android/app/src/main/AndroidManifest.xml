@@ -101,7 +101,7 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <receiver
             android:name=".ReminderSystemReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.USER_UNLOCKED" />

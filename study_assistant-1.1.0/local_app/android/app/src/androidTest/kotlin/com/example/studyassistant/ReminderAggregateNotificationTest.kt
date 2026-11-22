@@ -67,6 +67,36 @@ class ReminderAggregateNotificationTest {
     }
 
     @Test
+    fun detailedAggregateAndSilentRefreshKeepPublicTextAnonymous() {
+        val first = snapshot("合成正式作业", formal = true)
+        val second = snapshot("合成课堂活动", formal = false)
+        val third = snapshot("合成第二份作业", formal = true)
+        val id = publishBatch(listOf(first, second, third))
+
+        fun assertPrivateAggregate(notification: Notification, count: Int) {
+            assertEquals(Notification.VISIBILITY_PRIVATE, notification.visibility)
+            assertTrue(notification.extras.getCharSequence(Notification.EXTRA_TEXT)
+                .toString().contains(first.title))
+            val publicVersion = requireNotNull(notification.publicVersion)
+            assertEquals(Notification.VISIBILITY_PUBLIC, publicVersion.visibility)
+            assertEquals(
+                "有 $count 项作业有新变化，请打开课业手记查看",
+                publicVersion.extras.getCharSequence(Notification.EXTRA_TEXT).toString(),
+            )
+            assertEquals(notification.smallIcon.resId, publicVersion.smallIcon.resId)
+        }
+
+        assertPrivateAggregate(awaitNotification(id), 3)
+        val invalid = second.copy(status = "unknown")
+        reconcile(apply(listOf(first, invalid, third)))
+        val refreshed = awaitNotification(id) {
+            val body = it.extras.getCharSequence(Notification.EXTRA_TEXT).toString()
+            body.contains(first.title) && !body.contains(second.title)
+        }
+        assertPrivateAggregate(refreshed, 2)
+    }
+
+    @Test
     fun unknownActivityKeepsSubmittedFormalNotificationAndDetailClick() {
         assertSurvivor(formalSurvives = true)
     }

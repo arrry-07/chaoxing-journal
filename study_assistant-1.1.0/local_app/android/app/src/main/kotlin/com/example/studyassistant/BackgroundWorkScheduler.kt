@@ -1,9 +1,12 @@
 package com.example.studyassistant
 
 import android.content.Context
+import android.util.Log
 import androidx.work.BackoffPolicy
+import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
@@ -35,6 +38,7 @@ data class NotificationEnqueueResult(
 }
 
 object BackgroundWorkScheduler {
+    private const val TAG = "BackgroundWorkScheduler"
     const val REASON_DAYTIME = "daytime"
     const val REASON_NOTIFICATION = "notification_signal"
 
@@ -42,6 +46,9 @@ object BackgroundWorkScheduler {
     internal const val LEGACY_NOTIFICATION_WORK = "notification_assignment_check"
 
     private const val CONFIRM_TIMEOUT_SECONDS = 5L
+    internal val networkConnectedConstraints = Constraints.Builder()
+        .setRequiredNetworkType(NetworkType.CONNECTED)
+        .build()
 
     fun daytimeWorkName(accountHash: String, sessionEpoch: Long): String =
         "$LEGACY_DAYTIME_WORK:$accountHash:$sessionEpoch"
@@ -87,6 +94,8 @@ object BackgroundWorkScheduler {
             workManager.enqueueUniqueWork(name, ExistingWorkPolicy.REPLACE, request)
                 .getResult()
                 .get(CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        }.onFailure { error ->
+            Log.w(TAG, "daytime_reconcile_enqueue_failed:${error.javaClass.simpleName}")
         }
         database.setNextCheckAt(account.accountHash, target)
     }
@@ -126,6 +135,8 @@ object BackgroundWorkScheduler {
                 ExistingWorkPolicy.APPEND_OR_REPLACE,
                 request,
             ).getResult().get(CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        }.onFailure { error ->
+            Log.w(TAG, "daytime_successor_enqueue_failed:${error.javaClass.simpleName}")
         }
         database.setNextCheckAt(accountHash, targetAt)
     }
@@ -217,6 +228,8 @@ object BackgroundWorkScheduler {
                 .getResult()
                 .get(CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             true
+        }.onFailure { error ->
+            Log.w(TAG, "notification_enqueue_failed:${error.javaClass.simpleName}")
         }.getOrDefault(false)
         if (!accepted) return NotificationEnqueueResult.failed("enqueueFailed")
         return if (confirmSuccessor(workManager, name, currentWorkId)) {
@@ -283,6 +296,8 @@ object BackgroundWorkScheduler {
                 .getResult()
                 .get(CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             true
+        }.onFailure { error ->
+            Log.w(TAG, "notification_successor_enqueue_failed:${error.javaClass.simpleName}")
         }.getOrDefault(false)
         if (!accepted) return NotificationEnqueueResult.failed("enqueueFailed")
         return if (confirmSuccessor(workManager, name, currentWorkId)) {
@@ -359,6 +374,7 @@ object BackgroundWorkScheduler {
             Instant.ofEpochMilli(cooldownAt),
         ).toEpochMilli()
         return OneTimeWorkRequestBuilder<FlutterCheckWorker>()
+            .setConstraints(networkConnectedConstraints)
             .setBackoffCriteria(
                 BackoffPolicy.EXPONENTIAL,
                 10,
@@ -420,6 +436,7 @@ object BackgroundWorkScheduler {
         intervalMinutes: Int,
         account: ReminderAccountState,
     ) = OneTimeWorkRequestBuilder<FlutterCheckWorker>()
+        .setConstraints(networkConnectedConstraints)
         .setBackoffCriteria(
             BackoffPolicy.EXPONENTIAL,
             10,
@@ -450,6 +467,8 @@ object BackgroundWorkScheduler {
     ): List<WorkInfo> = runCatching {
         workManager.getWorkInfosForUniqueWork(name)
             .get(CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    }.onFailure { error ->
+        Log.w(TAG, "live_work_query_failed:${error.javaClass.simpleName}")
     }.getOrDefault(emptyList())
 
     private fun enqueueAction(

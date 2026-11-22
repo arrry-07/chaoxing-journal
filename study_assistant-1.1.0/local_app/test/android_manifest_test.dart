@@ -83,6 +83,7 @@ void main() {
       r'<receiver\s+android:name="\.ReminderSystemReceiver"[\s\S]*?</receiver>',
     ).firstMatch(manifest)?.group(0);
     expect(reminderSystemReceiver, isNotNull);
+    expect(reminderSystemReceiver, contains('android:exported="false"'));
     expect(
       reminderSystemReceiver,
       contains('android.intent.action.USER_UNLOCKED'),

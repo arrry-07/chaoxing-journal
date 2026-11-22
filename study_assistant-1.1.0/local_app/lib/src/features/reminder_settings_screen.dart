@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app/journal.dart';
@@ -341,6 +342,10 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     }
     if (current?.scheduleRecoveryPending == true) {
       issues.add('存在待恢复的调度事务');
+    }
+    if (current?.queryErrors.isNotEmpty == true ||
+        _backgroundHealth?.queryErrors.isNotEmpty == true) {
+      issues.add('部分系统状态读取失败，请下拉重试或检查系统权限');
     }
 
     final hasPositiveSignal = current != null &&
@@ -1139,7 +1144,16 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
         _showMessage('通知权限已开启');
         unawaited(_loadHealth(force: true));
       }
-    } catch (_) {
+    } on PlatformException catch (error) {
+      debugPrint('[ReminderSettings] requestPermission: ${error.runtimeType}');
+      if (mounted) {
+        await _openPermissionSettings(
+          widget.permissionSettingsService.openNotificationSettingsResult,
+          destination: '通知设置',
+        );
+      }
+    } on MissingPluginException catch (error) {
+      debugPrint('[ReminderSettings] requestPermission: ${error.runtimeType}');
       if (mounted) {
         await _openPermissionSettings(
           widget.permissionSettingsService.openNotificationSettingsResult,

@@ -6,11 +6,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import java.time.Instant
-import java.time.ZonedDateTime
-import java.time.temporal.ChronoUnit
+import java.time.ZoneId
 
 object AssignmentAlarmScheduler {
+    private const val TAG = "AssignmentAlarmScheduler"
     private const val NEW_WINDOW_ACTION =
         "com.example.studyassistant.action.NEW_ASSIGNMENT_WINDOW"
 
@@ -56,8 +57,13 @@ object AssignmentAlarmScheduler {
         ) != null
     }
 
-    fun scheduleNewAssignmentWindow(context: Context, accountHash: String) {
-        val triggerAt = NativeReminderPolicy.nextWindowStart(Instant.now()).toEpochMilli()
+    fun scheduleNewAssignmentWindow(
+        context: Context,
+        accountHash: String,
+        now: Instant = Instant.now(),
+        zone: ZoneId = ZoneId.systemDefault(),
+    ) {
+        val triggerAt = NativeReminderPolicy.nextWindowStart(now, zone).toEpochMilli()
         val requestCode = stableRequestCode("new-window:$accountHash")
         val intent = Intent(context, NewAssignmentWindowReceiver::class.java)
             .setAction(NEW_WINDOW_ACTION)
@@ -98,74 +104,94 @@ object AssignmentAlarmScheduler {
         ) != null
     }
 
-    fun reconcile(context: Context, database: ReminderDatabase) {
+    fun reconcile(
+        context: Context,
+        database: ReminderDatabase,
+        now: Instant = Instant.now(),
+        zone: ZoneId = ZoneId.systemDefault(),
+    ) {
         val account = database.activeAccount() ?: return
         if (!database.isSessionCurrent(account.accountHash, account.sessionEpoch)) return
         database.pendingDeadlineEvents(account.accountHash).forEach {
             scheduleDeadline(context, it)
         }
-        if (database.pendingNewEvents(account.accountHash).isNotEmpty()) {
-            scheduleNewAssignmentWindow(context, account.accountHash)
-        }
+        reconcilePendingNewAssignments(context, database, account, now, zone)
     }
 
-    fun rescheduleForTimeZoneChange(context: Context, database: ReminderDatabase) {
+    fun rescheduleForTimeZoneChange(
+        context: Context,
+        database: ReminderDatabase,
+        now: Instant = Instant.now(),
+        zone: ZoneId = ZoneId.systemDefault(),
+    ) {
         val account = database.activeAccount() ?: return
-        val now = Instant.now()
+        if (!database.isSessionCurrent(account.accountHash, account.sessionEpoch)) return
         database.pendingDeadlineEvents(account.accountHash).forEach { event ->
-            val deadline = event.deadlineAt ?: return@forEach
-            if (deadline <= now.toEpochMilli()) {
+            val deadline = event.deadlineAt?.let(Instant::ofEpochMilli) ?: return@forEach
+            if (!deadline.isAfter(now)) {
                 database.cancelEvent(event.eventId)
                 cancelDeadline(context, event)
                 return@forEach
             }
-            val deadlineTime = Instant.ofEpochMilli(deadline).atZone(ZonedDateTime.now().zone)
-            var earliest: ZonedDateTime? = null
-            event.offsets.forEach { offset ->
-                var candidate = deadlineTime.minusMinutes(offset.toLong())
-                candidate = NativeReminderPolicy.moveToDaytime(
-                    candidate.toInstant(),
-                    ZonedDateTime.now().zone,
-                ).atZone(ZonedDateTime.now().zone)
-                if (candidate.toInstant().isAfter(now) &&
-                    candidate.toInstant().isBefore(Instant.ofEpochMilli(deadline))
-                ) {
-                    if (earliest == null || candidate.isBefore(earliest)) earliest = candidate
-                }
-            }
+            val earliest = event.offsets.asSequence()
+                .map { deadline.minusSeconds(it.toLong() * 60) }
+                .map { NativeReminderPolicy.moveToDaytime(it, zone) }
+                .filter { it.isAfter(now) && it.isBefore(deadline) }
+                .minOrNull()
             if (earliest == null) {
                 database.cancelEvent(event.eventId)
                 cancelDeadline(context, event)
             } else {
-                val updated = event.copy(notifyAt = earliest!!.toInstant().toEpochMilli())
+                val updated = event.copy(notifyAt = earliest.toEpochMilli())
                 database.updateEventNotifyAt(updated.eventId, updated.notifyAt)
                 scheduleDeadline(context, updated)
             }
         }
-        if (database.pendingNewEvents(account.accountHash).isNotEmpty()) {
-            scheduleNewAssignmentWindow(context, account.accountHash)
+        reconcilePendingNewAssignments(context, database, account, now, zone)
+    }
+
+    private fun reconcilePendingNewAssignments(
+        context: Context,
+        database: ReminderDatabase,
+        account: ReminderAccountState,
+        now: Instant,
+        zone: ZoneId,
+    ) {
+        val accountHash = account.accountHash
+        if (!account.newAssignmentEnabled || database.pendingNewEvents(accountHash).isEmpty()) {
+            cancelNewAssignmentWindow(context, accountHash)
+        } else if (NativeReminderPolicy.isInDaytimeWindow(now, zone)) {
+            cancelNewAssignmentWindow(context, accountHash)
+            AssignmentNotificationPublisher.publishPendingNewAssignments(
+                context,
+                database,
+                accountHash,
+                now,
+            )
+        } else {
+            scheduleNewAssignmentWindow(context, accountHash, now, zone)
         }
     }
 
     private fun setAlarm(context: Context, triggerAt: Long, pending: PendingIntent) {
         val alarms = context.getSystemService(AlarmManager::class.java) ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            !alarms.canScheduleExactAlarms()
-        ) {
-            runCatching {
-                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms.canScheduleExactAlarms()) {
+                alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+                return
             }
+        } catch (error: SecurityException) {
+            // Exact alarm permission can be revoked between check and schedule.
+            Log.w(TAG, "exact_alarm_denied:${error.javaClass.simpleName}")
+        } catch (error: RuntimeException) {
+            // Alarm quota or OEM restrictions must not abort remaining schedules.
+            Log.w(TAG, "exact_alarm_failed:${error.javaClass.simpleName}")
             return
         }
         try {
-            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-        } catch (_: SecurityException) {
-            // Exact alarm permission can be revoked between check and schedule.
-            runCatching {
-                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-            }
-        } catch (_: RuntimeException) {
-            // Alarm quota or OEM restrictions must not abort remaining schedules.
+            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "inexact_alarm_failed:${error.javaClass.simpleName}")
         }
     }
 

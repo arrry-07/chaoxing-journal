@@ -50,8 +50,8 @@ class WidgetSnapshotService {
       _snapshotKey,
       jsonEncode(items.map((item) => item.toJson()).toList()),
     );
-    await HomeWidget.saveWidgetData<String>(
-        _snapshotAtKey, DateTime.now().toUtc().toIso8601String());
+    await HomeWidget.saveWidgetData<String>(_snapshotAtKey,
+        authenticated ? DateTime.now().toUtc().toIso8601String() : null);
     await HomeWidget.saveWidgetData<bool>(_authenticatedKey, authenticated);
     await HomeWidget.saveWidgetData<int>(_totalCountKey, totalCount);
     await HomeWidget.saveWidgetData<String>(_rangeLabelKey, rangeLabelText);

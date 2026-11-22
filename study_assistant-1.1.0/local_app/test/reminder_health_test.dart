@@ -1143,6 +1143,7 @@ void main() {
       if (c.method == 'areNotificationsEnabled') return true;
       if (c.method == 'canScheduleExactNotifications') return true;
       if (c.method == 'pendingNotificationRequests') return [];
+      if (c.method == 'getActiveNotifications') return [];
       return true;
     });
     final store =
@@ -1166,6 +1167,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     final tile = find.widgetWithText(ListTile, '作业变化通知渠道');
+    await tester.ensureVisible(tile);
     await tester.tap(tile);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

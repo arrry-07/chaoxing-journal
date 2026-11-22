@@ -3,6 +3,7 @@ package com.example.studyassistant
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -14,6 +15,7 @@ import java.util.concurrent.Executors
 
 object BackgroundReminderBridge {
     const val CHANNEL = "study_assistant/background_reminders"
+    private const val TAG = "BackgroundReminderBridge"
     private const val CONFIRMATION_TIMEOUT_SECONDS = 10L
     private val leaseExecutor = Executors.newCachedThreadPool()
     // Database, alarm and notification publishing run here, never on the
@@ -39,7 +41,9 @@ object BackgroundReminderBridge {
                 val cancel: () -> Unit = { future.cancel(false) }
                 cancel
             },
-            onCleanupFailure = { /* best effort; the lease is still released */ },
+            onCleanupFailure = { error ->
+                Log.w(TAG, "lease_cleanup_failed:${error.javaClass.simpleName}")
+            },
         )
         engine.addEngineLifecycleListener(
             object : FlutterEngine.EngineLifecycleListener {
@@ -60,34 +64,40 @@ object BackgroundReminderBridge {
             try {
                 when (call.method) {
                     "ping" -> result.success(true)
-                    "ensureActiveAccount" -> {
+                    "ensureActiveAccount" -> tasks.execute(result) { reply ->
                         val accountHash = call.requiredString("accountHash")
                         BackgroundWorkScheduler.retireLegacyWork(appContext)
-                        result.success(database.ensureActiveAccount(accountHash).sessionEpoch)
+                        reply.success(database.ensureActiveAccount(accountHash).sessionEpoch)
                     }
                     "switchAccount" -> tasks.execute(result) { reply ->
-                        val previous = call.argument<String>("previousAccountHash")
                         val target = call.requiredString("accountHash")
-                        val switchingAccount =
-                            !previous.isNullOrBlank() && previous != target
-                        val targetBefore =
-                            if (switchingAccount) database.readAccount(target) else null
-                        if (switchingAccount) {
-                            database.readAccount(previous!!)?.let { previousState ->
+                        val previous = database.activeAccount()?.accountHash?.takeIf { it != target }
+                            ?: call.argument<String>("previousAccountHash")
+                        val switchingFrom = previous?.takeIf { it.isNotBlank() && it != target }
+                        val targetBefore = switchingFrom?.let { database.readAccount(target) }
+                        if (switchingFrom != null) {
+                            database.readAccount(switchingFrom)?.let { previousState ->
                                 BackgroundWorkScheduler.cancelAllForAccount(
                                     appContext,
-                                    previous,
+                                    switchingFrom,
                                     previousState.sessionEpoch,
                                 )
                             }
                             AssignmentNotificationPublisher.cancelForAccount(
                                 appContext,
                                 database,
-                                previous!!,
+                                switchingFrom,
+                            )
+                            // Cancel the target's old notifications while the DB still has their IDs.
+                            AssignmentNotificationPublisher.cancelForAccount(
+                                appContext,
+                                database,
+                                target,
                             )
                         }
                         val state = database.switchAccount(previous, target)
-                        if (switchingAccount) {
+                        if (switchingFrom != null) {
+                            AssignmentWidgetProvider.clearForUnauthenticated(appContext)
                             if (targetBefore != null &&
                                 targetBefore.sessionEpoch != state.sessionEpoch
                             ) {
@@ -101,11 +111,6 @@ object BackgroundReminderBridge {
                                 appContext,
                                 target,
                                 state.sessionEpoch,
-                            )
-                            AssignmentNotificationPublisher.cancelForAccount(
-                                appContext,
-                                database,
-                                target,
                             )
                         }
                         reply.success(state.sessionEpoch)
@@ -146,14 +151,20 @@ object BackgroundReminderBridge {
                             database,
                             accountHash,
                         )
-                        reply.success(database.clearActiveAccount(accountHash))
+                        val epoch = database.clearActiveAccount(accountHash)
+                        if (database.activeAccount() == null) {
+                            AssignmentWidgetProvider.clearForUnauthenticated(appContext)
+                        }
+                        reply.success(epoch)
                     }
-                    "isSessionCurrent" -> result.success(
-                        database.isSessionCurrent(
-                            call.requiredString("accountHash"),
-                            call.requiredLong("sessionEpoch"),
-                        ),
-                    )
+                    "isSessionCurrent" -> tasks.execute(result) { reply ->
+                        reply.success(
+                            database.isSessionCurrent(
+                                call.requiredString("accountHash"),
+                                call.requiredLong("sessionEpoch"),
+                            ),
+                        )
+                    }
                     "updateSettings" -> {
                         leaseExecutor.execute {
                             runCatching {
@@ -318,21 +329,21 @@ object BackgroundReminderBridge {
                         )
                         result.success(null)
                     }
-                    "markPendingUpdate" -> {
+                    "markPendingUpdate" -> tasks.execute(result) { reply ->
                         database.markPendingUpdate(
                             call.requiredString("accountHash"),
                             call.requiredLong("sessionEpoch"),
                         )
-                        result.success(null)
+                        reply.success(null)
                     }
-                    "authorizeNotificationRemoteStart" -> {
+                    "authorizeNotificationRemoteStart" -> tasks.execute(result) { reply ->
                         val authorization = database.authorizeNotificationRemoteStart(
                             accountHash = call.requiredString("accountHash"),
                             sessionEpoch = call.requiredLong("sessionEpoch"),
                             claimToken = call.requiredString("claimToken"),
                             ownerWorkId = call.requiredString("workerId"),
                         )
-                        result.success(
+                        reply.success(
                             when (authorization) {
                                 NotificationRemoteAuthorization.GRANTED -> "granted"
                                 NotificationRemoteAuthorization.OUTSIDE_WINDOW ->
@@ -341,12 +352,12 @@ object BackgroundReminderBridge {
                             },
                         )
                     }
-                    "loadPlanState" -> {
+                    "loadPlanState" -> tasks.execute(result) { reply ->
                         val state = database.loadPlanState(
                             call.requiredString("accountHash"),
                             call.requiredLong("sessionEpoch"),
                         )
-                        result.success(
+                        reply.success(
                             mapOf(
                                 "baselineCompleted" to state.baselineCompleted,
                                 "baselinedSources" to state.baselinedSources.toList(),
@@ -402,7 +413,7 @@ object BackgroundReminderBridge {
                             ),
                         )
                     }
-                    "recordAttempt" -> {
+                    "recordAttempt" -> tasks.execute(result) { reply ->
                         database.recordAttempt(
                             accountHash = call.requiredString("accountHash"),
                             sessionEpoch = call.requiredLong("sessionEpoch"),
@@ -413,18 +424,24 @@ object BackgroundReminderBridge {
                             fullSucceeded = call.argument<Boolean>("fullSucceeded") == true,
                             failure = call.argument<String>("failure"),
                         )
-                        result.success(null)
+                        reply.success(null)
                     }
-                    "inspectHealth" -> {
+                    "inspectHealth" -> tasks.execute(result) { reply ->
                         val state = database.loadPlanState(
                             call.requiredString("accountHash"),
                             call.requiredLong("sessionEpoch"),
                         )
                         val counts = database.counts(state.accountHash)
-                        val listenerGranted = NotificationManagerCompat
-                            .getEnabledListenerPackages(appContext)
-                            .contains(appContext.packageName)
-                        result.success(
+                        val queryErrors = mutableListOf<String>()
+                        val listenerGranted = try {
+                            NotificationManagerCompat.getEnabledListenerPackages(appContext)
+                                .contains(appContext.packageName)
+                        } catch (error: RuntimeException) {
+                            Log.w(TAG, "listener_permission_read_failed:${error.javaClass.simpleName}")
+                            queryErrors.add("通知使用权状态读取失败")
+                            false
+                        }
+                        reply.success(
                             mapOf(
                                 "backgroundEnabled" to state.backgroundEnabled,
                                 "intervalMinutes" to state.intervalMinutes,
@@ -439,6 +456,7 @@ object BackgroundReminderBridge {
                                 "migrationPending" to
                                     (state.migrationState != "native_active" || state.pendingUpdate),
                                 "lastFailure" to state.lastFailure,
+                                "queryErrors" to queryErrors,
                             ),
                         )
                     }
@@ -458,12 +476,12 @@ object BackgroundReminderBridge {
                         )
                         reply.success(null)
                     }
-                    "consumeNotificationSignal" -> {
+                    "consumeNotificationSignal" -> tasks.execute(result) { reply ->
                         database.consumeSignal(
                             call.requiredString("accountHash"),
                             call.requiredLong("version"),
                         )
-                        result.success(null)
+                        reply.success(null)
                     }
                     "getReminderHistoryControl" -> tasks.execute(result) { reply ->
                         val snapshot = ReminderHistoryStore.controlSnapshot(
@@ -673,7 +691,7 @@ object BackgroundReminderBridge {
         if (application.pendingNewCount == 0) {
             AssignmentAlarmScheduler.cancelNewAssignmentWindow(appContext, accountHash)
         }
-        if (now.hour >= 8) {
+        if (NativeReminderPolicy.isInDaytimeWindow(now.toInstant(), now.zone)) {
             val published = AssignmentNotificationPublisher.publishPendingNewAssignments(
                 appContext,
                 database,
@@ -686,6 +704,8 @@ object BackgroundReminderBridge {
             AssignmentAlarmScheduler.scheduleNewAssignmentWindow(
                 appContext,
                 accountHash,
+                now.toInstant(),
+                now.zone,
             )
             if (application.newEvents.isNotEmpty()) {
                 val windowStart = NativeReminderPolicy

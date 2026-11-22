@@ -32,6 +32,20 @@ class NativeReminderPolicyTest {
     }
 
     @Test
+    fun zoneDeterminesWhetherTheSameInstantIsInTheDaytimeWindow() {
+        val utc = ZoneId.of("UTC")
+        val beforeEight = Instant.parse("2026-11-10T23:59:00Z")
+        val atEight = Instant.parse("2026-11-11T00:00:00Z")
+        val lateEvening = Instant.parse("2026-11-11T15:59:00Z")
+
+        assertFalse(NativeReminderPolicy.isInDaytimeWindow(beforeEight, zone))
+        assertTrue(NativeReminderPolicy.isInDaytimeWindow(beforeEight, utc))
+        assertTrue(NativeReminderPolicy.isInDaytimeWindow(atEight, zone))
+        assertFalse(NativeReminderPolicy.isInDaytimeWindow(atEight, utc))
+        assertTrue(NativeReminderPolicy.isInDaytimeWindow(lateEvening, zone))
+    }
+
+    @Test
     fun earlyAlarmMovesToEightOnTheSameLocalDate() {
         val input = ZonedDateTime.of(2026, 11, 12, 3, 15, 0, 0, zone).toInstant()
         val result = NativeReminderPolicy.moveToDaytime(input, zone)

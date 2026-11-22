@@ -5,6 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.SharedPreferences
 import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
@@ -79,8 +81,44 @@ class LegacyAssignmentNotificationMigratorTest {
         assertTrue(outcome.completed)
         assertEquals(listOf(legacyId), outcome.retiredIds)
         assertTrue(outcome.preservedUnknownIds.isEmpty())
-        assertFalse(activeIds().contains(legacyId))
+        // The notification service dispatches cancel requests asynchronously.
+        val deadline = SystemClock.elapsedRealtime() + 3_000
+        while (legacyId in activeIds() && SystemClock.elapsedRealtime() < deadline) {
+            SystemClock.sleep(50)
+        }
+        assertFalse("已退休的旧通知仍在系统通知列表中", activeIds().contains(legacyId))
         assertTrue(activeIds().contains(nativeId))
+    }
+
+    @Test
+    fun staleDatabaseIdCannotProveOwnershipOfAnUnrelatedClickToken() {
+        val id = ReminderDatabase.stableNotificationId("stale-owner:$accountHash")
+        seedNativeEvent(id)
+        postNative(id, "different-event-$id")
+
+        // The legacy cache makes this id a cancellation candidate, so the
+        // PendingIntent check must still hold during the main-thread re-read.
+        val cacheName = "legacy-ownership-$accountHash"
+        val cache = context.getSharedPreferences(cacheName, Context.MODE_PRIVATE)
+        val raw = """[{"id":$id,"payload":"a:synthetic","channelId":"assignment_deadlines"}]"""
+        val isolatedCacheContext = object : ContextWrapper(context) {
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences =
+                if (name == "scheduled_notifications") cache else super.getSharedPreferences(name, mode)
+        }
+        try {
+            assertTrue(cache.edit().putString("scheduled_notifications", raw).commit())
+            val outcome = LegacyAssignmentNotificationMigrator.retireNow(
+                isolatedCacheContext, database, setOf(id),
+            )
+
+            assertFalse(outcome.completed)
+            assertEquals(listOf(id), outcome.preservedUnknownIds)
+            assertTrue(outcome.retiredIds.isEmpty())
+            assertTrue(id in activeIds())
+            assertEquals(raw, cache.getString("scheduled_notifications", null))
+        } finally {
+            context.deleteSharedPreferences(cacheName)
+        }
     }
 
     @Test

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
@@ -25,6 +26,7 @@ class _Snapshot extends WidgetSnapshotService {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   final now = DateTime.utc(2026, 11, 17, 8);
 
   Assignment exam(String id, DateTime start) => Assignment(
@@ -167,5 +169,64 @@ void main() {
     bgWidget.shouldFail = true;
     await bgStore.syncAssignments();
     expect(bgStore.error, isNull);
+  });
+
+  test('headless logout clears the previously saved widget data', () async {
+    const channel = MethodChannel('home_widget');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final data = <String, Object?>{};
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'saveWidgetData') {
+        final args = call.arguments as Map;
+        data[args['id'] as String] = args['data'];
+      }
+      return true;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: f.Notifications(),
+      widgetSnapshotService: WidgetSnapshotService(),
+      chaoxingClient: f.Client(),
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.syncAssignments();
+    expect(data['assignment_authenticated'], isTrue);
+    expect(jsonDecode(data['assignment_snapshot'] as String), isNotEmpty);
+    expect(data['assignment_snapshot_at'], isA<String>());
+
+    await store.logout();
+
+    expect(data['assignment_authenticated'], isFalse);
+    expect(jsonDecode(data['assignment_snapshot'] as String), isEmpty);
+    expect(data['assignment_total_count'], 0);
+    expect(data['assignment_snapshot_at'], isNull);
+  });
+
+  test('signed-out snapshot removes a previously written timestamp', () async {
+    const channel = MethodChannel('home_widget');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final writes = <Object?>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'saveWidgetData') {
+        final args = call.arguments as Map;
+        if (args['id'] == 'assignment_snapshot_at') writes.add(args['data']);
+      }
+      return true;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final service = WidgetSnapshotService();
+    await service.saveAssignmentsForContext(
+      [work('1', DateTime.now().add(const Duration(days: 1)))],
+    );
+    await service.saveAssignmentsForContext(const [], authenticated: false);
+    expect(writes.first, isA<String>());
+    expect(writes.last, isNull);
+    expect(writes, hasLength(2));
   });
 }

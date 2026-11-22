@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/reminder_history.dart';
@@ -114,6 +115,7 @@ class BackgroundReminderHealth {
     required this.pendingSignalCount,
     required this.migrationPending,
     required this.lastFailure,
+    this.queryErrors = const [],
   });
 
   final bool backgroundEnabled;
@@ -128,6 +130,7 @@ class BackgroundReminderHealth {
   final int pendingSignalCount;
   final bool migrationPending;
   final String? lastFailure;
+  final List<String> queryErrors;
 }
 
 class BackgroundReminderGateway {
@@ -817,6 +820,10 @@ class BackgroundReminderGateway {
       pendingSignalCount: value['pendingSignalCount'] as int,
       migrationPending: value['migrationPending'] as bool,
       lastFailure: value['lastFailure'] as String?,
+      queryErrors: switch (value['queryErrors']) {
+        List<Object?> errors => List.unmodifiable(errors.whereType<String>()),
+        _ => const [],
+      },
     );
   }
 
@@ -896,16 +903,20 @@ class BackgroundReminderGateway {
     Map<String, Object?>? arguments,
     Duration timeout,
   ) async {
+    // An unavailable binding is expected in pure Dart callers.
+    if (kDebugMode && BindingBase.debugBindingType() == null) return null;
     try {
       return await _channel.invokeMethod<T>(method, arguments).timeout(timeout);
     } on MissingPluginException {
       return null;
-    } on PlatformException {
+    } on PlatformException catch (error) {
+      debugPrint('[BackgroundReminder] $method: ${error.runtimeType}');
       return null;
-    } catch (_) {
-      // Pure unit tests and desktop platforms may not initialize a binary
-      // messenger. Native delivery is an enhancement there; local plugin
-      // fallback remains responsible for reminders.
+    } on TimeoutException catch (error) {
+      debugPrint('[BackgroundReminder] $method: ${error.runtimeType}');
+      return null;
+    } on TypeError catch (error) {
+      debugPrint('[BackgroundReminder] $method: ${error.runtimeType}');
       return null;
     }
   }

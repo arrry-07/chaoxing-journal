@@ -10,14 +10,18 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
+import java.time.DateTimeException
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import kotlin.math.ceil
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
 class AssignmentWidgetProvider : AppWidgetProvider() {
@@ -71,7 +75,7 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
         }
 
         val views = RemoteViews(context.packageName, layoutId)
-        val prefs = context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val items = loadItems(prefs)
         val meta = AssignmentWidgetLayoutPolicy.resolveSnapshotMeta(
             hasAuthenticatedKey = prefs.contains("assignment_authenticated"),
@@ -88,7 +92,8 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
                     .atZoneSameInstant(ZoneId.of("Asia/Shanghai"))
                     .format(DateTimeFormatter.ofPattern("M/d HH:mm"))
             }
-        } catch (_: Exception) {
+        } catch (error: DateTimeException) {
+            Log.w(TAG, "snapshot_time_parse_failed:${error.javaClass.simpleName}")
             null
         }
 
@@ -200,11 +205,15 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
         val anchorAt = try {
             val instant = try {
                 OffsetDateTime.parse(raw).toInstant()
-            } catch (_: Exception) {
+            } catch (_: DateTimeParseException) {
                 LocalDateTime.parse(raw).atZone(ZoneId.systemDefault()).toInstant()
             }
             instant.toEpochMilli()
-        } catch (_: Exception) {
+        } catch (error: DateTimeException) {
+            Log.w(TAG, "anchor_time_parse_failed:${error.javaClass.simpleName}")
+            return fallback
+        } catch (error: ArithmeticException) {
+            Log.w(TAG, "anchor_time_out_of_range:${error.javaClass.simpleName}")
             return fallback
         }
         return AssignmentWidgetTimeText.remainingText(
@@ -234,21 +243,35 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
         val raw = prefs.getString("assignment_snapshot", "[]") ?: "[]"
         return try {
             JSONArray(raw)
-        } catch (_: Exception) {
+        } catch (error: JSONException) {
+            Log.w(TAG, "snapshot_parse_failed:${error.javaClass.simpleName}")
             JSONArray()
         }
     }
 
     companion object {
+        private const val TAG = "AssignmentWidgetProvider"
+        private const val PREFS_NAME = "HomeWidgetPreferences"
         private const val COLOR_MUTED = "#53645A"
         private const val COLOR_BERRY = "#813E53"
+
+        fun clearForUnauthenticated(context: Context) {
+            val saved = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putString("assignment_snapshot", "[]")
+                .putBoolean("assignment_authenticated", false)
+                .putInt("assignment_total_count", 0)
+                .remove("assignment_snapshot_at")
+                .commit()
+            refreshAll(context)
+            check(saved) { "小组件隐私状态保存失败" }
+        }
 
         /**
          * Refreshes every active home-screen instance from saved preferences after
          * package replacement, boot reconciliation, or system time changes.
          */
         fun refreshAll(context: Context) {
-            runCatching {
+            try {
                 val manager = AppWidgetManager.getInstance(context) ?: return
                 val ids = manager.getAppWidgetIds(
                     ComponentName(context, AssignmentWidgetProvider::class.java),
@@ -256,6 +279,8 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
                 if (ids.isNotEmpty()) {
                     AssignmentWidgetProvider().onUpdate(context, manager, ids)
                 }
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "refresh_failed:${error.javaClass.simpleName}")
             }
         }
     }

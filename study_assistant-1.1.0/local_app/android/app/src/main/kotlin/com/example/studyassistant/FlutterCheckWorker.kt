@@ -214,6 +214,7 @@ class FlutterCheckWorker(
                     ),
                 )
             } catch (error: Exception) {
+                Log.w(TAG, "flutter_engine_start_failed:${error.javaClass.simpleName}")
                 completed.set(false)
                 latch.countDown()
             }
@@ -223,9 +224,7 @@ class FlutterCheckWorker(
         activeLatch = null
         val received = finished && completed.get()
         if (!received) {
-            mainHandler.post {
-                runCatching { channel?.invokeMethod("cancel", null) }
-            }
+            requestDartCancellation()
             claim?.let { settleUnconfirmed(it) }
         }
         if (reason == BackgroundWorkScheduler.REASON_DAYTIME) {
@@ -389,19 +388,31 @@ class FlutterCheckWorker(
         stopped = true
         activeLatch?.countDown()
         activeClaim?.let { settleUnconfirmed(it) }
-        mainHandler.post { runCatching { channel?.invokeMethod("cancel", null) } }
+        requestDartCancellation()
         cleanup()
         super.onStopped()
     }
 
+    private fun requestDartCancellation() {
+        mainHandler.post {
+            try {
+                channel?.invokeMethod("cancel", null)
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "flutter_cancel_failed:${error.javaClass.simpleName}")
+            }
+        }
+    }
+
     private fun settleUnconfirmed(claim: NotificationSignalClaim) {
-        runCatching {
+        try {
             ReminderDatabase.get(applicationContext).settleNotificationAttempt(
                 claim.accountHash,
                 claim.sessionEpoch,
                 claim.token,
                 ownerWorkId = id.toString(),
             )
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "notification_claim_settle_failed:${error.javaClass.simpleName}")
         }
     }
 

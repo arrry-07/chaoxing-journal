@@ -32,7 +32,7 @@ class ReminderDatabaseMigrationTest {
     }
 
     @Test
-    fun v3ToV6PreservesAccountAndAddsClaimAndAttemptTables() {
+    fun v3ToV7PreservesAccountAndAddsClaimAndAttemptTables() {
         val name = "migration-v3-${System.nanoTime()}.db"
         names.add(name)
         createDatabase(name, version = 3, includeAttemptColumns = false) { db ->
@@ -48,7 +48,7 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v3")!!
 
-        assertEquals(6, database.readableDatabase.version)
+        assertEquals(7, database.readableDatabase.version)
         assertEquals(3L, account.pendingSignalVersion)
         assertEquals(2L, account.consumedSignalVersion)
         assertEquals(0L, account.attemptedSignalVersion)
@@ -59,7 +59,7 @@ class ReminderDatabaseMigrationTest {
     }
 
     @Test
-    fun v4ToV6PreservesAttemptStateAndAddsNullableToken() {
+    fun v4ToV7PreservesAttemptStateAndAddsNullableToken() {
         val name = "migration-v4-${System.nanoTime()}.db"
         names.add(name)
         createDatabase(name, version = 4, includeAttemptColumns = true) { db ->
@@ -77,7 +77,7 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v4")!!
 
-        assertEquals(6, database.readableDatabase.version)
+        assertEquals(7, database.readableDatabase.version)
         assertEquals(8L, account.pendingSignalVersion)
         assertEquals(6L, account.consumedSignalVersion)
         assertEquals(7L, account.attemptedSignalVersion)
@@ -87,7 +87,7 @@ class ReminderDatabaseMigrationTest {
     }
 
     @Test
-    fun v5ToV6PreservesAllTablesAndConsumeClearsLegacyClaimToken() {
+    fun v5ToV7PreservesAllTablesAndConsumeClearsLegacyClaimToken() {
         val name = "migration-v5-${System.nanoTime()}.db"
         names.add(name)
         createDatabase(
@@ -111,7 +111,7 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v5")!!
 
-        assertEquals(6, database.readableDatabase.version)
+        assertEquals(7, database.readableDatabase.version)
         assertEquals("legacy-v5-token", account.claimToken)
         assertMigratedBusinessDataIntact(database, "migration-v5")
 
@@ -126,6 +126,150 @@ class ReminderDatabaseMigrationTest {
         assertTrue(database.rollbackUnstartedNotificationAttempt(claim))
         assertNull(database.readAccount("migration-v5")!!.claimToken)
         assertV6HistoryPruneWorks(database, "migration-v5")
+    }
+
+    @Test
+    fun freshDatabaseHasV7Indices() {
+        val name = "fresh-v7-${System.nanoTime()}.db"
+        names.add(name)
+        ReminderDatabase.openForTest(context, name).use { database ->
+            assertV7Indices(database.readableDatabase)
+            assertEquals(7, database.readableDatabase.version)
+        }
+    }
+
+    @Test
+    fun v6ToV7AddsIndicesAndPreservesExistingRows() {
+        val name = "migration-v6-${System.nanoTime()}.db"
+        val account = "migration-v6"
+        names.add(name)
+        createDatabase(name, version = 6, includeAttemptColumns = true, includeClaimToken = true) { db ->
+            seedV6Schema(db)
+            insertAccount(db, account, pendingVersion = 8, consumedVersion = 6)
+            seedLegacyRows(db, account)
+            db.execSQL(
+                "INSERT INTO reminder_schedule_evidence " +
+                    "(account_hash, history_generation, logical_key, session_epoch, " +
+                    "operation_sequence, subject_kind, subject_id, category, state, confirmed_at) " +
+                    "VALUES (?, 1, 'v6-evidence', 4, 1, 'assignment', 'cx:work:1:2:migrated', " +
+                    "'deadline', 'recoveryPending', ?)",
+                arrayOf(account, System.currentTimeMillis()),
+            )
+        }
+
+        ReminderDatabase.openForTest(context, name).use { database ->
+            val db = database.readableDatabase
+            assertEquals(8L, database.readAccount(account)!!.pendingSignalVersion)
+            assertEquals("迁移测试作业", database.snapshot(account, "cx:work:1:2:migrated")!!.title)
+            assertEquals("迁移测试作业", database.eventsForAccount(account).single().title)
+            assertEquals(
+                1L,
+                db.rawQuery(
+                    "SELECT COUNT(*) FROM notification_signals WHERE account_hash = ?",
+                    arrayOf(account),
+                ).use { it.moveToFirst(); it.getLong(0) },
+            )
+            val evidence = database.scheduleEvidenceForSubject(account, 1, "assignment", "cx:work:1:2:migrated")
+            assertEquals("v6-evidence", evidence.single().logicalKey)
+            assertEquals("recoveryPending", evidence.single().state)
+            assertV7Indices(db)
+            assertEquals(7, db.version)
+        }
+    }
+
+    private fun seedV6Schema(db: SQLiteDatabase) {
+        db.execSQL("CREATE INDEX events_account_status ON events(account_hash, status, notify_at)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS notification_attempts (
+                account_hash TEXT PRIMARY KEY,
+                session_epoch INTEGER NOT NULL,
+                claim_token TEXT NOT NULL,
+                owner_work_id TEXT,
+                claimed_version INTEGER NOT NULL,
+                claimed_at INTEGER NOT NULL,
+                prior_attempted_version INTEGER NOT NULL,
+                prior_last_signal_check_at INTEGER,
+                prior_consumed_version INTEGER NOT NULL,
+                phase TEXT NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS reminder_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_hash TEXT NOT NULL,
+                session_epoch INTEGER NOT NULL,
+                history_generation INTEGER NOT NULL,
+                observation_id TEXT NOT NULL,
+                operation_sequence INTEGER NOT NULL,
+                subject_kind TEXT NOT NULL,
+                subject_id TEXT,
+                logical_key TEXT NOT NULL,
+                category TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                reason_code TEXT,
+                observed_at INTEGER NOT NULL,
+                scheduled_at INTEGER,
+                notification_id INTEGER,
+                batch_key TEXT
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS reminder_history_account_id " +
+                "ON reminder_history(account_hash, history_generation, id)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS reminder_history_account_key " +
+                "ON reminder_history(account_hash, history_generation, logical_key, id)",
+        )
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS reminder_history_observation " +
+                "ON reminder_history(account_hash, history_generation, observation_id)",
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS reminder_schedule_evidence (
+                account_hash TEXT NOT NULL,
+                history_generation INTEGER NOT NULL,
+                logical_key TEXT NOT NULL,
+                session_epoch INTEGER NOT NULL,
+                operation_sequence INTEGER NOT NULL,
+                subject_kind TEXT NOT NULL,
+                subject_id TEXT,
+                category TEXT NOT NULL,
+                scheduled_at INTEGER,
+                notification_id INTEGER,
+                expected_payload TEXT,
+                state TEXT NOT NULL,
+                confirmed_at INTEGER NOT NULL,
+                PRIMARY KEY(account_hash, history_generation, logical_key)
+            )
+            """.trimIndent(),
+        )
+    }
+
+    private val v7Indices = mapOf(
+        "events_notification_id" to listOf("notification_id"),
+        "events_account_assignment" to listOf("account_hash", "assignment_id", "updated_at"),
+        "notification_signals_received_at" to listOf("account_hash", "received_at"),
+        "reminder_schedule_evidence_subject" to listOf(
+            "account_hash", "history_generation", "subject_kind", "subject_id", "confirmed_at",
+        ),
+    )
+
+    private fun assertV7Indices(db: SQLiteDatabase) {
+        for ((index, columns) in v7Indices) {
+            val actual = db.rawQuery("PRAGMA index_info($index)", null).use { cursor ->
+                val name = cursor.getColumnIndexOrThrow("name")
+                buildList {
+                    while (cursor.moveToNext()) add(cursor.getString(name))
+                }
+            }
+            assertEquals(index, columns, actual)
+        }
     }
 
     private fun createDatabase(

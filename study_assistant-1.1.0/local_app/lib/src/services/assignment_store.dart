@@ -1485,6 +1485,7 @@ class AssignmentStore extends ChangeNotifier {
         await prefs.remove(_notificationClickMissingKey);
       }
     } catch (error) {
+      debugPrint('[AssignmentStore] restoreIdentity: ${error.runtimeType}');
       _recoveryWarnings.add('本机数据恢复未完成：登录信息暂时无法读取，请重新登录');
     }
     try {
@@ -1500,6 +1501,7 @@ class AssignmentStore extends ChangeNotifier {
       }
       await _restoreAccountData();
     } catch (error) {
+      debugPrint('[AssignmentStore] restoreAccount: ${error.runtimeType}');
       _authenticated = false;
       _assignments.clear();
       _hiddenAssignments = [];
@@ -1510,7 +1512,8 @@ class AssignmentStore extends ChangeNotifier {
       _chaoxingAvatarUrl = await sessionStore.readChaoxingAvatarUrl();
       _needsProfileRecovery = _authenticated &&
           (_chaoxingDisplayName == null || _chaoxingAvatarUrl == null);
-    } catch (_) {
+    } catch (error) {
+      debugPrint('[AssignmentStore] restoreProfile: ${error.runtimeType}');
       _recoveryWarnings.add('个人资料暂时无法恢复，不影响重新登录和读取作业');
     }
     await _reconcileBackgroundControls();
@@ -1539,10 +1542,14 @@ class AssignmentStore extends ChangeNotifier {
     _lastSyncAttemptAt = null;
     _serverBackoffUntil = null;
     syncReport = const SyncReport();
+    var stageNumber = 0;
     Future<void> stage(String name, Future<void> Function() action) async {
+      stageNumber++;
       try {
         await action();
-      } catch (_) {
+      } catch (error) {
+        debugPrint(
+            '[AssignmentStore] restoreStage$stageNumber: ${error.runtimeType}');
         _recoveryWarnings.add('$name恢复未完成，请重新同步或保存设置');
       }
     }
@@ -1614,14 +1621,28 @@ class AssignmentStore extends ChangeNotifier {
           } else {
             reportDamaged = true;
           }
-        } catch (_) {
+        } on FormatException catch (error) {
+          debugPrint(
+              '[AssignmentStore] restoreSyncReportJson: ${error.runtimeType}');
           reportDamaged = true;
         }
       }
       if (reportJson != null) {
         try {
           SyncReport.fromJson(reportJson);
-        } catch (_) {
+        } on FormatException catch (error) {
+          debugPrint(
+              '[AssignmentStore] restoreSyncReport: ${error.runtimeType}');
+          reportJson = null;
+          reportDamaged = true;
+        } on TypeError catch (error) {
+          debugPrint(
+              '[AssignmentStore] restoreSyncReport: ${error.runtimeType}');
+          reportJson = null;
+          reportDamaged = true;
+        } on ArgumentError catch (error) {
+          debugPrint(
+              '[AssignmentStore] restoreSyncReport: ${error.runtimeType}');
           reportJson = null;
           reportDamaged = true;
         }
@@ -2537,8 +2558,15 @@ class AssignmentStore extends ChangeNotifier {
           if (decoded is Map<String, dynamic>) {
             syncReport = SyncReport.fromJson(decoded);
           }
-        } catch (_) {
-          // _reloadJournal reconciles durable timestamps below.
+        } on FormatException catch (error) {
+          debugPrint(
+              '[AssignmentStore] reconcileSyncReport: ${error.runtimeType}');
+        } on TypeError catch (error) {
+          debugPrint(
+              '[AssignmentStore] reconcileSyncReport: ${error.runtimeType}');
+        } on ArgumentError catch (error) {
+          debugPrint(
+              '[AssignmentStore] reconcileSyncReport: ${error.runtimeType}');
         }
       }
       await _reloadJournal();
@@ -2886,6 +2914,7 @@ class AssignmentStore extends ChangeNotifier {
       final accountHash = _accountHash;
       final sessionEpoch = _nativeSessionEpoch;
       String? historyLogoutWarning;
+      String? widgetLogoutWarning;
       if (_nativeReminderAvailable && accountHash != null) {
         historyLogoutWarning = await _retireReminderHistoryBeforeLogout(
           accountHash,
@@ -2913,6 +2942,23 @@ class AssignmentStore extends ChangeNotifier {
       }
       _accountHash = null;
       _nativeSessionEpoch = 0;
+      try {
+        await repository.runScopedWrite(
+          (_) => widgetSnapshotService.saveAssignmentsForContext(
+            const [],
+            authenticated: false,
+            range: display.widgetRange,
+          ),
+          canCommit: () async => logoutGen == _generation && !_disposed,
+        );
+      } on StaleSessionWriteException {
+        if (logoutGen != _generation || _disposed) return;
+        widgetLogoutWarning = '退出时未能确认小组件内容已清除';
+      } catch (error) {
+        debugPrint('[WidgetSnapshot] logout: ${error.runtimeType}');
+        widgetLogoutWarning = '退出时未能确认小组件内容已清除';
+      }
+      if (logoutGen != _generation || _disposed) return;
       try {
         await _cancelPrivateNotifications();
       } catch (_) {
@@ -2971,8 +3017,11 @@ class AssignmentStore extends ChangeNotifier {
       repository.recoveryWarning = null;
       await _reconcileBackgroundControls();
       if (logoutGen != _generation || _disposed) return;
-      await _afterAssignmentsChanged();
+      await _afterAssignmentsChanged(updateWidget: false);
       if (logoutGen != _generation || _disposed) return;
+      if (widgetLogoutWarning != null) {
+        _serviceWarnings.add(widgetLogoutWarning);
+      }
       if (historyLogoutWarning != null) {
         _serviceWarnings.add(historyLogoutWarning);
       }
@@ -3335,6 +3384,10 @@ class AssignmentStore extends ChangeNotifier {
     var healthQueryFailed = false;
     try {
       health = await notificationService.inspectHealth();
+      if (health.queryErrors.isNotEmpty) {
+        healthQueryFailed = true;
+        warnings.addAll(health.queryErrors);
+      }
     } catch (error) {
       healthQueryFailed = true;
       warnings.add('系统通知状态暂时无法读取：$error');

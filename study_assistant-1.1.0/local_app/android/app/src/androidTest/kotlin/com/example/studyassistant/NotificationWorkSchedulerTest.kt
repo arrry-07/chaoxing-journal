@@ -3,6 +3,7 @@ package com.example.studyassistant
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.work.NetworkType
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import org.junit.After
@@ -47,10 +48,48 @@ class NotificationWorkSchedulerTest {
         workManager.cancelUniqueWork(workName())
             .getResult()
             .get(5, TimeUnit.SECONDS)
+        workManager.cancelUniqueWork(daytimeWorkName())
+            .getResult()
+            .get(5, TimeUnit.SECONDS)
         workManager.cancelUniqueWork(BackgroundWorkScheduler.LEGACY_NOTIFICATION_WORK)
             .getResult()
             .get(5, TimeUnit.SECONDS)
         runCatching { database.clearActiveAccount(accountHash) }
+    }
+
+    @Test
+    fun notificationCheckRequestRequiresNetwork() {
+        val signal = database.recordSignal(
+            accountHash,
+            epoch,
+            "signal-requires-network",
+            System.currentTimeMillis(),
+        )
+        val enqueue = BackgroundWorkScheduler.scheduleNotificationCheck(
+            context,
+            database,
+            accountHash,
+            signal,
+        )
+
+        assertTrue("notification check request was not enqueued", enqueue.confirmed)
+        assertEquals(NetworkType.CONNECTED, liveWork().single().constraints.requiredNetworkType)
+    }
+
+    @Test
+    fun daytimeCheckRequestRequiresNetwork() {
+        BackgroundWorkScheduler.reconcileDaytime(
+            context,
+            database,
+            targetAt = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(10),
+            enabled = true,
+            intervalMinutes = 240,
+            accountHash = accountHash,
+            sessionEpoch = epoch,
+        )
+
+        val work = liveWorks(daytimeWorkName()).single()
+        assertEquals(NetworkType.CONNECTED, work.constraints.requiredNetworkType)
     }
 
     @Test
@@ -178,9 +217,12 @@ class NotificationWorkSchedulerTest {
     private fun workName(): String =
         BackgroundWorkScheduler.notificationWorkName(accountHash, epoch)
 
-    private fun liveWorks(): List<WorkInfo> =
+    private fun daytimeWorkName(): String =
+        BackgroundWorkScheduler.daytimeWorkName(accountHash, epoch)
+
+    private fun liveWorks(name: String = workName()): List<WorkInfo> =
         workManager.getWorkInfosForUniqueWork(
-            workName(),
+            name,
         ).get(5, TimeUnit.SECONDS)
             .filter {
                 it.state == WorkInfo.State.ENQUEUED ||

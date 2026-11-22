@@ -1,6 +1,7 @@
 package com.example.studyassistant
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -131,6 +132,38 @@ class AssignmentNotificationPublisherTest {
         assertFalse(snapshot.formal)
         assertTrue(snapshot.inAssignmentScope)
         assertEquals("pending", snapshot.status)
+    }
+
+    @Test
+    fun detailedDeadlineIsPrivateWithAnAnonymousPublicVersion() {
+        val event = seedPendingDeadlineAssignment()
+        assertTrue(LegacyAssignmentMigrationState.confirm(context))
+        assertTrue("Grant POST_NOTIFICATIONS on the isolated test app",
+            notificationManager.areNotificationsEnabled())
+
+        val result = AssignmentNotificationPublisher.publishDeadline(
+            context, database, event, Instant.now(),
+        )
+
+        assertTrue("Expected actual delivery: ${result.warning}", result.submitted)
+        val notification = notificationManager.activeNotifications.single {
+            it.id == event.notificationId && it.tag == null
+        }.notification
+        assertEquals(Notification.VISIBILITY_PRIVATE, notification.visibility)
+        assertTrue(
+            notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString()
+                .contains(event.title),
+        )
+        assertTrue(AssignmentNotificationPublisher.matchesClickIntent(
+            context, notification.contentIntent, event,
+        ))
+        val publicVersion = requireNotNull(notification.publicVersion)
+        assertEquals(Notification.VISIBILITY_PUBLIC, publicVersion.visibility)
+        assertEquals(
+            "有作业即将截止，请打开课业手记查看",
+            publicVersion.extras.getCharSequence(Notification.EXTRA_TEXT).toString(),
+        )
+        assertEquals(notification.smallIcon.resId, publicVersion.smallIcon.resId)
     }
 
     @Test
