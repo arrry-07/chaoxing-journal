@@ -8,6 +8,7 @@ import '../models/assignment.dart';
 import '../models/course.dart';
 import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
+import '../models/course_term_preferences.dart';
 import '../models/backup_snapshot.dart';
 import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
@@ -78,6 +79,9 @@ class LocalAssignmentRepository {
   static const _courseworkStateKey = 'local_coursework_state_v1';
   static const _courseworkRecoveryWarning =
       '部分个人课业状态无法读取，原始数据已保留备份；本次以空状态临时显示，请勿覆盖原数据。';
+  static const _courseTermPreferencesKey = 'course_term_preferences_v1';
+  static const _courseTermRecoveryWarning =
+      '部分课程学期与归档设置无法读取，原始数据已保留备份；本次以自动推断临时显示，请勿覆盖原数据。';
   static const _acknowledgedDeadlineChangesKey =
       'acknowledged_deadline_changes_v1';
   static const _maxAcknowledgedDeadlineChanges = 300;
@@ -132,6 +136,9 @@ class LocalAssignmentRepository {
     '${_pinnedV2Key}_recovery_backups',
     '${_courseworkStateKey}_recovery_backup',
     '${_courseworkStateKey}_recovery_backups',
+    _courseTermPreferencesKey,
+    '${_courseTermPreferencesKey}_recovery_backup',
+    '${_courseTermPreferencesKey}_recovery_backups',
     _acknowledgedDeadlineChangesKey,
     '${_acknowledgedDeadlineChangesKey}_recovery_backup',
     '${_acknowledgedDeadlineChangesKey}_recovery_backups',
@@ -265,6 +272,53 @@ class LocalAssignmentRepository {
         final prefs = await SharedPreferences.getInstance();
         _checkOwner(prefs, account);
         await writeCourseworkStateInPrefs(prefs, state);
+      });
+
+  Future<CourseTermPreferences> _readCourseTermPreferences(
+          SharedPreferences prefs) =>
+      _readProtected(
+        prefs,
+        _courseTermPreferencesKey,
+        CourseTermPreferences.decode,
+        CourseTermPreferences.empty,
+        _courseTermRecoveryWarning,
+      );
+
+  Future<void> writeCourseTermPreferencesInPrefs(
+    SharedPreferences prefs,
+    CourseTermPreferences value,
+  ) async {
+    await _protectExisting(
+      prefs,
+      _courseTermPreferencesKey,
+      CourseTermPreferences.decode,
+      _courseTermRecoveryWarning,
+    );
+    final raw = value.encode();
+    CourseTermPreferences.decode(raw);
+    await _writeVerified(
+      prefs,
+      _courseTermPreferencesKey,
+      raw,
+      '课程学期与归档设置保存失败',
+    );
+  }
+
+  Future<CourseTermPreferences> loadCourseTermPreferences(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return _readCourseTermPreferences(prefs);
+      });
+
+  Future<void> saveCourseTermPreferences(
+    CourseTermPreferences value,
+    String account,
+  ) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        await writeCourseTermPreferencesInPrefs(prefs, value);
       });
 
   static Set<String> _decodeAcknowledgedDeadlineChanges(String raw) {
@@ -569,7 +623,8 @@ class LocalAssignmentRepository {
               '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
             ),
             pinned: await _readPinnedAssignments(prefs),
-            courseworkState: await _readCourseworkState(prefs));
+            courseworkState: await _readCourseworkState(prefs),
+            courseTermPreferences: await _readCourseTermPreferences(prefs));
         if (recoveryWarning != null) {
           throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
         }
@@ -720,6 +775,13 @@ class LocalAssignmentRepository {
               state.byId.values,
             );
             await writeCourseworkStateInPrefs(prefs, mergedCoursework);
+          }
+          if (validated.courseTermPreferences.isNotEmpty) {
+            final localTerms = await _readCourseTermPreferences(prefs);
+            final mergedTerms = localTerms.mergeBackup(
+              validated.courseTermPreferences,
+            );
+            await writeCourseTermPreferencesInPrefs(prefs, mergedTerms);
           }
           await _require(prefs.remove(_switchKey));
           return true;

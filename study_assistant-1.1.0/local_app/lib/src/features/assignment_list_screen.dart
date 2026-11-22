@@ -18,6 +18,7 @@ import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_web_link.dart';
+import '../services/course_term_catalog.dart';
 import '../services/exam_schedule_presentation.dart';
 import '../services/external_link_service.dart';
 import '../services/home_course_filter.dart';
@@ -535,22 +536,44 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             _courseKey != null ||
             _deadlineFilter != AssignmentDeadlineFilter.all;
         final coursework = store.courseworkState;
-        final catalogAssignments = store.homeCatalogAssignments;
+        final termCatalog = store.termCatalog;
+        final catalogAssignments = _courseKey == null
+            ? store.homeCatalogAssignments
+            : store.homeCatalogAssignmentsWithSelectedCourse(_courseKey);
         final examSources = catalogAssignments;
-        final displayIndex = store.homeDisplayIndex;
+        final displayIndex = _courseKey == null
+            ? store.homeDisplayIndex
+            : AssignmentDisplayIndex.from(catalogAssignments);
         final displayAssignments = AssignmentQuery.currentDisplay(
           catalogAssignments,
           now,
           index: displayIndex,
           coursework: coursework,
         );
+        final allFollowedSources = [
+          for (final group in store.localRecordGroups)
+            if (!group.hidden &&
+                (group.primary.courseKey == null ||
+                    store.follows(group.primary.courseKey!)))
+              ...group.sources,
+        ];
+        final pickerAssignments = AssignmentQuery.currentDisplay(
+          AssignmentQuery.scope(allFollowedSources, {}),
+          now,
+          index: allFollowedSources.isEmpty
+              ? displayIndex
+              : AssignmentDisplayIndex.from(allFollowedSources),
+          coursework: coursework,
+        );
         final options = buildHomeCourseFilterOptions(
-          assignments: displayAssignments,
-          catalog: store.courses,
-          records: [
-            for (final group in store.localRecordGroups) ...group.sources,
+          assignments: pickerAssignments,
+          catalog: [
+            for (final course in store.courses)
+              if (store.follows(course.key)) course,
           ],
+          records: allFollowedSources,
           selectedCourseKey: _courseKey,
+          termCatalog: termCatalog,
         );
         final items = recoveryScope == null
             ? AssignmentQuery.filterHome(
@@ -2211,6 +2234,31 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                     .any((o) => o.teacherNames.isNotEmpty),
                             searchHint: '搜索课程或教师...',
                             displayPrefs: store.display,
+                            filterOptions: const [
+                              JournalPickerFilterOption(
+                                id: 'currentTerm',
+                                label: '本学期',
+                              ),
+                              JournalPickerFilterOption(
+                                id: 'pastTerms',
+                                label: '往期',
+                              ),
+                              JournalPickerFilterOption(
+                                id: 'allTerms',
+                                label: '全部学期',
+                              ),
+                            ],
+                            initialFilterId: 'currentTerm',
+                            filterPredicate: (option, filterId) {
+                              if (option.value.isEmpty) return true;
+                              final scope = switch (filterId) {
+                                'pastTerms' => CourseTermScope.pastTerms,
+                                'allTerms' => CourseTermScope.allTerms,
+                                _ => CourseTermScope.currentTerm,
+                              };
+                              return store.termCatalog.matchesCoursePickerScope(
+                                  option.value, scope);
+                            },
                             options: [
                               const JournalPickerOption<String>(
                                 value: '',

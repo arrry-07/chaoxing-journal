@@ -345,4 +345,90 @@ void main() {
     expect(find.byKey(const ValueKey('course-option-1:k1')), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+      'course filter sheet defaults to current term, filters past and all terms with teachers, keeps past selection clearable',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final store = _Store(catalog: const [
+      CourseRef(
+        courseId: '1',
+        clazzId: 'k1',
+        name: '在学高数',
+        folderName: '2026年秋',
+        teacherNames: ['在学王老师'],
+      ),
+      CourseRef(
+        courseId: '2',
+        clazzId: 'k2',
+        name: '往期线代',
+        folderName: '2025年秋',
+        teacherNames: ['往期李老师'],
+      ),
+    ])
+      ..replaceAssignmentsForTest([
+        _work(
+          workId: 'w1',
+          courseId: '1',
+          classId: 'k1',
+          courseName: '在学高数',
+        ),
+        Assignment(
+          id: 'cx:work:2:k2:w2',
+          courseName: '往期线代',
+          title: '往期遗留讨论',
+          requirementsText: '',
+          status: 'pending',
+          deadlineAt: null,
+          deadlineTrusted: false,
+          lastSyncedAt: now,
+        ),
+      ]);
+    addTearDown(store.dispose);
+
+    tester.view.physicalSize = const Size(420, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home:
+          Scaffold(body: AssignmentListScreen(store: store, clock: () => now)),
+    ));
+    await tester.pumpAndSettle();
+
+    // Past archived course is not in current-term home list or default picker.
+    expect(find.text('本周作业'), findsNothing);
+    expect(find.text('往期遗留讨论'), findsNothing);
+
+    await _openFilters(tester);
+    await _openCourseMenu(tester);
+    expect(find.byKey(const ValueKey('course-option-1:k1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('course-option-2:k2')), findsNothing);
+
+    // Switch picker chip to 往期 -> shows past course with teacher subtitle.
+    await tester.tap(find.byKey(const ValueKey('picker-filter-pastTerms')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('course-option-2:k2')), findsOneWidget);
+    expect(find.textContaining('往期李老师'), findsOneWidget);
+    expect(find.byKey(const ValueKey('course-option-1:k1')), findsNothing);
+
+    // Select past course -> retains selection & shows its record on Home until cleared.
+    await tester.tap(find.byKey(const ValueKey('course-option-2:k2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    expect(find.text('课程：往期线代'), findsOneWidget);
+    expect(find.text('往期遗留讨论'), findsOneWidget);
+
+    // Clear via 全部课程 restores clean current-term Home.
+    await _openFilters(tester);
+    await _openCourseMenu(tester);
+    expect(find.byKey(const ValueKey('course-option-2:k2')), findsOneWidget);
+    await tester.tap(find.text('全部课程'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    expect(find.text('往期遗留讨论'), findsNothing);
+  });
 }

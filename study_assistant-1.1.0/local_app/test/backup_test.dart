@@ -8,6 +8,7 @@ import 'package:study_assistant_mobile/src/local/local_assignment_repository.dar
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/course_term_preferences.dart';
 import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
@@ -521,6 +522,25 @@ void main() {
       final badExtraKey = jsonDecode(v9.encode()) as Map<String, dynamic>;
       (badExtraKey['courses'] as List).first['unknownField'] = 'x';
       expect(() => BackupSnapshot.decode(jsonEncode(badExtraKey)),
+          throwsFormatException);
+
+      // Strict validation on schema 9 courseTermPreferences roundtrip & invalid overrides.
+      final termPrefs = CourseTermPreferences()
+          .withManualTerm('101:201', '2026-fall')
+          .withArchiveMode('102:202', CourseArchiveMode.archived);
+      await repo.saveCourseTermPreferences(termPrefs, 'alice');
+      final withTerms = await repo.createBackupSnapshot('alice');
+      final decodedTerms = BackupSnapshot.decode(withTerms.encode());
+      expect(decodedTerms.courseTermPreferences, termPrefs);
+
+      final badTerms = jsonDecode(withTerms.encode()) as Map<String, dynamic>;
+      badTerms['courseTermPreferences'] = {
+        'version': 1,
+        'entries': {
+          'badkey': {'archiveMode': 'archived'},
+        },
+      };
+      expect(() => BackupSnapshot.decode(jsonEncode(badTerms)),
           throwsFormatException);
     });
   });

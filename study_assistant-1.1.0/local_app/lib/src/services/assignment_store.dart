@@ -36,11 +36,13 @@ import 'daily_summary.dart';
 import 'daytime_check_policy.dart';
 import '../models/assignment_change.dart';
 import '../models/backup_snapshot.dart';
+import '../models/course_term_preferences.dart';
 import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
 import '../models/pinned_assignments.dart';
 import '../models/reminder_history.dart';
 import '../models/study_notebook.dart';
+import 'course_term_catalog.dart';
 import 'coursework_deadline.dart';
 import 'reminder_explanation.dart';
 
@@ -1023,6 +1025,9 @@ class AssignmentStore extends ChangeNotifier {
   final Set<String> _unfollowed = {};
   PinnedAssignments _pinned = const PinnedAssignments.empty();
   LocalCourseworkState _courseworkState = const LocalCourseworkState.empty();
+  CourseTermPreferences _courseTermPreferences =
+      const CourseTermPreferences.empty();
+  CourseTermCatalog? _termCatalogCache;
   bool _pinsNeedSave = false;
   bool _journalRestoreFailed = false;
 
@@ -1476,6 +1481,124 @@ class AssignmentStore extends ChangeNotifier {
   List<CourseRef> _courses = [];
   List<CourseRef> get courses => List.unmodifiable(_courses);
   bool follows(String key) => !_unfollowed.contains(key);
+  CourseTermPreferences get courseTermPreferences => _courseTermPreferences;
+
+  CourseTermCatalog get termCatalog {
+    final currentNow = _clock();
+    final currentTerm = AcademicTerm.fromInstant(currentNow);
+    final cached = _termCatalogCache;
+    if (cached != null && cached.currentTerm == currentTerm) {
+      return cached;
+    }
+    return _termCatalogCache = CourseTermCatalog.build(
+      courses: courses,
+      assignments: [..._assignments, ..._hiddenAssignments],
+      notices: _courseNotices.items,
+      preferences: _courseTermPreferences,
+      now: currentNow,
+      coursework: _courseworkState,
+      unfollowedCourseKeys: _unfollowed,
+      hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+    );
+  }
+
+  bool isCourseActive(String key) =>
+      follows(key) && termCatalog.isActiveOrRecalled(key);
+
+  Future<bool> _mutateCourseTermPreferences(
+    _SessionSnapshot snap,
+    CourseTermPreferences Function(CourseTermPreferences current) transform, {
+    required String leaseWarning,
+  }) async {
+    var saved = false;
+    await _run(() async {
+      if (!_isSessionCurrent(snap)) return;
+      final next = transform(_courseTermPreferences);
+      if (next == _courseTermPreferences) {
+        saved = true;
+        return;
+      }
+      await _markReminderMutationPending();
+      if (!_isSessionCurrent(snap)) return;
+      try {
+        await _runScopedWrite(
+          snap,
+          (prefs) => repository.writeCourseTermPreferencesInPrefs(prefs, next),
+        );
+      } on StaleSessionWriteException {
+        return;
+      } on LocalStorageLeaseReleaseException {
+        if (snap.generation == _generation &&
+            !_recoveryWarnings.contains(leaseWarning)) {
+          _recoveryWarnings.add(leaseWarning);
+        }
+      } catch (_) {
+        return;
+      }
+      if (!_isSessionCurrent(snap)) return;
+      _courseTermPreferences = next;
+      _invalidateHomeDisplayIndex();
+      saved = true;
+      await _afterAssignmentsChanged(
+        updateSummary: true,
+        updateManual: false,
+        updateWidget: true,
+      );
+      if (_isSessionCurrent(snap)) notifyListeners();
+    });
+    return saved;
+  }
+
+  Future<bool> setCourseManualTerm(String courseKey, AcademicTerm? term) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    return _mutateCourseTermPreferences(
+      snap,
+      (current) => current.withManualTerm(courseKey, term?.key),
+      leaseWarning: '学期归属已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
+  Future<bool> setCourseArchiveMode(
+    String courseKey,
+    CourseArchiveMode mode,
+  ) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    return _mutateCourseTermPreferences(
+      snap,
+      (current) => current.withArchiveMode(courseKey, mode),
+      leaseWarning: '课程归档状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
+  Future<bool> dismissCourseRecall(String courseKey) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    return _mutateCourseTermPreferences(
+      snap,
+      (current) {
+        final cursor = termCatalog.entryFor(courseKey)?.latestRecallEventUtc ??
+            _clock().toUtc();
+        return current
+            .withArchiveMode(courseKey, CourseArchiveMode.auto)
+            .withDismissedRecallCursor(courseKey, cursor);
+      },
+      leaseWarning: '召回忽略状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
+  Future<bool> archivePastCourses() async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    return _mutateCourseTermPreferences(
+      snap,
+      (current) =>
+          current.withBatchArchive(termCatalog.archivablePastCourseKeys),
+      leaseWarning: '往期课程已批量归档，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
   List<Assignment> get formalAssignments =>
       courseAssignments.where((a) => a.isFormal).toList();
   List<CourseworkGroup>? _courseworkGroupsCache;
@@ -1494,7 +1617,8 @@ class AssignmentStore extends ChangeNotifier {
       _courseworkGroupsCache ??= List.unmodifiable(AssignmentGrouping.group(
         AssignmentQuery.scope([..._assignments, ..._hiddenAssignments], {})
             .where((assignment) =>
-                assignment.courseKey == null || follows(assignment.courseKey!))
+                assignment.courseKey == null ||
+                isCourseActive(assignment.courseKey!))
             .toList(),
         hiddenIds:
             _hiddenAssignments.map((assignment) => assignment.id).toSet(),
@@ -1506,13 +1630,64 @@ class AssignmentStore extends ChangeNotifier {
           if (!group.hidden) ...group.sources,
       ]);
 
-  /// Original primary records for statistics. Notice supplementation is a
-  /// display-only projection and must never resolve submission state.
+  /// Original primary records for statistics across followed courses.
+  ///
+  /// Uses all non-hidden followed records so past/archived terms remain
+  /// inspectable via [statsAssignmentsForScope].
   List<Assignment> get statsAssignments =>
       _statsAssignmentsCache ??= List.unmodifiable([
-        for (final group in courseworkGroups)
-          if (!group.hidden) group.primary,
+        for (final group in localRecordGroups)
+          if (!group.hidden &&
+              (group.primary.courseKey == null ||
+                  follows(group.primary.courseKey!)))
+            group.primary,
       ]);
+
+  List<Assignment> statsAssignmentsForScope(
+    CourseTermScope scope, {
+    DateTime? now,
+  }) {
+    final catalog = now == null
+        ? termCatalog
+        : CourseTermCatalog.build(
+            courses: courses,
+            assignments: [..._assignments, ..._hiddenAssignments],
+            notices: _courseNotices.items,
+            preferences: _courseTermPreferences,
+            now: now,
+            coursework: _courseworkState,
+            unfollowedCourseKeys: _unfollowed,
+            hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+          );
+    return List.unmodifiable([
+      for (final a in statsAssignments)
+        if (catalog.matchesAssignmentInStatsScope(a, scope)) a,
+    ]);
+  }
+
+  List<Assignment> homeCatalogAssignmentsWithSelectedCourse(
+    String? selectedCourseKey,
+  ) {
+    final activeCatalog = homeCatalogAssignments;
+    if (selectedCourseKey == null ||
+        !follows(selectedCourseKey) ||
+        termCatalog.isActiveOrRecalled(selectedCourseKey)) {
+      return activeCatalog;
+    }
+    final activeIds = {for (final a in activeCatalog) a.id};
+    final extra = <Assignment>[];
+    for (final group in localRecordGroups) {
+      if (group.hidden) continue;
+      if (group.primary.courseKey != selectedCourseKey) continue;
+      for (final source in group.sources) {
+        if (!activeIds.contains(source.id)) {
+          extra.add(source);
+        }
+      }
+    }
+    if (extra.isEmpty) return activeCatalog;
+    return List<Assignment>.unmodifiable([...activeCatalog, ...extra]);
+  }
 
   Set<String> _effectiveHiddenAssignmentIds() => {
         for (final item in _hiddenAssignments) item.id,
@@ -1720,6 +1895,7 @@ class AssignmentStore extends ChangeNotifier {
       _homeDisplayIndex ??= AssignmentDisplayIndex.from(homeCatalogAssignments);
 
   void _invalidateHomeDisplayIndex() {
+    _termCatalogCache = null;
     _homeCatalogCache = null;
     _homeDisplayIndex = null;
     _courseworkGroupsCache = null;
@@ -1748,7 +1924,8 @@ class AssignmentStore extends ChangeNotifier {
   List<Assignment> _catalogAssignmentsFrom(Iterable<Assignment> records) =>
       AssignmentQuery.scope(records.toList(), {})
           .where((assignment) =>
-              assignment.courseKey == null || follows(assignment.courseKey!))
+              assignment.courseKey == null ||
+              isCourseActive(assignment.courseKey!))
           .toList();
 
   void _handleHomeProgress(int generation, AssignmentSyncProgress progress) {
@@ -1950,6 +2127,8 @@ class AssignmentStore extends ChangeNotifier {
     _unfollowed.clear();
     _pinned = const PinnedAssignments.empty();
     _courseworkState = const LocalCourseworkState.empty();
+    _courseTermPreferences = const CourseTermPreferences.empty();
+    _termCatalogCache = null;
     _visitedAssignment = null;
     _activeVisitTicket = null;
     _visitLeftApp = false;
@@ -2012,6 +2191,13 @@ class AssignmentStore extends ChangeNotifier {
       final account = _account;
       if (_authenticated && account != null) {
         _courseworkState = await repository.loadCourseworkState(account);
+      }
+    });
+    await stage('课程学期设置', () async {
+      final account = _account;
+      if (_authenticated && account != null) {
+        _courseTermPreferences =
+            await repository.loadCourseTermPreferences(account);
       }
     });
     await stage('提醒设置', () async {
@@ -2379,6 +2565,8 @@ class AssignmentStore extends ChangeNotifier {
             _unfollowed.clear();
             _pinned = const PinnedAssignments.empty();
             _courseworkState = const LocalCourseworkState.empty();
+            _courseTermPreferences = const CourseTermPreferences.empty();
+            _termCatalogCache = null;
             _acknowledgedDeadlineChangeIds = <String>{};
             _pinsNeedSave = false;
             _courseNotices = CourseNoticeCollection();
@@ -3466,6 +3654,8 @@ class AssignmentStore extends ChangeNotifier {
       _unfollowed.clear();
       _pinned = const PinnedAssignments.empty();
       _courseworkState = const LocalCourseworkState.empty();
+      _courseTermPreferences = const CourseTermPreferences.empty();
+      _termCatalogCache = null;
       _pinsNeedSave = false;
       _invalidateHomeDisplayIndex();
       syncReport = const SyncReport();
@@ -4250,7 +4440,10 @@ class AssignmentStore extends ChangeNotifier {
         markSavingStage();
         try {
           await repository.saveCourses(nextCourses, account: account);
-          if (generation == _generation && !_disposed) _courses = nextCourses;
+          if (generation == _generation && !_disposed) {
+            _courses = nextCourses;
+            _invalidateHomeDisplayIndex();
+          }
         } on StaleSessionWriteException {
           // Account changed before the finally block could commit courses.
         }
@@ -4346,6 +4539,7 @@ class AssignmentStore extends ChangeNotifier {
           await repository.saveCourseNotices(mergedNotices, account);
           if (generation == _generation && _account == account && !_disposed) {
             _courseNotices = mergedNotices;
+            _invalidateHomeDisplayIndex();
           }
         } on StaleSessionWriteException {
           return;

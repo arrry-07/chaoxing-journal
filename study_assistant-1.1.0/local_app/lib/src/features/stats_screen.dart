@@ -10,6 +10,7 @@ import '../app/transient_feedback.dart';
 import '../models/assignment.dart';
 import '../services/assignment_statistics.dart';
 import '../services/assignment_store.dart';
+import '../services/course_term_catalog.dart';
 import '../services/local_record_query.dart';
 import 'widgets/completion_pie_chart.dart';
 import 'widgets/journal_context_menu.dart';
@@ -52,6 +53,7 @@ class _StatsScreenState extends State<StatsScreen> {
 
   Timer? _clock;
   late DateTime _now;
+  CourseTermScope _termScope = CourseTermScope.currentTerm;
   StatsTimeRange _range = StatsTimeRange.all;
   final _feedback = TransientFeedbackController();
   late int _feedbackEpoch;
@@ -117,7 +119,12 @@ class _StatsScreenState extends State<StatsScreen> {
     final store = widget.store;
     final epoch = store.accountEpoch;
     await store.followCourse(courseKey, false);
-    if (!context.mounted || !mounted || store.accountEpoch != epoch) return;
+    if (store.error != null ||
+        !context.mounted ||
+        !mounted ||
+        store.accountEpoch != epoch) {
+      return;
+    }
     _feedback.show(
       context,
       SnackBar(
@@ -196,7 +203,7 @@ class _StatsScreenState extends State<StatsScreen> {
           final store = widget.store;
           final now = _now;
           final rangeResult = LocalRecordQuery.filterStatsRecords(
-            store.statsAssignments,
+            store.statsAssignmentsForScope(_termScope, now: now),
             _range,
             now,
           );
@@ -266,6 +273,24 @@ class _StatsScreenState extends State<StatsScreen> {
               children: [
                 const JournalHeading('课业统计', bookTitle: true),
                 const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    for (final scope in CourseTermScope.values)
+                      ChoiceChip(
+                        key: ValueKey('stats-term-scope-${scope.name}'),
+                        selected: _termScope == scope,
+                        onSelected: (_) {
+                          if (_termScope == scope) return;
+                          JournalMotion.tap(store.display);
+                          setState(() => _termScope = scope);
+                        },
+                        label: Text(scope.label),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
                 _StatsRangeSegmentedBar(
                   selected: _range,
                   onChanged: (next) {

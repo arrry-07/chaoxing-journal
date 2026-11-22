@@ -1,5 +1,6 @@
 import '../models/assignment.dart';
 import '../models/course.dart';
+import 'course_term_catalog.dart';
 
 /// A course filter entry resolved from the account's full course catalog.
 ///
@@ -15,6 +16,9 @@ class HomeCourseFilterOption {
     required this.showClass,
     required this.showCourseId,
     this.teacherNames = const [],
+    this.termLabel,
+    this.archived = false,
+    this.recalled = false,
   });
 
   final String courseKey;
@@ -24,6 +28,9 @@ class HomeCourseFilterOption {
   final bool showClass;
   final bool showCourseId;
   final List<String> teacherNames;
+  final String? termLabel;
+  final bool archived;
+  final bool recalled;
 
   String get classLabel =>
       showCourseId ? '班级 $clazzId · 课程 $courseId' : '班级 $clazzId';
@@ -31,9 +38,19 @@ class HomeCourseFilterOption {
   String get teacherLabel => teacherNames.join('、');
 
   String? get subtitle {
+    final statusSuffix = recalled
+        ? (termLabel != null && termLabel!.isNotEmpty
+            ? '$termLabel · 补修/近期活跃'
+            : '补修/近期活跃')
+        : archived
+            ? (termLabel != null && termLabel!.isNotEmpty
+                ? '$termLabel · 已归档'
+                : '已归档')
+            : null;
     final parts = <String>[
       if (showClass) classLabel,
       if (teacherNames.isNotEmpty) teacherLabel,
+      if (statusSuffix != null) statusSuffix,
     ];
     return parts.isEmpty ? null : parts.join(' · ');
   }
@@ -49,6 +66,7 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
   required Iterable<CourseRef> catalog,
   required Iterable<Assignment> records,
   String? selectedCourseKey,
+  CourseTermCatalog? termCatalog,
 }) {
   final known = <String, _KnownCourse>{};
 
@@ -137,6 +155,7 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
     final clazzId = course?.clazzId ?? '—';
     final courseId = course?.courseId ?? key;
     final normalized = _normalized(name);
+    final termEntry = termCatalog?.entryFor(key);
     options.add(
       HomeCourseFilterOption(
         courseKey: key,
@@ -147,6 +166,9 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
         showCourseId: normalized.isNotEmpty &&
             (nameClassCounts['$normalized\u0000$clazzId'] ?? 0) > 1,
         teacherNames: course?.teacherNames ?? const [],
+        termLabel: termEntry?.term?.label,
+        archived: termEntry?.state == CourseCatalogState.archived,
+        recalled: termEntry?.state == CourseCatalogState.recalled,
       ),
     );
   }

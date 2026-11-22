@@ -4,6 +4,7 @@ import 'assignment.dart';
 import 'course.dart';
 import 'course_chapter_progress.dart';
 import 'course_notice.dart';
+import 'course_term_preferences.dart';
 import 'local_coursework_state.dart';
 import 'personal_workspace.dart';
 import 'pinned_assignments.dart';
@@ -28,7 +29,8 @@ class BackupSnapshot {
       this.notices,
       this.chapters,
       this.pinned,
-      this.courseworkState)
+      this.courseworkState,
+      this.courseTermPreferences)
       : records = List.unmodifiable(records),
         hidden = Set.unmodifiable(hidden),
         courses = List.unmodifiable(courses),
@@ -52,6 +54,7 @@ class BackupSnapshot {
   final CourseChapterCatalog chapters;
   final PinnedAssignments pinned;
   final LocalCourseworkState courseworkState;
+  final CourseTermPreferences courseTermPreferences;
   static String ownerFor(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
 
@@ -79,8 +82,11 @@ class BackupSnapshot {
     PinnedAssignments pinned,
     LocalCourseworkState courseworkState,
     List<CourseRef> courses,
+    CourseTermPreferences courseTermPreferences,
   ) {
-    if (courses.any((c) => c.hasMetadata)) return 9;
+    if (courses.any((c) => c.hasMetadata) || courseTermPreferences.isNotEmpty) {
+      return 9;
+    }
     if (pinned.isNotEmpty ||
         pinned.manuallyOrdered ||
         courseworkState.isNotEmpty) {
@@ -150,12 +156,15 @@ class BackupSnapshot {
       CourseNoticeCollection? notices,
       CourseChapterCatalog? chapters,
       PinnedAssignments? pinned,
-      LocalCourseworkState? courseworkState}) {
+      LocalCourseworkState? courseworkState,
+      CourseTermPreferences? courseTermPreferences}) {
     final effectiveNotices = notices ?? CourseNoticeCollection();
     final effectiveChapters = chapters ?? CourseChapterCatalog();
     final effectivePinned = pinned ?? const PinnedAssignments.empty();
     final effectiveCoursework =
         courseworkState ?? const LocalCourseworkState.empty();
+    final effectiveTermPrefs =
+        courseTermPreferences ?? const CourseTermPreferences.empty();
     final version = _schemaVersion(
       records,
       effectiveNotices,
@@ -163,6 +172,7 @@ class BackupSnapshot {
       effectivePinned,
       effectiveCoursework,
       courses,
+      effectiveTermPrefs,
     );
     return BackupSnapshot.decode(jsonEncode({
       'schema': version,
@@ -173,6 +183,8 @@ class BackupSnapshot {
       if (version >= 8) 'pinned': effectivePinned.toJson(),
       if (version >= 8 && effectiveCoursework.isNotEmpty)
         'courseworkState': effectiveCoursework.toJson(),
+      if (version >= 9 && effectiveTermPrefs.isNotEmpty)
+        'courseTermPreferences': effectiveTermPrefs.toJson(),
       'owner': owner,
       'createdAt': createdAt.toUtc().toIso8601String(),
       'records': records
@@ -195,6 +207,7 @@ class BackupSnapshot {
       pinned,
       courseworkState,
       courses,
+      courseTermPreferences,
     );
     return jsonEncode({
       'schema': version,
@@ -205,6 +218,8 @@ class BackupSnapshot {
       if (version >= 8) 'pinned': pinned.toJson(),
       if (version >= 8 && courseworkState.isNotEmpty)
         'courseworkState': courseworkState.toJson(),
+      if (version >= 9 && courseTermPreferences.isNotEmpty)
+        'courseTermPreferences': courseTermPreferences.toJson(),
       'owner': owner,
       'createdAt': createdAt.toUtc().toIso8601String(),
       'records': records
@@ -279,6 +294,9 @@ class BackupSnapshot {
     final hasCourseworkState = version >= 8 &&
         decoded is Map &&
         decoded.containsKey('courseworkState');
+    final hasCourseTermPreferences = version >= 9 &&
+        decoded is Map &&
+        decoded.containsKey('courseTermPreferences');
     final j = _map(decoded, {
       if (version >= 2) 'personal',
       if (version >= 3) 'notebook',
@@ -286,6 +304,7 @@ class BackupSnapshot {
       if (version >= 6) 'chapters',
       if (version >= 8) 'pinned',
       if (hasCourseworkState) 'courseworkState',
+      if (hasCourseTermPreferences) 'courseTermPreferences',
       'schema',
       'owner',
       'createdAt',
@@ -472,6 +491,12 @@ class BackupSnapshot {
     final decodedCoursework = !hasCourseworkState
         ? const LocalCourseworkState.empty()
         : LocalCourseworkState.fromJson(j['courseworkState'], strict: true);
+    final decodedTermPrefs = !hasCourseTermPreferences
+        ? const CourseTermPreferences.empty()
+        : CourseTermPreferences.fromJson(
+            j['courseTermPreferences'],
+            strict: true,
+          );
     return BackupSnapshot._(
         owner,
         _date(j['createdAt']),
@@ -489,7 +514,8 @@ class BackupSnapshot {
         cleanNotices,
         cleanChapters,
         decodedPinned,
-        decodedCoursework);
+        decodedCoursework,
+        decodedTermPrefs);
   }
 
   static ExamInfo? _exam(dynamic value) {
