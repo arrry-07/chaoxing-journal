@@ -72,17 +72,30 @@ class CheckRepoSafetyTests(unittest.TestCase):
         gh_token = "gh" + "p_" + "A" * 24
         session_cookie = "Cookie: JSESSION" + "ID=" + "x" * 30
         vc3_cookie = "v" + "c3=" + "a%2Fb+c%3D" * 4
+        dsstash_cookie = "DSSTASH_" + "LOG=" + "ab12cd34" * 4
+        chaoxing_bundle = (
+            "Cookie: F" + "ID=1234; U" + "ID=98765432; _" + "d=1732200000123"
+        )
 
-        for line in (private_key, keystore_pw, gh_token, session_cookie, vc3_cookie):
+        for line in (
+            private_key,
+            keystore_pw,
+            gh_token,
+            session_cookie,
+            vc3_cookie,
+            dsstash_cookie,
+            chaoxing_bundle,
+        ):
             self.assertTrue(
                 mod.check_lines("lib/sample.dart", [(1, line)]),
-                f"expected secret hit for {line[:12]}",
+                f"expected secret hit for {line[:16]}",
             )
 
         clean_lines = [
             (1, "antispider=cleared; route=mooc1"),
             (2, "storePassword keystoreProperties['storePassword']"),
             (3, "final token = 'enc=synthetic';"),
+            (4, "const query = 'fid=1234&courseId=99';"),
         ]
         self.assertEqual(mod.check_lines("test/fixture.dart", clean_lines), [])
 
@@ -185,6 +198,33 @@ class CheckRepoSafetyTests(unittest.TestCase):
             merge_hits = mod.scan_range(repo, f"{before_merge}..HEAD")
             self.assertTrue(any("blocked-file" in h and "cookies.json" in h for h in merge_hits))
             self.assertTrue(any("long-session-cookie" in h for h in merge_hits))
+
+    def test_scan_worktree_and_cli_main_respect_deletions_and_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+
+            # Binary file containing NUL bytes must be skipped without false text decoding errors.
+            (repo / "icon.bin").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00" + b"gh" + b"p_" + b"X" * 24)
+            (repo / "notes.txt").write_text("clean\n", encoding="utf-8")
+            subprocess.run(["git", "add", "icon.bin", "notes.txt"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+            self.assertEqual(mod.scan_worktree(repo), [])
+            self.assertEqual(mod.main(["--repo-root", str(repo), "--worktree"]), 0)
+
+            # Modify tracked file with secret -> worktree scan & CLI must fail.
+            (repo / "notes.txt").write_text("DSSTASH_" + "LOG=" + "Z" * 28 + "\n", encoding="utf-8")
+            hits = mod.scan_worktree(repo)
+            self.assertTrue(any("long-session-cookie" in h for h in hits))
+            self.assertEqual(mod.main(["--repo-root", str(repo), "--worktree"]), 1)
+
+            # Staged deletion must remove the file from worktree scan.
+            subprocess.run(["git", "rm", "-f", "notes.txt"], cwd=repo, check=True, capture_output=True)
+            self.assertEqual(mod.scan_worktree(repo), [])
+            self.assertEqual(mod.main(["--repo-root", str(repo), "--worktree"]), 0)
 
 
 if __name__ == "__main__":

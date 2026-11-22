@@ -33,6 +33,7 @@ def _changed_dart_files(repo: Path, app_dir: Path) -> list[str]:
     for args in (
         ["git", "-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=ACMR", "-z", "HEAD"],
         ["git", "-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=ACMR", "-z", "HEAD^", "HEAD"],
+        ["git", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard", "-z"],
     ):
         proc = subprocess.run(args, cwd=repo, capture_output=True)
         if proc.returncode != 0:
@@ -73,6 +74,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Enforce formal release version metadata (never pass --allow-dev)",
     )
     args = parser.parse_args(argv)
+    if args.mode == "quick" and not args.tests and not args.skip_flutter_tests:
+        print(
+            "[FAIL] Quick mode requires --tests <files>, --mode full, or explicit "
+            "--skip-flutter-tests (refusing to silently skip Flutter tests and pass).",
+            file=sys.stderr,
+        )
+        return 2
 
     repo = Path(__file__).resolve().parents[1]
     app_dir = repo / "study_assistant-1.1.0" / "local_app"
@@ -156,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             "test_gitee_workflow.py",
             "test_verify_apk_and_report.py",
             "test_check_repo_safety.py",
+            "test_verify_local_gate.py",
         ):
             _run_step(f"Python tests ({test_name})", [py, str(repo / "scripts" / test_name)], repo)
 

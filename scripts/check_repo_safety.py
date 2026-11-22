@@ -53,7 +53,14 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "long-session-cookie",
         re.compile(
-            r"(?i)\b(?:JSESSION" + r"ID|FI" + r"D|U" + r"F|v" + r"c3)=[A-Za-z0-9._%+/=-]{24,}"
+            r"(?i)\b(?:JSESSION" + r"ID|U" + r"F|v" + r"c3|DSSTASH_" + r"LOG)=[A-Za-z0-9._%+/=-]{24,}"
+        ),
+    ),
+    (
+        "chaoxing-cookie-bundle",
+        re.compile(
+            r"(?i)(?:\b_" + r"d=\d{10,}\b[^\n]*\b(?:F" + r"ID|U" + r"ID|U" + r"F|v" + r"c3)=[^\s;,'\"]+"
+            r"|\b(?:F" + r"ID|U" + r"ID|U" + r"F|v" + r"c3)=[^\s;,'\"]+[^\n]*\b_" + r"d=\d{10,}\b)"
         ),
     ),
 ]

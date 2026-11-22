@@ -93,6 +93,16 @@ Future<AssignmentStore> _seededStore(DateTime now) async {
   return store;
 }
 
+Directory _resolveLibDir() {
+  final direct = Directory('lib');
+  if (direct.existsSync()) return direct;
+  final nested = Directory('study_assistant-1.1.0/local_app/lib');
+  if (nested.existsSync()) return nested;
+  throw StateError(
+    'Unable to locate lib from cwd ${Directory.current.path}',
+  );
+}
+
 Directory _resolveFeaturesDir() {
   final direct = Directory('lib/src/features');
   if (direct.existsSync()) return direct;
@@ -110,12 +120,55 @@ List<File> _dartFiles(Directory dir) => dir
     .toList()
   ..sort((a, b) => a.path.compareTo(b.path));
 
+/// Advances past a Dart comment or string literal starting at [index], or
+/// returns [index] unchanged if none starts there.
+int _skipDartCommentOrString(String source, int index) {
+  final len = source.length;
+  if (index >= len) return index;
+  if (source.startsWith('//', index)) {
+    final nl = source.indexOf('\n', index + 2);
+    return nl == -1 ? len : nl + 1;
+  }
+  if (source.startsWith('/*', index)) {
+    final end = source.indexOf('*/', index + 2);
+    return end == -1 ? len : end + 2;
+  }
+  var raw = false;
+  var pos = index;
+  if (source[pos] == 'r' &&
+      pos + 1 < len &&
+      (source[pos + 1] == "'" || source[pos + 1] == '"')) {
+    raw = true;
+    pos++;
+  }
+  final ch = source[pos];
+  if (ch != "'" && ch != '"') return index;
+  final triple =
+      pos + 2 < len && source[pos + 1] == ch && source[pos + 2] == ch;
+  final delim = triple ? ch * 3 : ch;
+  pos += delim.length;
+  while (pos < len) {
+    if (!raw && source[pos] == r'\') {
+      pos += 2;
+      continue;
+    }
+    if (source.startsWith(delim, pos)) return pos + delim.length;
+    pos++;
+  }
+  return len;
+}
+
 /// Source text between an opening bracket (already consumed at [start]) and
-/// its matching closer.
+/// its matching closer, ignoring brackets inside strings and comments.
 String _balancedArgs(String source, int start) {
   var depth = 1;
   var i = start;
   while (i < source.length && depth > 0) {
+    final skipped = _skipDartCommentOrString(source, i);
+    if (skipped > i) {
+      i = skipped;
+      continue;
+    }
     final c = source[i];
     if ('([{'.contains(c)) depth++;
     if (')]}'.contains(c)) depth--;
@@ -124,12 +177,19 @@ String _balancedArgs(String source, int start) {
   return source.substring(start, i - 1);
 }
 
-/// Top-level comma-separated items of a list literal opened at [start].
+/// Top-level comma-separated items of a list literal opened at [start],
+/// ignoring delimiters inside strings and comments.
 List<String> _directListItems(String source, int start) {
   final items = <String>[];
   var depth = 1;
   var itemStart = start;
-  for (var i = start; i < source.length; i++) {
+  var i = start;
+  while (i < source.length) {
+    final skipped = _skipDartCommentOrString(source, i);
+    if (skipped > i) {
+      i = skipped;
+      continue;
+    }
     final c = source[i];
     if ('([{'.contains(c)) {
       depth++;
@@ -143,6 +203,7 @@ List<String> _directListItems(String source, int start) {
       items.add(source.substring(itemStart, i));
       itemStart = i + 1;
     }
+    i++;
   }
   return items.map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
 }
@@ -200,10 +261,13 @@ void main() {
       );
     });
 
-    test('pages route snackbars through the shared feedback entry points', () {
-      final featuresDir = _resolveFeaturesDir();
+    test('app and pages route snackbars through the shared feedback entries',
+        () {
+      final libDir = _resolveLibDir();
       final violations = <String>[];
-      for (final file in _dartFiles(featuresDir)) {
+      for (final file in _dartFiles(libDir)) {
+        final norm = file.path.replaceAll('\\', '/');
+        if (norm.endsWith('lib/src/app/transient_feedback.dart')) continue;
         final lines = file.readAsLinesSync();
         for (var i = 0; i < lines.length; i++) {
           final trimmed = lines[i].trimLeft();
@@ -248,6 +312,27 @@ void main() {
         reason: 'Wrap free-form card content in a single Column:\n'
             '${violations.join('\n')}',
       );
+    });
+
+    test('grouped card parser ignores brackets inside strings and comments',
+        () {
+      const sample = '''
+JournalGroupedCard(
+  title: '含右括号)与]的标题', // comment with ) and ]
+  children: [
+    /* block comment ) ] */
+    const Text('正常内容 (示例)'),
+    const SizedBox(height: 8),
+  ],
+)
+''';
+      final match = RegExp(r'JournalGroupedCard\(').firstMatch(sample)!;
+      final args = _balancedArgs(sample, match.end);
+      final children =
+          RegExp(r'\bchildren:\s*(?:const\s*)?\[').firstMatch(args);
+      expect(children, isNotNull);
+      final items = _directListItems(args, children!.end);
+      expect(items.any(_isSpacerItem), isTrue);
     });
 
     test('light and dark themes expose distinct Journal tokens and WenKai', () {
