@@ -152,14 +152,14 @@ class _AgreementPanel extends StatelessWidget {
                   materialTapTargetSize: MaterialTapTargetSize.padded,
                   visualDensity: VisualDensity.standard,
                   shape: const CircleBorder(),
-                  checkColor: journal.sheet,
+                  checkColor: journal.onPrimaryFill,
                   fillColor: WidgetStateProperty.resolveWith((states) =>
                       states.contains(WidgetState.selected)
-                          ? Journal.of(context).ink
-                          : Journal.of(context).sage),
+                          ? journal.primaryFill
+                          : Colors.transparent),
                   side: BorderSide(
-                    color: journal.rule,
-                    width: 1,
+                    color: journal.muted,
+                    width: 1.6,
                   ),
                   onChanged:
                       enabled ? (value) => onChanged(value ?? false) : null,

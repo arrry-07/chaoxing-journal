@@ -1026,9 +1026,15 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
             : '保存失败：$operationError；已恢复原提醒时间');
         return;
       }
-      final hasWarnings = widget.assignmentStore.serviceWarnings.isNotEmpty ||
-          widget.assignmentStore.recoveryWarning != null;
-      _showMessage(hasWarnings ? '提醒时间已保存' : '提醒时间已保存，作业通知已更新');
+      if (widget.assignmentStore.serviceWarnings.isNotEmpty) {
+        _showMessage(
+          '提醒时间已保存；提醒安排失败：${widget.assignmentStore.serviceWarnings.first}',
+        );
+      } else if (widget.assignmentStore.recoveryWarning != null) {
+        _showMessage('提醒时间已保存；提醒恢复仍需检查');
+      } else {
+        _showMessage('提醒时间已保存，作业通知已更新');
+      }
       unawaited(_loadHealth(force: true));
     } catch (_) {
       if (mounted) {

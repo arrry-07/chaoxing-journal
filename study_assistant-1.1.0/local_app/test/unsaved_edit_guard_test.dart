@@ -14,6 +14,7 @@ import 'package:study_assistant_mobile/src/app/app_deep_links.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
+import 'package:study_assistant_mobile/src/features/daily_plan_screen.dart';
 import 'package:study_assistant_mobile/src/features/login_screen.dart';
 import 'package:study_assistant_mobile/src/features/manual_agenda_screen.dart';
 import 'package:study_assistant_mobile/src/features/personal_work_screen.dart';
@@ -805,5 +806,54 @@ void main() {
 
     expect(find.text('放弃未保存的提醒规则？'), findsNothing);
     expect(find.byType(CalendarScreen), findsNothing);
+  });
+
+  group('Batch 1B.5 S9: query-aware notification routing and account eviction',
+      () {
+    testWidgets(
+        'summary notification leaves /assignments?scope=noDeadline back to full /assignments',
+        (tester) async {
+      await initializeDateFormatting('zh_CN');
+      final notifications = _CapturingNotifications();
+      await _launchApp(
+        tester,
+        '/assignments?scope=noDeadline',
+        notifications: notifications,
+      );
+      expect(find.text('无截止日期'), findsOneWidget);
+
+      notifications.handler!('d:summary');
+      await tester.pumpAndSettle();
+
+      final router = GoRouter.of(tester.element(find.byType(AppShell)));
+      expect(AppShell.currentUriOf(router).toString(), '/assignments');
+      expect(find.text('无截止日期'), findsNothing);
+    });
+
+    testWidgets(
+        'in-place account switch evicts /plan (DailyPlanScreen) so stale epoch cannot lock saves',
+        (tester) async {
+      await initializeDateFormatting('zh_CN');
+      final session = f.Session();
+      final notifications = _CapturingNotifications();
+      final store =
+          _LaunchStore(session: session, notifications: notifications);
+      await _launchApp(
+        tester,
+        '/plan',
+        notifications: notifications,
+        suppliedStore: store,
+      );
+      expect(find.byType(DailyPlanScreen), findsOneWidget);
+
+      session.account = 'B';
+      await store.restoreSession();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DailyPlanScreen), findsNothing,
+          reason:
+              'DailyPlanScreen caches late final epoch and must be evicted on account switch');
+      expect(find.byType(AssignmentListScreen), findsOneWidget);
+    });
   });
 }

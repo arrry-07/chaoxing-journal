@@ -50,11 +50,18 @@ class VerificationBrowser(private val activity: MainActivity) {
             "https://i.chaoxing.com/",
         )
         BrowserPolicy.trustedChaoxingPageOrigin(url)?.let { origins.add(it) }
-        cookies.mapNotNull { it["url"] }.filter { trusted(it) }.forEach { origins.add(it) }
+        cookies.mapNotNull { it["url"] }.forEach { raw ->
+            BrowserPolicy.trustedChaoxingOrigin(raw)?.let { origins.add(it) }
+            BrowserPolicy.trustedChaoxingPageOrigin(raw)?.let { origins.add(it) }
+        }
         browser.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val rawTarget = request.url.toString()
-                val upgraded = BrowserPolicy.upgradeChaoxingHttpUrl(rawTarget)
+                val upgraded = BrowserPolicy.upgradeChaoxingNavigationUrl(
+                    rawTarget,
+                    request.isForMainFrame,
+                    request.method,
+                )
                 if (upgraded != null) {
                     BrowserPolicy.trustedChaoxingOrigin(upgraded)?.let { origins.add(it) }
                     view.loadUrl(upgraded)

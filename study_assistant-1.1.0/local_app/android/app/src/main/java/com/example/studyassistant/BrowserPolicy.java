@@ -12,6 +12,9 @@ public final class BrowserPolicy {
     private static final Pattern STRICT_HOST = Pattern.compile(
         "^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
     );
+    private static final Pattern IPV4_LITERAL = Pattern.compile(
+        "^\\d+(?:\\.\\d+){3}$"
+    );
 
     private BrowserPolicy() {}
 
@@ -32,7 +35,9 @@ public final class BrowserPolicy {
                 authority.indexOf('@') >= 0 || authority.indexOf('\\') >= 0) {
                 return null;
             }
-            if (uri.getRawUserInfo() != null || host == null || !STRICT_HOST.matcher(host).matches()) {
+            if (uri.getRawUserInfo() != null || host == null ||
+                !STRICT_HOST.matcher(host).matches() ||
+                IPV4_LITERAL.matcher(host).matches()) {
                 return null;
             }
             return uri;
@@ -49,7 +54,7 @@ public final class BrowserPolicy {
     public static boolean isAllowed(String url) {
         URI uri = parseStrictUri(url);
         return uri != null &&
-            "https".equals(uri.getScheme()) &&
+            "https".equalsIgnoreCase(uri.getScheme()) &&
             (uri.getPort() == -1 || uri.getPort() == 443);
     }
 
@@ -57,7 +62,7 @@ public final class BrowserPolicy {
     public static boolean isTrustedChaoxingUrl(String url) {
         URI uri = parseStrictUri(url);
         return uri != null &&
-            "https".equals(uri.getScheme()) &&
+            "https".equalsIgnoreCase(uri.getScheme()) &&
             (uri.getPort() == -1 || uri.getPort() == 443) &&
             isChaoxingHost(uri.getHost());
     }
@@ -76,7 +81,8 @@ public final class BrowserPolicy {
         URI uri = parseStrictUri(url);
         if (uri == null) return null;
         String rawPath = uri.getRawPath();
-        return "https://" + uri.getHost().toLowerCase(Locale.ROOT) + (rawPath == null ? "" : rawPath);
+        String normalizedPath = (rawPath == null || rawPath.isEmpty()) ? "/" : rawPath;
+        return "https://" + uri.getHost().toLowerCase(Locale.ROOT) + normalizedPath;
     }
 
     /**
@@ -86,7 +92,7 @@ public final class BrowserPolicy {
     public static String upgradeChaoxingHttpUrl(String url) {
         URI uri = parseStrictUri(url);
         if (uri == null ||
-            !"http".equals(uri.getScheme()) ||
+            !"http".equalsIgnoreCase(uri.getScheme()) ||
             (uri.getPort() != -1 && uri.getPort() != 80) ||
             !isChaoxingHost(uri.getHost())) {
             return null;
@@ -98,5 +104,21 @@ public final class BrowserPolicy {
         if (uri.getRawFragment() != null) upgraded.append('#').append(uri.getRawFragment());
         String candidate = upgraded.toString();
         return isTrustedChaoxingUrl(candidate) ? candidate : null;
+    }
+
+    /**
+     * Only main-frame GET navigations may be upgraded via view.loadUrl; subframes
+     * and non-GET requests (e.g. POST forms) must not hijack the top frame or drop bodies.
+     */
+    public static String upgradeChaoxingNavigationUrl(
+        String url,
+        boolean isForMainFrame,
+        String httpMethod
+    ) {
+        if (!isForMainFrame) return null;
+        if (httpMethod != null && !httpMethod.isEmpty() && !"GET".equalsIgnoreCase(httpMethod)) {
+            return null;
+        }
+        return upgradeChaoxingHttpUrl(url);
     }
 }

@@ -13,6 +13,7 @@ Duration feedbackDuration({bool action = false, bool accessible = false}) =>
 void showJournalMessage(BuildContext context, String message) {
   final messenger = ScaffoldMessenger.maybeOf(context);
   if (messenger == null) return;
+  TransientFeedbackController.revokeOwner(messenger);
   final duration =
       feedbackDuration(accessible: MediaQuery.accessibleNavigationOf(context));
   messenger
@@ -55,6 +56,14 @@ class JournalFloatingBanner extends StatelessWidget {
 /// also bounds action snackbars when Flutter keeps them for accessibility.
 class TransientFeedbackController {
   static final _owners = Expando<TransientFeedbackController>();
+
+  /// Revokes any live or disposing controller's ownership of [messenger] so its
+  /// pending post-frame cleanup will not dismiss a replacement snackbar.
+  static void revokeOwner(ScaffoldMessengerState messenger) {
+    _owners[messenger]?._forget();
+    _owners[messenger] = null;
+  }
+
   Timer? _timer;
   ScaffoldMessengerState? _messenger;
   ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _current;

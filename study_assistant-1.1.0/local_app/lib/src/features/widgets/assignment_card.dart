@@ -376,9 +376,7 @@ class AssignmentCard extends StatelessWidget {
               overflow: largeText ? null : TextOverflow.ellipsis,
               style: overdue
                   ? journal.entryTitle.copyWith(
-                      color: journal == JournalPalette.dark
-                          ? journal.muted
-                          : const Color(0xFF4B5563),
+                      color: journal.isDark ? journal.muted : journal.ochre,
                     )
                   : journal.entryTitle,
             ),

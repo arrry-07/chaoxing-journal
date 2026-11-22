@@ -308,17 +308,21 @@ class LocalAssignmentRepository {
     }
   }
 
-  void _checkOwner(SharedPreferences prefs, String account) {
+  void _checkOwner(
+    SharedPreferences prefs,
+    String account, {
+    String message = '当前账号会话已变化，旧写入已拒绝提交',
+  }) {
     if (account.trim().isEmpty ||
         prefs.getString(_ownerKey) != _owner(account) ||
         prefs.containsKey(_switchKey)) {
-      throw StaleSessionWriteException('当前账号已变化，请重新打开备份页面');
+      throw StaleSessionWriteException(message);
     }
   }
 
   /// Runs an account-scoped preference or cross-engine side-effect inside the
   /// serialized repository queue (holding the native write lease when enabled),
-  /// verifying the optional commit gate and active account owner after reload.
+  /// reloading preferences and verifying the commit gate and active account owner.
   Future<T> runScopedWrite<T>(
     Future<T> Function(SharedPreferences prefs) action, {
     String? account,
@@ -330,8 +334,11 @@ class LocalAssignmentRepository {
           throw StaleSessionWriteException(rejectedMessage);
         }
         final prefs = await SharedPreferences.getInstance();
+        if (!crossEngineLockEnabled) {
+          await prefs.reload();
+        }
         if (account != null) {
-          _checkOwner(prefs, account);
+          _checkOwner(prefs, account, message: rejectedMessage);
         } else if (prefs.containsKey(_switchKey)) {
           throw StaleSessionWriteException('账号本机记录切换未完成，请重新登录后恢复');
         }
@@ -341,14 +348,14 @@ class LocalAssignmentRepository {
   Future<void> validateBackupOwner(BackupSnapshot snapshot, String account) =>
       _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
-        _checkOwner(prefs, account);
+        _checkOwner(prefs, account, message: '当前账号已变化，请重新打开备份页面');
         if (snapshot.owner != _owner(account)) throw StateError('此备份不属于当前账号');
       });
 
   Future<BackupSnapshot> createBackupSnapshot(String account) =>
       _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
-        _checkOwner(prefs, account);
+        _checkOwner(prefs, account, message: '当前账号已变化，请重新打开备份页面');
         if (recoveryWarning != null) {
           throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
         }
@@ -407,7 +414,7 @@ class LocalAssignmentRepository {
   Future<bool> restoreBackupSnapshot(BackupSnapshot snapshot, String account) =>
       _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
-        _checkOwner(prefs, account);
+        _checkOwner(prefs, account, message: '当前账号已变化，请重新打开备份页面');
         if (snapshot.owner != _owner(account)) throw StateError('此备份不属于当前账号');
         // Validate again at the trust boundary even for in-memory callers.
         final validated = BackupSnapshot.decode(snapshot.encode());
@@ -710,7 +717,7 @@ class LocalAssignmentRepository {
         if (account != null) {
           _checkOwner(p, account);
         } else if (p.containsKey(_switchKey)) {
-          throw StateError('账号本机记录切换未完成，请重新登录后恢复');
+          throw StaleSessionWriteException('账号本机记录切换未完成，请重新登录后恢复');
         }
         await _writeVerified(
           p,
@@ -753,6 +760,8 @@ class LocalAssignmentRepository {
         try {
           await _backgroundReminderGateway.releaseWriteLease(_writeOwner);
         } catch (releaseError, releaseStack) {
+          _backgroundReminderGateway
+              .schedulePendingWriteReleaseRetry(_writeOwner);
           // Never let a release failure hide the real persistence error; when
           // the action succeeded, the unconfirmed release is the only failure.
           if (primaryError == null) {
@@ -772,6 +781,10 @@ class LocalAssignmentRepository {
     return result;
   }
 
+  void dispose() {
+    _backgroundReminderGateway.cancelPendingWriteReleaseRetry(_writeOwner);
+  }
+
   Future<List<Assignment>> loadJournal() =>
       _serialized(() async => (await _read()).journal);
 
@@ -785,7 +798,7 @@ class LocalAssignmentRepository {
           {bool completeSync = true, Future<bool> Function()? canCommit}) =>
       _serialized(() async {
         if (canCommit != null && !await canCommit()) {
-          throw StateError('账号会话已变化，旧同步结果已拒绝提交');
+          throw StaleSessionWriteException('账号会话已变化，旧同步结果已拒绝提交');
         }
         final state = await _read();
         state.merge(incoming);
@@ -820,7 +833,7 @@ class LocalAssignmentRepository {
   }) =>
       _serialized(() async {
         if (canCommit != null && !await canCommit()) {
-          throw StateError('账号会话已变化，旧隐藏结果已拒绝提交');
+          throw StaleSessionWriteException('账号会话已变化，旧隐藏结果已拒绝提交');
         }
         final state = await _read();
         final existing = ids.where(state.byId.containsKey).toSet();

@@ -142,24 +142,39 @@ void main() {
     expect(manifest, contains('android:allowBackup="false"'));
     expect(manifest, isNot(contains('android:allowBackup="true"')));
 
-    for (final path in [
-      'android/app/src/main/res/xml/backup_rules.xml',
-      'android/app/src/main/res/xml/data_extraction_rules.xml',
-    ]) {
-      final rules = File(path).readAsStringSync();
-      expect(rules, isNot(contains('<include')), reason: path);
-      expect(
-        rules,
-        contains(
-            '<exclude domain="sharedpref" path="FlutterSharedPreferences.xml"'),
-        reason: path,
-      );
-      expect(
-        rules,
-        contains('<exclude domain="sharedpref" path="."'),
-        reason: path,
-      );
+    void expectAllDomainsExcluded(String block, String label) {
+      expect(block, isNot(contains('<include')), reason: label);
+      for (final rule in [
+        '<exclude domain="sharedpref" path="FlutterSharedPreferences.xml"',
+        '<exclude domain="sharedpref" path="."',
+        '<exclude domain="database" path="."',
+        '<exclude domain="file" path="."',
+        '<exclude domain="external" path="."',
+        '<exclude domain="root" path="."',
+      ]) {
+        expect(block, contains(rule), reason: '$label missing $rule');
+      }
     }
+
+    final legacyRules = File(
+      'android/app/src/main/res/xml/backup_rules.xml',
+    ).readAsStringSync();
+    expectAllDomainsExcluded(legacyRules, 'backup_rules.xml');
+
+    final extractionRules = File(
+      'android/app/src/main/res/xml/data_extraction_rules.xml',
+    ).readAsStringSync();
+    final cloudBlock = RegExp(
+      r'<cloud-backup\b[^>]*>([\s\S]*?)</cloud-backup>',
+    ).firstMatch(extractionRules)?.group(1);
+    final transferBlock = RegExp(
+      r'<device-transfer\b[^>]*>([\s\S]*?)</device-transfer>',
+    ).firstMatch(extractionRules)?.group(1);
+    expect(cloudBlock, isNotNull);
+    expect(transferBlock, isNotNull);
+    expectAllDomainsExcluded(cloudBlock!, 'data_extraction_rules.xml cloud');
+    expectAllDomainsExcluded(
+        transferBlock!, 'data_extraction_rules.xml device-transfer');
   });
 
   test('BackupBridge opens overwrite output streams with truncate mode wt', () {
@@ -171,13 +186,16 @@ void main() {
   });
 
   test(
-      'VerificationBrowser delegates host validation and http upgrade to BrowserPolicy',
+      'VerificationBrowser delegates host validation and main-frame http upgrade to BrowserPolicy',
       () {
     final browser = File(
       'android/app/src/main/kotlin/com/example/studyassistant/VerificationBrowser.kt',
     ).readAsStringSync();
     expect(browser, contains('BrowserPolicy.isTrustedChaoxingUrl'));
-    expect(browser, contains('BrowserPolicy.upgradeChaoxingHttpUrl'));
+    expect(browser, contains('BrowserPolicy.upgradeChaoxingNavigationUrl'));
+    expect(browser, contains('request.isForMainFrame'));
+    expect(browser,
+        isNot(contains('filter { trusted(it) }.forEach { origins.add(it) }')));
     expect(browser, isNot(contains('Uri.parse')));
   });
 }

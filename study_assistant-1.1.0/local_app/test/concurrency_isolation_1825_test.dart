@@ -13,7 +13,10 @@ import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/course_chapter_progress.dart';
 import 'package:study_assistant_mobile/src/models/course_notice.dart';
+import 'package:study_assistant_mobile/src/models/display_preferences.dart';
+import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
@@ -455,47 +458,139 @@ void main() {
       expect(gateway.activeWriteDepth, 0,
           reason: 'all write leases must be balanced');
     });
+
+    test(
+        'S4/P0-01 late-stage breakpoints: cross-engine switch right before sync_report_v1 and right before change log/widget each fail closed',
+        () async {
+      // Breakpoint 1: switch right AFTER sync_data_at is written (before sync_report_v1).
+      // Breakpoint 2: switch right AFTER sync_report_v1 is written (before widget & change log).
+      for (final stage in ['beforeReport', 'beforeWidgetAndChangeLog']) {
+        SharedPreferences.setMockInitialValues({
+          'assignment_changes_v1': jsonEncode({
+            'version': 1,
+            'initialized': true,
+            'events': const [],
+          }),
+        });
+        final gateway = _FakeGateway();
+        final widgetSnapshot = _RecordingWidgetSnapshot();
+        final repo = LocalAssignmentRepository(
+          backgroundReminderGateway: gateway,
+          writeLeaseOwner: 'bg-worker-$stage',
+        );
+        final store = AssignmentStore(
+          sessionStore: _MemSessionStore(account: 'account-a'),
+          repository: repo,
+          chaoxingClient: _FixedClient([_work('a1', '账号A敏感作业')]),
+          notificationService: _NoopNotifications(),
+          widgetSnapshotService: widgetSnapshot,
+          backgroundReminderGateway: gateway,
+          nativeReminderDeliveryEnabled: true,
+          manageBackgroundSchedule: false,
+          clock: () => DateTime(2026, 11, 22, 10, 0),
+        );
+        addTearDown(store.dispose);
+
+        await store.restoreSession();
+        widgetSnapshot.savedTitles.clear();
+
+        final accountBReport = jsonEncode(
+          SyncReport(
+            phase: SyncPhase.success,
+            attemptedAt: DateTime.utc(2031, 1, 1),
+            lastDataSuccessAt: DateTime.utc(2031, 1, 1),
+            lastFullSuccessAt: DateTime.utc(2031, 1, 1),
+          ).toJson(),
+        );
+        final accountBChanges = jsonEncode({
+          'version': 1,
+          'initialized': true,
+          'events': [
+            {
+              'assignmentId': 'cx:work:9:9:b1',
+              'title': '账号B原变更',
+              'courseName': '账号B课程',
+              'kind': 'added',
+              'detail': '原变更',
+              'at': '2031-01-01T00:00:00.000Z',
+            }
+          ],
+        });
+
+        var switched = false;
+        gateway.onWriteLeaseReleased = (_) async {
+          if (switched) return;
+          final prefs = await SharedPreferences.getInstance();
+          final hasDataAt = prefs.getString('sync_data_at') != null;
+          final rawReport = prefs.getString('sync_report_v1') ?? '';
+          final hasSuccessReport = rawReport.contains('"phase":"success"');
+          final trigger = stage == 'beforeReport'
+              ? hasDataAt && !hasSuccessReport
+              : hasSuccessReport;
+          if (!trigger) return;
+          switched = true;
+          gateway.activeAccountHash = AccountIdentity.hash('account-b');
+          gateway.sessionCurrent = false;
+          await prefs.setString(
+            'journal_account_owner',
+            AccountIdentity.hash('account-b'),
+          );
+          await prefs.setString('sync_report_v1', accountBReport);
+          await prefs.setString(AssignmentChangeLog.key, accountBChanges);
+        };
+
+        await store.syncAssignments();
+
+        expect(switched, isTrue, reason: 'must hit $stage breakpoint');
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('sync_report_v1'), accountBReport,
+            reason: '$stage must not overwrite Account B sync_report_v1');
+        expect(prefs.getString(AssignmentChangeLog.key), accountBChanges,
+            reason: '$stage must not overwrite Account B change log');
+        expect(
+          widgetSnapshot.savedTitles.expand((t) => t),
+          isNot(contains('账号A敏感作业')),
+          reason: '$stage must not publish Account A items to widget',
+        );
+        expect(gateway.activeWriteDepth, 0);
+      }
+    });
   });
 
   group('Batch 1B P0-03: serial queue self-healing and _loginRunning reset',
       () {
     test(
-        'failing _updateServerBackoff inside sync catch block does not permanently poison _run queue',
+        'S4/P0-03: uncaught error escaping _execute (notifyListeners throw in finally) does not permanently poison _run queue',
         () async {
       SharedPreferences.setMockInitialValues({});
-      final gateway = _FakeGateway();
-      final client = _RateLimitedFailOnceClient(gateway);
-      final store = AssignmentStore(
+      final store = _ThrowingNotifyStore(
         sessionStore: _MemSessionStore(account: 'account-a'),
-        repository: LocalAssignmentRepository(
-          backgroundReminderGateway: gateway,
-        ),
-        chaoxingClient: client,
         notificationService: _NoopNotifications(),
         widgetSnapshotService: _RecordingWidgetSnapshot(),
-        backgroundReminderGateway: gateway,
-        nativeReminderDeliveryEnabled: true,
       );
       addTearDown(store.dispose);
-
       await store.restoreSession();
 
-      // First sync throws with retryAfterSeconds and fails write lease during
-      // catch-block _updateServerBackoff.
-      await store.syncAssignments();
-      gateway.failWriteAcquire = false;
+      // Force _execute's finally { notifyListeners(); } to throw so the Future
+      // returned by _execute actually rejects and exercises _run's onError handler.
+      store.throwOnNextIdleNotify = true;
+      await expectLater(
+        store.followCourse('1:1', false),
+        throwsA(isA<StateError>()),
+      );
 
-      // Queue must still be alive for subsequent operations.
+      // The serial _operations tail must recover rather than staying permanently rejected.
       await store.followCourse('1:2', false);
       expect(store.follows('1:2'), isFalse,
           reason:
-              'subsequent _run task must execute after earlier catch failure');
+              'subsequent _run task must still run after previous _execute future rejected');
     });
 
-    test('_loginRunning resets in finally even when login fails unexpectedly',
+    test(
+        'S4/P0-03: _loginRunning resets in finally even when _run rejects out of loginChaoxing',
         () async {
       SharedPreferences.setMockInitialValues({});
-      final store = AssignmentStore(
+      final store = _ThrowingNotifyStore(
         sessionStore: _MemSessionStore(account: null, password: null),
         chaoxingClient: _ThrowingThenSucceedingLoginClient(),
         notificationService: _NoopNotifications(),
@@ -503,15 +598,20 @@ void main() {
       );
       addTearDown(store.dispose);
 
-      // First login throws an uncaught synchronous/async error inside login.
-      await store.loginChaoxing(
-        account: 'account-a',
-        password: 'pass-a',
-        agreementAccepted: true,
+      // Force _run's Future to reject during first loginChaoxing; without
+      // try/finally around _loginRunning, _loginRunning stays true forever.
+      store.throwOnNextIdleNotify = true;
+      await expectLater(
+        store.loginChaoxing(
+          account: 'account-a',
+          password: 'pass-a',
+          agreementAccepted: true,
+        ),
+        throwsA(isA<StateError>()),
       );
       expect(store.isAuthenticated, isFalse);
 
-      // Next login must not be stuck behind _loginRunning == true.
+      // Next login must proceed instead of silently returning behind stuck _loginRunning == true.
       await store.loginChaoxing(
         account: 'account-b',
         password: 'pass-b',
@@ -671,6 +771,86 @@ void main() {
           reason: 'notice detail sheet must close when account changes');
       expect(find.text('账号A正文内容'), findsNothing);
     });
+
+    testWidgets(
+        'Batch 1B.5 S3: account switch while DatePicker is open over notice sheet closes both without popping parent page',
+        (tester) async {
+      await initializeDateFormatting('zh_CN');
+      SharedPreferences.setMockInitialValues({});
+      final noticeA = CourseNotice(
+        id: 'cx:notice:${'c' * 64}',
+        courseId: '1',
+        clazzId: '2',
+        courseName: '高等数学',
+        senderName: '张老师',
+        title: '账号A带日期框通知',
+        summary: '打开日期选择器时切换账号',
+        publishedAt: DateTime.utc(2030, 5, 1, 8, 0),
+        publishedTrusted: true,
+        lastSyncedAt: DateTime.utc(2030, 5, 1, 8, 0),
+      );
+      final client = _NoticeClient([noticeA]);
+      final store = AssignmentStore(
+        sessionStore: _MemSessionStore(account: 'account-a'),
+        chaoxingClient: client,
+        notificationService: _NoopNotifications(),
+        widgetSnapshotService: _RecordingWidgetSnapshot(),
+      );
+      addTearDown(store.dispose);
+
+      await store.restoreSession();
+      await store.syncAssignments();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: Builder(
+            builder: (ctx) => Scaffold(
+              body: ElevatedButton(
+                onPressed: () => Navigator.of(ctx).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => CourseStudyHubScreen(store: store),
+                  ),
+                ),
+                child: const Text('进入通知中心'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('进入通知中心'));
+      await tester.pumpAndSettle();
+      expect(find.byType(CourseStudyHubScreen), findsOneWidget);
+
+      await tester.tap(find.text('账号A带日期框通知'));
+      await tester.pumpAndSettle();
+      expect(find.text('设为本地提醒'), findsOneWidget);
+
+      // Open DatePicker on top of the modal bottom sheet.
+      await tester.tap(find.text('设为本地提醒'));
+      await tester.pumpAndSettle();
+      expect(find.byType(DatePickerDialog), findsOneWidget);
+
+      // Switch account while DatePicker is on top of the sheet.
+      client.notices = const [];
+      await store.loginChaoxing(
+        account: 'account-b',
+        password: 'pass-b',
+        agreementAccepted: true,
+      );
+      await tester.pumpAndSettle();
+
+      // Both DatePicker and notice sheet must be gone, with no invisible modal
+      // barrier left behind, and CourseStudyHubScreen itself must remain mounted.
+      expect(find.byType(DatePickerDialog), findsNothing);
+      expect(find.text('设为本地提醒'), findsNothing);
+      expect(find.byType(DraggableScrollableSheet), findsNothing,
+          reason: 'sheet must not stay open as an invisible barrier');
+      expect(find.byType(CourseStudyHubScreen), findsOneWidget,
+          reason: 'auto-closing sheet must never pop the parent page');
+    });
   });
 
   group(
@@ -719,13 +899,27 @@ void main() {
       await prefs.setStringList('reminder_offsets_minutes', const ['60']);
       await prefs.setBool('background_check_enabled_v1', true);
 
+      final initialDetails = store.notificationDetails;
       await store.followCourse('1:2', true);
       expect(await store.saveReminderRule([15]), isFalse);
       expect(await store.saveBackgroundCheckEnabled(false), isFalse);
+      expect(await store.saveBackgroundCheckIntervalMinutes(120), isFalse);
+      expect(await store.saveNotificationListenerEnabled(true), isFalse);
+      expect(await store.saveNewAssignmentReminderEnabled(false), isFalse);
+      await store.saveNotificationDetails(!initialDetails);
 
       expect(prefs.getStringList('unfollowed_courses'), ['9:9']);
       expect(prefs.getStringList('reminder_offsets_minutes'), ['60']);
       expect(prefs.getBool('background_check_enabled_v1'), isTrue);
+      expect(store.follows('1:2'), isFalse,
+          reason: 'rejected followCourse must leave in-memory state unchanged');
+      expect(store.reminderOffsetsMinutes, [45],
+          reason:
+              'rejected saveReminderRule must leave in-memory state unchanged');
+      expect(store.backgroundCheckEnabled, isFalse);
+      expect(store.notificationDetails, initialDetails,
+          reason:
+              'rejected saveNotificationDetails must leave in-memory state unchanged');
     });
 
     testWidgets('CourseListScreen disables course follow switch while loading',
@@ -773,12 +967,16 @@ void main() {
       blockClient.release.complete(const []);
       await syncFuture;
       await tester.pumpAndSettle();
+      final restoredSwitch =
+          tester.widget<SwitchListTile>(find.byType(SwitchListTile));
+      expect(restoredSwitch.onChanged, isNotNull,
+          reason: 'course follow switch must re-enable after sync completes');
     });
   });
 
   group('Batch 1B P1-07: retryReminderRecovery serialized via _run', () {
     test(
-        'retryReminderRecovery waits for active _run task, guards generation, and notifies listeners',
+        'S4/P1-07: retryReminderRecovery waits for active _run task, aborts on generation change, and notifies on same generation',
         () async {
       SharedPreferences.setMockInitialValues({});
       final notifications = _TrackingRecoveryNotifications();
@@ -793,7 +991,7 @@ void main() {
 
       await store.restoreSession();
 
-      // Start a blocking _run operation (syncAssignments).
+      // 1) Same-generation serialization + listener notification.
       final syncFuture = store.syncAssignments();
       await blockClient.started.future;
 
@@ -816,6 +1014,29 @@ void main() {
 
       expect(notifications.recoverCalls, 1);
       expect(notifiedAfterRecovery, isTrue);
+
+      // 2) Generation change (logout) while queued must cancel stale recovery.
+      final blockClient2 = _BlockingFetchClient();
+      final notifications2 = _TrackingRecoveryNotifications();
+      final store2 = AssignmentStore(
+        sessionStore: _MemSessionStore(account: 'account-a'),
+        chaoxingClient: blockClient2,
+        notificationService: notifications2,
+        widgetSnapshotService: _RecordingWidgetSnapshot(),
+      );
+      addTearDown(store2.dispose);
+      await store2.restoreSession();
+
+      final sync2 = store2.syncAssignments();
+      await blockClient2.started.future;
+      final staleRecovery = store2.retryReminderRecovery();
+      final logoutFuture = store2.logout();
+      blockClient2.release.complete(const []);
+      await Future.wait([sync2, staleRecovery, logoutFuture]);
+
+      expect(notifications2.recoverCalls, 0,
+          reason:
+              'queued retryReminderRecovery must abort when generation changed via logout');
     });
   });
 
@@ -868,11 +1089,22 @@ void main() {
             'Account B initial sync was swallowed by Account A _syncInFlight'),
       );
 
-      // Now finish Account A's lease release and wait for Account B's sync too.
+      // Now finish Account A's lease release and wait deterministically for Account B's sync.
+      final accountBLoaded = Completer<void>();
+      void onStoreUpdate() {
+        if (!accountBLoaded.isCompleted &&
+            store.assignments.any((a) => a.title == '账号B首轮同步作业')) {
+          accountBLoaded.complete();
+        }
+      }
+
+      store.addListener(onStoreUpdate);
       gateway.releaseSyncLeaseGate = null;
       releaseLeaseGate.complete();
       await syncA;
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      onStoreUpdate();
+      await accountBLoaded.future.timeout(const Duration(seconds: 2));
+      store.removeListener(onStoreUpdate);
 
       expect(store.account, 'account-b');
       expect(
@@ -920,6 +1152,268 @@ void main() {
       expect(store.isAuthenticated, isFalse);
     });
   });
+
+  group(
+      'Batch 1B.5 S1, S2 & M6: rollback, remaining scoped writes, error contract and chapter cancel',
+      () {
+    test(
+        'S1: loginChaoxing interrupted by dispose after activateAccount rolls back native and repository to old account',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final gateway = _FakeGateway();
+      final repo = _GatedActivateRepository(
+        backgroundReminderGateway: gateway,
+      );
+      final session =
+          _MemSessionStore(account: 'account-a', password: 'pass-a');
+      final client = _FixedClient(const []);
+      final store = AssignmentStore(
+        sessionStore: session,
+        repository: repo,
+        chaoxingClient: client,
+        notificationService: _NoopNotifications(),
+        widgetSnapshotService: _RecordingWidgetSnapshot(),
+        backgroundReminderGateway: gateway,
+        nativeReminderDeliveryEnabled: true,
+      );
+
+      await store.restoreSession();
+      expect(gateway.activeAccountHash, AccountIdentity.hash('account-a'));
+
+      // Arm a hook right after activateAccount('account-b') completes, before
+      // saveChaoxingAccount runs, and dispose the store mid-login.
+      repo.onActivateCompleted = (account) {
+        if (account == 'account-b') {
+          store.dispose();
+        }
+      };
+
+      await store.loginChaoxing(
+        account: 'account-b',
+        password: 'pass-b',
+        agreementAccepted: true,
+      );
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getString('journal_account_owner'),
+        AccountIdentity.hash('account-a'),
+        reason:
+            'interrupted login after activateAccount must roll back repository owner to account-a',
+      );
+      expect(
+        gateway.activeAccountHash,
+        AccountIdentity.hash('account-a'),
+        reason:
+            'interrupted login after switchAccount must roll back native active account to account-a',
+      );
+      expect(session.account, 'account-a');
+    });
+
+    test(
+        'S2: saveDisplay widgetRange update acquires write lease and rejects stale account switch',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final gateway = _FakeGateway();
+      final widgetSnapshot = _RecordingWidgetSnapshot();
+      final store = AssignmentStore(
+        sessionStore: _MemSessionStore(account: 'account-a'),
+        repository: LocalAssignmentRepository(
+          backgroundReminderGateway: gateway,
+        ),
+        chaoxingClient: _FixedClient([_work('a1', '账号A小组件作业')]),
+        notificationService: _NoopNotifications(),
+        widgetSnapshotService: widgetSnapshot,
+        backgroundReminderGateway: gateway,
+        nativeReminderDeliveryEnabled: true,
+      );
+      addTearDown(store.dispose);
+
+      await store.restoreSession();
+      await store.syncAssignments();
+      widgetSnapshot.savedTitles.clear();
+
+      // Valid session: widget write must acquire the write lease.
+      final acquiresBefore = gateway.writeAcquireCount;
+      final okError = await store.saveDisplay(
+        store.display.copyWith(widgetRange: WidgetRange.today),
+      );
+      expect(okError, isNull);
+      expect(gateway.writeAcquireCount, greaterThan(acquiresBefore),
+          reason: '_finishDisplaySave widget write must run under write lease');
+
+      // Stale cross-engine session: widget write must fail closed without publishing Account A items.
+      widgetSnapshot.savedTitles.clear();
+      gateway.sessionCurrent = false;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        'journal_account_owner',
+        AccountIdentity.hash('account-b'),
+      );
+      final staleError = await store.saveDisplay(
+        store.display.copyWith(widgetRange: WidgetRange.week),
+      );
+      expect(staleError, isNull);
+      expect(widgetSnapshot.savedTitles, isEmpty,
+          reason:
+              'stale widgetRange update must not overwrite Account B widget');
+    });
+
+    test(
+        'S2: _restoreAccountData backgroundCheckSettingsStore.loadAndMigrate runs inside write lease',
+        () async {
+      SharedPreferences.setMockInitialValues({
+        'auto_sync_interval_minutes': 60,
+      });
+      final gateway = _FakeGateway();
+      var leaseHeldDuringMigration = false;
+      final settingsStore = _LeaseObservingBackgroundSettingsStore(
+        onLoadAndMigrate: () {
+          if (gateway.activeWriteDepth > 0) {
+            leaseHeldDuringMigration = true;
+          }
+        },
+      );
+      final store = AssignmentStore(
+        sessionStore: _MemSessionStore(account: 'account-a'),
+        repository: LocalAssignmentRepository(
+          backgroundReminderGateway: gateway,
+        ),
+        backgroundCheckSettingsStore: settingsStore,
+        notificationService: _NoopNotifications(),
+        widgetSnapshotService: _RecordingWidgetSnapshot(),
+        backgroundReminderGateway: gateway,
+        nativeReminderDeliveryEnabled: true,
+      );
+      addTearDown(store.dispose);
+
+      await store.restoreSession();
+      expect(leaseHeldDuringMigration, isTrue,
+          reason: 'legacy 6-key migration must hold repository write lease');
+    });
+
+    test(
+        'S2: cancelled sync in _execute catch block uses original sync session and cannot overwrite Account B report',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final gateway = _FakeGateway();
+      final client = _AccountAwareBlockingClient();
+      final store = AssignmentStore(
+        sessionStore: _MemSessionStore(account: 'account-a'),
+        repository: LocalAssignmentRepository(
+          backgroundReminderGateway: gateway,
+        ),
+        chaoxingClient: client,
+        notificationService: _NoopNotifications(),
+        widgetSnapshotService: _RecordingWidgetSnapshot(),
+        backgroundReminderGateway: gateway,
+        nativeReminderDeliveryEnabled: true,
+      );
+      addTearDown(store.dispose);
+
+      await store.restoreSession();
+      final syncA = store.syncAssignments();
+      await client.firstFetchStarted.future;
+
+      // Switch to Account B in SharedPreferences/native and cancel syncA via logout.
+      final prefs = await SharedPreferences.getInstance();
+      final accountBReport = jsonEncode(
+        SyncReport(
+          phase: SyncPhase.success,
+          attemptedAt: DateTime.utc(2032, 1, 1),
+          lastDataSuccessAt: DateTime.utc(2032, 1, 1),
+          lastFullSuccessAt: DateTime.utc(2032, 1, 1),
+        ).toJson(),
+      );
+      await prefs.setString('sync_report_v1', accountBReport);
+      var sawCancelledWrite = false;
+      gateway.onWriteLeaseReleased = (_) async {
+        final raw = prefs.getString('sync_report_v1') ?? '';
+        if (raw.contains('"cancelled"')) sawCancelledWrite = true;
+      };
+      final logoutFuture = store.logout();
+      await Future.wait([syncA, logoutFuture]);
+
+      expect(sawCancelledWrite, isFalse,
+          reason:
+              '_execute SyncCancelledException catch block must never write cancelled report after generation changed');
+    });
+
+    test(
+        'S2: non-backup stale StaleSessionWriteException never surfaces backup-page wording',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final store = AssignmentStore(
+        sessionStore: _MemSessionStore(account: 'account-a'),
+        notificationService: _NoopNotifications(),
+        widgetSnapshotService: _RecordingWidgetSnapshot(),
+      );
+      addTearDown(store.dispose);
+      await store.restoreSession();
+
+      // Simulate cross-engine owner change to Account B.
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        'journal_account_owner',
+        AccountIdentity.hash('account-b'),
+      );
+
+      final saved = await store.saveHomeFilters(
+        const HomeFilters(query: '高数'),
+        store.accountEpoch,
+      );
+      expect(saved, isFalse);
+      expect(store.error ?? '', isNot(contains('备份页面')),
+          reason:
+              'stale non-backup writes must never show backup-screen error wording');
+    });
+
+    test(
+        'M6: cancelling syncCourseChapters and starting syncAssignments never un-cancels chapter loop',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final client = _TwoCourseBlockingChapterClient();
+      final store = AssignmentStore(
+        sessionStore: _MemSessionStore(account: 'account-a'),
+        chaoxingClient: client,
+        notificationService: _NoopNotifications(),
+        widgetSnapshotService: _RecordingWidgetSnapshot(),
+      );
+      addTearDown(store.dispose);
+
+      await store.restoreSession();
+      await store.repository.saveCourses(
+        const [
+          CourseRef(courseId: '1', clazzId: '10', name: '课程一'),
+          CourseRef(courseId: '2', clazzId: '20', name: '课程二'),
+        ],
+        account: 'account-a',
+      );
+      await store.restoreSession();
+
+      final chapterFuture = store.syncCourseChapters();
+      await client.firstChapterStarted.future;
+
+      // Cancel chapter sync and immediately start a normal assignment sync
+      // (which resets _syncCancelled = false before _run executes).
+      store.cancelSynchronization();
+      final syncFuture = store.syncAssignments();
+      client.firstChapterGate.complete(
+        CourseChapterSnapshot(
+          courseId: '1',
+          clazzId: '10',
+          courseName: '课程一',
+          lastSyncedAt: DateTime.utc(2026, 11, 22, 10),
+          nodes: const [],
+        ),
+      );
+      await Future.wait([chapterFuture, syncFuture]);
+
+      expect(client.chapterFetchCount, 1,
+          reason:
+              'course 2 must not be fetched after syncCourseChapters was cancelled');
+    });
+  });
 }
 
 class _ThrowingThenSucceedingLoginClient extends ChaoxingLocalClient {
@@ -942,28 +1436,6 @@ class _ThrowingThenSucceedingLoginClient extends ChaoxingLocalClient {
 
   @override
   Future<List<Assignment>> fetchAssignments() async => const [];
-}
-
-class _RateLimitedFailOnceClient extends ChaoxingLocalClient {
-  _RateLimitedFailOnceClient(this.gateway);
-
-  final _FakeGateway gateway;
-
-  @override
-  bool get needsSessionInitialization => false;
-
-  @override
-  Future<List<Assignment>> fetchAssignments() async {
-    issues = const [
-      SyncIssue(
-        SyncIssueKind.rateLimited,
-        '请求受限',
-        retryAfterSeconds: 120,
-      ),
-    ];
-    gateway.failWriteAcquire = true;
-    throw StateError('synthetic rate limit');
-  }
 }
 
 class _NoticeClient extends ChaoxingLocalClient {
@@ -1168,4 +1640,82 @@ class _NeedsInitRefreshClient extends ChaoxingLocalClient {
 
   @override
   Future<List<Assignment>> fetchAssignments() async => const [];
+}
+
+class _GatedActivateRepository extends LocalAssignmentRepository {
+  _GatedActivateRepository({required super.backgroundReminderGateway});
+
+  void Function(String account)? onActivateCompleted;
+
+  @override
+  Future<void> activateAccount(String account,
+      {String? previousAccount}) async {
+    await super.activateAccount(account, previousAccount: previousAccount);
+    onActivateCompleted?.call(account);
+  }
+}
+
+class _LeaseObservingBackgroundSettingsStore
+    extends BackgroundCheckSettingsStore {
+  const _LeaseObservingBackgroundSettingsStore({
+    required this.onLoadAndMigrate,
+  });
+
+  final void Function() onLoadAndMigrate;
+
+  @override
+  Future<BackgroundCheckSettings> loadAndMigrate({SharedPreferences? prefs}) {
+    onLoadAndMigrate();
+    return super.loadAndMigrate(prefs: prefs);
+  }
+}
+
+class _TwoCourseBlockingChapterClient extends ChaoxingLocalClient {
+  final firstChapterStarted = Completer<void>();
+  final firstChapterGate = Completer<CourseChapterSnapshot>();
+  int chapterFetchCount = 0;
+
+  @override
+  bool get needsSessionInitialization => false;
+
+  @override
+  Future<CourseChapterSnapshot> fetchCourseChapters(
+    ChaoxingCourseRef course,
+  ) async {
+    chapterFetchCount++;
+    if (chapterFetchCount == 1) {
+      if (!firstChapterStarted.isCompleted) firstChapterStarted.complete();
+      return firstChapterGate.future;
+    }
+    return CourseChapterSnapshot(
+      courseId: course.courseId,
+      clazzId: course.clazzId,
+      courseName: course.courseName,
+      lastSyncedAt: DateTime.utc(2026, 11, 22, 10),
+      nodes: const [],
+    );
+  }
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async => const [];
+}
+
+class _ThrowingNotifyStore extends AssignmentStore {
+  _ThrowingNotifyStore({
+    required super.sessionStore,
+    super.chaoxingClient,
+    required super.notificationService,
+    required super.widgetSnapshotService,
+  });
+
+  bool throwOnNextIdleNotify = false;
+
+  @override
+  void notifyListeners() {
+    if (throwOnNextIdleNotify && !isLoading) {
+      throwOnNextIdleNotify = false;
+      throw StateError('notifyListeners exploded in finally');
+    }
+    super.notifyListeners();
+  }
 }

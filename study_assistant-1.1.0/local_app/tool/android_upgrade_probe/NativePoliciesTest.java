@@ -60,15 +60,18 @@ public final class NativePoliciesTest {
       "https://user@mooc1.chaoxing.com/", "https://mooc1.chaoxing.com:8443/", "https:///missing", "https://bad host/",
       "https://evil.com\\@mooc1.chaoxing.com/", "https://evil.com\\.chaoxing.com/",
       "https://mooc1.chaoxing.com\\@evil.com/", "https://-bad.chaoxing.com/",
-      "https://a..chaoxing.com/", "https://mooc1.chaoxing.com./"}) {
+      "https://a..chaoxing.com/", "https://mooc1.chaoxing.com./",
+      "https://127.0.0.1/", "https://169.254.169.254/latest/meta-data/"}) {
       if (BrowserPolicy.isAllowed(bad)) throw new AssertionError("Accepted invalid browser URL: " + bad);
       checks++;
     }
     if (!BrowserPolicy.isAllowed("https://mooc1.chaoxing.com/work?id=synthetic") ||
+        !BrowserPolicy.isAllowed("HTTPS://mooc1.chaoxing.com/work") ||
         !BrowserPolicy.isAllowed("https://example.invalid:443/")) throw new AssertionError("HTTPS rejected");
     checks++;
     for (String trusted : new String[]{
       "https://chaoxing.com/",
+      "HTTPS://chaoxing.com/",
       "https://mooc1.chaoxing.com/work?id=synthetic",
       "https://MOOC1.CHAOXING.COM:443/path"}) {
       if (!BrowserPolicy.isTrustedChaoxingUrl(trusted)) {
@@ -90,11 +93,34 @@ public final class NativePoliciesTest {
       }
       checks++;
     }
+    if (!"https://mooc1.chaoxing.com/".equals(
+        BrowserPolicy.trustedChaoxingOrigin("HTTPS://MOOC1.CHAOXING.COM:443/work?a=1#frag")) ||
+        BrowserPolicy.trustedChaoxingOrigin("https://evil.example/") != null) {
+      throw new AssertionError("trustedChaoxingOrigin contract failed");
+    }
+    checks++;
+    if (!"https://mooc1.chaoxing.com/".equals(
+        BrowserPolicy.trustedChaoxingPageOrigin("https://mooc1.chaoxing.com")) ||
+        !"https://mooc1.chaoxing.com/work/list".equals(
+        BrowserPolicy.trustedChaoxingPageOrigin("HTTPS://MOOC1.CHAOXING.COM:443/work/list?enc=1#top")) ||
+        BrowserPolicy.trustedChaoxingPageOrigin("https://evil.example/work") != null) {
+      throw new AssertionError("trustedChaoxingPageOrigin contract failed");
+    }
+    checks++;
     if (!"https://mooc1.chaoxing.com/work?enc=a%2Bb%3D".equals(
         BrowserPolicy.upgradeChaoxingHttpUrl("http://mooc1.chaoxing.com/work?enc=a%2Bb%3D")) ||
+        !"https://mooc1.chaoxing.com/work".equals(
+        BrowserPolicy.upgradeChaoxingHttpUrl("HTTP://MOOC1.CHAOXING.COM/work")) ||
         !"https://chaoxing.com/login".equals(
         BrowserPolicy.upgradeChaoxingHttpUrl("http://chaoxing.com:80/login"))) {
       throw new AssertionError("Valid Chaoxing HTTP upgrade failed");
+    }
+    checks++;
+    if (!"https://mooc1.chaoxing.com/verify".equals(
+        BrowserPolicy.upgradeChaoxingNavigationUrl("http://mooc1.chaoxing.com/verify", true, "GET")) ||
+        BrowserPolicy.upgradeChaoxingNavigationUrl("http://mooc1.chaoxing.com/iframe", false, "GET") != null ||
+        BrowserPolicy.upgradeChaoxingNavigationUrl("http://mooc1.chaoxing.com/submit", true, "POST") != null) {
+      throw new AssertionError("Main-frame GET navigation HTTP upgrade policy failed");
     }
     checks++;
     for (String badUpgrade : new String[]{

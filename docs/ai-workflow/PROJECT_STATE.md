@@ -9,7 +9,7 @@
 - [x] **Phase 0 / 0.5（工程化 Wave A+ & Wave B-1 及 `M10` 补洞）已完成**：安全钩子合并/新分支与 Cookie 组合扫描、本地门禁防静默跳过/未跟踪格式检查、CI 官方 Gradle 与多时区扩展、UI 静态守卫词法去脆与全 `lib/` 覆盖。
 - [x] **Phase 1 · Batch 1A（UI 视觉、溢出与手势止血）已完成**：`P0-06~11`、`P1-29`、`P1-34` 核心 6 项（登录加载圈、深色 SnackBar、卡片分隔线、长按菜单/日历滑月/统计胶囊溢出、侧滑橡皮筋、双留白与反馈收口）。
 - [x] **Phase 1 · Batch 1B（并发安全、跨账号隔离与原生安全/备份初版）已提交（`ef067ec`）**；随后完成 `main..dev` 独立只读防幻觉复盘并纠偏更新总方案与路线图。
-- [ ] **下一步优先：Batch 1B.5（独立复盘高危回补与 Store 止增重构）**——先清零复盘检出的 `loginChaoxing` 跳过回滚、3 处 `_scopedKeys` 裸写、弹窗误弹选择器、4 条假并发测试、`showJournalMessage` 误杀竞态、`VerificationBrowser` 主帧限制、通知深链/切号驱逐与双色硬伤，再进入 **Batch 1C（统计 `FB-007`/`FB-008` 止血、首页流畅度、原生高危、Cookie/音频与死代码清仓）**。
+- [x] **Phase 1 · Batch 1B.5（独立复盘高危回补与 Store 止增重构）已完成**：清零 `S1`–`S5`/`S7`–`S10`/`M6`（登录中断回滚、3 处 `_scopedKeys` 裸写与 `_execute` 代次透传、弹窗 `removeRoute`、重写 4 条假并发测试、`showJournalMessage` 吊销 `_owners`、提醒排期失败告警、`VerificationBrowser` 主帧限制、`currentUriOf` 保留 query & `/plan` 切号驱逐、双色对比度硬伤、章节取消操作序号与写租约自愈重试），抽 `_SessionSnapshot` 令 `assignment_store.dart` 净降 143 行；下一步 **Batch 1C（统计 `FB-007`/`FB-008` 止血、首页流畅度、原生高危、Cookie/手势音频与死代码清仓）**。
 
 ## 最近 2 个正式发布版本
 

@@ -8,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 // ignore: depend_on_referenced_packages
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:study_assistant_mobile/main.dart';
-import 'package:study_assistant_mobile/src/app/unsaved_edit_guard.dart';
 import 'package:study_assistant_mobile/src/features/reminder_settings_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
@@ -802,7 +801,8 @@ void main() {
     expect(find.textContaining('提醒时间已保存'), findsOneWidget);
   });
 
-  testWidgets('reminder scheduling failure still reports settings saved',
+  testWidgets(
+      'reminder scheduling failure reports both saved and schedule failure warning',
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'auto_sync_interval_minutes': 0,
@@ -834,7 +834,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(store.reminderOffsetsMinutes, [1440, 30]);
-    expect(find.text('提醒时间已保存'), findsOneWidget);
+    expect(
+      find.textContaining('提醒时间已保存；提醒安排失败'),
+      findsOneWidget,
+    );
     expect(find.textContaining('保存失败'), findsNothing);
   });
 
@@ -856,15 +859,16 @@ void main() {
   });
 
   testWidgets('ruleControlsLockedWhileSavePending', (tester) async {
-    final store = await _gatedStore();
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'reminder_offsets_minutes': ['30', '45'],
+    });
+    final store = _GatedRuleStore();
     addTearDown(store.dispose);
-    final guard = UnsavedEditGuard();
-    await tester.pumpWidget(UnsavedEditGuardScope(
-      guard: guard,
-      child: MaterialApp(
-        home: Scaffold(
-          body: ReminderSettingsScreen(assignmentStore: store),
-        ),
+    await store.restoreSession();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ReminderSettingsScreen(assignmentStore: store),
       ),
     ));
     await tester.pumpAndSettle();
@@ -886,17 +890,22 @@ void main() {
             .widget<FilledButton>(find.widgetWithText(FilledButton, '添加'))
             .onPressed,
         isNull);
+    final deleteIcon = find.byIcon(Icons.delete_outline);
+    await scrollTo(tester, deleteIcon);
+    final deleteButton = find.ancestor(
+      of: deleteIcon,
+      matching: find.byType(IconButton),
+    );
+    expect(tester.widget<IconButton>(deleteButton).onPressed, isNull);
 
-    await tester.tap(preset);
+    await tester.tap(preset, warnIfMissed: false);
     await tester.pump();
     expect(store.calls, hasLength(1));
 
     store.gate.complete(true);
     await tester.pumpAndSettle();
-    expect(store.calls.single.toSet(), {30, 1440});
+    expect(store.calls.single.toSet(), {30, 45, 1440});
     expect(find.textContaining('提醒时间已保存'), findsOneWidget);
-    expect(guard.hasUnsavedChanges, isFalse);
-    expect(await guard.confirmLeave(), isTrue);
   });
 
   testWidgets('failedInstantSaveRollsBackAndAllowsRetry', (tester) async {
@@ -958,7 +967,7 @@ void main() {
     expect(find.text('至少保留 1 个提前提醒时间'), findsOneWidget);
   });
 
-  testWidgets('immediate settings do not dirty the reminder rule draft',
+  testWidgets('immediate settings persist independently of reminder rules',
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'auto_sync_interval_minutes': 0,
@@ -971,13 +980,10 @@ void main() {
     );
     addTearDown(store.dispose);
     await store.restoreSession();
-    final guard = UnsavedEditGuard();
-    await tester.pumpWidget(UnsavedEditGuardScope(
-      guard: guard,
-      child: MaterialApp(
-        home: Scaffold(
-          body: ReminderSettingsScreen(assignmentStore: store),
-        ),
+    final initialDetails = store.notificationDetails;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ReminderSettingsScreen(assignmentStore: store),
       ),
     ));
     await tester.pumpAndSettle();
@@ -989,7 +995,8 @@ void main() {
     await tester.tap(detailsTile);
     await tester.pumpAndSettle();
 
-    expect(guard.hasUnsavedChanges, isFalse);
+    expect(store.notificationDetails, !initialDetails);
+    expect(store.reminderOffsetsMinutes, [30]);
   });
 }
 

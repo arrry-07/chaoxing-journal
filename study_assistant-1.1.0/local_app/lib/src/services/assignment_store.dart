@@ -280,6 +280,9 @@ class AssignmentStore extends ChangeNotifier {
         return;
       }
       _syncCancelled = false;
+      final chapterOperation = ++_syncOperation;
+      bool chapterCancelled() =>
+          _syncCancelled || chapterOperation != _syncOperation;
       _isChapterSyncing = true;
       _chapterSyncProgressText = '正在准备读取章节进度…';
       notifyListeners();
@@ -320,7 +323,7 @@ class AssignmentStore extends ChangeNotifier {
         var updatedCount = 0;
         String? firstIssue;
         for (var i = 0; i < targets.length; i++) {
-          if (_syncCancelled ||
+          if (chapterCancelled() ||
               _generation != epoch ||
               !_authenticated ||
               account != _account ||
@@ -336,14 +339,14 @@ class AssignmentStore extends ChangeNotifier {
             try {
               snapshot = await chaoxingClient.fetchCourseChapters(target);
             } on ChaoxingAuthenticationException {
-              if (_syncCancelled ||
+              if (chapterCancelled() ||
                   _generation != epoch ||
                   !_authenticated ||
                   _disposed) {
                 break;
               }
               await _refreshChaoxingSession();
-              if (_syncCancelled ||
+              if (chapterCancelled() ||
                   _generation != epoch ||
                   !_authenticated ||
                   _disposed) {
@@ -351,7 +354,7 @@ class AssignmentStore extends ChangeNotifier {
               }
               snapshot = await chaoxingClient.fetchCourseChapters(target);
             }
-            if (_syncCancelled ||
+            if (chapterCancelled() ||
                 _generation != epoch ||
                 account != _account ||
                 _disposed) {
@@ -363,6 +366,8 @@ class AssignmentStore extends ChangeNotifier {
             _courseChapters = merged;
             updatedCount++;
             notifyListeners();
+          } on StaleSessionWriteException {
+            break;
           } on SyncReadException catch (e) {
             if (e.issue.kind == SyncIssueKind.cancelled) {
               _error = '已取消读取章节进度';
@@ -373,8 +378,9 @@ class AssignmentStore extends ChangeNotifier {
             firstIssue ??= '${target.courseName} 章节进度读取失败：$e';
           }
         }
-        succeeded = updatedCount > 0 && firstIssue == null && !_syncCancelled;
-        if (_syncCancelled) {
+        succeeded =
+            updatedCount > 0 && firstIssue == null && !chapterCancelled();
+        if (chapterCancelled()) {
           _error = updatedCount > 0
               ? '已取消读取，已保存前 $updatedCount 门课的章节进度'
               : '已取消读取章节进度';
@@ -702,19 +708,12 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _recordChanges(
-      List<Assignment> before, List<Assignment> incoming,
-      {bool completeSync = false,
-      int? expectedGeneration,
-      String? expectedAccount,
-      bool? expectedAuthenticated,
-      String? expectedAccountHash,
-      int? expectedSessionEpoch,
-      int? syncOperation}) async {
-    final generation = expectedGeneration ?? _generation;
-    final account = expectedAccount ?? _account;
-    final wasAuthenticated = expectedAuthenticated ?? _authenticated;
-    final accountHash = expectedAccountHash ?? _accountHash;
-    final sessionEpoch = expectedSessionEpoch ?? _nativeSessionEpoch;
+    List<Assignment> before,
+    List<Assignment> incoming, {
+    bool completeSync = false,
+    _SessionSnapshot? session,
+  }) async {
+    final snap = session ?? _captureSession();
     try {
       final after = [..._assignments, ..._hiddenAssignments];
       final observedIds = incoming.expand<String>((a) {
@@ -727,38 +726,22 @@ class AssignmentStore extends ChangeNotifier {
             .toSet();
         return ids.isEmpty ? [a.id] : ids;
       }).toSet();
-      final loaded = await repository.runScopedWrite(
-        (prefs) async {
-          await changeLog.record(
-            before,
-            after,
-            observedIds,
-            completeSync: completeSync,
-            prefs: prefs,
-          );
-          return changeLog.load(prefs: prefs);
-        },
-        account: wasAuthenticated ? account : null,
-        canCommit: _scopedWriteGate(
-          generation: generation,
-          account: account,
-          wasAuthenticated: wasAuthenticated,
-          accountHash: accountHash,
-          sessionEpoch: sessionEpoch,
-          syncOperation: syncOperation,
-        ),
-      );
-      if (generation != _generation ||
-          _disposed ||
-          _account != account ||
-          _authenticated != wasAuthenticated) {
-        return;
-      }
+      final loaded = await _runScopedWrite(snap, (prefs) async {
+        await changeLog.record(
+          before,
+          after,
+          observedIds,
+          completeSync: completeSync,
+          prefs: prefs,
+        );
+        return changeLog.load(prefs: prefs);
+      });
+      if (!_isSessionCurrent(snap)) return;
       changes = loaded;
     } on StaleSessionWriteException {
       return;
     } catch (_) {
-      if (generation == _generation && !_disposed) {
+      if (snap.generation == _generation && !_disposed) {
         _recoveryWarnings.add('部分作业变化记录未能保存或读取，请稍后重试');
       }
     }
@@ -969,6 +952,8 @@ class AssignmentStore extends ChangeNotifier {
       Set<String> ids, String account, int generation) async {
     try {
       await repository.savePinnedIds(ids, account);
+    } on StaleSessionWriteException {
+      return;
     } on LocalStorageLeaseReleaseException {
       const warning = '置顶状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
       if (generation == _generation && !_recoveryWarnings.contains(warning)) {
@@ -1062,86 +1047,42 @@ class AssignmentStore extends ChangeNotifier {
   bool get notificationPrivacyPending => _privacyCleanupPending;
   bool get notificationDetails => notificationService.showDetails;
   Future<void> saveNotificationDetails(bool value) {
-    final generation = _generation;
-    final account = _account;
-    final wasAuthenticated = _authenticated;
-    final accountHash = _accountHash;
-    final sessionEpoch = _nativeSessionEpoch;
+    final snap = _captureSession();
     return _run(() async {
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       await _markReminderMutationPending();
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       if (!value) {
         try {
           await _cancelPrivateNotifications();
         } catch (_) {
           throw StateError('旧提醒未能清理，通知详情尚未关闭，请在提醒体检重试');
         }
-        if (_disposed ||
-            generation != _generation ||
-            _authenticated != wasAuthenticated ||
-            _account != account) {
-          return;
-        }
+        if (!_isSessionCurrent(snap)) return;
       }
       try {
-        await repository.runScopedWrite(
-          (prefs) async {
-            if (value) {
-              await prefs.remove(_privacyVerifiedHiddenKey);
-            }
-            if (!await prefs.setBool('notification_details_v1', value)) {
-              throw StateError('通知隐私设置未能保存');
-            }
-            if (!value) {
-              await _writeBoolPreferenceAndVerify(
-                  prefs, _privacyVerifiedHiddenKey, true);
-            }
-          },
-          account: wasAuthenticated ? account : null,
-          canCommit: _scopedWriteGate(
-            generation: generation,
-            account: account,
-            wasAuthenticated: wasAuthenticated,
-            accountHash: accountHash,
-            sessionEpoch: sessionEpoch,
-          ),
-        );
+        await _runScopedWrite(snap, (prefs) async {
+          if (value) {
+            await prefs.remove(_privacyVerifiedHiddenKey);
+          }
+          if (!await prefs.setBool('notification_details_v1', value)) {
+            throw StateError('通知隐私设置未能保存');
+          }
+          if (!value) {
+            await _writeBoolPreferenceAndVerify(
+                prefs, _privacyVerifiedHiddenKey, true);
+          }
+        });
       } on StaleSessionWriteException {
         return;
       }
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       notificationService.showDetails = value;
       _privacyCleanupPending = false;
       await _reconcileBackgroundControls();
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       await _afterAssignmentsChanged();
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       if (_serviceWarnings.isNotEmpty) {
         throw StateError('隐私设置已保存，部分旧提醒未更新，请在提醒体检重试');
       }
@@ -1152,6 +1093,7 @@ class AssignmentStore extends ChangeNotifier {
   Future<void>? _displayWrites;
 
   Future<String?> saveDisplay(DisplayPreferences next) {
+    final snap = _captureSession();
     display = next;
     // Serialize preference writes independently of coursework operations.
     final write = (_displayWrites ?? Future<void>.value()).then((_) async {
@@ -1165,27 +1107,40 @@ class AssignmentStore extends ChangeNotifier {
     });
     _displayWrites = write.then<void>((_) {}, onError: (Object _) {});
     notifyListeners();
-    return _finishDisplaySave(next, write);
+    return _finishDisplaySave(next, write, snap);
   }
 
   Future<String?> _finishDisplaySave(
-      DisplayPreferences next, Future<bool> write) async {
+    DisplayPreferences next,
+    Future<bool> write,
+    _SessionSnapshot snap,
+  ) async {
     final bool rangeChanged;
     try {
       rangeChanged = await write;
     } catch (_) {
       return '显示设置未能保存，当前调整仅在本次使用时生效';
     }
-    if (!rangeChanged || _disposed || display.widgetRange != next.widgetRange) {
+    if (!rangeChanged ||
+        !_isSessionCurrent(snap) ||
+        display.widgetRange != next.widgetRange) {
       return null;
     }
+    final items = next.forWidget(
+      snap.authenticated ? courseAssignments : <Assignment>[],
+      _clock(),
+    );
     try {
-      await widgetSnapshotService.saveAssignmentsForContext(
-        next.forWidget(
-            _authenticated ? courseAssignments : <Assignment>[], _clock()),
-        authenticated: _authenticated,
-        range: next.widgetRange,
+      await _runScopedWrite(
+        snap,
+        (_) => widgetSnapshotService.saveAssignmentsForContext(
+          items,
+          authenticated: snap.authenticated,
+          range: next.widgetRange,
+        ),
       );
+      return null;
+    } on StaleSessionWriteException {
       return null;
     } catch (_) {
       return '显示设置已保存，小组件更新失败，请稍后刷新';
@@ -1340,25 +1295,11 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> followCourse(String key, bool followed) {
-    final generation = _generation;
-    final account = _account;
-    final wasAuthenticated = _authenticated;
-    final accountHash = _accountHash;
-    final sessionEpoch = _nativeSessionEpoch;
+    final snap = _captureSession();
     return _run(() async {
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       await _markReminderMutationPending();
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       final next = {..._unfollowed};
       if (followed) {
         next.remove(key);
@@ -1366,31 +1307,15 @@ class AssignmentStore extends ChangeNotifier {
         next.add(key);
       }
       try {
-        await repository.runScopedWrite(
-          (prefs) async {
-            if (!await prefs.setStringList(
-                'unfollowed_courses', next.toList())) {
-              throw StateError('课程关注设置未能保存，请重试');
-            }
-          },
-          account: wasAuthenticated ? account : null,
-          canCommit: _scopedWriteGate(
-            generation: generation,
-            account: account,
-            wasAuthenticated: wasAuthenticated,
-            accountHash: accountHash,
-            sessionEpoch: sessionEpoch,
-          ),
-        );
+        await _runScopedWrite(snap, (prefs) async {
+          if (!await prefs.setStringList('unfollowed_courses', next.toList())) {
+            throw StateError('课程关注设置未能保存，请重试');
+          }
+        });
       } on StaleSessionWriteException {
         return;
       }
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       _unfollowed
         ..clear()
         ..addAll(next);
@@ -1548,8 +1473,11 @@ class AssignmentStore extends ChangeNotifier {
       _reminderOffsetsMinutes = await reminderRuleStore.loadOffsetsMinutes();
     });
     await stage('自动同步设置', () async {
-      _backgroundCheckSettings =
-          await backgroundCheckSettingsStore.loadAndMigrate();
+      final snap = _captureSession();
+      _backgroundCheckSettings = await _runScopedWrite(
+        snap,
+        (prefs) => backgroundCheckSettingsStore.loadAndMigrate(prefs: prefs),
+      );
       final prefs = await SharedPreferences.getInstance();
       await prefs.reload();
       _serverBackoffUntil =
@@ -1744,36 +1672,6 @@ class AssignmentStore extends ChangeNotifier {
         final newAccountHash = AccountIdentity.hash(normalizedAccount);
         final sameAccount =
             oldAccountHash != null && oldAccountHash == newAccountHash;
-        var nativeSwitched = false;
-        if (_nativeReminderAvailable) {
-          try {
-            final nativeEpoch = sameAccount
-                ? await backgroundReminderGateway
-                    .rotateSessionEpoch(newAccountHash)
-                : await backgroundReminderGateway.switchAccount(
-                    previousAccountHash: oldAccountHash ??
-                        (oldAccount == null
-                            ? null
-                            : AccountIdentity.hash(oldAccount)),
-                    accountHash: newAccountHash,
-                  );
-            if (nativeEpoch <= 0) {
-              throw StateError('原生会话代次无效');
-            }
-            _nativeSessionEpoch = nativeEpoch;
-            _accountHash = newAccountHash;
-            nativeSwitched = true;
-            if (generation != _generation || _disposed) {
-              chaoxingClient.clearSession();
-              return;
-            }
-          } catch (error) {
-            // The server accepted the login, but native reminder state did not
-            // follow. Do not commit the new local identity with split ownership.
-            chaoxingClient.clearSession();
-            throw StateError('原生提醒账号切换失败，登录未完成：$error');
-          }
-        }
         String? oldPassword;
         if (oldAccount != null) {
           try {
@@ -1787,14 +1685,43 @@ class AssignmentStore extends ChangeNotifier {
           }
         }
         final oldName = _chaoxingDisplayName, oldAvatar = _chaoxingAvatarUrl;
+        var nativeSwitched = false;
+        var repositoryActivated = false;
         try {
+          if (_nativeReminderAvailable) {
+            try {
+              final nativeEpoch = sameAccount
+                  ? await backgroundReminderGateway
+                      .rotateSessionEpoch(newAccountHash)
+                  : await backgroundReminderGateway.switchAccount(
+                      previousAccountHash: oldAccountHash ??
+                          (oldAccount == null
+                              ? null
+                              : AccountIdentity.hash(oldAccount)),
+                      accountHash: newAccountHash,
+                    );
+              if (nativeEpoch <= 0) {
+                throw StateError('原生会话代次无效');
+              }
+              _nativeSessionEpoch = nativeEpoch;
+              _accountHash = newAccountHash;
+              nativeSwitched = true;
+            } catch (error) {
+              // The server accepted the login, but native reminder state did not
+              // follow. Do not commit the new local identity with split ownership.
+              chaoxingClient.clearSession();
+              throw StateError('原生提醒账号切换失败，登录未完成：$error');
+            }
+            if (generation != _generation || _disposed) {
+              throw const _LoginInterruptedException();
+            }
+          }
           if (oldAccount?.trim() != normalizedAccount) {
             // Full privacy cleanup also removes delivered notifications that
             // are no longer pending and have no v2 active-ID manifest.
             await _cancelPrivateNotifications();
             if (generation != _generation || _disposed) {
-              chaoxingClient.clearSession();
-              return;
+              throw const _LoginInterruptedException();
             }
             await widgetSnapshotService.saveAssignmentsForContext(
               const [],
@@ -1802,15 +1729,14 @@ class AssignmentStore extends ChangeNotifier {
               range: display.widgetRange,
             );
             if (generation != _generation || _disposed) {
-              chaoxingClient.clearSession();
-              return;
+              throw const _LoginInterruptedException();
             }
           }
           await repository.activateAccount(normalizedAccount,
               previousAccount: oldAccount);
+          repositoryActivated = true;
           if (generation != _generation || _disposed) {
-            chaoxingClient.clearSession();
-            return;
+            throw const _LoginInterruptedException();
           }
           await sessionStore.saveChaoxingAccount(
             account: normalizedAccount,
@@ -1818,7 +1744,7 @@ class AssignmentStore extends ChangeNotifier {
             displayName: result.displayName,
             avatarUrl: result.avatarUrl,
           );
-        } catch (_) {
+        } catch (error) {
           // The server has already authenticated the new account. A local
           // rollback must also invalidate those cookies before any old-account sync.
           chaoxingClient.clearSession();
@@ -1840,8 +1766,12 @@ class AssignmentStore extends ChangeNotifier {
                 _nativeSessionEpoch = 0;
               }
             }
-            if (oldAccount != null) {
-              await repository.activateAccount(oldAccount);
+            if (repositoryActivated) {
+              if (oldAccount != null) {
+                await repository.activateAccount(oldAccount);
+              } else {
+                await repository.clear();
+              }
             }
             if (oldAccount != null && oldPassword != null) {
               await sessionStore.saveChaoxingAccount(
@@ -1852,7 +1782,8 @@ class AssignmentStore extends ChangeNotifier {
             } else {
               await sessionStore.clear();
             }
-            if (_nativeReminderAvailable &&
+            if (!_disposed &&
+                _nativeReminderAvailable &&
                 nativeSwitched &&
                 _authenticated &&
                 _accountHash != null &&
@@ -1879,14 +1810,21 @@ class AssignmentStore extends ChangeNotifier {
             try {
               await sessionStore.clear();
             } catch (_) {/* Already failed closed. */}
-            await _afterAssignmentsChanged();
+            if (!_disposed) await _afterAssignmentsChanged();
           }
+          if (error is _LoginInterruptedException) return;
           rethrow;
         }
-        if (generation != _generation || _disposed) return;
+        if (generation != _generation || _disposed) {
+          chaoxingClient.clearSession();
+          return;
+        }
         if (oldAccount?.trim() != normalizedAccount) {
           await sessionStore.clearWebSession();
-          if (generation != _generation || _disposed) return;
+          if (generation != _generation || _disposed) {
+            chaoxingClient.clearSession();
+            return;
+          }
           chaoxingClient.previousAssignments = {};
           chaoxingClient.trackedActivityIds = {};
         }
@@ -1901,13 +1839,22 @@ class AssignmentStore extends ChangeNotifier {
               oldAccountHash,
               oldNativeEpoch,
             );
-            if (generation != _generation || _disposed) return;
+            if (generation != _generation || _disposed) {
+              chaoxingClient.clearSession();
+              return;
+            }
           }
           await _prepareReminderHistorySession();
-          if (generation != _generation || _disposed) return;
+          if (generation != _generation || _disposed) {
+            chaoxingClient.clearSession();
+            return;
+          }
         }
         await _restoreAccountData();
-        if (generation != _generation || _disposed) return;
+        if (generation != _generation || _disposed) {
+          chaoxingClient.clearSession();
+          return;
+        }
         if (historyRetireWarning != null) {
           _recoveryWarnings.add(historyRetireWarning);
         }
@@ -2206,6 +2153,8 @@ class AssignmentStore extends ChangeNotifier {
     if (reportReconciled) {
       try {
         await _persistSyncReport();
+      } on StaleSessionWriteException {
+        return;
       } catch (error) {
         _recoveryWarnings.add('已从作业仓库恢复同步时间，但同步报告未能重新保存：$error');
       }
@@ -2323,48 +2272,22 @@ class AssignmentStore extends ChangeNotifier {
       );
 
   Future<bool> saveReminderRule(List<int> offsetsMinutes) async {
-    final generation = _generation;
-    final account = _account;
-    final wasAuthenticated = _authenticated;
-    final accountHash = _accountHash;
-    final sessionEpoch = _nativeSessionEpoch;
+    final snap = _captureSession();
     var saved = false;
     await _run(() async {
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       await _markReminderMutationPending();
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       final List<int> normalized;
       try {
-        normalized = await repository.runScopedWrite(
+        normalized = await _runScopedWrite(
+          snap,
           (_) => reminderRuleStore.saveOffsetsMinutes(offsetsMinutes),
-          account: wasAuthenticated ? account : null,
-          canCommit: _scopedWriteGate(
-            generation: generation,
-            account: account,
-            wasAuthenticated: wasAuthenticated,
-            accountHash: accountHash,
-            sessionEpoch: sessionEpoch,
-          ),
         );
       } on StaleSessionWriteException {
         return;
       }
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       _reminderOffsetsMinutes = normalized;
       saved = true;
       await _afterAssignmentsChanged();
@@ -2382,51 +2305,25 @@ class AssignmentStore extends ChangeNotifier {
   Future<bool> _saveBackgroundCheckSettings(
     BackgroundCheckSettings Function(BackgroundCheckSettings current) transform,
   ) async {
-    final generation = _generation;
-    final account = _account;
-    final wasAuthenticated = _authenticated;
-    final accountHash = _accountHash;
-    final sessionEpoch = _nativeSessionEpoch;
+    final snap = _captureSession();
     var saved = false;
     await _run(() async {
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       final next = transform(_backgroundCheckSettings);
       try {
-        await repository.runScopedWrite(
-          (_) => backgroundCheckSettingsStore.save(next),
-          account: wasAuthenticated ? account : null,
-          canCommit: _scopedWriteGate(
-            generation: generation,
-            account: account,
-            wasAuthenticated: wasAuthenticated,
-            accountHash: accountHash,
-            sessionEpoch: sessionEpoch,
-          ),
+        await _runScopedWrite(
+          snap,
+          (prefs) => backgroundCheckSettingsStore.save(next, prefs: prefs),
         );
       } on StaleSessionWriteException {
         return;
       }
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       _backgroundCheckSettings = next;
       if (!await _reconcileBackgroundControls()) {
         throw StateError('设置已保存，但后台提醒设置未确认，请重试');
       }
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return;
-      }
+      if (!_isSessionCurrent(snap)) return;
       saved = true;
     });
     return saved;
@@ -2919,7 +2816,14 @@ class AssignmentStore extends ChangeNotifier {
       if (logoutGen != _generation || _disposed) return;
       await repository.clear();
       if (logoutGen != _generation || _disposed) return;
-      await reminderRuleStore.clear();
+      try {
+        await repository.runScopedWrite(
+          (prefs) => reminderRuleStore.clear(prefs: prefs),
+          canCommit: () async => logoutGen == _generation && !_disposed,
+        );
+      } on StaleSessionWriteException {
+        return;
+      }
       if (logoutGen != _generation || _disposed) return;
       _authenticated = false;
       _account = null;
@@ -2990,23 +2894,16 @@ class AssignmentStore extends ChangeNotifier {
     String? syncFailure,
     DateTime? completedAt,
   }) async {
-    final generation = _generation;
-    final account = _account;
-    final wasAuthenticated = _authenticated;
-    final accountHash = _accountHash;
-    final sessionEpoch = _nativeSessionEpoch;
+    final snap = _captureSession();
     await _prunePins();
-    if (_disposed ||
-        generation != _generation ||
-        _authenticated != wasAuthenticated ||
-        _account != account) {
+    if (!_isSessionCurrent(snap)) {
       return false;
     }
     var manualRescheduleSucceeded = false;
     _serviceWarnings.clear();
     // Restored app preferences can outlive excluded/nonportable credentials.
     // Do not publish their private content to lockscreen or widget before login.
-    final scoped = wasAuthenticated ? courseAssignments : <Assignment>[];
+    final scoped = snap.authenticated ? courseAssignments : <Assignment>[];
     if (_privacyCleanupPending) {
       try {
         await _cancelPrivateNotifications();
@@ -3081,48 +2978,36 @@ class AssignmentStore extends ChangeNotifier {
         );
       }
     }
-    if (_disposed ||
-        generation != _generation ||
-        _authenticated != wasAuthenticated ||
-        _account != account) {
+    if (!_isSessionCurrent(snap)) {
       return manualRescheduleSucceeded;
     }
     final widgetItems = display.forWidget(scoped, DateTime.now());
-    final widgetGate = _scopedWriteGate(
-      generation: generation,
-      account: account,
-      wasAuthenticated: wasAuthenticated,
-      accountHash: accountHash,
-      sessionEpoch: sessionEpoch,
-    );
     if (_manageBackgroundSchedule) {
       try {
-        await repository.runScopedWrite(
+        await _runScopedWrite(
+          snap,
           (_) => widgetSnapshotService.saveAssignmentsForContext(
             widgetItems,
-            authenticated: wasAuthenticated,
+            authenticated: snap.authenticated,
             range: display.widgetRange,
           ),
-          account: wasAuthenticated ? account : null,
-          canCommit: widgetGate,
         );
       } on StaleSessionWriteException {
         return manualRescheduleSucceeded;
       } catch (_) {
-        if (generation == _generation && !_disposed) {
+        if (snap.generation == _generation && !_disposed) {
           _serviceWarnings.add('作业已保存在本机，小组件更新失败，请稍后刷新');
         }
       }
-    } else if (wasAuthenticated && !_privacyCleanupPending) {
+    } else if (snap.authenticated && !_privacyCleanupPending) {
       try {
-        await repository.runScopedWrite(
+        await _runScopedWrite(
+          snap,
           (_) => widgetSnapshotService.saveAssignmentsForContext(
             widgetItems,
             authenticated: true,
             range: display.widgetRange,
           ),
-          account: account,
-          canCommit: widgetGate,
         );
       } on StaleSessionWriteException {
         return manualRescheduleSucceeded;
@@ -3561,10 +3446,10 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> _syncAssignmentsBody(BackgroundSyncTrigger trigger,
       {required int operation, bool skipTaskEngineProbe = false}) async {
-    final generation = _generation;
-    final syncAccount = _account;
-    final syncAccountHash = _accountHash;
-    final syncSessionEpoch = _nativeSessionEpoch;
+    final syncSession = _captureSession(syncOperation: operation);
+    final generation = syncSession.generation;
+    final syncAccount = syncSession.account;
+    _activeSyncSession = syncSession;
     final startedAt = _autoSyncRunning && _lastSyncAttemptAt != null
         ? _lastSyncAttemptAt!
         : _clock();
@@ -3616,14 +3501,7 @@ class AssignmentStore extends ChangeNotifier {
         lastDataSuccessAt: syncReport.lastDataSuccessAt,
         lastFullSuccessAt: _lastSyncAt);
     try {
-      await _persistSyncReport(
-        expectedGeneration: generation,
-        expectedAccount: syncAccount,
-        expectedAuthenticated: true,
-        expectedAccountHash: syncAccountHash,
-        expectedSessionEpoch: syncSessionEpoch,
-        syncOperation: operation,
-      );
+      await _persistSyncReport(session: syncSession);
     } on StaleSessionWriteException {
       return;
     }
@@ -3633,12 +3511,7 @@ class AssignmentStore extends ChangeNotifier {
       attemptMirrorSaved = await _writeScopedPreferenceAndVerify(
         'sync_attempt_at',
         attempted.toUtc().toIso8601String(),
-        generation: generation,
-        account: syncAccount,
-        wasAuthenticated: true,
-        accountHash: syncAccountHash,
-        sessionEpoch: syncSessionEpoch,
-        syncOperation: operation,
+        session: syncSession,
       );
     } on StaleSessionWriteException {
       return;
@@ -3713,8 +3586,12 @@ class AssignmentStore extends ChangeNotifier {
           throw StateError('当前学习通账号已变化，课程资料未保存');
         }
         markSavingStage();
-        await repository.saveCourses(nextCourses, account: account);
-        if (generation == _generation && !_disposed) _courses = nextCourses;
+        try {
+          await repository.saveCourses(nextCourses, account: account);
+          if (generation == _generation && !_disposed) _courses = nextCourses;
+        } on StaleSessionWriteException {
+          // Account changed before the finally block could commit courses.
+        }
       }
     }
     if (generation != _generation || _disposed) return;
@@ -3772,12 +3649,7 @@ class AssignmentStore extends ChangeNotifier {
       dataMirrorSaved = await _writeScopedPreferenceAndVerify(
         'sync_data_at',
         dataSuccessAt.toUtc().toIso8601String(),
-        generation: generation,
-        account: syncAccount,
-        wasAuthenticated: true,
-        accountHash: syncAccountHash,
-        sessionEpoch: syncSessionEpoch,
-        syncOperation: operation,
+        session: syncSession,
       );
     } on StaleSessionWriteException {
       return;
@@ -3848,15 +3720,7 @@ class AssignmentStore extends ChangeNotifier {
         sourceResults: chaoxingClient.sourceResults,
         issues: reportIssues);
     try {
-      await _updateServerBackoff(
-        reportIssues,
-        expectedGeneration: generation,
-        expectedAccount: syncAccount,
-        expectedAuthenticated: true,
-        expectedAccountHash: syncAccountHash,
-        expectedSessionEpoch: syncSessionEpoch,
-        syncOperation: operation,
-      );
+      await _updateServerBackoff(reportIssues, session: syncSession);
     } on StaleSessionWriteException {
       return;
     }
@@ -3869,14 +3733,7 @@ class AssignmentStore extends ChangeNotifier {
         .join('；');
     if (_error!.isEmpty) _error = null;
     try {
-      await _persistSyncReport(
-        expectedGeneration: generation,
-        expectedAccount: syncAccount,
-        expectedAuthenticated: true,
-        expectedAccountHash: syncAccountHash,
-        expectedSessionEpoch: syncSessionEpoch,
-        syncOperation: operation,
-      );
+      await _persistSyncReport(session: syncSession);
     } on StaleSessionWriteException {
       return;
     } catch (_) {
@@ -3914,12 +3771,7 @@ class AssignmentStore extends ChangeNotifier {
         before,
         incoming,
         completeSync: warning == null,
-        expectedGeneration: generation,
-        expectedAccount: syncAccount,
-        expectedAuthenticated: true,
-        expectedAccountHash: syncAccountHash,
-        expectedSessionEpoch: syncSessionEpoch,
-        syncOperation: operation,
+        session: syncSession,
       );
       _error ??= warning;
     } on StaleSessionWriteException {
@@ -3935,14 +3787,7 @@ class AssignmentStore extends ChangeNotifier {
       );
       _error = '作业数据已保存，但同步后的本机状态刷新未完成；请重新打开或重新同步核对';
       try {
-        await _persistSyncReport(
-          expectedGeneration: generation,
-          expectedAccount: syncAccount,
-          expectedAuthenticated: true,
-          expectedAccountHash: syncAccountHash,
-          expectedSessionEpoch: syncSessionEpoch,
-          syncOperation: operation,
-        );
+        await _persistSyncReport(session: syncSession);
       } on StaleSessionWriteException {
         return;
       } catch (_) {
@@ -4085,18 +3930,9 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> _updateServerBackoff(
     Iterable<SyncIssue> issues, {
-    int? expectedGeneration,
-    String? expectedAccount,
-    bool? expectedAuthenticated,
-    String? expectedAccountHash,
-    int? expectedSessionEpoch,
-    int? syncOperation,
+    _SessionSnapshot? session,
   }) async {
-    final generation = expectedGeneration ?? _generation;
-    final account = expectedAccount ?? _account;
-    final wasAuthenticated = expectedAuthenticated ?? _authenticated;
-    final accountHash = expectedAccountHash ?? _accountHash;
-    final sessionEpoch = expectedSessionEpoch ?? _nativeSessionEpoch;
+    final snap = session ?? _captureSession();
     final seconds = issues
         .map((issue) => issue.retryAfterSeconds ?? 0)
         .where((value) => value > 0)
@@ -4106,31 +3942,17 @@ class AssignmentStore extends ChangeNotifier {
     }
     final until =
         seconds == 0 ? null : DateTime.now().add(Duration(seconds: seconds));
-    await repository.runScopedWrite(
-      (prefs) async {
-        if (until == null) {
-          await prefs.remove(_serverBackoffKey);
-        } else {
-          await prefs.setString(
-            _serverBackoffKey,
-            until.toUtc().toIso8601String(),
-          );
-        }
-      },
-      account: wasAuthenticated ? account : null,
-      canCommit: _scopedWriteGate(
-        generation: generation,
-        account: account,
-        wasAuthenticated: wasAuthenticated,
-        accountHash: accountHash,
-        sessionEpoch: sessionEpoch,
-        syncOperation: syncOperation,
-      ),
-    );
-    if (generation == _generation &&
-        !_disposed &&
-        _account == account &&
-        _authenticated == wasAuthenticated) {
+    await _runScopedWrite(snap, (prefs) async {
+      if (until == null) {
+        await prefs.remove(_serverBackoffKey);
+      } else {
+        await prefs.setString(
+          _serverBackoffKey,
+          until.toUtc().toIso8601String(),
+        );
+      }
+    });
+    if (_isSessionCurrent(snap)) {
       _serverBackoffUntil = until;
     }
   }
@@ -4161,6 +3983,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void>? _operations;
+  _SessionSnapshot? _activeSyncSession;
 
   Future<void> _run(Future<void> Function() action) {
     // Seed lazily in the caller's zone, including WidgetTester's fake clock.
@@ -4181,9 +4004,20 @@ class AssignmentStore extends ChangeNotifier {
     try {
       await action();
     } catch (error) {
+      if (error is _LoginInterruptedException ||
+          error is StaleSessionWriteException) {
+        return;
+      }
+      final failedSyncSession = _activeSyncSession;
       if (error is SyncCancelledException) {
         // A stopped operation never advances full-success time and is not
         // merged as an empty snapshot. Already committed data stays committed.
+        if (failedSyncSession != null &&
+            (failedSyncSession.generation != _generation ||
+                failedSyncSession.account != _account ||
+                _disposed)) {
+          return;
+        }
         _error = '本次同步已取消';
         syncReport = SyncReport(
           phase: SyncPhase.cancelled,
@@ -4197,10 +4031,18 @@ class AssignmentStore extends ChangeNotifier {
           ],
         );
         try {
-          await _persistSyncReport();
+          await _persistSyncReport(
+            session: failedSyncSession?.withoutSyncOperation(),
+          );
         } catch (_) {
           // The in-memory cancelled phase still prevents a success claim.
         }
+        return;
+      }
+      if (failedSyncSession != null &&
+          (failedSyncSession.generation != _generation ||
+              failedSyncSession.account != _account ||
+              _disposed)) {
         return;
       }
       _error = _friendlyError(error);
@@ -4225,7 +4067,10 @@ class AssignmentStore extends ChangeNotifier {
                         _error!)
             ]);
         try {
-          await _updateServerBackoff(syncReport.issues);
+          await _updateServerBackoff(
+            syncReport.issues,
+            session: failedSyncSession,
+          );
         } catch (_) {
           // Backoff mirror failure must not abort failure-report persistence or
           // poison the serial operation queue.
@@ -4241,54 +4086,54 @@ class AssignmentStore extends ChangeNotifier {
           failure: _error,
         );
         try {
-          await _persistSyncReport();
+          await _persistSyncReport(session: failedSyncSession);
         } catch (_) {
           _error = '$_error；同步结果未能保存，请重试';
         }
       }
     } finally {
+      _activeSyncSession = null;
       _loading = false;
       _clearHomePreview();
       if (!_disposed) notifyListeners();
     }
   }
 
-  Future<bool> Function() _scopedWriteGate({
-    required int generation,
-    required String? account,
-    required bool wasAuthenticated,
-    required String? accountHash,
-    required int sessionEpoch,
-    int? syncOperation,
-  }) {
+  _SessionSnapshot _captureSession({int? syncOperation}) => _SessionSnapshot(
+        generation: _generation,
+        account: _account,
+        authenticated: _authenticated,
+        accountHash: _accountHash,
+        sessionEpoch: _nativeSessionEpoch,
+        syncOperation: syncOperation,
+      );
+
+  bool _isSessionCurrent(_SessionSnapshot snap) {
+    if (_disposed ||
+        snap.generation != _generation ||
+        snap.authenticated != _authenticated ||
+        snap.account != _account) {
+      return false;
+    }
+    if (snap.syncOperation != null &&
+        (_syncCancelled || snap.syncOperation != _syncOperation)) {
+      return false;
+    }
+    return true;
+  }
+
+  Future<bool> Function() _scopedWriteGateFor(_SessionSnapshot snap) {
     return () async {
-      if (_disposed ||
-          generation != _generation ||
-          _authenticated != wasAuthenticated ||
-          _account != account) {
-        return false;
-      }
-      if (syncOperation != null &&
-          (_syncCancelled || syncOperation != _syncOperation)) {
-        return false;
-      }
+      if (!_isSessionCurrent(snap)) return false;
       if (_nativeReminderAvailable &&
-          wasAuthenticated &&
-          accountHash != null &&
-          sessionEpoch > 0) {
+          snap.authenticated &&
+          snap.accountHash != null &&
+          snap.sessionEpoch > 0) {
         final current = await backgroundReminderGateway.isSessionCurrent(
-          accountHash,
-          sessionEpoch,
+          snap.accountHash!,
+          snap.sessionEpoch,
         );
-        if (!current ||
-            _disposed ||
-            generation != _generation ||
-            _authenticated != wasAuthenticated ||
-            _account != account) {
-          return false;
-        }
-        if (syncOperation != null &&
-            (_syncCancelled || syncOperation != _syncOperation)) {
+        if (!current || !_isSessionCurrent(snap)) {
           return false;
         }
       }
@@ -4296,53 +4141,34 @@ class AssignmentStore extends ChangeNotifier {
     };
   }
 
+  Future<T> _runScopedWrite<T>(
+    _SessionSnapshot snap,
+    Future<T> Function(SharedPreferences prefs) action, {
+    String rejectedMessage = '账号会话已变化，旧写入已拒绝提交',
+  }) =>
+      repository.runScopedWrite(
+        action,
+        account: snap.authenticated ? snap.account : null,
+        canCommit: _scopedWriteGateFor(snap),
+        rejectedMessage: rejectedMessage,
+      );
+
   Future<bool> _writeScopedPreferenceAndVerify(
     String key,
     String value, {
-    int? generation,
-    String? account,
-    bool? wasAuthenticated,
-    String? accountHash,
-    int? sessionEpoch,
-    int? syncOperation,
-  }) {
-    final targetGeneration = generation ?? _generation;
-    final targetAccount = account ?? _account;
-    final targetAuthenticated = wasAuthenticated ?? _authenticated;
-    final targetAccountHash = accountHash ?? _accountHash;
-    final targetSessionEpoch = sessionEpoch ?? _nativeSessionEpoch;
-    return repository.runScopedWrite(
-      (prefs) => _writePreferenceAndVerify(prefs, key, value),
-      account: targetAuthenticated ? targetAccount : null,
-      canCommit: _scopedWriteGate(
-        generation: targetGeneration,
-        account: targetAccount,
-        wasAuthenticated: targetAuthenticated,
-        accountHash: targetAccountHash,
-        sessionEpoch: targetSessionEpoch,
-        syncOperation: syncOperation,
-      ),
-    );
-  }
+    _SessionSnapshot? session,
+  }) =>
+      _runScopedWrite(
+        session ?? _captureSession(),
+        (prefs) => _writePreferenceAndVerify(prefs, key, value),
+      );
 
-  Future<void> _persistSyncReport({
-    int? expectedGeneration,
-    String? expectedAccount,
-    bool? expectedAuthenticated,
-    String? expectedAccountHash,
-    int? expectedSessionEpoch,
-    int? syncOperation,
-  }) async {
+  Future<void> _persistSyncReport({_SessionSnapshot? session}) async {
     final encoded = jsonEncode(syncReport.toJson());
     if (!await _writeScopedPreferenceAndVerify(
       'sync_report_v1',
       encoded,
-      generation: expectedGeneration,
-      account: expectedAccount,
-      wasAuthenticated: expectedAuthenticated,
-      accountHash: expectedAccountHash,
-      sessionEpoch: expectedSessionEpoch,
-      syncOperation: syncOperation,
+      session: session,
     )) {
       throw StateError('同步结果未能保存');
     }
@@ -4518,9 +4344,40 @@ class AssignmentStore extends ChangeNotifier {
     _disposed = true;
     _syncCancelled = true;
     _syncOperation++;
+    repository.dispose();
     chaoxingClient.cancelActiveRequests();
     _clearHomePreview();
     _generation++;
     super.dispose();
   }
+}
+
+class _SessionSnapshot {
+  const _SessionSnapshot({
+    required this.generation,
+    required this.account,
+    required this.authenticated,
+    required this.accountHash,
+    required this.sessionEpoch,
+    this.syncOperation,
+  });
+
+  final int generation;
+  final String? account;
+  final bool authenticated;
+  final String? accountHash;
+  final int sessionEpoch;
+  final int? syncOperation;
+
+  _SessionSnapshot withoutSyncOperation() => _SessionSnapshot(
+        generation: generation,
+        account: account,
+        authenticated: authenticated,
+        accountHash: accountHash,
+        sessionEpoch: sessionEpoch,
+      );
+}
+
+class _LoginInterruptedException implements Exception {
+  const _LoginInterruptedException();
 }

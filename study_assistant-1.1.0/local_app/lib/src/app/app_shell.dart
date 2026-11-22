@@ -30,26 +30,31 @@ class AppShell extends StatefulWidget {
     '/profile',
   };
 
-  /// Resolves the true top-most route path, including imperative `push()`
-  /// routes that `routeInformationProvider.value.uri` overwrites when
-  /// `GoRouter.optionURLReflectsImperativeAPIs` is false.
-  static String currentLocationOf(GoRouter router) {
+  /// Resolves the true top-most route URI (preserving query parameters),
+  /// including imperative `push()` routes that `routeInformationProvider.value.uri`
+  /// overwrites when `GoRouter.optionURLReflectsImperativeAPIs` is false.
+  static Uri currentUriOf(GoRouter router) {
     final configuration = router.routerDelegate.currentConfiguration;
     final lastMatch = configuration.lastOrNull;
     if (lastMatch is ImperativeRouteMatch) {
-      final uriPath = lastMatch.matches.uri.path;
-      if (uriPath.isNotEmpty) return uriPath;
+      if (lastMatch.matches.uri.path.isNotEmpty) {
+        return lastMatch.matches.uri;
+      }
       if (lastMatch.matchedLocation.isNotEmpty) {
-        return lastMatch.matchedLocation;
+        return Uri.parse(lastMatch.matchedLocation);
       }
     }
-    if (lastMatch != null && lastMatch.matchedLocation.isNotEmpty) {
-      return lastMatch.matchedLocation;
+    if (configuration.uri.path.isNotEmpty) {
+      return configuration.uri;
     }
-    final configPath = configuration.uri.path;
-    if (configPath.isNotEmpty) return configPath;
-    return router.routeInformationProvider.value.uri.path;
+    if (lastMatch != null && lastMatch.matchedLocation.isNotEmpty) {
+      return Uri.parse(lastMatch.matchedLocation);
+    }
+    return router.routeInformationProvider.value.uri;
   }
+
+  /// Resolves the true top-most route path (without query parameters).
+  static String currentLocationOf(GoRouter router) => currentUriOf(router).path;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -185,7 +190,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _selectDestination(int index) async {
     Future<void> go() async {
       final router = GoRouter.of(context);
-      final from = AppShell.currentLocationOf(router);
+      final from = AppShell.currentUriOf(router).toString();
       final to = switch (index) {
         0 => '/assignments',
         1 => '/calendar',

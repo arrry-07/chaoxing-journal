@@ -164,6 +164,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         !widget.store.isAuthenticated) {
       return;
     }
+    var closingForAccountChange = false;
     await showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
@@ -172,13 +173,24 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         final journal = Journal.of(sheetContext);
-        var closingForAccountChange = false;
         void scheduleClose() {
           if (closingForAccountChange) return;
           closingForAccountChange = true;
+          final sheetRoute = ModalRoute.of(sheetContext);
+          final rootNavigator = Navigator.of(sheetContext, rootNavigator: true);
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (sheetContext.mounted && Navigator.of(sheetContext).canPop()) {
-              Navigator.of(sheetContext).pop();
+            if (sheetRoute == null ||
+                !sheetRoute.isActive ||
+                !rootNavigator.mounted) {
+              return;
+            }
+            // Pop any child picker/dialog pushed above this sheet, then remove
+            // only the sheet route itself so the underlying page is never popped.
+            rootNavigator.popUntil(
+              (route) => route == sheetRoute || !sheetRoute.isActive,
+            );
+            if (sheetRoute.isActive) {
+              rootNavigator.removeRoute(sheetRoute);
             }
           });
         }

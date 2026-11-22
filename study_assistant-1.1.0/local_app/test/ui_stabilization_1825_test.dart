@@ -5,10 +5,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
+import 'package:study_assistant_mobile/src/app/transient_feedback.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/login_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/features/widgets/journal_context_menu.dart';
 import 'package:study_assistant_mobile/src/features/widgets/journal_swipe_tile.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
@@ -462,6 +465,116 @@ void main() {
       await gesture.up();
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('Batch 1B.5 S5 & S10: feedback ownership and dark contrast guards', () {
+    testWidgets(
+        'S5: showJournalMessage revokes a disposing TransientFeedbackController owner',
+        (tester) async {
+      final controller = TransientFeedbackController();
+      late BuildContext hostContext;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: Scaffold(
+            body: Builder(
+              builder: (context) {
+                hostContext = context;
+                return const Text('host');
+              },
+            ),
+          ),
+        ),
+      );
+
+      controller.show(
+        hostContext,
+        const SnackBar(content: Text('旧页面提示')),
+      );
+      await tester.pump();
+      expect(find.text('旧页面提示'), findsOneWidget);
+
+      // Previous page disposes (scheduling post-frame removal) right before
+      // the next page emits a one-off showJournalMessage on the same messenger.
+      controller.dispose();
+      showJournalMessage(hostContext, '新页面提示');
+      await tester.pumpAndSettle();
+
+      expect(find.text('新页面提示'), findsOneWidget,
+          reason:
+              'disposing controller post-frame cleanup must not kill showJournalMessage');
+    });
+
+    testWidgets(
+        'S10: LoginScreen unchecked agreement checkbox stays high contrast in light and dark themes',
+        (tester) async {
+      for (final mode in [
+        (name: 'light', theme: StudyAssistantTheme.light),
+        (name: 'dark', theme: StudyAssistantTheme.dark),
+      ]) {
+        final store = _Store();
+        addTearDown(store.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: mode.theme,
+            home: LoginScreen(store: store),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final checkbox = tester.widget<Checkbox>(find.byType(Checkbox));
+        final journal = mode.theme.extension<JournalPalette>()!;
+        final borderColor = checkbox.side?.color ??
+            mode.theme.checkboxTheme.side?.color ??
+            journal.ruleStrong;
+        expect(
+          _contrast(borderColor, journal.sheet),
+          greaterThanOrEqualTo(3.0),
+          reason:
+              'unchecked login checkbox outline must remain >= 3:1 in ${mode.name}',
+        );
+      }
+    });
+
+    testWidgets(
+        'S10: AssignmentCard overdue title uses isDark rather than identity equality with JournalPalette.dark',
+        (tester) async {
+      final derivedDark = JournalPalette.dark.copyWith(
+        paper: const Color(0xFF1A1917),
+      );
+      final darkTheme = StudyAssistantTheme.dark.copyWith(
+        extensions: [derivedDark],
+      );
+      final now = DateTime(2026, 11, 22, 10);
+      final overdueItem = _work(
+        'overdue-card',
+        status: 'pending',
+        due: now.subtract(const Duration(days: 2)),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: darkTheme,
+          home: Scaffold(
+            body: AssignmentCard(
+              assignment: overdueItem,
+              now: now,
+              onTap: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final titleText = tester.widget<Text>(find.text('作业overdue-card'));
+      final color = titleText.style!.color!;
+      expect(
+        _contrast(color, derivedDark.sheet),
+        greaterThanOrEqualTo(4.5),
+        reason:
+            'overdue card title on interpolated/copied dark palette must stay readable (>= 4.5:1)',
+      );
     });
   });
 }

@@ -545,6 +545,50 @@ void main() {
     expect(released, [req1, req2]);
   });
 
+  test(
+      'M6: failed releaseWriteLease schedules bounded self-healing retry without needing another write',
+      () async {
+    final acquired = <String>[];
+    final released = <String>[];
+    var failFirst = true;
+    final healed = Completer<void>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      final args = call.arguments as Map;
+      if (call.method == 'acquireWriteLease') {
+        acquired.add(args['requestId'] as String);
+        return true;
+      }
+      if (call.method == 'confirmWriteLease') return true;
+      if (call.method == 'releaseWriteLease') {
+        final id = args['requestId'] as String;
+        if (failFirst) {
+          failFirst = false;
+          throw PlatformException(code: 'transient_release_error');
+        }
+        released.add(id);
+        if (!healed.isCompleted) healed.complete();
+        return null;
+      }
+      return null;
+    });
+
+    final gateway = BackgroundReminderGateway(
+      writeLeaseRetryDelay: const Duration(milliseconds: 15),
+    );
+    addTearDown(() => gateway.cancelPendingWriteReleaseRetry('self-heal'));
+
+    expect(await gateway.acquireWriteLease('self-heal'), isTrue);
+    await expectLater(
+      gateway.releaseWriteLease('self-heal'),
+      throwsA(isA<BackgroundReminderGatewayException>()),
+    );
+    expect(released, isEmpty);
+
+    await healed.future.timeout(const Duration(seconds: 1));
+    expect(released, acquired);
+  });
+
   test('isSessionCurrent fails closed when the native call fails', () async {
     const gateway = BackgroundReminderGateway();
     expect(await gateway.isSessionCurrent('hash', 1), isFalse);

@@ -137,23 +137,34 @@ class BackgroundReminderGateway {
     this.operationTimeout = const Duration(seconds: 10),
     this.syncLeaseTimeout = const Duration(seconds: 130),
     this.writeLeaseTimeout = const Duration(seconds: 65),
+    this.writeLeaseRetryDelay,
   }) : _channel = channel;
 
   final MethodChannel _channel;
   final Duration operationTimeout;
   final Duration syncLeaseTimeout;
   final Duration writeLeaseTimeout;
+  final Duration? writeLeaseRetryDelay;
 
   // Keep the const gateway usable in default arguments. Active confirmed write
   // grants stay in [_confirmedWrites]; releases that failed to confirm move to
-  // [_pendingReleases] so subsequent releases drain every unacknowledged id.
+  // [_pendingReleases] so subsequent releases or bounded retries drain them.
   static final _writeRequests = Expando<Map<String, List<String>>>();
   static final _pendingWriteReleases = Expando<Map<String, List<String>>>();
+  static final _drainingWriteReleases = Expando<Map<String, int>>();
+  static final _writeReleaseRetryTimers = Expando<Map<String, Timer>>();
+  static final _writeReleaseRetryAttempts = Expando<Map<String, int>>();
   static int _requestSequence = 0;
   Map<String, List<String>> get _confirmedWrites =>
       _writeRequests[this] ??= <String, List<String>>{};
   Map<String, List<String>> get _pendingReleases =>
       _pendingWriteReleases[this] ??= <String, List<String>>{};
+  Map<String, int> get _drainDepth =>
+      _drainingWriteReleases[this] ??= <String, int>{};
+  Map<String, Timer> get _retryTimers =>
+      _writeReleaseRetryTimers[this] ??= <String, Timer>{};
+  Map<String, int> get _retryAttempts =>
+      _writeReleaseRetryAttempts[this] ??= <String, int>{};
 
   Future<bool> isAvailable() async =>
       await _invokeTimed<bool>('ping', null, const Duration(seconds: 2)) ??
@@ -304,31 +315,90 @@ class BackgroundReminderGateway {
       throw const BackgroundReminderGatewayException(
           'releaseWriteLease', '没有可释放的已确认写租约');
     }
-    final queue = pending ?? (_pendingReleases[owner] = <String>[]);
+    final queue = _pendingReleases.putIfAbsent(owner, () => <String>[]);
     if (hasActive) {
       queue.add(active.removeLast());
       if (active.isEmpty) _confirmedWrites.remove(owner);
     }
     Object? firstError;
     StackTrace? firstStack;
-    // Drain the current lease and any previously failed releases in LIFO order
-    // so an earlier transient failure can never leave native writeGate depth > 0.
-    for (final requestId in List<String>.of(queue.reversed)) {
-      try {
-        await _invokeStrictVoid('releaseWriteLease', {
-          'owner': owner,
-          'requestId': requestId,
-        });
-        queue.remove(requestId);
-      } catch (error, stack) {
-        firstError ??= error;
-        firstStack ??= stack;
+    _drainDepth[owner] = (_drainDepth[owner] ?? 0) + 1;
+    try {
+      // Drain the current lease and any previously failed releases in LIFO order
+      // so an earlier transient failure can never leave native writeGate depth > 0.
+      for (final requestId in List<String>.of(queue.reversed)) {
+        try {
+          await _invokeStrictVoid('releaseWriteLease', {
+            'owner': owner,
+            'requestId': requestId,
+          });
+          queue.remove(requestId);
+        } catch (error, stack) {
+          firstError ??= error;
+          firstStack ??= stack;
+        }
+      }
+    } finally {
+      final remainingDepth = (_drainDepth[owner] ?? 1) - 1;
+      if (remainingDepth <= 0) {
+        _drainDepth.remove(owner);
+        if (queue.isEmpty && identical(_pendingReleases[owner], queue)) {
+          _pendingReleases.remove(owner);
+        }
+      } else {
+        _drainDepth[owner] = remainingDepth;
       }
     }
-    if (queue.isEmpty) _pendingReleases.remove(owner);
+    if (queue.isEmpty) {
+      cancelPendingWriteReleaseRetry(owner);
+    } else if (writeLeaseRetryDelay != null) {
+      schedulePendingWriteReleaseRetry(owner, delay: writeLeaseRetryDelay!);
+    }
     if (firstError != null) {
       Error.throwWithStackTrace(firstError, firstStack!);
     }
+  }
+
+  /// Schedules a bounded background retry to drain unconfirmed write-lease
+  /// releases for [owner] even if no subsequent repository write occurs.
+  void schedulePendingWriteReleaseRetry(
+    String owner, {
+    Duration delay = const Duration(seconds: 2),
+    int maxAttempts = 3,
+  }) {
+    final pending = _pendingReleases[owner];
+    if (pending == null || pending.isEmpty) {
+      cancelPendingWriteReleaseRetry(owner);
+      return;
+    }
+    final attempts = _retryAttempts[owner] ?? 0;
+    if (attempts >= maxAttempts) return;
+    _retryTimers[owner]?.cancel();
+    _retryTimers[owner] = Timer(delay, () {
+      _retryTimers.remove(owner);
+      final currentPending = _pendingReleases[owner];
+      if (currentPending == null || currentPending.isEmpty) {
+        _retryAttempts.remove(owner);
+        return;
+      }
+      _retryAttempts[owner] = attempts + 1;
+      unawaited(
+          releaseWriteLease(owner).then<void>((_) {}, onError: (Object _) {
+        final stillPending = _pendingReleases[owner];
+        if (stillPending != null && stillPending.isNotEmpty) {
+          schedulePendingWriteReleaseRetry(
+            owner,
+            delay: delay,
+            maxAttempts: maxAttempts,
+          );
+        }
+      }));
+    });
+  }
+
+  void cancelPendingWriteReleaseRetry(String owner) {
+    _retryTimers.remove(owner)?.cancel();
+    _retryAttempts.remove(owner);
   }
 
   Future<void> _cancelUncertainAcquisition(

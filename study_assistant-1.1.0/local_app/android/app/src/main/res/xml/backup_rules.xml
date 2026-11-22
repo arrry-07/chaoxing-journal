@@ -7,4 +7,5 @@
     <exclude domain="database" path="." />
     <exclude domain="file" path="." />
     <exclude domain="external" path="." />
+    <exclude domain="root" path="." />
 </full-backup-content>
