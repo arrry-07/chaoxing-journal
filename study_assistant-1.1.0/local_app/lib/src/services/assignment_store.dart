@@ -920,6 +920,7 @@ class AssignmentStore extends ChangeNotifier {
   String? _chaoxingAvatarUrl;
   DateTime? _lastSyncAt;
   List<int> _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
+  bool _allowUrgentDeadlineNightBreakthrough = false;
   BackgroundCheckSettings _backgroundCheckSettings =
       const BackgroundCheckSettings(
     enabled: true,
@@ -1007,6 +1008,8 @@ class AssignmentStore extends ChangeNotifier {
       _backgroundCheckSettings.notificationListenerEnabled;
   bool get newAssignmentReminderEnabled =>
       _backgroundCheckSettings.newAssignmentReminderEnabled;
+  bool get allowUrgentDeadlineNightBreakthrough =>
+      _allowUrgentDeadlineNightBreakthrough;
   String? get backgroundWarning => _backgroundWarning;
   DateTime? get nextBackgroundCheckAt {
     if (!_authenticated || !_backgroundCheckSettings.enabled) return null;
@@ -2147,6 +2150,7 @@ class AssignmentStore extends ChangeNotifier {
     _pinsNeedSave = false;
     _journalRestoreFailed = false;
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
+    _allowUrgentDeadlineNightBreakthrough = false;
     _lastSyncAt = null;
     _lastSyncAttemptAt = null;
     _serverBackoffUntil = null;
@@ -2220,6 +2224,11 @@ class AssignmentStore extends ChangeNotifier {
     });
     await stage('提醒设置', () async {
       _reminderOffsetsMinutes = await reminderRuleStore.loadOffsetsMinutes();
+      final account = _account;
+      _allowUrgentDeadlineNightBreakthrough =
+          (_authenticated && account != null)
+              ? await repository.loadAllowUrgentNightBreakthrough(account)
+              : false;
     });
     await stage('自动同步设置', () async {
       final snap = _captureSession();
@@ -3183,6 +3192,34 @@ class AssignmentStore extends ChangeNotifier {
         (current) => current.copyWith(newAssignmentReminderEnabled: enabled),
       );
 
+  Future<bool> saveAllowUrgentDeadlineNightBreakthrough(bool enabled) async {
+    final snap = _captureSession();
+    var saved = false;
+    await _run(() async {
+      if (!_isSessionCurrent(snap)) return;
+      await _markReminderMutationPending();
+      if (!_isSessionCurrent(snap)) return;
+      try {
+        await _runScopedWrite(
+          snap,
+          (prefs) => repository.writeAllowUrgentNightBreakthroughInPrefs(
+            prefs,
+            enabled,
+          ),
+        );
+      } on StaleSessionWriteException {
+        return;
+      }
+      if (!_isSessionCurrent(snap)) return;
+      _allowUrgentDeadlineNightBreakthrough = enabled;
+      notificationService.allowUrgentNightBreakthrough =
+          snap.authenticated && enabled;
+      saved = true;
+      await _afterAssignmentsChanged(updateSummary: false);
+    });
+    return saved;
+  }
+
   /// Reloads durable sync timestamps and journal records if a headless
   /// background check persisted newer state while this foreground store was idle.
   Future<bool> reconcileExternalSyncState() async {
@@ -3700,6 +3737,7 @@ class AssignmentStore extends ChangeNotifier {
       _agreementAccepted = false;
       _needsProfileRecovery = false;
       _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
+      _allowUrgentDeadlineNightBreakthrough = false;
       _chaoxingDisplayName = null;
       _chaoxingAvatarUrl = null;
       _error = null;
@@ -3799,6 +3837,8 @@ class AssignmentStore extends ChangeNotifier {
         ? _courseworkState
         : const LocalCourseworkState.empty();
     notificationService.courseworkState = effectiveCoursework;
+    notificationService.allowUrgentNightBreakthrough =
+        snap.authenticated && _allowUrgentDeadlineNightBreakthrough;
     if (!_privacyCleanupPending) {
       if (updateAssignmentReminders) {
         if (_nativeReminderAvailable && _authenticated) {
@@ -4204,6 +4244,7 @@ class AssignmentStore extends ChangeNotifier {
         pluginEvidence: plugin,
         queryWarnings: warnings,
         coursework: _courseworkState,
+        allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
         healthQueryFailed: healthQueryFailed,
         pluginQueryFailed: pluginQueryFailed,
         subjectQueryFailed: subjectQueryFailed,
@@ -4219,6 +4260,7 @@ class AssignmentStore extends ChangeNotifier {
         health: health,
         pluginEvidence: plugin,
         queryWarnings: warnings,
+        allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
         healthQueryFailed: healthQueryFailed,
         pluginQueryFailed: pluginQueryFailed,
         subjectQueryFailed: subjectQueryFailed,
@@ -4315,7 +4357,7 @@ class AssignmentStore extends ChangeNotifier {
       accountHash: accountHash,
       sessionEpoch: sessionEpoch,
     );
-    final now = completedAt ?? DateTime.now();
+    final now = completedAt ?? _clock();
     final plan = AssignmentReminderPlanner.planAfterSync(
       accountHash: accountHash,
       sessionEpoch: sessionEpoch,
@@ -4341,6 +4383,8 @@ class AssignmentStore extends ChangeNotifier {
       reminderOffsetsMinutes: _reminderOffsetsMinutes,
       now: now,
       courseworkState: _courseworkState,
+      archivedCourseKeys: _archivedReminderCourseKeys(),
+      allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
     );
     final result = await backgroundReminderGateway.applyPlan(
       accountHash: accountHash,
@@ -5047,6 +5091,13 @@ class AssignmentStore extends ChangeNotifier {
     return target;
   }
 
+  Set<String> _archivedReminderCourseKeys() {
+    return {
+      for (final entry in termCatalog.entries)
+        if (entry.state == CourseCatalogState.archived) entry.courseKey,
+    };
+  }
+
   /// Applies settings/schedule to the native side. Returns false only when a
   /// control write was not confirmed, so callers can refuse to activate a plan
   /// under stale settings. Health is diagnostic and never blocks that result.
@@ -5062,6 +5113,7 @@ class AssignmentStore extends ChangeNotifier {
           _backgroundCheckSettings,
           showDetails: notificationService.showDetails,
           reconcileSchedules: _manageBackgroundSchedule,
+          allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
         );
       }
       if (_manageBackgroundSchedule) {

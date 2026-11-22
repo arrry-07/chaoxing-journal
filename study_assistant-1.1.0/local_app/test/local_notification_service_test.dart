@@ -7,11 +7,13 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_local_notifications_platform_interface/flutter_local_notifications_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
+import 'package:timezone/data/latest.dart' as timezone_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import 'reminder_health_test.dart' as fixture;
@@ -87,7 +89,7 @@ void main() {
           id: 'sample',
           title: '合成提醒详情',
           kind: 'todo',
-          at: DateTime.now().add(const Duration(days: 1)),
+          at: DateTime(2030, 11, 6, 18, 0),
           remind: true,
         );
 
@@ -139,6 +141,91 @@ void main() {
       expect(result.queryWarnings, contains('通知渠道状态读取失败'));
       expect(result.queryWarnings.join(),
           isNot(contains('synthetic_query_error')));
+    });
+
+    test(
+        'manual and assignment schedules obey quiet hours and night breakthrough',
+        () async {
+      timezone_data.initializeTimeZones();
+      final shanghai = tz.getLocation('Asia/Shanghai');
+      final now = tz.TZDateTime(shanghai, 2030, 11, 20, 20, 0);
+      final service = LocalNotificationService(
+        clock: () => now,
+        location: shanghai,
+      )..showDetails = true;
+
+      await service.rescheduleManual([
+        ManualEntry(
+          id: 'night-todo',
+          title: '凌晨待办',
+          kind: 'todo',
+          at: tz.TZDateTime(shanghai, 2030, 11, 21, 0, 45),
+          remind: true,
+        ),
+        ManualEntry(
+          id: 'shiftable-todo',
+          title: '八点待办',
+          kind: 'todo',
+          at: tz.TZDateTime(shanghai, 2030, 11, 21, 7, 50),
+          remind: true,
+        ),
+      ]);
+      var scheduledTimes = calls
+          .where((call) => call.method == 'zonedSchedule')
+          .map((call) => DateTime.parse(
+              (call.arguments as Map)['scheduledDateTime'] as String))
+          .toList();
+      expect(scheduledTimes, hasLength(1));
+      expect(
+        scheduledTimes.single.millisecondsSinceEpoch,
+        tz.TZDateTime(shanghai, 2030, 11, 21, 7, 30).millisecondsSinceEpoch,
+      );
+
+      calls.clear();
+      service.allowUrgentNightBreakthrough = true;
+      await service.rescheduleManual([
+        ManualEntry(
+          id: 'night-todo',
+          title: '凌晨待办',
+          kind: 'todo',
+          at: tz.TZDateTime(shanghai, 2030, 11, 21, 0, 45),
+          remind: true,
+        ),
+      ]);
+      scheduledTimes = calls
+          .where((call) => call.method == 'zonedSchedule')
+          .map((call) => DateTime.parse(
+              (call.arguments as Map)['scheduledDateTime'] as String))
+          .toList();
+      expect(
+        scheduledTimes.single.millisecondsSinceEpoch,
+        tz.TZDateTime(shanghai, 2030, 11, 21, 0, 15).millisecondsSinceEpoch,
+      );
+
+      calls.clear();
+      await service.rescheduleAssignments([
+        Assignment(
+          id: 'cx:work:1:2:night',
+          courseName: '计算机网络',
+          title: '实验报告',
+          deadlineAt: tz.TZDateTime(shanghai, 2030, 11, 21, 0, 30),
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: now,
+          deadlineTrusted: true,
+        ),
+      ], offsetsMinutes: [
+        30
+      ]);
+      scheduledTimes = calls
+          .where((call) => call.method == 'zonedSchedule')
+          .map((call) => DateTime.parse(
+              (call.arguments as Map)['scheduledDateTime'] as String))
+          .toList();
+      expect(scheduledTimes.map((t) => t.millisecondsSinceEpoch).toList(), [
+        tz.TZDateTime(shanghai, 2030, 11, 20, 22, 30).millisecondsSinceEpoch,
+        tz.TZDateTime(shanghai, 2030, 11, 21, 0, 0).millisecondsSinceEpoch,
+      ]);
     });
   });
 

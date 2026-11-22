@@ -153,8 +153,9 @@ void main() {
       return null;
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-    final service = LocalNotificationService();
-    final original = work('作业', DateTime.now().add(const Duration(days: 2)));
+    final baseNow = DateTime(2030, 11, 20, 10, 0);
+    final service = LocalNotificationService(clock: () => baseNow);
+    final original = work('作业', baseNow.add(const Duration(days: 2)));
     await service.rescheduleAssignments([original], offsetsMinutes: [30]);
     final first = active.values.single;
     final extended = original.copyWith(

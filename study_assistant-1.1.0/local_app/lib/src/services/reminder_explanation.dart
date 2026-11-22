@@ -9,6 +9,7 @@ import 'background_reminder_gateway.dart';
 import 'coursework_deadline.dart';
 import 'daily_summary.dart';
 import 'daytime_check_policy.dart';
+import 'deadline_quiet_hours_policy.dart';
 
 class ReminderExplanationService {
   const ReminderExplanationService._();
@@ -28,6 +29,7 @@ class ReminderExplanationService {
     required PluginScheduleEvidenceSnapshot? pluginEvidence,
     required List<String> queryWarnings,
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+    bool allowUrgentNightBreakthrough = false,
     bool healthQueryFailed = false,
     bool pluginQueryFailed = false,
     bool subjectQueryFailed = false,
@@ -146,7 +148,13 @@ class ReminderExplanationService {
       if (anchor != null && !anchor.isAfter(now)) 'anchorPassed',
       ...deadlineSystem,
     ];
-    final planned = _nextPlanned(primary, offsets, now, entry: primaryEntry);
+    final planned = _nextPlanned(
+      primary,
+      offsets,
+      now,
+      entry: primaryEntry,
+      allowUrgentNightBreakthrough: allowUrgentNightBreakthrough,
+    );
     if (anchor != null &&
         anchor.isAfter(now) &&
         planned == null &&
@@ -225,6 +233,7 @@ class ReminderExplanationService {
     required ReminderHealth? health,
     required PluginScheduleEvidenceSnapshot? pluginEvidence,
     required List<String> queryWarnings,
+    bool allowUrgentNightBreakthrough = false,
     bool healthQueryFailed = false,
     bool pluginQueryFailed = false,
     bool subjectQueryFailed = false,
@@ -241,8 +250,14 @@ class ReminderExplanationService {
     } else if (entry.at == null) {
       reasons.add('noDeadline');
     } else {
-      planned = entry.at!.subtract(const Duration(minutes: 30));
-      if (!planned.isAfter(now)) {
+      final rawCandidate = entry.at!.subtract(const Duration(minutes: 30));
+      planned = DeadlineQuietHoursPolicy.adjustManualCandidate(
+        candidateAt: rawCandidate,
+        eventAt: entry.at!,
+        now: now,
+        allowUrgentNightBreakthrough: allowUrgentNightBreakthrough,
+      );
+      if (planned == null) {
         reasons.add('offsetWindowPassed');
       } else {
         eligible = true;
@@ -410,27 +425,25 @@ class ReminderExplanationService {
     List<int> offsets,
     DateTime now, {
     LocalCourseworkEntry? entry,
+    bool allowUrgentNightBreakthrough = false,
   }) {
-    final anchor = _anchor(assignment, entry: entry)?.toLocal();
+    final snapshot = AssignmentReminderSnapshot(
+      assignment: assignment,
+      hidden: false,
+      followed: true,
+      courseworkEntry: entry,
+    );
+    final anchor = _anchor(assignment, entry: entry);
     if (anchor == null) return null;
-    final values = <DateTime>[];
-    for (final offset in offsets) {
-      if (offset <= 0) continue;
-      final original = anchor.subtract(Duration(minutes: offset));
-      final shifted = original.hour < DaytimeCheckPolicy.startHour
-          ? DateTime(
-              original.year,
-              original.month,
-              original.day,
-              DaytimeCheckPolicy.startHour,
-            )
-          : original;
-      if (shifted.isAfter(now) && shifted.isBefore(anchor)) {
-        values.add(shifted);
-      }
-    }
-    values.sort();
-    return values.firstOrNull;
+    final slots = DeadlineQuietHoursPolicy.planDeadlineSlots(
+      deadlineAt: anchor,
+      now: now,
+      offsetsMinutes: offsets,
+      source: snapshot.deadlineSource,
+      eventKind: snapshot.eventKind,
+      allowUrgentNightBreakthrough: allowUrgentNightBreakthrough,
+    );
+    return slots.firstOrNull?.notifyAt;
   }
 
   static ReminderCategoryExplanation _category({
@@ -688,6 +701,9 @@ class ReminderExplanationService {
       'alreadySubmitted',
       'newReminderDisabled',
       'outsideWindow',
+      'quietHours',
+      'lateQuietSuppressed',
+      'missingDeadlineSource',
       'cooldown',
       'notificationPermissionOff',
       'channelOff',

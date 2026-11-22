@@ -13,6 +13,7 @@ import '../models/assignment.dart';
 import '../models/local_coursework_state.dart';
 import 'assignment_reminder_planner.dart';
 import 'coursework_deadline.dart';
+import 'deadline_quiet_hours_policy.dart';
 import 'reminder_rule_store.dart';
 import 'daily_summary.dart';
 import '../models/personal_workspace.dart';
@@ -22,16 +23,23 @@ import '../models/study_notebook.dart';
 typedef NotificationPayloadHandler = void Function(String payload);
 
 class LocalNotificationService {
-  LocalNotificationService(
-      {NotificationPayloadHandler? onPayload,
-      FlutterLocalNotificationsPlugin? plugin})
-      : _onPayload = onPayload,
-        _plugin = plugin ?? FlutterLocalNotificationsPlugin();
+  LocalNotificationService({
+    NotificationPayloadHandler? onPayload,
+    FlutterLocalNotificationsPlugin? plugin,
+    DateTime Function()? clock,
+    tz.Location? location,
+  })  : _onPayload = onPayload,
+        _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
+        _clock = clock ?? DateTime.now,
+        _location = location;
 
   final FlutterLocalNotificationsPlugin _plugin;
+  final DateTime Function() _clock;
+  final tz.Location? _location;
   String? lastWarning;
   List<ReminderScheduleOutcome> lastScheduleOutcomes = const [];
   bool showDetails = false;
+  bool allowUrgentNightBreakthrough = false;
   LocalCourseworkState courseworkState = const LocalCourseworkState.empty();
   static const assignmentChannel = 'assignment_deadlines';
   static const assignmentUpdatesChannel = 'assignment_updates';
@@ -287,18 +295,31 @@ class LocalNotificationService {
     lastWarning = null;
     lastScheduleOutcomes = const [];
     await _ensurePluginInitialized();
+    final now = _clock();
     final schedules = <(ManualEntry, DateTime)>[];
     final validIds = <String>{};
     final seen = <String>{};
     var reminderWindowMissed = false;
+    var quietHoursSkipped = false;
     for (final e in entries.where((e) => !e.done && e.remind && e.at != null)) {
-      final at = e.at!.subtract(const Duration(minutes: 30));
-      if (!at.isAfter(DateTime.now())) {
+      final rawAt = e.at!.subtract(const Duration(minutes: 30));
+      if (!rawAt.isAfter(now)) {
         reminderWindowMissed = true;
         continue;
       }
       if (!seen.add(e.id)) {
         throw StateError('个人提醒存在重复标识，请修改后重试');
+      }
+      final at = DeadlineQuietHoursPolicy.adjustManualCandidate(
+        candidateAt: rawAt,
+        eventAt: e.at!,
+        now: now,
+        allowUrgentNightBreakthrough: allowUrgentNightBreakthrough,
+        location: _location,
+      );
+      if (at == null) {
+        quietHoursSkipped = true;
+        continue;
       }
       validIds.add(e.id);
       schedules.add((e, at));
@@ -306,6 +327,9 @@ class LocalNotificationService {
     if (reminderWindowMissed) {
       lastWarning =
           _appendWarning(lastWarning, '部分个人安排的提前30分钟提醒时间已过，本次未安排提醒；请调整时间或关闭提醒');
+    } else if (quietHoursSkipped) {
+      lastWarning =
+          _appendWarning(lastWarning, '部分个人安排落在夜间静音时段且无可用白天时段，本次未安排有声提醒');
     }
     if (schedules.isNotEmpty) {
       await _ensureAndroidChannel(manualChannel);
@@ -344,12 +368,14 @@ class LocalNotificationService {
         schedules: schedules,
         schedule: (id, item) {
           final (entry, at) = item as (ManualEntry, DateTime);
+          final remainingMinutes =
+              entry.at!.difference(at).inMinutes.clamp(1, 525600);
           return _zonedSchedule(
               id: id,
               channelId: manualChannel,
               title: entry.kind == 'exam' ? '个人考试提醒' : '个人待办提醒',
               body: showDetails
-                  ? '${entry.title} · 30分钟后到时，请核对个人安排'
+                  ? '${entry.title} · $remainingMinutes分钟后到时，请核对个人安排'
                   : '有个人安排即将到时，请打开课业手记查看',
               notifyAt: at,
               payload: 'p:${entry.id}');
@@ -364,7 +390,7 @@ class LocalNotificationService {
                 'manual:${schedules[index].$1.id}:${schedules[index].$2.millisecondsSinceEpoch}',
             category: 'personal',
             stage: 'scheduled',
-            observedAt: DateTime.now(),
+            observedAt: _clock(),
             scheduledAt: schedules[index].$2,
             notificationId: ids[index],
             expectedPayload: 'p:${schedules[index].$1.id}',
@@ -1687,27 +1713,42 @@ class LocalNotificationService {
     try {
       await _ensurePluginInitialized();
       final offsets = ReminderRuleStore.normalizeOffsets(offsetsMinutes);
-      final schedules = <(Assignment, int)>[];
+      final schedules = <(Assignment, DateTime, int)>[];
       final seen = <String>{};
-      final now = DateTime.now();
-      for (final assignment
-          in assignments.where((item) => AssignmentReminderSnapshot(
-                assignment: item,
-                hidden: false,
-                followed: true,
-                courseworkEntry:
-                    CourseworkDeadline.entryFor(item, courseworkState),
-              ).eligibleAt(now))) {
-        final anchor = assignment.isExam
-            ? assignment.reminderAnchorAt
-            : CourseworkDeadline.resolveFor(assignment, courseworkState)?.at;
-        for (final offset in offsets) {
-          final at = anchor?.subtract(Duration(minutes: offset));
-          if (at == null || !at.isAfter(now)) continue;
-          if (!seen.add('${assignment.id}:$offset')) {
+      final now = _clock();
+      for (final assignment in assignments) {
+        final snapshot = AssignmentReminderSnapshot(
+          assignment: assignment,
+          hidden: false,
+          followed: true,
+          courseworkEntry:
+              CourseworkDeadline.entryFor(assignment, courseworkState),
+        );
+        if (!snapshot.eligibleAt(now)) continue;
+        final source = snapshot.deadlineSource;
+        if (source == DeadlineScheduleSource.unknown) continue;
+        final anchor = snapshot.anchorAt;
+        if (anchor == null || !anchor.isAfter(now)) continue;
+        final slots = DeadlineQuietHoursPolicy.planDeadlineSlots(
+          deadlineAt: anchor,
+          now: now,
+          offsetsMinutes: offsets,
+          source: source,
+          eventKind: snapshot.eventKind,
+          allowUrgentNightBreakthrough: allowUrgentNightBreakthrough,
+          location: _location,
+        );
+        for (final slot in slots) {
+          final epochMs = slot.notifyAt.toUtc().millisecondsSinceEpoch;
+          if (!seen.add('${assignment.id}:$epochMs')) {
             throw StateError('作业提醒存在重复标识，请重新同步后重试');
           }
-          schedules.add((assignment, offset));
+          final remaining = anchor
+              .toUtc()
+              .difference(slot.notifyAt.toUtc())
+              .inMinutes
+              .clamp(1, 525600);
+          schedules.add((assignment, slot.notifyAt, remaining));
         }
       }
       if (schedules.isNotEmpty) {
@@ -1718,8 +1759,14 @@ class LocalNotificationService {
         belongs: (payload) => payload?.startsWith('a:') ?? false,
         schedules: schedules,
         schedule: (id, item) {
-          final (assignment, offset) = item as (Assignment, int);
-          return _scheduleAssignmentReminder(assignment, offset, id);
+          final (assignment, notifyAt, remainingMinutes) =
+              item as (Assignment, DateTime, int);
+          return _scheduleAssignmentReminder(
+            assignment,
+            notifyAt,
+            remainingMinutes,
+            id,
+          );
         },
       );
     } catch (error) {
@@ -1730,14 +1777,11 @@ class LocalNotificationService {
 
   Future<void> _scheduleAssignmentReminder(
     Assignment assignment,
-    int offset,
+    DateTime notifyAt,
+    int remainingMinutes,
     int notificationId,
   ) async {
-    final anchor = assignment.isExam
-        ? assignment.reminderAnchorAt
-        : CourseworkDeadline.resolveFor(assignment, courseworkState)?.at;
-    final notifyAt = anchor?.subtract(Duration(minutes: offset));
-    if (notifyAt == null || notifyAt.difference(DateTime.now()).isNegative) {
+    if (!notifyAt.toUtc().isAfter(_clock().toUtc())) {
       return;
     }
     await _zonedSchedule(
@@ -1745,7 +1789,7 @@ class LocalNotificationService {
       channelId: assignmentChannel,
       title: assignment.isExam ? '考试即将开考' : '作业即将截止',
       body: showDetails
-          ? '${assignment.courseName} · ${assignment.title}，${formatDeadlineRemainingText(offset, examStart: assignment.isExam)}'
+          ? '${assignment.courseName} · ${assignment.title}，${formatDeadlineRemainingText(remainingMinutes, examStart: assignment.isExam)}'
           : assignment.isExam
               ? '有考试即将开考，请打开课业手记查看'
               : '有作业即将截止，请打开课业手记查看',

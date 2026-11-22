@@ -832,6 +832,19 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                         tooltip: '删除',
                       ),
                     ),
+                  SwitchListTile(
+                    key: const ValueKey('night-breakthrough-switch'),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    title: Text('允许 ≤1 小时死线穿透夜间静音', style: journal.entryTitle),
+                    subtitle: Text(
+                      '默认 23:30 至次日 07:30 静音并提前于 22:30 提醒；开启后仅距截止 ≤1 小时可穿透（仍受系统音量与勿扰限制）',
+                      style: journal.metadata,
+                    ),
+                    value: widget
+                        .assignmentStore.allowUrgentDeadlineNightBreakthrough,
+                    onChanged: _saving ? null : _saveNightBreakthrough,
+                  ),
                 ],
               ),
               const SizedBox(height: 14),
@@ -1222,6 +1235,26 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                 ? '新增正式作业提醒已开启'
                 : '新增正式作业提醒已关闭；截止提醒仍由原规则控制'
             : widget.assignmentStore.operationError ?? '设置保存失败，请重试');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _saveNightBreakthrough(bool value) async {
+    setState(() => _saving = true);
+    try {
+      final saved = await widget.assignmentStore
+          .saveAllowUrgentDeadlineNightBreakthrough(value);
+      if (mounted) {
+        _showMessage(saved
+            ? widget.assignmentStore.serviceWarnings.isNotEmpty
+                ? '夜间穿透设置已保存，但提醒仍需处理：${widget.assignmentStore.serviceWarnings.first}'
+                : value
+                    ? '已允许 ≤1 小时紧急死线在夜间静音时段提醒'
+                    : '已关闭夜间静音穿透，23:30–07:30 默认静音'
+            : widget.assignmentStore.operationError ?? '设置保存失败，请重试');
+        if (saved) unawaited(_loadHealth(force: true));
       }
     } finally {
       if (mounted) setState(() => _saving = false);

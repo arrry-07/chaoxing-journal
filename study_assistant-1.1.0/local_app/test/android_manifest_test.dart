@@ -84,6 +84,11 @@ void main() {
       contains('android.service.notification.NotificationListenerService'),
     );
     expect(manifest, contains('android.intent.action.TIMEZONE_CHANGED'));
+    expect(
+      manifest,
+      contains(
+          'android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED'),
+    );
     final reminderSystemReceiver = RegExp(
       r'<receiver\s+android:name="\.ReminderSystemReceiver"[\s\S]*?</receiver>',
     ).firstMatch(manifest)?.group(0);

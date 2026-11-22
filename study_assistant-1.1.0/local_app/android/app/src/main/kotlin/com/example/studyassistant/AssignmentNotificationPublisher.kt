@@ -13,11 +13,13 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 object AssignmentNotificationPublisher {
     const val CHANNEL_DEADLINES = "assignment_deadlines"
     const val CHANNEL_UPDATES = "assignment_updates"
+    const val CHANNEL_SILENT = "assignment_silent"
     private const val EXTRA_DELIVERY_TOKEN = "com.example.studyassistant.DELIVERY_TOKEN"
 
     // Guarded by deliveryLock, including cleanup and the visibility check.
@@ -56,6 +58,17 @@ object AssignmentNotificationPublisher {
                 description = "学习通作业新增提醒"
             },
         )
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_SILENT,
+                "静默作业通知",
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = "未知截止时间的新增作业静默提示"
+                setSound(null, null)
+                enableVibration(false)
+            },
+        )
     }
 
     fun publishDeadline(
@@ -63,6 +76,7 @@ object AssignmentNotificationPublisher {
         database: ReminderDatabase,
         event: StoredReminderEvent,
         now: Instant = Instant.now(),
+        zone: ZoneId = ZoneId.systemDefault(),
     ): PublishResult {
         ensureChannels(context)
         if (!LegacyAssignmentMigrationState.isComplete(context)) {
@@ -107,7 +121,96 @@ object AssignmentNotificationPublisher {
         if (deadline <= now.toEpochMilli()) {
             return cancelInvalid(context, database, event, null, now.toEpochMilli())
         }
-        notificationWarning(context, CHANNEL_DEADLINES)?.let {
+        val evaluation = DeadlineQuietHoursPolicy.evaluateDeadlineDelivery(
+            now = now,
+            scheduledNotifyAt = Instant.ofEpochMilli(event.notifyAt),
+            deadlineAt = Instant.ofEpochMilli(deadline),
+            deadlineSource = snapshot.deadlineSource,
+            allowUrgentNightBreakthrough = account.allowUrgentNightBreakthrough,
+            zone = zone,
+        )
+        when (evaluation.decision) {
+            DeadlineQuietHoursPolicy.DeliveryDecision.DELIVER -> Unit
+            DeadlineQuietHoursPolicy.DeliveryDecision.BLOCK_MISSING_SOURCE -> {
+                database.cancelEvent(event.eventId)
+                return PublishResult(
+                    false,
+                    null,
+                    "旧版提醒缺少时间来源，等待重新规划",
+                    recordObservations(
+                        context,
+                        database,
+                        listOf(event),
+                        "blocked",
+                        "missingDeadlineSource",
+                        null,
+                        now.toEpochMilli(),
+                        useEventNotificationId = true,
+                    ),
+                )
+            }
+            DeadlineQuietHoursPolicy.DeliveryDecision.SUPPRESS_LATE_QUIET -> {
+                database.cancelEvent(event.eventId)
+                return PublishResult(
+                    false,
+                    null,
+                    null,
+                    recordObservations(
+                        context,
+                        database,
+                        listOf(event),
+                        "cancelled",
+                        "lateQuietSuppressed",
+                        null,
+                        now.toEpochMilli(),
+                        useEventNotificationId = true,
+                    ),
+                )
+            }
+            DeadlineQuietHoursPolicy.DeliveryDecision.CANCEL_DEADLINE_PASSED -> {
+                database.cancelEvent(event.eventId)
+                return PublishResult(
+                    false,
+                    null,
+                    null,
+                    recordObservations(
+                        context,
+                        database,
+                        listOf(event),
+                        "cancelled",
+                        "deadlinePassed",
+                        null,
+                        now.toEpochMilli(),
+                        useEventNotificationId = true,
+                    ),
+                )
+            }
+            DeadlineQuietHoursPolicy.DeliveryDecision.DEFER_TO_QUIET_END -> {
+                val nextAt = evaluation.deferredAt!!.toEpochMilli()
+                database.updateEventNotifyAt(event.eventId, nextAt)
+                AssignmentAlarmScheduler.scheduleDeadline(
+                    context,
+                    event.copy(notifyAt = nextAt),
+                )
+                return PublishResult(
+                    false,
+                    null,
+                    "当前处于夜间静音时段，提醒已顺延",
+                    recordObservations(
+                        context,
+                        database,
+                        listOf(event),
+                        "deferred",
+                        "quietHours",
+                        null,
+                        now.toEpochMilli(),
+                        scheduledAtOverride = nextAt,
+                    ),
+                )
+            }
+        }
+        val activeChannel = CHANNEL_DEADLINES
+        notificationWarning(context, activeChannel)?.let {
             return blocked(context, database, listOf(event), event.eventKind, it)
         }
 
@@ -214,6 +317,23 @@ object AssignmentNotificationPublisher {
                 it,
             )
         }
+        val unknownDeadlineOnly = todo.all { it.deadlineAt == null }
+        val deliveryChannelId = if (unknownDeadlineOnly && channelId == CHANNEL_UPDATES) {
+            CHANNEL_SILENT
+        } else {
+            channelId
+        }
+        if (deliveryChannelId != channelId) {
+            notificationWarning(context, deliveryChannelId)?.let {
+                return blocked(
+                    context,
+                    database,
+                    todo,
+                    "newAssignment",
+                    it,
+                )
+            }
+        }
         val single = todo.singleOrNull()
         val notificationId = if (single != null) {
             single.notificationId
@@ -222,7 +342,16 @@ object AssignmentNotificationPublisher {
                 "new:${accountHash}:${todo.map { it.eventId }.sorted().joinToString("|")}",
             )
         }
-        val notification = newAssignmentNotification(context, todo, account.showDetails, now, channelId)
+        val notification = newAssignmentNotification(
+            context,
+            todo,
+            account.showDetails,
+            now,
+            deliveryChannelId,
+        )
+            .apply {
+                if (unknownDeadlineOnly) setSilent(true)
+            }
             .build()
         return submit(
             context,

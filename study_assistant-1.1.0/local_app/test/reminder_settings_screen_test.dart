@@ -998,6 +998,38 @@ void main() {
     expect(store.notificationDetails, !initialDetails);
     expect(store.reminderOffsetsMinutes, [30]);
   });
+
+  testWidgets('Phase 4A night breakthrough switch defaults off and toggles',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ReminderSettingsScreen(assignmentStore: store),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final toggle = find.byKey(const ValueKey('night-breakthrough-switch'));
+    await scrollTo(tester, toggle);
+    await Scrollable.ensureVisible(tester.element(toggle), alignment: 0.5);
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+    expect(store.allowUrgentDeadlineNightBreakthrough, isFalse);
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(store.allowUrgentDeadlineNightBreakthrough, isTrue);
+    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+    expect(find.textContaining('夜间静音时段提醒'), findsOneWidget);
+  });
 }
 
 Future<AssignmentStore> _launchApp(WidgetTester tester, String location) async {

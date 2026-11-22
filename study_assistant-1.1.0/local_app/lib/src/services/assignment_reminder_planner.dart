@@ -1,7 +1,9 @@
+import 'package:timezone/timezone.dart' as tz;
+
 import '../models/assignment.dart';
 import '../models/local_coursework_state.dart';
 import 'coursework_deadline.dart';
-import 'daytime_check_policy.dart';
+import 'deadline_quiet_hours_policy.dart';
 import 'assignment_query.dart';
 
 enum AssignmentReminderEventType { newAssignment, deadline }
@@ -11,12 +13,14 @@ class AssignmentReminderSnapshot {
     required this.assignment,
     required this.hidden,
     required this.followed,
+    this.archived = false,
     this.courseworkEntry,
   });
 
   final Assignment assignment;
   final bool hidden;
   final bool followed;
+  final bool archived;
   final LocalCourseworkEntry? courseworkEntry;
 
   String get eventKind => assignment.isExam ? 'examStart' : 'deadline';
@@ -24,6 +28,21 @@ class AssignmentReminderSnapshot {
   CourseworkDeadline? get _resolvedDeadline => assignment.isExam
       ? null
       : CourseworkDeadline.resolveEntry(assignment, courseworkEntry);
+
+  DeadlineScheduleSource get deadlineSource {
+    if (assignment.isExam) {
+      return _examCanRemind &&
+              assignment.exam!.startTrusted &&
+              assignment.reminderAnchorAt != null
+          ? DeadlineScheduleSource.official
+          : DeadlineScheduleSource.unknown;
+    }
+    final resolved = _resolvedDeadline;
+    if (resolved == null) return DeadlineScheduleSource.unknown;
+    return resolved.isManual
+        ? DeadlineScheduleSource.manual
+        : DeadlineScheduleSource.official;
+  }
 
   // The reminder DTO's historical deadlineAt field carries the event anchor.
   // Assignment.deadlineAt continues to mean the exam's end time.
@@ -55,6 +74,7 @@ class AssignmentReminderSnapshot {
 
   bool eligibleAt(DateTime now) {
     if (!assignment.isInAssignmentScope ||
+        archived ||
         AssignmentQuery.isArchivedPastTerm(assignment, now) ||
         !assignment.isPendingConfirmed ||
         _effectivelyCompleted ||
@@ -81,6 +101,7 @@ class AssignmentReminderSnapshot {
         'title': assignment.title,
         'eventKind': eventKind,
         'deadlineAt': anchorAt?.toUtc().toIso8601String(),
+        'deadlineSource': deadlineSource.wireValue,
         'deadlineTrusted': anchorTrusted,
         'deadlineReadFailed': _anchorReadFailed,
         'status': assignment.availability == AssignmentAvailability.available &&
@@ -107,6 +128,7 @@ class AssignmentReminderEvent {
     this.offsetMinutes = const [],
     this.batchId,
     this.eventKind = 'deadline',
+    this.deadlineSource = DeadlineScheduleSource.official,
   });
 
   final String eventId;
@@ -119,6 +141,7 @@ class AssignmentReminderEvent {
   final List<int> offsetMinutes;
   final String? batchId;
   final String eventKind;
+  final DeadlineScheduleSource deadlineSource;
 
   Map<String, dynamic> toJson() => {
         'eventId': eventId,
@@ -129,6 +152,7 @@ class AssignmentReminderEvent {
         'title': title,
         'notifyAt': notifyAt.toUtc().toIso8601String(),
         'deadlineAt': deadlineAt?.toUtc().toIso8601String(),
+        'deadlineSource': deadlineSource.wireValue,
         'offsets': offsetMinutes,
         if (batchId != null) 'batchId': batchId,
       };
@@ -181,6 +205,9 @@ class AssignmentReminderPlanner {
     Set<String>? baselinedSources,
     Set<String> completedSourceKeys = const {},
     LocalCourseworkState courseworkState = const LocalCourseworkState.empty(),
+    Set<String> archivedCourseKeys = const {},
+    bool allowUrgentNightBreakthrough = false,
+    tz.Location? location,
   }) {
     final snapshots = assignments
         .where((assignment) => assignment.hasCourseTaskIdentity)
@@ -188,6 +215,7 @@ class AssignmentReminderPlanner {
               assignment: assignment,
               hidden: hiddenAssignmentIds.contains(assignment.id),
               followed: !unfollowedCourseKeys.contains(assignment.courseKey),
+              archived: archivedCourseKeys.contains(assignment.courseKey),
               courseworkEntry:
                   CourseworkDeadline.entryFor(assignment, courseworkState),
             ))
@@ -234,6 +262,7 @@ class AssignmentReminderPlanner {
           notifyAt: now,
           deadlineAt: _trustedDeadline(snapshot),
           eventKind: snapshot.eventKind,
+          deadlineSource: snapshot.deadlineSource,
           batchId: batchId,
         ));
       }
@@ -252,36 +281,32 @@ class AssignmentReminderPlanner {
                   AssignmentDeadlineBucket.notExpiredWithDeadline)) {
         continue;
       }
+      final source = snapshot.deadlineSource;
+      if (source == DeadlineScheduleSource.unknown) continue;
       final deadline = _trustedDeadline(snapshot);
       if (deadline == null || !deadline.isAfter(now)) continue;
-      final localDeadline = deadline.toLocal();
-      final byTime = <DateTime, List<int>>{};
-      for (final offset in reminderOffsetsMinutes.where((value) => value > 0)) {
-        final original = localDeadline.subtract(Duration(minutes: offset));
-        final shifted = original.hour < DaytimeCheckPolicy.startHour
-            ? DateTime(
-                original.year,
-                original.month,
-                original.day,
-                DaytimeCheckPolicy.startHour,
-              )
-            : original;
-        if (!shifted.isAfter(now) || !shifted.isBefore(deadline)) continue;
-        byTime.putIfAbsent(shifted, () => []).add(offset);
-      }
-      for (final entry in byTime.entries) {
-        final offsets = entry.value..sort((a, b) => b.compareTo(a));
+      final slots = DeadlineQuietHoursPolicy.planDeadlineSlots(
+        deadlineAt: deadline,
+        now: now,
+        offsetsMinutes: reminderOffsetsMinutes,
+        source: source,
+        eventKind: snapshot.eventKind,
+        allowUrgentNightBreakthrough: allowUrgentNightBreakthrough,
+        location: location,
+      );
+      for (final slot in slots) {
         rawDeadlineEvents.add(AssignmentReminderEvent(
           eventId: _deadlineEventId(accountHash, assignment.id, deadline,
-              offsets, snapshot.eventKind),
+              slot.offsetMinutes, snapshot.eventKind),
           type: AssignmentReminderEventType.deadline,
           assignmentId: assignment.id,
           courseName: assignment.courseName,
           title: assignment.title,
-          notifyAt: entry.key,
+          notifyAt: slot.notifyAt,
           deadlineAt: deadline,
           eventKind: snapshot.eventKind,
-          offsetMinutes: List.unmodifiable(offsets),
+          deadlineSource: source,
+          offsetMinutes: slot.offsetMinutes,
         ));
       }
     }

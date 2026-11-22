@@ -226,13 +226,14 @@ void main() {
   test(
       'deleting a delivered manual reminder uses native channel ownership without payload',
       () async {
-    final service = LocalNotificationService();
+    final fixedNow = DateTime(2030, 11, 20, 10, 0);
+    final service = LocalNotificationService(clock: () => fixedNow);
     await service.rescheduleManual([
       ManualEntry(
           id: 'qa-manual',
           title: 'QA',
           kind: 'exam',
-          at: DateTime.now().add(const Duration(hours: 1)),
+          at: fixedNow.add(const Duration(hours: 1)),
           remind: true)
     ]);
     final id = pending.single['id'];
@@ -245,12 +246,13 @@ void main() {
   });
   test('active query failure still cancels provable pending manual reminders',
       () async {
-    final service = LocalNotificationService();
+    final fixedNow = DateTime(2030, 11, 20, 10, 0);
+    final service = LocalNotificationService(clock: () => fixedNow);
     ManualEntry entry(String id) => ManualEntry(
         id: id,
         title: id,
         kind: 'todo',
-        at: DateTime.now().add(const Duration(hours: 1)),
+        at: fixedNow.add(const Duration(hours: 1)),
         remind: true);
     await service.rescheduleManual([entry('qa-delete'), entry('qa-keep')]);
     final deleteId = pending
@@ -268,12 +270,13 @@ void main() {
   test(
       'active query failure keeps journal for delivered manual reminder without payload',
       () async {
-    final service = LocalNotificationService();
+    final fixedNow = DateTime(2030, 11, 20, 10, 0);
+    final service = LocalNotificationService(clock: () => fixedNow);
     ManualEntry entry(String id) => ManualEntry(
         id: id,
         title: id,
         kind: 'todo',
-        at: DateTime.now().add(const Duration(hours: 1)),
+        at: fixedNow.add(const Duration(hours: 1)),
         remind: true);
     await service.rescheduleManual([entry('qa-delete'), entry('qa-delivered')]);
     final deleteId = pending
@@ -341,10 +344,11 @@ void main() {
         () async {
       final service = LocalNotificationService();
       if (category == 'assignments') {
+        final baseNow = DateTime(2030, 11, 20, 10, 0);
         await service.rescheduleAssignments([
           f
               .sample('shared')
-              .copyWith(deadlineAt: DateTime.now().add(const Duration(days: 2)))
+              .copyWith(deadlineAt: baseNow.add(const Duration(days: 2)))
         ], offsetsMinutes: [
           30
         ]);

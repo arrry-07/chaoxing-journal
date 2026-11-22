@@ -125,6 +125,8 @@ class _HealthGateway extends BackgroundReminderGateway {
     BackgroundCheckSettings settings, {
     required bool showDetails,
     bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
   }) async {}
 
   @override
@@ -355,12 +357,11 @@ void main() {
     final s = LocalNotificationService();
     await s.initialize();
     calls.clear();
-    final now = DateTime.now();
     final item = ManualEntry(
         id: 'private',
         title: 'PRIVATE TITLE',
         kind: 'exam',
-        at: now.add(const Duration(hours: 2)),
+        at: DateTime(2030, 11, 6, 18, 0),
         remind: true);
     await s.rescheduleManual([item]);
     final hidden =
@@ -400,7 +401,7 @@ void main() {
       id: 'permission-warning',
       title: '个人安排',
       kind: 'todo',
-      at: DateTime.now().add(const Duration(hours: 2)),
+      at: DateTime(2030, 11, 6, 18, 0),
       remind: true,
     );
 
@@ -439,7 +440,7 @@ void main() {
       id: 'channel-warning',
       title: '个人安排',
       kind: 'todo',
-      at: DateTime.now().add(const Duration(hours: 2)),
+      at: DateTime(2030, 11, 6, 18, 0),
       remind: true,
     );
 
@@ -695,7 +696,7 @@ void main() {
           id: 'manual-channel',
           title: '个人安排',
           kind: 'todo',
-          at: DateTime.now().add(const Duration(days: 2)),
+          at: DateTime(2030, 11, 6, 18, 0),
           remind: true)
     ]);
     createIndex = calls
@@ -873,7 +874,7 @@ void main() {
         id: 'manual-retry',
         title: '重试',
         kind: 'todo',
-        at: DateTime.now().add(const Duration(days: 2)),
+        at: DateTime(2030, 11, 6, 18, 0),
         remind: true);
     await expectLater(
         service.rescheduleManual([entry]), throwsA(isA<PlatformException>()));
@@ -947,7 +948,7 @@ void main() {
           id: 'manual-survives',
           title: '个人提醒',
           kind: 'todo',
-          at: DateTime.now().add(const Duration(days: 2)),
+          at: DateTime(2030, 11, 6, 18, 0),
           remind: true)
     ]);
     expect(
@@ -1514,7 +1515,7 @@ void main() {
     final s = LocalNotificationService();
     await s.initialize();
     calls.clear();
-    final at = DateTime.now().toUtc().add(const Duration(days: 2));
+    final at = DateTime(2030, 11, 6, 18, 0);
     final entry = ManualEntry(
         id: 'm1', title: 'exam', kind: 'exam', at: at, remind: true);
     await s.rescheduleManual([
@@ -1549,7 +1550,9 @@ void main() {
     final s = LocalNotificationService();
     await s.initialize();
     calls.clear();
-    await s.rescheduleAssignments([f.sample('106040')], offsetsMinutes: [30]);
+    final daytimeSample =
+        f.sample('106040').copyWith(deadlineAt: DateTime(2030, 11, 6, 18, 0));
+    await s.rescheduleAssignments([daytimeSample], offsetsMinutes: [30]);
     final workId = (calls
         .singleWhere((c) => c.method == 'zonedSchedule')
         .arguments as Map)['id'];
@@ -1623,7 +1626,7 @@ void main() {
               id: id,
               title: id,
               kind: 'todo',
-              at: at ?? now.add(const Duration(days: 2)),
+              at: at ?? DateTime(2030, 11, 6, 18, 0),
               done: done,
               remind: remind);
       final stale = entry('stale');
@@ -1710,18 +1713,17 @@ void main() {
     });
     final service = LocalNotificationService();
     await service.initialize();
-    final now = DateTime.now();
     final stale = ManualEntry(
         id: 'stale',
         title: 'stale',
         kind: 'todo',
-        at: now.add(const Duration(days: 2)),
+        at: DateTime(2030, 11, 6, 18, 0),
         remind: true);
     final valid = ManualEntry(
         id: 'valid',
         title: 'valid',
         kind: 'todo',
-        at: now.add(const Duration(days: 2)),
+        at: DateTime(2030, 11, 6, 18, 0),
         remind: true);
     await service.rescheduleManual([stale, valid]);
     final staleId = active.entries
@@ -1810,20 +1812,19 @@ void main() {
       }
     });
     final service = LocalNotificationService();
-    final now = DateTime.now();
     await expectLater(
         service.rescheduleManual([
           ManualEntry(
               id: 'valid',
               title: 'valid',
               kind: 'todo',
-              at: now.add(const Duration(days: 2)),
+              at: DateTime(2030, 11, 6, 18, 0),
               remind: true),
           ManualEntry(
               id: 'other',
               title: 'other',
               kind: 'todo',
-              at: now.add(const Duration(days: 3)),
+              at: DateTime(2030, 11, 7, 18, 0),
               remind: true),
         ]),
         throwsA(isA<PlatformException>()));
@@ -1877,7 +1878,7 @@ void main() {
           id: 'delivered-private',
           title: '已送达的个人事项',
           kind: 'todo',
-          at: DateTime.now().add(const Duration(days: 2)),
+          at: DateTime(2030, 11, 6, 18, 0),
           remind: true)
     ]);
     final deliveredId = active.keys.single;
@@ -2606,9 +2607,16 @@ void main() {
       return true;
     });
     final service = LocalNotificationService();
+    final daytimeDeadline = DateTime(2030, 11, 6, 18, 0);
     await service.rescheduleAssignments([
-      f.sample('batch-a').copyWith(deadlineTrusted: true),
-      f.sample('batch-b').copyWith(deadlineTrusted: true),
+      f.sample('batch-a').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: daytimeDeadline,
+          ),
+      f.sample('batch-b').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: daytimeDeadline,
+          ),
     ], offsetsMinutes: [
       30
     ]);
@@ -2664,9 +2672,16 @@ void main() {
       return true;
     });
     final service = LocalNotificationService();
+    final daytimeDeadline = DateTime(2030, 11, 6, 18, 0);
     await service.rescheduleAssignments([
-      f.sample('compensate-a').copyWith(deadlineTrusted: true),
-      f.sample('compensate-b').copyWith(deadlineTrusted: true),
+      f.sample('compensate-a').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: daytimeDeadline,
+          ),
+      f.sample('compensate-b').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: daytimeDeadline,
+          ),
     ], offsetsMinutes: [
       30
     ]);
@@ -2713,9 +2728,14 @@ void main() {
       return true;
     });
     final service = LocalNotificationService();
-    await service.rescheduleAssignments(
-        [f.sample('committed').copyWith(deadlineTrusted: true)],
-        offsetsMinutes: [30]);
+    await service.rescheduleAssignments([
+      f.sample('committed').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: DateTime(2030, 11, 6, 18, 0),
+          )
+    ], offsetsMinutes: [
+      30
+    ]);
     expect(service.lastWarning, contains('旧通知清理失败'));
     expect(active.length, 2,
         reason: 'new batch is committed while old cancellation is pending');
@@ -2762,9 +2782,14 @@ void main() {
     });
 
     final service = LocalNotificationService();
-    await service.rescheduleAssignments(
-        [f.sample('commit-ack-lost').copyWith(deadlineTrusted: true)],
-        offsetsMinutes: [30]);
+    await service.rescheduleAssignments([
+      f.sample('commit-ack-lost').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: DateTime(2030, 11, 6, 18, 0),
+          )
+    ], offsetsMinutes: [
+      30
+    ]);
 
     expect(active.length, 1,
         reason: 'read-back must recognize the committed marker as durable');
@@ -2807,9 +2832,14 @@ void main() {
     });
 
     final service = LocalNotificationService();
-    await service.rescheduleAssignments(
-        [f.sample('commit-write-failed').copyWith(deadlineTrusted: true)],
-        offsetsMinutes: [30]);
+    await service.rescheduleAssignments([
+      f.sample('commit-write-failed').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: DateTime(2030, 11, 6, 18, 0),
+          )
+    ], offsetsMinutes: [
+      30
+    ]);
 
     expect(service.lastWarning, contains('未能完整更新'));
     expect(active.keys, [805]);
@@ -2855,9 +2885,14 @@ void main() {
     });
 
     final firstProcess = LocalNotificationService();
-    await firstProcess.rescheduleAssignments(
-        [f.sample('orphaned-commit').copyWith(deadlineTrusted: true)],
-        offsetsMinutes: [30]);
+    await firstProcess.rescheduleAssignments([
+      f.sample('orphaned-commit').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: DateTime(2030, 11, 6, 18, 0),
+          )
+    ], offsetsMinutes: [
+      30
+    ]);
 
     expect(firstProcess.lastWarning, contains('无法重建恢复记录'));
     expect(active.length, 2,
@@ -3014,13 +3049,24 @@ void main() {
       return true;
     });
     final service = LocalNotificationService();
+    final daytimeDeadline = DateTime(2030, 11, 6, 18, 0);
     await Future.wait([
-      service.rescheduleAssignments(
-          [f.sample('concurrent-first').copyWith(deadlineTrusted: true)],
-          offsetsMinutes: [30]),
-      service.rescheduleAssignments(
-          [f.sample('concurrent-second').copyWith(deadlineTrusted: true)],
-          offsetsMinutes: [30]),
+      service.rescheduleAssignments([
+        f.sample('concurrent-first').copyWith(
+              deadlineTrusted: true,
+              deadlineAt: daytimeDeadline,
+            )
+      ], offsetsMinutes: [
+        30
+      ]),
+      service.rescheduleAssignments([
+        f.sample('concurrent-second').copyWith(
+              deadlineTrusted: true,
+              deadlineAt: daytimeDeadline,
+            )
+      ], offsetsMinutes: [
+        30
+      ]),
     ]);
     expect(active, hasLength(1));
     expect(active.values.single['payload'], contains('concurrent-second'));

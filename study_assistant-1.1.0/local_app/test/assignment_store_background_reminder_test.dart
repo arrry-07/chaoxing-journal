@@ -810,7 +810,7 @@ void main() {
             id: 'm-q',
             title: '测查询',
             kind: 'todo',
-            at: DateTime.now().add(const Duration(days: 2)),
+            at: DateTime(2030, 11, 6, 18, 0),
             remind: true,
             done: false,
           ),
@@ -1242,6 +1242,79 @@ void main() {
     await otherStore.restoreSession();
     expect(otherStore.courseworkState.isEmpty, isTrue);
   });
+
+  test(
+      'Phase 4A night breakthrough persists per-account, updates native settings, and rebuilds plan',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _FakeGateway();
+    final session = _MemorySessionStore()..account = 'account-a';
+    final daytime = DateTime(2026, 11, 20, 20, 0);
+    final midnightDue = DateTime(2026, 11, 21, 0, 30);
+    final store = _store(
+      gateway: gateway,
+      client: _ClientQueue([
+        [_assignment('night', midnightDue)],
+      ]),
+      session: session,
+      clock: () => daytime,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await store.syncAssignments();
+    expect(store.allowUrgentDeadlineNightBreakthrough, isFalse);
+
+    // Toggle ON: marks mutation pending, writes scoped pref, syncs updateSettings, rebuilds plan.
+    gateway.plans.clear();
+    gateway.updatedNightBreakthroughs.clear();
+    expect(await store.saveAllowUrgentDeadlineNightBreakthrough(true), isTrue);
+    expect(store.allowUrgentDeadlineNightBreakthrough, isTrue);
+    expect(gateway.updatedNightBreakthroughs.last, isTrue);
+    final onEvents = gateway.plans.last.deadlineEvents;
+    expect(
+      onEvents.any((e) =>
+          e.deadlineAt!.difference(e.notifyAt) <= const Duration(minutes: 60)),
+      isTrue,
+    );
+
+    // Separate store for account-b has isolated default false.
+    final otherSession = _MemorySessionStore()..account = 'account-b';
+    final otherStore = _store(
+      gateway: _FakeGateway(),
+      client: _ClientQueue([[]]),
+      session: otherSession,
+      clock: () => daytime,
+    );
+    addTearDown(otherStore.dispose);
+    await otherStore.restoreSession();
+    expect(otherStore.allowUrgentDeadlineNightBreakthrough, isFalse);
+
+    // Restoring account-a still loads persisted breakthrough true.
+    final aSession = _MemorySessionStore()..account = 'account-a';
+    final restoredA = _store(
+      gateway: gateway,
+      client: _ClientQueue([[]]),
+      session: aSession,
+      clock: () => daytime,
+    );
+    addTearDown(restoredA.dispose);
+    await restoredA.restoreSession();
+    expect(restoredA.allowUrgentDeadlineNightBreakthrough, isTrue);
+
+    // Fail native settings -> plan activation is aborted & warning surfaced.
+    gateway.plans.clear();
+    gateway.failSettings = true;
+    expect(await restoredA.saveAllowUrgentDeadlineNightBreakthrough(false),
+        isTrue);
+    expect(restoredA.allowUrgentDeadlineNightBreakthrough, isFalse);
+    expect(gateway.plans, isEmpty);
+    expect(restoredA.error, isNotNull);
+
+    // Logout resets runtime flag cleanly.
+    gateway.failSettings = false;
+    await restoredA.logout();
+    expect(restoredA.allowUrgentDeadlineNightBreakthrough, isFalse);
+  });
 }
 
 DateTime todayAt(int hour, [int minute = 0]) {
@@ -1520,6 +1593,7 @@ class _FakeGateway extends BackgroundReminderGateway {
       NotificationRemoteAuthorization.granted;
   bool sessionCurrent = true;
   final reconcileSettings = <bool>[];
+  final updatedNightBreakthroughs = <bool>[];
   void Function()? onAcquire;
 
   @override
@@ -1666,9 +1740,12 @@ class _FakeGateway extends BackgroundReminderGateway {
     BackgroundCheckSettings settings, {
     required bool showDetails,
     bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
   }) async {
     if (failSettings) throw StateError('synthetic settings failure');
     reconcileSettings.add(reconcileSchedules);
+    updatedNightBreakthroughs.add(allowUrgentNightBreakthrough);
     mutationVersion++;
   }
 

@@ -136,13 +136,20 @@ class AssignmentNotificationPublisherTest {
 
     @Test
     fun detailedDeadlineIsPrivateWithAnAnonymousPublicVersion() {
-        val event = seedPendingDeadlineAssignment()
+        val shanghai = ZoneId.of("Asia/Shanghai")
+        val daytimeNow = ZonedDateTime.now(shanghai).plusDays(1)
+            .withHour(10).withMinute(0).withSecond(0).withNano(0)
+        val daytimeDeadline = daytimeNow.plusHours(1).toInstant().toEpochMilli()
+        val event = seedPendingDeadlineAssignment(
+            deadlineAtOverride = daytimeDeadline,
+            notifyAtOverride = daytimeDeadline - 60_000L,
+        )
         assertTrue(LegacyAssignmentMigrationState.confirm(context))
         assertTrue("Grant POST_NOTIFICATIONS on the isolated test app",
             notificationManager.areNotificationsEnabled())
 
         val result = AssignmentNotificationPublisher.publishDeadline(
-            context, database, event, Instant.now(),
+            context, database, event, daytimeNow.toInstant(), shanghai,
         )
 
         assertTrue("Expected actual delivery: ${result.warning}", result.submitted)
@@ -559,7 +566,11 @@ class AssignmentNotificationPublisherTest {
         return stableId
     }
 
-    private fun seedPendingDeadlineAssignment(): StoredReminderEvent {
+    private fun seedPendingDeadlineAssignment(
+        deadlineAtOverride: Long? = null,
+        notifyAtOverride: Long? = null,
+        deadlineSource: String = "official",
+    ): StoredReminderEvent {
         val sessionEpoch = database.ensureActiveAccount(accountHash).sessionEpoch
         database.updateSettings(
             accountHash = accountHash,
@@ -572,7 +583,8 @@ class AssignmentNotificationPublisherTest {
         )
         val state = database.loadPlanState(accountHash, sessionEpoch)
         val assignmentId = "cx:work:instrumentation:class:deadline"
-        val deadlineAt = System.currentTimeMillis() + 3_600_000L
+        val deadlineAt = deadlineAtOverride ?: (System.currentTimeMillis() + 3_600_000L)
+        val notifyAt = notifyAtOverride ?: (deadlineAt - 60_000L)
         val eventId = "$accountHash|$assignmentId|deadline:$deadlineAt|60"
         val stableId = ReminderDatabase.stableNotificationId(eventId)
         val now = System.currentTimeMillis()
@@ -596,6 +608,7 @@ class AssignmentNotificationPublisherTest {
                     hidden = false,
                     followed = true,
                     formal = true,
+                    deadlineSource = deadlineSource,
                 ),
             ),
             events = listOf(
@@ -607,12 +620,13 @@ class AssignmentNotificationPublisherTest {
                     assignmentId = assignmentId,
                     courseName = "合成课程",
                     title = "合成截止作业",
-                    notifyAt = deadlineAt - 60_000L,
+                    notifyAt = notifyAt,
                     deadlineAt = deadlineAt,
                     offsets = listOf(1),
                     batchId = null,
                     status = ReminderDatabase.STATUS_PENDING,
                     notificationId = stableId,
+                    deadlineSource = deadlineSource,
                 ),
             ),
             completedAt = now,
@@ -705,7 +719,8 @@ class AssignmentNotificationPublisherTest {
         val zone = ZoneId.of("Asia/Shanghai")
         val futureDay = ZonedDateTime.now(zone).plusDays(7)
         val preWindowNow = futureDay.withHour(2).withMinute(0).withSecond(0).withNano(0)
-        val windowStart = BackgroundWorkScheduler.nextWindowStart(preWindowNow)
+        val windowStart = DeadlineQuietHoursPolicy.nextQuietEnd(preWindowNow.toInstant(), zone)
+            .toEpochMilli()
 
         val beforeWindowDeadlineAt = futureDay.withHour(6).withMinute(0).withSecond(0).withNano(0)
             .toInstant()
@@ -826,11 +841,144 @@ class AssignmentNotificationPublisherTest {
                 subjectRefs = listOf("assignment" to lateId),
             )["items"] as List<Map<String, Any?>>
             assertEquals("deferred", lateHistory.first()["stage"])
-            assertEquals("outsideWindow", lateHistory.first()["reasonCode"])
+            assertEquals("quietHours", lateHistory.first()["reasonCode"])
             assertEquals(windowStart, lateHistory.first()["scheduledAt"])
         } finally {
             AssignmentAlarmScheduler.cancelDeadline(context, earlyEvent)
             AssignmentAlarmScheduler.cancelDeadline(context, lateEvent)
+        }
+    }
+
+    @Test
+    fun unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel() {
+        assertTrue(LegacyAssignmentMigrationState.confirm(context))
+        val id = seedPendingNewAssignment()
+        val daytimeNow = ZonedDateTime.now(ZoneId.of("Asia/Shanghai"))
+            .withHour(10).withMinute(0).withSecond(0).withNano(0)
+        val result = AssignmentNotificationPublisher.publishPendingNewAssignments(
+            context,
+            database,
+            accountHash,
+            daytimeNow.toInstant(),
+        )
+        assertTrue(result.submitted)
+        val active = notificationManager.activeNotifications.single { it.id == id && it.tag == null }
+        assertEquals(AssignmentNotificationPublisher.CHANNEL_SILENT, active.notification.channelId)
+        notificationManager.cancel(id)
+    }
+
+    @Test
+    fun deadlineReceiverBlocksMissingSourceSuppressesLateQuietAndAllowsUrgentBreakthrough() {
+        assertTrue(LegacyAssignmentMigrationState.confirm(context))
+        val zone = ZoneId.of("Asia/Shanghai")
+        val futureDay = ZonedDateTime.now(zone).plusDays(7)
+        val quietNow = futureDay.withHour(0).withMinute(15).withSecond(0).withNano(0)
+        val urgentDeadline = futureDay.withHour(1).withMinute(0).withSecond(0).withNano(0)
+            .toInstant().toEpochMilli()
+        val epoch = database.ensureActiveAccount(accountHash).sessionEpoch
+        database.updateSettings(
+            accountHash = accountHash,
+            sessionEpoch = epoch,
+            backgroundEnabled = true,
+            intervalMinutes = 240,
+            listenerEnabled = true,
+            newAssignmentEnabled = true,
+            showDetails = false,
+            allowUrgentNightBreakthrough = true,
+        )
+        ReminderHistoryStore.enableSession(context, database, accountHash, epoch, 1)
+        val lateId = "cx:work:4a:late"
+        val urgentId = "cx:work:4a:urgent"
+        val lateEvent = StoredReminderEvent(
+            eventId = "$accountHash|$lateId|deadline:${urgentDeadline + 7_200_000L}|30",
+            accountHash = accountHash,
+            sessionEpoch = epoch,
+            type = ReminderDatabase.EVENT_DEADLINE,
+            assignmentId = lateId,
+            courseName = "晚间到达测试课",
+            title = "错峰迟到作业",
+            notifyAt = quietNow.minusHours(2).toInstant().toEpochMilli(),
+            deadlineAt = urgentDeadline + 7_200_000L,
+            offsets = listOf(30),
+            batchId = null,
+            status = ReminderDatabase.STATUS_PENDING,
+            notificationId = ReminderDatabase.stableNotificationId("late-quiet"),
+            deadlineSource = "official",
+        )
+        val urgentEvent = StoredReminderEvent(
+            eventId = "$accountHash|$urgentId|deadline:$urgentDeadline|45",
+            accountHash = accountHash,
+            sessionEpoch = epoch,
+            type = ReminderDatabase.EVENT_DEADLINE,
+            assignmentId = urgentId,
+            courseName = "紧急穿透测试课",
+            title = "45分钟死线作业",
+            notifyAt = quietNow.toInstant().toEpochMilli(),
+            deadlineAt = urgentDeadline,
+            offsets = listOf(45),
+            batchId = null,
+            status = ReminderDatabase.STATUS_PENDING,
+            notificationId = ReminderDatabase.stableNotificationId("urgent-break"),
+            deadlineSource = "manual",
+        )
+        val state = database.loadPlanState(accountHash, epoch)
+        database.applyPlan(
+            accountHash = accountHash,
+            sessionEpoch = epoch,
+            baselineCompleted = true,
+            knownIds = setOf(lateId, urgentId),
+            snapshots = listOf(
+                StoredReminderSnapshot(
+                    accountHash = accountHash,
+                    assignmentId = lateId,
+                    sessionEpoch = epoch,
+                    courseName = "晚间到达测试课",
+                    title = "错峰迟到作业",
+                    deadlineAt = urgentDeadline + 7_200_000L,
+                    deadlineTrusted = true,
+                    deadlineReadFailed = false,
+                    status = "pending",
+                    completed = false,
+                    hidden = false,
+                    followed = true,
+                    formal = true,
+                    deadlineSource = "official",
+                ),
+                StoredReminderSnapshot(
+                    accountHash = accountHash,
+                    assignmentId = urgentId,
+                    sessionEpoch = epoch,
+                    courseName = "紧急穿透测试课",
+                    title = "45分钟死线作业",
+                    deadlineAt = urgentDeadline,
+                    deadlineTrusted = true,
+                    deadlineReadFailed = false,
+                    status = "pending",
+                    completed = false,
+                    hidden = false,
+                    followed = true,
+                    formal = true,
+                    deadlineSource = "manual",
+                ),
+            ),
+            events = listOf(lateEvent, urgentEvent),
+            completedAt = quietNow.toInstant().toEpochMilli(),
+            failure = null,
+            syncCompleted = true,
+            expectedMutationVersion = state.mutationVersion,
+        )
+        val receiver = AssignmentDeadlineReceiver()
+        try {
+            receiver.handleDeadline(context, database, lateEvent.eventId, accountHash, quietNow)
+            assertEquals(ReminderDatabase.STATUS_CANCELLED, database.event(lateEvent.eventId)?.status)
+
+            receiver.handleDeadline(context, database, urgentEvent.eventId, accountHash, quietNow)
+            assertEquals(ReminderDatabase.STATUS_SUBMITTED, database.event(urgentEvent.eventId)?.status)
+            assertTrue(notificationManager.activeNotifications.any { it.id == urgentEvent.notificationId })
+        } finally {
+            notificationManager.cancel(urgentEvent.notificationId)
+            AssignmentAlarmScheduler.cancelDeadline(context, lateEvent)
+            AssignmentAlarmScheduler.cancelDeadline(context, urgentEvent)
         }
     }
 

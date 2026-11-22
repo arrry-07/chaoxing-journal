@@ -26,9 +26,16 @@ class NewAssignmentWindowReceiver : BroadcastReceiver() {
     ) {
         val account = database.readAccount(accountHash) ?: return
         if (!account.active || !account.newAssignmentEnabled) return
-        if (now.hour < 8) {
-            val windowStart = BackgroundWorkScheduler.nextWindowStart(now)
-            AssignmentAlarmScheduler.scheduleNewAssignmentWindow(appContext, accountHash)
+        if (!DeadlineQuietHoursPolicy.isInAudibleNewWindow(now.toInstant(), now.zone)) {
+            val windowStart = DeadlineQuietHoursPolicy
+                .nextAudibleNewWindowStart(now.toInstant(), now.zone)
+                .toEpochMilli()
+            AssignmentAlarmScheduler.scheduleNewAssignmentWindow(
+                appContext,
+                accountHash,
+                now.toInstant(),
+                now.zone,
+            )
             AssignmentNotificationPublisher.recordReceiverReason(
                 appContext,
                 database,

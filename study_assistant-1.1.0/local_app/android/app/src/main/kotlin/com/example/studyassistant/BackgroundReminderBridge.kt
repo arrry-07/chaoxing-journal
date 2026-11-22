@@ -185,6 +185,10 @@ object BackgroundReminderBridge {
                                         ) == true,
                                     showDetails =
                                         call.argument<Boolean>("showDetails") == true,
+                                    allowUrgentNightBreakthrough =
+                                        call.argument<Boolean>("allowUrgentNightBreakthrough"),
+                                    deadlineChannelId =
+                                        call.argument<String>("deadlineChannelId"),
                                 )
                                 val reconcileSchedules =
                                     call.argument<Boolean>("reconcileSchedules") != false
@@ -691,7 +695,7 @@ object BackgroundReminderBridge {
         if (application.pendingNewCount == 0) {
             AssignmentAlarmScheduler.cancelNewAssignmentWindow(appContext, accountHash)
         }
-        if (NativeReminderPolicy.isInDaytimeWindow(now.toInstant(), now.zone)) {
+        if (DeadlineQuietHoursPolicy.isInAudibleNewWindow(now.toInstant(), now.zone)) {
             val published = AssignmentNotificationPublisher.publishPendingNewAssignments(
                 appContext,
                 database,
@@ -708,8 +712,8 @@ object BackgroundReminderBridge {
                 now.zone,
             )
             if (application.newEvents.isNotEmpty()) {
-                val windowStart = NativeReminderPolicy
-                    .nextWindowStart(now.toInstant(), now.zone)
+                val windowStart = DeadlineQuietHoursPolicy
+                    .nextAudibleNewWindowStart(now.toInstant(), now.zone)
                     .toEpochMilli()
                 AssignmentNotificationPublisher.recordEventObservations(
                     context = appContext,

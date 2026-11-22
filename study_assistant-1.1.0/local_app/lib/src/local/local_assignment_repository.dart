@@ -87,6 +87,8 @@ class LocalAssignmentRepository {
   static const _historicalSweepRecoveryWarning = '往期课程轮询游标无法读取，已从起始位置重新计算。';
   static const _acknowledgedDeadlineChangesKey =
       'acknowledged_deadline_changes_v1';
+  static const allowUrgentNightBreakthroughKey =
+      'allow_urgent_deadline_night_breakthrough_v1';
   static const _maxAcknowledgedDeadlineChanges = 300;
   static const _acknowledgedDeadlineRecoveryWarning =
       '部分时间变更已读状态无法读取，原始数据已保留备份；本次以未确认状态临时显示，请勿覆盖原数据。';
@@ -148,6 +150,7 @@ class LocalAssignmentRepository {
     _acknowledgedDeadlineChangesKey,
     '${_acknowledgedDeadlineChangesKey}_recovery_backup',
     '${_acknowledgedDeadlineChangesKey}_recovery_backups',
+    allowUrgentNightBreakthroughKey,
     '${_noticesKey}_recovery_backup',
     '${_noticesKey}_recovery_backups',
     '${_chaptersKey}_recovery_backup',
@@ -427,6 +430,34 @@ class LocalAssignmentRepository {
       raw,
       '时间变更确认状态保存失败',
     );
+  }
+
+  Future<bool> loadAllowUrgentNightBreakthrough(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        final raw = prefs.get(allowUrgentNightBreakthroughKey);
+        return raw is bool ? raw : false;
+      });
+
+  Future<void> writeAllowUrgentNightBreakthroughInPrefs(
+    SharedPreferences prefs,
+    bool enabled,
+  ) async {
+    Object? writeError;
+    try {
+      if (await prefs.setBool(allowUrgentNightBreakthroughKey, enabled)) return;
+      writeError = '原生写入未确认';
+    } catch (error) {
+      writeError = error;
+    }
+    try {
+      await prefs.reload();
+    } catch (reloadError) {
+      throw LocalStorageWriteException('夜间静音穿透设置保存结果未确认；重新读取也失败：$reloadError');
+    }
+    if (prefs.get(allowUrgentNightBreakthroughKey) == enabled) return;
+    throw LocalStorageWriteException('夜间静音穿透设置保存失败：$writeError');
   }
 
   Future<StudyNotebook> loadNotebook() => _serialized(() async {

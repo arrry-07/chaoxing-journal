@@ -215,6 +215,8 @@ class BackgroundReminderGateway {
     BackgroundCheckSettings settings, {
     required bool showDetails,
     bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
   }) async {
     await _invokeStrictVoid('updateSettings', {
       'accountHash': accountHash,
@@ -222,6 +224,8 @@ class BackgroundReminderGateway {
       ...settings.toJson(),
       'showDetails': showDetails,
       'reconcileSchedules': reconcileSchedules,
+      'allowUrgentNightBreakthrough': allowUrgentNightBreakthrough,
+      if (deadlineChannelId != null) 'deadlineChannelId': deadlineChannelId,
     });
   }
 
