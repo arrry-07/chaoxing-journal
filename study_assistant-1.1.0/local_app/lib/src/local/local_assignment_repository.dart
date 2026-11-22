@@ -36,6 +36,12 @@ class LocalStorageLeaseReleaseException extends StateError {
       : super('本机数据已写入，但写租约释放未确认：$error');
 }
 
+/// A serialized write was aborted because the active account or native session
+/// changed before the transaction could commit.
+class StaleSessionWriteException extends StateError {
+  StaleSessionWriteException(super.message);
+}
+
 class LocalAssignmentRepository {
   LocalAssignmentRepository({
     BackgroundReminderGateway backgroundReminderGateway =
@@ -306,9 +312,31 @@ class LocalAssignmentRepository {
     if (account.trim().isEmpty ||
         prefs.getString(_ownerKey) != _owner(account) ||
         prefs.containsKey(_switchKey)) {
-      throw StateError('当前账号已变化，请重新打开备份页面');
+      throw StaleSessionWriteException('当前账号已变化，请重新打开备份页面');
     }
   }
+
+  /// Runs an account-scoped preference or cross-engine side-effect inside the
+  /// serialized repository queue (holding the native write lease when enabled),
+  /// verifying the optional commit gate and active account owner after reload.
+  Future<T> runScopedWrite<T>(
+    Future<T> Function(SharedPreferences prefs) action, {
+    String? account,
+    Future<bool> Function()? canCommit,
+    String rejectedMessage = '账号会话已变化，旧写入已拒绝提交',
+  }) =>
+      _serialized(() async {
+        if (canCommit != null && !await canCommit()) {
+          throw StaleSessionWriteException(rejectedMessage);
+        }
+        final prefs = await SharedPreferences.getInstance();
+        if (account != null) {
+          _checkOwner(prefs, account);
+        } else if (prefs.containsKey(_switchKey)) {
+          throw StaleSessionWriteException('账号本机记录切换未完成，请重新登录后恢复');
+        }
+        return action(prefs);
+      });
 
   Future<void> validateBackupOwner(BackupSnapshot snapshot, String account) =>
       _serialized(() async {
@@ -700,10 +728,11 @@ class LocalAssignmentRepository {
           ..sort(Assignment.compareByDeadline);
       });
 
-  Future<void> _tail = Future.value();
+  Future<void>? _tail;
 
   Future<T> _serialized<T>(Future<T> Function() action) {
-    final result = _tail.then((_) async {
+    // Seed lazily in the caller's zone, including WidgetTester's fake clock.
+    final result = (_tail ?? Future<void>.value()).then((_) async {
       if (!crossEngineLockEnabled) return action();
       final acquired =
           await _backgroundReminderGateway.acquireWriteLease(_writeOwner);

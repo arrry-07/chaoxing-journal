@@ -115,6 +115,10 @@ class _HealthGateway extends BackgroundReminderGateway {
   Future<int> clearActiveAccount(String accountHash) async => 1;
 
   @override
+  Future<bool> isSessionCurrent(String accountHash, int sessionEpoch) async =>
+      true;
+
+  @override
   Future<void> updateSettings(
     String accountHash,
     int sessionEpoch,

@@ -144,12 +144,16 @@ class BackgroundReminderGateway {
   final Duration syncLeaseTimeout;
   final Duration writeLeaseTimeout;
 
-  // Keep the const gateway usable in default arguments. Only acknowledged write
-  // grants are retained, and failed releases stay here so they can be retried.
+  // Keep the const gateway usable in default arguments. Active confirmed write
+  // grants stay in [_confirmedWrites]; releases that failed to confirm move to
+  // [_pendingReleases] so subsequent releases drain every unacknowledged id.
   static final _writeRequests = Expando<Map<String, List<String>>>();
+  static final _pendingWriteReleases = Expando<Map<String, List<String>>>();
   static int _requestSequence = 0;
   Map<String, List<String>> get _confirmedWrites =>
       _writeRequests[this] ??= <String, List<String>>{};
+  Map<String, List<String>> get _pendingReleases =>
+      _pendingWriteReleases[this] ??= <String, List<String>>{};
 
   Future<bool> isAvailable() async =>
       await _invokeTimed<bool>('ping', null, const Duration(seconds: 2)) ??
@@ -292,18 +296,39 @@ class BackgroundReminderGateway {
   }
 
   Future<void> releaseWriteLease(String owner) async {
-    final requests = _confirmedWrites[owner];
-    if (requests == null || requests.isEmpty) {
+    final active = _confirmedWrites[owner];
+    final pending = _pendingReleases[owner];
+    final hasActive = active != null && active.isNotEmpty;
+    final hasPending = pending != null && pending.isNotEmpty;
+    if (!hasActive && !hasPending) {
       throw const BackgroundReminderGatewayException(
           'releaseWriteLease', '没有可释放的已确认写租约');
     }
-    final requestId = requests.last;
-    await _invokeStrictVoid('releaseWriteLease', {
-      'owner': owner,
-      'requestId': requestId,
-    });
-    requests.removeLast();
-    if (requests.isEmpty) _confirmedWrites.remove(owner);
+    final queue = pending ?? (_pendingReleases[owner] = <String>[]);
+    if (hasActive) {
+      queue.add(active.removeLast());
+      if (active.isEmpty) _confirmedWrites.remove(owner);
+    }
+    Object? firstError;
+    StackTrace? firstStack;
+    // Drain the current lease and any previously failed releases in LIFO order
+    // so an earlier transient failure can never leave native writeGate depth > 0.
+    for (final requestId in List<String>.of(queue.reversed)) {
+      try {
+        await _invokeStrictVoid('releaseWriteLease', {
+          'owner': owner,
+          'requestId': requestId,
+        });
+        queue.remove(requestId);
+      } catch (error, stack) {
+        firstError ??= error;
+        firstStack ??= stack;
+      }
+    }
+    if (queue.isEmpty) _pendingReleases.remove(owner);
+    if (firstError != null) {
+      Error.throwWithStackTrace(firstError, firstStack!);
+    }
   }
 
   Future<void> _cancelUncertainAcquisition(

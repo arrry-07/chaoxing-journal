@@ -133,14 +133,51 @@ void main() {
     );
   });
 
-  test('backup allowlists do not contain out-of-scope exclusions', () {
+  test(
+      'Android backup disables plaintext cloud backup and excludes shared prefs',
+      () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    expect(manifest, contains('android:allowBackup="false"'));
+    expect(manifest, isNot(contains('android:allowBackup="true"')));
+
     for (final path in [
       'android/app/src/main/res/xml/backup_rules.xml',
       'android/app/src/main/res/xml/data_extraction_rules.xml',
     ]) {
       final rules = File(path).readAsStringSync();
-      expect(rules, contains('FlutterSharedPreferences.xml'), reason: path);
-      expect(rules, isNot(contains('<exclude')), reason: path);
+      expect(rules, isNot(contains('<include')), reason: path);
+      expect(
+        rules,
+        contains(
+            '<exclude domain="sharedpref" path="FlutterSharedPreferences.xml"'),
+        reason: path,
+      );
+      expect(
+        rules,
+        contains('<exclude domain="sharedpref" path="."'),
+        reason: path,
+      );
     }
+  });
+
+  test('BackupBridge opens overwrite output streams with truncate mode wt', () {
+    final bridge = File(
+      'android/app/src/main/kotlin/com/example/studyassistant/BackupBridge.kt',
+    ).readAsStringSync();
+    expect(bridge, contains('openOutputStream(uri, "wt")'));
+    expect(bridge, isNot(contains('openOutputStream(uri, "w")')));
+  });
+
+  test(
+      'VerificationBrowser delegates host validation and http upgrade to BrowserPolicy',
+      () {
+    final browser = File(
+      'android/app/src/main/kotlin/com/example/studyassistant/VerificationBrowser.kt',
+    ).readAsStringSync();
+    expect(browser, contains('BrowserPolicy.isTrustedChaoxingUrl'));
+    expect(browser, contains('BrowserPolicy.upgradeChaoxingHttpUrl'));
+    expect(browser, isNot(contains('Uri.parse')));
   });
 }

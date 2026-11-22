@@ -2,7 +2,6 @@ package com.example.studyassistant
 
 import android.app.Dialog
 import android.graphics.Color
-import android.net.Uri
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
@@ -25,11 +24,7 @@ class VerificationBrowser(private val activity: MainActivity) {
         if (action == null) WebSessionCleaner.clear(activity, onComplete = onCleared)
         else { closedCallbacks.add(onCleared); action() }
     }
-    private fun trusted(url: String): Boolean {
-        val u = Uri.parse(url)
-        return u.scheme == "https" && u.userInfo == null && (u.port == -1 || u.port == 443) &&
-            (u.host == "chaoxing.com" || u.host?.endsWith(".chaoxing.com") == true)
-    }
+    private fun trusted(url: String): Boolean = BrowserPolicy.isTrustedChaoxingUrl(url)
     fun open(url: String?, cookies: List<Map<String, String>>, userAgent: String?, result: MethodChannel.Result) {
         if (url == null || !trusted(url)) { result.error("invalid_origin", "验证地址不可用", null); return }
         val manager = CookieManager.getInstance()
@@ -54,19 +49,19 @@ class VerificationBrowser(private val activity: MainActivity) {
             "https://notice.chaoxing.com/",
             "https://i.chaoxing.com/",
         )
-        origins.add(Uri.parse(url).buildUpon().clearQuery().fragment(null).build().toString())
+        BrowserPolicy.trustedChaoxingPageOrigin(url)?.let { origins.add(it) }
         cookies.mapNotNull { it["url"] }.filter { trusted(it) }.forEach { origins.add(it) }
         browser.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                val target = request.url
-                if (target.scheme == "http" && target.host?.endsWith(".chaoxing.com") == true) {
-                    val upgraded = target.buildUpon().scheme("https").build()
-                    upgraded.host?.let { origins.add("https://$it/") }
-                    view.loadUrl(upgraded.toString())
+                val rawTarget = request.url.toString()
+                val upgraded = BrowserPolicy.upgradeChaoxingHttpUrl(rawTarget)
+                if (upgraded != null) {
+                    BrowserPolicy.trustedChaoxingOrigin(upgraded)?.let { origins.add(it) }
+                    view.loadUrl(upgraded)
                     return true
                 }
-                if (trusted(target.toString())) {
-                    target.host?.let { origins.add("https://$it/") }
+                if (trusted(rawTarget)) {
+                    BrowserPolicy.trustedChaoxingOrigin(rawTarget)?.let { origins.add(it) }
                     return false
                 }
                 return true
@@ -75,7 +70,8 @@ class VerificationBrowser(private val activity: MainActivity) {
                 return if (trusted(request.url.toString())) null else WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
             }
             override fun onPageFinished(view: WebView, loaded: String) {
-                if (trusted(loaded)) { val u=Uri.parse(loaded); origins.add("https://${u.host}/"); origins.add(u.buildUpon().clearQuery().fragment(null).build().toString()) }
+                BrowserPolicy.trustedChaoxingOrigin(loaded)?.let { origins.add(it) }
+                BrowserPolicy.trustedChaoxingPageOrigin(loaded)?.let { origins.add(it) }
             }
         }
         val actions = LinearLayout(activity)

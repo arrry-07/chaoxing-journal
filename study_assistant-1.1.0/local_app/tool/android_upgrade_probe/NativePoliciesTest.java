@@ -57,13 +57,59 @@ public final class NativePoliciesTest {
     if (!BrowserPolicy.browserPackages(Collections.emptyList(), Arrays.asList("chaoxing.app")).isEmpty()) throw new AssertionError("Missing browser must fail");
     checks++;
     for (String bad : new String[]{"http://mooc1.chaoxing.com/", "javascript:alert(1)",
-      "https://user@mooc1.chaoxing.com/", "https://mooc1.chaoxing.com:8443/", "https:///missing", "https://bad host/"}) {
-      if (BrowserPolicy.isAllowed(bad)) throw new AssertionError("Accepted invalid browser URL");
+      "https://user@mooc1.chaoxing.com/", "https://mooc1.chaoxing.com:8443/", "https:///missing", "https://bad host/",
+      "https://evil.com\\@mooc1.chaoxing.com/", "https://evil.com\\.chaoxing.com/",
+      "https://mooc1.chaoxing.com\\@evil.com/", "https://-bad.chaoxing.com/",
+      "https://a..chaoxing.com/", "https://mooc1.chaoxing.com./"}) {
+      if (BrowserPolicy.isAllowed(bad)) throw new AssertionError("Accepted invalid browser URL: " + bad);
       checks++;
     }
     if (!BrowserPolicy.isAllowed("https://mooc1.chaoxing.com/work?id=synthetic") ||
         !BrowserPolicy.isAllowed("https://example.invalid:443/")) throw new AssertionError("HTTPS rejected");
     checks++;
+    for (String trusted : new String[]{
+      "https://chaoxing.com/",
+      "https://mooc1.chaoxing.com/work?id=synthetic",
+      "https://MOOC1.CHAOXING.COM:443/path"}) {
+      if (!BrowserPolicy.isTrustedChaoxingUrl(trusted)) {
+        throw new AssertionError("Rejected trusted Chaoxing URL: " + trusted);
+      }
+      checks++;
+    }
+    for (String untrusted : new String[]{
+      "http://mooc1.chaoxing.com/",
+      "https://evil.example/",
+      "https://notchaoxing.com/",
+      "https://chaoxing.com.evil.example/",
+      "https://evil.com\\@mooc1.chaoxing.com/",
+      "https://evil.com\\.chaoxing.com/",
+      "https://user@mooc1.chaoxing.com/",
+      "https://mooc1.chaoxing.com:8443/"}) {
+      if (BrowserPolicy.isTrustedChaoxingUrl(untrusted)) {
+        throw new AssertionError("Accepted untrusted Chaoxing URL: " + untrusted);
+      }
+      checks++;
+    }
+    if (!"https://mooc1.chaoxing.com/work?enc=a%2Bb%3D".equals(
+        BrowserPolicy.upgradeChaoxingHttpUrl("http://mooc1.chaoxing.com/work?enc=a%2Bb%3D")) ||
+        !"https://chaoxing.com/login".equals(
+        BrowserPolicy.upgradeChaoxingHttpUrl("http://chaoxing.com:80/login"))) {
+      throw new AssertionError("Valid Chaoxing HTTP upgrade failed");
+    }
+    checks++;
+    for (String badUpgrade : new String[]{
+      "https://mooc1.chaoxing.com/",
+      "http://evil.example/",
+      "http://evil.com\\.chaoxing.com/",
+      "http://evil.com\\@mooc1.chaoxing.com/",
+      "http://user@mooc1.chaoxing.com/",
+      "http://mooc1.chaoxing.com:8080/",
+      "http://mooc1.chaoxing.com:443/"}) {
+      if (BrowserPolicy.upgradeChaoxingHttpUrl(badUpgrade) != null) {
+        throw new AssertionError("Upgraded unsafe HTTP URL: " + badUpgrade);
+      }
+      checks++;
+    }
     Map<String,String> credentials = UpgradeFixture.credentials(true);
     JSONObject valid = UpgradeFixture.expectedJournal(true);
     UpgradeFixture.verify(credentials, valid, Arrays.asList("60", "10"),

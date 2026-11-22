@@ -149,10 +149,21 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   }
 
   Future<void> _openNoticeDetail(CourseNotice notice) async {
+    final openingEpoch = widget.store.accountEpoch;
+    final openingHash = widget.store.accountHash;
     if (!notice.localRead) {
-      await widget.store.markNoticeLocalRead(notice.id, read: true);
+      await widget.store.markNoticeLocalRead(
+        notice.id,
+        read: true,
+        expectedEpoch: openingEpoch,
+      );
     }
-    if (!mounted) return;
+    if (!mounted ||
+        widget.store.accountEpoch != openingEpoch ||
+        widget.store.accountHash != openingHash ||
+        !widget.store.isAuthenticated) {
+      return;
+    }
     await showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
@@ -161,6 +172,17 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         final journal = Journal.of(sheetContext);
+        var closingForAccountChange = false;
+        void scheduleClose() {
+          if (closingForAccountChange) return;
+          closingForAccountChange = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (sheetContext.mounted && Navigator.of(sheetContext).canPop()) {
+              Navigator.of(sheetContext).pop();
+            }
+          });
+        }
+
         return Container(
           decoration: BoxDecoration(
             color: journal.sheetElevated,
@@ -175,10 +197,18 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
               animation: widget.store,
               builder: (context, _) {
                 final journal = Journal.of(context);
-                final latest = widget.store.courseNotices.items
+                final accountChanged = !widget.store.isAuthenticated ||
+                    widget.store.accountEpoch != openingEpoch ||
+                    widget.store.accountHash != openingHash;
+                final latest = accountChanged
+                    ? null
+                    : widget.store.courseNotices.items
                         .where((item) => item.id == notice.id)
-                        .firstOrNull ??
-                    notice;
+                        .firstOrNull;
+                if (latest == null) {
+                  scheduleClose();
+                  return const SizedBox.shrink();
+                }
                 final linked = latest.linkedManualEntryId != null &&
                     widget.store.notebook.entries
                         .any((e) => e.id == latest.linkedManualEntryId);
@@ -277,13 +307,27 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                                     final picked = await _pickDateTime(
                                       initial: latest.extractedEventAt,
                                     );
-                                    if (picked == null || !mounted) return;
+                                    if (picked == null ||
+                                        !mounted ||
+                                        widget.store.accountEpoch !=
+                                            openingEpoch ||
+                                        widget.store.accountHash !=
+                                            openingHash) {
+                                      return;
+                                    }
                                     final created = await widget.store
                                         .createReminderFromNotice(
                                       latest,
                                       remindAt: picked,
+                                      expectedEpoch: openingEpoch,
                                     );
-                                    if (!mounted) return;
+                                    if (!mounted ||
+                                        widget.store.accountEpoch !=
+                                            openingEpoch ||
+                                        widget.store.accountHash !=
+                                            openingHash) {
+                                      return;
+                                    }
                                     if (created != null) {
                                       _showSnack('已添加到个人待办并安排本地提醒');
                                     } else if (widget.store.error != null) {
@@ -303,6 +347,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                                   await widget.store.markNoticeLocalRead(
                                     latest.id,
                                     read: !latest.localRead,
+                                    expectedEpoch: openingEpoch,
                                   );
                                 },
                         ),
@@ -323,8 +368,13 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     ChapterNode node,
   ) async {
     final epoch = widget.store.accountEpoch;
+    final openingHash = widget.store.accountHash;
     final picked = await _pickDateTime();
-    if (!mounted) return;
+    if (!mounted ||
+        widget.store.accountEpoch != epoch ||
+        widget.store.accountHash != openingHash) {
+      return;
+    }
     final created = await widget.store.createTodoFromChapterNode(
       snapshot,
       node,
@@ -332,6 +382,11 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       minutes: 30,
       expectedEpoch: epoch,
     );
+    if (!mounted ||
+        widget.store.accountEpoch != epoch ||
+        widget.store.accountHash != openingHash) {
+      return;
+    }
     if (created != null) {
       _showSnack(picked == null ? '已添加到个人待办' : '已添加到个人待办并设置本地提醒');
     } else if (widget.store.error != null) {

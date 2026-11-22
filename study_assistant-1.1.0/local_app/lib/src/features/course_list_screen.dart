@@ -105,7 +105,9 @@ class CourseListScreen extends StatelessWidget {
                                 )
                               : null,
                           value: store.follows(course.key),
-                          onChanged: (v) => store.followCourse(course.key, v),
+                          onChanged: store.isLoading
+                              ? null
+                              : (v) => store.followCourse(course.key, v),
                         ),
                     ],
                   ),

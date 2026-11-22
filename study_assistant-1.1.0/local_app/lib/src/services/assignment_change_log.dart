@@ -5,8 +5,8 @@ import '../models/assignment_change.dart';
 
 class AssignmentChangeLog {
   static const key = 'assignment_changes_v1';
-  Future<List<AssignmentChange>> load() async {
-    final p = await SharedPreferences.getInstance();
+  Future<List<AssignmentChange>> load({SharedPreferences? prefs}) async {
+    final p = prefs ?? await SharedPreferences.getInstance();
     final raw = p.getString(key);
     if (raw == null) return [];
     final j = jsonDecode(raw) as Map<String, dynamic>;
@@ -19,12 +19,12 @@ class AssignmentChangeLog {
 
   Future<void> record(List<Assignment> previous, List<Assignment> current,
       Set<String> observedIds,
-      {bool completeSync = true}) async {
-    final p = await SharedPreferences.getInstance();
+      {bool completeSync = true, SharedPreferences? prefs}) async {
+    final p = prefs ?? await SharedPreferences.getInstance();
     final raw = p.getString(key);
     final initialized = raw != null &&
         ((jsonDecode(raw) as Map)['initialized'] ?? true) == true;
-    final old = await load();
+    final old = await load(prefs: p);
     final delta = initialized
         ? AssignmentChange.compare(
             previous, current, observedIds, DateTime.now())
