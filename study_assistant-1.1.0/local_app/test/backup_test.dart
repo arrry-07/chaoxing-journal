@@ -7,6 +7,7 @@ import 'package:shared_preferences_platform_interface/shared_preferences_platfor
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
@@ -455,6 +456,71 @@ void main() {
           },
         };
       expect(() => BackupSnapshot.decode(jsonEncode(badExtra)),
+          throwsFormatException);
+    });
+
+    test(
+        'schema 9 roundtrips course metadata, preserves existing local metadata on old backups, and rejects invalid course metadata',
+        () async {
+      await repo.activateAccount('alice');
+      const richCourse = CourseRef(
+        courseId: '101',
+        clazzId: '201',
+        name: '编译原理',
+        teacherNames: ['陈教授', '助教甲'],
+        folderName: '2026年秋季学期',
+      );
+      const plainCourse = CourseRef(
+        courseId: '102',
+        clazzId: '202',
+        name: '操作系统',
+      );
+      await repo.saveCourses([richCourse, plainCourse], account: 'alice');
+      final v9 = await repo.createBackupSnapshot('alice');
+      final rawV9 = jsonDecode(v9.encode()) as Map<String, dynamic>;
+      expect(rawV9['schema'], 9);
+      final decodedV9 = BackupSnapshot.decode(v9.encode());
+      expect(decodedV9.courses.first.teacherNames, ['陈教授', '助教甲']);
+      expect(decodedV9.courses.first.folderName, '2026年秋季学期');
+
+      // Restoring an older backup without metadata must not wipe verified local metadata.
+      final legacyV8 = BackupSnapshot.create(
+        owner: BackupSnapshot.ownerFor('alice'),
+        createdAt: DateTime.utc(2026, 11, 20),
+        records: const [],
+        hidden: const {},
+        courses: const [
+          CourseRef(courseId: '101', clazzId: '201', name: '编译原理'),
+        ],
+        unfollowed: const {},
+        reminderOffsets: const [120],
+        autoSyncIntervalMinutes: 60,
+        pinned: PinnedAssignments(keys: ['cx:work:1:2:9']),
+      );
+      expect((jsonDecode(legacyV8.encode()) as Map)['schema'], 8);
+      await repo.restoreBackupSnapshot(legacyV8, 'alice');
+      final preserved = await repo.loadCourses(account: 'alice');
+      expect(preserved.first.teacherNames, ['陈教授', '助教甲']);
+      expect(preserved.first.folderName, '2026年秋季学期');
+
+      // Missing course metadata in local storage is backfilled from schema 9 restore.
+      await repo.saveCourses(const [
+        CourseRef(courseId: '101', clazzId: '201', name: '编译原理'),
+      ], account: 'alice');
+      await repo.restoreBackupSnapshot(v9, 'alice');
+      final filled = await repo.loadCourses(account: 'alice');
+      expect(filled.first.teacherNames, ['陈教授', '助教甲']);
+      expect(filled.first.folderName, '2026年秋季学期');
+
+      // Strict validation rejects bad schema 9 course payloads and pre-v9 metadata.
+      final badTeachersEmpty = jsonDecode(v9.encode()) as Map<String, dynamic>;
+      (badTeachersEmpty['courses'] as List).first['teacherNames'] = <String>[];
+      expect(() => BackupSnapshot.decode(jsonEncode(badTeachersEmpty)),
+          throwsFormatException);
+
+      final badExtraKey = jsonDecode(v9.encode()) as Map<String, dynamic>;
+      (badExtraKey['courses'] as List).first['unknownField'] = 'x';
+      expect(() => BackupSnapshot.decode(jsonEncode(badExtraKey)),
           throwsFormatException);
     });
   });

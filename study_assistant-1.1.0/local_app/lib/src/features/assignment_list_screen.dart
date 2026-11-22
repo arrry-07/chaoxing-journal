@@ -2206,8 +2206,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             context,
                             title: '课程筛选',
                             selectedValue: courseKey ?? '',
-                            searchable: courseOptions.length > 5,
-                            searchHint: '搜索课程名称...',
+                            searchable: courseOptions.length > 5 ||
+                                courseOptions
+                                    .any((o) => o.teacherNames.isNotEmpty),
+                            searchHint: '搜索课程或教师...',
                             displayPrefs: store.display,
                             options: [
                               const JournalPickerOption<String>(
@@ -2220,9 +2222,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                       'course-option-${option.courseKey}'),
                                   value: option.courseKey,
                                   label: option.name,
-                                  subtitle: option.showClass
-                                      ? option.classLabel
-                                      : null,
+                                  subtitle: option.subtitle,
+                                  keywords: option.searchKeywords,
                                   icon: courseIconFor(option.name),
                                 ),
                             ],

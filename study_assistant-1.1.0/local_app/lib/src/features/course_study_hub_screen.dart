@@ -614,8 +614,10 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     final journal = Journal.of(context);
     final query = _searchQuery;
     final courseOptions = <String, String>{};
+    final catalogByKey = <String, CourseRef>{};
     for (final c in widget.store.courses) {
       courseOptions[c.key] = c.name;
+      catalogByKey[c.key] = c;
     }
     for (final n in notices) {
       if (n.courseKey != null && !courseOptions.containsKey(n.courseKey)) {
@@ -626,6 +628,13 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         _selectedCourseKey != null &&
         !courseOptions.containsKey(_selectedCourseKey)) {
       courseOptions[_selectedCourseKey!] = '所选课程';
+    }
+    final optionNameCounts = <String, int>{};
+    for (final name in courseOptions.values) {
+      final trimmed = name.trim();
+      if (trimmed.isNotEmpty) {
+        optionNameCounts[trimmed] = (optionNameCounts[trimmed] ?? 0) + 1;
+      }
     }
 
     final currentScopeKey = switch (_noticeScope) {
@@ -673,8 +682,9 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                   context,
                   title: '通知范围',
                   selectedValue: currentScopeKey,
-                  searchable: courseOptions.length > 4,
-                  searchHint: '搜索课程名称...',
+                  searchable: courseOptions.length > 4 ||
+                      catalogByKey.values.any((c) => c.teacherNames.isNotEmpty),
+                  searchHint: '搜索课程或教师...',
                   displayPrefs: widget.store.display,
                   options: [
                     const JournalPickerOption(
@@ -690,12 +700,34 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                       icon: Icons.inbox_outlined,
                     ),
                     for (final entry in courseOptions.entries)
-                      JournalPickerOption(
-                        value: entry.key,
-                        label: entry.value,
-                        group: '按课程筛选',
-                        icon: courseIconFor(entry.value),
-                      ),
+                      () {
+                        final courseMeta = catalogByKey[entry.key];
+                        final parts = entry.key.split(':');
+                        final clazzId = courseMeta?.clazzId ??
+                            (parts.length > 1 ? parts[1] : '');
+                        final duplicateName =
+                            (optionNameCounts[entry.value.trim()] ?? 0) > 1;
+                        final subtitleParts = <String>[
+                          if (duplicateName && clazzId.isNotEmpty)
+                            '班级 $clazzId',
+                          if (courseMeta != null &&
+                              courseMeta.teacherNames.isNotEmpty)
+                            courseMeta.teacherLabel,
+                        ];
+                        return JournalPickerOption(
+                          value: entry.key,
+                          label: entry.value,
+                          subtitle: subtitleParts.isEmpty
+                              ? null
+                              : subtitleParts.join(' · '),
+                          keywords: courseMeta == null ||
+                                  courseMeta.teacherNames.isEmpty
+                              ? null
+                              : courseMeta.teacherNames.join(' '),
+                          group: '按课程筛选',
+                          icon: courseIconFor(entry.value),
+                        );
+                      }(),
                   ],
                 );
                 if (picked == null || !mounted) return;
@@ -975,11 +1007,16 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         leading: CourseMark(course.name, size: 26),
         title: Text(course.name, style: journal.entryTitle),
         subtitle: Text(
-          snapshot == null
-              ? duplicateName
-                  ? '班级 ${course.clazzId} · $progressLabel'
-                  : progressLabel
-              : '$progressLabel · 更新于 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(snapshot.lastSyncedAt))}',
+          [
+            if (duplicateName && course.clazzId.isNotEmpty)
+              '班级 ${course.clazzId}',
+            if (course.teacherNames.isNotEmpty) course.teacherLabel,
+            snapshot == null
+                ? progressLabel
+                : '$progressLabel · 更新于 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(snapshot.lastSyncedAt))}',
+          ].join(' · '),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: journal.metadata,
         ),
         trailing: Row(

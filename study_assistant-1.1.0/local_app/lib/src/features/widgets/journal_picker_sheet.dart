@@ -329,6 +329,9 @@ class _JournalPickerSheetBodyState<T>
                                                     const SizedBox(height: 2),
                                                     Text(
                                                       opt.subtitle!,
+                                                      maxLines: 2,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
                                                       style: journal.metadata
                                                           .copyWith(
                                                               fontSize: 12),

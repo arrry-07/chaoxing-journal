@@ -387,9 +387,12 @@ class AssignmentStore extends ChangeNotifier {
               _courses
                   .where((c) => c.key == courseKey)
                   .map((c) => ChaoxingCourseRef(
-                      courseId: c.courseId,
-                      clazzId: c.clazzId,
-                      courseName: c.name))
+                        courseId: c.courseId,
+                        clazzId: c.clazzId,
+                        courseName: c.name,
+                        teacherNames: c.teacherNames,
+                        folderName: c.folderName,
+                      ))
                   .firstOrNull;
           if (match != null) targets.add(match);
         } else {
@@ -398,9 +401,12 @@ class AssignmentStore extends ChangeNotifier {
           for (final c in followed) {
             targets.add(clientByKey[c.key] ??
                 ChaoxingCourseRef(
-                    courseId: c.courseId,
-                    clazzId: c.clazzId,
-                    courseName: c.name));
+                  courseId: c.courseId,
+                  clazzId: c.clazzId,
+                  courseName: c.name,
+                  teacherNames: c.teacherNames,
+                  folderName: c.folderName,
+                ));
           }
         }
         if (targets.isEmpty) {
@@ -4230,7 +4236,12 @@ class AssignmentStore extends ChangeNotifier {
           chaoxingClient.hasCourseResponse) {
         final nextCourses = chaoxingClient.courses
             .map((c) => CourseRef(
-                courseId: c.courseId, clazzId: c.clazzId, name: c.courseName))
+                  courseId: c.courseId,
+                  clazzId: c.clazzId,
+                  name: c.courseName,
+                  teacherNames: c.teacherNames,
+                  folderName: c.folderName,
+                ))
             .toList();
         final account = _account;
         if (account == null) {

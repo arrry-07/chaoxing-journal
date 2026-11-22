@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/features/course_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/course_study_hub_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/features/sync_status_screen.dart';
@@ -16,6 +17,7 @@ import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_sync_diagnostics_exporter.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/course_chapter_progress.dart';
 import 'package:study_assistant_mobile/src/models/course_notice.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
@@ -999,5 +1001,94 @@ void main() {
       CourseStudyHubScreen.cleanNoticeSummary('正文内容\n课程名称：保留中间引用'),
       '正文内容\n课程名称：保留中间引用',
     );
+  });
+
+  testWidgets(
+      'CourseListScreen and CourseStudyHubScreen show teacher names, clip long teacher lists at 320w@2x, and search by teacher',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _TestSessionStore(),
+      notificationService: _TestNotificationService(),
+      widgetSnapshotService: _TestWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.repository.activateAccount('13800000001');
+    await store.repository.saveCourses(
+      const [
+        CourseRef(
+          courseId: '10',
+          clazzId: '100',
+          name: '大学英语',
+          teacherNames: ['Alice教师', 'Bob教师', 'Carol教师', 'Dave教师'],
+          folderName: '2026年秋',
+        ),
+        CourseRef(
+          courseId: '11',
+          clazzId: '101',
+          name: '大学英语',
+          teacherNames: ['Eve导师'],
+        ),
+      ],
+      account: '13800000001',
+    );
+    await store.restoreSession();
+
+    tester.view.physicalSize = const Size(320, 760);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    Widget wrap(Widget child) => MaterialApp(
+          builder: (context, inner) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: const TextScaler.linear(2.0)),
+            child: inner!,
+          ),
+          home: child,
+        );
+
+    // 1. CourseListScreen displays class + teacher names, clips long lists, and filters by teacher.
+    await tester.pumpWidget(wrap(CourseListScreen(store: store)));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('班级 100 · Alice教师'), findsOneWidget);
+    expect(find.textContaining('班级 101 · Eve导师'), findsOneWidget);
+    final listSub =
+        tester.widget<Text>(find.textContaining('班级 100 · Alice教师'));
+    expect(listSub.maxLines, 2);
+    expect(listSub.overflow, TextOverflow.ellipsis);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(
+      find.byKey(const ValueKey('course-list-search-toggle')),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('course-list-search')),
+      'Eve导师',
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('班级 101 · Eve导师'), findsOneWidget);
+    expect(find.textContaining('班级 100 · Alice教师'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    // 2. CourseStudyHubScreen chapters show teacher names and notice picker searches by teacher.
+    await tester.pumpWidget(wrap(CourseStudyHubScreen(store: store)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('已关联课程'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('班级 100 · Alice教师'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, 'Eve导师');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('班级 101 · Eve导师'), findsOneWidget);
+    expect(find.textContaining('班级 100 · Alice教师'), findsNothing);
+    await tester.tap(find.byTooltip('关闭'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.textContaining('章节任务点'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('班级 100 · Alice教师'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

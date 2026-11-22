@@ -615,7 +615,9 @@ class LocalAssignmentRepository {
           for (final c in await _loadCourses(account: account)) c.key: c
         };
         for (final c in validated.courses) {
-          courses.putIfAbsent(c.key, () => c);
+          final existing = courses[c.key];
+          courses[c.key] =
+              existing == null ? c : existing.mergeMissingMetadata(c);
         }
         final before = <String, dynamic>{
           'owner': prefs.getString(_ownerKey),

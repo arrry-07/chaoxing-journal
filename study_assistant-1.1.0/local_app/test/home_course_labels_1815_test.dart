@@ -294,4 +294,55 @@ void main() {
     expect(labelsOf(restarted), ['同名课程 · 班级 k1']);
     expect(restarted.homeFilters.courseKey, '1:k1');
   });
+
+  testWidgets(
+      'course filter displays teacher names alongside duplicate class label, searches by teacher, and clips long teacher list at 320x900@2x',
+      (tester) async {
+    final store = _Store(catalog: const [
+      CourseRef(
+        courseId: '1',
+        clazzId: 'k1',
+        name: '大学物理',
+        teacherNames: ['张老师', '王老师', '刘老师', '陈老师'],
+      ),
+      CourseRef(
+        courseId: '2',
+        clazzId: 'k2',
+        name: '大学物理',
+        teacherNames: ['李老师'],
+      ),
+      CourseRef(
+        courseId: '3',
+        clazzId: 'k3',
+        name: '数据结构',
+        teacherNames: ['独有教师赵某'],
+      ),
+    ])
+      ..replaceAssignmentsForTest([
+        _work(workId: 'w1', courseId: '1', classId: 'k1', courseName: '大学物理'),
+        _work(workId: 'w2', courseId: '2', classId: 'k2', courseName: '大学物理'),
+        _work(workId: 'w3', courseId: '3', classId: 'k3', courseName: '数据结构'),
+      ]);
+    addTearDown(store.dispose);
+
+    await _pump(tester, store, size: const Size(320, 900), scale: 2);
+    expect(tester.takeException(), isNull);
+    await _openFilters(tester);
+    await _openCourseMenu(tester);
+
+    expect(find.textContaining('班级 k1 · 张老师、王老师'), findsOneWidget);
+    expect(find.text('独有教师赵某'), findsOneWidget);
+    final longSubtitle = tester.widget<Text>(
+      find.textContaining('班级 k1 · 张老师、王老师'),
+    );
+    expect(longSubtitle.maxLines, 2);
+    expect(longSubtitle.overflow, TextOverflow.ellipsis);
+
+    // Search picker by teacher name finds matching course only.
+    await tester.enterText(find.byType(TextField).last, '李老师');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('course-option-2:k2')), findsOneWidget);
+    expect(find.byKey(const ValueKey('course-option-1:k1')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

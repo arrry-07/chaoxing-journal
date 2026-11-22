@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 // ignore: depend_on_referenced_packages
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 
 void main() {
@@ -429,6 +432,39 @@ void main() {
         throwsA(isA<LocalStorageWriteException>()),
       );
       expect((await repository.loadPinnedAssignments('alice')), ordered);
+    });
+
+    test(
+        'course metadata persists per account and decodes legacy 3-key course_refs cache',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final repository = LocalAssignmentRepository();
+      await repository.activateAccount('alice');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        'course_refs',
+        jsonEncode([
+          {'courseId': '1', 'clazzId': '2', 'name': '旧格式课程'},
+        ]),
+      );
+      final legacyCourses = await repository.loadCourses(account: 'alice');
+      expect(legacyCourses.single.teacherNames, isEmpty);
+      expect(legacyCourses.single.folderName, isNull);
+
+      const enriched = CourseRef(
+        courseId: '1',
+        clazzId: '2',
+        name: '旧格式课程',
+        teacherNames: ['赵老师', '钱老师'],
+        folderName: '2026年秋',
+      );
+      await repository.saveCourses([enriched], account: 'alice');
+      await repository.activateAccount('bob');
+      expect(await repository.loadCourses(account: 'bob'), isEmpty);
+      await repository.activateAccount('alice');
+      final reloaded = await repository.loadCourses(account: 'alice');
+      expect(reloaded.single.teacherNames, ['赵老师', '钱老师']);
+      expect(reloaded.single.folderName, '2026年秋');
     });
   });
 }

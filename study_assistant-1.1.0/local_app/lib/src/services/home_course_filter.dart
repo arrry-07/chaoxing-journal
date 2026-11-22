@@ -14,6 +14,7 @@ class HomeCourseFilterOption {
     required this.name,
     required this.showClass,
     required this.showCourseId,
+    this.teacherNames = const [],
   });
 
   final String courseKey;
@@ -22,9 +23,23 @@ class HomeCourseFilterOption {
   final String name;
   final bool showClass;
   final bool showCourseId;
+  final List<String> teacherNames;
 
   String get classLabel =>
       showCourseId ? '班级 $clazzId · 课程 $courseId' : '班级 $clazzId';
+
+  String get teacherLabel => teacherNames.join('、');
+
+  String? get subtitle {
+    final parts = <String>[
+      if (showClass) classLabel,
+      if (teacherNames.isNotEmpty) teacherLabel,
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
+  String? get searchKeywords =>
+      teacherNames.isEmpty ? null : teacherNames.join(' ');
 
   String get label => showClass ? '$name · $classLabel' : name;
 }
@@ -37,13 +52,26 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
 }) {
   final known = <String, _KnownCourse>{};
 
-  void learn(String? key, String? name, {String? courseId, String? clazzId}) {
+  void learn(
+    String? key,
+    String? name, {
+    String? courseId,
+    String? clazzId,
+    List<String> teacherNames = const [],
+  }) {
     if (key == null || key.isEmpty) return;
     final cleanName = (name ?? '').trim();
     final existing = known[key];
     if (existing != null) {
-      if (existing.name.isEmpty && cleanName.isNotEmpty) {
-        known[key] = existing.copyWith(name: cleanName);
+      if ((existing.name.isEmpty && cleanName.isNotEmpty) ||
+          (existing.teacherNames.isEmpty && teacherNames.isNotEmpty)) {
+        known[key] = existing.copyWith(
+          name:
+              existing.name.isEmpty && cleanName.isNotEmpty ? cleanName : null,
+          teacherNames: existing.teacherNames.isEmpty && teacherNames.isNotEmpty
+              ? teacherNames
+              : null,
+        );
       }
       return;
     }
@@ -53,6 +81,7 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
       clazzId:
           clazzId ?? (parts.length > 1 && parts[1].isNotEmpty ? parts[1] : '—'),
       name: cleanName,
+      teacherNames: teacherNames,
     );
   }
 
@@ -62,6 +91,7 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
       course.name,
       courseId: course.courseId,
       clazzId: course.clazzId,
+      teacherNames: course.teacherNames,
     );
   }
   for (final record in records) {
@@ -116,6 +146,7 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
         showClass: normalized.isNotEmpty && (nameCounts[normalized] ?? 0) > 1,
         showCourseId: normalized.isNotEmpty &&
             (nameClassCounts['$normalized\u0000$clazzId'] ?? 0) > 1,
+        teacherNames: course?.teacherNames ?? const [],
       ),
     );
   }
@@ -138,15 +169,19 @@ class _KnownCourse {
     required this.courseId,
     required this.clazzId,
     required this.name,
+    this.teacherNames = const [],
   });
 
   final String courseId;
   final String clazzId;
   final String name;
+  final List<String> teacherNames;
 
-  _KnownCourse copyWith({String? name}) => _KnownCourse(
+  _KnownCourse copyWith({String? name, List<String>? teacherNames}) =>
+      _KnownCourse(
         courseId: courseId,
         clazzId: clazzId,
         name: name ?? this.name,
+        teacherNames: teacherNames ?? this.teacherNames,
       );
 }

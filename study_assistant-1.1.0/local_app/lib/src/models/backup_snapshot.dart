@@ -78,7 +78,9 @@ class BackupSnapshot {
     CourseChapterCatalog chapters,
     PinnedAssignments pinned,
     LocalCourseworkState courseworkState,
+    List<CourseRef> courses,
   ) {
+    if (courses.any((c) => c.hasMetadata)) return 9;
     if (pinned.isNotEmpty ||
         pinned.manuallyOrdered ||
         courseworkState.isNotEmpty) {
@@ -160,6 +162,7 @@ class BackupSnapshot {
       effectiveChapters,
       effectivePinned,
       effectiveCoursework,
+      courses,
     );
     return BackupSnapshot.decode(jsonEncode({
       'schema': version,
@@ -185,8 +188,14 @@ class BackupSnapshot {
   }
 
   String encode() {
-    final version =
-        _schemaVersion(records, notices, chapters, pinned, courseworkState);
+    final version = _schemaVersion(
+      records,
+      notices,
+      chapters,
+      pinned,
+      courseworkState,
+      courses,
+    );
     return jsonEncode({
       'schema': version,
       'notebook': notebook.toJson(),
@@ -203,7 +212,15 @@ class BackupSnapshot {
               includeTimeEvidence: version >= 7))
           .toList(),
       'hidden': hidden.toList(),
-      'courses': courses.map((c) => c.toJson()).toList(),
+      'courses': version >= 9
+          ? courses.map((c) => c.toJson()).toList()
+          : courses
+              .map((c) => {
+                    'courseId': c.courseId,
+                    'clazzId': c.clazzId,
+                    'name': c.name,
+                  })
+              .toList(),
       'unfollowed': unfollowed.toList(),
       'reminderOffsets': reminderOffsets,
       'autoSyncIntervalMinutes': autoSyncIntervalMinutes,
@@ -256,7 +273,9 @@ class BackupSnapshot {
     }
     final decoded = jsonDecode(plaintext);
     final version = decoded is Map ? decoded['schema'] : null;
-    if (version is! int || !{1, 2, 3, 4, 5, 6, 7, 8}.contains(version)) _bad();
+    if (version is! int || !{1, 2, 3, 4, 5, 6, 7, 8, 9}.contains(version)) {
+      _bad();
+    }
     final hasCourseworkState = version >= 8 &&
         decoded is Map &&
         decoded.containsKey('courseworkState');
@@ -369,11 +388,44 @@ class BackupSnapshot {
     if (!hidden.every(ids.contains)) _bad();
     final courses = <CourseRef>[];
     for (final value in _list(j['courses'], max: 2000)) {
-      final c = _map(value, {'courseId', 'clazzId', 'name'});
-      courses.add(CourseRef(
+      if (version < 9) {
+        final c = _map(value, {'courseId', 'clazzId', 'name'});
+        courses.add(CourseRef(
+            courseId: _text(c['courseId']),
+            clazzId: _text(c['clazzId']),
+            name: _text(c['name'])));
+      } else {
+        if (value is! Map<String, dynamic>) _bad();
+        final c = _map(value, {
+          'courseId',
+          'clazzId',
+          'name',
+          if (value.containsKey('teacherNames')) 'teacherNames',
+          if (value.containsKey('folderName')) 'folderName',
+        });
+        final teacherRaw = c['teacherNames'];
+        final teacherList = <String>[];
+        if (c.containsKey('teacherNames')) {
+          final items = _list(teacherRaw, max: 10);
+          if (items.isEmpty) _bad();
+          final seenTeachers = <String>{};
+          for (final item in items) {
+            final name = _text(item, max: 80);
+            if (!seenTeachers.add(name)) _bad();
+            teacherList.add(name);
+          }
+        }
+        final folderName = c.containsKey('folderName')
+            ? _text(c['folderName'], max: 120)
+            : null;
+        courses.add(CourseRef(
           courseId: _text(c['courseId']),
           clazzId: _text(c['clazzId']),
-          name: _text(c['name'])));
+          name: _text(c['name']),
+          teacherNames: List.unmodifiable(teacherList),
+          folderName: folderName,
+        ));
+      }
     }
     if (courses.map((c) => c.key).toSet().length != courses.length) _bad();
     final offsets =
