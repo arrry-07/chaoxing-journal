@@ -22,6 +22,10 @@ class AssignmentSyncProgress {
     required this.attemptedCount,
     this.unconfirmedCount = 0,
     this.workListFailureCount = 0,
+    this.plannedCourses = 0,
+    this.completedCourses = 0,
+    this.skippedCourses = 0,
+    this.failedCourses = 0,
   })  : assignments = List.unmodifiable(assignments),
         pendingDetailIds = Set.unmodifiable(pendingDetailIds);
 
@@ -32,6 +36,10 @@ class AssignmentSyncProgress {
   final int attemptedCount;
   final int unconfirmedCount;
   final int workListFailureCount;
+  final int plannedCourses;
+  final int completedCourses;
+  final int skippedCourses;
+  final int failedCourses;
 
   String get stageLabel => switch (stage) {
         AssignmentSyncStage.courses => '正在读取课程',

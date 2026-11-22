@@ -266,12 +266,15 @@ class _CalendarScreenState extends State<CalendarScreen>
               month.year != today.year ||
               month.month != today.month;
           final busy = _refreshing || widget.store.isLoading;
+          final effectiveLastSync =
+              widget.store.syncReport.lastCurrentSuccessAt ??
+                  widget.store.lastSyncAt;
           final syncStatusText = busy
-              ? '正在刷新${widget.store.lastSyncAt == null ? '' : ' · 上次 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'}…'
+              ? '正在刷新${effectiveLastSync == null ? '' : ' · 上次 ${DateFormat('M月d日 HH:mm').format(effectiveLastSync.toLocal())}'}…'
               : _refreshMessage ??
-                  (widget.store.lastSyncAt == null
+                  (effectiveLastSync == null
                       ? '尚未同步 · 当前显示本机记录'
-                      : '上次同步 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}');
+                      : '上次同步 ${DateFormat('M月d日 HH:mm').format(effectiveLastSync.toLocal())}');
 
           final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
           final leading = month.weekday % 7;

@@ -14,6 +14,7 @@ import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
 import '../models/pinned_assignments.dart';
 import '../models/study_notebook.dart';
+import '../models/sync_scope.dart';
 import '../models/home_filters.dart';
 import '../services/reminder_rule_store.dart';
 import '../services/background_reminder_gateway.dart';
@@ -82,6 +83,8 @@ class LocalAssignmentRepository {
   static const _courseTermPreferencesKey = 'course_term_preferences_v1';
   static const _courseTermRecoveryWarning =
       '部分课程学期与归档设置无法读取，原始数据已保留备份；本次以自动推断临时显示，请勿覆盖原数据。';
+  static const _historicalSweepStateKey = 'historical_sweep_state_v1';
+  static const _historicalSweepRecoveryWarning = '往期课程轮询游标无法读取，已从起始位置重新计算。';
   static const _acknowledgedDeadlineChangesKey =
       'acknowledged_deadline_changes_v1';
   static const _maxAcknowledgedDeadlineChanges = 300;
@@ -139,6 +142,9 @@ class LocalAssignmentRepository {
     _courseTermPreferencesKey,
     '${_courseTermPreferencesKey}_recovery_backup',
     '${_courseTermPreferencesKey}_recovery_backups',
+    _historicalSweepStateKey,
+    '${_historicalSweepStateKey}_recovery_backup',
+    '${_historicalSweepStateKey}_recovery_backups',
     _acknowledgedDeadlineChangesKey,
     '${_acknowledgedDeadlineChangesKey}_recovery_backup',
     '${_acknowledgedDeadlineChangesKey}_recovery_backups',
@@ -319,6 +325,42 @@ class LocalAssignmentRepository {
         final prefs = await SharedPreferences.getInstance();
         _checkOwner(prefs, account);
         await writeCourseTermPreferencesInPrefs(prefs, value);
+      });
+
+  Future<HistoricalSweepState> loadHistoricalSweepState(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return _readProtected(
+          prefs,
+          _historicalSweepStateKey,
+          HistoricalSweepState.decode,
+          HistoricalSweepState.empty,
+          _historicalSweepRecoveryWarning,
+        );
+      });
+
+  Future<void> saveHistoricalSweepState(
+    HistoricalSweepState state,
+    String account,
+  ) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        await _protectExisting(
+          prefs,
+          _historicalSweepStateKey,
+          HistoricalSweepState.decode,
+          _historicalSweepRecoveryWarning,
+        );
+        final raw = state.encode();
+        HistoricalSweepState.decode(raw);
+        await _writeVerified(
+          prefs,
+          _historicalSweepStateKey,
+          raw,
+          '往期课程轮询游标保存失败',
+        );
       });
 
   static Set<String> _decodeAcknowledgedDeadlineChanges(String raw) {

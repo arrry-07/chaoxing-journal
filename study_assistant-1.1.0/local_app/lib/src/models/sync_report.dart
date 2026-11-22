@@ -1,3 +1,5 @@
+import 'sync_scope.dart';
+
 enum SyncPhase { idle, running, success, partial, failed, cancelled }
 
 enum SyncSourcePhase { success, partial, failed, notEnabled }
@@ -147,14 +149,22 @@ class SyncReport {
       {this.phase = SyncPhase.idle,
       this.attemptedAt,
       this.lastDataSuccessAt,
+      this.lastCurrentSuccessAt,
       this.lastFullSuccessAt,
+      this.syncScope = AssignmentSyncScope.all,
+      this.plannedCourses = 0,
+      this.skippedCourses = 0,
       this.succeededCourses = 0,
       this.failedCourses = 0,
       this.issues = const [],
       this.sourceResults = const []});
   final SyncPhase phase;
-  final DateTime? attemptedAt, lastDataSuccessAt, lastFullSuccessAt;
-  final int succeededCourses, failedCourses;
+  final DateTime? attemptedAt,
+      lastDataSuccessAt,
+      lastCurrentSuccessAt,
+      lastFullSuccessAt;
+  final AssignmentSyncScope syncScope;
+  final int plannedCourses, skippedCourses, succeededCourses, failedCourses;
   final List<SyncIssue> issues;
   final List<SyncSourceResult> sourceResults;
 
@@ -177,7 +187,11 @@ class SyncReport {
     SyncPhase? phase,
     DateTime? attemptedAt,
     DateTime? lastDataSuccessAt,
+    DateTime? lastCurrentSuccessAt,
     DateTime? lastFullSuccessAt,
+    AssignmentSyncScope? syncScope,
+    int? plannedCourses,
+    int? skippedCourses,
     int? succeededCourses,
     int? failedCourses,
     List<SyncIssue>? issues,
@@ -187,7 +201,11 @@ class SyncReport {
         phase: phase ?? this.phase,
         attemptedAt: attemptedAt ?? this.attemptedAt,
         lastDataSuccessAt: lastDataSuccessAt ?? this.lastDataSuccessAt,
+        lastCurrentSuccessAt: lastCurrentSuccessAt ?? this.lastCurrentSuccessAt,
         lastFullSuccessAt: lastFullSuccessAt ?? this.lastFullSuccessAt,
+        syncScope: syncScope ?? this.syncScope,
+        plannedCourses: plannedCourses ?? this.plannedCourses,
+        skippedCourses: skippedCourses ?? this.skippedCourses,
         succeededCourses: succeededCourses ?? this.succeededCourses,
         failedCourses: failedCourses ?? this.failedCourses,
         issues: issues ?? this.issues,
@@ -198,7 +216,13 @@ class SyncReport {
         'phase': phase.name,
         'attemptedAt': attemptedAt?.toUtc().toIso8601String(),
         'lastDataSuccessAt': lastDataSuccessAt?.toUtc().toIso8601String(),
+        if (lastCurrentSuccessAt != null)
+          'lastCurrentSuccessAt':
+              lastCurrentSuccessAt!.toUtc().toIso8601String(),
         'lastFullSuccessAt': lastFullSuccessAt?.toUtc().toIso8601String(),
+        'syncScope': syncScope.name,
+        'plannedCourses': plannedCourses,
+        'skippedCourses': skippedCourses,
         'succeededCourses': succeededCourses,
         'failedCourses': failedCourses,
         'issues': issues.map((i) => i.toJson()).toList(),
@@ -219,6 +243,9 @@ class SyncReport {
             .toList();
     final failedCourses = json['failedCourses'] as int? ?? 0;
     final lastDataSuccessAt = time('lastDataSuccessAt');
+    final syncScope =
+        AssignmentSyncScope.tryParse(json['syncScope'] as String?) ??
+            AssignmentSyncScope.all;
     final normalizedSuccess = phase == SyncPhase.partial &&
         failedCourses == 0 &&
         issues.isEmpty &&
@@ -227,6 +254,11 @@ class SyncReport {
             (s.phase == SyncSourcePhase.success ||
                 s.phase == SyncSourcePhase.notEnabled) &&
             s.detailUnconfirmedCount == 0);
+    final lastFullSuccessAt = normalizedSuccess
+        ? (time('lastFullSuccessAt') ?? lastDataSuccessAt)
+        : time('lastFullSuccessAt');
+    final lastCurrentSuccessAt =
+        time('lastCurrentSuccessAt') ?? lastFullSuccessAt;
     return SyncReport(
         phase: interrupted
             ? SyncPhase.failed
@@ -235,9 +267,11 @@ class SyncReport {
                 : phase,
         attemptedAt: time('attemptedAt'),
         lastDataSuccessAt: lastDataSuccessAt,
-        lastFullSuccessAt: normalizedSuccess
-            ? (time('lastFullSuccessAt') ?? lastDataSuccessAt)
-            : time('lastFullSuccessAt'),
+        lastCurrentSuccessAt: lastCurrentSuccessAt,
+        lastFullSuccessAt: lastFullSuccessAt,
+        syncScope: syncScope,
+        plannedCourses: json['plannedCourses'] as int? ?? 0,
+        skippedCourses: json['skippedCourses'] as int? ?? 0,
         succeededCourses: json['succeededCourses'] as int? ?? 0,
         failedCourses: failedCourses,
         sourceResults: sourceResults,

@@ -19,6 +19,7 @@ import '../models/assignment_sync_progress.dart';
 import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
 import '../models/sync_report.dart';
+import '../models/sync_scope.dart';
 import '../models/course.dart';
 import 'assignment_query.dart';
 import 'assignment_grouping.dart';
@@ -898,6 +899,12 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   SyncReport syncReport = const SyncReport();
+  HistoricalSweepState _historicalSweepState =
+      const HistoricalSweepState.empty();
+  HistoricalSweepState get historicalSweepState => _historicalSweepState;
+  AssignmentSyncScope _lastRequestedSyncScope = AssignmentSyncScope.current;
+  Set<String> _lastTargetedCourseKeys = const {};
+  List<SyncSourceResult> _lastSyncSourceResults = const [];
   int _generation = 0;
   bool _disposed = false, _loginRunning = false;
   String get syncSummary =>
@@ -2128,6 +2135,10 @@ class AssignmentStore extends ChangeNotifier {
     _pinned = const PinnedAssignments.empty();
     _courseworkState = const LocalCourseworkState.empty();
     _courseTermPreferences = const CourseTermPreferences.empty();
+    _historicalSweepState = const HistoricalSweepState.empty();
+    _lastRequestedSyncScope = AssignmentSyncScope.current;
+    _lastTargetedCourseKeys = const {};
+    _lastSyncSourceResults = const [];
     _termCatalogCache = null;
     _visitedAssignment = null;
     _activeVisitTicket = null;
@@ -2198,6 +2209,13 @@ class AssignmentStore extends ChangeNotifier {
       if (_authenticated && account != null) {
         _courseTermPreferences =
             await repository.loadCourseTermPreferences(account);
+      }
+    });
+    await stage('往期巡检状态', () async {
+      final account = _account;
+      if (_authenticated && account != null) {
+        _historicalSweepState =
+            await repository.loadHistoricalSweepState(account);
       }
     });
     await stage('提醒设置', () async {
@@ -2566,6 +2584,7 @@ class AssignmentStore extends ChangeNotifier {
             _pinned = const PinnedAssignments.empty();
             _courseworkState = const LocalCourseworkState.empty();
             _courseTermPreferences = const CourseTermPreferences.empty();
+            _historicalSweepState = const HistoricalSweepState.empty();
             _termCatalogCache = null;
             _acknowledgedDeadlineChangeIds = <String>{};
             _pinsNeedSave = false;
@@ -2705,16 +2724,43 @@ class AssignmentStore extends ChangeNotifier {
   Future<void> syncAssignments() =>
       syncAssignmentsForTrigger(BackgroundSyncTrigger.manual);
 
+  Future<void> syncAllTerms() => syncAssignmentsForTrigger(
+        BackgroundSyncTrigger.manual,
+        scope: AssignmentSyncScope.all,
+      );
+
+  Future<void> syncTargetedCourses(Set<String> courseKeys) =>
+      syncAssignmentsForTrigger(
+        BackgroundSyncTrigger.manual,
+        scope: AssignmentSyncScope.targeted,
+        targetedCourseKeys: courseKeys,
+      );
+
+  Future<void> retryLastSyncAfterVerification() => syncAssignmentsForTrigger(
+        BackgroundSyncTrigger.manual,
+        scope: _lastRequestedSyncScope,
+        targetedCourseKeys: _lastTargetedCourseKeys,
+      );
+
   Future<void> syncAssignmentsForTrigger(
     BackgroundSyncTrigger trigger, {
     bool skipTaskEngineProbe = false,
+    AssignmentSyncScope? scope,
+    Set<String>? targetedCourseKeys,
   }) async {
-    await _syncForTrigger(trigger, skipTaskEngineProbe: skipTaskEngineProbe);
+    await _syncForTrigger(
+      trigger,
+      skipTaskEngineProbe: skipTaskEngineProbe,
+      scope: scope,
+      targetedCourseKeys: targetedCourseKeys,
+    );
   }
 
   Future<String?> _syncForTrigger(
     BackgroundSyncTrigger trigger, {
     bool skipTaskEngineProbe = false,
+    AssignmentSyncScope? scope,
+    Set<String>? targetedCourseKeys,
   }) {
     if (!_authenticated) return Future.value();
     final existing = _syncInFlight;
@@ -2723,6 +2769,8 @@ class AssignmentStore extends ChangeNotifier {
     currentFuture = _performCoordinatedSync(
       trigger,
       skipTaskEngineProbe: skipTaskEngineProbe,
+      scope: scope,
+      targetedCourseKeys: targetedCourseKeys,
     ).whenComplete(() {
       if (identical(_syncInFlight, currentFuture)) {
         _syncInFlight = null;
@@ -2735,6 +2783,8 @@ class AssignmentStore extends ChangeNotifier {
   Future<String?> _performCoordinatedSync(
     BackgroundSyncTrigger trigger, {
     bool skipTaskEngineProbe = false,
+    AssignmentSyncScope? scope,
+    Set<String>? targetedCourseKeys,
   }) async {
     final operation = ++_syncOperation;
     final generation = _generation;
@@ -2817,7 +2867,14 @@ class AssignmentStore extends ChangeNotifier {
           trigger,
           operation: operation,
           skipTaskEngineProbe: skipTaskEngineProbe,
+          scope: scope,
+          targetedCourseKeys: targetedCourseKeys,
         );
+        if (trigger == BackgroundSyncTrigger.daytime) {
+          await _maybeRunHistoricalSweepAfterDaytimeSync(
+            session: _captureSession(syncOperation: operation),
+          );
+        }
       });
       if (_syncSkipReasonOperation == operation &&
           _syncSkipReasonGeneration == generation) {
@@ -2863,6 +2920,7 @@ class AssignmentStore extends ChangeNotifier {
     bool completeSync = false,
     bool detectNewAssignments = false,
     bool syncCompleted = false,
+    bool allowSourceBaselineUpdate = true,
     String? syncFailure,
     DateTime? completedAt,
   }) async {
@@ -2936,6 +2994,7 @@ class AssignmentStore extends ChangeNotifier {
       completeSync: completeSync,
       detectNewAssignments: detectNewAssignments,
       syncCompleted: syncCompleted,
+      allowSourceBaselineUpdate: allowSourceBaselineUpdate,
       syncFailure: syncFailure,
       completedAt: completedAt,
     );
@@ -3655,6 +3714,10 @@ class AssignmentStore extends ChangeNotifier {
       _pinned = const PinnedAssignments.empty();
       _courseworkState = const LocalCourseworkState.empty();
       _courseTermPreferences = const CourseTermPreferences.empty();
+      _historicalSweepState = const HistoricalSweepState.empty();
+      _lastRequestedSyncScope = AssignmentSyncScope.current;
+      _lastTargetedCourseKeys = const {};
+      _lastSyncSourceResults = const [];
       _termCatalogCache = null;
       _pinsNeedSave = false;
       _invalidateHomeDisplayIndex();
@@ -3705,6 +3768,7 @@ class AssignmentStore extends ChangeNotifier {
     bool completeSync = false,
     bool detectNewAssignments = false,
     bool syncCompleted = false,
+    bool allowSourceBaselineUpdate = true,
     String? syncFailure,
     DateTime? completedAt,
     bool updateAssignmentReminders = true,
@@ -3750,6 +3814,7 @@ class AssignmentStore extends ChangeNotifier {
                   completeSync: completeSync,
                   detectNewAssignments: detectNewAssignments,
                   syncCompleted: syncCompleted,
+                  allowSourceBaselineUpdate: allowSourceBaselineUpdate,
                   failure: syncFailure,
                   completedAt: completedAt,
                 );
@@ -4239,6 +4304,7 @@ class AssignmentStore extends ChangeNotifier {
     required bool completeSync,
     required bool detectNewAssignments,
     required bool syncCompleted,
+    bool allowSourceBaselineUpdate = true,
     String? failure,
     DateTime? completedAt,
   }) async {
@@ -4260,9 +4326,11 @@ class AssignmentStore extends ChangeNotifier {
       sentNewAssignmentIds: state.sentNewAssignmentIds,
       baselineCompleted: state.baselineCompleted,
       baselinedSources: state.baselinedSources,
-      completedSourceKeys: syncCompleted
+      completedSourceKeys: (syncCompleted && allowSourceBaselineUpdate)
           ? {
-              for (final source in chaoxingClient.sourceResults)
+              for (final source in (_lastSyncSourceResults.isNotEmpty
+                  ? _lastSyncSourceResults
+                  : chaoxingClient.sourceResults))
                 if (source.phase == SyncSourcePhase.success) source.source,
             }
           : const {},
@@ -4291,8 +4359,188 @@ class AssignmentStore extends ChangeNotifier {
 
   bool _needsProfileRecovery = false;
 
-  Future<void> _syncAssignmentsBody(BackgroundSyncTrigger trigger,
-      {required int operation, bool skipTaskEngineProbe = false}) async {
+  SyncCourseSelector _buildSyncCourseSelector(
+    AssignmentSyncScope requestedScope,
+    Set<String> targetedCourseKeys,
+  ) {
+    return (catalog) {
+      final mappedCourses = [
+        for (final ref in catalog)
+          CourseRef(
+            courseId: ref.courseId,
+            clazzId: ref.clazzId,
+            name: ref.courseName,
+            teacherNames: ref.teacherNames,
+            folderName: ref.folderName,
+          ),
+      ];
+      final liveCatalog = CourseTermCatalog.build(
+        courses: mappedCourses,
+        assignments: [..._assignments, ..._hiddenAssignments],
+        notices: _courseNotices.items,
+        preferences: _courseTermPreferences,
+        now: _clock(),
+        coursework: _courseworkState,
+        unfollowedCourseKeys: _unfollowed,
+        hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+      );
+      return SyncScopeSelection.select(
+        catalog: catalog,
+        scope: requestedScope,
+        termCatalog: liveCatalog,
+        targetedCourseKeys: targetedCourseKeys,
+      );
+    };
+  }
+
+  Future<void> _maybeRunHistoricalSweepAfterDaytimeSync({
+    required _SessionSnapshot session,
+  }) async {
+    if (!_isSessionCurrent(session) || _disposed || _syncCancelled) return;
+    if (syncReport.phase != SyncPhase.success || _error != null) return;
+    final hasBlockingIssue = chaoxingClient.issues.any(
+      (issue) => const {
+        SyncIssueKind.verificationRequired,
+        SyncIssueKind.rateLimited,
+        SyncIssueKind.authExpired,
+      }.contains(issue.kind),
+    );
+    if (hasBlockingIssue) return;
+    final sweepNow = _clock();
+    if (!DaytimeCheckPolicy.isInWindow(sweepNow)) return;
+    if (_serverBackoffUntil?.isAfter(sweepNow) ?? false) return;
+
+    final catalog = termCatalog;
+    final eligibleKeys = [
+      for (final entry in catalog.entries)
+        if (entry.isFollowed && entry.state == CourseCatalogState.archived)
+          entry.courseKey,
+    ];
+    final batch = _historicalSweepState.selectNextBatch(
+      eligibleKeys,
+      now: sweepNow,
+    );
+    if (batch.isEmpty) return;
+
+    final account = session.account;
+    if (account == null) return;
+
+    final savedReport = syncReport;
+    final savedError = _error;
+    final batchSet = batch.toSet();
+    final priorRecords = [..._assignments, ..._hiddenAssignments];
+    var swept = const <Assignment>[];
+    var abortedMidBatch = false;
+    try {
+      chaoxingClient.nextSyncCourseSelector = _buildSyncCourseSelector(
+        AssignmentSyncScope.historicalSweep,
+        batchSet,
+      );
+      chaoxingClient.shouldStop =
+          () => !DaytimeCheckPolicy.isInWindow(_clock());
+      chaoxingClient.previousAssignments = {
+        for (final a in priorRecords) a.id: a,
+      };
+      swept = await chaoxingClient.fetchAssignmentsWithOptions(
+        collectCourseNotices: false,
+        enableTaskEngineProbe: false,
+      );
+    } on SyncReadException catch (error) {
+      if (error.issue.kind == SyncIssueKind.cancelled) {
+        throw const SyncCancelledException();
+      }
+      abortedMidBatch = true;
+    } on ChaoxingAuthenticationException {
+      abortedMidBatch = true;
+    } catch (_) {
+      abortedMidBatch = true;
+    } finally {
+      chaoxingClient.onProgress = null;
+      chaoxingClient.shouldStop = null;
+      chaoxingClient.nextSyncCourseSelector = null;
+    }
+
+    if (!_isSessionCurrent(session) || _disposed || _syncCancelled) return;
+    if (chaoxingClient.issues.isNotEmpty) {
+      try {
+        await _updateServerBackoff(chaoxingClient.issues, session: session);
+      } catch (_) {/* Keep sweep non-blocking for daytime sync state. */}
+    }
+
+    final failedKeys = {
+      ...chaoxingClient.lastFailedCourseKeys.where(batchSet.contains),
+      if (abortedMidBatch && chaoxingClient.lastFailedCourseKeys.isEmpty)
+        ...batchSet,
+    };
+    final nextState = _historicalSweepState.recordBatchResult(
+      plannedKeys: batch,
+      failedKeys: failedKeys,
+      eligiblePastCourseKeys: eligibleKeys,
+      at: sweepNow,
+    );
+    try {
+      await repository.saveHistoricalSweepState(nextState, account);
+      if (_isSessionCurrent(session)) {
+        _historicalSweepState = nextState;
+      }
+    } catch (_) {
+      // Cursor persistence failure leaves old cursor intact without failing
+      // the primary daytime sync.
+    }
+
+    if (swept.isNotEmpty && _isSessionCurrent(session) && !_disposed) {
+      try {
+        await _markReminderMutationPending();
+        await repository.mergeAndSave(
+          swept,
+          completeSync: false,
+          canCommit: _nativeReminderAvailable
+              ? () async {
+                  if (!_isSessionCurrent(session) || _disposed) return false;
+                  return backgroundReminderGateway.isSessionCurrent(
+                    session.accountHash!,
+                    session.sessionEpoch,
+                  );
+                }
+              : () async => _isSessionCurrent(session) && !_disposed,
+        );
+        if (_isSessionCurrent(session) && !_disposed) {
+          await _reloadJournal(
+            completeSync: false,
+            detectNewAssignments: false,
+            syncCompleted: true,
+            allowSourceBaselineUpdate: false,
+          );
+        }
+      } on StaleSessionWriteException {
+        return;
+      } catch (_) {
+        // Keep primary daytime sync state intact when best-effort historical merge fails.
+      }
+    }
+    if (_isSessionCurrent(session) && !_disposed) {
+      syncReport = savedReport;
+      _error = savedError;
+    }
+  }
+
+  Future<void> _syncAssignmentsBody(
+    BackgroundSyncTrigger trigger, {
+    required int operation,
+    bool skipTaskEngineProbe = false,
+    AssignmentSyncScope? scope,
+    Set<String>? targetedCourseKeys,
+  }) async {
+    final requestedScope = scope ?? AssignmentSyncScope.current;
+    final targetedKeys =
+        Set<String>.unmodifiable(targetedCourseKeys ?? const {});
+    if (trigger == BackgroundSyncTrigger.manual) {
+      _lastRequestedSyncScope = requestedScope;
+      _lastTargetedCourseKeys = targetedKeys;
+    }
+    final priorCurrentSuccessAt = syncReport.lastCurrentSuccessAt;
+    final priorFullSuccessAt = _lastSyncAt ?? syncReport.lastFullSuccessAt;
+    _lastSyncSourceResults = const [];
     final syncSession = _captureSession(syncOperation: operation);
     final generation = syncSession.generation;
     final syncAccount = syncSession.account;
@@ -4346,7 +4594,9 @@ class AssignmentStore extends ChangeNotifier {
         phase: SyncPhase.running,
         attemptedAt: attempted,
         lastDataSuccessAt: syncReport.lastDataSuccessAt,
-        lastFullSuccessAt: _lastSyncAt);
+        lastCurrentSuccessAt: priorCurrentSuccessAt,
+        lastFullSuccessAt: priorFullSuccessAt,
+        syncScope: requestedScope);
     try {
       await _persistSyncReport(session: syncSession);
     } on StaleSessionWriteException {
@@ -4397,6 +4647,10 @@ class AssignmentStore extends ChangeNotifier {
     }
 
     try {
+      chaoxingClient.nextSyncCourseSelector = _buildSyncCourseSelector(
+        requestedScope,
+        targetedKeys,
+      );
       incoming = await chaoxingClient.fetchAssignmentsWithOptions(
         collectCourseNotices: manualSync,
         enableTaskEngineProbe: manualSync && !skipTaskEngineProbe,
@@ -4407,6 +4661,10 @@ class AssignmentStore extends ChangeNotifier {
       _clearHomePreview(notify: true);
       await _refreshChaoxingSession();
       attachProgress();
+      chaoxingClient.nextSyncCourseSelector = _buildSyncCourseSelector(
+        requestedScope,
+        targetedKeys,
+      );
       incoming = await chaoxingClient.fetchAssignmentsWithOptions(
         collectCourseNotices: manualSync,
         enableTaskEngineProbe: manualSync && !skipTaskEngineProbe,
@@ -4419,6 +4677,7 @@ class AssignmentStore extends ChangeNotifier {
     } finally {
       chaoxingClient.onProgress = null;
       chaoxingClient.shouldStop = null;
+      chaoxingClient.nextSyncCourseSelector = null;
       if (generation == _generation &&
           !_disposed &&
           !_syncCancelled &&
@@ -4452,6 +4711,31 @@ class AssignmentStore extends ChangeNotifier {
     if (generation != _generation || _disposed) return;
     _ensureSyncActive(operation);
     var warning = chaoxingClient.lastSyncWarning;
+    // Snapshot scope, issues, sources, and counts before optional profile
+    // recovery, because _refreshChaoxingSession() calls login()->clearSession()
+    // and would otherwise wipe this round's sync telemetry.
+    final usedSelector = chaoxingClient.hasCourseResponse;
+    final effectiveScope = usedSelector
+        ? chaoxingClient.lastSyncScope
+        : (requestedScope == AssignmentSyncScope.targeted ||
+                requestedScope == AssignmentSyncScope.historicalSweep
+            ? requestedScope
+            : AssignmentSyncScope.all);
+    final plannedCount = usedSelector
+        ? chaoxingClient.plannedCourses
+        : (requestedScope == AssignmentSyncScope.targeted ||
+                requestedScope == AssignmentSyncScope.historicalSweep
+            ? targetedKeys.length
+            : 0);
+    final skippedCount = usedSelector ? chaoxingClient.skippedCourses : 0;
+    final clientSucceededCourses = chaoxingClient.succeededCourses;
+    final clientFailedCourses = chaoxingClient.failedCourses;
+    final capturedIssues = List<SyncIssue>.of(chaoxingClient.issues);
+    var capturedSourceResults =
+        List<SyncSourceResult>.of(chaoxingClient.sourceResults);
+    _lastSyncSourceResults = capturedSourceResults;
+    final capturedNotices =
+        List<CourseNotice>.of(chaoxingClient.lastFetchedNotices);
     if (_needsProfileRecovery && !chaoxingClient.deferProfile) {
       _needsProfileRecovery = false;
       try {
@@ -4462,12 +4746,18 @@ class AssignmentStore extends ChangeNotifier {
     }
     if (generation != _generation || _disposed) return;
     _ensureSyncActive(operation);
+    final isCurrentCoverage = effectiveScope == AssignmentSyncScope.current ||
+        effectiveScope == AssignmentSyncScope.all;
+    final isFullCoverage = effectiveScope == AssignmentSyncScope.all ||
+        (effectiveScope == AssignmentSyncScope.current && skippedCount == 0);
+    final cleanSuccess = warning == null;
+
     final before = [..._assignments, ..._hiddenAssignments];
     await _markReminderMutationPending();
     markSavingStage();
     await repository.mergeAndSave(
       incoming,
-      completeSync: warning == null,
+      completeSync: cleanSuccess && isFullCoverage,
       canCommit: _nativeReminderAvailable
           ? () async {
               _ensureSyncActive(operation);
@@ -4491,12 +4781,14 @@ class AssignmentStore extends ChangeNotifier {
     if (repository.identityConflictCount > 0) {
       warning ??= '部分旧记录存在重复关联，已暂停其提醒，请查看本地记录';
       final sources = repository.identityConflictSources;
-      chaoxingClient.sourceResults = [
-        for (final source in chaoxingClient.sourceResults)
+      capturedSourceResults = [
+        for (final source in capturedSourceResults)
           sources.contains(source.source)
               ? source.withIdentityConflict()
               : source,
       ];
+      _lastSyncSourceResults = capturedSourceResults;
+      chaoxingClient.sourceResults = capturedSourceResults;
     }
     final dataSuccessAt = DateTime.now();
     final bool dataMirrorSaved;
@@ -4510,10 +4802,10 @@ class AssignmentStore extends ChangeNotifier {
       return;
     }
     final timestampMirrorFailed = !attemptMirrorSaved || !dataMirrorSaved;
-    final reportIssues = List<SyncIssue>.of(chaoxingClient.issues);
+    final reportIssues = List<SyncIssue>.of(capturedIssues);
     var courseNoticeReadFailed = false;
     var courseNoticeSaveFailed = false;
-    final courseNoticeResults = chaoxingClient.sourceResults
+    final courseNoticeResults = capturedSourceResults
         .where((source) => source.source == 'courseNotice')
         .toList();
     if (courseNoticeResults.isNotEmpty &&
@@ -4526,7 +4818,7 @@ class AssignmentStore extends ChangeNotifier {
       ));
     }
     if (manualSync &&
-        chaoxingClient.sourceResults.any((s) =>
+        capturedSourceResults.any((s) =>
             s.source == 'courseNotice' && s.phase != SyncSourcePhase.failed)) {
       final account = syncAccount;
       if (account != null &&
@@ -4534,8 +4826,7 @@ class AssignmentStore extends ChangeNotifier {
           _account == account &&
           !_disposed) {
         try {
-          final mergedNotices =
-              _courseNotices.mergeIncoming(chaoxingClient.lastFetchedNotices);
+          final mergedNotices = _courseNotices.mergeIncoming(capturedNotices);
           await repository.saveCourseNotices(mergedNotices, account);
           if (generation == _generation && _account == account && !_disposed) {
             _courseNotices = mergedNotices;
@@ -4561,6 +4852,11 @@ class AssignmentStore extends ChangeNotifier {
           '作业数据已保存，但兼容同步时间记录未能完整更新；当前同步报告保留了准确时间，请重试以修复记录',
           stage: 'persistence'));
     }
+    final nextCurrentSuccessAt = (cleanSuccess && isCurrentCoverage)
+        ? dataSuccessAt
+        : priorCurrentSuccessAt;
+    final nextFullSuccessAt =
+        (cleanSuccess && isFullCoverage) ? dataSuccessAt : priorFullSuccessAt;
     syncReport = SyncReport(
         phase: warning == null &&
                 !timestampMirrorFailed &&
@@ -4570,10 +4866,14 @@ class AssignmentStore extends ChangeNotifier {
             : SyncPhase.partial,
         attemptedAt: attempted,
         lastDataSuccessAt: dataSuccessAt,
-        lastFullSuccessAt: warning == null ? dataSuccessAt : _lastSyncAt,
-        succeededCourses: chaoxingClient.succeededCourses,
-        failedCourses: chaoxingClient.failedCourses,
-        sourceResults: chaoxingClient.sourceResults,
+        lastCurrentSuccessAt: nextCurrentSuccessAt,
+        lastFullSuccessAt: nextFullSuccessAt,
+        syncScope: effectiveScope,
+        plannedCourses: plannedCount,
+        skippedCourses: skippedCount,
+        succeededCourses: clientSucceededCourses,
+        failedCourses: clientFailedCourses,
+        sourceResults: capturedSourceResults,
         issues: reportIssues);
     try {
       await _updateServerBackoff(reportIssues, session: syncSession);
@@ -4601,10 +4901,14 @@ class AssignmentStore extends ChangeNotifier {
           phase: SyncPhase.partial,
           attemptedAt: attempted,
           lastDataSuccessAt: dataSuccessAt,
-          lastFullSuccessAt: warning == null ? dataSuccessAt : _lastSyncAt,
-          succeededCourses: chaoxingClient.succeededCourses,
-          failedCourses: chaoxingClient.failedCourses,
-          sourceResults: chaoxingClient.sourceResults,
+          lastCurrentSuccessAt: nextCurrentSuccessAt,
+          lastFullSuccessAt: nextFullSuccessAt,
+          syncScope: effectiveScope,
+          plannedCourses: plannedCount,
+          skippedCourses: skippedCount,
+          succeededCourses: clientSucceededCourses,
+          failedCourses: clientFailedCourses,
+          sourceResults: capturedSourceResults,
           issues: [
             ...reportIssues,
             const SyncIssue(
@@ -4615,9 +4919,11 @@ class AssignmentStore extends ChangeNotifier {
     }
     try {
       await _reloadJournal(
-        completeSync: warning == null,
-        detectNewAssignments: true,
+        completeSync: cleanSuccess && isCurrentCoverage,
+        detectNewAssignments:
+            effectiveScope != AssignmentSyncScope.historicalSweep,
         syncCompleted: true,
+        allowSourceBaselineUpdate: isCurrentCoverage,
         syncFailure: warning,
         completedAt: dataSuccessAt,
       );
@@ -4626,7 +4932,7 @@ class AssignmentStore extends ChangeNotifier {
       await _recordChanges(
         before,
         incoming,
-        completeSync: warning == null,
+        completeSync: cleanSuccess && isCurrentCoverage,
         session: syncSession,
       );
       _error ??= warning;
@@ -4879,7 +5185,11 @@ class AssignmentStore extends ChangeNotifier {
           phase: SyncPhase.cancelled,
           attemptedAt: syncReport.attemptedAt,
           lastDataSuccessAt: syncReport.lastDataSuccessAt,
-          lastFullSuccessAt: _lastSyncAt,
+          lastCurrentSuccessAt: syncReport.lastCurrentSuccessAt,
+          lastFullSuccessAt: _lastSyncAt ?? syncReport.lastFullSuccessAt,
+          syncScope: syncReport.syncScope,
+          plannedCourses: syncReport.plannedCourses,
+          skippedCourses: syncReport.skippedCourses,
           succeededCourses: chaoxingClient.succeededCourses,
           failedCourses: chaoxingClient.failedCourses,
           issues: const [
@@ -4908,7 +5218,11 @@ class AssignmentStore extends ChangeNotifier {
             phase: SyncPhase.failed,
             attemptedAt: syncReport.attemptedAt ?? _lastSyncAttemptAt,
             lastDataSuccessAt: syncReport.lastDataSuccessAt,
-            lastFullSuccessAt: _lastSyncAt,
+            lastCurrentSuccessAt: syncReport.lastCurrentSuccessAt,
+            lastFullSuccessAt: _lastSyncAt ?? syncReport.lastFullSuccessAt,
+            syncScope: syncReport.syncScope,
+            plannedCourses: syncReport.plannedCourses,
+            skippedCourses: syncReport.skippedCourses,
             issues: [
               ...chaoxingClient.issues,
               if (storageFailure)

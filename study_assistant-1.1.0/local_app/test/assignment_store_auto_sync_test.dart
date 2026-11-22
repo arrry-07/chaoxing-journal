@@ -2,6 +2,11 @@ import 'dart:convert';
 
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
+import 'package:dio/dio.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/sync_scope.dart';
+import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
+import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 // Failure injection into the persistence boundary used by SharedPreferences.
@@ -537,6 +542,295 @@ void main() {
             issue.kind == SyncIssueKind.storage &&
             issue.stage == 'persistence')));
   });
+
+  group('Phase 3D bounded historical sweep and unidentified signal check', () {
+    test(
+        'HistoricalSweepState enforces 24h cooldown, max 3/batch, retry-first cursor rotation, and safe corruption fallback',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final repo = LocalAssignmentRepository();
+      await repo.activateAccount('student-a');
+
+      final now = DateTime.utc(2026, 11, 20, 4);
+      final eligible = ['10:1', '10:2', '10:3', '10:4', '10:5'];
+      var state = const HistoricalSweepState.empty();
+
+      final batch1 = state.selectNextBatch(eligible, now: now);
+      expect(batch1, ['10:1', '10:2', '10:3']);
+
+      state = state.recordBatchResult(
+        plannedKeys: batch1,
+        failedKeys: const {'10:2'},
+        eligiblePastCourseKeys: eligible,
+        at: now,
+      );
+      expect(state.pendingRetryKeys, ['10:2']);
+      expect(state.cursorIndex, 3);
+      expect(
+        state.selectNextBatch(eligible,
+            now: now.add(const Duration(hours: 23))),
+        isEmpty,
+      );
+
+      final batch2 = state.selectNextBatch(
+        eligible,
+        now: now.add(const Duration(hours: 24)),
+      );
+      expect(batch2, ['10:2', '10:4', '10:5']);
+
+      state = state.recordBatchResult(
+        plannedKeys: batch2,
+        failedKeys: const {},
+        eligiblePastCourseKeys: eligible,
+        at: now.add(const Duration(hours: 24)),
+      );
+      expect(state.pendingRetryKeys, isEmpty);
+      expect(state.cursorIndex, 0);
+
+      await repo.saveHistoricalSweepState(state, 'student-a');
+      final loaded = await repo.loadHistoricalSweepState('student-a');
+      expect(loaded.cursorIndex, 0);
+      expect(loaded.lastBatchAtUtc, now.add(const Duration(hours: 24)));
+
+      await repo.activateAccount('student-b');
+      expect((await repo.loadHistoricalSweepState('student-b')).lastBatchAtUtc,
+          isNull);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('historical_sweep_state_v1', '{broken-json');
+      final recovered = await repo.loadHistoricalSweepState('student-b');
+      expect(recovered.lastBatchAtUtc, isNull);
+      expect(recovered.cursorIndex, 0);
+    });
+
+    test(
+        'daytime check sweeps <=3 followed archived courses per 24h without inflating current/full timestamps or false new alerts, recalls extended course, and keeps notificationSignal light',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      var clockNow = DateTime(2026, 11, 20, 11, 0);
+      final requestedCourses = <String>[];
+      var failCourse2 = true;
+      var returnExtendedCourse1 = false;
+
+      final catalogPayload = [
+        {
+          'courseId': '0',
+          'clazzId': '10',
+          'courseName': '本学期课程',
+          'folderName': '2026年秋'
+        },
+        {
+          'courseId': '1',
+          'clazzId': '10',
+          'courseName': '往期课1',
+          'folderName': '2025年秋'
+        },
+        {
+          'courseId': '2',
+          'clazzId': '10',
+          'courseName': '往期课2',
+          'folderName': '2025年秋'
+        },
+        {
+          'courseId': '3',
+          'clazzId': '10',
+          'courseName': '往期课3',
+          'folderName': '2025年秋'
+        },
+        {
+          'courseId': '4',
+          'clazzId': '10',
+          'courseName': '往期课4',
+          'folderName': '2025年秋'
+        },
+        {
+          'courseId': '5',
+          'clazzId': '10',
+          'courseName': '往期课5',
+          'folderName': '2025年秋'
+        },
+        {
+          'courseId': '9',
+          'clazzId': '10',
+          'courseName': '未关注往期',
+          'folderName': '2025年秋'
+        },
+      ];
+
+      final dio = Dio()
+        ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+          final path = o.uri.path;
+          if (path == '/mycourse/backclazzdata') {
+            h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data: {'courses': catalogPayload},
+            ));
+            return;
+          }
+          final cid = o.uri.queryParameters['courseId'] ??
+              o.uri.queryParameters['courseid'];
+          if (path == '/visit/stucoursemiddle') {
+            requestedCourses.add('$cid:10');
+            if (failCourse2 && cid == '2') {
+              h.resolve(Response(
+                requestOptions: o,
+                statusCode: 200,
+                data: '没有此页面访问权限',
+              ));
+              return;
+            }
+            h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data: '<input id="workEnc" value="w">',
+            ));
+            return;
+          }
+          if (path == '/mooc2/work/list') {
+            if (returnExtendedCourse1 && cid == '1') {
+              h.resolve(Response(
+                requestOptions: o,
+                statusCode: 200,
+                data:
+                    '<li onclick="goTask(this);" data="https://mooc1.chaoxing.com/work/task?courseId=1&classId=10&workId=ext99"><p class="overHidden2 fl">补修作业</p><p class="status fl">未提交</p></li>',
+              ));
+              return;
+            }
+            h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data: cid == '1'
+                  ? '<li onclick="goTask(this);" data="https://mooc1.chaoxing.com/work/task?courseId=1&classId=10&workId=old1"><p class="overHidden2 fl">旧作业</p><p class="status fl">已提交</p></li>'
+                  : '<div>暂无作业</div>',
+            ));
+            return;
+          }
+          if (path == '/work/task' || path.contains('/mooc2/work/')) {
+            final workId = o.uri.queryParameters['workId'];
+            h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data: workId == 'old1'
+                  ? '截止时间：2025-11-20 20:00'
+                  : '截止时间：2026-11-23 20:00',
+            ));
+            return;
+          }
+          if (path == '/phone/moocAnalysis/examList') {
+            h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data:
+                  '<div class="ybox"><p class="blankTips">您好，本课程下暂未收到考试</p></div>',
+            ));
+            return;
+          }
+          if (path == '/exam-ans/exam/test/examcode/examlist') {
+            h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data:
+                  '<table class="dataTable"><tr><th>考试名称</th><th>作答状态</th></tr></table><script>page.showPage(0/12+1,Math.ceil(0/12));</script>',
+            ));
+            return;
+          }
+          if (path == '/pc/notice/getNoticeList') {
+            h.resolve(Response(
+              requestOptions: o,
+              statusCode: 200,
+              data: {'status': true},
+            ));
+            return;
+          }
+          throw StateError('unexpected $path');
+        }));
+
+      final repo = LocalAssignmentRepository();
+      await repo.activateAccount('student');
+      await repo.saveCourses(
+        [
+          for (final row in catalogPayload)
+            CourseRef(
+              courseId: row['courseId']!,
+              clazzId: row['clazzId']!,
+              name: row['courseName']!,
+              folderName: row['folderName'],
+            ),
+        ],
+        account: 'student',
+      );
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('unfollowed_courses', ['9:10']);
+
+      final client = _ScopedAutoSyncClient(
+        dio: dio,
+        enableClassroomTasks: false,
+        wait: (_) async {},
+      );
+      final store = AssignmentStore(
+        repository: repo,
+        sessionStore: _MemorySessionStore(account: 'student', password: 'pw'),
+        notificationService: _RecordingNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        chaoxingClient: client,
+        clock: () => clockNow,
+      );
+      addTearDown(store.dispose);
+      await store.restoreSession();
+
+      // Unidentified notification signal: light current check only (1 current course, no sweep, no full scan).
+      await store.saveNotificationListenerEnabled(true);
+      final signalRes = await store.runBackgroundAutomaticCheck(
+          BackgroundSyncTrigger.notificationSignal);
+      expect(signalRes.success, isTrue);
+      expect(requestedCourses, ['0:10']);
+
+      // Advance clock 5 hours for due daytime check -> current + 1st bounded sweep batch (<=3: 1:10, 2:10, 3:10).
+      requestedCourses.clear();
+      clockNow = clockNow.add(const Duration(hours: 5));
+      final daytimeRes1 = await store
+          .runBackgroundAutomaticCheck(BackgroundSyncTrigger.daytime);
+      expect(daytimeRes1.success, isTrue);
+      expect(requestedCourses.first, '0:10');
+      expect(
+        requestedCourses.skip(1).toList(),
+        unorderedEquals(['1:10', '2:10', '3:10']),
+      );
+      expect(requestedCourses, isNot(contains('9:10')));
+      expect(store.historicalSweepState.pendingRetryKeys, ['2:10']);
+      expect(store.syncReport.syncScope, AssignmentSyncScope.current);
+      expect(store.syncReport.lastFullSuccessAt, isNull);
+      expect(store.syncReport.lastCurrentSuccessAt, isNotNull);
+
+      // Cooldown (<24h) prevents second sweep even on later daytime check.
+      requestedCourses.clear();
+      clockNow = clockNow.add(const Duration(hours: 5));
+      await store.runBackgroundAutomaticCheck(BackgroundSyncTrigger.daytime);
+      expect(requestedCourses, ['0:10']);
+
+      // After 24h cooldown, batch 2 retries 2:10 first and advances to 4:10, 5:10; also recall course 1 via new extension on batch 3 or check 2:10 recovery.
+      failCourse2 = false;
+      requestedCourses.clear();
+      clockNow = clockNow.add(const Duration(hours: 20));
+      await store.runBackgroundAutomaticCheck(BackgroundSyncTrigger.daytime);
+      expect(
+        requestedCourses.skip(1).toList(),
+        unorderedEquals(['2:10', '4:10', '5:10']),
+      );
+      expect(store.historicalSweepState.pendingRetryKeys, isEmpty);
+
+      // Wrap around after 24h with an extended deadline on 1:10 -> course 1 recalls into current scope.
+      returnExtendedCourse1 = true;
+      requestedCourses.clear();
+      clockNow = clockNow.add(const Duration(hours: 25));
+      await store.runBackgroundAutomaticCheck(BackgroundSyncTrigger.daytime);
+      expect(
+        store.termCatalog.entryFor('1:10')!.state,
+        CourseCatalogState.recalled,
+      );
+    });
+  });
 }
 
 Assignment _assignment({required DateTime deadlineAt}) {
@@ -739,4 +1033,15 @@ class _ColdClient extends ChaoxingLocalClient {
     if (!ready) throw StateError('result=false');
     return [];
   }
+}
+
+class _ScopedAutoSyncClient extends ChaoxingLocalClient {
+  _ScopedAutoSyncClient({
+    required super.dio,
+    super.enableClassroomTasks = false,
+    super.wait,
+  });
+
+  @override
+  bool get needsSessionInitialization => false;
 }

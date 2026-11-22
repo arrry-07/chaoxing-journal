@@ -1093,7 +1093,7 @@ void main() {
       () async {
     final anchor = DateTime.now().toUtc();
     final now = DateTime.utc(anchor.year, anchor.month, anchor.day, 2);
-    final daytimeClock = todayAt(10);
+    final daytimeClock = todayAt(10).add(const Duration(days: 1));
     SharedPreferences.setMockInitialValues({
       'background_check_enabled_v1': true,
       'background_check_interval_minutes_v1': 240,

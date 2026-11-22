@@ -2,11 +2,11 @@
 
 <a id="dev-当前迭代进度"></a>
 
-## dev 当前迭代进度（阶段二已验收；阶段三 3A–3C 已过本地门禁，待续 3D）
+## dev 当前迭代进度（阶段二已验收；阶段三 3A–3D 已过本地门禁，待续 3E）
 
 - **1.8.25+114 已正式发布收口**（PR `#62` / `233a8b0`，收口 `f25dc57`），八维方案 Phase 0–2 已归档。当前预览版 `1.8.26-dev.2+116` 已过阶段二 MuMu 实测（正式目标版本待定）。
 - [x] **阶段一（1A–1C，`1.8.26-dev.1+115`）与阶段二（2A–2D，`1.8.26-dev.2+116`）已完成并过 MuMu 实测**：详见[总迭代方案](../plans/2026-11-22-v1.8.25-产品与体验分期升级方案.md)。
-- [x] **阶段三 `3A–3C` 已过本地门禁**：`3A` 完成不触碰凭据只读取证，`3B` 完成课程元数据透传与 `schema 9` 兼容性（12 组 132 项），`3C` 完成 `CourseTermCatalog`、`course_term_preferences_v1`、`schema 9` 导入合并、首页/统计/我的课程学期过滤与批量归档（11 组 105 项）。下一步推进 **3D（同步范围 `current/all/targeted/historicalSweep` 与有界历史巡检）**。
+- [x] **阶段三 `3A–3D` 已过本地门禁**：`3A` 只读取证、`3B` 课程元数据与 `schema 9`（12 组 132 项）、`3C` 统一学期目录及各端过滤（11 组 105 项）、`3D` 同步范围 `current/all/targeted/historicalSweep`、24h/3 门有界历史巡检及 Android Gradle `:app:testDebugUnitTest :app:assembleDebugAndroidTest`（10 组 181 项）。下一步推进 **3E（系统通知分区与单课入口）**。
 
 ## 最近 2 个正式发布版本
 

@@ -45,6 +45,36 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
     );
   }
 
+  Future<void> _runAllTermsSync() async {
+    final before = store.syncReport;
+    final epoch = store.accountEpoch;
+    await store.syncAllTerms();
+    if (!mounted) return;
+    InteractionFeedback.triggerSyncDoneIfReady(
+      prefs: store.display,
+      before: before,
+      after: store.syncReport,
+      beforeEpoch: epoch,
+      afterEpoch: store.accountEpoch,
+      operationError: store.operationError,
+    );
+  }
+
+  Future<void> _runVerificationRetry() async {
+    final before = store.syncReport;
+    final epoch = store.accountEpoch;
+    await store.retryLastSyncAfterVerification();
+    if (!mounted) return;
+    InteractionFeedback.triggerSyncDoneIfReady(
+      prefs: store.display,
+      before: before,
+      after: store.syncReport,
+      beforeEpoch: epoch,
+      afterEpoch: store.accountEpoch,
+      operationError: store.operationError,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -52,8 +82,10 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       builder: (context, _) {
         final journal = Journal.of(context);
         final lastSyncAt = store.lastSyncAt;
-        final stale = lastSyncAt == null ||
-            DateTime.now().difference(lastSyncAt).inHours >= 24;
+        final currentSyncAt = store.syncReport.lastCurrentSuccessAt;
+        final effectiveSyncAt = currentSyncAt ?? lastSyncAt;
+        final stale = effectiveSyncAt == null ||
+            DateTime.now().difference(effectiveSyncAt).inHours >= 24;
         final issues = store.syncReport.issues;
         final needsVerification = issues
             .any((issue) => issue.kind == SyncIssueKind.verificationRequired);
@@ -98,6 +130,14 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                         lastSyncAt == null
                             ? '尚无完整同步记录'
                             : '最近完整同步：${DateFormat('M月d日 HH:mm', 'zh_CN').format(lastSyncAt.toLocal())}',
+                        if (currentSyncAt != null &&
+                            currentSyncAt != lastSyncAt)
+                          '最近本学期同步：${DateFormat('M月d日 HH:mm', 'zh_CN').format(currentSyncAt.toLocal())}',
+                        if (store.syncReport.plannedCourses > 0 ||
+                            store.syncReport.skippedCourses > 0)
+                          '本次范围：${store.syncReport.syncScope.label} · '
+                              '已扫描 ${store.syncReport.plannedCourses} 门'
+                              '${store.syncReport.skippedCourses > 0 ? '，跳过往期/归档 ${store.syncReport.skippedCourses} 门' : ''}',
                         if (store.syncReport.attemptedAt != null)
                           '最后尝试：${DateFormat('M月d日 HH:mm').format(store.syncReport.attemptedAt!.toLocal())}',
                         if (store.syncReport.lastDataSuccessAt != null)
@@ -177,6 +217,13 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                 loading: store.isLoading,
                 onPressed: store.isLoading ? null : _runSync,
               ),
+              const SizedBox(height: 10),
+              JournalSecondaryButton(
+                key: const ValueKey('sync-all-terms-button'),
+                icon: Icons.manage_search_rounded,
+                label: '全量扫描全部学期',
+                onPressed: store.isLoading ? null : _runAllTermsSync,
+              ),
               if (needsVerification || canInspectCoursePage) ...[
                 const SizedBox(height: 10),
                 JournalPrimaryButton(
@@ -189,7 +236,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                             final continued = await store.chaoxingClient
                                 .verifyInBrowser(
                                     courseInspection: !needsVerification);
-                            if (continued) await _runSync();
+                            if (continued) await _runVerificationRetry();
                           } on VerificationTargetUnavailable {
                             if (context.mounted) {
                               _showMessage(needsVerification

@@ -11,6 +11,7 @@ import '../models/assignment_sync_progress.dart';
 import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
 import '../models/sync_report.dart';
+import '../models/sync_scope.dart';
 import 'chaoxing_api_parser.dart';
 import 'chaoxing_assignment_parser.dart';
 import 'chaoxing_chapter_parser.dart';
@@ -462,6 +463,13 @@ class ChaoxingLocalClient {
   List<ChaoxingCourseRef> courses = [];
   Set<String> trackedActivityIds = {};
   Map<String, Assignment> previousAssignments = {};
+  SyncCourseSelector? nextSyncCourseSelector;
+  AssignmentSyncScope lastSyncScope = AssignmentSyncScope.all;
+  int plannedCourses = 0;
+  int skippedCourses = 0;
+  Set<String> lastPlannedCourseKeys = const {};
+  Set<String> lastFailedCourseKeys = const {};
+  final Set<String> _lastExamFailedCourseKeys = <String>{};
   void clearSession() {
     // Stop any transport that still belongs to the previous identity before
     // clearing cookies and generation. A session replacement is a stale-result
@@ -474,6 +482,13 @@ class ChaoxingLocalClient {
     _loginPayload = null;
     courses = [];
     hasCourseResponse = false;
+    nextSyncCourseSelector = null;
+    lastSyncScope = AssignmentSyncScope.all;
+    plannedCourses = 0;
+    skippedCourses = 0;
+    lastPlannedCourseKeys = const {};
+    lastFailedCourseKeys = const {};
+    _lastExamFailedCourseKeys.clear();
     issues = [];
     sourceResults = const [];
     succeededCourses = 0;
@@ -777,14 +792,17 @@ class ChaoxingLocalClient {
     } finally {
       _collectCourseNoticesInNextSync = false;
       _enableTaskEngineProbeInNextSync = false;
+      nextSyncCourseSelector = null;
     }
   }
 
   Future<List<Assignment>> fetchAssignments() async {
     final collectNotices = _collectCourseNoticesInNextSync;
     final enableProbe = _enableTaskEngineProbeInNextSync;
+    final courseSelector = nextSyncCourseSelector;
     _collectCourseNoticesInNextSync = false;
     _enableTaskEngineProbeInNextSync = false;
+    nextSyncCourseSelector = null;
     _lastFetchedNotices = const [];
     _startRequestToken();
     final generation = _sessionGeneration;
@@ -802,6 +820,13 @@ class ChaoxingLocalClient {
     issues = [];
     sourceResults = const [];
     hasCourseResponse = false;
+    lastSyncScope = AssignmentSyncScope.all;
+    plannedCourses = 0;
+    skippedCourses = 0;
+    lastPlannedCourseKeys = const {};
+    lastFailedCourseKeys = const {};
+    _lastExamFailedCourseKeys.clear();
+    final trackedFailedCourseKeys = <String>{};
     succeededCourses = 0;
     failedCourses = 0;
     detailUnconfirmedCount = 0;
@@ -842,6 +867,20 @@ class ChaoxingLocalClient {
         throw const SyncReadException(
             SyncIssue(SyncIssueKind.schemaChanged, '课程列表结构无法识别，请查看详情并重试'));
       }
+      final selection = courseSelector != null
+          ? courseSelector(courses)
+          : SyncScopeSelection.all(courses);
+      final targetCourses = selection.targetCourses;
+      lastSyncScope = selection.scope;
+      plannedCourses = targetCourses.length;
+      skippedCourses = selection.skippedCourseKeys.length;
+      lastPlannedCourseKeys = Set.unmodifiable(
+        targetCourses.map(SyncScopeSelection.courseKeyOf),
+      );
+      progress?.setScopeCounts(
+        planned: plannedCourses,
+        skipped: skippedCourses,
+      );
       final problems = <String>{};
       hasCourseResponse = true;
       progress?.setStage(AssignmentSyncStage.workLists);
@@ -852,12 +891,13 @@ class ChaoxingLocalClient {
       }
       final assignments = <Assignment>[];
       final formalFailedCourseKeys = <String>{};
-      var recognized = courses.isEmpty;
+      var recognized =
+          courses.isEmpty || (targetCourses.isEmpty && invalidCourseCount == 0);
       final formalWatch = Stopwatch()..start();
-      for (final course in courses) {
+      for (final course in targetCourses) {
         if (shouldStop?.call() == true) {
-          formalFailedCourseKeys.addAll(courses
-              .skip(courses.indexOf(course))
+          formalFailedCourseKeys.addAll(targetCourses
+              .skip(targetCourses.indexOf(course))
               .map((c) => '${c.courseId}:${c.clazzId}'));
           const issue = SyncIssue(
             SyncIssueKind.partial,
@@ -901,9 +941,10 @@ class ChaoxingLocalClient {
               stage: failure?.stage ?? 'work');
           issues.add(issue);
           problems.add(issue.message);
+          progress?.markCourseFinished(failed: true);
           if (issue.kind == SyncIssueKind.verificationRequired) {
-            formalFailedCourseKeys.addAll(courses
-                .skip(courses.indexOf(course))
+            formalFailedCourseKeys.addAll(targetCourses
+                .skip(targetCourses.indexOf(course))
                 .map((c) => '${c.courseId}:${c.clazzId}'));
             break;
           }
@@ -911,17 +952,20 @@ class ChaoxingLocalClient {
           recognized = true;
           succeededCourses++;
           assignments.addAll(work);
+          progress?.markCourseFinished(failed: false);
           if (work.any((a) => a.deadlineReadFailed)) {
             problems.add('$label 部分截止时间未读取');
           }
         }
         if (_deadlineReadsBlockedBy != null) {
-          final unread = courses.length - courses.indexOf(course) - 1;
+          final unread =
+              targetCourses.length - targetCourses.indexOf(course) - 1;
           if (unread > 0) {
             issues.add(SyncIssue(
                 _deadlineReadsBlockedBy!, '本次读取已暂停，另有 $unread 门课程尚未更新',
                 stage: 'workList'));
-            for (final remaining in courses.skip(courses.indexOf(course) + 1)) {
+            for (final remaining
+                in targetCourses.skip(targetCourses.indexOf(course) + 1)) {
               formalFailedCourseKeys
                   .add('${remaining.courseId}:${remaining.clazzId}');
             }
@@ -930,6 +974,7 @@ class ChaoxingLocalClient {
         }
       }
       _recordPhase('formalWork', formalWatch);
+      trackedFailedCourseKeys.addAll(formalFailedCourseKeys);
       final formalFailureCount =
           invalidCourseCount + formalFailedCourseKeys.length;
       failedCourses = formalFailureCount;
@@ -941,7 +986,7 @@ class ChaoxingLocalClient {
       if (enableClassroomTasks) {
         progress?.setStage(AssignmentSyncStage.classroomTasks);
       }
-      final classroom = await _fetchClassroomTasks(courses,
+      final classroom = await _fetchClassroomTasks(targetCourses,
           generation: generation,
           unreadCourses: invalidCourseCount,
           progress: progress);
@@ -953,6 +998,7 @@ class ChaoxingLocalClient {
         ...formalFailedCourseKeys,
         if (enableClassroomTasks) ...classroom.failedCourseKeys,
       };
+      trackedFailedCourseKeys.addAll(failedCourseKeys);
       failedCourses = invalidCourseCount + failedCourseKeys.length;
       if (classroom.failedCourses > 0) {
         problems.add('部分课堂任务信息尚未读取');
@@ -962,23 +1008,27 @@ class ChaoxingLocalClient {
       }
       final examWatch = Stopwatch()..start();
       final exams = await _fetchExams(
-        courses,
+        targetCourses,
         generation: generation,
+        includeAccount: selection.includeAccountExams,
         collectCourseNotices: collectNotices,
+        skippedCourseKeys: selection.skippedCourseKeys,
+        noticeCatalog: courses,
       );
       _recordPhase('exams', examWatch);
+      trackedFailedCourseKeys.addAll(_lastExamFailedCourseKeys);
       if (generation != _sessionGeneration) return const [];
       assignments.addAll(exams);
       recognized = recognized || _hasExamObservation;
-      if (enableProbe && enableClassroomTasks && courses.isNotEmpty) {
+      if (enableProbe && enableClassroomTasks && targetCourses.isNotEmpty) {
         final probeWatch = Stopwatch()..start();
         if (_verificationRequiredThisSync) {
           sourceResults = [
             ...sourceResults,
-            _verificationPausedSource('taskEnginePlan', courses.length),
+            _verificationPausedSource('taskEnginePlan', targetCourses.length),
           ];
         } else {
-          await _probeTaskEnginePlans(courses, generation: generation);
+          await _probeTaskEnginePlans(targetCourses, generation: generation);
           _recordPhase('taskEnginePlan', probeWatch);
         }
         if (generation != _sessionGeneration) return const [];
@@ -1012,6 +1062,10 @@ class ChaoxingLocalClient {
       }
       return _dedupeAssignments(assignments);
     } finally {
+      lastFailedCourseKeys = Set.unmodifiable({
+        ...trackedFailedCourseKeys,
+        ..._lastExamFailedCourseKeys,
+      });
       if (identical(_syncCourseEntries, entryCache)) _syncCourseEntries = null;
       if (identical(_syncExamEntryCourses, examEntryCourses)) {
         _syncExamEntryCourses = null;
@@ -3071,6 +3125,25 @@ class _SyncProgressTracker {
   int resolvedCount = 0;
   int attemptedCount = 0;
   int workListFailureCount = 0;
+  int plannedCourses = 0;
+  int completedCourses = 0;
+  int skippedCourses = 0;
+  int failedCourses = 0;
+
+  void setScopeCounts({required int planned, required int skipped}) {
+    plannedCourses = planned;
+    skippedCourses = skipped;
+    _emit();
+  }
+
+  void markCourseFinished({required bool failed}) {
+    if (failed) {
+      failedCourses++;
+    } else {
+      completedCourses++;
+    }
+    _emit();
+  }
 
   void setStage(AssignmentSyncStage value) {
     stage = value;
@@ -3165,6 +3238,10 @@ class _SyncProgressTracker {
       attemptedCount: attemptedCount,
       unconfirmedCount: _unconfirmedIds.length,
       workListFailureCount: workListFailureCount,
+      plannedCourses: plannedCourses,
+      completedCourses: completedCourses,
+      skippedCourses: skippedCourses,
+      failedCourses: failedCourses,
     ));
   }
 }

@@ -8,9 +8,14 @@ import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/course_notice.dart';
+import 'package:study_assistant_mobile/src/models/course_term_preferences.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
+import 'package:study_assistant_mobile/src/models/sync_scope.dart';
 import 'package:study_assistant_mobile/src/services/assignment_web_link.dart';
 import 'package:study_assistant_mobile/src/services/assignment_query.dart';
+import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
 import 'ai_practice_client_test.dart' show AiFixture;
 
 const course =
@@ -1272,5 +1277,83 @@ void main() {
     final parsed = ChaoxingExamParser.account(html)!;
     expect(parsed.rows.single.id, 'cx:exam:7:11:99');
     expect(parsed.rows.single.clazzId, '11');
+  });
+
+  test(
+      'current scope preserves examAccount when all course exams are skipped, avoids downgrading cached course exams to unknown, and matches notices against full catalog',
+      () async {
+    final f = ExamFixture()
+      ..accountHtml = accountGoRow(
+        title: '全账期统考',
+        time: '2030-06-09 09:00 至 2030-06-09 11:00',
+        courseId: '7',
+        clazzId: '11',
+        examId: '701',
+      )
+      ..noticeRows = [
+        {
+          'uuid': 'n-archived-course',
+          'title': '《合成课程》往期补考提醒',
+          'content': '课程名称：合成课程\n请同学按时查看补考安排',
+          'senderName': '张老师',
+          'sendTime': '2030-04-01 09:00',
+        },
+      ];
+
+    final termCatalog = CourseTermCatalog.build(
+      courses: const [
+        CourseRef(
+            courseId: '7', clazzId: '11', name: '合成课程', folderName: '2025年秋'),
+      ],
+      assignments: const [],
+      notices: const <CourseNotice>[],
+      preferences: const CourseTermPreferences.empty(),
+      now: DateTime.utc(2026, 11, 20, 4),
+    );
+
+    final cachedCourseExam = Assignment(
+      id: 'cx:exam:7:11:old1',
+      source: AssignmentSource.exam,
+      courseName: '合成课程',
+      title: '往期课程考试',
+      deadlineAt: DateTime.utc(2025, 11, 10, 3),
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: DateTime.utc(2025, 11, 1),
+      exam: ExamInfo(
+        examId: 'old1',
+        courseId: '7',
+        clazzId: '11',
+        startAt: DateTime.utc(2025, 11, 10, 1),
+        endAt: DateTime.utc(2025, 11, 10, 3),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'ended',
+      ),
+    );
+
+    final client = f.client()
+      ..previousAssignments = {cachedCourseExam.id: cachedCourseExam}
+      ..nextSyncCourseSelector = (catalog) => SyncScopeSelection.select(
+            catalog: catalog,
+            scope: AssignmentSyncScope.current,
+            termCatalog: termCatalog,
+          );
+
+    final rows = await client.fetchAssignmentsWithOptions(
+      collectCourseNotices: true,
+    );
+    expect(client.plannedCourses, 0);
+    expect(client.skippedCourses, 1);
+    expect(rows.any((a) => a.id == 'cx:exam:7:11:701'), isTrue);
+    expect(rows.any((a) => a.id == cachedCourseExam.id), isFalse);
+    expect(
+        f.requests.where((r) => r.uri.path == '/phone/moocAnalysis/examList'),
+        isEmpty);
+    expect(
+      client.lastFetchedNotices
+          .any((n) => n.title == '《合成课程》往期补考提醒' && n.courseKey == '7:11'),
+      isTrue,
+    );
   });
 }

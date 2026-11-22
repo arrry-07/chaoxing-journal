@@ -40,7 +40,9 @@ extension _ExamCollection on ChaoxingLocalClient {
   Future<List<Assignment>> _fetchExams(List<ChaoxingCourseRef> refs,
       {required int generation,
       bool includeAccount = true,
-      bool collectCourseNotices = false}) async {
+      bool collectCourseNotices = false,
+      Set<String> skippedCourseKeys = const {},
+      List<ChaoxingCourseRef>? noticeCatalog}) async {
     if (!enableExams) return const [];
     if (_verificationRequiredThisSync) {
       sourceResults = [
@@ -127,6 +129,7 @@ extension _ExamCollection on ChaoxingLocalClient {
       final courseProbe = _courseVerificationEntry(course);
       if (blocked || windowEnded) {
         failed++;
+        _lastExamFailedCourseKeys.add(courseKey);
         preservePriorExamCourses.add(courseKey);
         continue;
       }
@@ -311,6 +314,7 @@ extension _ExamCollection on ChaoxingLocalClient {
         }
         failure('exam', error, courseKey: courseKey);
         failed++;
+        _lastExamFailedCourseKeys.add(courseKey);
         // A failed supplement cannot establish that a missing PC row vanished.
         // The remainder of a partial phone list is also unverified, even
         // when the failure is structural rather than transient.
@@ -458,8 +462,10 @@ extension _ExamCollection on ChaoxingLocalClient {
             if (ids.add(a.id)) notices.add(a);
           }
           if (collectCourseNotices && page < 5) {
-            final parsedCourseNotices =
-                ChaoxingNoticeParser.parsePage(decodedPayload, courses: refs);
+            final parsedCourseNotices = ChaoxingNoticeParser.parsePage(
+              decodedPayload,
+              courses: noticeCatalog ?? refs,
+            );
             if (parsedCourseNotices == null) {
               courseNoticeFailed = true;
             } else {
@@ -526,8 +532,13 @@ extension _ExamCollection on ChaoxingLocalClient {
     final ids = rows.map((a) => a.id).toSet();
     final keys = refs.map((c) => '${c.courseId}:${c.clazzId}').toSet();
     for (final old in previousAssignments.values) {
+      final isSkippedCourseExam = old.courseKey != null &&
+          skippedCourseKeys.contains(old.courseKey) &&
+          !old.id.startsWith('cx:exam:account:') &&
+          !old.id.startsWith('cx:exam:notice:');
       if (!old.isExam ||
           ids.contains(old.id) ||
+          isSkippedCourseExam ||
           (!includeAccount && !keys.contains(old.courseKey))) {
         continue;
       }
