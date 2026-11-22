@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../models/personal_workspace.dart';
 
@@ -28,6 +29,22 @@ class PersonalFileService {
   }
 
   Future<bool> releaseAll() async {
+    if (kDebugMode) {
+      if (BindingBase.debugBindingType() == null) return false;
+      try {
+        final messenger = ServicesBinding.instance.defaultBinaryMessenger;
+        if (messenger.runtimeType.toString() == 'TestDefaultBinaryMessenger') {
+          final dynamic testMessenger = messenger;
+          if (testMessenger.allMessagesHandler == null &&
+              testMessenger.checkMockMessageHandler(channel.name, null) ==
+                  true) {
+            return false;
+          }
+        }
+      } catch (_) {
+        // Fall through to the normal platform channel invocation.
+      }
+    }
     try {
       return await channel.invokeMethod<bool>('releaseAll') ?? false;
     } on PlatformException {

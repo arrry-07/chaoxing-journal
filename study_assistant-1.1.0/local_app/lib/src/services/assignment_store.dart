@@ -169,6 +169,15 @@ class AssignmentStore extends ChangeNotifier {
         await repository.saveHomeFilters(next, account);
       } on StaleSessionWriteException {
         return false;
+      } catch (error) {
+        if (!_disposed &&
+            _authenticated &&
+            _generation == expectedEpoch &&
+            _account == account) {
+          _error = _friendlyError(error);
+          notifyListeners();
+        }
+        return false;
       }
       if (_disposed ||
           !_authenticated ||
@@ -176,6 +185,7 @@ class AssignmentStore extends ChangeNotifier {
           _account != account) {
         return false;
       }
+      _error = null;
       homeFilters = HomeFilters.decode(encoded);
       notifyListeners();
       return true;

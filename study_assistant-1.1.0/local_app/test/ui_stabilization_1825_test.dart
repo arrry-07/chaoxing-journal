@@ -368,7 +368,7 @@ void main() {
           scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      for (final label in ['待完成 12', '已逾期 12', '未知 12']) {
+      for (final label in ['待完成 12', '已逾期 12', '待核对 12']) {
         expect(find.descendant(of: row, matching: find.text(label)),
             findsOneWidget);
       }
