@@ -14,17 +14,20 @@ class LocalCourseworkEntry {
   const LocalCourseworkEntry({
     this.manualDeadlineAt,
     this.officialTakenOver = false,
+    this.locallyCompleted = false,
   });
 
   final DateTime? manualDeadlineAt;
   final bool officialTakenOver;
+  final bool locallyCompleted;
 
-  bool get isEmpty => manualDeadlineAt == null;
+  bool get isEmpty => manualDeadlineAt == null && !locallyCompleted;
 
   LocalCourseworkEntry copyWith({
     DateTime? manualDeadlineAt,
     bool clearManualDeadlineAt = false,
     bool? officialTakenOver,
+    bool? locallyCompleted,
   }) {
     final nextManual = clearManualDeadlineAt
         ? null
@@ -34,27 +37,35 @@ class LocalCourseworkEntry {
       officialTakenOver: nextManual == null
           ? false
           : (officialTakenOver ?? this.officialTakenOver),
+      locallyCompleted: locallyCompleted ?? this.locallyCompleted,
     );
   }
 
   Map<String, dynamic> toJson() => {
         'manualDeadlineAt': manualDeadlineAt?.toUtc().toIso8601String(),
         'officialTakenOver': manualDeadlineAt != null && officialTakenOver,
+        if (locallyCompleted) 'locallyCompleted': true,
       };
 
   static LocalCourseworkEntry fromJson(dynamic raw, {bool strict = false}) {
     if (raw is! Map<String, dynamic>) {
       throw const FormatException('课业本地状态条目格式无效');
     }
-    if (strict &&
-        (raw.length != 2 ||
-            !raw.containsKey('manualDeadlineAt') ||
-            !raw.containsKey('officialTakenOver'))) {
-      throw const FormatException('课业本地状态字段校验失败');
+    if (strict) {
+      final hasBase = raw.containsKey('manualDeadlineAt') &&
+          raw.containsKey('officialTakenOver');
+      final hasLocalDone = raw.containsKey('locallyCompleted');
+      if (!hasBase || raw.length != (hasLocalDone ? 3 : 2)) {
+        throw const FormatException('课业本地状态字段校验失败');
+      }
     }
     final rawTakenOver = raw['officialTakenOver'];
     if (rawTakenOver is! bool) {
       throw const FormatException('官方接管标记类型无效');
+    }
+    final rawCompleted = raw['locallyCompleted'];
+    if (rawCompleted != null && rawCompleted is! bool) {
+      throw const FormatException('本机完成标记类型无效');
     }
     final manualRaw = raw['manualDeadlineAt'];
     DateTime? manualDeadlineAt;
@@ -76,6 +87,7 @@ class LocalCourseworkEntry {
     return LocalCourseworkEntry(
       manualDeadlineAt: manualDeadlineAt,
       officialTakenOver: manualDeadlineAt != null && rawTakenOver,
+      locallyCompleted: rawCompleted == true,
     );
   }
 
@@ -85,11 +97,14 @@ class LocalCourseworkEntry {
     if (other is! LocalCourseworkEntry) return false;
     final leftUtc = manualDeadlineAt?.toUtc();
     final rightUtc = other.manualDeadlineAt?.toUtc();
-    return leftUtc == rightUtc && officialTakenOver == other.officialTakenOver;
+    return leftUtc == rightUtc &&
+        officialTakenOver == other.officialTakenOver &&
+        locallyCompleted == other.locallyCompleted;
   }
 
   @override
-  int get hashCode => Object.hash(manualDeadlineAt?.toUtc(), officialTakenOver);
+  int get hashCode => Object.hash(
+      manualDeadlineAt?.toUtc(), officialTakenOver, locallyCompleted);
 }
 
 @immutable
@@ -153,10 +168,19 @@ class LocalCourseworkState {
     Iterable<String> aliases,
     DateTime? deadlineAt,
   ) {
+    final existing = entryForAliases([canonicalKey, ...aliases]);
     if (deadlineAt == null) {
-      return withEntry(canonicalKey, aliases, null);
+      if (existing == null) return this;
+      final cleared = existing.copyWith(
+        clearManualDeadlineAt: true,
+        officialTakenOver: false,
+      );
+      return withEntry(
+        canonicalKey,
+        aliases,
+        cleared.isEmpty ? null : cleared,
+      );
     }
-    final existing = entryForAliases(aliases);
     return withEntry(
       canonicalKey,
       aliases,
@@ -165,6 +189,18 @@ class LocalCourseworkState {
         officialTakenOver: false,
       ),
     );
+  }
+
+  LocalCourseworkState withLocallyCompleted(
+    String canonicalKey,
+    Iterable<String> aliases,
+    bool completed,
+  ) {
+    final existing = entryForAliases([canonicalKey, ...aliases]);
+    if (!completed && existing == null) return this;
+    final next = (existing ?? const LocalCourseworkEntry())
+        .copyWith(locallyCompleted: completed);
+    return withEntry(canonicalKey, aliases, next.isEmpty ? null : next);
   }
 
   /// Non-destructively merges imported backup entries: local entries win per key.

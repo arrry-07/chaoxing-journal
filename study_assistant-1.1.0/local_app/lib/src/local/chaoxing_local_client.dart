@@ -660,6 +660,112 @@ class ChaoxingLocalClient {
     }
   }
 
+  /// Fetches ONLY the single visited non-exam target within its course without
+  /// scanning other assignments' detail pages, classroom activities, or exams.
+  Future<Assignment?> fetchReturnedWork(Assignment target) async {
+    if (target.isExam ||
+        target.courseId == null ||
+        target.clazzId == null ||
+        (!target.isFormal && !target.isSupportedClassroomTask)) {
+      return null;
+    }
+    _startRequestToken();
+    final generation = _sessionGeneration;
+    _verificationTarget = null;
+    _courseVerificationProbe = null;
+    final entryCache = _syncCourseEntries = <String, Response<dynamic>>{};
+    final examEntryCourses = _syncExamEntryCourses = <String>{};
+    issues = [];
+    sourceResults = const [];
+    _deadlineReadsBlockedBy = null;
+    detailUnconfirmedCount = 0;
+    _detailUnconfirmedCourseKeys.clear();
+    try {
+      final mcode =
+          _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
+      final response = await _safeGet<dynamic>(
+        'https://mooc1-api.chaoxing.com/mycourse/backclazzdata',
+        queryParameters: {'view': 'json', if (mcode != null) 'mcode': mcode},
+      );
+      if (generation != _sessionGeneration) return null;
+      final refs = _measureParse(
+        '课程列表',
+        () => ChaoxingApiParser.parseCourseRefs(
+          _decodeJsonPayload(response?.data),
+        ),
+      );
+      final course = refs
+          .where(
+            (c) => c.courseId == target.courseId && c.clazzId == target.clazzId,
+          )
+          .firstOrNull;
+      if (course == null) return null;
+
+      bool matchesTarget(Assignment candidate) =>
+          candidate.id == target.id ||
+          (target.courseTaskKey != null &&
+              candidate.courseTaskKey == target.courseTaskKey);
+
+      if (target.isSupportedClassroomTask) {
+        if (!enableClassroomTasks) return null;
+        final uid =
+            _readCookie('UID') ?? _readCookie('uid') ?? _readCookie('_uid');
+        final courseProbe = _courseVerificationEntry(course);
+        _courseVerificationProbe = courseProbe;
+        final activityResp = await _safeGet<dynamic>(
+          'https://mobilelearn.chaoxing.com/v2/apis/active/student/activelist',
+          queryParameters: {
+            'fid': 0,
+            'courseId': course.courseId,
+            'classId': course.clazzId,
+            'showNotStartedActive': 0,
+          },
+          requestKind: '课堂活动列表',
+          verificationProbe: courseProbe,
+        );
+        if (generation != _sessionGeneration) return null;
+        final activities = _measureParse(
+          '课堂活动列表',
+          () => ChaoxingClassroomParser.readActivityList(
+            _decodeJsonPayload(activityResp?.data),
+          ),
+        );
+        final seeds = ChaoxingClassroomParser.parseActivities(
+          activities,
+          courseId: course.courseId,
+          clazzId: course.clazzId,
+          courseName: course.courseName,
+          activityType: target.activityType!,
+        ).where(matchesTarget).toList();
+        if (seeds.length != 1) return null;
+        final hydrated = await _hydrateClassroomTask(
+          seeds.single,
+          uid: uid,
+          generation: generation,
+          expectedCpi: course.cpi,
+          verificationProbe: courseProbe,
+        );
+        if (generation != _sessionGeneration) return null;
+        return matchesTarget(hydrated) ? hydrated : null;
+      }
+
+      final work = await _fetchCourseWork(
+        course,
+        generation: generation,
+        targetAssignmentId: target.id,
+        targetCourseTaskKey: target.courseTaskKey,
+      );
+      if (generation != _sessionGeneration || work == null) return null;
+      final matches = work.where(matchesTarget).toList();
+      return matches.length == 1 ? matches.single : null;
+    } finally {
+      if (identical(_syncCourseEntries, entryCache)) _syncCourseEntries = null;
+      if (identical(_syncExamEntryCourses, examEntryCourses)) {
+        _syncExamEntryCourses = null;
+      }
+    }
+  }
+
   Future<List<Assignment>> fetchAssignmentsWithOptions({
     bool collectCourseNotices = false,
     bool enableTaskEngineProbe = false,
@@ -1473,15 +1579,24 @@ class ChaoxingLocalClient {
         'v': '2',
       });
 
-  Future<List<Assignment>?> _fetchCourseWork(ChaoxingCourseRef course,
-      {required int generation, _SyncProgressTracker? progress}) async {
+  Future<List<Assignment>?> _fetchCourseWork(
+    ChaoxingCourseRef course, {
+    required int generation,
+    _SyncProgressTracker? progress,
+    String? targetAssignmentId,
+    String? targetCourseTaskKey,
+  }) async {
     final courseUri = _courseVerificationEntry(course);
     _courseVerificationProbe = courseUri;
     if (_v3FormalApiConfirmed) {
-      return _fetchV3FormalHomework(course,
-          generation: generation,
-          progress: progress,
-          verificationProbe: courseUri);
+      return _fetchV3FormalHomework(
+        course,
+        generation: generation,
+        progress: progress,
+        verificationProbe: courseUri,
+        targetAssignmentId: targetAssignmentId,
+        targetCourseTaskKey: targetCourseTaskKey,
+      );
     }
     final middle = await _courseGet(courseUri,
         generation: generation, verificationProbe: courseUri);
@@ -1519,10 +1634,14 @@ class ChaoxingLocalClient {
       }
       if (isVue || middle?.statusCode == 200) {
         try {
-          final work = await _fetchV3FormalHomework(course,
-              generation: generation,
-              progress: progress,
-              verificationProbe: courseUri);
+          final work = await _fetchV3FormalHomework(
+            course,
+            generation: generation,
+            progress: progress,
+            verificationProbe: courseUri,
+            targetAssignmentId: targetAssignmentId,
+            targetCourseTaskKey: targetCourseTaskKey,
+          );
           if (generation != _sessionGeneration) return null;
           if (isVue) _v3FormalApiConfirmed = true;
           return work;
@@ -1562,6 +1681,25 @@ class ChaoxingLocalClient {
     if (parsed == null) {
       _noteParseFailure('作业列表');
       return null;
+    }
+    if (targetAssignmentId != null || targetCourseTaskKey != null) {
+      final targeted = parsed
+          .where((row) =>
+              row.id == targetAssignmentId ||
+              (targetCourseTaskKey != null &&
+                  row.courseTaskKey == targetCourseTaskKey))
+          .toList();
+      if (targeted.length != 1) return const [];
+      return _hydrateWorkDeadlines(targeted,
+          generation: generation,
+          verificationProbe: courseUri,
+          readStartTimes: () async => (await _readV3FormalHomework(course,
+                  generation: generation,
+                  requestKind: '截止时间佐证',
+                  verificationProbe: courseUri,
+                  targetAssignmentId: targetAssignmentId,
+                  targetCourseTaskKey: targetCourseTaskKey))
+              .starts);
     }
     progress?.addRows(parsed);
     return _hydrateWorkDeadlines(parsed,
@@ -1858,14 +1996,22 @@ class ChaoxingLocalClient {
   }
 
   // fanyav3 fetches homework separately from its exam and activity APIs.
-  Future<List<Assignment>> _fetchV3FormalHomework(ChaoxingCourseRef course,
-      {required int generation,
-      _SyncProgressTracker? progress,
-      Uri? verificationProbe}) async {
-    final list = await _readV3FormalHomework(course,
-        generation: generation,
-        progress: progress,
-        verificationProbe: verificationProbe);
+  Future<List<Assignment>> _fetchV3FormalHomework(
+    ChaoxingCourseRef course, {
+    required int generation,
+    _SyncProgressTracker? progress,
+    Uri? verificationProbe,
+    String? targetAssignmentId,
+    String? targetCourseTaskKey,
+  }) async {
+    final list = await _readV3FormalHomework(
+      course,
+      generation: generation,
+      progress: progress,
+      verificationProbe: verificationProbe,
+      targetAssignmentId: targetAssignmentId,
+      targetCourseTaskKey: targetCourseTaskKey,
+    );
     if (generation != _sessionGeneration) return const [];
     return _hydrateWorkDeadlines(list.rows,
         generation: generation,
@@ -1882,11 +2028,15 @@ class ChaoxingLocalClient {
   }
 
   Future<({List<Assignment> rows, Map<String, DateTime> starts})>
-      _readV3FormalHomework(ChaoxingCourseRef course,
-          {required int generation,
-          _SyncProgressTracker? progress,
-          String requestKind = '作业列表',
-          Uri? verificationProbe}) async {
+      _readV3FormalHomework(
+    ChaoxingCourseRef course, {
+    required int generation,
+    _SyncProgressTracker? progress,
+    String requestKind = '作业列表',
+    Uri? verificationProbe,
+    String? targetAssignmentId,
+    String? targetCourseTaskKey,
+  }) async {
     final result = <Assignment>[];
     final starts = <String, DateTime>{};
     final seen = <String>{};
@@ -2026,7 +2176,24 @@ class ChaoxingLocalClient {
         if (pageRows.isNotEmpty) {
           progress?.addRows(pageRows, courseKey: courseKey);
         }
+        if (targetAssignmentId != null || targetCourseTaskKey != null) {
+          final targeted = pageRows
+              .where((row) =>
+                  row.id == targetAssignmentId ||
+                  (targetCourseTaskKey != null &&
+                      row.courseTaskKey == targetCourseTaskKey))
+              .toList();
+          if (targeted.length == 1) {
+            return (rows: targeted, starts: starts);
+          }
+          if (targeted.length > 1) {
+            return (rows: const <Assignment>[], starts: starts);
+          }
+        }
         if (result.length == pageResult.total) {
+          if (targetAssignmentId != null || targetCourseTaskKey != null) {
+            return (rows: const <Assignment>[], starts: starts);
+          }
           return (rows: result, starts: starts);
         }
         if (pageResult.rowCount == 0) {

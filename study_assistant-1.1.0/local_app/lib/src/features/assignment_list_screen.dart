@@ -534,12 +534,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             _typeFilter != AssignmentTypeFilter.all ||
             _courseKey != null ||
             _deadlineFilter != AssignmentDeadlineFilter.all;
+        final coursework = store.courseworkState;
         final catalogAssignments = store.homeCatalogAssignments;
         final examSources = catalogAssignments;
         final displayIndex = store.homeDisplayIndex;
         final displayAssignments = AssignmentQuery.currentDisplay(
-            catalogAssignments, now,
-            index: displayIndex);
+          catalogAssignments,
+          now,
+          index: displayIndex,
+          coursework: coursework,
+        );
         final options = buildHomeCourseFilterOptions(
           assignments: displayAssignments,
           catalog: store.courses,
@@ -548,7 +552,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           ],
           selectedCourseKey: _courseKey,
         );
-        final coursework = store.courseworkState;
         final items = recoveryScope == null
             ? AssignmentQuery.filterHome(
                 catalogAssignments,

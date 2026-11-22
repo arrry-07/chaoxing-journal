@@ -1133,6 +1133,93 @@ void main() {
     expect(find.text('手动旧记录（已被官方接管）'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+      'Phase 2C detail locallyCompleted toggle marks local completion, undoes safely, and yields to official submitted',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final now = DateTime.utc(2026, 11, 20, 4);
+    const account = 'detail-2c-student';
+    final session = _DetailMemorySession(account);
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount(account);
+    final work = Assignment(
+      id: 'cx:work:1:2:local-2c',
+      courseName: '计算机网络',
+      title: '可本机标完成作业',
+      deadlineAt: now.add(const Duration(days: 2)),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    await repo.mergeAndSave([work], completeSync: true);
+    final store = _RefinementStore(
+      repository: repo,
+      sessionStore: session,
+      notificationService: _DetailNoopNotifications(),
+      widgetSnapshotService: _DetailNoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    Future<void> mount({String tag = 'a'}) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 900);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: AssignmentDetailScreen(
+            key: ValueKey('2c-$tag'),
+            store: store,
+            assignmentId: work.id,
+            clock: () => now,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    await mount();
+    final toggleBtn =
+        find.byKey(const ValueKey('assignment-detail-local-complete'));
+    expect(toggleBtn, findsOneWidget);
+    expect(find.text('标记为本机已完成'), findsOneWidget);
+    await tester.ensureVisible(toggleBtn);
+    await tester.tap(toggleBtn);
+    await tester.pumpAndSettle();
+
+    expect(store.isLocallyCompleted(work), isTrue);
+    expect(find.text('本机标记'), findsOneWidget);
+    expect(find.text('撤销本机完成标记'), findsOneWidget);
+
+    await tester.ensureVisible(toggleBtn);
+    await tester.tap(toggleBtn);
+    await tester.pumpAndSettle();
+    expect(store.isLocallyCompleted(work), isFalse);
+    expect(find.text('本机标记'), findsNothing);
+    expect(find.text('标记为本机已完成'), findsOneWidget);
+
+    // Mark local completed again, then official server confirms submitted -> official wins!
+    await tester.tap(toggleBtn);
+    await tester.pumpAndSettle();
+    await repo.mergeAndSave([
+      work.copyWith(
+        status: 'submitted',
+        lastSyncedAt: now.add(const Duration(minutes: 5)),
+      ),
+    ]);
+    await store.refreshAssignments();
+    await mount(tag: 'official');
+    expect(find.text('已提交'), findsOneWidget);
+    expect(find.text('本机标记'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('assignment-detail-local-complete')),
+      findsNothing,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 GoRouter _router(

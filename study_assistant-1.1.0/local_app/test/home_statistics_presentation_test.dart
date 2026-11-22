@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_statistics.dart';
 import 'package:study_assistant_mobile/src/services/home_sync_presentation.dart';
@@ -457,6 +458,63 @@ void main() {
       expect(noneToday.completedToday, 0);
       expect(noneToday.dueIn3Days, 0);
       expect(noneToday.label(compact: true), '今日无待交');
+    });
+
+    test(
+        'Phase 2C AssignmentStatistics includes locallyCompleted and tracks official vs local counts',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      final localDoneWork = Assignment(
+        id: 'cx:work:1:2:local',
+        courseName: '计算机网络',
+        title: '本机已完成作业',
+        deadlineAt: now.add(const Duration(days: 2)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+      final officialDoneWork = Assignment(
+        id: 'cx:work:1:2:official',
+        courseName: '计算机网络',
+        title: '官方已交作业',
+        deadlineAt: now.add(const Duration(days: 2)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'submitted',
+        lastSyncedAt: now,
+      );
+      final stillPendingWork = Assignment(
+        id: 'cx:work:1:2:pending',
+        courseName: '计算机网络',
+        title: '仍待提交作业',
+        deadlineAt: now.add(const Duration(days: 3)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+      final state = LocalCourseworkState()
+          .withLocallyCompleted(localDoneWork.id, const [], true)
+          .withLocallyCompleted(officialDoneWork.id, const [], true);
+
+      final stats = AssignmentStatistics(
+        [localDoneWork, officialDoneWork, stillPendingWork],
+        now: now,
+        coursework: state,
+      );
+      expect(stats.officialCompleted, 1);
+      expect(stats.localCompleted, 1);
+      expect(stats.completed, 2);
+      expect(stats.pending, 1);
+      expect(
+        AssignmentStatistics.isPendingCourseAttention(
+          localDoneWork,
+          now,
+          coursework: state,
+        ),
+        isFalse,
+      );
     });
   });
 }

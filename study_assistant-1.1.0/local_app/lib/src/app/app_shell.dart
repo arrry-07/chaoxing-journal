@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../features/widgets/journal_floating_nav_bar.dart';
 import '../features/widgets/update_scope.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import 'app_back_navigation_policy.dart';
 import 'journal.dart';
 import 'journal_motion.dart';
@@ -150,10 +151,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _handleStoreIdentityChange() {
     final epoch = widget.assignmentStore.accountEpoch;
     final hash = widget.assignmentStore.accountHash;
-    if (epoch == _lastAccountEpoch && hash == _lastAccountHash) return;
-    _lastAccountEpoch = epoch;
-    _lastAccountHash = hash;
-    _resetExitWindow();
+    if (epoch != _lastAccountEpoch || hash != _lastAccountHash) {
+      _lastAccountEpoch = epoch;
+      _lastAccountHash = hash;
+      _resetExitWindow();
+    }
+    final confirmation =
+        widget.assignmentStore.consumeReturnCheckConfirmation();
+    if (confirmation != null &&
+        confirmation.accountEpoch == widget.assignmentStore.accountEpoch) {
+      InteractionFeedback.trigger(
+        widget.assignmentStore.display,
+        kind: InteractionSoundKind.complete,
+      );
+    }
   }
 
   void _handleRouteChange() {

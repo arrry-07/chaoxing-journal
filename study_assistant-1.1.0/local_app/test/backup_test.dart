@@ -382,16 +382,18 @@ void main() {
       expect(BackupSnapshot.decode(jsonEncode(raw2A)).courseworkState.isEmpty,
           isTrue);
 
-      // Export schema 8 with manualDeadlineAt & officialTakenOver.
+      // Export schema 8 with manualDeadlineAt, officialTakenOver & locallyCompleted.
       final manualAt = DateTime.utc(2026, 12, 5, 15, 59);
       final localState = LocalCourseworkState()
           .withManualDeadline('cx:work:1:2:9', const [], manualAt)
+          .withLocallyCompleted('cx:work:1:2:11', const [], true)
           .withEntry(
             'cx:work:1:2:10',
             const [],
             LocalCourseworkEntry(
               manualDeadlineAt: DateTime.utc(2026, 12, 6, 12),
               officialTakenOver: true,
+              locallyCompleted: true,
             ),
           );
       await repo.saveCourseworkState(localState, 'alice');
@@ -418,6 +420,14 @@ void main() {
       );
       expect(
         restored.entryForAliases(const ['cx:work:1:2:10'])!.officialTakenOver,
+        isTrue,
+      );
+      expect(
+        restored.entryForAliases(const ['cx:work:1:2:10'])!.locallyCompleted,
+        isTrue,
+      );
+      expect(
+        restored.entryForAliases(const ['cx:work:1:2:11'])!.locallyCompleted,
         isTrue,
       );
 

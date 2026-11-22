@@ -82,5 +82,12 @@ void main() {
     final current = AssignmentQuery.currentDisplay(
         await repository.loadJournal(), DateTime.utc(2026, 11, 19));
     expect(current.map((assignment) => assignment.id), contains(id));
+
+    // Single-target return check also surfaces the reopened returned state cleanly.
+    final returnedWork = await client.fetchReturnedWork(observed.single);
+    expect(returnedWork, isNotNull);
+    expect(returnedWork!.id, id);
+    expect(returnedWork.status, 'returned');
+    expect(returnedWork.isCompleted, isFalse);
   });
 }

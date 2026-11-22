@@ -102,7 +102,11 @@ class _StatsScreenState extends State<StatsScreen> {
 
   List<Assignment> _actionableRecords(_StatsGroup group, DateTime now) =>
       group.records
-          .where((r) => AssignmentStatistics.isPendingCourseAttention(r, now))
+          .where((r) => AssignmentStatistics.isPendingCourseAttention(
+                r,
+                now,
+                coursework: widget.store.courseworkState,
+              ))
           .toList(growable: false);
 
   Future<void> _unfollowCourseWithUndo(
@@ -196,9 +200,11 @@ class _StatsScreenState extends State<StatsScreen> {
             _range,
             now,
           );
+          final coursework = store.courseworkState;
           final records = rangeResult.records;
           final excludedUnscheduled = rangeResult.excludedUnscheduledCount;
-          final stats = AssignmentStatistics(records, now: now);
+          final stats =
+              AssignmentStatistics(records, now: now, coursework: coursework);
           final keyed = <String, List<Assignment>>{};
           final accountExams = <Assignment>[];
           final otherUnkeyed = <Assignment>[];
@@ -239,6 +245,7 @@ class _StatsScreenState extends State<StatsScreen> {
             final own = AssignmentStatistics(
               _actionableRecords(g, now),
               now: now,
+              coursework: coursework,
             );
             return own.pending + own.expired + own.unknown > 0;
           }).toList(growable: false);
@@ -377,7 +384,9 @@ class _StatsScreenState extends State<StatsScreen> {
                           _buildStatusRow(
                             context,
                             index: i,
-                            label: CompletionPieChart.labels[i],
+                            label: i == 0 && stats.localCompleted > 0
+                                ? '${CompletionPieChart.labels[i]}（含本机标记 ${stats.localCompleted}）'
+                                : CompletionPieChart.labels[i],
                             count: stats.counts[i],
                             percent: stats.percentages[i],
                             dotColor: barColors[i],
@@ -545,7 +554,11 @@ class _StatsScreenState extends State<StatsScreen> {
     required JournalPalette journal,
   }) {
     final actionable = _actionableRecords(group, now);
-    final own = AssignmentStatistics(actionable, now: now);
+    final own = AssignmentStatistics(
+      actionable,
+      now: now,
+      coursework: widget.store.courseworkState,
+    );
     final same = group.accountExam
         ? const <_StatsGroup>[]
         : allGroups

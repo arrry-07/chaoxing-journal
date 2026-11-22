@@ -126,11 +126,17 @@ void main() {
     );
     final manualAt = DateTime.utc(2027, 1, 3, 15, 59);
     await repository.saveCourseworkState(
-      LocalCourseworkState().withManualDeadline(
-        'cx:work:synthetic-course:class:1',
-        const [],
-        manualAt,
-      ),
+      LocalCourseworkState()
+          .withManualDeadline(
+            'cx:work:synthetic-course:class:1',
+            const [],
+            manualAt,
+          )
+          .withLocallyCompleted(
+            'cx:work:synthetic-course:class:1',
+            const [],
+            true,
+          ),
       'alice',
     );
     final snapshot = await repository.createBackupSnapshot('alice');
@@ -169,6 +175,11 @@ void main() {
           .manualDeadlineAt!
           .toUtc(),
       manualAt,
+    );
+    expect(
+      restored.courseworkState.entryForAliases(
+          const ['cx:work:synthetic-course:class:1'])!.locallyCompleted,
+      isTrue,
     );
 
     await expectLater(

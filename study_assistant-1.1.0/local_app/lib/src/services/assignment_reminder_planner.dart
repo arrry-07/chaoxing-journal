@@ -47,11 +47,17 @@ class AssignmentReminderSnapshot {
           assignment.exam!.lifecycle == 'scheduled' &&
           assignment.submitUrl?.isNotEmpty == true);
 
+  bool get _effectivelyCompleted =>
+      CourseworkDeadline.isEffectivelyCompletedEntry(
+        assignment,
+        courseworkEntry,
+      );
+
   bool eligibleAt(DateTime now) {
     if (!assignment.isInAssignmentScope ||
         AssignmentQuery.isArchivedPastTerm(assignment, now) ||
         !assignment.isPendingConfirmed ||
-        assignment.isCompleted ||
+        _effectivelyCompleted ||
         hidden ||
         !followed ||
         !_examCanRemind) {
@@ -81,7 +87,7 @@ class AssignmentReminderSnapshot {
                 _examCanRemind
             ? assignment.status
             : 'unknown',
-        'completed': assignment.isCompleted,
+        'completed': _effectivelyCompleted,
         'hidden': hidden,
         'followed': followed,
         'formal': assignment.isFormal,

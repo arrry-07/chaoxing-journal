@@ -81,6 +81,24 @@ class Client extends ChaoxingLocalClient {
       sample(cookieOwner == 'B' ? 'B-only' : 'A-server')
     ];
   }
+
+  @override
+  Future<Assignment?> fetchReturnedWork(Assignment target) async {
+    if (target.isExam || target.courseId == null || target.clazzId == null) {
+      return null;
+    }
+    final rows = await fetchAssignmentsForCourse(
+      courseId: target.courseId!,
+      clazzId: target.clazzId!,
+    );
+    final matches = rows
+        .where((a) =>
+            a.id == target.id ||
+            (target.courseTaskKey != null &&
+                a.courseTaskKey == target.courseTaskKey))
+        .toList();
+    return matches.length == 1 ? matches.single : null;
+  }
 }
 
 class Notifications extends LocalNotificationService {

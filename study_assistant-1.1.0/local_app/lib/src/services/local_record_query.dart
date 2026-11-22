@@ -1,4 +1,5 @@
 import '../models/assignment.dart';
+import '../models/local_coursework_state.dart';
 import 'assignment_grouping.dart';
 import 'assignment_query.dart';
 import 'assignment_statistics.dart';
@@ -280,10 +281,12 @@ class LocalRecordQuery {
   static bool matchesStatusFilter(
     Assignment a,
     LocalRecordStatusFilter status,
-    DateTime now,
-  ) {
+    DateTime now, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
     if (status == LocalRecordStatusFilter.all) return true;
-    final bucket = AssignmentStatistics.classify(a, now);
+    final bucket =
+        AssignmentStatistics.classify(a, now, coursework: coursework);
     return switch (status) {
       LocalRecordStatusFilter.all => true,
       LocalRecordStatusFilter.unfinished =>
@@ -352,7 +355,12 @@ class LocalRecordQuery {
       if (!matchesStatsTimeRange(primary, spec.timeRange, now)) {
         return false;
       }
-      if (!matchesStatusFilter(primary, spec.status, now)) {
+      if (!matchesStatusFilter(
+        primary,
+        spec.status,
+        now,
+        coursework: store.courseworkState,
+      )) {
         return false;
       }
       if (needle.isNotEmpty) {

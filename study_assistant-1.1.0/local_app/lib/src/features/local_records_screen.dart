@@ -189,12 +189,19 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
     DateTime now,
   ) {
     final journal = Journal.of(context);
-    final bucket = AssignmentStatistics.classify(primary, now);
+    final coursework = widget.store.courseworkState;
+    final bucket = AssignmentStatistics.classify(
+      primary,
+      now,
+      coursework: coursework,
+    );
+    final localDoneOnly = widget.store.isLocallyCompleted(primary);
     final label = primary.isExam
         ? AssignmentCard.examStateLabel(primary, now)
         : switch (bucket) {
             AssignmentStatBucket.expired => '已逾期',
-            AssignmentStatBucket.completed ||
+            AssignmentStatBucket.completed =>
+              localDoneOnly ? '已完成' : primary.statusLabel,
             AssignmentStatBucket.pending ||
             AssignmentStatBucket.unknown =>
               primary.statusLabel,
@@ -624,6 +631,11 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
   }) {
     final primary = group.primary;
     final badge = _statusBadge(primary, now);
+    final localDoneOnly = widget.store.isLocallyCompleted(primary);
+    final canToggleLocalDone = !group.hidden &&
+        !primary.isExam &&
+        !primary.isCompleted &&
+        primary.isInAssignmentScope;
     final title = primary.title.trim().isNotEmpty
         ? primary.title.trim()
         : primary.courseName;
@@ -666,6 +678,8 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                       if (group.hidden)
                         _pill('已隐藏', bg: journal.parchment, fg: journal.muted),
                       _pill(badge.label, bg: badge.bg, fg: badge.fg),
+                      if (localDoneOnly)
+                        _pill('本机标记', bg: journal.parchment, fg: journal.ink),
                       if (primary.isExam || group.sources.length > 1)
                         _pill(
                           '${primary.isExam ? '考试' : _sourceLabel(primary.source)}${group.sources.length > 1 ? ' · ${group.sources.length} 条来源' : ''}',
@@ -687,12 +701,31 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
                     : () => widget.store.setCourseworkGroupHidden(group, false),
                 child: const Text('恢复'),
               ),
-            ] else
+            ] else ...[
+              if (canToggleLocalDone) ...[
+                const SizedBox(width: 4),
+                TextButton(
+                  key: ValueKey('local-record-complete-toggle-${primary.id}'),
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(48, 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.padded,
+                  ),
+                  onPressed: widget.store.isLoading
+                      ? null
+                      : () => widget.store.setLocallyCompleted(
+                            primary,
+                            !localDoneOnly,
+                          ),
+                  child: Text(localDoneOnly ? '撤销本机' : '本机已完成'),
+                ),
+              ],
               Icon(
                 Icons.chevron_right_rounded,
                 size: 18,
                 color: journal.muted,
               ),
+            ],
           ],
         ),
       ),

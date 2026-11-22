@@ -616,10 +616,11 @@ class AssignmentQuery {
     List<Assignment> records,
     DateTime now, {
     AssignmentDisplayIndex? index,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) =>
       projectDisplay(records, index: index)
           .where((a) =>
-              !a.isCompleted &&
+              !CourseworkDeadline.isEffectivelyCompleted(a, coursework) &&
               !isExamEnded(a, now) &&
               !isArchivedPastTerm(a, now) &&
               !isArchivedClassroomPractice(a, now))
@@ -702,7 +703,11 @@ class AssignmentQuery {
     DateTime now, {
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) {
-    if ((!assignment.isExam && assignment.isCompleted) ||
+    final completed = CourseworkDeadline.isEffectivelyCompleted(
+      assignment,
+      coursework,
+    );
+    if ((!assignment.isExam && completed) ||
         isArchivedPastTerm(assignment, now)) {
       return false;
     }
@@ -711,8 +716,7 @@ class AssignmentQuery {
         return false;
       }
       final pastDay = dayKey(assignment.timelineAt!).isBefore(dayKey(now));
-      return (!assignment.isCompleted && !isExamEnded(assignment, now)) ||
-          pastDay;
+      return (!completed && !isExamEnded(assignment, now)) || pastDay;
     }
     final resolved = effectiveDeadline(assignment, coursework: coursework);
     if (resolved == null) return false;
@@ -765,7 +769,9 @@ class AssignmentQuery {
     return projectDisplay(sourceRecords, index: index).where((a) {
       if (isArchivedClassroomPractice(a, now)) return false;
       if (isArchivedPastTerm(a, now)) return false;
-      final historical = a.isCompleted || (a.isExam && isExamEnded(a, now));
+      final completed =
+          CourseworkDeadline.isEffectivelyCompleted(a, coursework);
+      final historical = completed || (a.isExam && isExamEnded(a, now));
       if ((!includeHistorical && historical) ||
           !matchesType(a, type) ||
           (courseKey != null && a.courseKey != courseKey)) {
@@ -820,7 +826,11 @@ class AssignmentQuery {
     required DateTime now,
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) {
-    final eligible = currentDisplay(scope(records, {}), now).where((a) {
+    final eligible = currentDisplay(
+      scope(records, {}),
+      now,
+      coursework: coursework,
+    ).where((a) {
       if (!a.isPendingConfirmed) return false;
       final at = a.isExam
           ? (a.timelineTrusted ? a.timelineAt : null)
@@ -923,7 +933,11 @@ class AssignmentQuery {
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) {
     final g = HomeAssignmentGroups();
-    for (final a in currentDisplay(scope(records, followed), now)) {
+    for (final a in currentDisplay(
+      scope(records, followed),
+      now,
+      coursework: coursework,
+    )) {
       switch (timelineBucketAt(a, now, coursework: coursework)) {
         case AssignmentDeadlineBucket.completed:
           break;

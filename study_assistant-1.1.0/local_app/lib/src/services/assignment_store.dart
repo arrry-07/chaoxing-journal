@@ -44,6 +44,24 @@ import '../models/study_notebook.dart';
 import 'coursework_deadline.dart';
 import 'reminder_explanation.dart';
 
+class ReturnCheckConfirmation {
+  const ReturnCheckConfirmation({
+    required this.id,
+    required this.accountEpoch,
+    required this.assignmentId,
+    required this.title,
+    required this.message,
+    required this.confirmedAt,
+  });
+
+  final int id;
+  final int accountEpoch;
+  final String assignmentId;
+  final String title;
+  final String message;
+  final DateTime confirmedAt;
+}
+
 class BackgroundCheckResult {
   const BackgroundCheckResult({
     required this.success,
@@ -662,25 +680,43 @@ class AssignmentStore extends ChangeNotifier {
   String? returnCheckMessage;
   String? _visitedAssignment;
   int? _visitGeneration;
+  int _nextVisitTicket = 0;
+  int? _activeVisitTicket;
   bool _visitLeftApp = false;
+  int _nextConfirmationId = 0;
+  ReturnCheckConfirmation? _pendingReturnConfirmation;
+
+  ReturnCheckConfirmation? get pendingReturnConfirmation =>
+      _pendingReturnConfirmation;
+
+  ReturnCheckConfirmation? consumeReturnCheckConfirmation() {
+    final current = _pendingReturnConfirmation;
+    _pendingReturnConfirmation = null;
+    return current;
+  }
 
   void beginAssignmentVisit(String id) {
     if (!_authenticated || findAssignment(id) == null) return;
     _visitedAssignment = id;
     _visitGeneration = _generation;
+    _activeVisitTicket = ++_nextVisitTicket;
     _visitLeftApp = false;
+    _pendingReturnConfirmation = null;
     returnCheckMessage = null;
   }
 
   void cancelAssignmentVisit(String id) {
     if (_visitedAssignment == id) {
       _visitedAssignment = null;
+      _activeVisitTicket = null;
       _visitLeftApp = false;
     }
   }
 
   void markAssignmentVisitLeftApp() {
-    if (_visitedAssignment != null) _visitLeftApp = true;
+    if (_visitedAssignment != null && _activeVisitTicket != null) {
+      _visitLeftApp = true;
+    }
   }
 
   void dismissReturnCheck() {
@@ -689,10 +725,14 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> checkReturnedAssignment() async {
-    final id = _visitedAssignment, generation = _visitGeneration;
-    if (id == null || !_visitLeftApp) return;
+    final id = _visitedAssignment;
+    final generation = _visitGeneration;
+    final ticket = _activeVisitTicket;
+    if (id == null || ticket == null || !_visitLeftApp) return;
     _visitedAssignment = null;
+    _activeVisitTicket = null;
     _visitLeftApp = false;
+    _pendingReturnConfirmation = null;
     if (generation != _generation || !_authenticated || _disposed) return;
     final target = findAssignment(id);
     if (target == null ||
@@ -712,17 +752,28 @@ class AssignmentStore extends ChangeNotifier {
         for (final a in [..._assignments, ..._hiddenAssignments]) a.id: a
       };
       late List<Assignment> incoming;
-      try {
-        incoming = target.courseId == null
-            ? await chaoxingClient.fetchAssignments()
-            : await chaoxingClient.fetchAssignmentsForCourse(
-                courseId: target.courseId!, clazzId: target.clazzId!);
-      } on ChaoxingAuthenticationException {
-        await _refreshChaoxingSession();
-        incoming = target.courseId == null
-            ? await chaoxingClient.fetchAssignments()
-            : await chaoxingClient.fetchAssignmentsForCourse(
-                courseId: target.courseId!, clazzId: target.clazzId!);
+      if (target.isExam) {
+        try {
+          incoming = target.courseId == null
+              ? await chaoxingClient.fetchAssignments()
+              : await chaoxingClient.fetchAssignmentsForCourse(
+                  courseId: target.courseId!, clazzId: target.clazzId!);
+        } on ChaoxingAuthenticationException {
+          await _refreshChaoxingSession();
+          incoming = target.courseId == null
+              ? await chaoxingClient.fetchAssignments()
+              : await chaoxingClient.fetchAssignmentsForCourse(
+                  courseId: target.courseId!, clazzId: target.clazzId!);
+        }
+      } else {
+        Assignment? single;
+        try {
+          single = await chaoxingClient.fetchReturnedWork(target);
+        } on ChaoxingAuthenticationException {
+          await _refreshChaoxingSession();
+          single = await chaoxingClient.fetchReturnedWork(target);
+        }
+        incoming = single == null ? const <Assignment>[] : [single];
       }
       if (generation != _generation || !_authenticated || _disposed) return;
       final observed = incoming
@@ -762,16 +813,33 @@ class AssignmentStore extends ChangeNotifier {
           observed != null &&
           !observed.isCompleted &&
           observed.status != 'returned';
-      returnCheckMessage = observed == null ||
-              observed.status == 'unknown' ||
-              observed.statusLabel == '提交状态未知' ||
-              conflictsWithConfirmation
-          ? (observed?.isSupportedClassroomTask == true
-              ? '本次未能确认提交状态，已更新为待确认；确认前暂停提醒。'
-              : '本次未能确认提交状态，已保留原记录；请稍后刷新核对。')
-          : observed.isCompleted
-              ? '已确认提交：${observed.title}（${observed.statusLabel}）'
-              : '刚才的作业仍为${observed.statusLabel}，提醒继续保留。';
+      final unconfirmed = observed == null ||
+          observed.status == 'unknown' ||
+          observed.statusLabel == '提交状态未知' ||
+          conflictsWithConfirmation;
+      if (unconfirmed) {
+        returnCheckMessage = observed?.isSupportedClassroomTask == true
+            ? '本次未能确认提交状态，已更新为待确认；确认前暂停提醒。'
+            : '本次未能确认提交状态，已保留原记录；请稍后刷新核对。';
+      } else if (observed.isCompleted) {
+        if (!latestBefore.isCompleted) {
+          final event = ReturnCheckConfirmation(
+            id: ++_nextConfirmationId,
+            accountEpoch: accountEpoch,
+            assignmentId: observed.id,
+            title: observed.title,
+            message: '《${observed.title}》已确认提交',
+            confirmedAt: _clock(),
+          );
+          _pendingReturnConfirmation = event;
+          returnCheckMessage = event.message;
+        } else {
+          returnCheckMessage =
+              '已确认提交：${observed.title}（${observed.statusLabel}）';
+        }
+      } else {
+        returnCheckMessage = '刚才的作业仍为${observed.statusLabel}，提醒继续保留。';
+      }
       confirmed = true;
     });
     if (generation != _generation || !_authenticated || _disposed) return;
@@ -968,25 +1036,29 @@ class AssignmentStore extends ChangeNotifier {
           assignment, courseworkEntryFor(assignment));
   DateTime? manualDeadlineFor(Assignment assignment) =>
       courseworkEntryFor(assignment)?.manualDeadlineAt;
+  bool isLocallyCompleted(Assignment assignment) =>
+      _authenticated &&
+      CourseworkDeadline.isLocallyCompleted(assignment, _courseworkState);
+  bool isEffectivelyCompleted(Assignment assignment) =>
+      assignment.isCompleted || isLocallyCompleted(assignment);
 
-  Future<bool> setManualDeadline(Assignment assignment, DateTime? at) async {
-    final snap = _captureSession();
-    if (!snap.authenticated || snap.account == null || assignment.isExam) {
-      return false;
-    }
-    if (at != null && !CourseworkDeadline.canSetManualDeadline(assignment)) {
-      return false;
-    }
+  Future<bool> _mutateCourseworkState(
+    _SessionSnapshot snap,
+    LocalCourseworkState Function(Assignment current) transform, {
+    required String leaseWarning,
+  }) async {
     var saved = false;
     await _run(() async {
       if (!_isSessionCurrent(snap)) return;
-      final current = findAnyAssignment(assignment.id) ?? assignment;
-      if (at != null && !CourseworkDeadline.canSetManualDeadline(current)) {
-        return;
-      }
-      final key = CourseworkDeadline.keyFor(current);
-      final aliases = CourseworkDeadline.aliasesFor(current);
-      final next = _courseworkState.withManualDeadline(key, aliases, at);
+      final next = transform(Assignment(
+        id: '_',
+        courseName: '',
+        title: '',
+        deadlineAt: null,
+        requirementsText: '',
+        status: 'unknown',
+        lastSyncedAt: _clock(),
+      ));
       if (next == _courseworkState) {
         saved = true;
         return;
@@ -1001,10 +1073,9 @@ class AssignmentStore extends ChangeNotifier {
       } on StaleSessionWriteException {
         return;
       } on LocalStorageLeaseReleaseException {
-        const warning = '手动截止状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
         if (snap.generation == _generation &&
-            !_recoveryWarnings.contains(warning)) {
-          _recoveryWarnings.add(warning);
+            !_recoveryWarnings.contains(leaseWarning)) {
+          _recoveryWarnings.add(leaseWarning);
         }
       } catch (_) {
         return;
@@ -1021,6 +1092,59 @@ class AssignmentStore extends ChangeNotifier {
       if (_isSessionCurrent(snap)) notifyListeners();
     });
     return saved;
+  }
+
+  Future<bool> setManualDeadline(Assignment assignment, DateTime? at) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null || assignment.isExam) {
+      return false;
+    }
+    if (at != null &&
+        !CourseworkDeadline.canSetManualDeadline(
+          assignment,
+          entry: courseworkEntryFor(assignment),
+        )) {
+      return false;
+    }
+    return _mutateCourseworkState(
+      snap,
+      (_) {
+        final current = findAnyAssignment(assignment.id) ?? assignment;
+        if (at != null &&
+            !CourseworkDeadline.canSetManualDeadline(
+              current,
+              entry: courseworkEntryFor(current),
+            )) {
+          return _courseworkState;
+        }
+        return _courseworkState.withManualDeadline(
+          CourseworkDeadline.keyFor(current),
+          CourseworkDeadline.aliasesFor(current),
+          at,
+        );
+      },
+      leaseWarning: '手动截止状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
+  Future<bool> setLocallyCompleted(
+    Assignment assignment,
+    bool completed,
+  ) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    return _mutateCourseworkState(
+      snap,
+      (_) {
+        final current = findAnyAssignment(assignment.id) ?? assignment;
+        return _courseworkState.withLocallyCompleted(
+          CourseworkDeadline.keyFor(current),
+          CourseworkDeadline.aliasesFor(current),
+          completed,
+        );
+      },
+      leaseWarning: '本机完成状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
   }
 
   Future<void> _reconcileCourseworkState() async {
@@ -1244,6 +1368,7 @@ class AssignmentStore extends ChangeNotifier {
       }
       if (group.hidden ||
           group.primary.isCompleted ||
+          isLocallyCompleted(group.primary) ||
           AssignmentQuery.isExamEnded(group.primary, _clock())) {
         explicitlyCompletedOrHiddenKeys.add(canonical);
         explicitlyCompletedOrHiddenKeys.addAll(_pinAliases(group.primary));
@@ -1442,8 +1567,13 @@ class AssignmentStore extends ChangeNotifier {
     }
   }
 
-  List<Assignment> get visibleAssignments =>
-      AssignmentQuery.currentDisplay(courseAssignments, _clock());
+  List<Assignment> get visibleAssignments => AssignmentQuery.currentDisplay(
+        courseAssignments,
+        _clock(),
+        coursework: _authenticated
+            ? _courseworkState
+            : const LocalCourseworkState.empty(),
+      );
   AssignmentSyncProgress? _homeSyncProgress;
   List<Assignment> _homePreviewAssignments = [];
   Set<String> _homePendingDeadlineIds = {};
@@ -1457,8 +1587,13 @@ class AssignmentStore extends ChangeNotifier {
 
   List<Assignment> get homeDisplayAssignments {
     return AssignmentQuery.currentDisplay(
-        homeCatalogAssignments, DateTime.now(),
-        index: homeDisplayIndex);
+      homeCatalogAssignments,
+      DateTime.now(),
+      index: homeDisplayIndex,
+      coursework: _authenticated
+          ? _courseworkState
+          : const LocalCourseworkState.empty(),
+    );
   }
 
   /// Complete scoped source catalog for the home list, including submitted
@@ -1735,6 +1870,10 @@ class AssignmentStore extends ChangeNotifier {
     _unfollowed.clear();
     _pinned = const PinnedAssignments.empty();
     _courseworkState = const LocalCourseworkState.empty();
+    _visitedAssignment = null;
+    _activeVisitTicket = null;
+    _visitLeftApp = false;
+    _pendingReturnConfirmation = null;
     _pinsNeedSave = false;
     _journalRestoreFailed = false;
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
@@ -1993,6 +2132,9 @@ class AssignmentStore extends ChangeNotifier {
     final generation = ++_generation;
     cancelSynchronization();
     _visitedAssignment = null;
+    _activeVisitTicket = null;
+    _visitLeftApp = false;
+    _pendingReturnConfirmation = null;
     returnCheckMessage = null;
     var loginSucceeded = false;
     chaoxingClient.deferProfile = true;
@@ -3128,6 +3270,9 @@ class AssignmentStore extends ChangeNotifier {
     chaoxingClient.clearSession();
     _clearHomePreview(notify: true);
     _visitedAssignment = null;
+    _activeVisitTicket = null;
+    _visitLeftApp = false;
+    _pendingReturnConfirmation = null;
     returnCheckMessage = null;
     changes = [];
     await _run(() async {
@@ -3236,6 +3381,9 @@ class AssignmentStore extends ChangeNotifier {
       _invalidateHomeDisplayIndex();
       syncReport = const SyncReport();
       _visitedAssignment = null;
+      _activeVisitTicket = null;
+      _visitLeftApp = false;
+      _pendingReturnConfirmation = null;
       returnCheckMessage = null;
       changes = [];
       repository.recoveryWarning = null;

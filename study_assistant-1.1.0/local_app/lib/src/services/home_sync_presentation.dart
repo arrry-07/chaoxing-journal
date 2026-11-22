@@ -2,6 +2,7 @@ import '../models/assignment.dart';
 import '../models/local_coursework_state.dart';
 import '../models/sync_report.dart';
 import 'assignment_query.dart';
+import 'coursework_deadline.dart';
 
 enum HomeSyncAction { none, read, retry, login, verify, settings }
 
@@ -216,7 +217,7 @@ class HomeDueSummary {
       if (resolved == null) continue;
       final deadline = resolved.at;
       final dueDay = AssignmentQuery.dayKey(deadline);
-      if (assignment.isCompleted) {
+      if (CourseworkDeadline.isEffectivelyCompleted(assignment, coursework)) {
         if (dueDay == todayDay && resolved.isOfficial) completedToday++;
         continue;
       }

@@ -40,9 +40,36 @@ class CourseworkDeadline {
         a.minute == b.minute;
   }
 
-  static bool canSetManualDeadline(Assignment assignment) =>
+  static bool isLocallyCompletedEntry(
+    Assignment assignment,
+    LocalCourseworkEntry? entry,
+  ) =>
+      !assignment.isCompleted && (entry?.locallyCompleted == true);
+
+  static bool isEffectivelyCompletedEntry(
+    Assignment assignment,
+    LocalCourseworkEntry? entry,
+  ) =>
+      assignment.isCompleted || (entry?.locallyCompleted == true);
+
+  static bool isLocallyCompleted(
+    Assignment assignment,
+    LocalCourseworkState state,
+  ) =>
+      isLocallyCompletedEntry(assignment, entryFor(assignment, state));
+
+  static bool isEffectivelyCompleted(
+    Assignment assignment,
+    LocalCourseworkState state,
+  ) =>
+      isEffectivelyCompletedEntry(assignment, entryFor(assignment, state));
+
+  static bool canSetManualDeadline(
+    Assignment assignment, {
+    LocalCourseworkEntry? entry,
+  }) =>
       !assignment.isExam &&
-      !assignment.isCompleted &&
+      !isEffectivelyCompletedEntry(assignment, entry) &&
       assignment.isInAssignmentScope &&
       (!assignment.deadlineTrusted || assignment.deadlineReadFailed);
 
@@ -82,7 +109,7 @@ class CourseworkDeadline {
     Assignment assignment,
     LocalCourseworkState state,
   ) {
-    if (assignment.isExam || state.isEmpty) return null;
+    if (state.isEmpty) return null;
     return state.entryForAliases(aliasesFor(assignment));
   }
 
@@ -110,7 +137,11 @@ class CourseworkDeadline {
     LocalCourseworkEntry? entry,
     LocalCourseworkState? state,
   }) {
-    if (assignment.isCompleted) return AssignmentDeadlineBucket.completed;
+    final resolvedEntry =
+        entry ?? (state == null ? null : entryFor(assignment, state));
+    if (isEffectivelyCompletedEntry(assignment, resolvedEntry)) {
+      return AssignmentDeadlineBucket.completed;
+    }
     if (assignment.isExam) {
       if (!assignment.timelineTrusted ||
           assignment.timelineAt == null ||
@@ -124,8 +155,6 @@ class CourseworkDeadline {
       }
       return AssignmentDeadlineBucket.notExpiredWithDeadline;
     }
-    final resolvedEntry =
-        entry ?? (state == null ? null : entryFor(assignment, state));
     final resolved = resolveEntry(assignment, resolvedEntry);
     if (resolved == null || resolved.isOfficial) {
       return assignment.deadlineBucketAt(now);
@@ -145,7 +174,8 @@ class CourseworkDeadline {
 
   /// Reconciles persisted manual deadlines against fresh official records.
   ///
-  /// - Same UTC minute under a trusted official read -> silently clears manual.
+  /// - Same UTC minute under a trusted official read -> silently clears manual
+  ///   while preserving any local completion flag.
   /// - Different trusted official read (or confirmed no-deadline) -> retains old
   ///   manual value for comparison while marking [officialTakenOver] true so a
   ///   later transient read failure cannot resurrect it.
@@ -156,18 +186,31 @@ class CourseworkDeadline {
     if (state.isEmpty) return state;
     var next = state;
     for (final assignment in records) {
-      if (assignment.isExam) continue;
       final canonicalKey = keyFor(assignment);
       final aliases = aliasesFor(assignment);
       final existing = next.entryForAliases(aliases);
-      if (existing == null || existing.manualDeadlineAt == null) continue;
+      if (existing == null || existing.isEmpty) continue;
+      if (assignment.isExam || existing.manualDeadlineAt == null) {
+        if (next.entries[canonicalKey] != existing) {
+          next = next.withEntry(canonicalKey, aliases, existing);
+        }
+        continue;
+      }
       final officialTrusted =
           assignment.deadlineTrusted && !assignment.deadlineReadFailed;
       if (officialTrusted) {
         final officialAt = assignment.deadlineAt;
         if (officialAt != null &&
             sameUtcMinute(officialAt, existing.manualDeadlineAt!)) {
-          next = next.withEntry(canonicalKey, aliases, null);
+          final cleared = existing.copyWith(
+            clearManualDeadlineAt: true,
+            officialTakenOver: false,
+          );
+          next = next.withEntry(
+            canonicalKey,
+            aliases,
+            cleared.isEmpty ? null : cleared,
+          );
         } else {
           next = next.withEntry(
             canonicalKey,

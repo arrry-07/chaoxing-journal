@@ -360,7 +360,9 @@ class ReminderExplanationService {
     if (groupHidden || snapshots.every((item) => item.hidden)) {
       return const ['hidden'];
     }
-    if (snapshots.every((item) => item.assignment.isCompleted)) {
+    if (snapshots.every((item) =>
+        CourseworkDeadline.isEffectivelyCompletedEntry(
+            item.assignment, item.courseworkEntry))) {
       return const ['completed'];
     }
     if (snapshots.every((item) => !item.followed)) {

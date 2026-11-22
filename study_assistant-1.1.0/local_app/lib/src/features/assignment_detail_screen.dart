@@ -441,6 +441,49 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     });
   }
 
+  Future<void> _toggleLocallyCompleted(
+    Assignment assignment,
+    bool completed,
+  ) async {
+    if (_savingManualDeadline) return;
+    final store = widget.store;
+    final epoch = store.accountEpoch;
+    final routeId = widget.assignmentId;
+    setState(() {
+      _savingManualDeadline = true;
+      if (_actionMessageTarget == _DetailNoticeTarget.records) {
+        _actionMessage = null;
+        _actionMessageTarget = null;
+      }
+    });
+    var saved = false;
+    try {
+      saved = await store.setLocallyCompleted(assignment, completed);
+    } catch (_) {
+      saved = false;
+    }
+    if (!mounted) return;
+    final current = widget.store == store &&
+        store.accountEpoch == epoch &&
+        widget.assignmentId == routeId;
+    if (saved && current) {
+      InteractionFeedback.trigger(
+        store.display,
+        kind: completed
+            ? InteractionSoundKind.complete
+            : InteractionSoundKind.tap,
+      );
+    }
+    setState(() {
+      _savingManualDeadline = false;
+      if (!current) return;
+      _actionMessage = saved
+          ? (completed ? '已标记为本机已完成，待办提醒已暂停并退顶。' : '已撤销本机完成标记。')
+          : '本机完成状态更新失败，请稍后重试。';
+      _actionMessageTarget = _DetailNoticeTarget.records;
+    });
+  }
+
   Future<void> _hide() async {
     if (_hiding) return;
     setState(() {
@@ -637,16 +680,24 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
             '结束（未核实） ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(exam.endAt!))}',
         ];
         final courseworkTarget = original ?? assignment;
-        final courseworkEntry = assignment.isExam
-            ? null
-            : widget.store.courseworkEntryFor(courseworkTarget);
+        final courseworkEntry =
+            widget.store.courseworkEntryFor(courseworkTarget);
+        final localDoneOnly = !assignment.isExam &&
+            CourseworkDeadline.isLocallyCompletedEntry(
+              assignment,
+              courseworkEntry,
+            );
+        final effectivelyCompleted = assignment.isCompleted || localDoneOnly;
         final resolvedDeadline = assignment.isExam
             ? null
             : CourseworkDeadline.resolveEntry(assignment, courseworkEntry);
         final manualAt = courseworkEntry?.manualDeadlineAt;
         final hasActiveManual = resolvedDeadline?.isManual == true;
         final canEditManual = !assignment.isExam &&
-            CourseworkDeadline.canSetManualDeadline(assignment);
+            CourseworkDeadline.canSetManualDeadline(
+              assignment,
+              entry: courseworkEntry,
+            );
         final effectiveAt =
             assignment.isExam ? assignment.timelineAt : resolvedDeadline?.at;
         final bucket = assignment.isExam
@@ -656,18 +707,21 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                 _now,
                 entry: courseworkEntry,
               );
-        final overdue = bucket == AssignmentDeadlineBucket.overdue;
+        final overdue =
+            !effectivelyCompleted && bucket == AssignmentDeadlineBucket.overdue;
         final today = effectiveAt != null &&
             bucket != AssignmentDeadlineBucket.unconfirmed &&
             AssignmentQuery.dayKey(effectiveAt) == AssignmentQuery.dayKey(_now);
-        final urgentLabel = overdue
-            ? '${hasActiveManual ? '手动截止已过' : '已逾期'}${_now.difference(effectiveAt!).inDays > 0 ? '${_now.difference(effectiveAt).inDays}天' : ''}'
-            : !assignment.isExam &&
-                    assignment.isPendingConfirmed &&
-                    resolvedDeadline != null &&
-                    today
-                ? '今天截止'
-                : null;
+        final urgentLabel = effectivelyCompleted
+            ? null
+            : overdue
+                ? '${hasActiveManual ? '手动截止已过' : '已逾期'}${_now.difference(effectiveAt!).inDays > 0 ? '${_now.difference(effectiveAt).inDays}天' : ''}'
+                : !assignment.isExam &&
+                        assignment.isPendingConfirmed &&
+                        resolvedDeadline != null &&
+                        today
+                    ? '今天截止'
+                    : null;
         final statusLabel = assignment.isExam
             ? AssignmentCard.examStateLabel(assignment, _now)
             : assignment.statusLabel;
@@ -714,6 +768,12 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
             CourseworkStatusPill(
               label: statusLabel,
               tone: statusTone,
+            ),
+          if (localDoneOnly)
+            const CourseworkStatusPill(
+              label: '本机标记',
+              tone: CourseworkPillTone.completed,
+              icon: Icons.check_circle_outline_rounded,
             ),
           if (hasActiveManual)
             const CourseworkStatusPill(
@@ -1436,6 +1496,28 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                           iconSize: 20,
                         ),
                       ),
+                      if (!isHidden &&
+                          !assignment.isExam &&
+                          !assignment.isCompleted)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          child: _DetailToolButton(
+                            key: const ValueKey(
+                                'assignment-detail-local-complete'),
+                            onPressed:
+                                _savingManualDeadline || _hiding || _refreshing
+                                    ? null
+                                    : () => _toggleLocallyCompleted(
+                                          courseworkTarget,
+                                          !localDoneOnly,
+                                        ),
+                            icon: localDoneOnly
+                                ? Icons.undo_rounded
+                                : Icons.check_circle_outline_rounded,
+                            label: localDoneOnly ? '撤销本机完成标记' : '标记为本机已完成',
+                          ),
+                        ),
                       if (!isHidden)
                         Padding(
                           padding: const EdgeInsets.symmetric(

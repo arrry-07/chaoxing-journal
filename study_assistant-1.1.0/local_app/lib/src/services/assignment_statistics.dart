@@ -1,15 +1,20 @@
 import '../models/assignment.dart';
+import '../models/local_coursework_state.dart';
 import 'assignment_query.dart';
+import 'coursework_deadline.dart';
 
 enum AssignmentStatBucket { completed, pending, expired, unknown }
 
 class AssignmentStatistics {
   static AssignmentStatBucket classify(
     Assignment a,
-    DateTime referenceTime,
-  ) {
+    DateTime referenceTime, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
+    if (CourseworkDeadline.isEffectivelyCompleted(a, coursework)) {
+      return AssignmentStatBucket.completed;
+    }
     if (a.isExam) {
-      if (a.isCompleted) return AssignmentStatBucket.completed;
       if (a.exam!.noticeOnly || AssignmentQuery.isExamEnded(a, referenceTime)) {
         return AssignmentStatBucket.unknown;
       }
@@ -17,7 +22,7 @@ class AssignmentStatistics {
           ? AssignmentStatBucket.pending
           : AssignmentStatBucket.unknown;
     }
-    switch (a.deadlineBucketAt(referenceTime)) {
+    switch (CourseworkDeadline.bucketAt(a, referenceTime, state: coursework)) {
       case AssignmentDeadlineBucket.completed:
         return AssignmentStatBucket.completed;
       case AssignmentDeadlineBucket.overdue:
@@ -35,15 +40,17 @@ class AssignmentStatistics {
   /// Whether a record needs active student follow-up inside the per-course
   /// "各课程待处理" list.
   ///
-  /// Completed work, cancelled/ended exams, pure broadcast exam notices
-  /// (`noticeOnly`), and elapsed historical classroom practices without
-  /// confirmed submission status stay accessible in Local Records and Overview
-  /// counts, without cluttering actionable per-course pending rows.
+  /// Completed work (official or marked locally), cancelled/ended exams, pure
+  /// broadcast exam notices (`noticeOnly`), and elapsed historical classroom
+  /// practices without confirmed submission status stay accessible in Local
+  /// Records and Overview counts, without cluttering actionable per-course
+  /// pending rows.
   static bool isPendingCourseAttention(
     Assignment a,
-    DateTime referenceTime,
-  ) {
-    if (a.isCompleted) return false;
+    DateTime referenceTime, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
+    if (CourseworkDeadline.isEffectivelyCompleted(a, coursework)) return false;
     if (a.isExam) {
       if (a.exam!.noticeOnly || AssignmentQuery.isExamEnded(a, referenceTime)) {
         return false;
@@ -55,12 +62,20 @@ class AssignmentStatistics {
     return true;
   }
 
-  AssignmentStatistics(Iterable<Assignment> records, {DateTime? now}) {
+  AssignmentStatistics(
+    Iterable<Assignment> records, {
+    DateTime? now,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
     final referenceTime = now ?? DateTime.now();
     for (final a in records) {
-      switch (classify(a, referenceTime)) {
+      switch (classify(a, referenceTime, coursework: coursework)) {
         case AssignmentStatBucket.completed:
-          completed++;
+          if (a.isCompleted) {
+            officialCompleted++;
+          } else {
+            localCompleted++;
+          }
         case AssignmentStatBucket.expired:
           expired++;
         case AssignmentStatBucket.pending:
@@ -70,7 +85,12 @@ class AssignmentStatistics {
       }
     }
   }
-  int completed = 0, pending = 0, expired = 0, unknown = 0;
+  int officialCompleted = 0,
+      localCompleted = 0,
+      pending = 0,
+      expired = 0,
+      unknown = 0;
+  int get completed => officialCompleted + localCompleted;
   int get total => completed + pending + expired + unknown;
   List<int> get counts => [completed, pending, expired, unknown];
   // Keep the headline completion rate conventionally rounded, independent of

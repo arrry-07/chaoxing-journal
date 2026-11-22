@@ -81,7 +81,8 @@ class DisplayPreferences {
     DateTime now, {
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) {
-    final display = AssignmentQuery.currentDisplay(items, now);
+    final display =
+        AssignmentQuery.currentDisplay(items, now, coursework: coursework);
     if (widgetRange == WidgetRange.all) return display;
     final today = AssignmentQuery.dayKey(now);
     final days = widgetRange == WidgetRange.today ? 1 : 7;
