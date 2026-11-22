@@ -19,7 +19,7 @@ class DailySummary {
     for (var i = 0; result.length < 7; i++) {
       final local = DateTime.utc(beijing.year, beijing.month, beijing.day + i,
           personal.summaryHour, personal.summaryMinute);
-      final at = local.subtract(const Duration(hours: 8));
+      final at = local.subtract(const Duration(hours: 8)).toLocal();
       if (!at.isAfter(now)) continue;
       final day = PersonalWorkspace.dayKey(at);
       final due = rows.where((a) {
@@ -93,7 +93,8 @@ class ReminderHealth {
       this.pending,
       this.summaryPending,
       this.manualPending,
-      this.scheduleRecoveryPending = false});
+      this.scheduleRecoveryPending = false,
+      this.queryErrors = const []});
 
   final bool? notifications, exact;
   final ReminderChannelHealth? assignmentChannel,
@@ -102,6 +103,7 @@ class ReminderHealth {
       manualChannel;
   final int? pending, summaryPending, manualPending;
   final bool scheduleRecoveryPending;
+  final List<String> queryErrors;
 
   // Missing, unsupported and failed channel checks must not collapse to false.
   bool? get channelEnabled => assignmentChannel?.enabled;

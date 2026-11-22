@@ -91,6 +91,109 @@ void main() {
     expect(snapshot.nodes, hasLength(5));
   });
 
+  test(
+      'oversized chapter fields and colliding codes survive catalog round trip',
+      () {
+    final codePrefix = '1' * 59;
+    final longTitle = '节' * 510;
+    final longCourseName = '课' * 260;
+    String section(String code) => '''
+  <li>
+    <div class="chapter_item" title="$longTitle">
+      <span class="catalog_sbar">$code</span>
+      <span class="catalog_task"><span class="catalog_points_yi">1500</span></span>
+    </div>
+  </li>
+''';
+    final course = ChaoxingCourseRef(
+      courseId: '1' * 120,
+      clazzId: '2' * 120,
+      courseName: longCourseName,
+      cpi: '9001',
+    );
+    final snapshot = ChaoxingChapterParser.parse(
+      '''
+<ul class="chapter_list">
+  ${section('${codePrefix}23')}
+  ${section('${codePrefix}24')}
+  ${section('${codePrefix}34')}
+</ul>
+''',
+      course,
+      now: DateTime.utc(2026, 11, 22),
+    );
+    expect(snapshot, isNotNull);
+    final catalog = CourseChapterCatalog().upsertCourse(snapshot!);
+    final restored = CourseChapterCatalog.decode(catalog.encode());
+
+    expect(restored.toJson(), catalog.toJson());
+    final persisted = restored.byCourse[snapshot.courseKey]!;
+    expect(persisted.courseName, '课' * 200);
+    expect(persisted.nodes.map((node) => node.code),
+        ['${codePrefix}2', '${codePrefix}2', '${codePrefix}3']);
+    expect(persisted.nodes.map((node) => node.title), everyElement('节' * 500));
+    expect(persisted.nodes.map((node) => node.pendingPoints), [999, 999, 999]);
+    final ids = persisted.nodes.map((node) => node.sectionId).toList();
+    expect(ids.toSet(), hasLength(3));
+    expect(ids.map((id) => id.length), everyElement(lessThanOrEqualTo(300)));
+    expect(ids[1], endsWith('#2'));
+  });
+
+  test('chapter parser and snapshot reject the same invalid course identities',
+      () {
+    final now = DateTime.utc(2026, 11, 22);
+    final baseline =
+        ChaoxingChapterParser.parse(_sampleHtml, _course, now: now)!;
+    final invalidIds = {
+      'empty': '',
+      'overlong': '1' * 121,
+      'colon': '1:2',
+      'embedded whitespace': '1 2',
+      'control character': '1\x002',
+      'DEL': '1\x7f2',
+    };
+    final acceptedByParser = <String>[];
+    for (final field in ['courseId', 'clazzId']) {
+      for (final entry in invalidIds.entries) {
+        final reason = '$field: ${entry.key}';
+        expect(
+          () => CourseChapterSnapshot.fromJson(
+            {...baseline.toJson(), field: entry.value},
+          ),
+          throwsFormatException,
+          reason: reason,
+        );
+        final course = ChaoxingCourseRef(
+          courseId: field == 'courseId' ? entry.value : _course.courseId,
+          clazzId: field == 'clazzId' ? entry.value : _course.clazzId,
+          courseName: _course.courseName,
+          cpi: _course.cpi,
+        );
+        if (ChaoxingChapterParser.parse(_sampleHtml, course, now: now) !=
+            null) {
+          acceptedByParser.add(reason);
+        }
+      }
+    }
+    expect(acceptedByParser, isEmpty);
+  });
+
+  test('blank parsed course name falls back to a persistable label', () {
+    const course = ChaoxingCourseRef(
+      courseId: '2001',
+      clazzId: '3001',
+      courseName: '   ',
+      cpi: '9001',
+    );
+    final snapshot = ChaoxingChapterParser.parse(
+      _sampleHtml,
+      course,
+      now: DateTime.utc(2026, 11, 22),
+    )!;
+    final restored = CourseChapterSnapshot.fromJson(snapshot.toJson());
+    expect(restored.courseName, '未命名课程');
+  });
+
   test('throws chapterAccessDenied and rejects unknown HTML', () {
     expect(
       () => ChaoxingChapterParser.parse('<html>没有此页面访问权限</html>', _course),

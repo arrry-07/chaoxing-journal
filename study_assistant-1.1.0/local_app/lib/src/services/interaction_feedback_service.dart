@@ -77,12 +77,13 @@ class InteractionFeedback {
   }
 
   static bool _shouldEmit(InteractionSoundKind kind, bool preview) {
+    if (preview) return true;
     final current = now();
-    if (kind == InteractionSoundKind.tap &&
-        !preview &&
-        _last != null &&
-        current.difference(_last!) < const Duration(milliseconds: 90)) {
-      return false;
+    if (kind == InteractionSoundKind.tap && _last != null) {
+      final elapsed = current.difference(_last!);
+      if (!elapsed.isNegative && elapsed < const Duration(milliseconds: 90)) {
+        return false;
+      }
     }
     _last = current;
     return true;

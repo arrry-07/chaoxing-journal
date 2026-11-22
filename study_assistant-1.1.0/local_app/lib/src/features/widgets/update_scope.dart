@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../app/journal.dart';
+import '../../app/transient_feedback.dart';
 
 import '../../services/app_update_controller.dart';
 import 'update_dialog.dart';
@@ -28,55 +29,52 @@ class UpdateDownloadBanner extends StatelessWidget {
         final label = controller.downloading
             ? '${controller.message}${progress == null ? '' : ' · ${(progress * 100).floor()}%'}'
             : controller.message;
-        return Material(
-          color: Journal.of(context).sage,
-          child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
-              child: LayoutBuilder(builder: (context, constraints) {
-                final journal = Journal.of(context);
-                final status = Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Semantics(
-                          liveRegion: !controller.downloading,
-                          child: Text(label,
-                              style: journal.metadata
-                                  .copyWith(color: journal.ink))),
-                      if (controller.downloading) ...[
-                        const SizedBox(height: 8),
-                        LinearProgressIndicator(value: progress, minHeight: 3),
-                      ],
-                    ]);
-                final actions = Row(mainAxisSize: MainAxisSize.min, children: [
-                  TextButton(
-                      onPressed: () => showUpdateDialog(context, controller),
-                      child: Text(controller.phase == UpdatePhase.ready
-                          ? '安装更新'
-                          : '查看进度')),
-                  if (!controller.busy)
-                    IconButton(
-                        tooltip: '稍后再说',
-                        onPressed: controller.hideBanner,
-                        icon: const Icon(Icons.close, size: 20)),
+        return JournalFloatingBanner(
+          padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
+          child: LayoutBuilder(builder: (context, constraints) {
+            final journal = Journal.of(context);
+            final status = Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Semantics(
+                      liveRegion: !controller.downloading,
+                      child: Text(label,
+                          style:
+                              journal.metadata.copyWith(color: journal.ink))),
+                  if (controller.downloading) ...[
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(value: progress, minHeight: 3),
+                  ],
                 ]);
-                if (constraints.maxWidth < 400 ||
-                    MediaQuery.textScalerOf(context).scale(14) > 21) {
-                  return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        status,
-                        const SizedBox(height: 4),
-                        Align(alignment: Alignment.centerRight, child: actions)
-                      ]);
-                }
-                return Row(children: [
-                  Expanded(child: status),
-                  const SizedBox(width: 16),
-                  actions
-                ]);
-              })),
+            final actions = Row(mainAxisSize: MainAxisSize.min, children: [
+              TextButton(
+                  onPressed: () => showUpdateDialog(context, controller),
+                  child: Text(
+                      controller.phase == UpdatePhase.ready ? '安装更新' : '查看进度')),
+              if (!controller.busy)
+                IconButton(
+                    tooltip: '稍后再说',
+                    onPressed: controller.hideBanner,
+                    icon: const Icon(Icons.close, size: 20)),
+            ]);
+            if (constraints.maxWidth < 400 ||
+                MediaQuery.textScalerOf(context).scale(14) > 21) {
+              return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    status,
+                    const SizedBox(height: 4),
+                    Align(alignment: Alignment.centerRight, child: actions)
+                  ]);
+            }
+            return Row(children: [
+              Expanded(child: status),
+              const SizedBox(width: 16),
+              actions
+            ]);
+          }),
         );
       });
 }

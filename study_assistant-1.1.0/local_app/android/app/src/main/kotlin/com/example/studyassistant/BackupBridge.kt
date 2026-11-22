@@ -102,7 +102,8 @@ class BackupBridge(private val activity: Activity, private val channel: MethodCh
         background(operation) {
             if (operation.kind == "save") {
                 val bytes = operation.content ?: throw IllegalStateException("Missing content")
-                val output = activity.contentResolver.openOutputStream(uri, "w")
+                // Use "wt" so overwriting a shorter backup on Android 10+ truncates trailing bytes.
+                val output = activity.contentResolver.openOutputStream(uri, "wt")
                     ?: throw java.io.IOException("Cannot open document")
                 // A successful result requires write, flush AND close to succeed.
                 output.use { it.write(bytes); it.flush() }

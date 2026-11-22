@@ -7,17 +7,22 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import android.util.SizeF
 import android.view.View
 import android.widget.RemoteViews
+import java.time.DateTimeException
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import kotlin.math.ceil
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
 class AssignmentWidgetProvider : AppWidgetProvider() {
@@ -57,21 +62,8 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
     }
 
     internal fun buildViews(context: Context, options: Bundle?): RemoteViews {
-        val isPortrait =
-            context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
-        val minHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0
-        val maxHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) ?: 0
-        val effectiveHeight =
-            AssignmentWidgetLayoutPolicy.effectiveHeightDp(isPortrait, minHeightDp, maxHeightDp)
-        val tier = AssignmentWidgetLayoutPolicy.tierForHeightDp(effectiveHeight)
-        val layoutId = when (tier) {
-            6 -> R.layout.assignment_widget_large
-            4 -> R.layout.assignment_widget_medium
-            else -> R.layout.assignment_widget
-        }
-
-        val views = RemoteViews(context.packageName, layoutId)
-        val prefs = context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
+        val configuration = context.resources.configuration
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val items = loadItems(prefs)
         val meta = AssignmentWidgetLayoutPolicy.resolveSnapshotMeta(
             hasAuthenticatedKey = prefs.contains("assignment_authenticated"),
@@ -88,10 +80,54 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
                     .atZoneSameInstant(ZoneId.of("Asia/Shanghai"))
                     .format(DateTimeFormatter.ofPattern("M/d HH:mm"))
             }
-        } catch (_: Exception) {
+        } catch (error: DateTimeException) {
+            Log.w(TAG, "snapshot_time_parse_failed:${error.javaClass.simpleName}")
             null
         }
+        val availableRows = minOf(rowSlots.size, items.length())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            options?.containsKey(AppWidgetManager.OPTION_APPWIDGET_SIZES) == true &&
+            meta.authenticated && availableRows > 1
+        ) {
+            // Some launchers report grid sizes larger than the area they render.
+            // Let the host choose a layout using its measured content size.
+            val variants = (1..availableRows).associate { rows ->
+                val height = if (rows == 1) 0f else {
+                    AssignmentWidgetLayoutPolicy.minimumHeightDp(rows, configuration.fontScale)
+                }
+                SizeF(0f, height) to renderViews(context, rows, items, meta, stamp)
+            }
+            return RemoteViews(variants)
+        }
+        val effectiveHeight = AssignmentWidgetLayoutPolicy.effectiveHeightDp(
+            isPortrait = configuration.orientation != Configuration.ORIENTATION_LANDSCAPE,
+            minHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0,
+            maxHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) ?: 0,
+        )
+        val maxRows = AssignmentWidgetLayoutPolicy.visibleRowCount(
+            effectiveHeight, configuration.fontScale,
+        )
+        return renderViews(context, maxRows, items, meta, stamp)
+    }
 
+    private fun renderViews(
+        context: Context,
+        maxRows: Int,
+        items: JSONArray,
+        meta: WidgetSnapshotMeta,
+        stamp: String?,
+    ): RemoteViews {
+        val tier = when {
+            maxRows <= 2 -> 2
+            maxRows <= 4 -> 4
+            else -> 6
+        }
+        val layoutId = when (tier) {
+            6 -> R.layout.assignment_widget_large
+            4 -> R.layout.assignment_widget_medium
+            else -> R.layout.assignment_widget
+        }
+        val views = RemoteViews(context.packageName, layoutId)
         views.setTextViewText(
             R.id.widget_header,
             AssignmentWidgetLayoutPolicy.headerText(
@@ -123,7 +159,7 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
                 first.metaId,
                 if (!meta.authenticated) "打开 App 登录并同步学习通" else "打开 App 同步学习通",
             )
-            views.setTextColor(first.metaId, Color.parseColor(COLOR_MUTED))
+            applyTextColorRes(context, views, first.metaId, R.color.widget_muted)
             views.setOnClickPendingIntent(first.containerId, homePendingIntent)
             for (index in 1 until slots.size) {
                 views.setViewVisibility(slots[index].containerId, View.GONE)
@@ -132,7 +168,7 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
             return views
         }
 
-        val shownCount = minOf(tier, items.length())
+        val shownCount = minOf(maxRows, items.length())
         for (index in slots.indices) {
             val slot = slots[index]
             if (index >= shownCount) {
@@ -148,9 +184,11 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(slot.containerId, View.VISIBLE)
             views.setTextViewText(slot.titleId, item.optString("title"))
             views.setTextViewText(slot.metaId, itemMeta(item, resolvedRemaining))
-            views.setTextColor(
+            applyTextColorRes(
+                context,
+                views,
                 slot.metaId,
-                Color.parseColor(if (urgent) COLOR_BERRY else COLOR_MUTED),
+                if (urgent) R.color.widget_urgent else R.color.widget_muted,
             )
             val rowPendingIntent = createPendingIntent(
                 context = context,
@@ -171,6 +209,14 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.widget_footer, View.GONE)
         }
         return views
+    }
+
+    private fun applyTextColorRes(context: Context, views: RemoteViews, id: Int, color: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            views.setColor(id, "setTextColor", color)
+        } else {
+            views.setTextColor(id, context.getColor(color))
+        }
     }
 
     private fun createPendingIntent(
@@ -200,11 +246,15 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
         val anchorAt = try {
             val instant = try {
                 OffsetDateTime.parse(raw).toInstant()
-            } catch (_: Exception) {
+            } catch (_: DateTimeParseException) {
                 LocalDateTime.parse(raw).atZone(ZoneId.systemDefault()).toInstant()
             }
             instant.toEpochMilli()
-        } catch (_: Exception) {
+        } catch (error: DateTimeException) {
+            Log.w(TAG, "anchor_time_parse_failed:${error.javaClass.simpleName}")
+            return fallback
+        } catch (error: ArithmeticException) {
+            Log.w(TAG, "anchor_time_out_of_range:${error.javaClass.simpleName}")
             return fallback
         }
         return AssignmentWidgetTimeText.remainingText(
@@ -234,21 +284,33 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
         val raw = prefs.getString("assignment_snapshot", "[]") ?: "[]"
         return try {
             JSONArray(raw)
-        } catch (_: Exception) {
+        } catch (error: JSONException) {
+            Log.w(TAG, "snapshot_parse_failed:${error.javaClass.simpleName}")
             JSONArray()
         }
     }
 
     companion object {
-        private const val COLOR_MUTED = "#53645A"
-        private const val COLOR_BERRY = "#813E53"
+        private const val TAG = "AssignmentWidgetProvider"
+        private const val PREFS_NAME = "HomeWidgetPreferences"
+
+        fun clearForUnauthenticated(context: Context) {
+            val saved = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putString("assignment_snapshot", "[]")
+                .putBoolean("assignment_authenticated", false)
+                .putInt("assignment_total_count", 0)
+                .remove("assignment_snapshot_at")
+                .commit()
+            refreshAll(context)
+            check(saved) { "小组件隐私状态保存失败" }
+        }
 
         /**
          * Refreshes every active home-screen instance from saved preferences after
          * package replacement, boot reconciliation, or system time changes.
          */
         fun refreshAll(context: Context) {
-            runCatching {
+            try {
                 val manager = AppWidgetManager.getInstance(context) ?: return
                 val ids = manager.getAppWidgetIds(
                     ComponentName(context, AssignmentWidgetProvider::class.java),
@@ -256,6 +318,8 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
                 if (ids.isNotEmpty()) {
                     AssignmentWidgetProvider().onUpdate(context, manager, ids)
                 }
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "refresh_failed:${error.javaClass.simpleName}")
             }
         }
     }
@@ -289,6 +353,28 @@ internal object AssignmentWidgetLayoutPolicy {
         heightDp < 230 -> 4
         else -> 6
     }
+
+    fun visibleRowCount(heightDp: Int, fontScale: Float): Int {
+        val baseTier = tierForHeightDp(heightDp)
+        val safeScale = safeFontScale(fontScale)
+        if (safeScale <= 1.05f || heightDp <= 0) return baseTier
+
+        return (baseTier downTo 2).firstOrNull {
+            heightDp >= minimumHeightDp(it, safeScale)
+        } ?: 1
+    }
+
+    fun minimumHeightDp(rows: Int, fontScale: Float): Float {
+        val safeScale = safeFontScale(fontScale)
+        // Include CJK font padding for both lines and keep the footer clear
+        // even when the launcher's density rounds each child's size separately.
+        val chromeDp = 35f + 34f * safeScale
+        val rowDp = 10f + 40f * safeScale
+        return ceil(chromeDp + rows * rowDp)
+    }
+
+    private fun safeFontScale(fontScale: Float): Float =
+        fontScale.takeIf { it.isFinite() && it > 0f } ?: 1.0f
 
     fun headerText(authenticated: Boolean, rangeLabel: String, totalCount: Int): String {
         if (!authenticated) return "课业手记 · 未登录"

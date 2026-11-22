@@ -33,14 +33,31 @@ class ExamInfo {
     final keepNoticeAnchor = noticeOnly &&
         previous.noticeOnly &&
         examId == previous.examId &&
-        courseId != null &&
-        clazzId != null &&
         courseId == previous.courseId &&
         clazzId == previous.clazzId;
+    final keepRelatedExamId = keepNoticeAnchor &&
+        courseId != null &&
+        courseId!.trim().isNotEmpty &&
+        clazzId != null &&
+        clazzId!.trim().isNotEmpty;
+    var nextNoticeStart =
+        noticeStartAt ?? (keepNoticeAnchor ? previous.noticeStartAt : null);
+    var nextNoticeEnd =
+        noticeEndAt ?? (keepNoticeAnchor ? previous.noticeEndAt : null);
+    if (nextNoticeStart != null &&
+        nextNoticeEnd != null &&
+        nextNoticeEnd.isBefore(nextNoticeStart)) {
+      // Drop incompatible history. A reversed pair from this read is invalid.
+      final freshRangeReversed = noticeStartAt != null &&
+          noticeEndAt != null &&
+          noticeEndAt!.isBefore(noticeStartAt!);
+      nextNoticeStart = freshRangeReversed ? null : noticeStartAt;
+      nextNoticeEnd = freshRangeReversed ? null : noticeEndAt;
+    }
     return ExamInfo(
         examId: examId,
-        relatedExamId:
-            relatedExamId ?? (keepNoticeAnchor ? previous.relatedExamId : null),
+        relatedExamId: relatedExamId ??
+            (keepRelatedExamId ? previous.relatedExamId : null),
         courseId: courseId,
         clazzId: clazzId,
         startAt: start,
@@ -51,10 +68,8 @@ class ExamInfo {
         location: location.isEmpty ? previous.location : location,
         lifecycle: lifecycle,
         noticeOnly: noticeOnly,
-        noticeStartAt:
-            noticeStartAt ?? (keepNoticeAnchor ? previous.noticeStartAt : null),
-        noticeEndAt:
-            noticeEndAt ?? (keepNoticeAnchor ? previous.noticeEndAt : null));
+        noticeStartAt: nextNoticeStart,
+        noticeEndAt: nextNoticeEnd);
   }
 
   Map<String, dynamic> toJson() => {

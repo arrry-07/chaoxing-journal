@@ -83,6 +83,13 @@ class _DailyPlanState extends State<DailyPlanScreen> {
             value: a.id,
             label: a.title,
             subtitle: () {
+              if (a.isExam) {
+                final start = a.timelineAt;
+                final startText = start != null && a.timelineTrusted
+                    ? '开考 ${DateFormat('MM-dd HH:mm').format(start.toLocal())}'
+                    : '开考时间待确认';
+                return '${a.courseName} · $startText';
+              }
               final overdue = a.isOverdueAt(now);
               final deadlineText = a.deadlineAt != null &&
                       a.deadlineTrusted &&
@@ -508,18 +515,32 @@ class _PlannerSheetState extends State<_PlannerSheet> {
       setState(() => error = '账号已变化，请重新生成安排');
       return;
     }
-    final assignments = {
-      for (final assignment in widget.store.visibleAssignments)
-        assignment.id: assignment
-    };
     final chosen = currentPreview.suggested
         .where((item) => accepted.contains(item.assignment.id))
         .toList();
     var stale = false;
     void validate(PersonalWorkspace workspace) {
       currentPreview.ensureCurrentEpoch(widget.store.accountEpoch);
+      final now = DateTime.now();
+      final visible = widget.store.visibleAssignments;
+      final assignments = {for (final a in visible) a.id: a};
+      for (final item in chosen) {
+        final original = item.assignment;
+        final current = assignments[original.id];
+        if (current == null ||
+            current.isCompleted ||
+            current.status != original.status ||
+            current.title != original.title ||
+            current.courseName != original.courseName ||
+            !_sameMoment(current.timelineAt, original.timelineAt) ||
+            !_sameMoment(current.deadlineAt, original.deadlineAt) ||
+            AssignmentQuery.isExamEnded(current, now)) {
+          stale = true;
+          throw StateError('作业信息已变化，请重新生成安排');
+        }
+      }
       final refreshed = RulePlanningService.preview(
-        assignments: widget.store.visibleAssignments,
+        assignments: visible,
         selectedIds: chosen.map((item) => item.assignment.id).toSet(),
         estimates: {
           for (final item in chosen) item.assignment.id: item.minutes,
@@ -527,7 +548,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
         existingPlans: workspace.plans,
         day: widget.day,
         budgetMinutes: currentPreview.budgetMinutes,
-        now: DateTime.now(),
+        now: now,
         accountEpoch: currentPreview.accountEpoch,
       );
       if (refreshed.suggested.length != chosen.length) {
@@ -536,18 +557,6 @@ class _PlannerSheetState extends State<_PlannerSheet> {
       }
     }
 
-    for (final item in chosen) {
-      final current = assignments[item.assignment.id];
-      if (current == null ||
-          current.isCompleted ||
-          current.status != item.assignment.status ||
-          current.title != item.assignment.title ||
-          current.courseName != item.assignment.courseName ||
-          current.deadlineAt != item.assignment.deadlineAt) {
-        setState(() => error = '作业信息已变化，请重新生成安排');
-        return;
-      }
-    }
     try {
       validate(widget.store.personal);
     } on StateError catch (value) {
@@ -838,12 +847,19 @@ class _PlannerSheetState extends State<_PlannerSheet> {
 
   Widget _candidate(Assignment assignment) {
     final chosen = selected.contains(assignment.id);
-    final deadline = assignment.deadlineAt;
-    final deadlineText = deadline != null &&
-            assignment.deadlineTrusted &&
-            !assignment.deadlineReadFailed
-        ? '截止 ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(deadline))}'
-        : assignment.deadlineLabel;
+    final time = assignment.timelineAt;
+    final String timeText;
+    if (assignment.isExam) {
+      timeText = time != null && assignment.timelineTrusted
+          ? '开考 ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(time))}'
+          : '开考时间待确认';
+    } else {
+      timeText = time != null &&
+              assignment.deadlineTrusted &&
+              !assignment.deadlineReadFailed
+          ? '截止 ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(time))}'
+          : assignment.deadlineLabel;
+    }
     return CheckboxListTile(
       key: ValueKey('planning-candidate-${assignment.id}'),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12),
@@ -862,7 +878,7 @@ class _PlannerSheetState extends State<_PlannerSheet> {
               }),
       title: Text(assignment.title),
       subtitle: Text(
-          '${assignment.courseName} · ${assignment.statusLabel} · $deadlineText'),
+          '${assignment.courseName} · ${assignment.statusLabel} · $timeText'),
     );
   }
 
@@ -890,6 +906,10 @@ class _PlannerSheetState extends State<_PlannerSheet> {
     );
   }
 }
+
+bool _sameMoment(DateTime? left, DateTime? right) => left == null
+    ? right == null
+    : right != null && left.isAtSameMomentAs(right);
 
 String _planningReason(PlanningReason reason) => switch (reason) {
       PlanningReason.statusUnknown => '提交状态未知，请先核对',

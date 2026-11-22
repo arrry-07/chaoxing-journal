@@ -28,7 +28,7 @@ class AssignmentChange {
       title: j['title'] as String,
       courseName: j['course'] as String,
       kind: AssignmentChangeKind.values.byName(j['kind'] as String),
-      at: DateTime.parse(j['at'] as String),
+      at: DateTime.parse(j['at'] as String).toLocal(),
       before: j['before'] as String,
       after: j['after'] as String);
 
@@ -51,15 +51,20 @@ class AssignmentChange {
         add(AssignmentChangeKind.published, '', '新读取到作业');
         continue;
       }
+      final before = prior.deadlineAt;
+      final after = a.deadlineAt;
+      final sameDeadline = before == null
+          ? after == null
+          : after != null && before.isAtSameMomentAs(after);
       if (prior.deadlineTrusted &&
           !prior.deadlineReadFailed &&
           a.deadlineTrusted &&
           !a.deadlineReadFailed &&
-          prior.deadlineAt != a.deadlineAt) {
+          !sameDeadline) {
         add(
             AssignmentChangeKind.deadline,
-            prior.deadlineAt?.toUtc().toIso8601String() ?? '',
-            a.deadlineAt?.toUtc().toIso8601String() ?? '');
+            before?.toUtc().toIso8601String() ?? '',
+            after?.toUtc().toIso8601String() ?? '');
       }
       if (prior.statusLabel != a.statusLabel && a.statusLabel != '提交状态未知') {
         add(AssignmentChangeKind.status, prior.statusLabel, a.statusLabel);

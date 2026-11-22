@@ -7,6 +7,7 @@ import 'package:study_assistant_mobile/src/local/chaoxing_exam_parser.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/services/assignment_query.dart';
+import 'package:study_assistant_mobile/src/services/exam_wall_time.dart';
 import 'exam_sync_test.dart' show pcRow, course, ExamFixture;
 
 Map<String, dynamic> noticePayload(String body,
@@ -17,6 +18,8 @@ Map<String, dynamic> noticePayload(String body,
         String clazz = '11',
         String? url,
         String sendTime = '2040-01-01',
+        String cardClassKey = 'clazzId',
+        String? conflictingCardClass,
         bool attachment = true}) =>
     {
       'status': true,
@@ -34,7 +37,9 @@ Map<String, dynamic> noticePayload(String body,
                         'examOrWork': 'exam',
                         'examOrWorkId': int.parse(examId),
                         'courseId': int.parse(course),
-                        'clazzId': int.parse(clazz),
+                        cardClassKey: int.parse(clazz),
+                        if (conflictingCardClass != null)
+                          'classId': conflictingCardClass,
                         'title': '合成期末考试',
                         'url': url ??
                             'https://mooc1-api.chaoxing.com/examApi/intoexamorwork?taskrefId=$examId&courseId=$course&classId=$clazz&workOrExam=exam&enc=synthetic'
@@ -55,6 +60,216 @@ void main() {
   const yearless = '试卷名称：合成期末考试\r考试时间：04-01 09:00:00 至 04-01 11:00:00';
   Assignment parse(Map<String, dynamic> payload) =>
       ChaoxingExamParser.notices(payload)!.rows.single;
+  test('exam wall time accepts fullwidth minute and second separators', () {
+    final time = ExamWallTime.read('北京时间 04-01 09：15：27').singleOrNull;
+    expect(time?.label, '04-01 09:15:27');
+  });
+
+  test('projected Beijing exam time is returned in device-local form', () {
+    final time = ExamWallTime.read('04-01 09:15:27').single;
+    final projected = time.projectedAt(2030)!;
+    expect(projected.toUtc(), DateTime.utc(2030, 4, 1, 1, 15, 27));
+    expect(projected.isUtc, isFalse);
+  });
+
+  for (final body in [
+    '开始时间：2030-04-01 09：00：23\r结束时间：2030-04-01 11：00：45',
+    '考试时间：2030-04-01 09：00：23 至 2030-04-01 11：00：45',
+  ]) {
+    test(
+        'fullwidth exam notice times preserve both seconds (${body.split('：').first})',
+        () {
+      final exam = parse(noticePayload(body)).exam!;
+      expect(
+        (exam.startAt?.toUtc(), exam.endAt?.toUtc()),
+        (
+          DateTime.utc(2030, 4, 1, 1, 0, 23),
+          DateTime.utc(2030, 4, 1, 3, 0, 45)
+        ),
+      );
+      expect(exam.startTrusted && exam.endTrusted, isTrue);
+    });
+  }
+
+  test('yearless exam with fullwidth seconds matches its exact peer', () {
+    final peer = parse(noticePayload(
+        '考试时间：2030-04-01 09:00:23 至 2030-04-01 11:00:45',
+        uuid: 'full-peer-seconds'));
+    final notice = parse(noticePayload('考试时间：04-01 09：00：23 至 04-01 11：00：45',
+        uuid: 'yearless-seconds', sendTime: ''));
+    expect(notice.timelineTrusted, isFalse);
+    final exam = ChaoxingExamParser.enrichNotices([peer, notice]).last.exam!;
+    expect(
+      (exam.startAt?.toUtc(), exam.endAt?.toUtc()),
+      (DateTime.utc(2030, 4, 1, 1, 0, 23), DateTime.utc(2030, 4, 1, 3, 0, 45)),
+    );
+  });
+
+  test('peer-supplied years survive persistence and a later formal reschedule',
+      () {
+    final peer = parse(noticePayload(full, uuid: 'full-peer'));
+    final notice =
+        parse(noticePayload(yearless, uuid: 'yearless-anchor', sendTime: ''));
+    expect(notice.timelineTrusted, isFalse);
+    final enriched = ChaoxingExamParser.enrichNotices([peer, notice]).last;
+    expect(enriched.timelineTrusted, isTrue);
+    final saved = Assignment.fromJson(enriched.toJson());
+    expect(
+      (saved.exam!.noticeStartAt?.toUtc(), saved.exam!.noticeEndAt?.toUtc()),
+      (DateTime.utc(2030, 4, 1, 1), DateTime.utc(2030, 4, 1, 3)),
+    );
+    final official = ChaoxingExamParser.make(
+      id: '99',
+      title: '正式改期',
+      courseId: '7',
+      clazzId: '11',
+      status: 'pending',
+      start: DateTime.utc(2030, 4, 2, 1),
+      end: DateTime.utc(2030, 4, 2, 3),
+    );
+    final exam = ChaoxingExamParser.enrichNotices([official, saved]).last.exam!;
+    expect(exam.startAt?.toUtc(), DateTime.utc(2030, 4, 2, 1));
+    expect(
+      (exam.noticeStartAt?.toUtc(), exam.noticeEndAt?.toUtc()),
+      (DateTime.utc(2030, 4, 1, 1), DateTime.utc(2030, 4, 1, 3)),
+    );
+  });
+
+  test('successive formal reschedules label an old venue only once', () {
+    final notice = parse(noticePayload('$full\r考试地点：合成机房', sendTime: ''));
+    final firstStart = DateTime.utc(2030, 4, 2, 1);
+    final secondStart = DateTime.utc(2030, 4, 3, 1);
+    Assignment official(DateTime start) => ChaoxingExamParser.make(
+          id: '99',
+          title: '正式改期',
+          courseId: '7',
+          clazzId: '11',
+          status: 'pending',
+          start: start,
+          end: start.add(const Duration(hours: 2)),
+        );
+    const expected = '通知原地点：合成机房（已改期，请核对）';
+    final first =
+        ChaoxingExamParser.enrichNotices([official(firstStart), notice]).last;
+    expect(first.exam!.location, expected);
+    final second =
+        ChaoxingExamParser.enrichNotices([official(secondStart), first]).last;
+    expect(second.exam!.startAt?.toUtc(), secondStart);
+    expect(second.exam!.location, expected);
+  });
+
+  for (final usePeer in [false, true]) {
+    test(
+        'newer reschedule keeps notice state with an ended formal exam (peer=$usePeer)',
+        () {
+      final start = DateTime.utc(2090, 4, 1, 1);
+      final end = DateTime.utc(2090, 4, 1, 3);
+      final current = ChaoxingExamParser.make(
+        id: '99',
+        title: '旧考试',
+        courseId: '7',
+        clazzId: '11',
+        status: usePeer ? 'submitted' : 'completed',
+        start: DateTime.utc(2020, 4, 1, 1),
+        end: DateTime.utc(2020, 4, 1, 3),
+        now: DateTime.utc(2020, 4, 2),
+        duration: 120,
+        location: '旧机房',
+      );
+      final notice = parse(noticePayload(
+        '${usePeer ? yearless : full.replaceAll('2030', '2090')}'
+        '\r考试地点：新机房\r答题时长：60分钟',
+        uuid: 'newer-notice',
+        sendTime: '',
+      )).copyWith(
+        title: '新考试安排',
+        publishedAt: DateTime.utc(2020, 4, 3),
+        availability: AssignmentAvailability.unknown,
+        completedAt: DateTime.utc(2020, 4, 1, 2),
+      );
+      expect(notice.timelineTrusted, !usePeer);
+      expect(current.exam!.lifecycle, 'ended');
+      final peer = parse(
+          noticePayload(full.replaceAll('2030', '2090'), uuid: 'newer-peer'));
+      final joined = ChaoxingExamParser.enrichNotices(
+        [current, if (usePeer) peer, notice],
+        now: DateTime.utc(2090, 3, 31),
+      ).last;
+      expect(
+        (joined.exam!.startAt?.toUtc(), joined.exam!.endAt?.toUtc()),
+        (start, end),
+      );
+      expect(
+        (joined.exam!.lifecycle, joined.status, joined.title),
+        ('scheduled', notice.status, '新考试安排'),
+      );
+      expect(joined.completedAt, isNull);
+      expect(joined.availability, AssignmentAvailability.unknown);
+      expect(
+          (joined.exam!.durationMinutes, joined.exam!.location), (60, '新机房'));
+    });
+  }
+
+  test('historical merge keeps standalone notice anchors without a class', () {
+    final start = DateTime.utc(2030, 4, 1, 1).toLocal();
+    final end = DateTime.utc(2030, 4, 1, 3).toLocal();
+    final previous = ExamInfo(
+      examId: 'standalone',
+      noticeOnly: true,
+      noticeStartAt: start,
+      noticeEndAt: end,
+    );
+    const current = ExamInfo(examId: 'standalone', noticeOnly: true);
+    final restored =
+        ExamInfo.fromJson(current.retainingHistoricalTimes(previous).toJson());
+    expect((restored.noticeStartAt, restored.noticeEndAt), (start, end));
+    expect(restored.relatedExamId, isNull);
+  });
+
+  test('historical merge keeps the fresh anchor when old end is reversed', () {
+    final start = DateTime.utc(2030, 4, 2, 1);
+    final previous = ExamInfo(
+      examId: 'notice',
+      courseId: '7',
+      clazzId: '11',
+      noticeOnly: true,
+      noticeEndAt: DateTime.utc(2030, 4, 1, 3),
+    );
+    final current = ExamInfo(
+      examId: 'notice',
+      courseId: '7',
+      clazzId: '11',
+      noticeOnly: true,
+      noticeStartAt: start,
+    );
+    final merged = current.retainingHistoricalTimes(previous);
+    expect((merged.noticeStartAt, merged.noticeEndAt), (start, null));
+  });
+
+  test('historical merge clears an explicitly reversed fresh notice range', () {
+    const previous = ExamInfo(examId: 'notice', noticeOnly: true);
+    final current = ExamInfo(
+      examId: 'notice',
+      noticeOnly: true,
+      noticeStartAt: DateTime.utc(2030, 4, 2, 1),
+      noticeEndAt: DateTime.utc(2030, 4, 1, 3),
+    );
+    final merged = current.retainingHistoricalTimes(previous);
+    expect((merged.noticeStartAt, merged.noticeEndAt), (null, null));
+  });
+
+  test('exam card resolves class identity from a mixed-case map key', () {
+    final row = parse(noticePayload(full, cardClassKey: 'ClAsSiD'));
+    expect((row.courseId, row.clazzId, row.exam!.relatedExamId),
+        ('7', '11', '99'));
+  });
+
+  test('exam card drops identity when class aliases disagree', () {
+    final row = parse(noticePayload(full, conflictingCardClass: '12'));
+    expect((row.courseId, row.clazzId, row.exam!.relatedExamId),
+        (null, null, null));
+  });
+
   test('title timestamp anchors a June exam and archives it in autumn', () {
     final now = DateTime.utc(2026, 11, 20);
     final payload = noticePayload('考试时间：06-10 08:00 至 06-10 10:00',

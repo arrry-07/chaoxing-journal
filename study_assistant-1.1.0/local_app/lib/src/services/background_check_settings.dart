@@ -52,60 +52,63 @@ class BackgroundCheckSettingsStore {
 
   const BackgroundCheckSettingsStore();
 
-  Future<BackgroundCheckSettings> loadAndMigrate() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.reload();
-    final migrated = prefs.getBool(legacyMigrationKey) == true;
-    final hasNewInterval = prefs.containsKey(_intervalKey);
+  Future<BackgroundCheckSettings> loadAndMigrate({
+    SharedPreferences? prefs,
+  }) async {
+    final p = prefs ?? await SharedPreferences.getInstance();
+    if (prefs == null) await p.reload();
+    final migrated = p.getBool(legacyMigrationKey) == true;
+    final hasNewInterval = p.containsKey(_intervalKey);
 
     if (!migrated || !hasNewInterval) {
-      final legacy = prefs.getInt(legacyIntervalKey);
+      final legacy = p.getInt(legacyIntervalKey);
       final enabled = legacy != 0;
       final interval = _migrateLegacyInterval(legacy);
-      await _writeVerified(prefs, _enabledKey, enabled);
-      await _writeVerified(prefs, _intervalKey, interval);
-      if (!prefs.containsKey(_listenerKey)) {
-        await _writeVerified(prefs, _listenerKey, false);
+      await _writeVerified(p, _enabledKey, enabled);
+      await _writeVerified(p, _intervalKey, interval);
+      if (!p.containsKey(_listenerKey)) {
+        await _writeVerified(p, _listenerKey, false);
       }
-      if (!prefs.containsKey(_newAssignmentKey)) {
-        await _writeVerified(prefs, _newAssignmentKey, true);
+      if (!p.containsKey(_newAssignmentKey)) {
+        await _writeVerified(p, _newAssignmentKey, true);
       }
-      await _writeVerified(prefs, legacyMigrationKey, true);
+      await _writeVerified(p, legacyMigrationKey, true);
       // Keep the legacy value for backup/older-client compatibility.
-      await _writeVerified(prefs, legacyIntervalKey, enabled ? interval : 0);
+      await _writeVerified(p, legacyIntervalKey, enabled ? interval : 0);
       return BackgroundCheckSettings(
         enabled: enabled,
         intervalMinutes: interval,
-        notificationListenerEnabled: prefs.getBool(_listenerKey) ?? false,
-        newAssignmentReminderEnabled: prefs.getBool(_newAssignmentKey) ?? true,
+        notificationListenerEnabled: p.getBool(_listenerKey) ?? false,
+        newAssignmentReminderEnabled: p.getBool(_newAssignmentKey) ?? true,
         migratedFromLegacy: !migrated,
       );
     }
 
     return BackgroundCheckSettings(
-      enabled: prefs.getBool(_enabledKey) ?? true,
+      enabled: p.getBool(_enabledKey) ?? true,
       intervalMinutes: DaytimeCheckPolicy.normalizeIntervalMinutes(
-        prefs.getInt(_intervalKey) ?? DaytimeCheckPolicy.defaultIntervalMinutes,
+        p.getInt(_intervalKey) ?? DaytimeCheckPolicy.defaultIntervalMinutes,
       ),
-      notificationListenerEnabled: prefs.getBool(_listenerKey) ?? false,
-      newAssignmentReminderEnabled: prefs.getBool(_newAssignmentKey) ?? true,
+      notificationListenerEnabled: p.getBool(_listenerKey) ?? false,
+      newAssignmentReminderEnabled: p.getBool(_newAssignmentKey) ?? true,
       migratedFromLegacy: false,
     );
   }
 
-  Future<void> save(BackgroundCheckSettings settings) async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<void> save(
+    BackgroundCheckSettings settings, {
+    SharedPreferences? prefs,
+  }) async {
+    final p = prefs ?? await SharedPreferences.getInstance();
     final interval =
         DaytimeCheckPolicy.normalizeIntervalMinutes(settings.intervalMinutes);
-    await _writeVerified(prefs, _enabledKey, settings.enabled);
-    await _writeVerified(prefs, _intervalKey, interval);
+    await _writeVerified(p, _enabledKey, settings.enabled);
+    await _writeVerified(p, _intervalKey, interval);
+    await _writeVerified(p, _listenerKey, settings.notificationListenerEnabled);
     await _writeVerified(
-        prefs, _listenerKey, settings.notificationListenerEnabled);
-    await _writeVerified(
-        prefs, _newAssignmentKey, settings.newAssignmentReminderEnabled);
-    await _writeVerified(prefs, legacyMigrationKey, true);
-    await _writeVerified(
-        prefs, legacyIntervalKey, settings.enabled ? interval : 0);
+        p, _newAssignmentKey, settings.newAssignmentReminderEnabled);
+    await _writeVerified(p, legacyMigrationKey, true);
+    await _writeVerified(p, legacyIntervalKey, settings.enabled ? interval : 0);
   }
 
   static int _migrateLegacyInterval(int? legacy) {

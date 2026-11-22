@@ -10,6 +10,11 @@ enum ChapterTaskState {
 }
 
 class ChapterNode {
+  static const int maxPendingPoints = 999;
+  static const int maxSectionIdLength = 300;
+  static const int maxCodeLength = 60;
+  static const int maxTitleLength = 500;
+
   const ChapterNode({
     required this.sectionId,
     required this.level,
@@ -74,19 +79,20 @@ class ChapterNode {
     if (state == null ||
         pendingPoints is! int ||
         pendingPoints < 0 ||
-        pendingPoints > 999 ||
+        pendingPoints > maxPendingPoints ||
         (state == ChapterTaskState.pendingPoints && pendingPoints < 1) ||
         (state != ChapterTaskState.pendingPoints && pendingPoints != 0)) {
       PersonalWorkspace.bad();
     }
-    final sectionId = PersonalWorkspace.text(j['sectionId'], 300);
+    final sectionId =
+        PersonalWorkspace.text(j['sectionId'], maxSectionIdLength);
     if (!sectionId.startsWith('cx:chapter:')) PersonalWorkspace.bad();
     final rawEntryId = j['linkedManualEntryId'];
     return ChapterNode(
       sectionId: sectionId,
       level: level,
-      code: PersonalWorkspace.text(j['code'], 60),
-      title: PersonalWorkspace.text(j['title'], 500),
+      code: PersonalWorkspace.text(j['code'], maxCodeLength),
+      title: PersonalWorkspace.text(j['title'], maxTitleLength),
       state: state,
       pendingPoints: pendingPoints,
       linkedManualEntryId:
@@ -108,6 +114,7 @@ class CourseChapterSnapshot {
   }) : nodes = List.unmodifiable(nodes);
 
   static const int maxNodes = 600;
+  static const int maxCourseNameLength = 200;
 
   final String courseId;
   final String clazzId;
@@ -160,6 +167,11 @@ class CourseChapterSnapshot {
 
   static final RegExp _identityTokenBad = RegExp(r'[:\s\x00-\x1f\x7f]');
 
+  static bool isValidIdentityToken(String value) =>
+      value.length <= 120 &&
+      value.trim().isNotEmpty &&
+      !_identityTokenBad.hasMatch(value);
+
   factory CourseChapterSnapshot.fromJson(dynamic value) {
     final j = PersonalWorkspace.map(value, {
       'courseId',
@@ -171,10 +183,12 @@ class CourseChapterSnapshot {
       'nodes',
       'lastSyncedAt',
     });
-    final courseId = PersonalWorkspace.text(j['courseId'], 120);
-    final clazzId = PersonalWorkspace.text(j['clazzId'], 120);
-    if (_identityTokenBad.hasMatch(courseId) ||
-        _identityTokenBad.hasMatch(clazzId)) {
+    final courseId = j['courseId'];
+    final clazzId = j['clazzId'];
+    if (courseId is! String ||
+        clazzId is! String ||
+        !isValidIdentityToken(courseId) ||
+        !isValidIdentityToken(clazzId)) {
       PersonalWorkspace.bad();
     }
     final completed = j['completedPoints'];
@@ -214,7 +228,7 @@ class CourseChapterSnapshot {
     return CourseChapterSnapshot(
       courseId: courseId,
       clazzId: clazzId,
-      courseName: PersonalWorkspace.text(j['courseName'], 200),
+      courseName: PersonalWorkspace.text(j['courseName'], maxCourseNameLength),
       completedPoints: completed as int?,
       totalPoints: total as int?,
       progressTrusted: trusted,

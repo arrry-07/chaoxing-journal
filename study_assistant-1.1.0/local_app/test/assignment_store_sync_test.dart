@@ -217,8 +217,10 @@ void main() {
     await store.restoreSession();
     final first = store.syncAssignments();
     final second = store.syncAssignments();
-    final logout = store.logout();
+    // Wait until the coalesced fetch is actually in flight before logging out;
+    // a sync cancelled before starting now aborts cleanly without fetching.
     await client.started.future;
+    final logout = store.logout();
     client.response.complete([_assignment(id: 'cx:one', title: '第一课')]);
     await Future.wait([first, second, logout]);
     expect(client.fetchCount, 1);
@@ -227,6 +229,26 @@ void main() {
     expect(store.assignments, isEmpty);
     expect(await store.repository.loadJournal(), isEmpty);
     expect(store.lastSyncAt, isNull);
+  });
+
+  test(
+      'syncAssignments cancelled immediately by logout before fetch starts aborts with zero fetches',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final client = _DelayedClient();
+    final store = AssignmentStore(
+        sessionStore: _MemorySessionStore(account: 'student'),
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        chaoxingClient: client);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final sync = store.syncAssignments();
+    final logout = store.logout();
+    await Future.wait([sync, logout]);
+    expect(client.fetchCount, 0);
+    expect(store.isAuthenticated, isFalse);
   });
 
   test('syncAssignments stores Chaoxing homework', () async {

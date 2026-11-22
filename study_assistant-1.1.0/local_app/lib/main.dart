@@ -266,21 +266,23 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
         accountHash == _lastAccountHash) {
       return;
     }
+    final wasAuthenticated = _lastAuthenticated;
     _lastAuthenticated = authenticated;
     _lastAccountEpoch = epoch;
     _lastAccountHash = accountHash;
     _leaveGuard.invalidate();
     _notificationFeedback.dismiss();
-    // A private editor belongs to the old identity. Leaving it mounted after
-    // an in-place account restore would let edits appear to belong to the new
-    // account even though the page is stale.
-    if (authenticated) {
-      final location = AppShell.currentLocationOf(_router);
-      if (location.startsWith('/personal/') ||
-          location == '/agenda' ||
-          location == '/reminders' ||
-          location.startsWith('/reminder-history') ||
-          location.startsWith('/reminder-status/')) {
+    // Account-bound secondary/editor pages (including /plan with a cached
+    // accountEpoch and query-scoped views) must be evicted on an in-place
+    // account replacement so stale state cannot leak or block saves.
+    if (authenticated && wasAuthenticated) {
+      final uri = AppShell.currentUriOf(_router);
+      final isCleanRootTab =
+          AppShell.primaryTabPaths.contains(uri.path) && !uri.hasQuery;
+      final isStaticRoute = uri.path == '/login' ||
+          uri.path == '/help' ||
+          uri.path == '/open-source';
+      if (!isCleanRootTab && !isStaticRoute) {
         _router.go('/assignments');
       }
     }
@@ -353,7 +355,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
         platformUri != null && AppDeepLinks.isOwnedNotificationUri(platformUri);
     return GoRouter(
       navigatorKey: _navigatorKey,
-      refreshListenable: assignmentStore,
+      refreshListenable: assignmentStore.authListenable,
       // go_router 14.8.1 _effectiveInitialLocation rebuilds an empty-path
       // platform URI as Uri(path: '/', queryParameters: {}). That loses the
       // scheme/host of native digest links and yields '/?' before redirect.
@@ -562,9 +564,10 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     }
     if (!mounted || assignmentStore.accountEpoch != epoch) return;
     final target = _notificationTarget(payload);
-    // A notification for the current route must not ask to discard a draft or
-    // approve a future exit; a later different destination asks normally.
-    if (AppShell.currentLocationOf(_router) == target) return;
+    // A notification for the exact current route (including query parameters)
+    // must not ask to discard a draft or approve a future exit; a query-scoped
+    // recovery view like /assignments?scope=noDeadline must still navigate home.
+    if (AppShell.currentUriOf(_router).toString() == target) return;
     // A dirty editor must not be replaced by a notification deep link without
     // the same confirmation used for back navigation. `navigate` also makes
     // concurrent notifications/tabs resolve to one winning destination.

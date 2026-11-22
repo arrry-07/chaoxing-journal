@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../app/journal.dart';
+import '../app/transient_feedback.dart';
 import '../local/chaoxing_local_client.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_store.dart';
@@ -96,11 +97,11 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                       [
                         lastSyncAt == null
                             ? '尚无完整同步记录'
-                            : '最近完整同步：${DateFormat('M月d日 HH:mm', 'zh_CN').format(lastSyncAt)}',
+                            : '最近完整同步：${DateFormat('M月d日 HH:mm', 'zh_CN').format(lastSyncAt.toLocal())}',
                         if (store.syncReport.attemptedAt != null)
-                          '最后尝试：${DateFormat('M月d日 HH:mm').format(store.syncReport.attemptedAt!)}',
+                          '最后尝试：${DateFormat('M月d日 HH:mm').format(store.syncReport.attemptedAt!.toLocal())}',
                         if (store.syncReport.lastDataSuccessAt != null)
-                          '最近数据成功：${DateFormat('M月d日 HH:mm').format(store.syncReport.lastDataSuccessAt!)}',
+                          '最近数据成功：${DateFormat('M月d日 HH:mm').format(store.syncReport.lastDataSuccessAt!.toLocal())}',
                       ].join('\n'),
                       style: journal.metadata,
                     ),
@@ -114,7 +115,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                       leading: const Icon(Icons.history_rounded),
                       title: Text('当前保留上次完整同步记录', style: journal.entryTitle),
                       subtitle: Text(
-                        '完整读取时间：${DateFormat('M月d日 HH:mm', 'zh_CN').format(lastSyncAt)}',
+                        '完整读取时间：${DateFormat('M月d日 HH:mm', 'zh_CN').format(lastSyncAt.toLocal())}',
                         style: journal.metadata,
                       ),
                     ),
@@ -150,7 +151,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                       if (store.nextBackgroundCheckAt != null) ...[
                         const SizedBox(height: 6),
                         Text(
-                          '下次目标：${DateFormat('M月d日 HH:mm').format(store.nextBackgroundCheckAt!)}',
+                          '下次目标：${DateFormat('M月d日 HH:mm').format(store.nextBackgroundCheckAt!.toLocal())}',
                           style: journal.metadata.copyWith(color: journal.ink),
                         ),
                       ],
@@ -438,8 +439,6 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       };
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showJournalMessage(context, message);
   }
 }

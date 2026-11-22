@@ -28,6 +28,16 @@ class MainActivity : FlutterActivity() {
     private var personalFileBridge: PersonalFileBridge? = null
     private var verificationBrowser: VerificationBrowser? = null
     private var webSessionGeneration = 0L
+    override fun onStart() {
+        super.onStart()
+        interactionSoundBridge?.onResume()
+    }
+
+    override fun onStop() {
+        interactionSoundBridge?.onPause()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         personalFileBridge?.close()
         personalFileBridge = null
@@ -253,10 +263,12 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun openExternalUrl(url: String?): Boolean {
-        if (url.isNullOrBlank()) {
+        if (url.isNullOrBlank() || !BrowserPolicy.isAllowed(url)) {
             return false
         }
-        return openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+        return openIntent(intent)
     }
 
     private fun composeFeedbackEmail(subject: String?, body: String?): Boolean {

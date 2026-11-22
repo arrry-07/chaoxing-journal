@@ -456,6 +456,139 @@ void main() {
     expect(requests.first, requests.last);
   });
 
+  test('failedWriteReleaseIsDrainedBySubsequentAcquireAndRelease', () async {
+    final acquired = <String>[];
+    final released = <String>[];
+    var depth = 0;
+    var failNextRelease = true;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      final args = call.arguments as Map;
+      if (call.method == 'acquireWriteLease') {
+        acquired.add(args['requestId'] as String);
+        depth++;
+        return true;
+      }
+      if (call.method == 'confirmWriteLease') return true;
+      if (call.method == 'releaseWriteLease') {
+        if (failNextRelease) {
+          failNextRelease = false;
+          throw PlatformException(code: 'transient_release_error');
+        }
+        released.add(args['requestId'] as String);
+        depth--;
+        return null;
+      }
+      return null;
+    });
+
+    const gateway = BackgroundReminderGateway();
+    expect(await gateway.acquireWriteLease('drain-owner'), isTrue);
+    await expectLater(gateway.releaseWriteLease('drain-owner'),
+        throwsA(isA<BackgroundReminderGatewayException>()));
+    expect(depth, 1);
+
+    expect(await gateway.acquireWriteLease('drain-owner'), isTrue);
+    expect(depth, 2);
+    await gateway.releaseWriteLease('drain-owner');
+
+    expect(depth, 0,
+        reason:
+            'both the current lease and the previously failed lease must be drained');
+    expect(released.toSet(), equals(acquired.toSet()));
+    await expectLater(gateway.releaseWriteLease('drain-owner'),
+        throwsA(isA<BackgroundReminderGatewayException>()));
+  });
+
+  test('failedWriteReleaseDrainsOtherPendingRequestsWhenLatestFails', () async {
+    final acquired = <String>[];
+    final released = <String>[];
+    final failIds = <String>{};
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      final args = call.arguments as Map;
+      if (call.method == 'acquireWriteLease') {
+        acquired.add(args['requestId'] as String);
+        return true;
+      }
+      if (call.method == 'confirmWriteLease') return true;
+      if (call.method == 'releaseWriteLease') {
+        final id = args['requestId'] as String;
+        if (failIds.contains(id)) {
+          throw PlatformException(code: 'release_failed');
+        }
+        released.add(id);
+        return null;
+      }
+      return null;
+    });
+
+    const gateway = BackgroundReminderGateway();
+    expect(await gateway.acquireWriteLease('partial-owner'), isTrue);
+    final req1 = acquired.last;
+    failIds.add(req1);
+    await expectLater(gateway.releaseWriteLease('partial-owner'),
+        throwsA(isA<BackgroundReminderGatewayException>()));
+
+    expect(await gateway.acquireWriteLease('partial-owner'), isTrue);
+    final req2 = acquired.last;
+    // Allow req1 to succeed now while req2 fails transiently.
+    failIds
+      ..clear()
+      ..add(req2);
+    await expectLater(gateway.releaseWriteLease('partial-owner'),
+        throwsA(isA<BackgroundReminderGatewayException>()));
+    expect(released, [req1]);
+
+    failIds.clear();
+    await gateway.releaseWriteLease('partial-owner');
+    expect(released, [req1, req2]);
+  });
+
+  test(
+      'M6: failed releaseWriteLease schedules bounded self-healing retry without needing another write',
+      () async {
+    final acquired = <String>[];
+    final released = <String>[];
+    var failFirst = true;
+    final healed = Completer<void>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      final args = call.arguments as Map;
+      if (call.method == 'acquireWriteLease') {
+        acquired.add(args['requestId'] as String);
+        return true;
+      }
+      if (call.method == 'confirmWriteLease') return true;
+      if (call.method == 'releaseWriteLease') {
+        final id = args['requestId'] as String;
+        if (failFirst) {
+          failFirst = false;
+          throw PlatformException(code: 'transient_release_error');
+        }
+        released.add(id);
+        if (!healed.isCompleted) healed.complete();
+        return null;
+      }
+      return null;
+    });
+
+    final gateway = BackgroundReminderGateway(
+      writeLeaseRetryDelay: const Duration(milliseconds: 15),
+    );
+    addTearDown(() => gateway.cancelPendingWriteReleaseRetry('self-heal'));
+
+    expect(await gateway.acquireWriteLease('self-heal'), isTrue);
+    await expectLater(
+      gateway.releaseWriteLease('self-heal'),
+      throwsA(isA<BackgroundReminderGatewayException>()),
+    );
+    expect(released, isEmpty);
+
+    await healed.future.timeout(const Duration(seconds: 1));
+    expect(released, acquired);
+  });
+
   test('isSessionCurrent fails closed when the native call fails', () async {
     const gateway = BackgroundReminderGateway();
     expect(await gateway.isSessionCurrent('hash', 1), isFalse);

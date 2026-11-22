@@ -55,6 +55,27 @@ class AssignmentWidgetLayoutPolicyTest {
     }
 
     @Test
+    fun normalAndInvalidFontScalesKeepTheOriginalHeightTiers() {
+        for ((height, expected) in listOf(0 to 2, 144 to 2, 145 to 4, 229 to 4, 230 to 6)) {
+            for (scale in listOf(1.0f, Float.NaN, 0f, Float.POSITIVE_INFINITY)) {
+                assertEquals(expected, AssignmentWidgetLayoutPolicy.visibleRowCount(height, scale))
+            }
+        }
+    }
+
+    @Test
+    fun largerTextFitsFewerRowsAndKeepsAtLeastOneForPositiveHeight() {
+        for ((height, moderate, large) in listOf(
+            Triple(150, 1, 1),
+            Triple(230, 2, 1),
+            Triple(300, 3, 2),
+        )) {
+            assertEquals(moderate, AssignmentWidgetLayoutPolicy.visibleRowCount(height, 1.5f))
+            assertEquals(large, AssignmentWidgetLayoutPolicy.visibleRowCount(height, 2.0f))
+        }
+    }
+
+    @Test
     fun headerAndOverflowCopyReflectAuthRangeAndTotalCount() {
         assertEquals(
             "课业手记 · 未登录",

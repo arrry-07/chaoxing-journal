@@ -11,7 +11,7 @@ import 'package:study_assistant_mobile/main.dart' as app;
 import 'package:study_assistant_mobile/src/app/app_deep_links.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
-import 'package:study_assistant_mobile/src/features/reminder_health_screen.dart';
+import 'package:study_assistant_mobile/src/features/reminder_settings_screen.dart';
 import 'package:study_assistant_mobile/src/features/reminder_history_screen.dart';
 import 'package:study_assistant_mobile/src/features/reminder_status_screen.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
@@ -273,7 +273,8 @@ class _ProbeState extends State<_Probe> {
   void _openHealth() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => ReminderHealthScreen(store: store),
+        builder: (_) => ReminderSettingsScreen(
+            assignmentStore: store, initialExpandHealth: true),
       ),
     );
   }

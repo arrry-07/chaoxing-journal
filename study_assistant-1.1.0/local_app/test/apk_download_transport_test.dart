@@ -4,7 +4,9 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:study_assistant_mobile/src/services/apk_download_transport.dart';
 import 'package:study_assistant_mobile/src/services/app_update_service.dart';
 
 void main() {
@@ -21,6 +23,219 @@ void main() {
   setUp(() async =>
       dir = await Directory.systemTemp.createTemp('apk-transport-'));
   tearDown(() async => dir.delete(recursive: true));
+
+  group('APK redirect policy', () {
+    final initial = Uri.parse('https://updates.invalid/start.apk');
+
+    test('blocks HTTPS downgrade before sending any loopback request',
+        () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      var plaintextRequests = 0;
+      server.listen((request) async {
+        plaintextRequests++;
+        request.response.contentLength = bytes.length;
+        request.response.add(bytes);
+        await request.response.close();
+      });
+      final plaintext = Uri.parse('http://127.0.0.1:${server.port}/asset.apk');
+      final io = IOHttpClientAdapter();
+      final dio = Dio()
+        ..httpClientAdapter =
+            _ApkFixtureAdapter((options, stream, cancel) async {
+          if (options.uri == plaintext) {
+            return io.fetch(options, stream, cancel);
+          }
+          expect(options.uri, initial);
+          if (!options.followRedirects) {
+            return _redirect(302, plaintext.toString());
+          }
+          // Only the HTTPS response is synthetic. Model IOHttpClientAdapter's
+          // automatic follow with an actual request to the counted listener.
+          final followed = await io.fetch(
+            options.copyWith(path: plaintext.toString(), baseUrl: ''),
+            stream,
+            cancel,
+          );
+          followed.redirects = [RedirectRecord(302, 'GET', plaintext)];
+          return followed;
+        }, onClose: (force) => io.close(force: force));
+      addTearDown(() => dio.close(force: true));
+
+      final outcome = await AppUpdateService(dio: dio)
+          .downloadApk(candidate(url: initial.toString()),
+              targetDirectory: dir.path)
+          .then<Object>((_) => 'download completed',
+              onError: (Object error) => error);
+      expect([plaintextRequests, outcome], [0, isA<StateError>()]);
+      expect(await dir.list().toList(), isEmpty);
+    });
+
+    test('rejects the sixth redirect before requesting its target', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final requested = <String>[];
+      server.listen((request) async {
+        requested.add(request.uri.path);
+        final hop = int.parse(request.uri.pathSegments.last);
+        if (hop < 6) {
+          request.response.statusCode = HttpStatus.temporaryRedirect;
+          request.response.headers
+              .set(HttpHeaders.locationHeader, '/hop/${hop + 1}');
+        } else {
+          request.response.add(bytes);
+        }
+        await request.response.close();
+      });
+      final dio = Dio(BaseOptions(maxRedirects: 20));
+      addTearDown(() => dio.close(force: true));
+
+      final result = await _apkStatusOrError(ApkDownloadTransport(dio).open(
+        'http://127.0.0.1:${server.port}/hop/0',
+        token: CancelToken(),
+      ));
+      expect(
+        [requested, result],
+        [List.generate(6, (hop) => '/hop/$hop'), isA<StateError>()],
+      );
+    });
+
+    for (final (description, location) in [
+      ('without Location', null),
+      ('with URI user info', 'https://fixture-user@updates.invalid/asset.apk'),
+    ]) {
+      test('rejects a redirect $description', () async {
+        final requested = <Uri>[];
+        final dio = Dio(BaseOptions(validateStatus: (_) => true))
+          ..httpClientAdapter = _ApkFixtureAdapter((options, _, __) {
+            requested.add(options.uri);
+            if (options.uri == initial) return _redirect(302, location);
+            return ResponseBody.fromBytes(bytes, 200);
+          });
+        addTearDown(() => dio.close(force: true));
+
+        final result = await _apkStatusOrError(ApkDownloadTransport(dio).open(
+          initial.toString(),
+          token: CancelToken(),
+        ));
+        expect([
+          requested,
+          result
+        ], [
+          [initial],
+          isA<StateError>()
+        ]);
+      });
+    }
+
+    test('legal hops preserve range and final adapter redirect metadata',
+        () async {
+      final relativeHop = initial.resolve('/delivery/relay.apk');
+      final finalHop = Uri.parse('https://cdn.invalid/asset.apk?part=1');
+      final adapterDestination = Uri.parse('https://cache.invalid/asset.apk');
+      final requested = <RequestOptions>[];
+      final headersValidated = <int?>[];
+      var redirectBodies = 0;
+      var redirectsClosed = 0;
+      ResponseBody stalledRedirect(int status, String location) {
+        final body = StreamController<Uint8List>(onCancel: () {
+          redirectsClosed++;
+        });
+        redirectBodies++;
+        addTearDown(body.close);
+        return ResponseBody(body.stream, status, headers: {
+          HttpHeaders.locationHeader: [location],
+        });
+      }
+
+      final dio = Dio(BaseOptions(validateStatus: (_) => true))
+        ..httpClientAdapter = _ApkFixtureAdapter((options, _, __) {
+          expect(redirectsClosed, redirectBodies);
+          if (requested.isNotEmpty) {
+            expect(requested.last.cancelToken!.isCancelled, isTrue);
+            expect(
+                options.cancelToken, isNot(same(requested.last.cancelToken)));
+          }
+          requested.add(options);
+          if (options.uri == initial) {
+            return stalledRedirect(307, '/delivery/relay.apk');
+          }
+          if (options.uri == relativeHop) {
+            return stalledRedirect(308, finalHop.toString());
+          }
+          expect(options.uri, finalHop);
+          return ResponseBody(
+            Stream.value(bytes),
+            HttpStatus.partialContent,
+            redirects: [RedirectRecord(302, 'GET', adapterDestination)],
+            headers: {
+              'content-range': ['bytes 0-7/8']
+            },
+          );
+        });
+      addTearDown(() => dio.close(force: true));
+
+      final parent = CancelToken();
+      final response = await ApkDownloadTransport(dio).open(
+        initial.toString(),
+        headers: {'Range': 'bytes=0-7', 'Authorization': 'Bearer fixture'},
+        token: parent,
+        validateHeaders: (response) =>
+            headersValidated.add(response.statusCode),
+      );
+      final payload =
+          await response.data!.stream.expand((chunk) => chunk).toList();
+      expect(requested.map((request) => request.uri),
+          [initial, relativeHop, finalHop]);
+      for (final request in requested) {
+        expect(request.method, 'GET');
+        expect(request.headers['Range'], 'bytes=0-7');
+        expect(request.headers['Accept'], 'application/octet-stream');
+        expect(request.headers['Accept-Encoding'], 'identity');
+      }
+      expect(headersValidated, [HttpStatus.partialContent]);
+      expect(redirectsClosed, 2);
+      expect(parent.isCancelled, isFalse);
+      expect(requested[1].headers['Authorization'], 'Bearer fixture');
+      expect(requested[2].headers['Authorization'], isNull);
+      expect(response.redirects.map((hop) => (hop.statusCode, hop.location)),
+          [(307, relativeHop), (308, finalHop), (302, adapterDestination)]);
+      expect(response.realUri, adapterDestination);
+      expect(payload, bytes);
+    });
+
+    test('a stalled redirect cancellation is bounded before the next hop',
+        () async {
+      final release = Completer<void>();
+      final body = StreamController<Uint8List>(onCancel: () => release.future);
+      final parent = CancelToken();
+      var requests = 0;
+      final dio = Dio()
+        ..interceptors.add(InterceptorsWrapper(onRequest: (request, handler) {
+          requests++;
+          handler.resolve(Response<ResponseBody>(
+            requestOptions: request,
+            statusCode: 302,
+            headers: Headers.fromMap({
+              HttpHeaders.locationHeader: ['/next.apk'],
+            }),
+            data: ResponseBody(body.stream, 302),
+          ));
+        }));
+      addTearDown(() => dio.close(force: true));
+      addTearDown(() async {
+        release.complete();
+        await body.close();
+      });
+
+      final result = await _apkStatusOrError(
+        ApkDownloadTransport(dio).open(initial.toString(), token: parent),
+      ).timeout(const Duration(seconds: 3));
+      expect(result, isA<TimeoutException>());
+      expect(requests, 1);
+      expect(parent.isCancelled, isFalse);
+    });
+  });
 
   test('APK policy does not change metadata timeouts or the injected Dio',
       () async {
@@ -396,4 +611,37 @@ void main() {
       expect(await dir.list().toList(), isEmpty);
     }, timeout: const Timeout(Duration(seconds: 90)));
   }
+}
+
+ResponseBody _redirect(int status, String? location) =>
+    ResponseBody.fromBytes(const [], status,
+        isRedirect: true,
+        headers: {
+          if (location != null) HttpHeaders.locationHeader: [location],
+        });
+
+Future<Object> _apkStatusOrError(Future<Response<ResponseBody>> request) async {
+  try {
+    final response = await request;
+    await response.data?.stream.drain<void>();
+    return response.statusCode!;
+  } catch (error) {
+    return error;
+  }
+}
+
+class _ApkFixtureAdapter implements HttpClientAdapter {
+  _ApkFixtureAdapter(this._respond, {this.onClose});
+
+  final FutureOr<ResponseBody> Function(
+      RequestOptions, Stream<Uint8List>?, Future<void>?) _respond;
+  final void Function(bool)? onClose;
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+          Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async =>
+      _respond(options, requestStream, cancelFuture);
+
+  @override
+  void close({bool force = false}) => onClose?.call(force);
 }

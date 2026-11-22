@@ -8,14 +8,26 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
+import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 object AssignmentNotificationPublisher {
     const val CHANNEL_DEADLINES = "assignment_deadlines"
     const val CHANNEL_UPDATES = "assignment_updates"
+    private const val EXTRA_DELIVERY_TOKEN = "com.example.studyassistant.DELIVERY_TOKEN"
+
+    // Guarded by deliveryLock, including cleanup and the visibility check.
+    private val inFlightDeliveries = mutableMapOf<Int, InFlightDelivery>()
+
+    private class InFlightDelivery(
+        val events: List<StoredReminderEvent>,
+        val token: String = UUID.randomUUID().toString(),
+        var cancelled: Boolean = false,
+    )
 
     data class PublishResult(
         val submitted: Boolean,
@@ -104,11 +116,15 @@ object AssignmentNotificationPublisher {
             event.eventKind,
         )
         val title = if (event.eventKind == "examStart") "考试即将开考" else "作业即将截止"
+        val anonymousBody = if (event.eventKind == "examStart") {
+            "有考试即将开考，请打开课业手记查看"
+        } else {
+            "有作业即将截止，请打开课业手记查看"
+        }
         val body = if (account.showDetails) {
             "${event.courseName} · ${event.title}，$remaining"
         } else {
-            if (event.eventKind == "examStart") "有考试即将开考，请打开课业手记查看"
-            else "有作业即将截止，请打开课业手记查看"
+            anonymousBody
         }
         val click = clickIntent(
             context = context,
@@ -121,7 +137,7 @@ object AssignmentNotificationPublisher {
             CHANNEL_DEADLINES,
             title,
             body,
-            account.showDetails,
+            anonymousBody.takeIf { account.showDetails },
         )
             .setContentIntent(click)
             .build()
@@ -132,7 +148,6 @@ object AssignmentNotificationPublisher {
             event.notificationId,
             notification,
             account.showDetails,
-            CHANNEL_DEADLINES,
             now.toEpochMilli(),
         )
     }
@@ -216,7 +231,6 @@ object AssignmentNotificationPublisher {
             notificationId,
             notification,
             account.showDetails,
-            channelId,
             now.toEpochMilli(),
         )
     }
@@ -231,12 +245,13 @@ object AssignmentNotificationPublisher {
         val single = events.singleOrNull()
         val hasExams = events.any { it.eventKind == "examStart" }
         val subject = if (hasExams) "课业" else "作业"
+        val anonymousBody = if (single == null) {
+            "有 ${events.size} 项${subject}有新变化，请打开课业手记查看"
+        } else {
+            "有${subject}有新变化，请打开课业手记查看"
+        }
         val body = if (!showDetails) {
-            if (single == null) {
-                "有 ${events.size} 项${subject}有新变化，请打开课业手记查看"
-            } else {
-                "有${subject}有新变化，请打开课业手记查看"
-            }
+            anonymousBody
         } else if (single == null) {
             val names = events.take(3).joinToString("、") { it.title }
             "共 ${events.size} 项：$names${if (events.size > 3) "等" else ""}"
@@ -258,7 +273,7 @@ object AssignmentNotificationPublisher {
             channelId,
             if (hasExams) "发现新的学习通课业" else "发现新的学习通作业",
             body,
-            showDetails,
+            anonymousBody.takeIf { showDetails },
         )
             .setContentIntent(click)
     }
@@ -372,6 +387,7 @@ object AssignmentNotificationPublisher {
             AssignmentAlarmScheduler.cancelNewAssignmentWindow(context, accountHash)
             val manager = NotificationManagerCompat.from(context)
             val cancelled = database.cancelAssignmentReminders(accountHash)
+            cancelInFlightForAccountLocked(manager, accountHash)
             cancelled.forEach {
                 if (it.type == ReminderDatabase.EVENT_DEADLINE) {
                     AssignmentAlarmScheduler.cancelDeadline(context, it)
@@ -399,6 +415,7 @@ object AssignmentNotificationPublisher {
         val events = synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
             AssignmentAlarmScheduler.cancelNewAssignmentWindow(context, accountHash)
             val manager = NotificationManagerCompat.from(context)
+            cancelInFlightForAccountLocked(manager, accountHash)
             val activeEvents = database.eventsForAccount(accountHash)
                 .filter {
                     it.status == ReminderDatabase.STATUS_PENDING ||
@@ -423,6 +440,18 @@ object AssignmentNotificationPublisher {
         )
     }
 
+    private fun cancelInFlightForAccountLocked(
+        manager: NotificationManagerCompat,
+        accountHash: String,
+    ) {
+        for ((id, delivery) in inFlightDeliveries) {
+            if (delivery.events.first().accountHash != accountHash) continue
+            delivery.cancelled = true
+            // A pending aggregate still has per-event IDs in the database.
+            cancelUnconfirmedNotification(manager, id, delivery)
+        }
+    }
+
     private fun submit(
         context: Context,
         database: ReminderDatabase,
@@ -430,57 +459,78 @@ object AssignmentNotificationPublisher {
         notificationId: Int,
         notification: Notification,
         showDetails: Boolean,
-        channelId: String,
         now: Long,
     ): PublishResult {
-        val (result, pendingHistory) = synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
-            val manager = NotificationManagerCompat.from(context)
-            val initial = synchronized(database) delivery@ {
-                // Plan replacement and submission use the same database monitor.
-                // Recheck after building the notification so a newer unknown or
-                // failed snapshot cannot be overwritten by stale delivery work.
-                validateEventsForSubmitLocked(context, database, events, now)?.let {
-                    return@delivery Pair(it, false)
+        val lock = LegacyAssignmentNotificationMigrator.deliveryLock
+        val manager = NotificationManagerCompat.from(context)
+        val delivery = InFlightDelivery(events)
+        val eventIds = events.map { it.eventId }.toSet()
+        val initial = synchronized(lock) {
+            synchronized(database) start@ {
+                if (notificationId in inFlightDeliveries || inFlightDeliveries.values.any {
+                        it.events.any { pending -> pending.eventId in eventIds }
+                    }
+                ) {
+                    return@start Pair(PublishResult(false, null, null), null)
+                }
+                validateEventsForSubmitLocked(context, database, events, showDetails, now)?.let {
+                    return@start it
                 }
                 try {
-                    if (!showDetails) {
-                        notification.visibility = Notification.VISIBILITY_PRIVATE
-                    }
+                    notification.visibility = Notification.VISIBILITY_PRIVATE
+                    notification.extras.putString(EXTRA_DELIVERY_TOKEN, delivery.token)
                     manager.notify(notificationId, notification)
-                    if (manager.activeNotifications.any { it.id == notificationId }) {
-                        return@delivery Pair(markSubmittedLocked(database, events, notificationId), false)
+                    if (activeNotification(manager, notificationId).matchesDelivery(delivery)) {
+                        return@start markSubmittedLocked(database, events, notificationId)
                     }
-                    Pair(null, true)
+                    inFlightDeliveries[notificationId] = delivery
+                    null
                 } catch (error: SecurityException) {
-                    Pair(blockedPermissionResult(events, error), false)
+                    blockedPermissionResult(events, error)
                 } catch (error: Exception) {
-                    Pair(blockedFailureResult(events, error), false)
+                    blockedFailureResult(events, error)
                 }
             }
-            if (!initial.second) {
-                initial.first!!
-            } else {
-                // Release the database monitor before sleeping so background plans or
-                // UI queries do not stall behind notification shade polling.
-                val visible = waitUntilActive(manager, notificationId)
+        }
+        val (result, pendingHistory) = initial ?: try {
+            // Android can take several hundred milliseconds to expose a post.
+            // Let account, privacy and plan changes proceed during this wait.
+            val visible = waitUntilActive(manager, notificationId, delivery)
+            synchronized(lock) {
                 synchronized(database) confirm@ {
-                    if (!visible) {
-                        return@confirm Pair(
-                            PublishResult(false, null, "系统未接受通知，请检查通知通道设置"),
-                            PendingHistoryBatch(
-                                events = events,
-                                stage = "blocked",
-                                reasonCode = "notificationNotVisible",
-                                categoryOverride = categoryFor(events),
-                            ),
-                        )
+                    if (delivery.cancelled) {
+                        return@confirm Pair(PublishResult(false, null, null), null)
                     }
-                    validateEventsForSubmitLocked(context, database, events, now)?.let { invalidated ->
-                        manager.cancel(notificationId)
-                        return@confirm invalidated
+                    validateEventsForSubmitLocked(context, database, events, showDetails, now)?.let {
+                        cancelUnconfirmedNotification(manager, notificationId, delivery)
+                        return@confirm it
                     }
-                    markSubmittedLocked(database, events, notificationId)
+                    if (visible) {
+                        if (activeNotification(manager, notificationId).matchesDelivery(delivery)) {
+                            return@confirm markSubmittedLocked(database, events, notificationId)
+                        }
+                        // The system showed the post, then it was removed or replaced.
+                        return@confirm Pair(PublishResult(false, null, null), null)
+                    }
+                    cancelUnconfirmedNotification(manager, notificationId, delivery)
+                    Pair(
+                        PublishResult(false, null, "系统未接受通知，请检查通知通道设置"),
+                        PendingHistoryBatch(
+                            events = events,
+                            stage = "blocked",
+                            reasonCode = "notificationNotVisible",
+                            categoryOverride = categoryFor(events),
+                        ),
+                    )
                 }
+            }
+        } catch (error: SecurityException) {
+            blockedPermissionResult(events, error)
+        } catch (error: Exception) {
+            blockedFailureResult(events, error)
+        } finally {
+            synchronized(lock) {
+                inFlightDeliveries.remove(notificationId)
             }
         }
         val historyWarning = pendingHistory?.let { batch ->
@@ -503,8 +553,20 @@ object AssignmentNotificationPublisher {
         context: Context,
         database: ReminderDatabase,
         events: List<StoredReminderEvent>,
+        showDetails: Boolean,
         now: Long,
     ): Pair<PublishResult, PendingHistoryBatch?>? {
+        if (!LegacyAssignmentMigrationState.isComplete(context)) {
+            return Pair(
+                PublishResult(false, null, "旧提醒迁移尚未完成，已暂缓自动投递"),
+                PendingHistoryBatch(
+                    events = events,
+                    stage = "blocked",
+                    reasonCode = "legacyMigrationPending",
+                    categoryOverride = categoryFor(events),
+                ),
+            )
+        }
         val account = database.readAccount(events.first().accountHash)
         if (account?.pendingUpdate == true) {
             return Pair(
@@ -518,12 +580,21 @@ object AssignmentNotificationPublisher {
             )
         }
         val stale = events.any { event ->
+            val stored = database.event(event.eventId)
             account?.active != true || account.sessionEpoch != event.sessionEpoch ||
                 (event.type == ReminderDatabase.EVENT_NEW && !account.newAssignmentEnabled) ||
-                database.event(event.eventId)?.status != ReminderDatabase.STATUS_PENDING ||
-                database.event(event.eventId)?.sessionEpoch != event.sessionEpoch
+                stored?.status != ReminderDatabase.STATUS_PENDING ||
+                stored.sessionEpoch != event.sessionEpoch ||
+                stored.notificationId != event.notificationId ||
+                stored.notifyAt != event.notifyAt
         }
         if (stale) return Pair(PublishResult(false, null, null), null)
+        if (showDetails && account?.showDetails != true) {
+            return Pair(
+                PublishResult(false, null, null),
+                PendingHistoryBatch(events, stage = "cancelled", reasonCode = "privacyCleanup"),
+            )
+        }
         val invalid = events.filter { event ->
             database.snapshot(event.accountHash, event.assignmentId)
                 ?.matchesEvent(event, now) != true
@@ -636,14 +707,34 @@ object AssignmentNotificationPublisher {
     private fun waitUntilActive(
         manager: NotificationManagerCompat,
         notificationId: Int,
+        delivery: InFlightDelivery,
     ): Boolean {
         repeat(9) {
             SystemClock.sleep(50)
-            if (manager.activeNotifications.any { it.id == notificationId }) {
+            if (activeNotification(manager, notificationId).matchesDelivery(delivery)) {
                 return true
             }
         }
         return false
+    }
+
+    private fun activeNotification(
+        manager: NotificationManagerCompat,
+        notificationId: Int,
+    ): StatusBarNotification? =
+        manager.activeNotifications.firstOrNull { it.id == notificationId && it.tag == null }
+
+    private fun StatusBarNotification?.matchesDelivery(delivery: InFlightDelivery): Boolean =
+        this?.notification?.extras?.getString(EXTRA_DELIVERY_TOKEN) == delivery.token
+
+    private fun cancelUnconfirmedNotification(
+        manager: NotificationManagerCompat,
+        notificationId: Int,
+        delivery: InFlightDelivery,
+    ) {
+        val current = activeNotification(manager, notificationId)
+        // Also cancel an enqueue that Android hasn't exposed in its list yet.
+        if (current == null || current.matchesDelivery(delivery)) manager.cancel(notificationId)
     }
 
     private fun cancelInvalid(
@@ -825,7 +916,25 @@ object AssignmentNotificationPublisher {
         channel: String,
         title: String,
         body: String,
-        showDetails: Boolean,
+        anonymousBody: String?,
+    ): NotificationCompat.Builder =
+        notificationContent(context, channel, title, body)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .apply {
+                if (anonymousBody != null) {
+                    setPublicVersion(
+                        notificationContent(context, channel, title, anonymousBody)
+                            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                            .build(),
+                    )
+                }
+            }
+
+    private fun notificationContent(
+        context: Context,
+        channel: String,
+        title: String,
+        body: String,
     ): NotificationCompat.Builder =
         NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.app_icon)
@@ -836,10 +945,6 @@ object AssignmentNotificationPublisher {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
-            .setVisibility(
-                if (showDetails) NotificationCompat.VISIBILITY_PUBLIC
-                else NotificationCompat.VISIBILITY_PRIVATE,
-            )
 
     private fun clickIntent(
         context: Context,

@@ -14,6 +14,7 @@ import 'package:study_assistant_mobile/src/app/app_deep_links.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
+import 'package:study_assistant_mobile/src/features/daily_plan_screen.dart';
 import 'package:study_assistant_mobile/src/features/login_screen.dart';
 import 'package:study_assistant_mobile/src/features/manual_agenda_screen.dart';
 import 'package:study_assistant_mobile/src/features/personal_work_screen.dart';
@@ -746,48 +747,48 @@ void main() {
     expect(find.byType(LoginScreen), findsOneWidget);
   });
 
-  testWidgets('H7: dirty editor below clean route still prompts on tab switch',
+  testWidgets(
+      'H7: dirty editor below clean pushed route still prompts on tab switch',
       (tester) async {
-    final guard = UnsavedEditGuard();
-    var prompts = 0;
-    final agendaOwner = Object();
-    final settingsOwner = Object();
-    guard.register(
-      agendaOwner,
-      routeScope: '/agenda',
-      hasUnsavedChanges: () => true,
-      confirmDiscard: () async {
-        prompts++;
-        return false;
-      },
-    );
-    guard.register(
-      settingsOwner,
-      routeScope: '/reminders',
-      hasUnsavedChanges: () => false,
-      confirmDiscard: () async => true,
-    );
+    await _launchApp(tester, '/agenda');
+    expect(find.byType(ManualAgendaScreen), findsOneWidget);
 
-    // Popping the clean pushed /reminders route over dirty /agenda succeeds.
-    expect(await guard.confirmLeave(routeScope: '/reminders'), isTrue);
-    expect(prompts, 0);
+    // Open new manual entry editor and enter unsaved title so /agenda is dirty.
+    await tester.tap(find.text('添加个人安排'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, '未保存的个人待办');
+    await tester.pump();
 
-    // Replacing the shell tab prompts for the underlying dirty /agenda editor.
-    var navigated = false;
-    await guard.navigate(
-      isCurrent: () => true,
-      action: () {
-        navigated = true;
-      },
-    );
-    expect(prompts, 1);
-    expect(navigated, isFalse);
+    // Push a clean /reminders route over the dirty /agenda editor, then pop it.
+    final router = GoRouter.of(tester.element(find.byType(AppShell)));
+    unawaited(router.push('/reminders'));
+    await tester.pumpAndSettle();
+
+    // Popping the clean /reminders route must succeed without triggering prompt.
+    unawaited(tester.binding.handlePopRoute());
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsNothing);
+    expect(find.byType(ManualEntryEditor), findsOneWidget);
+
+    // Attempting to pop/leave the dirty editor must prompt and stay on cancel.
+    unawaited(tester.binding.handlePopRoute());
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualEntryEditor), findsOneWidget);
   });
 
   testWidgets(
-      'M5: system back on instant-save reminder settings leaves cleanly without prompt',
+      'M5: system back on instant-save reminder settings pops cleanly back to home without prompt',
       (tester) async {
-    final store = await _launchApp(tester, '/reminders');
+    final store = await _launchApp(tester, '/assignments');
+    expect(find.byType(AssignmentListScreen), findsOneWidget);
+
+    final router = GoRouter.of(tester.element(find.byType(AppShell)));
+    unawaited(router.push('/reminders'));
+    await tester.pumpAndSettle();
+
     final preset = find.text('提前 1 天');
     await tester.scrollUntilVisible(
       preset,
@@ -804,6 +805,55 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('放弃未保存的提醒规则？'), findsNothing);
-    expect(find.byType(CalendarScreen), findsNothing);
+    expect(find.byType(AssignmentListScreen), findsOneWidget);
+  });
+
+  group('Batch 1B.5 S9: query-aware notification routing and account eviction',
+      () {
+    testWidgets(
+        'summary notification leaves /assignments?scope=noDeadline back to full /assignments',
+        (tester) async {
+      await initializeDateFormatting('zh_CN');
+      final notifications = _CapturingNotifications();
+      await _launchApp(
+        tester,
+        '/assignments?scope=noDeadline',
+        notifications: notifications,
+      );
+      expect(find.text('无截止日期'), findsOneWidget);
+
+      notifications.handler!('d:summary');
+      await tester.pumpAndSettle();
+
+      final router = GoRouter.of(tester.element(find.byType(AppShell)));
+      expect(AppShell.currentUriOf(router).toString(), '/assignments');
+      expect(find.text('无截止日期'), findsNothing);
+    });
+
+    testWidgets(
+        'in-place account switch evicts /plan (DailyPlanScreen) so stale epoch cannot lock saves',
+        (tester) async {
+      await initializeDateFormatting('zh_CN');
+      final session = f.Session();
+      final notifications = _CapturingNotifications();
+      final store =
+          _LaunchStore(session: session, notifications: notifications);
+      await _launchApp(
+        tester,
+        '/plan',
+        notifications: notifications,
+        suppliedStore: store,
+      );
+      expect(find.byType(DailyPlanScreen), findsOneWidget);
+
+      session.account = 'B';
+      await store.restoreSession();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DailyPlanScreen), findsNothing,
+          reason:
+              'DailyPlanScreen caches late final epoch and must be evicted on account switch');
+      expect(find.byType(AssignmentListScreen), findsOneWidget);
+    });
   });
 }

@@ -26,7 +26,7 @@
             android:ellipsize="end"
             android:maxLines="1"
             android:text="待完成 0 项"
-            android:textColor="#243E34"
+            android:textColor="@color/widget_ink"
             android:textSize="12sp"
             android:textStyle="bold" />
 
@@ -37,14 +37,14 @@
             android:layout_marginStart="8dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#53645A"
+            android:textColor="@color/widget_muted"
             android:textSize="11sp" />
     </LinearLayout>
 
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#D6D8C9" />
+        android:background="@color/widget_border" />
 
     <LinearLayout
         android:id="@+id/assignment_row_1"
@@ -60,7 +60,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#243E34"
+            android:textColor="@color/widget_ink"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -71,7 +71,7 @@
             android:layout_marginTop="1dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#53645A"
+            android:textColor="@color/widget_muted"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -86,7 +86,7 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginBottom="4dp"
-            android:background="#E6E7DC" />
+            android:background="@color/widget_divider" />
 
         <TextView
             android:id="@+id/assignment_title_2"
@@ -94,7 +94,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#243E34"
+            android:textColor="@color/widget_ink"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -105,7 +105,7 @@
             android:layout_marginTop="1dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#53645A"
+            android:textColor="@color/widget_muted"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -120,7 +120,7 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginBottom="4dp"
-            android:background="#E6E7DC" />
+            android:background="@color/widget_divider" />
 
         <TextView
             android:id="@+id/assignment_title_3"
@@ -128,7 +128,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#243E34"
+            android:textColor="@color/widget_ink"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -139,7 +139,7 @@
             android:layout_marginTop="1dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#53645A"
+            android:textColor="@color/widget_muted"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -154,7 +154,7 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginBottom="4dp"
-            android:background="#E6E7DC" />
+            android:background="@color/widget_divider" />
 
         <TextView
             android:id="@+id/assignment_title_4"
@@ -162,7 +162,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#243E34"
+            android:textColor="@color/widget_ink"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -173,7 +173,7 @@
             android:layout_marginTop="1dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#53645A"
+            android:textColor="@color/widget_muted"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -188,7 +188,7 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginBottom="4dp"
-            android:background="#E6E7DC" />
+            android:background="@color/widget_divider" />
 
         <TextView
             android:id="@+id/assignment_title_5"
@@ -196,7 +196,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#243E34"
+            android:textColor="@color/widget_ink"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -207,7 +207,7 @@
             android:layout_marginTop="1dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#53645A"
+            android:textColor="@color/widget_muted"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -222,7 +222,7 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:layout_marginBottom="4dp"
-            android:background="#E6E7DC" />
+            android:background="@color/widget_divider" />
 
         <TextView
             android:id="@+id/assignment_title_6"
@@ -230,7 +230,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#243E34"
+            android:textColor="@color/widget_ink"
             android:textSize="14sp"
             android:textStyle="bold" />
 
@@ -241,7 +241,7 @@
             android:layout_marginTop="1dp"
             android:ellipsize="end"
             android:maxLines="1"
-            android:textColor="#53645A"
+            android:textColor="@color/widget_muted"
             android:textSize="11sp" />
     </LinearLayout>
 
@@ -252,7 +252,7 @@
         android:layout_marginTop="4dp"
         android:ellipsize="end"
         android:maxLines="1"
-        android:textColor="#53645A"
+        android:textColor="@color/widget_muted"
         android:textSize="11sp"
         android:visibility="gone" />
 </LinearLayout>

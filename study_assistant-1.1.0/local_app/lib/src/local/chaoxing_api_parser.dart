@@ -1,5 +1,6 @@
 import '../models/assignment.dart';
 import 'chaoxing_classroom_parser.dart';
+import 'chaoxing_param_helper.dart';
 
 class ChaoxingCourseRef {
   const ChaoxingCourseRef({
@@ -48,13 +49,13 @@ class ChaoxingApiParser {
             content?['datatype']?.toString() == '1' ||
             channel?['cataName'] == '文件夹';
         final hasCourse = content?['course'] != null ||
-            content?['courseId'] != null ||
-            content?['courseid'] != null ||
+            ChaoxingParamHelper.hasAnyKey(
+                content, ChaoxingParamHelper.courseIdKeys) ||
             (!markedFolder &&
                 content?['id'] != null &&
                 (content?['clazz'] != null ||
-                    content?['clazzId'] != null ||
-                    content?['clazzid'] != null ||
+                    ChaoxingParamHelper.hasAnyKey(
+                        content, ChaoxingParamHelper.clazzIdKeys) ||
                     channel?['key'] != null));
         final isFolder = markedFolder ||
             childKeys.any((key) =>
@@ -76,25 +77,32 @@ class ChaoxingApiParser {
         continue;
       }
       final content = _asMap(channel['content']) ?? channel;
-      final courseData = _firstMapFrom(content['course']) ??
-          _asMap(content['course']) ??
-          content;
-      final clazzData = _firstMapFrom(content['clazz']) ??
-          _asMap(content['clazz']) ??
-          content;
+      final courseData =
+          _firstMapFrom(content['course']) ?? _asMap(content['course']);
+      final clazzData =
+          _firstMapFrom(content['clazz']) ?? _asMap(content['clazz']);
+      final courseAlias = ChaoxingParamHelper.singleMapValue(
+          content, ChaoxingParamHelper.courseIdKeys);
+      final clazzAlias = ChaoxingParamHelper.singleMapValue(
+          content, ChaoxingParamHelper.clazzIdKeys);
+      if ((courseAlias == null &&
+              ChaoxingParamHelper.hasAnyKey(
+                  content, ChaoxingParamHelper.courseIdKeys)) ||
+          (clazzAlias == null &&
+              ChaoxingParamHelper.hasAnyKey(
+                  content, ChaoxingParamHelper.clazzIdKeys))) {
+        rejected++;
+        continue;
+      }
 
-      final courseId = _stringValue(
-        courseData['id'] ?? content['courseId'] ?? content['courseid'],
-      );
-      final clazzId = _stringValue(
-        clazzData['id'] ??
-            channel['key'] ??
-            content['clazzId'] ??
-            content['clazzid'],
-      );
+      final courseId = _stringValue(courseData?['id'] ??
+          courseAlias ??
+          (courseData == null ? content['id'] : null));
+      final clazzId =
+          _stringValue(clazzData?['id'] ?? channel['key'] ?? clazzAlias);
       final courseName = _stringValue(
-        courseData['name'] ??
-            courseData['courseName'] ??
+        courseData?['name'] ??
+            courseData?['courseName'] ??
             content['name'] ??
             content['courseName'] ??
             channel['name'],

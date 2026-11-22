@@ -55,7 +55,7 @@ class OpenSourceScreen extends StatelessWidget {
             children: [
               JournalGroupTile(
                 title: '霞鹜文楷 · LXGW WenKai Screen',
-                subtitle: '标题字体 · SIL OFL 1.1；原文见完整声明',
+                subtitle: '全应用字体 · SIL OFL 1.1；原文见完整声明',
               ),
               JournalGroupTile(
                 title: 'Flutter 与第三方组件',

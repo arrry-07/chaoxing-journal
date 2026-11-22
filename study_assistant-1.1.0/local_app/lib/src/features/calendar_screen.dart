@@ -31,6 +31,7 @@ class CalendarScreen extends StatefulWidget {
 class _CalendarScreenState extends State<CalendarScreen>
     with WidgetsBindingObserver {
   static const int _basePageIndex = 1200;
+  static const int _maxWeekRows = 6;
   static const TextStyle _dateStyle = TextStyle(
     fontFamily: Journal.bodyFamily,
     fontFamilyFallback: Journal.bodyFallback,
@@ -210,21 +211,20 @@ class _CalendarScreenState extends State<CalendarScreen>
           final journal = Journal.of(context);
           final now = _now;
           final courseSources = widget.store.courseAssignments;
-          final all = AssignmentQuery.projectDisplay(courseSources);
-          final manual = widget.store.notebook.entries
-              .where((e) => !e.done && e.at != null)
-              .toList();
-          final manualAgenda = manual.where((e) {
-            final d = AssignmentQuery.dayKey(e.at!);
-            return selected == null
-                ? d.year == month.year && d.month == month.month
-                : d == selected;
-          }).toList()
-            ..sort((a, b) => a.at!.compareTo(b.at!));
-          final dated = all
-              .where((assignment) =>
-                  AssignmentQuery.isCalendarDated(assignment, now))
-              .toList();
+          final displayIndex = widget.store.homeDisplayIndex;
+          final all = AssignmentQuery.projectDisplay(courseSources,
+              index: displayIndex);
+          final assignmentsByDay = AssignmentQuery.groupCalendarByDay(all, now);
+          final manualByDay = <DateTime, List<ManualEntry>>{};
+          for (final entry in widget.store.notebook.entries) {
+            final at = entry.at;
+            if (entry.done || at == null) continue;
+            final day = AssignmentQuery.dayKey(at);
+            (manualByDay[day] ??= []).add(entry);
+          }
+          for (final entries in manualByDay.values) {
+            entries.sort((a, b) => a.at!.compareTo(b.at!));
+          }
           final noDeadlineCount = all
               .where((a) => AssignmentRecoveryScope.noDeadline.matches(a, now))
               .length;
@@ -232,13 +232,21 @@ class _CalendarScreenState extends State<CalendarScreen>
               .where((a) =>
                   AssignmentRecoveryScope.deadlinePending.matches(a, now))
               .length;
-          final agenda = selected == null
-              ? dated.where((a) {
-                  final d = AssignmentQuery.dayKey(a.timelineAt!);
-                  return d.year == month.year && d.month == month.month;
-                }).toList()
-              : AssignmentQuery.forDay(all, selected!, {}, now: now);
-          agenda.sort((a, b) => a.timelineAt!.compareTo(b.timelineAt!));
+          final selectedDay = selected;
+          final List<Assignment> agenda;
+          final List<ManualEntry> manualAgenda;
+          if (selectedDay == null) {
+            final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
+            final days = [
+              for (var day = 1; day <= daysInMonth; day++)
+                DateTime(month.year, month.month, day),
+            ];
+            agenda = [for (final day in days) ...?assignmentsByDay[day]];
+            manualAgenda = [for (final day in days) ...?manualByDay[day]];
+          } else {
+            agenda = assignmentsByDay[selectedDay] ?? const [];
+            manualAgenda = manualByDay[selectedDay] ?? const [];
+          }
 
           final textScaler = MediaQuery.textScalerOf(context);
           final cellHeight = _calendarCellHeight(textScaler);
@@ -544,11 +552,14 @@ class _CalendarScreenState extends State<CalendarScreen>
                         clipBehavior: Clip.hardEdge,
                         decoration: const BoxDecoration(),
                         child: OverflowBox(
+                          // Neighbouring months may need up to six rows while
+                          // they slide in; render that full height and let the
+                          // animated viewport clip to the current month.
                           minHeight: cellHeight,
-                          maxHeight: rowCount * cellHeight,
+                          maxHeight: _maxWeekRows * cellHeight,
                           alignment: Alignment.topCenter,
                           child: SizedBox(
-                            height: rowCount * cellHeight,
+                            height: _maxWeekRows * cellHeight,
                             child: PageView.builder(
                               controller: _pageController,
                               onPageChanged: (index) {
@@ -573,8 +584,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                                 return _buildMonthGrid(
                                   context,
                                   pageMonth: pageMonth,
-                                  all: all,
-                                  manual: manual,
+                                  assignmentsByDay: assignmentsByDay,
+                                  manualByDay: manualByDay,
                                   now: now,
                                   cellHeight: cellHeight,
                                 );
@@ -654,7 +665,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                       AssignmentCard(
                         assignment: a,
                         examSources: courseSources,
-                        displayIndex: widget.store.homeDisplayIndex,
+                        displayIndex: displayIndex,
                         now: now,
                         compact: widget.store.display.compact,
                         countdown: widget.store.display.countdown,
@@ -710,8 +721,8 @@ class _CalendarScreenState extends State<CalendarScreen>
   Widget _buildMonthGrid(
     BuildContext context, {
     required DateTime pageMonth,
-    required List<Assignment> all,
-    required List<ManualEntry> manual,
+    required Map<DateTime, List<Assignment>> assignmentsByDay,
+    required Map<DateTime, List<ManualEntry>> manualByDay,
     required DateTime now,
     required double cellHeight,
   }) {
@@ -747,8 +758,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                     pageMonth: pageMonth,
                     day: row * 7 + col - leading + 1,
                     daysInMonth: days,
-                    all: all,
-                    manual: manual,
+                    assignmentsByDay: assignmentsByDay,
+                    manualByDay: manualByDay,
                     now: now,
                     cellHeight: cellHeight,
                   ),
@@ -764,8 +775,8 @@ class _CalendarScreenState extends State<CalendarScreen>
     required DateTime pageMonth,
     required int day,
     required int daysInMonth,
-    required List<Assignment> all,
-    required List<ManualEntry> manual,
+    required Map<DateTime, List<Assignment>> assignmentsByDay,
+    required Map<DateTime, List<ManualEntry>> manualByDay,
     required DateTime now,
     required double cellHeight,
   }) {
@@ -774,7 +785,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     }
     final journal = Journal.of(context);
     final date = DateTime(pageMonth.year, pageMonth.month, day);
-    final items = AssignmentQuery.forDay(all, date, {}, now: now);
+    final items = assignmentsByDay[date] ?? const [];
     final unknown =
         items.where((a) => !a.isExam && !a.isPendingConfirmed).length;
     final exams = items.where((a) => a.isExam).length;
@@ -783,8 +794,7 @@ class _CalendarScreenState extends State<CalendarScreen>
             AssignmentQuery.timelineBucketAt(a, now) ==
             AssignmentDeadlineBucket.overdue)
         .length;
-    final personalCount =
-        manual.where((e) => AssignmentQuery.dayKey(e.at!) == date).length;
+    final personalCount = manualByDay[date]?.length ?? 0;
     final isSelected = selected == date;
     final isToday = date == today;
 

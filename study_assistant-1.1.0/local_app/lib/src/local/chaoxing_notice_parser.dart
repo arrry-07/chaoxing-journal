@@ -3,6 +3,7 @@ import 'package:crypto/crypto.dart';
 import '../models/course_notice.dart';
 import 'chaoxing_api_parser.dart';
 import 'chaoxing_exam_parser.dart';
+import 'chaoxing_param_helper.dart';
 
 class ChaoxingNoticeParser {
   const ChaoxingNoticeParser._();
@@ -27,35 +28,29 @@ class ChaoxingNoticeParser {
     return clean.trim();
   }
 
-  static DateTime? _parsePublishedAt(dynamic item) {
-    for (final key in const ['completeTime', 'sendTime']) {
-      final raw = item[key];
-      if (raw is! String || raw.trim().isEmpty) continue;
-      final full = ChaoxingExamParser.chinaTime(raw);
-      if (full != null) return full;
-      final dayOnly =
-          RegExp(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?').firstMatch(raw);
-      if (dayOnly != null) {
-        final y = int.parse(dayOnly[1]!);
-        final m = int.parse(dayOnly[2]!);
-        final d = int.parse(dayOnly[3]!);
-        final wall = DateTime.utc(y, m, d);
-        if (wall.year == y && wall.month == m && wall.day == d) {
-          return wall.subtract(const Duration(hours: 8)).toLocal();
-        }
-      }
-    }
-    return null;
-  }
+  static final _publicationTimePattern = RegExp(
+    r'^(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)(?:\s+(\d{1,2}[:：]\d{2}(?:[:：]\d{2})?))?$',
+  );
 
-  static bool _hasMinutePrecision(dynamic item) {
-    for (final key in const ['completeTime', 'sendTime']) {
-      final raw = item[key];
-      if (raw is String && ChaoxingExamParser.chinaTime(raw) != null) {
-        return true;
-      }
+  static ({DateTime? at, bool trusted}) _parsePublishMeta(Object? sendTime) {
+    final raw = switch (sendTime) {
+      int value => value.toString(),
+      String value => value.trim(),
+      _ => '',
+    };
+    if (RegExp(r'^\d+$').hasMatch(raw)) {
+      final epoch = int.tryParse(raw);
+      if (epoch == null || epoch <= 0) return (at: null, trusted: false);
+      final millis = epoch < 100000000000 ? epoch * 1000 : epoch;
+      if (millis > 8640000000000000) return (at: null, trusted: false);
+      return (at: DateTime.fromMillisecondsSinceEpoch(millis), trusted: true);
     }
-    return false;
+
+    final match = _publicationTimePattern.firstMatch(raw);
+    if (match == null) return (at: null, trusted: false);
+    final day = match[1]!, clock = match[2];
+    final at = ChaoxingExamParser.chinaTime('$day ${clock ?? '00:00'}');
+    return (at: at, trusted: at != null && clock != null);
   }
 
   static DateTime? _extractEventTime(String body) {
@@ -90,9 +85,10 @@ class ChaoxingNoticeParser {
         if (wrapper is! Map) continue;
         final card = wrapper['att_web'] ?? wrapper['att_chat_course'];
         if (card is Map) {
-          final courseId = card['courseId']?.toString().trim();
-          final clazzId =
-              (card['clazzId'] ?? card['classId'])?.toString().trim();
+          final courseId = ChaoxingParamHelper.singleMapValue(
+              card, ChaoxingParamHelper.courseIdKeys);
+          final clazzId = ChaoxingParamHelper.singleMapValue(
+              card, ChaoxingParamHelper.clazzIdKeys);
           final name = (card['courseName'] ?? card['title'])?.toString().trim();
           if (courseId != null &&
               clazzId != null &&
@@ -191,8 +187,7 @@ class ChaoxingNoticeParser {
         boundedSummary,
         courses,
       );
-      final publishedAt = _parsePublishedAt(item);
-      final publishedTrusted = publishedAt != null && _hasMinutePrecision(item);
+      final published = _parsePublishMeta(item['sendTime']);
       final extractedAt = _extractEventTime(boundedSummary);
       final sender = ChaoxingExamParser.text(
         (item['createrName'] ?? '').toString(),
@@ -210,8 +205,8 @@ class ChaoxingNoticeParser {
         senderName: boundedSender,
         title: title.length > 500 ? title.substring(0, 500) : title,
         summary: boundedSummary,
-        publishedAt: publishedAt,
-        publishedTrusted: publishedTrusted,
+        publishedAt: published.at,
+        publishedTrusted: published.trusted,
         extractedEventAt: extractedAt,
         extractedEventTrusted: extractedAt != null,
         platformUnread: item['isread']?.toString() == '0',

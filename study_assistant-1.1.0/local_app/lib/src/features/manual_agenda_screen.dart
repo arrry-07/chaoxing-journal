@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../app/journal.dart';
 import '../app/journal_motion.dart';
+import '../app/transient_feedback.dart';
 import '../app/unsaved_edit_guard.dart';
 import '../models/study_notebook.dart';
 import '../services/assignment_query.dart';
@@ -353,8 +354,7 @@ class _EditorState extends State<ManualEntryEditor> {
     );
     if (ok && editorRoute?.isCurrent != false) {
       if (widget.store.serviceWarnings.isNotEmpty) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(feedback)));
+        showJournalMessage(context, feedback);
       }
       Navigator.pop(context);
       return;
@@ -585,8 +585,9 @@ class _AgendaKindSegment extends StatelessWidget {
             curve: JournalMotion.easeOut,
             padding: const EdgeInsets.symmetric(vertical: 9),
             decoration: BoxDecoration(
-              color: active ? journal.sheet : Colors.transparent,
+              color: active ? journal.segmentThumb : Colors.transparent,
               borderRadius: BorderRadius.circular(11),
+              border: active ? journal.segmentBorder : null,
               boxShadow: active
                   ? [
                       BoxShadow(
@@ -616,8 +617,9 @@ class _AgendaKindSegment extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
-        color: journal.parchment,
+        color: journal.segmentTrack,
         borderRadius: BorderRadius.circular(14),
+        border: journal.segmentBorder,
       ),
       child: Row(
         children: [

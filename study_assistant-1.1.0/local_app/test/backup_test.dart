@@ -7,6 +7,7 @@ import 'package:shared_preferences_platform_interface/shared_preferences_platfor
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
+import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/reminder_rule_limits.dart';
 
 Assignment record(String id, String title) => Assignment(
@@ -40,6 +41,64 @@ void main() {
     expect(snapshot.encode(), isNot(contains('submitUrl')));
     expect(BackupSnapshot.decode(snapshot.encode()).owner,
         BackupSnapshot.ownerFor('alice'));
+  });
+
+  group('local file attachments and portable backups', () {
+    const workId = 'cx:work:1:2:3';
+    const file = PersonalLink('本机附件', 'content://documents/backup-fixture');
+    const note = '要随备份保留的笔记';
+
+    setUp(() async {
+      await repo.savePersonalWorkspace(
+        PersonalWorkspace(work: {
+          workId: const PersonalWork(note: note, files: [file]),
+        }),
+        'alice',
+      );
+    });
+
+    test('local reads retain file references and official exports omit them',
+        () async {
+      final local = await repo.loadPersonalWorkspace();
+      expect(local.work[workId]!.files.single.toJson(), file.toJson());
+
+      final exported = (await repo.createBackupSnapshot('alice')).encode();
+      final portable = BackupSnapshot.decode(exported).personal.work[workId]!;
+      expect(portable.note, note);
+      expect(portable.files, isEmpty);
+      expect(exported, isNot(contains(file.url)));
+    });
+
+    test('portable decoder rejects structurally valid nested file references',
+        () async {
+      final local = await repo.loadPersonalWorkspace();
+      final raw =
+          jsonDecode((await repo.createBackupSnapshot('alice')).encode())
+              as Map<String, dynamic>;
+      raw['personal'] = local.toJson();
+      expect(
+        PersonalWorkspace.fromJson(raw['personal'])
+            .work[workId]!
+            .files
+            .single
+            .toJson(),
+        file.toJson(),
+      );
+
+      expect(
+          () => BackupSnapshot.decode(jsonEncode(raw)), throwsFormatException);
+    });
+
+    test('portable decoder still rejects top-level personal.files', () async {
+      final raw =
+          jsonDecode((await repo.createBackupSnapshot('alice')).encode())
+              as Map<String, dynamic>;
+      final personal = raw['personal'] as Map<String, dynamic>;
+      personal['files'] = [file.toJson()];
+
+      expect(
+          () => BackupSnapshot.decode(jsonEncode(raw)), throwsFormatException);
+    });
   });
 
   test('restore only fills gaps and resets imported confirmation', () async {

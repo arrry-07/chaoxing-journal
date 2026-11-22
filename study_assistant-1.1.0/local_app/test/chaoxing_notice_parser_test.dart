@@ -4,6 +4,74 @@ import 'package:study_assistant_mobile/src/local/chaoxing_notice_parser.dart';
 import 'package:study_assistant_mobile/src/models/course_notice.dart';
 
 void main() {
+  CourseNotice parseNotice(Map<String, dynamic> fields) =>
+      ChaoxingNoticeParser.parsePage({
+        'status': true,
+        'notices': {
+          'list': [
+            {'uuid': 'synthetic-notice', 'title': '课程安排', ...fields},
+          ],
+        },
+      })!
+          .rows
+          .single;
+
+  test('completeTime alone does not supply publication metadata', () {
+    final notice = parseNotice({'completeTime': '2030-05-02 14:30'});
+    expect((notice.publishedAt, notice.publishedTrusted), (null, false));
+  });
+
+  test('date-only sendTime keeps its date and precision with a completeTime',
+      () {
+    final notice = parseNotice({
+      'sendTime': '2030-05-01',
+      'completeTime': '2030-05-02 14:30',
+    });
+    expect(
+      (notice.publishedAt?.toUtc(), notice.publishedTrusted),
+      (DateTime.utc(2030, 4, 30, 16), false),
+    );
+  });
+
+  for (final (sendTime, expected) in <(Object, DateTime)>[
+    (1903829400, DateTime.utc(2030, 5, 1, 1, 30)),
+    ('1903829400000', DateTime.utc(2030, 5, 1, 1, 30)),
+    ('2030-05-01 09：30：27', DateTime.utc(2030, 5, 1, 1, 30, 27)),
+  ]) {
+    test('precise sendTime $sendTime is the trusted publication instant', () {
+      final notice = parseNotice({'sendTime': sendTime});
+      expect(
+        (notice.publishedAt?.toUtc(), notice.publishedTrusted),
+        (expected, true),
+      );
+    });
+  }
+
+  for (final alias in ['classId', 'classid', 'jclassId', 'JcLaSsId']) {
+    test('course notice resolves attachment identity from $alias', () {
+      final notice = parseNotice({
+        'attachment': [
+          {
+            'att_chat_course': {'CoUrSeId': 7, alias: ' 11 '},
+          },
+        ],
+      });
+      expect(notice.courseKey, '7:11');
+    });
+  }
+
+  test('course notice drops identity for conflicting attachment class aliases',
+      () {
+    final notice = parseNotice({
+      'attachment': [
+        {
+          'att_web': {'courseId': 7, 'clazzId': 11, 'classId': 12},
+        },
+      ],
+    });
+    expect(notice.courseKey, isNull);
+  });
+
   test(
       'parses platformUnread strictly from string 0/1, sanitizes URLs, and respects 4-digit year times',
       () {
@@ -26,7 +94,7 @@ void main() {
                 '<p>请前往 https://mooc1.chaoxing.com/work?enc=secretToken123 完成</p><p>截止时间：2030-05-10 23:59</p>',
             'rtf_content': '',
             'createrName': '张老师',
-            'completeTime': '2030-05-01 09:30',
+            'sendTime': '2030-05-01 09:30',
             'isread': '0',
           },
           {
@@ -34,7 +102,7 @@ void main() {
             'title': '大学物理实验分组公告',
             'content': '截止时间：05-10 23:59 点击 https://i.chaoxing.com/x?token=abc',
             'createrName': '物理教研室',
-            'completeTime': '2030-05-01',
+            'sendTime': '2030-05-01',
             'isread': '1',
           },
           {
@@ -42,7 +110,7 @@ void main() {
             'title': '实验报告说明',
             'content': '提交方式见通知',
             'createrName': '李老师',
-            'completeTime': '2030-05-02 14:00',
+            'sendTime': '2030-05-02 14:00',
             'isread': 0,
             'attachment': [
               {

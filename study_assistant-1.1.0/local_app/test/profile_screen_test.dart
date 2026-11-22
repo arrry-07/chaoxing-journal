@@ -505,7 +505,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text(count == 0 ? '暂无课程，前往查看与同步' : '已同步 $count 门课程'),
           findsOneWidget);
-      expect(find.byType(CourseLabel), findsNothing);
+      expect(find.byType(CourseMark), findsNothing);
       expect(find.text('查看全部课程'), findsNothing);
     }
 

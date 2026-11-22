@@ -266,21 +266,27 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
             JournalGroupedCard(
               padding: const EdgeInsets.all(16),
               children: [
-                Semantics(
-                  liveRegion: true,
-                  child: Text(
-                    _error!,
-                    style: journal.metadata.copyWith(color: journal.berry),
-                  ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _error!,
+                        style: journal.metadata.copyWith(color: journal.berry),
+                      ),
+                    ),
+                    if (explanation == null) ...[
+                      const SizedBox(height: 12),
+                      JournalSecondaryButton(
+                        label: '重新查询',
+                        expanded: false,
+                        onPressed: _loading ? null : () => _load(force: true),
+                      ),
+                    ],
+                  ],
                 ),
-                if (explanation == null) ...[
-                  const SizedBox(height: 12),
-                  JournalSecondaryButton(
-                    label: '重新查询',
-                    expanded: false,
-                    onPressed: _loading ? null : () => _load(force: true),
-                  ),
-                ],
               ],
             ),
             const SizedBox(height: 12),
@@ -297,7 +303,7 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '查询时间 ${DateFormat('yyyy-MM-dd HH:mm:ss').format(explanation.checkedAt)}',
+                    '查询时间 ${DateFormat('yyyy-MM-dd HH:mm:ss').format(explanation.checkedAt.toLocal())}',
                     style: journal.metadata,
                   ),
                 ],
@@ -317,14 +323,21 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
                 title: '部分证据未读取',
                 padding: const EdgeInsets.all(16),
                 children: [
-                  for (final warning in explanation.queryWarnings)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        '· $warning',
-                        style: journal.metadata.copyWith(color: journal.ochre),
-                      ),
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final warning in explanation.queryWarnings)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text(
+                            '· $warning',
+                            style:
+                                journal.metadata.copyWith(color: journal.ochre),
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ],
@@ -441,14 +454,14 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
           if (category.nextScheduledAt != null) ...[
             const SizedBox(height: 8),
             Text(
-              '下一次计划：${DateFormat('M月d日 HH:mm').format(category.nextScheduledAt!)}',
+              '下一次计划：${DateFormat('M月d日 HH:mm').format(category.nextScheduledAt!.toLocal())}',
               style: journal.time,
             ),
           ],
           if (category.evidenceAt != null) ...[
             const SizedBox(height: 4),
             Text(
-              '系统排期证据：${DateFormat('M月d日 HH:mm:ss').format(category.evidenceAt!)}',
+              '系统排期证据：${DateFormat('M月d日 HH:mm:ss').format(category.evidenceAt!.toLocal())}',
               style: journal.metadata,
             ),
           ],

@@ -13,6 +13,32 @@ Assignment work(String id, {DateTime? due, String status = 'pending'}) =>
         requirementsText: '',
         status: status,
         lastSyncedAt: now);
+
+Assignment _exam(
+  String id, {
+  required DateTime start,
+  DateTime? end,
+  bool startTrusted = true,
+  String lifecycle = 'scheduled',
+}) =>
+    work(id).copyWith(
+      id: 'cx:exam:1:2:$id',
+      source: AssignmentSource.exam,
+      deadlineAt: end,
+      clearDeadlineAt: end == null,
+      deadlineTrusted: end != null,
+      exam: ExamInfo(
+        examId: id,
+        courseId: '1',
+        clazzId: '2',
+        startAt: start,
+        endAt: end,
+        startTrusted: startTrusted,
+        endTrusted: end != null,
+        lifecycle: lifecycle,
+      ),
+    );
+
 PlanningPreview preview(List<Assignment> rows,
         {int budget = 60,
         Map<String, int>? minutes,
@@ -52,6 +78,79 @@ void main() {
     expect(r.remainingMinutes, 0);
     expect(() => r.suggested.clear(), throwsUnsupportedError);
   });
+
+  test('upcoming exams compete for budget by start time alongside homework',
+      () {
+    final early = _exam('early',
+        start: now.add(const Duration(hours: 1)),
+        end: now.add(const Duration(hours: 5)));
+    final homework = work('homework', due: now.add(const Duration(hours: 2)));
+    final late = _exam('late',
+        start: now.add(const Duration(hours: 3)),
+        end: now.add(const Duration(hours: 4)));
+
+    final result = preview([late, homework, early], budget: 40);
+
+    expect(result.suggested.map((item) => item.assignment.id),
+        [early.id, homework.id]);
+    expect(result.manual.single.assignment.id, late.id);
+    expect(result.manual.single.reason, PlanningReason.insufficientBudget);
+  });
+
+  test('ended and cancelled exams are excluded from both preview sections', () {
+    final elapsed = _exam('elapsed',
+        start: now.subtract(const Duration(hours: 1)), end: now);
+    final ended = _exam('ended',
+        start: now.subtract(const Duration(hours: 1)),
+        end: now.add(const Duration(hours: 1)),
+        lifecycle: 'ended');
+    final cancelled = _exam('cancelled',
+        start: now.add(const Duration(hours: 1)),
+        end: now.add(const Duration(hours: 2)),
+        lifecycle: 'cancelled');
+
+    final result = preview([elapsed, ended, cancelled]);
+
+    expect([
+      ...result.suggested.map((item) => item.assignment.id),
+      ...result.manual.map((item) => item.assignment.id),
+    ], isEmpty);
+  });
+
+  test('trusted exam start is usable when the end could not be read', () {
+    final exam = _exam('start-only', start: now.add(const Duration(hours: 1)))
+        .copyWith(deadlineReadFailed: true);
+
+    final result = preview([exam]);
+
+    expect(result.suggested.map((item) => item.assignment.id), [exam.id]);
+    expect(result.manual, isEmpty);
+  });
+
+  test('trusted exam end does not make an uncertain start eligible', () {
+    final exam = _exam('uncertain-start',
+        start: now.add(const Duration(hours: 1)),
+        end: now.add(const Duration(hours: 3)),
+        startTrusted: false);
+
+    final result = preview([exam]);
+
+    expect(result.suggested, isEmpty);
+    expect(result.manual.single.assignment.id, exam.id);
+    expect(result.manual.single.reason, PlanningReason.deadlineUntrusted);
+  });
+
+  test('exam opening before the target day stays out of suggestions', () {
+    final exam = _exam('overnight',
+        start: DateTime.utc(2026, 11, 7, 15, 59),
+        end: DateTime.utc(2026, 11, 7, 18));
+
+    final result = preview([exam], day: '2026-11-08');
+
+    expect(result.suggested, isEmpty);
+    expect(result.manual.single.reason, PlanningReason.deadlineBeforeTarget);
+  });
+
   test(
       'unfinished existing plans consume total budget and same-day rows are not duplicated',
       () {

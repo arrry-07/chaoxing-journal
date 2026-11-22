@@ -26,8 +26,9 @@ class FlutterCheckWorker(
 ) : Worker(appContext, params) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val owner = "worker:${UUID.randomUUID()}"
-    @Volatile private var engine: FlutterEngine? = null
+    private val engineRef = AtomicReference<FlutterEngine?>(null)
     @Volatile private var channel: MethodChannel? = null
+    @Volatile private var activeLatch: CountDownLatch? = null
     @Volatile private var stopped = false
     @Volatile private var activeClaim: NotificationSignalClaim? = null
 
@@ -142,6 +143,10 @@ class FlutterCheckWorker(
         }
 
         val latch = CountDownLatch(1)
+        activeLatch = latch
+        if (stopped) {
+            latch.countDown()
+        }
         val completed = AtomicBoolean(false)
         val workResult = AtomicReference<Map<*, *>?>(null)
         val payload = mapOf(
@@ -157,12 +162,24 @@ class FlutterCheckWorker(
         )
 
         mainHandler.post {
+            if (stopped) {
+                latch.countDown()
+                return@post
+            }
             try {
                 val loader = FlutterInjector.instance().flutterLoader()
                 loader.startInitialization(applicationContext)
                 loader.ensureInitializationComplete(applicationContext, null)
+                if (stopped) {
+                    latch.countDown()
+                    return@post
+                }
                 val flutterEngine = FlutterEngine(applicationContext)
-                engine = flutterEngine
+                if (stopped || !engineRef.compareAndSet(null, flutterEngine)) {
+                    flutterEngine.destroy()
+                    latch.countDown()
+                    return@post
+                }
                 GeneratedPluginRegistrant.registerWith(flutterEngine)
                 BackgroundReminderBridge.attach(flutterEngine, applicationContext)
                 val workerChannel = MethodChannel(
@@ -174,7 +191,11 @@ class FlutterCheckWorker(
                     when (call.method) {
                         "ready" -> {
                             result.success(null)
-                            if (!stopped) workerChannel.invokeMethod("run", payload)
+                            if (!stopped) {
+                                workerChannel.invokeMethod("run", payload)
+                            } else {
+                                latch.countDown()
+                            }
                         }
                         "finished" -> {
                             if (completed.compareAndSet(false, true)) {
@@ -193,20 +214,24 @@ class FlutterCheckWorker(
                     ),
                 )
             } catch (error: Exception) {
+                Log.w(TAG, "flutter_engine_start_failed:${error.javaClass.simpleName}")
                 completed.set(false)
                 latch.countDown()
             }
         }
 
         val finished = latch.await(8, TimeUnit.MINUTES)
+        activeLatch = null
         val received = finished && completed.get()
         if (!received) {
-            mainHandler.post {
-                runCatching { channel?.invokeMethod("cancel", null) }
-            }
+            requestDartCancellation()
             claim?.let { settleUnconfirmed(it) }
         }
         if (reason == BackgroundWorkScheduler.REASON_DAYTIME) {
+            if (stopped) {
+                cleanup()
+                return Result.success()
+            }
             val currentAccount = database.activeAccount()
             if (currentAccount != null && currentAccount.accountHash != accountHash) {
                 val now = ZonedDateTime.now()
@@ -361,20 +386,33 @@ class FlutterCheckWorker(
 
     override fun onStopped() {
         stopped = true
+        activeLatch?.countDown()
         activeClaim?.let { settleUnconfirmed(it) }
-        mainHandler.post { runCatching { channel?.invokeMethod("cancel", null) } }
+        requestDartCancellation()
         cleanup()
         super.onStopped()
     }
 
+    private fun requestDartCancellation() {
+        mainHandler.post {
+            try {
+                channel?.invokeMethod("cancel", null)
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "flutter_cancel_failed:${error.javaClass.simpleName}")
+            }
+        }
+    }
+
     private fun settleUnconfirmed(claim: NotificationSignalClaim) {
-        runCatching {
+        try {
             ReminderDatabase.get(applicationContext).settleNotificationAttempt(
                 claim.accountHash,
                 claim.sessionEpoch,
                 claim.token,
                 ownerWorkId = id.toString(),
             )
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "notification_claim_settle_failed:${error.javaClass.simpleName}")
         }
     }
 
@@ -393,12 +431,12 @@ class FlutterCheckWorker(
         )
 
     private fun cleanup() {
-        val current = engine ?: return
-        engine = null
+        activeLatch = null
+        val current = engineRef.getAndSet(null)
         channel = null
         mainHandler.post {
             BackgroundExecutionCoordinator.releaseAllForOwner(owner)
-            current.destroy()
+            current?.destroy()
         }
     }
 

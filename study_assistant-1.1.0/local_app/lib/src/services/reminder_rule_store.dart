@@ -56,9 +56,9 @@ class ReminderRuleStore {
     return normalized;
   }
 
-  Future<void> clear() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_key);
+  Future<void> clear({SharedPreferences? prefs}) async {
+    final p = prefs ?? await SharedPreferences.getInstance();
+    await p.remove(_key);
   }
 
   static List<int> normalizeOffsets(List<int>? offsetsMinutes) {

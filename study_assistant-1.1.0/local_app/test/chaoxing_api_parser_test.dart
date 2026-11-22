@@ -3,6 +3,42 @@ import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_classroom_parser.dart';
 
 void main() {
+  for (final classKey in ['classId', 'classid', 'jclassId', 'JcLaSsId']) {
+    test('course refs accept $classKey on a course with a child list', () {
+      final result = ChaoxingApiParser.parseCourseRefsDetailed({
+        'channelList': [
+          {
+            'content': {
+              'CoUrSeId': 7,
+              classKey: ' 11 ',
+              'courseName': '合成课程',
+              'children': [],
+            },
+          },
+        ],
+      });
+      expect(result.refs, hasLength(1));
+      expect((result.refs.single.courseId, result.refs.single.clazzId),
+          ('7', '11'));
+      expect((result.rejected, result.duplicates), (0, 0));
+    });
+  }
+
+  test('course refs reject disagreeing class aliases', () {
+    final result = ChaoxingApiParser.parseCourseRefsDetailed({
+      'courses': [
+        {
+          'courseId': '7',
+          'clazzId': '11',
+          'classid': '12',
+          'courseName': '合成课程'
+        },
+      ],
+    });
+    expect(result.refs, isEmpty);
+    expect(result.rejected, 1);
+  });
+
   test('recurses into course folders and counts malformed leaves only', () {
     const course = {'courseId': '7', 'clazzId': '11', 'courseName': '文件夹内课程'};
     final result = ChaoxingApiParser.parseCourseRefsDetailed({

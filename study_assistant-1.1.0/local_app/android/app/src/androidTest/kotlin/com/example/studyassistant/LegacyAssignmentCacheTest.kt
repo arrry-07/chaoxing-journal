@@ -6,6 +6,17 @@ import org.junit.Test
 
 class LegacyAssignmentCacheTest {
     @Test
+    fun blankScheduledNotificationCacheIsAnEmptyCache() {
+        for (raw in listOf(null, "", " \r\n\t ")) {
+            val cache = LegacyAssignmentCache.parse(raw)
+            assertTrue(cache.assignmentIds.isEmpty())
+            assertTrue(cache.foreignIds.isEmpty())
+            assertFalse(cache.hasUnknown)
+            assertEquals("[]", cache.without(setOf(41)))
+        }
+    }
+
+    @Test
     fun v18IdAndAssignmentPayloadAreRequiredAndEveryNonTargetElementSurvives() {
         val raw = """[{"id":41,"payload":"a:studyassistant:///assignments/one","channelId":"assignment_deadlines"},{"id":42,"payload":"p:one","channelId":"personal_reminders"},null,17,{"notificationId":43,"payload":"a:old-extra-is-not-cache-id","channelId":"assignment_deadlines"}]"""
         val cache = LegacyAssignmentCache.parse(raw)

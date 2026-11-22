@@ -22,6 +22,19 @@ Assignment record() => Assignment(
     lastSyncedAt: DateTime.utc(2030));
 
 void main() {
+  test('AI practice page context accepts mixed-case class field by name', () {
+    final context = ChaoxingAiPracticeParser.pageContext(
+      record(),
+      '<input id="currentUserId" value="8"><input id="cpi" value="9">'
+      '<input name="CoUrSeId" value="7"><input name="jClassId" value="11">'
+      '<input id="publishRelationUuid" value="$pub">',
+      uid: '8',
+      expectedCpi: '9',
+    );
+    expect((context['courseid'], context['clazzid']), ('7', '11'));
+    expect(context['publishRelationUuid'], pub);
+  });
+
   test(
       'opaque activity identity survives journal and portable backup without resource URL',
       () {

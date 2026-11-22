@@ -55,6 +55,54 @@ void main() {
       expect(e.noLimit, isFalse);
     }
   });
+  test('yearless full-width start matches the same-work anchor', () {
+    final startedAt = DateTime.utc(2024, 10, 27);
+    final evidence = ChaoxingAssignmentParser.readDetailDeadline(
+      '作答时间：10-27 08：00 至 11-05 23：59',
+      startedAt: startedAt,
+      now: DateTime.utc(2026, 11, 22),
+    );
+    expect(evidence.deadlineAt?.toUtc(), DateTime.utc(2024, 11, 5, 15, 59));
+    expect(evidence.availableFromAt?.toUtc(), startedAt);
+    expect(evidence.startEvidenceConflict, isFalse);
+    expect(evidence.missingYear, isFalse);
+  });
+
+  test('late non-leap-year start can anchor the following leap day', () {
+    final evidence = ChaoxingAssignmentParser.readDetailDeadline(
+      '作答时间：2027-12-20 08:00 至 02-29 23:59',
+      now: DateTime.utc(2027, 12, 21),
+    );
+    expect(evidence.deadlineAt?.toUtc(), DateTime.utc(2028, 2, 29, 15, 59));
+    expect(evidence.missingYear, isFalse);
+  });
+
+  test('early non-leap-year start does not roll over to the next leap day', () {
+    final evidence = ChaoxingAssignmentParser.readDetailDeadline(
+      '作答时间：2027-01-10 08:00 至 02-29 23:59',
+      now: DateTime.utc(2027, 1, 11),
+    );
+    expect(evidence.availableFromAt?.toUtc(), DateTime.utc(2027, 1, 10));
+    expect(evidence.deadlineAt, isNull);
+  });
+
+  test('work list reads full-width deadline separators through seconds', () {
+    final items = ChaoxingAssignmentParser.parseWorkHtml(
+      '''
+<div class="work-item" data-id="work-1">
+  <a href="/work/123">需求分析报告</a>
+  <span>截止时间：2026-11-05 23：59：12</span>
+</div>
+''',
+      fallbackCourseName: '课程',
+      sourcePrefix: 'course-1',
+      baseUri: Uri.parse('https://mooc1-api.chaoxing.com'),
+      now: DateTime.utc(2026, 11, 1),
+    );
+    expect(items.single.deadlineAt?.toUtc(),
+        DateTime.utc(2026, 11, 5, 15, 59, 12));
+  });
+
   test('details keep a trustworthy start independently from the deadline', () {
     final startOnly =
         ChaoxingAssignmentParser.readDetailDeadline('开始时间：2026-11-17 00:00');

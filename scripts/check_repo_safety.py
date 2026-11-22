@@ -14,13 +14,23 @@ OVERSIZED_ALLOWLIST = {
     "study_assistant-1.1.0/local_app/assets/type/LXGWWenKaiScreen.ttf",
 }
 
-BLOCKED_EXTENSIONS = (".apk", ".aab", ".jks", ".keystore")
-BLOCKED_BASENAMES = {"key.properties", "local.properties"}
+BLOCKED_EXTENSIONS = (".apk", ".aab", ".jks", ".keystore", ".idsig")
+BLOCKED_BASENAMES = {
+    "key.properties",
+    "local.properties",
+    "cookies.json",
+    "session.json",
+    "session_cookies.json",
+    "credentials.json",
+}
+BLOCKED_ENV_RE = re.compile(r"^\.env(?:\..+)?$", re.IGNORECASE)
 BLOCKED_PREFIXES = (
+    "artifacts/",
     "docs/feedback/",
     "scripts/demo-video/",
     "docs/Gemini的迭代优化方案/",
 )
+BLOCKED_PREFIXES_LOWER = tuple(prefix.lower() for prefix in BLOCKED_PREFIXES)
 BLOCKED_XML_RE = re.compile(
     r"^(?:FlutterSecureStorage|FlutterSharedPreferences).*\.xml$",
     re.IGNORECASE,
@@ -42,13 +52,25 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "long-session-cookie",
-        re.compile(r"(?i)\b(?:JSESSION" + r"ID|FI" + r"D|U" + r"F)=[A-Za-z0-9._-]{24,}"),
+        re.compile(
+            r"(?i)\b(?:JSESSION" + r"ID|U" + r"F|v" + r"c3|DSSTASH_" + r"LOG)=[A-Za-z0-9._%+/=-]{24,}"
+        ),
+    ),
+    (
+        "chaoxing-cookie-bundle",
+        re.compile(
+            r"(?i)(?:\b_" + r"d=\d{10,}\b[^\n]*\b(?:F" + r"ID|U" + r"ID|U" + r"F|v" + r"c3)=[^\s;,'\"]+"
+            r"|\b(?:F" + r"ID|U" + r"ID|U" + r"F|v" + r"c3)=[^\s;,'\"]+[^\n]*\b_" + r"d=\d{10,}\b)"
+        ),
     ),
 ]
 
 
 def normalize_path(path: str) -> str:
-    return path.replace("\\", "/").lstrip("./")
+    norm = path.replace("\\", "/")
+    while norm.startswith("./"):
+        norm = norm[2:]
+    return norm.lstrip("/")
 
 
 def check_path(path: str) -> list[str]:
@@ -60,11 +82,11 @@ def check_path(path: str) -> list[str]:
     if any(lower.endswith(ext) for ext in BLOCKED_EXTENSIONS):
         violations.append(f"[blocked-extension] {norm}")
     basename = norm.rsplit("/", 1)[-1]
-    if basename.lower() in BLOCKED_BASENAMES:
+    if basename.lower() in BLOCKED_BASENAMES or BLOCKED_ENV_RE.match(basename):
         violations.append(f"[blocked-file] {norm}")
     if BLOCKED_XML_RE.match(basename):
         violations.append(f"[blocked-device-prefs] {norm}")
-    if any(norm.startswith(prefix) for prefix in BLOCKED_PREFIXES):
+    if any(lower.startswith(prefix) for prefix in BLOCKED_PREFIXES_LOWER):
         violations.append(f"[blocked-directory] {norm}")
     return violations
 
@@ -151,8 +173,40 @@ def scan_staged(repo: Path) -> list[str]:
     return violations
 
 
-def scan_range(repo: Path, revspec: str) -> list[str]:
+def _scan_commits(repo: Path, commits: list[str]) -> list[str]:
     violations: list[str] = []
+    for commit in commits:
+        raw_paths = _split_nul_paths(
+            _git_bytes(
+                repo,
+                [
+                    "diff-tree",
+                    "-m",
+                    "--no-commit-id",
+                    "--name-only",
+                    "-r",
+                    "--root",
+                    "--diff-filter=ACMR",
+                    "-z",
+                    commit,
+                ],
+            )
+        )
+        for path in dict.fromkeys(raw_paths):
+            violations.extend(check_path(path))
+            size_raw = _git_text(repo, ["cat-file", "-s", f"{commit}:{path}"]).strip()
+            if size_raw.isdigit():
+                violations.extend(check_blob_size(path, int(size_raw)))
+        diff_text = _git_text(
+            repo,
+            ["diff-tree", "-m", "-p", "--unified=0", "--no-color", "--root", commit],
+        )
+        for path, added in _parse_unified_zero_diff(diff_text).items():
+            violations.extend(check_lines(path, added))
+    return list(dict.fromkeys(violations))
+
+
+def scan_range(repo: Path, revspec: str) -> list[str]:
     if ".." in revspec:
         commits = [
             line.strip()
@@ -165,34 +219,22 @@ def scan_range(repo: Path, revspec: str) -> list[str]:
             for line in _git_text(repo, ["rev-list", "-n", "1", revspec]).splitlines()
             if line.strip()
         ]
-    for commit in commits:
-        paths = _split_nul_paths(
-            _git_bytes(
-                repo,
-                [
-                    "diff-tree",
-                    "--no-commit-id",
-                    "--name-only",
-                    "-r",
-                    "--root",
-                    "--diff-filter=ACMR",
-                    "-z",
-                    commit,
-                ],
-            )
-        )
-        for path in paths:
-            violations.extend(check_path(path))
-            size_raw = _git_text(repo, ["cat-file", "-s", f"{commit}:{path}"]).strip()
-            if size_raw.isdigit():
-                violations.extend(check_blob_size(path, int(size_raw)))
-        diff_text = _git_text(
-            repo,
-            ["diff-tree", "-p", "--unified=0", "--no-color", "--root", commit],
-        )
-        for path, added in _parse_unified_zero_diff(diff_text).items():
-            violations.extend(check_lines(path, added))
-    return violations
+    return _scan_commits(repo, commits)
+
+
+def scan_unpushed(repo: Path, commit: str) -> list[str]:
+    commits = [
+        line.strip()
+        for line in _git_text(repo, ["rev-list", commit, "--not", "--remotes"]).splitlines()
+        if line.strip()
+    ]
+    if not commits:
+        commits = [
+            line.strip()
+            for line in _git_text(repo, ["rev-list", "-n", "1", commit]).splitlines()
+            if line.strip()
+        ]
+    return _scan_commits(repo, commits)
 
 
 def scan_worktree(repo: Path) -> list[str]:
@@ -242,6 +284,11 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--staged", action="store_true", help="Inspect staged changes")
     mode.add_argument("--range", metavar="REVSPEC", help="Inspect commit(s) in range")
     mode.add_argument(
+        "--unpushed",
+        metavar="COMMIT",
+        help="Inspect all commits reachable from COMMIT not yet on any remote",
+    )
+    mode.add_argument(
         "--worktree",
         action="store_true",
         help="Inspect all tracked and staged repository files",
@@ -261,6 +308,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.range is not None:
         violations = scan_range(repo, args.range)
         scope = f"range({args.range})"
+    elif args.unpushed is not None:
+        violations = scan_unpushed(repo, args.unpushed)
+        scope = f"unpushed({args.unpushed})"
     else:
         violations = scan_worktree(repo)
         scope = "worktree"

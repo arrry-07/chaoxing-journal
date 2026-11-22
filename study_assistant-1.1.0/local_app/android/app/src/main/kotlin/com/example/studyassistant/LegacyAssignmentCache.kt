@@ -26,7 +26,7 @@ internal class LegacyAssignmentCache private constructor(
 
     companion object {
         fun parse(raw: String?): LegacyAssignmentCache {
-            val items = if (raw == null) JSONArray() else JSONArray(raw)
+            val items = if (raw.isNullOrBlank()) JSONArray() else JSONArray(raw)
             val assignments = linkedSetOf<Int>()
             val foreign = linkedSetOf<Int>()
             var unknown = false

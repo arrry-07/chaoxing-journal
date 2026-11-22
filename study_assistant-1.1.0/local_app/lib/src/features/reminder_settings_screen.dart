@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app/journal.dart';
 import '../app/journal_motion.dart';
+import '../app/transient_feedback.dart';
 import '../models/reminder_rule_limits.dart';
 import '../services/assignment_store.dart';
 import '../services/background_reminder_gateway.dart';
@@ -340,6 +342,10 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     }
     if (current?.scheduleRecoveryPending == true) {
       issues.add('存在待恢复的调度事务');
+    }
+    if (current?.queryErrors.isNotEmpty == true ||
+        _backgroundHealth?.queryErrors.isNotEmpty == true) {
+      issues.add('部分系统状态读取失败，请下拉重试或检查系统权限');
     }
 
     final hasPositiveSignal = current != null &&
@@ -1025,9 +1031,15 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
             : '保存失败：$operationError；已恢复原提醒时间');
         return;
       }
-      final hasWarnings = widget.assignmentStore.serviceWarnings.isNotEmpty ||
-          widget.assignmentStore.recoveryWarning != null;
-      _showMessage(hasWarnings ? '提醒时间已保存' : '提醒时间已保存，作业通知已更新');
+      if (widget.assignmentStore.serviceWarnings.isNotEmpty) {
+        _showMessage(
+          '提醒时间已保存；提醒安排失败：${widget.assignmentStore.serviceWarnings.first}',
+        );
+      } else if (widget.assignmentStore.recoveryWarning != null) {
+        _showMessage('提醒时间已保存；提醒恢复仍需检查');
+      } else {
+        _showMessage('提醒时间已保存，作业通知已更新');
+      }
       unawaited(_loadHealth(force: true));
     } catch (_) {
       if (mounted) {
@@ -1132,7 +1144,16 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
         _showMessage('通知权限已开启');
         unawaited(_loadHealth(force: true));
       }
-    } catch (_) {
+    } on PlatformException catch (error) {
+      debugPrint('[ReminderSettings] requestPermission: ${error.runtimeType}');
+      if (mounted) {
+        await _openPermissionSettings(
+          widget.permissionSettingsService.openNotificationSettingsResult,
+          destination: '通知设置',
+        );
+      }
+    } on MissingPluginException catch (error) {
+      debugPrint('[ReminderSettings] requestPermission: ${error.runtimeType}');
       if (mounted) {
         await _openPermissionSettings(
           widget.permissionSettingsService.openNotificationSettingsResult,
@@ -1249,9 +1270,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(message)));
+    showJournalMessage(context, message);
   }
 
   String _labelFor(int offsetMinutes) {

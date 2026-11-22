@@ -19,6 +19,23 @@ void main() {
     expect(courseIconFor('未知专题研讨'), Icons.menu_book_outlined);
   });
 
+  test('courseIconFor prefers the first matching subject rule', () {
+    const overlaps = {
+      '高等数学与大学物理': Icons.functions_rounded,
+      '物理化学': Icons.bolt_outlined,
+      '生物与 Python': Icons.science_outlined,
+      'Python 与英语': Icons.terminal_rounded,
+      '英语与历史': Icons.translate_rounded,
+      '历史与建筑': Icons.account_balance_outlined,
+      '建筑与金融': Icons.architecture_outlined,
+      '体育经济': Icons.trending_up_rounded,
+    };
+
+    for (final entry in overlaps.entries) {
+      expect(courseIconFor(entry.key), entry.value, reason: entry.key);
+    }
+  });
+
   testWidgets('CourseMark renders clean linear icon without grey box',
       (tester) async {
     Future<(int containerCount, Color? iconColor, IconData? icon)> renderMark(

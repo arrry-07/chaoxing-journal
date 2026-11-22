@@ -18,6 +18,7 @@ import 'chaoxing_classroom_parser.dart';
 import 'chaoxing_exam_parser.dart';
 import 'chaoxing_exam_visibility.dart';
 import 'chaoxing_notice_parser.dart';
+import 'chaoxing_param_helper.dart';
 
 part 'chaoxing_exam_client.dart';
 
@@ -337,6 +338,7 @@ class ChaoxingLocalClient {
 
         return rank(a).compareTo(rank(b));
       });
+    _skippedMalformedVerifyCookies = 0;
     for (final row in sortedRows) {
       final agent = row['userAgent'];
       if (agent is String &&
@@ -357,6 +359,11 @@ class ChaoxingLocalClient {
         if (split < 1) continue;
         final name = pair.substring(0, split).trim(),
             value = pair.substring(split + 1).trim();
+        if (value.isEmpty) {
+          // Empty WebView pairs (e.g. `UID=`) must never erase a valid session
+          // cookie.
+          continue;
+        }
         final Cookie validated;
         try {
           validated = Cookie(name, value)
@@ -366,6 +373,7 @@ class ChaoxingLocalClient {
         } on FormatException {
           // A single malformed WebView cookie must not abort verification import
           // or erase an existing valid session cookie.
+          _skippedMalformedVerifyCookies++;
           continue;
         }
         final matches = _cookies
@@ -373,28 +381,55 @@ class ChaoxingLocalClient {
             .toList();
         if (matches.any((e) =>
                 e.cookie.value == validated.value &&
+                e.expires == null &&
                 (!isRootDomain || !e.hostOnly)) &&
             matches.every((e) =>
                 e.domain != uri.host ||
                 e.path != path ||
-                e.cookie.value == validated.value)) {
+                (e.cookie.value == validated.value && e.expires == null))) {
           continue;
         }
-        if (matches.isNotEmpty && path == '/' && !isRootDomain) {
-          for (final e in matches) {
-            e.cookie.value = validated.value;
+        if (isRootDomain) {
+          _cookies.removeWhere((e) =>
+              e.cookie.name == name && e.domain == uri.host && e.path == path);
+          _cookies.add(_SessionCookie(validated, uri.host, path, false));
+        } else if (path == '/') {
+          // Never mutate parent `.chaoxing.com` cookies from a subdomain row.
+          // Replace only same-host entries (including stale path-scoped copies)
+          // with fresh host-only entries so `expires` is also refreshed.
+          final sameHost = matches.where((e) => e.domain == uri.host).toList();
+          if (sameHost.isNotEmpty) {
+            _cookies.removeWhere((e) =>
+                e.cookie.name == name &&
+                e.domain == uri.host &&
+                sameHost.contains(e));
+            for (final prev in sameHost) {
+              final refreshed = Cookie(name, value)
+                ..path = prev.path
+                ..secure = true;
+              _cookies
+                  .add(_SessionCookie(refreshed, uri.host, prev.path, true));
+            }
+          } else {
+            _cookies.removeWhere((e) =>
+                e.cookie.name == name &&
+                e.domain == uri.host &&
+                e.path == path);
+            _cookies.add(_SessionCookie(validated, uri.host, path, true));
           }
         } else {
           _cookies.removeWhere((e) =>
               e.cookie.name == name && e.domain == uri.host && e.path == path);
-          _cookies
-              .add(_SessionCookie(validated, uri.host, path, !isRootDomain));
+          _cookies.add(_SessionCookie(validated, uri.host, path, true));
         }
       }
     }
     // Returning closes the browser; only the subsequent signed request can prove success.
     return true;
   }
+
+  int _skippedMalformedVerifyCookies = 0;
+  int get skippedMalformedVerifyCookies => _skippedMalformedVerifyCookies;
 
   int _sessionGeneration = 0;
   bool hasCourseResponse = false;
@@ -1753,8 +1788,11 @@ class ChaoxingLocalClient {
                 target.host.endsWith('.chaoxing.com') &&
                 const ['/mooc2/work/list', '/mooc-ans/work/list']
                     .contains(target.path) &&
-                (q['courseId'] ?? q['courseid']) == course.courseId &&
-                (q['classId'] ?? q['clazzId'] ?? q['clazzid']) ==
+                ChaoxingParamHelper.singleQueryValue(
+                        target, ChaoxingParamHelper.courseIdKeys) ==
+                    course.courseId &&
+                ChaoxingParamHelper.singleQueryValue(
+                        target, ChaoxingParamHelper.clazzIdKeys) ==
                     course.clazzId &&
                 q['enc']?.isNotEmpty == true) {
               return target;
@@ -1836,6 +1874,13 @@ class ChaoxingLocalClient {
         verificationProbe: verificationProbe);
   }
 
+  static bool _matchesOptionalWorkIdentity(
+      Uri uri, Set<String> keys, String expected) {
+    final value = ChaoxingParamHelper.singleQueryValue(uri, keys);
+    return value == expected ||
+        (value == null && !ChaoxingParamHelper.hasAnyQueryValue(uri, keys));
+  }
+
   Future<({List<Assignment> rows, Map<String, DateTime> starts})>
       _readV3FormalHomework(ChaoxingCourseRef course,
           {required int generation,
@@ -1904,21 +1949,20 @@ class ChaoxingLocalClient {
                 url.host.endsWith('.chaoxing.com')) {
               url = url.replace(scheme: 'https', port: 443);
             }
-            final id = url?.queryParameters['workId'] ??
-                url?.queryParameters['taskrefId'];
-            final linkedCourse = url?.queryParameters['courseId'] ??
-                url?.queryParameters['courseid'];
-            final linkedClass = url?.queryParameters['classId'] ??
-                url?.queryParameters['clazzId'] ??
-                url?.queryParameters['clazzid'];
+            final id = url == null
+                ? null
+                : ChaoxingParamHelper.singleQueryValue(
+                    url, ChaoxingParamHelper.workIdKeys);
             if (url == null ||
                 url.scheme != 'https' ||
                 !url.host.endsWith('.chaoxing.com') ||
                 id == null ||
                 id.isEmpty ||
                 !url.path.contains('/work/') ||
-                (linkedCourse != null && linkedCourse != course.courseId) ||
-                (linkedClass != null && linkedClass != course.clazzId)) {
+                !_matchesOptionalWorkIdentity(
+                    url, ChaoxingParamHelper.courseIdKeys, course.courseId) ||
+                !_matchesOptionalWorkIdentity(
+                    url, ChaoxingParamHelper.clazzIdKeys, course.clazzId)) {
               throw const SyncReadException(SyncIssue(
                   SyncIssueKind.schemaChanged, '正式作业详情身份无法确认',
                   stage: 'workList'));
@@ -1950,7 +1994,7 @@ class ChaoxingLocalClient {
                 start >= 946684800000 &&
                 start <= 4102444800000) {
               starts['cx:work:${course.courseId}:${course.clazzId}:$id'] =
-                  DateTime.fromMillisecondsSinceEpoch(start, isUtc: true);
+                  DateTime.fromMillisecondsSinceEpoch(start);
             }
             final trusted =
                 end != null && (end >= 946684800000 && end <= 4102444800000);
@@ -2100,12 +2144,10 @@ class ChaoxingLocalClient {
           true) {
         cache[key] = response!;
         _sessionHasPcExamCredential = true;
-        final cId =
-            uri.queryParameters['courseid'] ?? uri.queryParameters['courseId'];
-        final clzId = uri.queryParameters['clazzid'] ??
-            uri.queryParameters['clazzId'] ??
-            uri.queryParameters['classid'] ??
-            uri.queryParameters['classId'];
+        final cId = ChaoxingParamHelper.singleQueryValue(
+            uri, ChaoxingParamHelper.courseIdKeys);
+        final clzId = ChaoxingParamHelper.singleQueryValue(
+            uri, ChaoxingParamHelper.clazzIdKeys);
         if (cId != null && clzId != null) {
           _syncExamEntryCourses?.add('$cId:$clzId');
         }
@@ -2456,7 +2498,12 @@ class ChaoxingLocalClient {
   Map<String, String> _headers(Uri uri, [Map<String, String>? extra]) {
     _cookies.removeWhere((c) => c.expired);
     final matching = _cookies.where((c) => c.matches(uri)).toList()
-      ..sort((a, b) => b.path.length.compareTo(a.path.length));
+      ..sort((a, b) {
+        final byPath = b.path.length.compareTo(a.path.length);
+        if (byPath != 0) return byPath;
+        if (a.hostOnly != b.hostOnly) return a.hostOnly ? -1 : 1;
+        return b.domain.length.compareTo(a.domain.length);
+      });
     return {
       if (matching.isNotEmpty)
         'Cookie': matching

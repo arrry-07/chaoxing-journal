@@ -1,10 +1,14 @@
 package com.example.studyassistant
 
 import android.content.Context
+import android.database.DatabaseUtils
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -19,13 +23,14 @@ class ReminderDatabaseAccountTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        database = ReminderDatabase.get(context)
         accountHash = "instrumentation-account-${System.nanoTime()}"
+        database = ReminderDatabase.openForTest(context, "$accountHash.db")
     }
 
     @After
     fun tearDown() {
-        runCatching { database.clearActiveAccount(accountHash) }
+        database.close()
+        context.deleteDatabase("$accountHash.db")
     }
 
     @Test
@@ -225,5 +230,145 @@ class ReminderDatabaseAccountTest {
         } finally {
             runCatching { database.clearActiveAccount(otherAccount) }
         }
+    }
+
+    @Test
+    fun reauthenticationKeepsTargetSnapshotsAndEventsAndPurgesInactivePlaintext() {
+        val stale = seedPlaintext("stale")
+        val target = seedPlaintext(accountHash)
+
+        val refreshed = database.switchAccount(accountHash, accountHash)
+
+        assertEquals(target.sessionEpoch, refreshed.sessionEpoch)
+        assertEquals(1L, rowCount("snapshots", accountHash))
+        assertEquals(1L, rowCount("events", accountHash))
+        assertEquals(1L, rowCount("notification_signals", accountHash))
+        assertCleared(stale.accountHash)
+        assertEquals(stale.sessionEpoch, database.readAccount(stale.accountHash)!!.sessionEpoch)
+    }
+
+    @Test
+    fun switchingPurgesPreviousThirdAndStaleTargetRowsWithoutRotatingThirdEpoch() {
+        val stale = seedPlaintext("stale")
+        val target = seedPlaintext("target")
+        val previous = seedPlaintext(accountHash)
+
+        val switched = database.switchAccount(previous.accountHash, target.accountHash)
+
+        assertCleared(previous.accountHash)
+        assertCleared(stale.accountHash)
+        for (table in plaintextTables) {
+            assertEquals(table, 0L, rowCount(table, target.accountHash))
+        }
+        assertEquals(previous.sessionEpoch + 1, database.readAccount(accountHash)!!.sessionEpoch)
+        assertEquals(stale.sessionEpoch, database.readAccount(stale.accountHash)!!.sessionEpoch)
+        assertEquals(target.sessionEpoch + 1, switched.sessionEpoch)
+        assertEquals(target.accountHash, database.activeAccount()!!.accountHash)
+    }
+
+    @Test
+    fun logoutPurgesAllAccountsAndRotatesOnlyTheLoggedOutEpoch() {
+        val stale = seedPlaintext("stale")
+        val active = seedPlaintext(accountHash)
+
+        val epoch = database.clearActiveAccount(accountHash)
+
+        assertNull(database.activeAccount())
+        for (table in plaintextTables) {
+            assertEquals(table, 0L, rowCount(table))
+        }
+        assertCleared(active.accountHash)
+        assertCleared(stale.accountHash)
+        assertEquals(active.sessionEpoch + 1, epoch)
+        assertEquals(stale.sessionEpoch, database.readAccount(stale.accountHash)!!.sessionEpoch)
+    }
+
+    private val plaintextTables = listOf(
+        "snapshots", "events", "notification_signals", "notification_attempts",
+    )
+
+    private fun rowCount(table: String, account: String? = null): Long =
+        DatabaseUtils.queryNumEntries(
+            database.readableDatabase,
+            table,
+            account?.let { "account_hash = ?" },
+            account?.let { arrayOf(it) },
+        )
+
+    private fun assertCleared(account: String) {
+        for (table in plaintextTables) {
+            assertEquals("$account $table", 0L, rowCount(table, account))
+        }
+        val row = database.readAccount(account)!!
+        assertFalse(row.active)
+        assertFalse(row.baselineCompleted)
+        assertTrue(row.baselinedSources.isEmpty())
+        assertTrue(row.knownAssignmentIds.isEmpty())
+        assertTrue(row.sentNewAssignmentIds.isEmpty())
+        assertNull(row.lastFailure)
+        assertFalse(row.pendingUpdate)
+    }
+
+    private fun seedPlaintext(account: String): ReminderAccountState {
+        val active = database.ensureActiveAccount(account)
+        val settings = database.updateSettings(
+            account, active.sessionEpoch, backgroundEnabled = true,
+            intervalMinutes = 240, listenerEnabled = true,
+            newAssignmentEnabled = true, showDetails = false,
+        )
+        val now = System.currentTimeMillis()
+        val assignment = "cx:work:1:2:fixture"
+        val eventId = "$account|$assignment|new"
+        database.applyPlan(
+            accountHash = account,
+            sessionEpoch = settings.sessionEpoch,
+            baselineCompleted = true,
+            knownIds = setOf(assignment),
+            snapshots = listOf(StoredReminderSnapshot(
+                accountHash = account,
+                assignmentId = assignment,
+                sessionEpoch = settings.sessionEpoch,
+                courseName = "fixture course",
+                title = "fixture work",
+                deadlineAt = null,
+                deadlineTrusted = true,
+                deadlineReadFailed = false,
+                status = "pending",
+                completed = false,
+                hidden = false,
+                followed = true,
+                formal = true,
+            )),
+            events = listOf(StoredReminderEvent(
+                eventId = eventId,
+                accountHash = account,
+                sessionEpoch = settings.sessionEpoch,
+                type = ReminderDatabase.EVENT_NEW,
+                assignmentId = assignment,
+                courseName = "fixture course",
+                title = "fixture work",
+                notifyAt = now,
+                deadlineAt = null,
+                offsets = emptyList(),
+                batchId = null,
+                status = ReminderDatabase.STATUS_PENDING,
+                notificationId = ReminderDatabase.stableNotificationId(eventId),
+            )),
+            completedAt = now,
+            failure = "fixture failure",
+            syncCompleted = true,
+            expectedMutationVersion = settings.mutationVersion,
+        )
+        database.recordSignal(account, settings.sessionEpoch, "fixture signal", now)
+        assertNotNull(database.claimNotificationAttempt(account, settings.sessionEpoch))
+        database.markPendingUpdate(account, settings.sessionEpoch)
+        database.writableDatabase.execSQL(
+            "UPDATE accounts SET sent_new_ids = ? WHERE account_hash = ?",
+            arrayOf("[\"fixture-sent\"]", account),
+        )
+        for (table in plaintextTables) {
+            assertEquals("fixture $table", 1L, rowCount(table, account))
+        }
+        return database.readAccount(account)!!
     }
 }

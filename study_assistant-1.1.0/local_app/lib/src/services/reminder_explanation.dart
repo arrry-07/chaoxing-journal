@@ -388,7 +388,7 @@ class ReminderExplanationService {
     List<int> offsets,
     DateTime now,
   ) {
-    final anchor = _anchor(assignment);
+    final anchor = _anchor(assignment)?.toLocal();
     if (anchor == null) return null;
     final values = <DateTime>[];
     for (final offset in offsets) {

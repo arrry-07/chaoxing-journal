@@ -28,8 +28,10 @@ class PersonalWork {
         'links': links.map((s) => s.toJson()).toList(),
         'files': portable ? [] : files.map((s) => s.toJson()).toList()
       };
-  factory PersonalWork.fromJson(dynamic value) {
+  factory PersonalWork.fromJson(dynamic value, {bool portable = false}) {
     final j = PersonalWorkspace.map(value, {'note', 'steps', 'links', 'files'});
+    final files = PersonalWorkspace.list(j['files'], 10);
+    if (portable && files.isNotEmpty) PersonalWorkspace.bad();
     final note = PersonalWorkspace.text(j['note'], 10000, empty: true);
     final steps = PersonalWorkspace.list(j['steps'], 50).map((v) {
       final s = PersonalWorkspace.map(v, {'text', 'done'});
@@ -37,8 +39,8 @@ class PersonalWork {
       return PersonalStep(PersonalWorkspace.text(s['text'], 200),
           done: s['done'] as bool);
     }).toList();
-    List<PersonalLink> refs(dynamic v, int max, bool file) =>
-        PersonalWorkspace.list(v, max).map((v) {
+    List<PersonalLink> refs(List<dynamic> values, {required bool file}) =>
+        values.map((v) {
           final s = PersonalWorkspace.map(v, {'label', 'url'});
           final url = PersonalWorkspace.text(s['url'], 4096);
           if (file
@@ -51,8 +53,9 @@ class PersonalWork {
     return PersonalWork(
         note: note,
         steps: List.unmodifiable(steps),
-        links: List.unmodifiable(refs(j['links'], 20, false)),
-        files: List.unmodifiable(refs(j['files'], 10, true)));
+        links: List.unmodifiable(
+            refs(PersonalWorkspace.list(j['links'], 20), file: false)),
+        files: List.unmodifiable(refs(files, file: true)));
   }
 }
 
@@ -152,7 +155,7 @@ class PersonalWorkspace {
     }
     return PersonalWorkspace.fromJson(jsonDecode(raw));
   }
-  factory PersonalWorkspace.fromJson(dynamic value) {
+  factory PersonalWorkspace.fromJson(dynamic value, {bool portable = false}) {
     final j = map(value, {
       'version',
       'work',
@@ -176,7 +179,8 @@ class PersonalWorkspace {
     }
     final work = <String, PersonalWork>{};
     for (final e in (j['work'] as Map).entries) {
-      work[text(e.key, 500)] = PersonalWork.fromJson(e.value);
+      work[text(e.key, 500)] =
+          PersonalWork.fromJson(e.value, portable: portable);
     }
     final seen = <String>{};
     final plans = <DailyPlanItem>[];

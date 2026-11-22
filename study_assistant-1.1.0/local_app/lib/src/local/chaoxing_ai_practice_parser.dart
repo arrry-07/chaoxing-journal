@@ -3,6 +3,7 @@ import '../models/assignment.dart';
 import '../models/ai_practice_entry.dart';
 import 'chaoxing_assignment_parser.dart';
 import 'chaoxing_classroom_parser.dart';
+import 'chaoxing_param_helper.dart';
 
 class ChaoxingAiPracticeParser {
   static Assignment seedEntry(Assignment seed, dynamic content) {
@@ -36,8 +37,12 @@ class ChaoxingAiPracticeParser {
     final cpi = value('cpi'), relation = value('publishRelationUuid');
     if (uid == null ||
         value('currentUserId') != uid ||
-        value('courseId') != seed.courseId ||
-        value('clazzId') != seed.clazzId ||
+        ChaoxingParamHelper.hiddenInputValue(
+                html, ChaoxingParamHelper.courseIdKeys) !=
+            seed.courseId ||
+        ChaoxingParamHelper.hiddenInputValue(
+                html, ChaoxingParamHelper.clazzIdKeys) !=
+            seed.clazzId ||
         cpi.isEmpty ||
         (expectedCpi != null && cpi != expectedCpi) ||
         !AiPracticeEntry.isUuid(relation)) {

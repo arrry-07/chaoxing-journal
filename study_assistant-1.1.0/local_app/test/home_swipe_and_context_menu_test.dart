@@ -48,6 +48,7 @@ Assignment _work(
   String title = '高等数学作业',
   DateTime? due,
   String? submitUrl,
+  required DateTime syncedAt,
 }) =>
     Assignment(
       id: 'cx:work:1:2:$id',
@@ -58,7 +59,7 @@ Assignment _work(
       requirementsText: '',
       status: 'pending',
       submitUrl: submitUrl,
-      lastSyncedAt: DateTime.now(),
+      lastSyncedAt: syncedAt,
     );
 
 Future<AssignmentStore> _authenticatedStore(List<Assignment> items) async {
@@ -77,19 +78,22 @@ Future<AssignmentStore> _authenticatedStore(List<Assignment> items) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  final fixedMorning = DateTime(2026, 11, 22, 10, 0);
 
   testWidgets(
       'right swipe toggles today plan (30 min default) and left swipe toggles pin',
       (tester) async {
-    final due = DateTime.now().add(const Duration(days: 1));
-    final item = _work('w1', title: '手势作业一', due: due);
+    final due = fixedMorning.add(const Duration(days: 1));
+    final item = _work('w1', title: '手势作业一', due: due, syncedAt: fixedMorning);
     final store = await _authenticatedStore([item]);
     addTearDown(store.dispose);
 
     await tester.pumpWidget(
       MaterialApp(
         theme: StudyAssistantTheme.light,
-        home: Scaffold(body: AssignmentListScreen(store: store)),
+        home: Scaffold(
+          body: AssignmentListScreen(store: store, clock: () => fixedMorning),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -101,7 +105,7 @@ void main() {
     await tester.drag(tile, const Offset(140, 0));
     await tester.pumpAndSettle();
 
-    final day = PersonalWorkspace.dayKey(DateTime.now());
+    final day = PersonalWorkspace.dayKey(fixedMorning);
     expect(
       store.personal.plans
           .where((p) => p.day == day && p.assignmentId == item.id)
@@ -134,12 +138,13 @@ void main() {
 
   testWidgets('long press opens context menu and supports hide with undo',
       (tester) async {
-    final due = DateTime.now().add(const Duration(days: 2));
+    final due = fixedMorning.add(const Duration(days: 2));
     final item = _work(
       'w2',
       title: '长按菜单作业',
       due: due,
       submitUrl: 'https://mooc1.chaoxing.com/work/view?workid=w2',
+      syncedAt: fixedMorning,
     );
     final store = await _authenticatedStore([item]);
     addTearDown(store.dispose);
@@ -147,7 +152,9 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: StudyAssistantTheme.light,
-        home: Scaffold(body: AssignmentListScreen(store: store)),
+        home: Scaffold(
+          body: AssignmentListScreen(store: store, clock: () => fixedMorning),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -176,9 +183,10 @@ void main() {
 
   testWidgets('home deduplicates today badge and merges pinned countdown line',
       (tester) async {
-    final now = DateTime.now();
+    final now = fixedMorning;
     final todayDue = now.add(const Duration(hours: 3));
-    final item = _work('w3', title: '今日合并时间作业', due: todayDue);
+    final item =
+        _work('w3', title: '今日合并时间作业', due: todayDue, syncedAt: fixedMorning);
     final store = await _authenticatedStore([item]);
     addTearDown(store.dispose);
     await store.saveDisplay(const DisplayPreferences(countdown: true));
@@ -186,12 +194,15 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: StudyAssistantTheme.light,
-        home: Scaffold(body: AssignmentListScreen(store: store)),
+        home: Scaffold(
+          body: AssignmentListScreen(store: store, clock: () => now),
+        ),
       ),
     );
     await tester.pumpAndSettle();
 
     // Group header owns '今天'; card must not repeat '今天截止' pill.
+    expect(find.text('今天'), findsOneWidget);
     expect(find.text('今天截止'), findsNothing);
     expect(find.textContaining('剩余'), findsOneWidget);
 

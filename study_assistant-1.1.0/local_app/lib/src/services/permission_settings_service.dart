@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 enum SettingsOpenResult {
@@ -63,7 +64,13 @@ class PermissionSettingsService {
       return await _channel
               .invokeMethod<bool>('isNotificationListenerEnabled') ??
           false;
-    } catch (_) {
+    } on PlatformException catch (error) {
+      debugPrint('[PermissionSettings] listenerStatus: ${error.runtimeType}');
+      return false;
+    } on MissingPluginException {
+      return false;
+    } on TypeError catch (error) {
+      debugPrint('[PermissionSettings] listenerStatus: ${error.runtimeType}');
       return false;
     }
   }
@@ -71,7 +78,13 @@ class PermissionSettingsService {
   Future<bool> _open(String method) async {
     try {
       return await _channel.invokeMethod<bool>(method) ?? false;
-    } catch (_) {
+    } on PlatformException catch (error) {
+      debugPrint('[PermissionSettings] $method: ${error.runtimeType}');
+      return false;
+    } on MissingPluginException {
+      return false;
+    } on TypeError catch (error) {
+      debugPrint('[PermissionSettings] $method: ${error.runtimeType}');
       return false;
     }
   }
@@ -92,7 +105,10 @@ class PermissionSettingsService {
         'unavailable' => SettingsOpenResult.unavailable,
         _ => SettingsOpenResult.unavailable,
       };
-    } catch (_) {
+    } on PlatformException catch (error) {
+      debugPrint('[PermissionSettings] $method: ${error.runtimeType}');
+      return SettingsOpenResult.unavailable;
+    } on MissingPluginException {
       return SettingsOpenResult.unavailable;
     }
   }

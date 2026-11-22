@@ -55,7 +55,7 @@ Future<void> showJournalContextMenu({
   );
 }
 
-class _JournalContextMenuOverlay extends StatelessWidget {
+class _JournalContextMenuOverlay extends StatefulWidget {
   const _JournalContextMenuOverlay({
     required this.animation,
     required this.anchorRect,
@@ -71,6 +71,41 @@ class _JournalContextMenuOverlay extends StatelessWidget {
   final DisplayPreferences displayPrefs;
 
   @override
+  State<_JournalContextMenuOverlay> createState() =>
+      _JournalContextMenuOverlayState();
+}
+
+class _JournalContextMenuOverlayState
+    extends State<_JournalContextMenuOverlay> {
+  late final CurvedAnimation _curved;
+  bool _dismissed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _curved = CurvedAnimation(
+      parent: widget.animation,
+      curve: JournalMotion.easeOut,
+      reverseCurve: JournalMotion.easeOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _curved.dispose();
+    super.dispose();
+  }
+
+  void _dismiss({VoidCallback? afterDismiss}) {
+    if (_dismissed) return;
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+    _dismissed = true;
+    Navigator.of(context).pop();
+    afterDismiss?.call();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
     final media = MediaQuery.of(context);
@@ -78,47 +113,78 @@ class _JournalContextMenuOverlay extends StatelessWidget {
     final topSafe = media.padding.top + 12;
     final bottomSafe = media.padding.bottom + 16;
     final reduced = JournalMotion.isReducedMotion(context);
-    final curved = CurvedAnimation(
-      parent: animation,
-      curve: JournalMotion.easeOut,
-      reverseCurve: JournalMotion.easeOut,
-    );
+    final actions = widget.actions;
+    final anchorRect = widget.anchorRect;
 
     const horizontalPad = 18.0;
-    final cardWidth = (size.width - horizontalPad * 2).clamp(240.0, 520.0);
-    final menuHeight = actions.length * 48.0 + 12.0;
-    final estCardHeight = (anchorRect?.height ?? 92.0).clamp(64.0, 220.0);
-    final availableAbove = (anchorRect?.top ?? size.height * 0.35) - topSafe;
+    const edgeInset = 8.0;
+    const gap = 10.0;
+    final largeText = JournalLayout.isLargeText(context);
+    // Rows grow with the text scale; 48dp stays the touch-target floor.
+    final itemHeight = math.max(48.0, media.textScaler.scale(15) * 1.38 + 20.0);
+    final naturalMenuHeight =
+        actions.length * itemHeight + (actions.length - 1) * 0.6;
+    final usableHeight = math.max(0.0, size.height - topSafe - bottomSafe);
+
+    final maxCardWidth = math.max(0.0, size.width - edgeInset * 2);
+    final cardWidth = math.min(
+      anchorRect?.width ??
+          (size.width - horizontalPad * 2).clamp(240.0, 520.0).toDouble(),
+      maxCardWidth,
+    );
+    final naturalCardHeight = anchorRect?.height ?? 92.0;
+
+    // One shared vertical budget: the menu keeps up to two rows when space
+    // permits and never exceeds usableHeight; the preview clips cleanly.
+    final minCardShown = math.min(naturalCardHeight, 96.0);
+    final desiredFloor = math.min(itemHeight * 2, usableHeight);
+    final menuBudget =
+        math.max(desiredFloor, usableHeight - gap - minCardShown);
+    final menuHeight = math.min(
+      naturalMenuHeight,
+      math.min(usableHeight, menuBudget),
+    );
+    final cardHeight = math.max(
+      0.0,
+      math.min(naturalCardHeight, usableHeight - gap - menuHeight),
+    );
+    final stackHeight = cardHeight + gap + menuHeight;
+
+    final anchorTop = anchorRect?.top ?? (size.height * 0.28);
+    final availableAbove = anchorTop - topSafe;
     final availableBelow =
         size.height - bottomSafe - (anchorRect?.bottom ?? size.height * 0.45);
-    final placeBelow =
-        availableBelow >= menuHeight + 12 || availableBelow >= availableAbove;
+    final fitsBelow = anchorTop + stackHeight <= size.height - bottomSafe;
+    final placeBelow = fitsBelow || availableBelow >= availableAbove;
 
-    double cardTop = anchorRect?.top ?? (size.height * 0.28);
+    final double cardTop;
     if (placeBelow) {
-      final maxTop = size.height - bottomSafe - menuHeight - 12 - estCardHeight;
-      cardTop = cardTop.clamp(topSafe, math.max(topSafe, maxTop));
+      final maxTop = size.height - bottomSafe - stackHeight;
+      cardTop = anchorTop.clamp(topSafe, math.max(topSafe, maxTop)).toDouble();
     } else {
-      final minTop = topSafe + menuHeight + 12;
-      cardTop = cardTop.clamp(
-        minTop,
-        math.max(minTop, size.height - bottomSafe - estCardHeight),
-      );
+      final minTop = topSafe + menuHeight + gap;
+      cardTop = anchorTop
+          .clamp(
+              minTop, math.max(minTop, size.height - bottomSafe - cardHeight))
+          .toDouble();
     }
 
-    final menuTop = placeBelow
-        ? cardTop + estCardHeight + 10
-        : (cardTop - menuHeight - 10).clamp(topSafe, size.height - bottomSafe);
-
-    final menuWidth = math.min(238.0, cardWidth);
-    final cardLeft = anchorRect?.left ?? ((size.width - cardWidth) / 2);
+    final cardLeft = (anchorRect?.left ?? ((size.width - cardWidth) / 2))
+        .clamp(
+            edgeInset, math.max(edgeInset, size.width - edgeInset - cardWidth))
+        .toDouble();
+    final menuWidth = math.min(largeText ? 300.0 : 238.0, cardWidth);
+    final menuLeft = cardLeft
+        .clamp(
+            edgeInset, math.max(edgeInset, size.width - edgeInset - menuWidth))
+        .toDouble();
 
     return Material(
       type: MaterialType.transparency,
       child: AnimatedBuilder(
-        animation: curved,
+        animation: _curved,
         builder: (context, _) {
-          final t = curved.value;
+          final t = _curved.value;
           final sigma = reduced ? 0.0 : 12.0 * t;
           final scaleCard = reduced ? 1.0 : 1.0 + 0.02 * t;
           final menuScale = reduced ? 1.0 : 0.90 + 0.10 * t;
@@ -128,7 +194,7 @@ class _JournalContextMenuOverlay extends StatelessWidget {
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: () => Navigator.of(context).pop(),
+                  onTap: _dismiss,
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
                     child: ColoredBox(
@@ -141,45 +207,53 @@ class _JournalContextMenuOverlay extends StatelessWidget {
                   ),
                 ),
               ),
-              Positioned(
-                left: cardLeft,
-                top: cardTop,
-                width: anchorRect?.width ?? cardWidth,
-                child: IgnorePointer(
-                  child: Transform.scale(
-                    scale: scaleCard,
-                    child: Opacity(
-                      opacity: t.clamp(0.0, 1.0),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: journal.sheetElevated,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: journal.cardBorder,
-                            width: 0.8,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(
-                                alpha: journal.isDark ? 0.36 : 0.14,
-                              ),
-                              blurRadius: 24,
-                              offset: const Offset(0, 10),
+              if (cardHeight > 0)
+                Positioned(
+                  left: cardLeft,
+                  top: cardTop,
+                  width: cardWidth,
+                  height: cardHeight,
+                  child: IgnorePointer(
+                    child: Transform.scale(
+                      scale: scaleCard,
+                      child: Opacity(
+                        opacity: t.clamp(0.0, 1.0),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: journal.sheetElevated,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: journal.cardBorder,
+                              width: 0.8,
                             ),
-                          ],
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: previewCard,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(
+                                  alpha: journal.isDark ? 0.36 : 0.14,
+                                ),
+                                blurRadius: 24,
+                                offset: const Offset(0, 10),
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            // Clip (never overflow) a preview taller than its
+                            // share of the screen budget.
+                            child: SingleChildScrollView(
+                              physics: const NeverScrollableScrollPhysics(),
+                              child: widget.previewCard,
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
               Positioned(
-                left: cardLeft,
-                top: menuTop,
+                left: menuLeft,
+                top: placeBelow ? cardTop + cardHeight + gap : null,
+                bottom: placeBelow ? null : size.height - (cardTop - gap),
                 width: menuWidth,
                 child: Transform.scale(
                   scale: menuScale,
@@ -200,52 +274,27 @@ class _JournalContextMenuOverlay extends StatelessWidget {
                           ),
                         ],
                       ),
-                      child: JournalGroupedCard(
-                        backgroundColor: journal.sheetElevated,
-                        dividerIndent: 16,
-                        children: [
-                          for (final action in actions)
-                            Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                onTap: () {
-                                  JournalMotion.tap(displayPrefs);
-                                  Navigator.of(context).pop();
-                                  action.onSelected();
-                                },
-                                child: SizedBox(
-                                  height: 47,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 16),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            action.label,
-                                            style: journal.entryTitle.copyWith(
-                                              fontSize: 15,
-                                              color: action.destructive
-                                                  ? journal.berry
-                                                  : journal.ink,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                        ),
-                                        Icon(
-                                          action.icon,
-                                          size: 19,
-                                          color: action.destructive
-                                              ? journal.berry
-                                              : journal.ink,
-                                        ),
-                                      ],
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: menuHeight),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: SingleChildScrollView(
+                            child: JournalGroupedCard(
+                              backgroundColor: journal.sheetElevated,
+                              dividerIndent: 16,
+                              children: [
+                                for (final action in actions)
+                                  _ContextMenuRow(
+                                    action: action,
+                                    journal: journal,
+                                    onTap: () => _dismiss(
+                                      afterDismiss: action.onSelected,
                                     ),
                                   ),
-                                ),
-                              ),
+                              ],
                             ),
-                        ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -254,6 +303,51 @@ class _JournalContextMenuOverlay extends StatelessWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _ContextMenuRow extends StatelessWidget {
+  const _ContextMenuRow({
+    required this.action,
+    required this.journal,
+    required this.onTap,
+  });
+
+  final JournalContextMenuAction action;
+  final JournalPalette journal;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = action.destructive ? journal.berry : journal.ink;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    action.label,
+                    style: journal.entryTitle.copyWith(
+                      fontSize: 15,
+                      color: color,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Icon(action.icon, size: 19, color: color),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

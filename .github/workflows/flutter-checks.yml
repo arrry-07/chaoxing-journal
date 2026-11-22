@@ -47,6 +47,10 @@ jobs:
                   maven {
                       name = "GoogleMavenCentralMirror"
                       url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                      content {
+                          excludeGroupByRegex("com\\.android.*")
+                          excludeGroupByRegex("androidx.*")
+                      }
                   }
                   if (settings.gradle.parent != null) {
                       gradlePluginPortal()
@@ -57,6 +61,10 @@ jobs:
                       maven {
                           name = "GoogleMavenCentralMirror"
                           url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                          content {
+                              excludeGroupByRegex("com\\.android.*")
+                              excludeGroupByRegex("androidx.*")
+                          }
                       }
                   }
               }
@@ -66,6 +74,10 @@ jobs:
                   maven {
                       name = "GoogleMavenCentralMirror"
                       url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                      content {
+                          excludeGroupByRegex("com\\.android.*")
+                          excludeGroupByRegex("androidx.*")
+                      }
                   }
               }
               if (project.gradle.parent == null) {
@@ -73,6 +85,10 @@ jobs:
                       maven {
                           name = "GoogleMavenCentralMirror"
                           url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                          content {
+                              excludeGroupByRegex("com\\.android.*")
+                              excludeGroupByRegex("androidx.*")
+                          }
                       }
                   }
               }
@@ -88,12 +104,17 @@ jobs:
             python3 tool/check_release_metadata.py
           fi
           python3 tool/check_changed_format.py
-      - name: Check Gitee distribution scripts
+      - name: Check repo safety, scripts and L0 doc budget
         working-directory: ${{ github.workspace }}
         run: |
-          python3 -m py_compile scripts/gitee_release_sync.py
+          python3 scripts/check_repo_safety.py --worktree
+          python3 -m py_compile scripts/*.py study_assistant-1.1.0/local_app/tool/*.py
+          python3 scripts/test_check_repo_safety.py
+          python3 scripts/test_verify_local_gate.py
+          python3 scripts/test_verify_apk_and_report.py
           python3 scripts/test_gitee_release_sync.py
           python3 scripts/test_gitee_workflow.py
+          python3 -c 'from pathlib import Path; a = len(Path("AGENTS.md").read_text(encoding="utf-8").splitlines()); s = len(Path("docs/ai-workflow/PROJECT_STATE.md").read_text(encoding="utf-8").splitlines()); assert a + s <= 80, f"L0 doc line budget exceeded: {a} + {s} = {a + s} > 80"; print(f"[PASS] L0 doc line budget: {a} + {s} = {a + s} <= 80")'
       - name: Run synthetic JVM checks
         run: |
           if ! curl --fail --location --retry 2 https://maven-central.storage-download.googleapis.com/maven2/org/json/json/20180813/json-20180813.jar -o "$RUNNER_TEMP/json.jar"; then
@@ -101,6 +122,9 @@ jobs:
           fi
           echo "518080049ba83181914419d11a25d9bc9833a2d729b6a6e7469fa52851356da8  $RUNNER_TEMP/json.jar" | sha256sum --check
           python3 tool/run_native_checks.py --json-jar "$RUNNER_TEMP/json.jar"
+      - name: Use official Gradle distribution on CI
+        run: |
+          python3 -c 'import re; from pathlib import Path; p = Path("android/gradle/wrapper/gradle-wrapper.properties"); text = p.read_text(encoding="utf-8"); updated = re.sub(r"https\\://mirrors\.aliyun\.com/gradle/distributions/(?:v[0-9.]+/)?", lambda _: "https\\://services.gradle.org/distributions/", text); assert "https\\://services.gradle.org/distributions/gradle-" in updated, updated; p.write_text(updated, encoding="utf-8")'
       - name: Run application native unit tests and lint
         run: bash android/gradlew -p android :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug --no-daemon
       - name: Analyze Dart code
@@ -113,7 +137,7 @@ jobs:
         run: |
           for timezone in Asia/Shanghai America/Los_Angeles; do
             echo "Testing deadlines in $timezone"
-            TZ="$timezone" flutter test --no-pub test/journal_flow_test.dart test/chaoxing_api_parser_test.dart test/review_core_remediation_test.dart test/assignment_detail_navigation_test.dart test/signed_deadline_anchor_test.dart test/assignment_query_test.dart test/home_scope_sort_1806_test.dart test/academic_term_scope_test.dart
+            TZ="$timezone" flutter test --no-pub test/journal_flow_test.dart test/chaoxing_api_parser_test.dart test/review_core_remediation_test.dart test/assignment_detail_navigation_test.dart test/signed_deadline_anchor_test.dart test/assignment_query_test.dart test/home_scope_sort_1806_test.dart test/academic_term_scope_test.dart test/calendar_clock_test.dart test/calendar_scope_test.dart test/exam_notice_metadata_test.dart test/home_swipe_and_context_menu_test.dart
           done
       - name: Build Android debug APK
         run: flutter build apk --debug --no-pub --target-platform android-arm64,android-x64

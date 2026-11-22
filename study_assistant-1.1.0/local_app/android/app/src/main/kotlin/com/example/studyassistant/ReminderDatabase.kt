@@ -4,12 +4,16 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteException
 import android.database.sqlite.SQLiteOpenHelper
+import android.util.Log
 import androidx.annotation.VisibleForTesting
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import java.time.Instant
 import java.time.ZoneId
+import java.time.format.DateTimeParseException
 import java.util.UUID
 
 data class ReminderAccountState(
@@ -183,7 +187,7 @@ class ReminderDatabase private constructor(
     databaseName: String = DATABASE_NAME,
 ) : SQLiteOpenHelper(context.applicationContext, databaseName, null, DATABASE_VERSION) {
 
-    override fun onCreate(db: SQLiteDatabase) {
+    override fun onCreate(db: SQLiteDatabase) = logSchemaFailure("onCreate") {
         db.execSQL(
             """
             CREATE TABLE accounts (
@@ -280,9 +284,14 @@ class ReminderDatabase private constructor(
         createNotificationAttempts(db)
         createReminderHistory(db)
         createReminderScheduleEvidence(db)
+        ensureV7Indices(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+    override fun onUpgrade(
+        db: SQLiteDatabase,
+        oldVersion: Int,
+        newVersion: Int,
+    ) = logSchemaFailure("onUpgrade") {
         if (oldVersion < 2 && newVersion >= 2) {
             db.execSQL("ALTER TABLE accounts ADD COLUMN baselined_sources TEXT NOT NULL DEFAULT '[]'")
             db.execSQL("ALTER TABLE snapshots ADD COLUMN in_assignment_scope INTEGER NOT NULL DEFAULT 0")
@@ -315,6 +324,35 @@ class ReminderDatabase private constructor(
             createReminderHistory(db)
             createReminderScheduleEvidence(db)
         }
+        if (oldVersion < 7 && newVersion >= 7) {
+            ensureV7Indices(db)
+        }
+    }
+
+    private inline fun logSchemaFailure(stage: String, changeSchema: () -> Unit) {
+        try {
+            changeSchema()
+        } catch (error: SQLiteException) {
+            Log.w(TAG, "$stage ${error.javaClass.simpleName}")
+            throw error
+        }
+    }
+
+    private fun ensureV7Indices(db: SQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS events_notification_id ON events(notification_id)")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS events_account_assignment " +
+                "ON events(account_hash, assignment_id, updated_at)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS notification_signals_received_at " +
+                "ON notification_signals(account_hash, received_at)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS reminder_schedule_evidence_subject " +
+                "ON reminder_schedule_evidence(" +
+                "account_hash, history_generation, subject_kind, subject_id, confirmed_at)",
+        )
     }
 
     private fun createNotificationAttempts(db: SQLiteDatabase) {
@@ -415,35 +453,22 @@ class ReminderDatabase private constructor(
             val switchingAccount = previousHash?.takeIf {
                 it.isNotBlank() && it != targetHash
             }
-            if (switchingAccount != null) {
-                writableDatabase.execSQL(
-                    "UPDATE accounts SET session_epoch = session_epoch + 1, active = 0, " +
-                        "claim_token = NULL, " +
-                        "updated_at = ? WHERE account_hash = ?",
-                    arrayOf<Any?>(now, switchingAccount),
-                )
-                deleteNotificationAttemptLocked(switchingAccount)
-                cancelEventsLocked(switchingAccount, now)
-            }
             requireAccount(targetHash)
+            purgeReminderStateLocked(keepAccountHash = targetHash.takeIf { switchingAccount == null })
+            clearAccountPlaintextLocked(keepAccountHash = targetHash)
             if (switchingAccount != null) {
                 writableDatabase.execSQL(
-                    "UPDATE accounts SET session_epoch = session_epoch + 1, active = 0, " +
-                        "claim_token = NULL " +
-                        "WHERE account_hash != ?",
-                    arrayOf<Any?>(switchingAccount),
+                    "UPDATE accounts SET session_epoch = session_epoch + 1, updated_at = ? " +
+                        "WHERE account_hash IN (?, ?)",
+                    arrayOf<Any?>(now, switchingAccount, targetHash),
                 )
             } else {
-                writableDatabase.execSQL("UPDATE accounts SET active = 0")
+                deleteNotificationAttemptLocked(targetHash)
             }
             writableDatabase.execSQL(
                 "UPDATE accounts SET active = 1, updated_at = ? WHERE account_hash = ?",
                 arrayOf<Any?>(now, targetHash),
             )
-            deleteNotificationAttemptLocked(targetHash)
-            if (switchingAccount != null) {
-                cancelEventsLocked(targetHash, now)
-            }
             readAccount(targetHash)!!
         }
 
@@ -467,33 +492,15 @@ class ReminderDatabase private constructor(
     fun clearActiveAccount(accountHash: String): Long =
         transaction {
             val now = System.currentTimeMillis()
+            // A retry of an earlier logout may arrive after a different login.
+            val keepActiveHash = activeAccount()?.accountHash?.takeIf { it != accountHash }
             requireAccount(accountHash)
-            writableDatabase.delete(
-                "snapshots",
-                "account_hash = ?",
-                arrayOf(accountHash),
-            )
-            writableDatabase.delete(
-                "events",
-                "account_hash = ?",
-                arrayOf(accountHash),
-            )
-            writableDatabase.delete(
-                "notification_signals",
-                "account_hash = ?",
-                arrayOf(accountHash),
-            )
-            deleteNotificationAttemptLocked(accountHash)
+            purgeReminderStateLocked(keepAccountHash = keepActiveHash)
+            clearAccountPlaintextLocked(keepAccountHash = keepActiveHash)
             writableDatabase.execSQL(
-                "UPDATE accounts SET session_epoch = session_epoch + 1, active = 0, " +
-                    "baseline_completed = 0, baselined_sources = '[]', " +
-                    "known_ids = '[]', sent_new_ids = '[]', " +
-                    "pending_update = 0, pending_signal_version = 0, " +
-                    "consumed_signal_version = 0, last_signal_at = NULL, " +
-                    "attempted_signal_version = 0, last_signal_check_at = NULL, " +
-                    "claim_token = NULL, " +
+                "UPDATE accounts SET session_epoch = session_epoch + 1, " +
                     "last_attempt_at = NULL, last_data_success_at = NULL, " +
-                    "last_full_success_at = NULL, last_failure = NULL, " +
+                    "last_full_success_at = NULL, " +
                     "next_check_at = NULL, migration_state = 'legacy_pending', " +
                     "mutation_version = mutation_version + 1, updated_at = ? " +
                     "WHERE account_hash = ?",
@@ -501,6 +508,46 @@ class ReminderDatabase private constructor(
             )
             readAccount(accountHash)!!.sessionEpoch
         }
+
+    private fun purgeReminderStateLocked(keepAccountHash: String?) {
+        val selection = keepAccountHash?.let { "account_hash != ?" }
+        val args = keepAccountHash?.let { arrayOf(it) }
+        writableDatabase.delete("snapshots", selection, args)
+        writableDatabase.delete("events", selection, args)
+        writableDatabase.delete("notification_signals", selection, args)
+        writableDatabase.delete("notification_attempts", selection, args)
+        // Reset the watermarks together with their signals and claims.
+        writableDatabase.update(
+            "accounts",
+            ContentValues().apply {
+                put("pending_signal_version", 0)
+                put("consumed_signal_version", 0)
+                put("attempted_signal_version", 0)
+                putNull("last_signal_at")
+                putNull("last_signal_check_at")
+                putNull("claim_token")
+            },
+            selection,
+            args,
+        )
+    }
+
+    private fun clearAccountPlaintextLocked(keepAccountHash: String?) {
+        writableDatabase.update(
+            "accounts",
+            ContentValues().apply {
+                put("active", 0)
+                put("baseline_completed", 0)
+                put("baselined_sources", "[]")
+                put("known_ids", "[]")
+                put("sent_new_ids", "[]")
+                putNull("last_failure")
+                put("pending_update", 0)
+            },
+            keepAccountHash?.let { "account_hash != ?" },
+            keepAccountHash?.let { arrayOf(it) },
+        )
+    }
 
     @Synchronized
     fun isSessionCurrent(accountHash: String, sessionEpoch: Long): Boolean {
@@ -717,6 +764,8 @@ class ReminderDatabase private constructor(
         val desiredIds = desiredDeadline.map { it.eventId }.toSet()
         val invalidatedEvents = mutableListOf<StoredReminderEvent>()
         val existing = eventsForAccount(accountHash)
+        val existingById = existing.associateBy { it.eventId }
+        val existingIds = existingById.keys.toMutableSet()
         existing.filter {
             (it.status == STATUS_PENDING || it.status == STATUS_SUBMITTED) &&
                 (snapshotsById[it.assignmentId]?.matchesEvent(it, now) != true ||
@@ -736,10 +785,11 @@ class ReminderDatabase private constructor(
         }
         val scheduledDeadlineEvents = mutableListOf<StoredReminderEvent>()
         desiredDeadline.forEach { event ->
-            val current = existing.firstOrNull { it.eventId == event.eventId }
+            val current = existingById[event.eventId]
             when {
                 current == null -> {
                     insertEvent(event, now)
+                    existingIds.add(event.eventId)
                     scheduledDeadlineEvents.add(event)
                 }
                 current.status == STATUS_PENDING -> {
@@ -765,7 +815,7 @@ class ReminderDatabase private constructor(
 
         val newEvents = mutableListOf<StoredReminderEvent>()
         validEvents.filter { it.type == EVENT_NEW }.forEach { event ->
-            if (eventsForAccount(accountHash).none { it.eventId == event.eventId }) {
+            if (existingIds.add(event.eventId)) {
                 insertEvent(event, now)
                 newEvents.add(event)
             }
@@ -796,14 +846,14 @@ class ReminderDatabase private constructor(
             arrayOf(accountHash),
         )
 
+        pruneStaleDataLocked(now)
+        val pendingEvents = eventsForAccount(accountHash).filter { it.status == STATUS_PENDING }
         PlanApplication(
             desiredDeadlineEvents = desiredDeadline,
             invalidatedEvents = invalidatedEvents,
             newEvents = newEvents,
-            pendingNewCount = eventsForAccount(accountHash)
-                .count { it.type == EVENT_NEW && it.status == STATUS_PENDING },
-            pendingDeadlineCount = eventsForAccount(accountHash)
-                .count { it.type == EVENT_DEADLINE && it.status == STATUS_PENDING },
+            pendingNewCount = pendingEvents.count { it.type == EVENT_NEW },
+            pendingDeadlineCount = pendingEvents.count { it.type == EVENT_DEADLINE },
             scheduledDeadlineEvents = scheduledDeadlineEvents,
         )
     }
@@ -1054,6 +1104,7 @@ class ReminderDatabase private constructor(
         }
         val version = account.pendingSignalVersion + 1
         transaction {
+            pruneStaleSignalsLocked(receivedAt)
             writableDatabase.insertOrThrow(
                 "notification_signals",
                 null,
@@ -1076,6 +1127,37 @@ class ReminderDatabase private constructor(
             )
         }
         return version
+    }
+
+    @Synchronized
+    fun pruneStaleData(now: Long = System.currentTimeMillis()) {
+        transaction { pruneStaleDataLocked(now) }
+    }
+
+    private fun pruneStaleDataLocked(now: Long) {
+        pruneStaleSignalsLocked(now)
+        val cutoff = (now - 30 * DAY_MILLIS).toString()
+        writableDatabase.delete(
+            "events",
+            "status IN (?, ?, ?) AND updated_at < ? " +
+                "AND (type != ? OR deadline_at IS NULL OR deadline_at < ?)",
+            arrayOf(
+                STATUS_CANCELLED, STATUS_SUBMITTED, STATUS_INVALID, cutoff, EVENT_DEADLINE, now.toString(),
+            ),
+        )
+        writableDatabase.delete(
+            "reminder_schedule_evidence",
+            "state != ? AND confirmed_at < ? AND (scheduled_at IS NULL OR scheduled_at < ?)",
+            arrayOf("recoveryPending", cutoff, cutoff),
+        )
+    }
+
+    private fun pruneStaleSignalsLocked(now: Long) {
+        writableDatabase.delete(
+            "notification_signals",
+            "received_at < ?",
+            arrayOf((now - 7 * DAY_MILLIS).toString()),
+        )
     }
 
     @Synchronized
@@ -2088,7 +2170,9 @@ class ReminderDatabase private constructor(
         const val STATUS_INVALID = "invalid"
 
         private const val DATABASE_NAME = "assignment_reminders_v1.db"
-        private const val DATABASE_VERSION = 6
+        private const val DATABASE_VERSION = 7
+        private const val DAY_MILLIS = 86_400_000L
+        private const val TAG = "ReminderDatabase"
 
         @Volatile
         private var instance: ReminderDatabase? = null
@@ -2106,24 +2190,39 @@ class ReminderDatabase private constructor(
         fun parseInstant(value: Any?): Long? {
             val text = value as? String ?: return null
             if (text.isBlank()) return null
-            return runCatching { Instant.parse(text).toEpochMilli() }.getOrNull()
+            return try {
+                Instant.parse(text).toEpochMilli()
+            } catch (error: DateTimeParseException) {
+                Log.w(TAG, "parseInstant ${error.javaClass.simpleName}")
+                null
+            } catch (error: ArithmeticException) {
+                // A valid Instant can still be outside the range of epoch milliseconds.
+                Log.w(TAG, "parseInstant ${error.javaClass.simpleName}")
+                null
+            }
         }
 
-        fun stringSet(raw: String?): Set<String> = runCatching {
+        fun stringSet(raw: String?): Set<String> = try {
             val array = JSONArray(raw ?: "[]")
             buildSet {
                 for (index in 0 until array.length()) {
                     array.optString(index).takeIf { it.isNotBlank() }?.let(::add)
                 }
             }
-        }.getOrDefault(emptySet())
+        } catch (error: JSONException) {
+            Log.w(TAG, "stringSet ${error.javaClass.simpleName}")
+            emptySet()
+        }
 
-        private fun intList(raw: String?): List<Int> = runCatching {
+        private fun intList(raw: String?): List<Int> = try {
             val array = JSONArray(raw ?: "[]")
             buildList {
                 for (index in 0 until array.length()) add(array.optInt(index))
             }
-        }.getOrDefault(emptyList())
+        } catch (error: JSONException) {
+            Log.w(TAG, "intList ${error.javaClass.simpleName}")
+            emptyList()
+        }
 
         fun eventFromJson(
             accountHash: String,

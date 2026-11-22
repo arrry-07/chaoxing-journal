@@ -1,7 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../models/personal_workspace.dart';
 
 class PersonalFileService {
+  const PersonalFileService();
+
   static const channel = MethodChannel('study_assistant/personal_files');
   Future<PersonalLink?> pick() async {
     final data = await channel.invokeMapMethod<String, dynamic>('pick');
@@ -21,6 +24,32 @@ class PersonalFileService {
     try {
       return await channel.invokeMethod<bool>('open', {'uri': uri}) ?? false;
     } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> releaseAll() async {
+    if (kDebugMode) {
+      if (BindingBase.debugBindingType() == null) return false;
+      try {
+        final messenger = ServicesBinding.instance.defaultBinaryMessenger;
+        if (messenger.runtimeType.toString() == 'TestDefaultBinaryMessenger') {
+          final dynamic testMessenger = messenger;
+          if (testMessenger.allMessagesHandler == null &&
+              testMessenger.checkMockMessageHandler(channel.name, null) ==
+                  true) {
+            return false;
+          }
+        }
+      } catch (_) {
+        // Fall through to the normal platform channel invocation.
+      }
+    }
+    try {
+      return await channel.invokeMethod<bool>('releaseAll') ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
       return false;
     }
   }

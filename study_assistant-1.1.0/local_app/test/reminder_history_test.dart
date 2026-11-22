@@ -586,6 +586,34 @@ void main() {
           .firstWhere((item) => item.category == 'deadline');
       expect(validDeadline.nextScheduledAt, DateTime(2026, 11, 19, 8, 0));
 
+      final utcItem = assignment(deadline: atTen.toUtc());
+      final utcExplain = ReminderExplanationService.forAssignment(
+        primary: utcItem,
+        sources: [utcItem],
+        groupHidden: false,
+        hiddenAssignmentIds: const {},
+        unfollowedCourseKeys: const {},
+        plan: plan(),
+        offsets: const [240],
+        newReminderEnabled: true,
+        now: DateTime(2026, 11, 19, 2),
+        evidence: null,
+        health: const ReminderHealth(
+          notifications: true,
+          assignmentChannel: ReminderChannelHealth(
+            ReminderChannelStatus.enabled,
+          ),
+        ),
+        pluginEvidence: null,
+        queryWarnings: const [],
+      );
+      expect(
+        utcExplain.categories
+            .singleWhere((item) => item.category == 'deadline')
+            .nextScheduledAt,
+        DateTime(2026, 11, 19, 8),
+      );
+
       final atSevenThirty = DateTime(2026, 11, 19, 7, 30);
       final invalidItem = assignment(deadline: atSevenThirty);
       final expiredShiftExplain = ReminderExplanationService.forAssignment(

@@ -47,11 +47,17 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
   static const double _rightThreshold = 72.0;
   static const double _leftThreshold = 68.0;
   static const double _maxDrag = 108.0;
+  static const double _edgeBackExclusionWidth = 24.0;
 
   late final AnimationController _snapController;
+  // Displayed (rubber-banded) offset and the raw finger travel behind it.
+  // Damping is always derived from the raw value; feeding the displayed value
+  // back into the damping made the tile creep backwards on slow forward drags.
   double _offset = 0.0;
+  double _rawOffset = 0.0;
   bool _crossedRight = false;
   bool _crossedLeft = false;
+  bool _ignoredEdgeDrag = false;
 
   @override
   void initState() {
@@ -59,8 +65,27 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
     _snapController = AnimationController.unbounded(vsync: this)
       ..addListener(() {
         if (!mounted) return;
-        setState(() => _offset = _snapController.value);
+        setState(() {
+          _offset = _snapController.value;
+          _rawOffset = _offset;
+        });
       });
+  }
+
+  @override
+  void didUpdateWidget(JournalSwipeTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The revealed action may disappear (item completed, pin no longer
+    // allowed, tile disabled) while the tile is open: never leave it stuck.
+    final lostRight = _offset > 0 && widget.rightAction == null;
+    final lostLeft = _offset < 0 && widget.leftAction == null;
+    if (!widget.enabled || lostRight || lostLeft) {
+      _snapController.stop();
+      _offset = 0.0;
+      _rawOffset = 0.0;
+      _crossedRight = false;
+      _crossedLeft = false;
+    }
   }
 
   @override
@@ -77,19 +102,44 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
     return damped * sign;
   }
 
+  double _maxRawFor(double threshold) =>
+      threshold + (_maxDrag - threshold) / 0.42;
+
+  double _undoRubberBand(double displayed, double threshold) {
+    final absVal = displayed.abs();
+    if (absVal <= threshold) return displayed;
+    final raw = threshold + (absVal - threshold) / 0.42;
+    return displayed.isNegative ? -raw : raw;
+  }
+
   void _handleDragStart(DragStartDetails details) {
     if (!widget.enabled) return;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final dx = details.globalPosition.dx;
+    if (dx < _edgeBackExclusionWidth ||
+        dx > screenWidth - _edgeBackExclusionWidth) {
+      _ignoredEdgeDrag = true;
+      return;
+    }
+    _ignoredEdgeDrag = false;
     _snapController.stop();
-    _crossedRight = false;
-    _crossedLeft = false;
+    _rawOffset = _undoRubberBand(
+      _offset,
+      _offset >= 0 ? _rightThreshold : _leftThreshold,
+    );
+    _crossedRight = _offset >= _rightThreshold;
+    _crossedLeft = _offset <= -_leftThreshold;
   }
 
   void _handleDragUpdate(DragUpdateDetails details) {
-    if (!widget.enabled) return;
+    if (!widget.enabled || _ignoredEdgeDrag) return;
     final delta = details.primaryDelta ?? 0.0;
-    var nextRaw = _offset + delta;
-    if (nextRaw > 0 && widget.rightAction == null) nextRaw = 0;
-    if (nextRaw < 0 && widget.leftAction == null) nextRaw = 0;
+    final maxRightRaw =
+        widget.rightAction == null ? 0.0 : _maxRawFor(_rightThreshold);
+    final maxLeftRaw =
+        widget.leftAction == null ? 0.0 : _maxRawFor(_leftThreshold);
+    final nextRaw = (_rawOffset + delta).clamp(-maxLeftRaw, maxRightRaw);
+    _rawOffset = nextRaw;
 
     final nextOffset = nextRaw >= 0
         ? _applyRubberBand(nextRaw, _rightThreshold, 1.0)
@@ -114,7 +164,10 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
   }
 
   void _handleDragEnd(DragEndDetails details) {
-    if (!widget.enabled) return;
+    if (!widget.enabled || _ignoredEdgeDrag) {
+      _ignoredEdgeDrag = false;
+      return;
+    }
     final velocity = details.primaryVelocity ?? 0.0;
     final triggerRight = widget.rightAction != null &&
         (_offset >= _rightThreshold || (_offset >= 42 && velocity > 750));
@@ -127,12 +180,15 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
       widget.leftAction!.onTrigger();
     }
 
-    _snapBack(velocity / 300.0);
+    _snapBack(velocity);
   }
 
-  void _snapBack(double velocity) {
+  void _snapBack(double velocityPxPerSec) {
+    if (!mounted) return;
     _crossedRight = false;
     _crossedLeft = false;
+    _rawOffset = 0.0;
+    _ignoredEdgeDrag = false;
     if (_offset.abs() < 0.5) {
       setState(() => _offset = 0.0);
       return;
@@ -147,7 +203,7 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
         JournalMotion.snappySpring,
         start: _offset,
         end: 0.0,
-        velocity: velocity.clamp(-12.0, 12.0),
+        velocity: velocityPxPerSec.clamp(-2400.0, 2400.0),
       ),
     );
   }
@@ -177,71 +233,74 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
       onHorizontalDragUpdate: _handleDragUpdate,
       onHorizontalDragEnd: _handleDragEnd,
       onHorizontalDragCancel: () => _snapBack(0.0),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          if (activeAction != null)
-            Positioned.fill(
-              child: ColoredBox(
-                color: Color.lerp(
-                  journal.sheet,
-                  activeAction.backgroundColor,
-                  0.45 + 0.55 * progress,
-                )!,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
-                  child: Align(
-                    alignment: showingRight
-                        ? Alignment.centerLeft
-                        : Alignment.centerRight,
-                    child: Opacity(
-                      opacity: math.min(1.0, progress * 1.2),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (showingLeft) ...[
-                            Text(
-                              activeAction.label,
-                              style: journal.pillLabel.copyWith(
+      child: ClipRect(
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            if (activeAction != null)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: Color.lerp(
+                    journal.sheet,
+                    activeAction.backgroundColor,
+                    0.45 + 0.55 * progress,
+                  )!,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    child: Align(
+                      alignment: showingRight
+                          ? Alignment.centerLeft
+                          : Alignment.centerRight,
+                      child: Opacity(
+                        opacity: math.min(1.0, progress * 1.2),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (showingLeft) ...[
+                              Text(
+                                activeAction.label,
+                                style: journal.pillLabel.copyWith(
+                                  color: activeAction.color,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            Transform.scale(
+                              scale: iconScale,
+                              child: Icon(
+                                activeAction.icon,
+                                size: 20,
                                 color: activeAction.color,
-                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                            const SizedBox(width: 8),
-                          ],
-                          Transform.scale(
-                            scale: iconScale,
-                            child: Icon(
-                              activeAction.icon,
-                              size: 20,
-                              color: activeAction.color,
-                            ),
-                          ),
-                          if (showingRight) ...[
-                            const SizedBox(width: 8),
-                            Text(
-                              activeAction.label,
-                              style: journal.pillLabel.copyWith(
-                                color: activeAction.color,
-                                fontWeight: FontWeight.w600,
+                            if (showingRight) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                activeAction.label,
+                                style: journal.pillLabel.copyWith(
+                                  color: activeAction.color,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
+            Transform.translate(
+              key: const ValueKey('journal-swipe-foreground'),
+              offset: Offset(_offset, 0),
+              child: ColoredBox(
+                color: _offset.abs() > 0.5 ? journal.sheet : Colors.transparent,
+                child: widget.child,
+              ),
             ),
-          Transform.translate(
-            offset: Offset(_offset, 0),
-            child: ColoredBox(
-              color: _offset.abs() > 0.5 ? journal.sheet : Colors.transparent,
-              child: widget.child,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

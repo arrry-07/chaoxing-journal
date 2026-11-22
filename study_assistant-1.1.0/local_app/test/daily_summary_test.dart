@@ -11,7 +11,7 @@ void main() {
     final p = PersonalWorkspace(summaryEnabled: true, summaryHour: 20);
     final rows = DailySummary.build([], p, now, null);
     expect(rows.length, 7);
-    expect(rows.first.at, DateTime.utc(2026, 11, 7, 12));
+    expect(rows.first.at, DateTime.utc(2026, 11, 7, 12).toLocal());
     expect(rows.map((r) => r.id).toSet().length, 7);
     expect(
         rows.map((r) => r.id),

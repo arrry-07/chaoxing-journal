@@ -799,7 +799,7 @@ void main() {
         records: [notice],
         now: now,
       ),
-      DateTime.utc(2027, 1, 4, 23, 6),
+      DateTime.utc(2027, 1, 4, 23, 6).toLocal(),
     );
     expect(notice.exam!.startAt, isNull);
     expect(notice.exam!.startTrusted, isFalse);

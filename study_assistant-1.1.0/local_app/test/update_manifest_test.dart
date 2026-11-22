@@ -8,6 +8,14 @@ import 'package:study_assistant_mobile/src/services/app_update_service.dart';
 
 const manifestHash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const officialGiteeApkUrl =
+    'https://gitee.com/arrry-07/chaoxing-journal-updates/releases/download/'
+    'v9.0.0/chaoxing-journal-9.0.0.apk';
+const officialGitHubApkUrl =
+    'https://github.com/arrry-07/chaoxing-journal/releases/download/'
+    'v9.0.0/chaoxing-journal-9.0.0.apk';
+const customPrimaryApkUrl = 'https://downloads.example.test/app.apk';
+const customBackupApkUrl = 'https://backup.example.test/app.apk';
 
 String patchVersion() {
   final parts = AppVersion.releaseName.split('.').map(int.parse).toList();
@@ -301,7 +309,10 @@ void main() {
         handler.resolve(Response(
           requestOptions: options,
           statusCode: 200,
-          data: manifest(),
+          data: manifest(
+            apkUrl: officialGiteeApkUrl,
+            backupApkUrl: officialGitHubApkUrl,
+          ),
         ));
       }));
     final result = await AppUpdateService(
@@ -310,6 +321,91 @@ void main() {
     ).checkConfigured(currentVersionCode: AppVersion.code);
     expect(result.status, UpdateCheckStatus.available);
     expect(calls, 1);
+    expect(result.update!.downloadUrls, [
+      officialGiteeApkUrl,
+      officialGitHubApkUrl,
+    ]);
+  });
+
+  final invalidOfficialApkSources = <String, Map<String, dynamic>>{
+    'a third-party HTTPS primary': manifest(apkUrl: customPrimaryApkUrl),
+    'a third-party HTTPS backup': manifest(
+      apkUrl: officialGiteeApkUrl,
+      backupApkUrl: customBackupApkUrl,
+    ),
+    'a third-party HTTPS entry in the backup list':
+        manifest(apkUrl: officialGiteeApkUrl)
+          ..['backupApkUrls'] = [officialGitHubApkUrl, customBackupApkUrl],
+    'a GitHub APK from another repository': manifest(
+      apkUrl: officialGitHubApkUrl.replaceFirst(
+        '/arrry-07/chaoxing-journal/',
+        '/arrry-07/fixture-repo/',
+      ),
+    ),
+    'a Gitee APK on a nonstandard port': manifest(
+      apkUrl: Uri.parse(officialGiteeApkUrl).replace(port: 8443).toString(),
+    ),
+  };
+  for (final entry in invalidOfficialApkSources.entries) {
+    test('official Gitee manifest rejects ${entry.key}', () async {
+      final result = await AppUpdateService(
+        dio: manifestDio((_) => entry.value),
+        manualManifestUrl: AppUpdateService.giteeManualManifestUrl,
+        githubFallbackEnabled: false,
+      ).checkConfigured(currentVersionCode: AppVersion.code);
+
+      expect(result.status, UpdateCheckStatus.invalidManifest);
+      expect(result.update, isNull);
+    });
+  }
+
+  test('official Gitee manifest accepts a GitHub primary on port 443',
+      () async {
+    const apkUrl = 'https://github.com:443/arrry-07/chaoxing-journal/'
+        'releases/download/v9.0.0/chaoxing-journal-9.0.0.apk';
+    final result = await AppUpdateService(
+      dio: manifestDio((_) => manifest(apkUrl: apkUrl)),
+      manualManifestUrl: AppUpdateService.giteeManualManifestUrl,
+      githubFallbackEnabled: false,
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+
+    expect(result.status, UpdateCheckStatus.available);
+    expect(result.update!.downloadUrls, [apkUrl]);
+  });
+
+  test('official Gitee manifest with a third-party APK falls back to GitHub',
+      () async {
+    final paths = <String>[];
+    final result = await AppUpdateService(
+      dio: manifestDio(
+        (options) => options.uri.host == 'raw.giteeusercontent.com'
+            ? manifest(apkUrl: customPrimaryApkUrl)
+            : [
+                {
+                  'tag_name': 'v9.0.0',
+                  'draft': false,
+                  'prerelease': false,
+                  'assets': [
+                    {
+                      'name': 'chaoxing-journal-9.0.0.apk',
+                      'browser_download_url': officialGitHubApkUrl,
+                      'size': 1234,
+                      'digest': 'sha256:${'b' * 64}',
+                    },
+                  ],
+                },
+              ],
+        paths: paths,
+      ),
+      manualManifestUrl: AppUpdateService.giteeManualManifestUrl,
+    ).checkConfigured(currentVersionCode: AppVersion.code);
+
+    expect(result.status, UpdateCheckStatus.available);
+    expect(result.update!.downloadUrls, [officialGitHubApkUrl]);
+    expect(paths.map((path) => Uri.parse(path).host), [
+      'raw.giteeusercontent.com',
+      'api.github.com',
+    ]);
   });
 
   test('HTML with HTTP 200 is an invalid manifest', () async {
@@ -506,13 +602,15 @@ void main() {
   test('backup APK URL is retained under the same manifest metadata', () async {
     final result = await AppUpdateService(
       dio: manifestDio((_) => manifest(
-            backupApkUrl: 'https://backup.example.org/app.apk',
+            apkUrl: customPrimaryApkUrl,
+            backupApkUrl: customBackupApkUrl,
           )),
-      manualManifestUrl: 'https://updates.example.org/manual.json',
+      manualManifestUrl: 'https://updates.example.test/manual.json',
     ).checkConfigured(currentVersionCode: AppVersion.code);
     expect(result.status, UpdateCheckStatus.available);
+    expect(result.update!.apkDownloadUrl, customPrimaryApkUrl);
     expect(result.update!.backupApkUrls, [
-      'https://backup.example.org/app.apk',
+      customBackupApkUrl,
     ]);
     expect(result.update!.apkSize, 1234);
     expect(result.update!.sha256Hash, manifestHash);

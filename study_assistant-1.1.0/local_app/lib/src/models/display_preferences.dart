@@ -81,16 +81,30 @@ class DisplayPreferences {
     final today = AssignmentQuery.dayKey(now);
     final days = widgetRange == WidgetRange.today ? 1 : 7;
     final end = DateTime(today.year, today.month, today.day + days);
-    return display
-        .where((a) =>
-            AssignmentQuery.timelineBucketAt(a, now) ==
-                AssignmentDeadlineBucket.notExpiredWithDeadline &&
-            a.timelineAt != null &&
-            a.timelineTrusted &&
-            (a.isExam || !a.deadlineReadFailed) &&
-            !AssignmentQuery.dayKey(a.timelineAt!).isBefore(today) &&
-            AssignmentQuery.dayKey(a.timelineAt!).isBefore(end))
-        .toList();
+    return display.where((a) {
+      final timelineAt = a.timelineAt;
+      if (AssignmentQuery.timelineBucketAt(a, now) !=
+              AssignmentDeadlineBucket.notExpiredWithDeadline ||
+          timelineAt == null ||
+          !a.timelineTrusted ||
+          (!a.isExam && a.deadlineReadFailed)) {
+        return false;
+      }
+      final startDay = AssignmentQuery.dayKey(timelineAt);
+      if (!startDay.isBefore(end)) return false;
+      if (!startDay.isBefore(today)) return true;
+      if (!a.isExam) return false;
+
+      // currentDisplay excludes ended and cancelled exams before range filtering.
+      final exam = a.exam!;
+      final endAt = exam.endAt;
+      if (exam.endTrusted && endAt != null) return endAt.isAfter(now);
+      if (exam.lifecycle == 'inProgress') return true;
+      final duration = exam.durationMinutes;
+      return duration != null &&
+          duration > 0 &&
+          timelineAt.add(Duration(minutes: duration)).isAfter(now);
+    }).toList();
   }
 
   static String remaining(DateTime deadline, DateTime now) {

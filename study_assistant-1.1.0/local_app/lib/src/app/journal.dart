@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 class Journal {
@@ -19,13 +21,11 @@ class Journal {
   static const divider = Color(0xFFECEBE6);
   static const berry = Color(0xFFC53B3B);
   static const berryBg = Color(0xFFFDF2F2);
-  static const berryBorder = Color(0xFFF3D1D1);
   static const ochre = Color(0xFF4F5D73);
   static const ochreBg = Color(0xFFEFF2F6);
   static const ochreBorder = Color(0xFFD8DEE8);
   static const slate = Color(0xFF3D63DD);
   static const slateBg = Color(0xFFEAF0FD);
-  static const slateBorder = Color(0xFFC9D6F7);
 
   static const displayFamily = 'LXGW WenKai Screen';
   static const titleFamily = displayFamily;
@@ -117,8 +117,6 @@ class Journal {
   );
 }
 
-typedef JournalThemeTokens = JournalPalette;
-
 @immutable
 class JournalPalette extends ThemeExtension<JournalPalette> {
   const JournalPalette({
@@ -139,13 +137,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     required this.divider,
     required this.berry,
     required this.berryBg,
-    required this.berryBorder,
     required this.ochre,
     required this.ochreBg,
     required this.ochreBorder,
     required this.slate,
     required this.slateBg,
-    required this.slateBorder,
     required this.navGlassFill,
     required this.navGlassBorder,
     required this.navGlassHighlight,
@@ -169,13 +165,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     divider: Journal.divider,
     berry: Journal.berry,
     berryBg: Journal.berryBg,
-    berryBorder: Journal.berryBorder,
     ochre: Journal.ochre,
     ochreBg: Journal.ochreBg,
     ochreBorder: Journal.ochreBorder,
     slate: Journal.slate,
     slateBg: Journal.slateBg,
-    slateBorder: Journal.slateBorder,
     navGlassFill: Color(0xD9FFFFFF),
     navGlassBorder: Color(0xB3E5E5E0),
     navGlassHighlight: Color(0x80FFFFFF),
@@ -200,13 +194,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     divider: Color(0x10FFF8EB),
     berry: Color(0xFFE8827D),
     berryBg: Color(0xFF342222),
-    berryBorder: Color(0xFF5A3636),
     ochre: Color(0xFFAEBACB),
     ochreBg: Color(0xFF272B32),
     ochreBorder: Color(0xFF3D434F),
     slate: Color(0xFF88A8F8),
     slateBg: Color(0xFF252B3B),
-    slateBorder: Color(0xFF3D4C6E),
     navGlassFill: Color(0xCC242320),
     navGlassBorder: Color(0x16FFF8EB),
     navGlassHighlight: Color(0x26FFF8EB),
@@ -229,18 +221,27 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
   final Color divider;
   final Color berry;
   final Color berryBg;
-  final Color berryBorder;
   final Color ochre;
   final Color ochreBg;
   final Color ochreBorder;
   final Color slate;
   final Color slateBg;
-  final Color slateBorder;
   final Color navGlassFill;
   final Color navGlassBorder;
   final Color navGlassHighlight;
 
   Color get accent => slate;
+
+  /// Action text on the inverted (ink-filled) snackbar. Dark mode inverts the
+  /// fill to warm ivory, so the action needs a deep blue to stay >= 4.5:1.
+  Color get snackActionColor => isDark ? const Color(0xFF2B4EB8) : slateBg;
+
+  /// Segmented control track/thumb: the thumb must read as raised above the
+  /// track in both themes (dark: lighter elevated thumb on a deeper track).
+  Color get segmentTrack => isDark ? const Color(0xFF21201D) : parchment;
+  Color get segmentThumb => isDark ? sheetElevated : sheet;
+  Border? get segmentBorder =>
+      isDark ? Border.all(color: cardBorder, width: 0.7) : null;
 
   Color get sectionHeaderFill => Color.lerp(sheet, parchment, 0.34)!;
 
@@ -282,13 +283,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     Color? divider,
     Color? berry,
     Color? berryBg,
-    Color? berryBorder,
     Color? ochre,
     Color? ochreBg,
     Color? ochreBorder,
     Color? slate,
     Color? slateBg,
-    Color? slateBorder,
     Color? navGlassFill,
     Color? navGlassBorder,
     Color? navGlassHighlight,
@@ -311,13 +310,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         divider: divider ?? this.divider,
         berry: berry ?? this.berry,
         berryBg: berryBg ?? this.berryBg,
-        berryBorder: berryBorder ?? this.berryBorder,
         ochre: ochre ?? this.ochre,
         ochreBg: ochreBg ?? this.ochreBg,
         ochreBorder: ochreBorder ?? this.ochreBorder,
         slate: slate ?? this.slate,
         slateBg: slateBg ?? this.slateBg,
-        slateBorder: slateBorder ?? this.slateBorder,
         navGlassFill: navGlassFill ?? this.navGlassFill,
         navGlassBorder: navGlassBorder ?? this.navGlassBorder,
         navGlassHighlight: navGlassHighlight ?? this.navGlassHighlight,
@@ -346,13 +343,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
       divider: Color.lerp(divider, other.divider, t)!,
       berry: Color.lerp(berry, other.berry, t)!,
       berryBg: Color.lerp(berryBg, other.berryBg, t)!,
-      berryBorder: Color.lerp(berryBorder, other.berryBorder, t)!,
       ochre: Color.lerp(ochre, other.ochre, t)!,
       ochreBg: Color.lerp(ochreBg, other.ochreBg, t)!,
       ochreBorder: Color.lerp(ochreBorder, other.ochreBorder, t)!,
       slate: Color.lerp(slate, other.slate, t)!,
       slateBg: Color.lerp(slateBg, other.slateBg, t)!,
-      slateBorder: Color.lerp(slateBorder, other.slateBorder, t)!,
       navGlassFill: Color.lerp(navGlassFill, other.navGlassFill, t)!,
       navGlassBorder: Color.lerp(navGlassBorder, other.navGlassBorder, t)!,
       navGlassHighlight:
@@ -380,8 +375,17 @@ class JournalLayout {
 
   static const double floatingNavHeight = 62.0;
 
-  static double floatingNavClearance(BuildContext context) =>
-      MediaQuery.paddingOf(context).bottom + 94.0;
+  /// Bottom inset that keeps the last row clear of the floating nav bar.
+  /// Inside AppShell (`Scaffold.extendBody`) `padding.bottom` already includes
+  /// the nav bar and any banners above it, so only a small gap is added; when
+  /// a tab is rendered standalone the device inset plus 94dp is the floor.
+  static double floatingNavClearance(BuildContext context) {
+    final media = MediaQuery.of(context);
+    return math.max(
+      media.padding.bottom + 14.0,
+      media.viewPadding.bottom + 94.0,
+    );
+  }
 
   static bool isLargeText(BuildContext context) =>
       MediaQuery.textScalerOf(context).scale(14) >= 19.5;
@@ -396,12 +400,10 @@ class JournalLayout {
 class JournalHeading extends StatelessWidget {
   const JournalHeading(this.title,
       {super.key,
-      this.eyebrow,
       this.bookTitle = false,
       this.trailing,
       this.trailingWidth = 48});
   final String title;
-  final String? eyebrow;
   final bool bookTitle;
   final Widget? trailing;
   final double trailingWidth;
@@ -433,50 +435,26 @@ class JournalHeading extends StatelessWidget {
 }
 
 // Map subject keywords to quiet single-tone linear icons.
+final _courseIconRules = <(RegExp, IconData)>[
+  (RegExp(r'数|微积分|代数|几何|概率|统计|离散'), Icons.functions_rounded),
+  (RegExp(r'物理|力学|电磁|光学|天文|电路|模电|数电'), Icons.bolt_outlined),
+  (RegExp(r'化学|生物|医学|实验|药'), Icons.science_outlined),
+  (
+    RegExp(r'计算机|信息|安全|软件|数据|程序|编程|算法|网络|人工智能|AI|ai|Python|Java|C\+\+'),
+    Icons.terminal_rounded
+  ),
+  (RegExp(r'英语|外语|口语|听力|语言|写作|语文|文学'), Icons.translate_rounded),
+  (RegExp(r'史|纲要|马原|毛概|习概|思政|政治|法|哲学|思想'), Icons.account_balance_outlined),
+  (RegExp(r'制图|机械|工程|建筑|设计|艺术|音乐|美术|影视'), Icons.architecture_outlined),
+  (RegExp(r'经济|管理|金融|会计|市场|财务'), Icons.trending_up_rounded),
+  (RegExp(r'体育|运动|健美|武术|篮球|足球|游泳'), Icons.directions_run_rounded),
+];
+
 IconData courseIconFor(String name) {
-  if (RegExp(r'数|微积分|代数|几何|概率|统计|离散').hasMatch(name)) {
-    return Icons.functions_rounded;
-  }
-  if (RegExp(r'物理|力学|电磁|光学|天文|电路|模电|数电').hasMatch(name)) {
-    return Icons.bolt_outlined;
-  }
-  if (RegExp(r'化学|生物|医学|实验|药').hasMatch(name)) {
-    return Icons.science_outlined;
-  }
-  if (RegExp(r'计算机|信息|安全|软件|数据|程序|编程|算法|网络|人工智能|AI|ai|Python|Java|C\+\+')
-      .hasMatch(name)) {
-    return Icons.terminal_rounded;
-  }
-  if (RegExp(r'英语|外语|口语|听力|语言|写作|语文|文学').hasMatch(name)) {
-    return Icons.translate_rounded;
-  }
-  if (RegExp(r'史|纲要|马原|毛概|习概|思政|政治|法|哲学|思想').hasMatch(name)) {
-    return Icons.account_balance_outlined;
-  }
-  if (RegExp(r'制图|机械|工程|建筑|设计|艺术|音乐|美术|影视').hasMatch(name)) {
-    return Icons.architecture_outlined;
-  }
-  if (RegExp(r'经济|管理|金融|会计|市场|财务').hasMatch(name)) {
-    return Icons.trending_up_rounded;
-  }
-  if (RegExp(r'体育|运动|健美|武术|篮球|足球|游泳').hasMatch(name)) {
-    return Icons.directions_run_rounded;
+  for (final (pattern, icon) in _courseIconRules) {
+    if (pattern.hasMatch(name)) return icon;
   }
   return Icons.menu_book_outlined;
-}
-
-class CourseLabel extends StatelessWidget {
-  const CourseLabel(this.name, {super.key});
-  final String name;
-  @override
-  Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CourseMark(name, size: 28),
-          const SizedBox(width: 8),
-          Flexible(child: Text(name)),
-        ],
-      );
 }
 
 class CourseMark extends StatelessWidget {

@@ -10,19 +10,24 @@ class DaytimeCheckPolicy {
   static const defaultIntervalMinutes = 240;
 
   static bool isInWindow(DateTime localNow) =>
-      localNow.hour >= startHour && localNow.hour < 24;
+      localNow.toLocal().hour >= startHour;
 
-  static DateTime windowStartFor(DateTime localTime) =>
-      DateTime(localTime.year, localTime.month, localTime.day, startHour);
+  static DateTime windowStartFor(DateTime localTime) {
+    final local = localTime.toLocal();
+    return DateTime(local.year, local.month, local.day, startHour);
+  }
 
-  static DateTime nextMidnightAfter(DateTime localTime) =>
-      DateTime(localTime.year, localTime.month, localTime.day + 1);
+  static DateTime nextMidnightAfter(DateTime localTime) {
+    final local = localTime.toLocal();
+    return DateTime(local.year, local.month, local.day + 1);
+  }
 
   static DateTime nextWindowStart(DateTime localNow) {
     final todayStart = windowStartFor(localNow);
     return localNow.isBefore(todayStart)
         ? todayStart
-        : DateTime(localNow.year, localNow.month, localNow.day + 1, startHour);
+        : DateTime(
+            todayStart.year, todayStart.month, todayStart.day + 1, startHour);
   }
 
   static DateTime nextAfterExecution(
@@ -30,10 +35,11 @@ class DaytimeCheckPolicy {
     int intervalMinutes,
   ) {
     final interval = normalizeIntervalMinutes(intervalMinutes);
-    final candidate = actualStart.add(Duration(minutes: interval));
-    if (!candidate.isBefore(nextMidnightAfter(actualStart))) {
+    final localStart = actualStart.toLocal();
+    final candidate = localStart.add(Duration(minutes: interval));
+    if (!candidate.isBefore(nextMidnightAfter(localStart))) {
       return DateTime(
-          actualStart.year, actualStart.month, actualStart.day + 1, startHour);
+          localStart.year, localStart.month, localStart.day + 1, startHour);
     }
     if (!isInWindow(candidate)) {
       return DateTime(
@@ -48,22 +54,23 @@ class DaytimeCheckPolicy {
     required DateTime? lastAttemptAt,
     required int intervalMinutes,
   }) {
-    if (!isInWindow(localNow)) {
-      return nextWindowStart(localNow);
+    final local = localNow.toLocal();
+    if (!isInWindow(local)) {
+      return nextWindowStart(local);
     }
 
     final last = lastAttemptAt?.toLocal();
-    if (last == null || _localDate(last) != _localDate(localNow)) {
-      return localNow;
+    if (last == null || _localDate(last) != _localDate(local)) {
+      return local;
     }
-    if (last.isAfter(localNow)) {
+    if (last.isAfter(local)) {
       // A wall-clock rollback must not make the check immediately due again.
-      return nextAfterExecution(localNow, intervalMinutes);
+      return nextAfterExecution(local, intervalMinutes);
     }
 
     final candidate = nextAfterExecution(last, intervalMinutes);
-    if (!candidate.isAfter(localNow)) {
-      return localNow;
+    if (!candidate.isAfter(local)) {
+      return local;
     }
     return candidate;
   }

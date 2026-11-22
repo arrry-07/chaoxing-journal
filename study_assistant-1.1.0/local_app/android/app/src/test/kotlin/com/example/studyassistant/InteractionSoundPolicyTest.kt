@@ -71,6 +71,27 @@ class InteractionSoundPolicyTest {
         assertFalse(InteractionSoundPolicy.shouldPlay(true, 5, false, null, setOf(1)))
         assertFalse(InteractionSoundPolicy.shouldPlay(true, 5, false, 2, setOf(1)))
         assertTrue(InteractionSoundPolicy.shouldPlay(true, 5, false, 1, setOf(1)))
+        // Silent/vibrate ringer modes and call/ringtone audio modes must suppress sound.
+        assertFalse(InteractionSoundPolicy.shouldPlay(true, 5, false, 1, setOf(1), ringerMode = 0))
+        assertFalse(InteractionSoundPolicy.shouldPlay(true, 5, false, 1, setOf(1), ringerMode = 1))
+        assertFalse(
+            InteractionSoundPolicy.shouldPlay(
+                true, 5, false, 1, setOf(1),
+                audioMode = InteractionSoundPolicy.AUDIO_MODE_RINGTONE,
+            ),
+        )
+        assertFalse(
+            InteractionSoundPolicy.shouldPlay(
+                true, 5, false, 1, setOf(1),
+                audioMode = InteractionSoundPolicy.AUDIO_MODE_IN_CALL,
+            ),
+        )
+        assertFalse(
+            InteractionSoundPolicy.shouldPlay(
+                true, 5, false, 1, setOf(1),
+                audioMode = InteractionSoundPolicy.AUDIO_MODE_IN_COMMUNICATION,
+            ),
+        )
     }
 
     @Test

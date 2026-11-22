@@ -1,19 +1,24 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../app/journal.dart';
 import '../app/journal_motion.dart';
+import '../app/transient_feedback.dart';
 import '../models/course.dart';
 import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import 'widgets/data_recovery_warning.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_info_popover.dart';
 import 'widgets/journal_picker_sheet.dart';
+import 'widgets/journal_sliver_grouped_card.dart';
 
 class CourseStudyHubScreen extends StatefulWidget {
   const CourseStudyHubScreen({
@@ -57,6 +62,8 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   String? _selectedCourseKey;
   bool _pendingChaptersOnly = false;
   late final TextEditingController _searchController;
+  String _searchQuery = '';
+  Timer? _searchDebounce;
   String? _accountHash;
   int _accountEpoch = 0;
 
@@ -86,7 +93,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       _selectedCourseKey = null;
       _noticeScope = _NoticeScope.linked;
       _noticeFilter = _NoticeFilter.all;
-      _searchController.clear();
+      _resetNoticeSearch();
     });
   }
 
@@ -118,15 +125,58 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   @override
   void dispose() {
     widget.store.removeListener(_handleIdentityChanged);
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
+  void _updateNoticeSearch(String text) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 200), () {
+      _searchDebounce = null;
+      setState(() => _searchQuery = text.trim().toLowerCase());
+    });
+  }
+
+  void _resetNoticeSearch() {
+    _searchDebounce?.cancel();
+    _searchDebounce = null;
+    _searchController.clear();
+    _searchQuery = '';
+  }
+
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+    showJournalMessage(context, message);
+  }
+
+  Future<void> _syncNotices() async {
+    final before = widget.store.syncReport;
+    final beforeEpoch = widget.store.accountEpoch;
+    await widget.store.syncAssignments();
+    if (!mounted) return;
+    InteractionFeedback.triggerSyncDoneIfReady(
+      prefs: widget.store.display,
+      before: before,
+      after: widget.store.syncReport,
+      beforeEpoch: beforeEpoch,
+      afterEpoch: widget.store.accountEpoch,
+      operationError: widget.store.error,
     );
+  }
+
+  Future<void> _syncChapters({String? courseKey}) async {
+    final beforeEpoch = widget.store.accountEpoch;
+    final ok = await widget.store.syncCourseChapters(courseKey: courseKey);
+    if (ok &&
+        mounted &&
+        widget.store.accountEpoch == beforeEpoch &&
+        widget.store.error == null) {
+      InteractionFeedback.trigger(
+        widget.store.display,
+        kind: InteractionSoundKind.syncDone,
+      );
+    }
   }
 
   Future<DateTime?> _pickDateTime({DateTime? initial}) async {
@@ -150,10 +200,22 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   }
 
   Future<void> _openNoticeDetail(CourseNotice notice) async {
+    final openingEpoch = widget.store.accountEpoch;
+    final openingHash = widget.store.accountHash;
     if (!notice.localRead) {
-      await widget.store.markNoticeLocalRead(notice.id, read: true);
+      await widget.store.markNoticeLocalRead(
+        notice.id,
+        read: true,
+        expectedEpoch: openingEpoch,
+      );
     }
-    if (!mounted) return;
+    if (!mounted ||
+        widget.store.accountEpoch != openingEpoch ||
+        widget.store.accountHash != openingHash ||
+        !widget.store.isAuthenticated) {
+      return;
+    }
+    var closingForAccountChange = false;
     await showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
@@ -162,6 +224,28 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         final journal = Journal.of(sheetContext);
+        void scheduleClose() {
+          if (closingForAccountChange) return;
+          closingForAccountChange = true;
+          final sheetRoute = ModalRoute.of(sheetContext);
+          final rootNavigator = Navigator.of(sheetContext, rootNavigator: true);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (sheetRoute == null ||
+                !sheetRoute.isActive ||
+                !rootNavigator.mounted) {
+              return;
+            }
+            // Pop any child picker/dialog pushed above this sheet, then remove
+            // only the sheet route itself so the underlying page is never popped.
+            rootNavigator.popUntil(
+              (route) => route == sheetRoute || !sheetRoute.isActive,
+            );
+            if (sheetRoute.isActive) {
+              rootNavigator.removeRoute(sheetRoute);
+            }
+          });
+        }
+
         return Container(
           decoration: BoxDecoration(
             color: journal.sheetElevated,
@@ -176,13 +260,23 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
               animation: widget.store,
               builder: (context, _) {
                 final journal = Journal.of(context);
-                final latest = widget.store.courseNotices.items
+                final accountChanged = !widget.store.isAuthenticated ||
+                    widget.store.accountEpoch != openingEpoch ||
+                    widget.store.accountHash != openingHash;
+                final latest = accountChanged
+                    ? null
+                    : widget.store.courseNotices.items
                         .where((item) => item.id == notice.id)
-                        .firstOrNull ??
-                    notice;
-                final linked = latest.linkedManualEntryId != null &&
-                    widget.store.notebook.entries
-                        .any((e) => e.id == latest.linkedManualEntryId);
+                        .firstOrNull;
+                if (latest == null) {
+                  scheduleClose();
+                  return const SizedBox.shrink();
+                }
+                final manualEntryIds = {
+                  for (final entry in widget.store.notebook.entries) entry.id,
+                };
+                final linked =
+                    manualEntryIds.contains(latest.linkedManualEntryId);
                 final timeText = latest.publishedAt == null
                     ? '发布时间待确认'
                     : DateFormat(
@@ -278,13 +372,27 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                                     final picked = await _pickDateTime(
                                       initial: latest.extractedEventAt,
                                     );
-                                    if (picked == null || !mounted) return;
+                                    if (picked == null ||
+                                        !mounted ||
+                                        widget.store.accountEpoch !=
+                                            openingEpoch ||
+                                        widget.store.accountHash !=
+                                            openingHash) {
+                                      return;
+                                    }
                                     final created = await widget.store
                                         .createReminderFromNotice(
                                       latest,
                                       remindAt: picked,
+                                      expectedEpoch: openingEpoch,
                                     );
-                                    if (!mounted) return;
+                                    if (!mounted ||
+                                        widget.store.accountEpoch !=
+                                            openingEpoch ||
+                                        widget.store.accountHash !=
+                                            openingHash) {
+                                      return;
+                                    }
                                     if (created != null) {
                                       _showSnack('已添加到个人待办并安排本地提醒');
                                     } else if (widget.store.error != null) {
@@ -304,6 +412,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                                   await widget.store.markNoticeLocalRead(
                                     latest.id,
                                     read: !latest.localRead,
+                                    expectedEpoch: openingEpoch,
                                   );
                                 },
                         ),
@@ -324,8 +433,13 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     ChapterNode node,
   ) async {
     final epoch = widget.store.accountEpoch;
+    final openingHash = widget.store.accountHash;
     final picked = await _pickDateTime();
-    if (!mounted) return;
+    if (!mounted ||
+        widget.store.accountEpoch != epoch ||
+        widget.store.accountHash != openingHash) {
+      return;
+    }
     final created = await widget.store.createTodoFromChapterNode(
       snapshot,
       node,
@@ -333,6 +447,11 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       minutes: 30,
       expectedEpoch: epoch,
     );
+    if (!mounted ||
+        widget.store.accountEpoch != epoch ||
+        widget.store.accountHash != openingHash) {
+      return;
+    }
     if (created != null) {
       _showSnack(picked == null ? '已添加到个人待办' : '已添加到个人待办并设置本地提醒');
     } else if (widget.store.error != null) {
@@ -394,9 +513,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                           ),
                         )
                       : const Icon(Icons.sync_rounded, size: 21),
-                  onPressed: widget.store.isLoading
-                      ? null
-                      : widget.store.syncAssignments,
+                  onPressed: widget.store.isLoading ? null : _syncNotices,
                 ),
               ] else ...[
                 IconButton(
@@ -411,9 +528,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                       ? widget.store.cancelSynchronization
                       : widget.store.isLoading || widget.store.courses.isEmpty
                           ? null
-                          : () => widget.store.syncCourseChapters(
-                                courseKey: _selectedCourseKey,
-                              ),
+                          : () => _syncChapters(courseKey: _selectedCourseKey),
                 ),
               ],
               const JournalInfoButton(
@@ -425,31 +540,68 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
               ),
             ],
           ),
-          body: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
-            children: [
-              if (widget.store.recoveryWarning case final warning?) ...[
-                DataRecoveryWarning(warning: warning),
-                const SizedBox(height: 12),
-              ],
-              _StudyHubTabBar(
-                tab: _tab,
-                unreadCount: widget.store.unreadCourseNoticeCount,
-                pendingSectionCount: widget.store.pendingChapterSectionCount,
-                onChanged: (next) {
-                  JournalMotion.tap(widget.store.display);
-                  setState(() => _tab = next);
-                },
+          body: CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+                sliver: SliverMainAxisGroup(
+                  slivers: [
+                    SliverList.list(
+                      children: [
+                        if (widget.store.recoveryWarning
+                            case final warning?) ...[
+                          DataRecoveryWarning(warning: warning),
+                          const SizedBox(height: 12),
+                        ],
+                        _StudyHubTabBar(
+                          tab: _tab,
+                          unreadCount: widget.store.unreadCourseNoticeCount,
+                          pendingSectionCount:
+                              widget.store.pendingChapterSectionCount,
+                          onChanged: (next) {
+                            JournalMotion.tap(widget.store.display);
+                            setState(() => _tab = next);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ),
+                    if (_tab == 'notices')
+                      ..._buildNoticesTab(
+                          context, notices, scoped, scopedUnread)
+                    else
+                      ..._buildChaptersTab(context),
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-              if (_tab == 'notices')
-                ..._buildNoticesTab(context, notices, scoped, scopedUnread)
-              else
-                ..._buildChaptersTab(context),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildNoticeSearch() {
+    return ListenableBuilder(
+      listenable: _searchController,
+      builder: (context, _) => TextField(
+        controller: _searchController,
+        decoration: InputDecoration(
+          hintText: '搜索标题、正文或发布人',
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          prefixIcon: const Icon(Icons.search_rounded, size: 19),
+          suffixIcon: _searchController.text.trim().isEmpty
+              ? null
+              : IconButton(
+                  tooltip: '清除搜索',
+                  onPressed: () => setState(_resetNoticeSearch),
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                ),
+        ),
+        onChanged: _updateNoticeSearch,
+      ),
     );
   }
 
@@ -460,7 +612,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     int scopedUnread,
   ) {
     final journal = Journal.of(context);
-    final query = _searchController.text.trim().toLowerCase();
+    final query = _searchQuery;
     final courseOptions = <String, String>{};
     for (final c in widget.store.courses) {
       courseOptions[c.key] = c.name;
@@ -503,32 +655,10 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       return true;
     }).toList();
 
-    return [
+    final controls = <Widget>[
       Row(
         children: [
-          Expanded(
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: '搜索标题、正文或发布人',
-                isDense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-                prefixIcon: const Icon(Icons.search_rounded, size: 19),
-                suffixIcon: query.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: '清除搜索',
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {});
-                        },
-                        icon: const Icon(Icons.close_rounded, size: 18),
-                      ),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-          ),
+          Expanded(child: _buildNoticeSearch()),
           const SizedBox(width: 8),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 146),
@@ -612,27 +742,31 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         ],
       ),
       const SizedBox(height: 12),
+    ];
+
+    return [
+      SliverList.list(children: controls),
       if (filtered.isEmpty)
-        JournalGroupedCard(
-          padding: const EdgeInsets.all(18),
-          children: [
-            Text(
-              notices.isEmpty
-                  ? '暂无课程通知记录，点击右上角同步图标读取。'
-                  : scoped.isEmpty
-                      ? '当前通知范围内没有记录，可切换到「收件箱」查看平台消息。'
-                      : '当前筛选条件下没有匹配的通知。',
-              style: journal.metadata,
-            ),
-          ],
+        SliverToBoxAdapter(
+          child: JournalGroupedCard(
+            padding: const EdgeInsets.all(18),
+            children: [
+              Text(
+                notices.isEmpty
+                    ? '暂无课程通知记录，点击右上角同步图标读取。'
+                    : scoped.isEmpty
+                        ? '当前通知范围内没有记录，可切换到「收件箱」查看平台消息。'
+                        : '当前筛选条件下没有匹配的通知。',
+                style: journal.metadata,
+              ),
+            ],
+          ),
         )
       else
-        JournalGroupedCard(
-          dividerIndent: 16,
-          children: [
-            for (final notice in filtered)
-              _buildNoticeTile(context, notice, journal),
-          ],
+        JournalSliverGroupedCard(
+          itemCount: filtered.length,
+          itemBuilder: (context, index) =>
+              _buildNoticeTile(context, filtered[index], journal),
         ),
     ];
   }
@@ -717,6 +851,9 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     final journal = Journal.of(context);
     final courses = widget.store.courses;
     final catalog = widget.store.courseChapters;
+    final manualEntryIds = {
+      for (final entry in widget.store.notebook.entries) entry.id,
+    };
     final nameCounts = <String, int>{};
     for (final c in courses) {
       final n = c.name.trim();
@@ -729,7 +866,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         ...courses,
     ];
 
-    return [
+    final controls = <Widget>[
       if (widget.store.isChapterSyncing) ...[
         JournalGroupedCard(
           padding: const EdgeInsets.all(14),
@@ -773,29 +910,36 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         ),
       ],
       const SizedBox(height: 12),
+    ];
+
+    return [
+      SliverList.list(children: controls),
       if (targetCourses.isEmpty)
-        JournalGroupedCard(
-          padding: const EdgeInsets.all(18),
-          children: [
-            Text(
-              '暂无课程资料，请先前往「同步学习通」同步课程列表。',
-              style: journal.metadata,
-            ),
-          ],
+        SliverToBoxAdapter(
+          child: JournalGroupedCard(
+            padding: const EdgeInsets.all(18),
+            children: [
+              Text(
+                '暂无课程资料，请先前往「同步学习通」同步课程列表。',
+                style: journal.metadata,
+              ),
+            ],
+          ),
         )
       else
-        JournalGroupedCard(
-          dividerIndent: 16,
-          children: [
-            for (final course in targetCourses)
-              _buildChapterCourseExpansion(
-                context,
-                course: course,
-                catalog: catalog,
-                duplicateName: (nameCounts[course.name.trim()] ?? 0) > 1,
-                journal: journal,
-              ),
-          ],
+        JournalSliverGroupedCard(
+          itemCount: targetCourses.length,
+          itemBuilder: (context, index) {
+            final course = targetCourses[index];
+            return _buildChapterCourseExpansion(
+              context,
+              course: course,
+              catalog: catalog,
+              manualEntryIds: manualEntryIds,
+              duplicateName: (nameCounts[course.name.trim()] ?? 0) > 1,
+              journal: journal,
+            );
+          },
         ),
     ];
   }
@@ -804,6 +948,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     BuildContext context, {
     required CourseRef course,
     required CourseChapterCatalog catalog,
+    required Set<String> manualEntryIds,
     required bool duplicateName,
     required JournalPalette journal,
   }) {
@@ -822,6 +967,8 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
           }).toList();
 
     return Theme(
+      // The ancestor stores expansion while the tile retains its row key.
+      key: PageStorageKey((_accountHash, _accountEpoch, course.key)),
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         key: ValueKey('chapter-course-${course.key}'),
@@ -842,8 +989,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
               tooltip: '刷新 ${course.name} 章节进度',
               onPressed: widget.store.isLoading
                   ? null
-                  : () =>
-                      widget.store.syncCourseChapters(courseKey: course.key),
+                  : () => _syncChapters(courseKey: course.key),
               icon: const Icon(Icons.sync_rounded, size: 19),
             ),
             const Icon(Icons.expand_more_rounded),
@@ -889,9 +1035,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                     ),
                   ),
                   trailing: node.state == ChapterTaskState.pendingPoints
-                      ? (node.linkedManualEntryId != null &&
-                              widget.store.notebook.entries
-                                  .any((e) => e.id == node.linkedManualEntryId)
+                      ? (manualEntryIds.contains(node.linkedManualEntryId)
                           ? TextButton(
                               onPressed: () => context.push('/agenda'),
                               child: const Text('已加待办'),
@@ -939,8 +1083,9 @@ class _StudyHubTabBar extends StatelessWidget {
             curve: JournalMotion.easeOut,
             padding: const EdgeInsets.symmetric(vertical: 9),
             decoration: BoxDecoration(
-              color: active ? journal.sheet : Colors.transparent,
+              color: active ? journal.segmentThumb : Colors.transparent,
               borderRadius: BorderRadius.circular(11),
+              border: active ? journal.segmentBorder : null,
               boxShadow: active
                   ? [
                       BoxShadow(
@@ -972,8 +1117,9 @@ class _StudyHubTabBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
-        color: journal.parchment,
+        color: journal.segmentTrack,
         borderRadius: BorderRadius.circular(14),
+        border: journal.segmentBorder,
       ),
       child: Row(
         children: [

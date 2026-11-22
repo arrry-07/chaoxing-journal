@@ -38,6 +38,27 @@ void main() {
           }
         }
       });
+  test('classroom detail accepts mixed-case class aliases', () {
+    ChaoxingClassroomParser.checkIdentity(
+      {'activeId': '35', 'CoUrSeId': '7', 'jClAsSiD': '11'},
+      seed,
+      requireCourse: true,
+      requireActivity: true,
+    );
+  });
+
+  test('classroom detail rejects a conflicting mixed-case class alias', () {
+    expect(
+      () => ChaoxingClassroomParser.checkIdentity(
+        {'activeId': '35', 'courseId': '7', 'clazzId': '11', 'jClAsSiD': '12'},
+        seed,
+        requireCourse: true,
+        requireActivity: true,
+      ),
+      throwsFormatException,
+    );
+  });
+
   test('personal submit status needs its matching timestamp', () {
     expect(parse(0, null).status, 'pending');
     expect(parse(1, DateTime.utc(2030).millisecondsSinceEpoch).status,
