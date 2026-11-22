@@ -48,6 +48,17 @@ jobs:
                       name = "GoogleMavenCentralMirror"
                       url = uri("https://maven-central.storage-download.googleapis.com/maven2")
                   }
+                  if (settings.gradle.parent != null) {
+                      gradlePluginPortal()
+                  }
+              }
+              if (settings.gradle.parent != null) {
+                  settings.dependencyResolutionManagement.repositories {
+                      maven {
+                          name = "GoogleMavenCentralMirror"
+                          url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                      }
+                  }
               }
           }
           allprojects { project ->
@@ -57,10 +68,12 @@ jobs:
                       url = uri("https://maven-central.storage-download.googleapis.com/maven2")
                   }
               }
-              project.repositories {
-                  maven {
-                      name = "GoogleMavenCentralMirror"
-                      url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+              if (project.gradle.parent == null) {
+                  project.repositories {
+                      maven {
+                          name = "GoogleMavenCentralMirror"
+                          url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                      }
                   }
               }
           }
