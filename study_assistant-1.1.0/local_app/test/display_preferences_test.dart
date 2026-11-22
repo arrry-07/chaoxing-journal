@@ -209,6 +209,9 @@ void main() {
           beforeEpoch: 1,
           afterEpoch: 1,
           operationError: null);
+      await t.pump();
+      expect(calls, isEmpty, reason: 'unchanged report must not emit');
+
       InteractionFeedback.triggerSyncDoneIfReady(
           prefs: prefs,
           before: base,
@@ -216,6 +219,9 @@ void main() {
           beforeEpoch: 1,
           afterEpoch: 1,
           operationError: null);
+      await t.pump();
+      expect(calls, isEmpty, reason: 'partial phase must not emit');
+
       InteractionFeedback.triggerSyncDoneIfReady(
           prefs: prefs,
           before: base,
@@ -223,6 +229,9 @@ void main() {
           beforeEpoch: 1,
           afterEpoch: 1,
           operationError: '保存失败');
+      await t.pump();
+      expect(calls, isEmpty, reason: 'operationError must suppress syncDone');
+
       InteractionFeedback.triggerSyncDoneIfReady(
           prefs: prefs,
           before: base,
@@ -230,6 +239,9 @@ void main() {
           beforeEpoch: 1,
           afterEpoch: 2,
           operationError: null);
+      await t.pump();
+      expect(calls, isEmpty, reason: 'epoch change must suppress syncDone');
+
       InteractionFeedback.triggerSyncDoneIfReady(
           prefs: prefs,
           before: base,

@@ -10,7 +10,7 @@ import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/daily_plan_screen.dart';
 import 'package:study_assistant_mobile/src/features/personal_work_screen.dart';
-import 'package:study_assistant_mobile/src/features/reminder_health_screen.dart';
+import 'package:study_assistant_mobile/src/features/reminder_settings_screen.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/daily_summary.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
@@ -186,7 +186,8 @@ void main() {
                 'plan' => DailyPlanScreen(store: s),
                 'personal' => PersonalWorkScreen(
                     store: s, assignmentId: 'cx:work:1:2:shared'),
-                _ => ReminderHealthScreen(store: s)
+                _ => ReminderSettingsScreen(
+                    assignmentStore: s, initialExpandHealth: true)
               })));
       await t.pumpAndSettle();
       expect(t.takeException(), isNull, reason: '$page/$width/$scale');

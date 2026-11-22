@@ -82,6 +82,15 @@ class _JournalPickerSheetBodyState<T>
     extends State<_JournalPickerSheetBody<T>> {
   final _controller = TextEditingController();
   String _query = '';
+  bool _popped = false;
+
+  void _close([T? result]) {
+    if (_popped) return;
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+    _popped = true;
+    Navigator.of(context).pop(result);
+  }
 
   @override
   void dispose() {
@@ -109,6 +118,7 @@ class _JournalPickerSheetBodyState<T>
     final journal = Journal.of(context);
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     final bottomSafe = MediaQuery.paddingOf(context).bottom;
+    final bottomPad = bottomInset > 0 ? 14.0 : 14.0 + bottomSafe;
     final maxHeight = MediaQuery.sizeOf(context).height * 0.78;
     final filtered = _filtered;
 
@@ -124,7 +134,7 @@ class _JournalPickerSheetBodyState<T>
               top: BorderSide(color: journal.cardBorder, width: 0.8),
             ),
           ),
-          padding: EdgeInsets.fromLTRB(18, 12, 18, 14 + bottomSafe),
+          padding: EdgeInsets.fromLTRB(18, 12, 18, bottomPad),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -150,7 +160,7 @@ class _JournalPickerSheetBodyState<T>
                     visualDensity: VisualDensity.compact,
                     icon: Icon(Icons.close_rounded,
                         size: 20, color: journal.muted),
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: _close,
                   ),
                 ],
               ),
@@ -266,10 +276,11 @@ class _JournalPickerSheetBodyState<T>
                                       : Colors.transparent,
                                   child: InkWell(
                                     onTap: () {
+                                      if (_popped) return;
                                       if (widget.displayPrefs != null) {
                                         JournalMotion.tap(widget.displayPrefs!);
                                       }
-                                      Navigator.of(context).pop(opt.value);
+                                      _close(opt.value);
                                     },
                                     child: ConstrainedBox(
                                       constraints:

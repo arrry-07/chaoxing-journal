@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/features/manual_agenda_screen.dart';
-import 'package:study_assistant_mobile/src/features/reminder_health_screen.dart';
+import 'package:study_assistant_mobile/src/features/reminder_settings_screen.dart';
 import 'package:study_assistant_mobile/src/features/reminder_history_screen.dart';
 import 'package:study_assistant_mobile/src/features/reminder_status_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
@@ -380,7 +380,9 @@ void main() {
                 id: '0',
               ),
             ),
-            Expanded(child: ReminderHealthScreen(store: store)),
+            Expanded(
+                child: ReminderSettingsScreen(
+                    assignmentStore: store, initialExpandHealth: true)),
           ],
         ),
       ));
@@ -530,7 +532,8 @@ void main() {
             routes: [
               GoRoute(
                 path: '/reminder-health',
-                builder: (_, __) => ReminderHealthScreen(store: store),
+                builder: (_, __) => ReminderSettingsScreen(
+                    assignmentStore: store, initialExpandHealth: true),
               ),
               GoRoute(
                 path: '/reminder-history',

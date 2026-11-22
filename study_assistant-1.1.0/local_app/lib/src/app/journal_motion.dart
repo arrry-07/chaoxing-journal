@@ -23,14 +23,7 @@ class JournalMotion {
     damping: 37.4, // damping ratio ~0.82
   );
 
-  static const gentleSpring = SpringDescription(
-    mass: 1.0,
-    stiffness: 320.0,
-    damping: 35.8, // critically damped (~1.0)
-  );
-
   static const Curve easeOut = Curves.easeOutCubic;
-  static const Curve easeSheet = Curves.easeOutQuart;
 
   static bool isReducedMotion(BuildContext context) =>
       MediaQuery.maybeDisableAnimationsOf(context) ?? false;

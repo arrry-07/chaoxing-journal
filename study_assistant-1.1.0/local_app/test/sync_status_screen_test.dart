@@ -601,12 +601,16 @@ void main() {
       await tester.pumpAndSettle();
 
       for (var i = 0; i < 4; i++) {
+        kinds.clear();
         mode = i;
         await tester.tap(find.text('刷新作业数据'));
         await tester.pumpAndSettle();
+        expect(
+          kinds.where((k) => k == 'syncDone').toList(),
+          i == 0 ? ['syncDone'] : isEmpty,
+          reason: 'mode=$i',
+        );
       }
-
-      expect(kinds.where((k) => k == 'syncDone'), ['syncDone']);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }

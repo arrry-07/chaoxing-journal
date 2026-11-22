@@ -15,7 +15,7 @@ import 'package:flutter_local_notifications_platform_interface/flutter_local_not
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/daily_summary.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
-import 'package:study_assistant_mobile/src/features/reminder_health_screen.dart';
+import 'package:study_assistant_mobile/src/features/reminder_settings_screen.dart';
 import 'package:study_assistant_mobile/src/services/permission_settings_service.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
@@ -1109,8 +1109,9 @@ void main() {
     addTearDown(store.dispose);
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     await store.restoreSession();
-    await tester
-        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pumpWidget(MaterialApp(
+        home: ReminderSettingsScreen(
+            assignmentStore: store, initialExpandHealth: true)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     await tester.scrollUntilVisible(find.text('截止提醒通知渠道'), 200);
@@ -1154,8 +1155,9 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: ReminderHealthScreen(
-          store: store,
+        home: ReminderSettingsScreen(
+          assignmentStore: store,
+          initialExpandHealth: true,
           permissionSettingsService: permissions,
         ),
       ),
@@ -1180,8 +1182,9 @@ void main() {
     addTearDown(store.dispose);
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     await store.restoreSession();
-    await tester
-        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pumpWidget(MaterialApp(
+        home: ReminderSettingsScreen(
+            assignmentStore: store, initialExpandHealth: true)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     expect(notifications.inspections, 1);
@@ -1206,8 +1209,9 @@ void main() {
     addTearDown(store.dispose);
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     await store.restoreSession();
-    await tester
-        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pumpWidget(MaterialApp(
+        home: ReminderSettingsScreen(
+            assignmentStore: store, initialExpandHealth: true)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     await tester.scrollUntilVisible(find.text('重新体检'), 200);
@@ -1227,8 +1231,9 @@ void main() {
     final store = _nativeHealthStore(InspectableNotifications(), gateway);
     addTearDown(store.dispose);
     await store.restoreSession();
-    await tester
-        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pumpWidget(MaterialApp(
+        home: ReminderSettingsScreen(
+            assignmentStore: store, initialExpandHealth: true)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
@@ -1259,8 +1264,9 @@ void main() {
     final store = _nativeHealthStore(InspectableNotifications(), gateway);
     addTearDown(store.dispose);
     await store.restoreSession();
-    await tester
-        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pumpWidget(MaterialApp(
+        home: ReminderSettingsScreen(
+            assignmentStore: store, initialExpandHealth: true)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     await showTechnicalInfo(tester);
@@ -1318,8 +1324,9 @@ void main() {
         _nativeHealthStore(InspectableNotifications(), unsupportedGateway);
     addTearDown(unsupported.dispose);
     await unsupported.restoreSession();
-    await tester.pumpWidget(
-        MaterialApp(home: ReminderHealthScreen(store: unsupported)));
+    await tester.pumpWidget(MaterialApp(
+        home: ReminderSettingsScreen(
+            assignmentStore: unsupported, initialExpandHealth: true)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
@@ -1339,8 +1346,9 @@ void main() {
         _nativeHealthStore(InspectableNotifications(), failingGateway);
     addTearDown(failing.dispose);
     await failing.restoreSession();
-    await tester
-        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: failing)));
+    await tester.pumpWidget(MaterialApp(
+        home: ReminderSettingsScreen(
+            assignmentStore: failing, initialExpandHealth: true)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
@@ -1361,8 +1369,9 @@ void main() {
     final store = _nativeHealthStore(notifications, _HealthGateway());
     addTearDown(store.dispose);
     await store.restoreSession();
-    await tester
-        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pumpWidget(MaterialApp(
+        home: ReminderSettingsScreen(
+            assignmentStore: store, initialExpandHealth: true)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.textContaining('系统通知与排期体检暂时无法读取，可重试'), findsOneWidget);
@@ -1397,8 +1406,9 @@ void main() {
     addTearDown(store.dispose);
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     await store.restoreSession();
-    await tester
-        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pumpWidget(MaterialApp(
+        home: ReminderSettingsScreen(
+            assignmentStore: store, initialExpandHealth: true)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
@@ -1420,8 +1430,9 @@ void main() {
     addTearDown(store.dispose);
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     await store.restoreSession();
-    await tester
-        .pumpWidget(MaterialApp(home: ReminderHealthScreen(store: store)));
+    await tester.pumpWidget(MaterialApp(
+        home: ReminderSettingsScreen(
+            assignmentStore: store, initialExpandHealth: true)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
@@ -3026,7 +3037,9 @@ void main() {
     await healthyStore.restoreSession();
 
     await tester.pumpWidget(
-      MaterialApp(home: ReminderHealthScreen(store: healthyStore)),
+      MaterialApp(
+          home: ReminderSettingsScreen(
+              assignmentStore: healthyStore, initialExpandHealth: true)),
     );
     await tester.pumpAndSettle();
 
@@ -3051,9 +3064,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: ReminderHealthScreen(
+        home: ReminderSettingsScreen(
           key: ValueKey(pendingStore),
-          store: pendingStore,
+          assignmentStore: pendingStore,
+          initialExpandHealth: true,
         ),
       ),
     );

@@ -21,13 +21,11 @@ class Journal {
   static const divider = Color(0xFFECEBE6);
   static const berry = Color(0xFFC53B3B);
   static const berryBg = Color(0xFFFDF2F2);
-  static const berryBorder = Color(0xFFF3D1D1);
   static const ochre = Color(0xFF4F5D73);
   static const ochreBg = Color(0xFFEFF2F6);
   static const ochreBorder = Color(0xFFD8DEE8);
   static const slate = Color(0xFF3D63DD);
   static const slateBg = Color(0xFFEAF0FD);
-  static const slateBorder = Color(0xFFC9D6F7);
 
   static const displayFamily = 'LXGW WenKai Screen';
   static const titleFamily = displayFamily;
@@ -119,8 +117,6 @@ class Journal {
   );
 }
 
-typedef JournalThemeTokens = JournalPalette;
-
 @immutable
 class JournalPalette extends ThemeExtension<JournalPalette> {
   const JournalPalette({
@@ -141,13 +137,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     required this.divider,
     required this.berry,
     required this.berryBg,
-    required this.berryBorder,
     required this.ochre,
     required this.ochreBg,
     required this.ochreBorder,
     required this.slate,
     required this.slateBg,
-    required this.slateBorder,
     required this.navGlassFill,
     required this.navGlassBorder,
     required this.navGlassHighlight,
@@ -171,13 +165,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     divider: Journal.divider,
     berry: Journal.berry,
     berryBg: Journal.berryBg,
-    berryBorder: Journal.berryBorder,
     ochre: Journal.ochre,
     ochreBg: Journal.ochreBg,
     ochreBorder: Journal.ochreBorder,
     slate: Journal.slate,
     slateBg: Journal.slateBg,
-    slateBorder: Journal.slateBorder,
     navGlassFill: Color(0xD9FFFFFF),
     navGlassBorder: Color(0xB3E5E5E0),
     navGlassHighlight: Color(0x80FFFFFF),
@@ -202,13 +194,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     divider: Color(0x10FFF8EB),
     berry: Color(0xFFE8827D),
     berryBg: Color(0xFF342222),
-    berryBorder: Color(0xFF5A3636),
     ochre: Color(0xFFAEBACB),
     ochreBg: Color(0xFF272B32),
     ochreBorder: Color(0xFF3D434F),
     slate: Color(0xFF88A8F8),
     slateBg: Color(0xFF252B3B),
-    slateBorder: Color(0xFF3D4C6E),
     navGlassFill: Color(0xCC242320),
     navGlassBorder: Color(0x16FFF8EB),
     navGlassHighlight: Color(0x26FFF8EB),
@@ -231,13 +221,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
   final Color divider;
   final Color berry;
   final Color berryBg;
-  final Color berryBorder;
   final Color ochre;
   final Color ochreBg;
   final Color ochreBorder;
   final Color slate;
   final Color slateBg;
-  final Color slateBorder;
   final Color navGlassFill;
   final Color navGlassBorder;
   final Color navGlassHighlight;
@@ -295,13 +283,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     Color? divider,
     Color? berry,
     Color? berryBg,
-    Color? berryBorder,
     Color? ochre,
     Color? ochreBg,
     Color? ochreBorder,
     Color? slate,
     Color? slateBg,
-    Color? slateBorder,
     Color? navGlassFill,
     Color? navGlassBorder,
     Color? navGlassHighlight,
@@ -324,13 +310,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         divider: divider ?? this.divider,
         berry: berry ?? this.berry,
         berryBg: berryBg ?? this.berryBg,
-        berryBorder: berryBorder ?? this.berryBorder,
         ochre: ochre ?? this.ochre,
         ochreBg: ochreBg ?? this.ochreBg,
         ochreBorder: ochreBorder ?? this.ochreBorder,
         slate: slate ?? this.slate,
         slateBg: slateBg ?? this.slateBg,
-        slateBorder: slateBorder ?? this.slateBorder,
         navGlassFill: navGlassFill ?? this.navGlassFill,
         navGlassBorder: navGlassBorder ?? this.navGlassBorder,
         navGlassHighlight: navGlassHighlight ?? this.navGlassHighlight,
@@ -359,13 +343,11 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
       divider: Color.lerp(divider, other.divider, t)!,
       berry: Color.lerp(berry, other.berry, t)!,
       berryBg: Color.lerp(berryBg, other.berryBg, t)!,
-      berryBorder: Color.lerp(berryBorder, other.berryBorder, t)!,
       ochre: Color.lerp(ochre, other.ochre, t)!,
       ochreBg: Color.lerp(ochreBg, other.ochreBg, t)!,
       ochreBorder: Color.lerp(ochreBorder, other.ochreBorder, t)!,
       slate: Color.lerp(slate, other.slate, t)!,
       slateBg: Color.lerp(slateBg, other.slateBg, t)!,
-      slateBorder: Color.lerp(slateBorder, other.slateBorder, t)!,
       navGlassFill: Color.lerp(navGlassFill, other.navGlassFill, t)!,
       navGlassBorder: Color.lerp(navGlassBorder, other.navGlassBorder, t)!,
       navGlassHighlight:
@@ -418,12 +400,10 @@ class JournalLayout {
 class JournalHeading extends StatelessWidget {
   const JournalHeading(this.title,
       {super.key,
-      this.eyebrow,
       this.bookTitle = false,
       this.trailing,
       this.trailingWidth = 48});
   final String title;
-  final String? eyebrow;
   final bool bookTitle;
   final Widget? trailing;
   final double trailingWidth;
@@ -485,20 +465,6 @@ IconData courseIconFor(String name) {
     return Icons.directions_run_rounded;
   }
   return Icons.menu_book_outlined;
-}
-
-class CourseLabel extends StatelessWidget {
-  const CourseLabel(this.name, {super.key});
-  final String name;
-  @override
-  Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CourseMark(name, size: 28),
-          const SizedBox(width: 8),
-          Flexible(child: Text(name)),
-        ],
-      );
 }
 
 class CourseMark extends StatelessWidget {

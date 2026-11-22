@@ -159,18 +159,15 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
   ) {
     final journal = Journal.of(context);
     final bucket = AssignmentStatistics.classify(primary, now);
-    final label = switch (bucket) {
-      AssignmentStatBucket.expired => '已逾期',
-      AssignmentStatBucket.completed => primary.isExam
-          ? AssignmentCard.examStateLabel(primary, now)
-          : primary.statusLabel,
-      AssignmentStatBucket.pending => primary.isExam
-          ? AssignmentCard.examStateLabel(primary, now)
-          : primary.statusLabel,
-      AssignmentStatBucket.unknown => primary.isExam
-          ? AssignmentCard.examStateLabel(primary, now)
-          : primary.statusLabel,
-    };
+    final label = primary.isExam
+        ? AssignmentCard.examStateLabel(primary, now)
+        : switch (bucket) {
+            AssignmentStatBucket.expired => '已逾期',
+            AssignmentStatBucket.completed ||
+            AssignmentStatBucket.pending ||
+            AssignmentStatBucket.unknown =>
+              primary.statusLabel,
+          };
     return switch (bucket) {
       AssignmentStatBucket.completed => (
           label: label,

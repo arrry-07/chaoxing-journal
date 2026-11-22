@@ -10,6 +10,7 @@ import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import 'widgets/data_recovery_warning.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
@@ -126,6 +127,35 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   void _showSnack(String message) {
     if (!mounted) return;
     showJournalMessage(context, message);
+  }
+
+  Future<void> _syncNotices() async {
+    final before = widget.store.syncReport;
+    final beforeEpoch = widget.store.accountEpoch;
+    await widget.store.syncAssignments();
+    if (!mounted) return;
+    InteractionFeedback.triggerSyncDoneIfReady(
+      prefs: widget.store.display,
+      before: before,
+      after: widget.store.syncReport,
+      beforeEpoch: beforeEpoch,
+      afterEpoch: widget.store.accountEpoch,
+      operationError: widget.store.error,
+    );
+  }
+
+  Future<void> _syncChapters({String? courseKey}) async {
+    final beforeEpoch = widget.store.accountEpoch;
+    final ok = await widget.store.syncCourseChapters(courseKey: courseKey);
+    if (ok &&
+        mounted &&
+        widget.store.accountEpoch == beforeEpoch &&
+        widget.store.error == null) {
+      InteractionFeedback.trigger(
+        widget.store.display,
+        kind: InteractionSoundKind.syncDone,
+      );
+    }
   }
 
   Future<DateTime?> _pickDateTime({DateTime? initial}) async {
@@ -460,9 +490,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                           ),
                         )
                       : const Icon(Icons.sync_rounded, size: 21),
-                  onPressed: widget.store.isLoading
-                      ? null
-                      : widget.store.syncAssignments,
+                  onPressed: widget.store.isLoading ? null : _syncNotices,
                 ),
               ] else ...[
                 IconButton(
@@ -477,9 +505,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                       ? widget.store.cancelSynchronization
                       : widget.store.isLoading || widget.store.courses.isEmpty
                           ? null
-                          : () => widget.store.syncCourseChapters(
-                                courseKey: _selectedCourseKey,
-                              ),
+                          : () => _syncChapters(courseKey: _selectedCourseKey),
                 ),
               ],
               const JournalInfoButton(
@@ -908,8 +934,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
               tooltip: '刷新 ${course.name} 章节进度',
               onPressed: widget.store.isLoading
                   ? null
-                  : () =>
-                      widget.store.syncCourseChapters(courseKey: course.key),
+                  : () => _syncChapters(courseKey: course.key),
               icon: const Icon(Icons.sync_rounded, size: 19),
             ),
             const Icon(Icons.expand_more_rounded),

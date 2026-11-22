@@ -248,9 +248,19 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
       _actionMessage = null;
       _actionMessageTarget = null;
     });
+    final before = widget.store.syncReport;
+    final beforeEpoch = widget.store.accountEpoch;
     var message = '刷新已结束，请核对最新截止时间和提交状态。';
     try {
       await widget.store.syncAssignments();
+      InteractionFeedback.triggerSyncDoneIfReady(
+        prefs: widget.store.display,
+        before: before,
+        after: widget.store.syncReport,
+        beforeEpoch: beforeEpoch,
+        afterEpoch: widget.store.accountEpoch,
+        operationError: widget.store.error,
+      );
       if (widget.store.error != null) {
         message = '刷新未完成，请查看同步详情后重试。';
       }

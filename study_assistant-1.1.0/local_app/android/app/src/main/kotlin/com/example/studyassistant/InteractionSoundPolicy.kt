@@ -91,14 +91,29 @@ internal object InteractionSoundPolicy {
         }.array()
     }
 
+    const val RINGER_MODE_NORMAL = 2
+    const val AUDIO_MODE_NORMAL = 0
+    const val AUDIO_MODE_RINGTONE = 1
+    const val AUDIO_MODE_IN_CALL = 2
+    const val AUDIO_MODE_IN_COMMUNICATION = 3
+
     fun shouldPlay(
         hasAudioManager: Boolean,
         streamVolume: Int,
         isStreamMuted: Boolean,
         soundId: Int?,
         readyIds: Set<Int>,
+        ringerMode: Int = RINGER_MODE_NORMAL,
+        audioMode: Int = AUDIO_MODE_NORMAL,
     ): Boolean {
         if (!hasAudioManager || streamVolume <= 0 || isStreamMuted) return false
+        if (ringerMode != RINGER_MODE_NORMAL) return false
+        if (audioMode == AUDIO_MODE_RINGTONE ||
+            audioMode == AUDIO_MODE_IN_CALL ||
+            audioMode == AUDIO_MODE_IN_COMMUNICATION
+        ) {
+            return false
+        }
         return soundId != null && soundId in readyIds
     }
 

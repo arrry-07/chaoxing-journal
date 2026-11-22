@@ -1,6 +1,6 @@
 import '../../models/display_preferences.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import '../../app/journal.dart';
 import '../../models/assignment.dart';
 import '../../services/assignment_query.dart';
@@ -40,6 +40,29 @@ class AssignmentCard extends StatelessWidget {
   final bool showFullDeadline, inPinnedSection, showDivider, enableTapFeedback;
   final bool deadlinePending, previewOnly, previewSaving;
   final bool compact, countdown;
+
+  static final DateFormat _clockFormat = DateFormat('HH:mm');
+  static (TextStyle, TextDirection, TextScaler)? _cachedRailKey;
+  static double _cachedRailWidth = 0;
+
+  static double _measureRailWidth(
+    TextStyle style,
+    TextDirection direction,
+    TextScaler scaler,
+  ) {
+    final key = (style, direction, scaler);
+    if (_cachedRailKey == key) return _cachedRailWidth;
+    final painter = TextPainter(
+      text: TextSpan(text: '00:00', style: style),
+      textDirection: direction,
+      textScaler: scaler,
+    )..layout();
+    final width = painter.width.ceilToDouble() + 4;
+    painter.dispose();
+    _cachedRailKey = key;
+    _cachedRailWidth = width;
+    return width;
+  }
 
   static String examStateLabel(Assignment assignment, DateTime now) {
     final exam = assignment.exam!;
@@ -185,22 +208,20 @@ class AssignmentCard extends StatelessWidget {
     final hasTime =
         d != null && a.timelineTrusted && (a.isExam || !a.deadlineReadFailed);
     final clock = hasTime
-        ? DateFormat('HH:mm').format(AssignmentQuery.beijing(d))
+        ? _clockFormat.format(AssignmentQuery.beijing(d))
         : examSchedule?.timeline?.clock ?? '';
     final railLabel = clock.isNotEmpty
         ? clock
         : bucket == AssignmentDeadlineBucket.confirmedNoDeadline
             ? '—'
             : '待定';
-    final timeMeasure = TextPainter(
-        text: TextSpan(text: '00:00', style: journal.time),
-        textDirection: Directionality.of(context),
-        textScaler: MediaQuery.textScalerOf(context))
-      ..layout();
-    final railWidth = timeMeasure.width.ceilToDouble() + 4;
+    final railWidth = _measureRailWidth(
+      journal.time,
+      Directionality.of(context),
+      MediaQuery.textScalerOf(context),
+    );
     final largeText = JournalLayout.isLargeText(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    timeMeasure.dispose();
 
     final stateTone = _stateTone(a, bucket);
     final hasSpecialStatePill = stateTone != CourseworkPillTone.neutral;
@@ -557,6 +578,8 @@ class _CourseStateLine extends StatelessWidget {
     required this.journal,
   });
 
+  static final RegExp _trailingPunctuation = RegExp(r'[（(\[【《「『·\-—\s]+$');
+
   final String course;
   final String state;
   final JournalPalette journal;
@@ -606,7 +629,7 @@ class _CourseStateLine extends StatelessWidget {
           }
           if (best > 0) {
             final raw = String.fromCharCodes(runes.take(best)).trimRight();
-            final trimmed = raw.replaceFirst(RegExp(r'[（(\[【《「『·\-—\s]+$'), '');
+            final trimmed = raw.replaceFirst(_trailingPunctuation, '');
             displayCourse = trimmed.isEmpty ? '$raw…' : '$trimmed…';
           }
         }

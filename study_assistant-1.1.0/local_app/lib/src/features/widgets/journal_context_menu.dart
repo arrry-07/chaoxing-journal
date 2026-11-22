@@ -55,7 +55,7 @@ Future<void> showJournalContextMenu({
   );
 }
 
-class _JournalContextMenuOverlay extends StatelessWidget {
+class _JournalContextMenuOverlay extends StatefulWidget {
   const _JournalContextMenuOverlay({
     required this.animation,
     required this.anchorRect,
@@ -71,6 +71,41 @@ class _JournalContextMenuOverlay extends StatelessWidget {
   final DisplayPreferences displayPrefs;
 
   @override
+  State<_JournalContextMenuOverlay> createState() =>
+      _JournalContextMenuOverlayState();
+}
+
+class _JournalContextMenuOverlayState
+    extends State<_JournalContextMenuOverlay> {
+  late final CurvedAnimation _curved;
+  bool _dismissed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _curved = CurvedAnimation(
+      parent: widget.animation,
+      curve: JournalMotion.easeOut,
+      reverseCurve: JournalMotion.easeOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _curved.dispose();
+    super.dispose();
+  }
+
+  void _dismiss({VoidCallback? afterDismiss}) {
+    if (_dismissed) return;
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+    _dismissed = true;
+    Navigator.of(context).pop();
+    afterDismiss?.call();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
     final media = MediaQuery.of(context);
@@ -78,11 +113,8 @@ class _JournalContextMenuOverlay extends StatelessWidget {
     final topSafe = media.padding.top + 12;
     final bottomSafe = media.padding.bottom + 16;
     final reduced = JournalMotion.isReducedMotion(context);
-    final curved = CurvedAnimation(
-      parent: animation,
-      curve: JournalMotion.easeOut,
-      reverseCurve: JournalMotion.easeOut,
-    );
+    final actions = widget.actions;
+    final anchorRect = widget.anchorRect;
 
     const horizontalPad = 18.0;
     const edgeInset = 8.0;
@@ -102,12 +134,15 @@ class _JournalContextMenuOverlay extends StatelessWidget {
     );
     final naturalCardHeight = anchorRect?.height ?? 92.0;
 
-    // One shared vertical budget: the menu keeps at least two rows (scrolling
-    // beyond that), the preview is clipped rather than drawn under the menu.
+    // One shared vertical budget: the menu keeps up to two rows when space
+    // permits and never exceeds usableHeight; the preview clips cleanly.
     final minCardShown = math.min(naturalCardHeight, 96.0);
+    final desiredFloor = math.min(itemHeight * 2, usableHeight);
+    final menuBudget =
+        math.max(desiredFloor, usableHeight - gap - minCardShown);
     final menuHeight = math.min(
       naturalMenuHeight,
-      math.max(itemHeight * 2, usableHeight - gap - minCardShown),
+      math.min(usableHeight, menuBudget),
     );
     final cardHeight = math.max(
       0.0,
@@ -147,9 +182,9 @@ class _JournalContextMenuOverlay extends StatelessWidget {
     return Material(
       type: MaterialType.transparency,
       child: AnimatedBuilder(
-        animation: curved,
+        animation: _curved,
         builder: (context, _) {
-          final t = curved.value;
+          final t = _curved.value;
           final sigma = reduced ? 0.0 : 12.0 * t;
           final scaleCard = reduced ? 1.0 : 1.0 + 0.02 * t;
           final menuScale = reduced ? 1.0 : 0.90 + 0.10 * t;
@@ -159,7 +194,7 @@ class _JournalContextMenuOverlay extends StatelessWidget {
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: () => Navigator.of(context).pop(),
+                  onTap: _dismiss,
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
                     child: ColoredBox(
@@ -172,48 +207,49 @@ class _JournalContextMenuOverlay extends StatelessWidget {
                   ),
                 ),
               ),
-              Positioned(
-                left: cardLeft,
-                top: cardTop,
-                width: cardWidth,
-                height: cardHeight,
-                child: IgnorePointer(
-                  child: Transform.scale(
-                    scale: scaleCard,
-                    child: Opacity(
-                      opacity: t.clamp(0.0, 1.0),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: journal.sheetElevated,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: journal.cardBorder,
-                            width: 0.8,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(
-                                alpha: journal.isDark ? 0.36 : 0.14,
-                              ),
-                              blurRadius: 24,
-                              offset: const Offset(0, 10),
+              if (cardHeight > 0)
+                Positioned(
+                  left: cardLeft,
+                  top: cardTop,
+                  width: cardWidth,
+                  height: cardHeight,
+                  child: IgnorePointer(
+                    child: Transform.scale(
+                      scale: scaleCard,
+                      child: Opacity(
+                        opacity: t.clamp(0.0, 1.0),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: journal.sheetElevated,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: journal.cardBorder,
+                              width: 0.8,
                             ),
-                          ],
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          // Clip (never overflow) a preview taller than its
-                          // share of the screen budget.
-                          child: SingleChildScrollView(
-                            physics: const NeverScrollableScrollPhysics(),
-                            child: previewCard,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(
+                                  alpha: journal.isDark ? 0.36 : 0.14,
+                                ),
+                                blurRadius: 24,
+                                offset: const Offset(0, 10),
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            // Clip (never overflow) a preview taller than its
+                            // share of the screen budget.
+                            child: SingleChildScrollView(
+                              physics: const NeverScrollableScrollPhysics(),
+                              child: widget.previewCard,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
               Positioned(
                 left: menuLeft,
                 top: placeBelow ? cardTop + cardHeight + gap : null,
@@ -251,11 +287,9 @@ class _JournalContextMenuOverlay extends StatelessWidget {
                                   _ContextMenuRow(
                                     action: action,
                                     journal: journal,
-                                    onTap: () {
-                                      JournalMotion.tap(displayPrefs);
-                                      Navigator.of(context).pop();
-                                      action.onSelected();
-                                    },
+                                    onTap: () => _dismiss(
+                                      afterDismiss: action.onSelected,
+                                    ),
                                   ),
                               ],
                             ),

@@ -337,6 +337,7 @@ class ChaoxingLocalClient {
 
         return rank(a).compareTo(rank(b));
       });
+    _skippedMalformedVerifyCookies = 0;
     for (final row in sortedRows) {
       final agent = row['userAgent'];
       if (agent is String &&
@@ -357,6 +358,11 @@ class ChaoxingLocalClient {
         if (split < 1) continue;
         final name = pair.substring(0, split).trim(),
             value = pair.substring(split + 1).trim();
+        if (value.isEmpty) {
+          // Empty WebView pairs (e.g. `UID=`) must never erase a valid session
+          // cookie.
+          continue;
+        }
         final Cookie validated;
         try {
           validated = Cookie(name, value)
@@ -366,6 +372,7 @@ class ChaoxingLocalClient {
         } on FormatException {
           // A single malformed WebView cookie must not abort verification import
           // or erase an existing valid session cookie.
+          _skippedMalformedVerifyCookies++;
           continue;
         }
         final matches = _cookies
@@ -373,28 +380,55 @@ class ChaoxingLocalClient {
             .toList();
         if (matches.any((e) =>
                 e.cookie.value == validated.value &&
+                e.expires == null &&
                 (!isRootDomain || !e.hostOnly)) &&
             matches.every((e) =>
                 e.domain != uri.host ||
                 e.path != path ||
-                e.cookie.value == validated.value)) {
+                (e.cookie.value == validated.value && e.expires == null))) {
           continue;
         }
-        if (matches.isNotEmpty && path == '/' && !isRootDomain) {
-          for (final e in matches) {
-            e.cookie.value = validated.value;
+        if (isRootDomain) {
+          _cookies.removeWhere((e) =>
+              e.cookie.name == name && e.domain == uri.host && e.path == path);
+          _cookies.add(_SessionCookie(validated, uri.host, path, false));
+        } else if (path == '/') {
+          // Never mutate parent `.chaoxing.com` cookies from a subdomain row.
+          // Replace only same-host entries (including stale path-scoped copies)
+          // with fresh host-only entries so `expires` is also refreshed.
+          final sameHost = matches.where((e) => e.domain == uri.host).toList();
+          if (sameHost.isNotEmpty) {
+            _cookies.removeWhere((e) =>
+                e.cookie.name == name &&
+                e.domain == uri.host &&
+                sameHost.contains(e));
+            for (final prev in sameHost) {
+              final refreshed = Cookie(name, value)
+                ..path = prev.path
+                ..secure = true;
+              _cookies
+                  .add(_SessionCookie(refreshed, uri.host, prev.path, true));
+            }
+          } else {
+            _cookies.removeWhere((e) =>
+                e.cookie.name == name &&
+                e.domain == uri.host &&
+                e.path == path);
+            _cookies.add(_SessionCookie(validated, uri.host, path, true));
           }
         } else {
           _cookies.removeWhere((e) =>
               e.cookie.name == name && e.domain == uri.host && e.path == path);
-          _cookies
-              .add(_SessionCookie(validated, uri.host, path, !isRootDomain));
+          _cookies.add(_SessionCookie(validated, uri.host, path, true));
         }
       }
     }
     // Returning closes the browser; only the subsequent signed request can prove success.
     return true;
   }
+
+  int _skippedMalformedVerifyCookies = 0;
+  int get skippedMalformedVerifyCookies => _skippedMalformedVerifyCookies;
 
   int _sessionGeneration = 0;
   bool hasCourseResponse = false;
@@ -2456,7 +2490,12 @@ class ChaoxingLocalClient {
   Map<String, String> _headers(Uri uri, [Map<String, String>? extra]) {
     _cookies.removeWhere((c) => c.expired);
     final matching = _cookies.where((c) => c.matches(uri)).toList()
-      ..sort((a, b) => b.path.length.compareTo(a.path.length));
+      ..sort((a, b) {
+        final byPath = b.path.length.compareTo(a.path.length);
+        if (byPath != 0) return byPath;
+        if (a.hostOnly != b.hostOnly) return a.hostOnly ? -1 : 1;
+        return b.domain.length.compareTo(a.domain.length);
+      });
     return {
       if (matching.isNotEmpty)
         'Cookie': matching

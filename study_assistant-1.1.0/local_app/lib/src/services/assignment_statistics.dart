@@ -1,4 +1,5 @@
 import '../models/assignment.dart';
+import 'assignment_query.dart';
 
 enum AssignmentStatBucket { completed, pending, expired, unknown }
 
@@ -7,6 +8,15 @@ class AssignmentStatistics {
     Assignment a,
     DateTime referenceTime,
   ) {
+    if (a.isExam) {
+      if (a.isCompleted) return AssignmentStatBucket.completed;
+      if (a.exam!.noticeOnly || AssignmentQuery.isExamEnded(a, referenceTime)) {
+        return AssignmentStatBucket.unknown;
+      }
+      return a.isPendingConfirmed
+          ? AssignmentStatBucket.pending
+          : AssignmentStatBucket.unknown;
+    }
     switch (a.deadlineBucketAt(referenceTime)) {
       case AssignmentDeadlineBucket.completed:
         return AssignmentStatBucket.completed;
@@ -20,6 +30,29 @@ class AssignmentStatistics {
             ? AssignmentStatBucket.pending
             : AssignmentStatBucket.unknown;
     }
+  }
+
+  /// Whether a record needs active student follow-up inside the per-course
+  /// "各课程待处理" list.
+  ///
+  /// Completed work, cancelled/ended exams, pure broadcast exam notices
+  /// (`noticeOnly`), and elapsed historical classroom practices without
+  /// confirmed submission status stay accessible in Local Records and Overview
+  /// counts, without cluttering actionable per-course pending rows.
+  static bool isPendingCourseAttention(
+    Assignment a,
+    DateTime referenceTime,
+  ) {
+    if (a.isCompleted) return false;
+    if (a.isExam) {
+      if (a.exam!.noticeOnly || AssignmentQuery.isExamEnded(a, referenceTime)) {
+        return false;
+      }
+    }
+    if (AssignmentQuery.isArchivedClassroomPractice(a, referenceTime)) {
+      return false;
+    }
+    return true;
   }
 
   AssignmentStatistics(Iterable<Assignment> records, {DateTime? now}) {

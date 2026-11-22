@@ -148,13 +148,24 @@ object AssignmentAlarmScheduler {
     }
 
     private fun setAlarm(context: Context, triggerAt: Long, pending: PendingIntent) {
-        val alarms = context.getSystemService(AlarmManager::class.java)
+        val alarms = context.getSystemService(AlarmManager::class.java) ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             !alarms.canScheduleExactAlarms()
         ) {
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-        } else {
+            runCatching {
+                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+            }
+            return
+        }
+        try {
             alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+        } catch (_: SecurityException) {
+            // Exact alarm permission can be revoked between check and schedule.
+            runCatching {
+                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+            }
+        } catch (_: RuntimeException) {
+            // Alarm quota or OEM restrictions must not abort remaining schedules.
         }
     }
 

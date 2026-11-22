@@ -144,22 +144,41 @@ class AssignmentStore extends ChangeNotifier {
         requestTimings: chaoxingClient.requestTimings,
       );
 
-  Future<bool> saveHomeFilters(HomeFilters next, int expectedEpoch) async {
+  Future<void>? _filterWrites;
+
+  Future<bool> saveHomeFilters(HomeFilters next, int expectedEpoch) {
     final account = _account;
-    var saved = false;
-    await _run(() async {
-      if (account == null ||
+    if (account == null ||
+        !_authenticated ||
+        _disposed ||
+        _generation != expectedEpoch) {
+      return Future<bool>.value(false);
+    }
+    final encoded = next.encode();
+    final write = (_filterWrites ?? Future<void>.value()).then((_) async {
+      if (_disposed ||
           !_authenticated ||
           _generation != expectedEpoch ||
-          account != _account) {
-        return;
+          _account != account) {
+        return false;
       }
-      await repository.saveHomeFilters(next, account);
-      if (_generation != expectedEpoch || !_authenticated) return;
-      homeFilters = HomeFilters.decode(next.encode());
-      saved = true;
+      try {
+        await repository.saveHomeFilters(next, account);
+      } on StaleSessionWriteException {
+        return false;
+      }
+      if (_disposed ||
+          !_authenticated ||
+          _generation != expectedEpoch ||
+          _account != account) {
+        return false;
+      }
+      homeFilters = HomeFilters.decode(encoded);
+      notifyListeners();
+      return true;
     });
-    return saved;
+    _filterWrites = write.then<void>((_) {}, onError: (Object _) {});
+    return write;
   }
 
   Future<bool> saveNotebook(
@@ -179,7 +198,12 @@ class AssignmentStore extends ChangeNotifier {
       final previous = notebook;
       notebook = StudyNotebook.decode(next.encode());
       saved = true;
-      final manualSucceeded = await _afterAssignmentsChanged();
+      final manualSucceeded = await _afterAssignmentsChanged(
+        updateAssignmentReminders: false,
+        updateSummary: false,
+        updateManual: true,
+        updateWidget: false,
+      );
       await _recordManualCancellationOutcomes(
         previous,
         notebook,
@@ -187,6 +211,22 @@ class AssignmentStore extends ChangeNotifier {
       );
     });
     return saved;
+  }
+
+  static bool _dailyPlansChanged(
+    List<DailyPlanItem> a,
+    List<DailyPlanItem> b,
+  ) {
+    if (a.length != b.length) return true;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].assignmentId != b[i].assignmentId ||
+          a[i].day != b[i].day ||
+          a[i].minutes != b[i].minutes ||
+          a[i].done != b[i].done) {
+        return true;
+      }
+    }
+    return false;
   }
 
   int get accountEpoch => _generation;
@@ -203,12 +243,28 @@ class AssignmentStore extends ChangeNotifier {
           account != _account) {
         return;
       }
-      final next = update(personal);
+      final previous = personal;
+      final next = update(previous);
       await repository.savePersonalWorkspace(next, account);
       if (_generation != expectedEpoch || !_authenticated) return;
       personal = PersonalWorkspace.decode(next.encode());
       saved = true;
-      await _afterAssignmentsChanged();
+      final summarySettingsChanged =
+          previous.summaryEnabled != personal.summaryEnabled ||
+              previous.summaryHour != personal.summaryHour ||
+              previous.summaryMinute != personal.summaryMinute;
+      final plansChanged = _dailyPlansChanged(previous.plans, personal.plans);
+      final needSummary = summarySettingsChanged ||
+          ((previous.summaryEnabled || personal.summaryEnabled) &&
+              plansChanged);
+      if (needSummary) {
+        await _afterAssignmentsChanged(
+          updateAssignmentReminders: false,
+          updateSummary: true,
+          updateManual: false,
+          updateWidget: false,
+        );
+      }
     });
     return saved;
   }
@@ -903,14 +959,53 @@ class AssignmentStore extends ChangeNotifier {
     return aliases;
   }
 
+  final _authNotifier = ValueNotifier<int>(0);
+  bool _lastNotifiedAuth = false;
+  int _lastNotifiedEpoch = 0;
+  String? _lastNotifiedHash;
+
+  /// Fires only when authentication status, account epoch, or account hash
+  /// changes, so GoRouter does not re-evaluate redirects on filter/plan/sync
+  /// ticks.
+  Listenable get authListenable => _authNotifier;
+
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
+    if (_authenticated != _lastNotifiedAuth ||
+        _generation != _lastNotifiedEpoch ||
+        _accountHash != _lastNotifiedHash) {
+      _lastNotifiedAuth = _authenticated;
+      _lastNotifiedEpoch = _generation;
+      _lastNotifiedHash = _accountHash;
+      _authNotifier.value++;
+    }
+  }
+
   bool isPinned(Assignment assignment) =>
       _authenticated && _pinAliases(assignment).any(_pinnedIds.contains);
+
+  Set<String>? _pinnableKeysCache;
+  int? _pinnableKeysCacheMinute;
+
+  Set<String> _pinnableKeys() {
+    final now = _clock();
+    final minute = now.millisecondsSinceEpoch ~/ 60000;
+    if (_pinnableKeysCache != null && _pinnableKeysCacheMinute == minute) {
+      return _pinnableKeysCache!;
+    }
+    _pinnableKeysCacheMinute = minute;
+    return _pinnableKeysCache = {
+      for (final item in visibleAssignments) _pinKey(item),
+    };
+  }
 
   bool canTogglePin(Assignment assignment) =>
       _manageBackgroundSchedule &&
       _authenticated &&
       _account != null &&
-      visibleAssignments.any((item) => _pinKey(item) == _pinKey(assignment));
+      _pinnableKeys().contains(_pinKey(assignment));
 
   Future<bool> togglePin(Assignment assignment) async {
     final account = _account;
@@ -1027,6 +1122,12 @@ class AssignmentStore extends ChangeNotifier {
         for (final group in courseworkGroups)
           if (!group.hidden) group.primary,
       ]);
+
+  Set<String> _effectiveHiddenAssignmentIds() => {
+        for (final item in _hiddenAssignments) item.id,
+        for (final group in hiddenCourseworkGroups)
+          for (final source in group.sources) source.id,
+      };
 
   List<CourseworkGroup> get hiddenCourseworkGroups => List.unmodifiable(
         localRecordGroups.where((group) => group.hidden),
@@ -1200,6 +1301,8 @@ class AssignmentStore extends ChangeNotifier {
 
   List<Assignment>? _homeCatalogCache;
   AssignmentDisplayIndex? _homeDisplayIndex;
+  Set<String>? _persistedIdsCache;
+  Set<String>? _previewIdsCache;
 
   AssignmentDisplayIndex get homeDisplayIndex =>
       _homeDisplayIndex ??= AssignmentDisplayIndex.from(homeCatalogAssignments);
@@ -1211,14 +1314,24 @@ class AssignmentStore extends ChangeNotifier {
     _localRecordGroupsCache = null;
     _courseworkSourcesCache = null;
     _statsAssignmentsCache = null;
+    _pinnableKeysCache = null;
+    _pinnableKeysCacheMinute = null;
+    _persistedIdsCache = null;
+    _previewIdsCache = null;
   }
 
   bool isHomeDeadlinePending(String assignmentId) =>
       _homePendingDeadlineIds.contains(assignmentId);
 
-  bool isHomeAssignmentPreviewOnly(String assignmentId) =>
-      _homePreviewAssignments.any((a) => a.id == assignmentId) &&
-      !_assignments.any((a) => a.id == assignmentId);
+  bool isHomeAssignmentPreviewOnly(String assignmentId) {
+    if (_homePreviewAssignments.isEmpty) return false;
+    final previewIds =
+        _previewIdsCache ??= {for (final a in _homePreviewAssignments) a.id};
+    if (!previewIds.contains(assignmentId)) return false;
+    final persistedIds =
+        _persistedIdsCache ??= {for (final a in _assignments) a.id};
+    return !persistedIds.contains(assignmentId);
+  }
 
   List<Assignment> _catalogAssignmentsFrom(Iterable<Assignment> records) =>
       AssignmentQuery.scope(records.toList(), {})
@@ -2893,11 +3006,17 @@ class AssignmentStore extends ChangeNotifier {
     bool syncCompleted = false,
     String? syncFailure,
     DateTime? completedAt,
+    bool updateAssignmentReminders = true,
+    bool updateSummary = true,
+    bool updateManual = true,
+    bool updateWidget = true,
   }) async {
     final snap = _captureSession();
-    await _prunePins();
-    if (!_isSessionCurrent(snap)) {
-      return false;
+    if (updateAssignmentReminders) {
+      await _prunePins();
+      if (!_isSessionCurrent(snap)) {
+        return false;
+      }
     }
     var manualRescheduleSucceeded = false;
     _serviceWarnings.clear();
@@ -2912,39 +3031,41 @@ class AssignmentStore extends ChangeNotifier {
       }
     }
     if (!_privacyCleanupPending) {
-      if (_nativeReminderAvailable && _authenticated) {
-        final controlsApplied = await _reconcileBackgroundControls();
-        if (!controlsApplied) {
-          // Fail closed: publishing a plan while showDetails/schedule settings
-          // were not applied would activate the previous native settings.
-          _serviceWarnings.add(_backgroundWarning ?? '后台提醒设置未能应用，本次未更新提醒计划');
+      if (updateAssignmentReminders) {
+        if (_nativeReminderAvailable && _authenticated) {
+          final controlsApplied = await _reconcileBackgroundControls();
+          if (!controlsApplied) {
+            // Fail closed: publishing a plan while showDetails/schedule settings
+            // were not applied would activate the previous native settings.
+            _serviceWarnings.add(_backgroundWarning ?? '后台提醒设置未能应用，本次未更新提醒计划');
+          } else {
+            try {
+              if (await _ensureLegacyAssignmentVerified()) {
+                await _applyNativeReminderPlan(
+                  completeSync: completeSync,
+                  detectNewAssignments: detectNewAssignments,
+                  syncCompleted: syncCompleted,
+                  failure: syncFailure,
+                  completedAt: completedAt,
+                );
+              }
+            } catch (error) {
+              _serviceWarnings.add('后台作业提醒状态未能更新：$error');
+            }
+          }
         } else {
           try {
-            if (await _ensureLegacyAssignmentVerified()) {
-              await _applyNativeReminderPlan(
-                completeSync: completeSync,
-                detectNewAssignments: detectNewAssignments,
-                syncCompleted: syncCompleted,
-                failure: syncFailure,
-                completedAt: completedAt,
-              );
-            }
-          } catch (error) {
-            _serviceWarnings.add('后台作业提醒状态未能更新：$error');
+            await notificationService.rescheduleAssignments(scoped,
+                offsetsMinutes: _reminderOffsetsMinutes);
+          } catch (_) {
+            _serviceWarnings.add('提醒安排失败，请检查通知权限后重试');
+          }
+          if (notificationService.lastWarning != null) {
+            _serviceWarnings.add(notificationService.lastWarning!);
           }
         }
-      } else {
-        try {
-          await notificationService.rescheduleAssignments(scoped,
-              offsetsMinutes: _reminderOffsetsMinutes);
-        } catch (_) {
-          _serviceWarnings.add('提醒安排失败，请检查通知权限后重试');
-        }
-        if (notificationService.lastWarning != null) {
-          _serviceWarnings.add(notificationService.lastWarning!);
-        }
       }
-      if (_manageBackgroundSchedule) {
+      if (_manageBackgroundSchedule && updateSummary) {
         try {
           await notificationService.rescheduleSummary(scoped,
               _authenticated ? personal : PersonalWorkspace(), _lastSyncAt);
@@ -2960,6 +3081,8 @@ class AssignmentStore extends ChangeNotifier {
         await _recordPluginScheduleOutcomes(
           notificationService.lastScheduleOutcomes,
         );
+      }
+      if (_manageBackgroundSchedule && updateManual) {
         try {
           await notificationService
               .rescheduleManual(_authenticated ? notebook.entries : []);
@@ -2978,7 +3101,7 @@ class AssignmentStore extends ChangeNotifier {
         );
       }
     }
-    if (!_isSessionCurrent(snap)) {
+    if (!_isSessionCurrent(snap) || !updateWidget) {
       return manualRescheduleSucceeded;
     }
     final widgetItems = display.forWidget(scoped, DateTime.now());
@@ -3285,7 +3408,7 @@ class AssignmentStore extends ChangeNotifier {
         primary: primary,
         sources: group?.sources ?? [primary],
         groupHidden: group?.hidden ?? false,
-        hiddenAssignmentIds: _hiddenAssignments.map((item) => item.id).toSet(),
+        hiddenAssignmentIds: _effectiveHiddenAssignmentIds(),
         unfollowedCourseKeys: _unfollowed,
         plan: plan,
         offsets: _reminderOffsetsMinutes,
@@ -3408,7 +3531,7 @@ class AssignmentStore extends ChangeNotifier {
       accountHash: accountHash,
       sessionEpoch: sessionEpoch,
       assignments: [..._assignments, ..._hiddenAssignments],
-      hiddenAssignmentIds: _hiddenAssignments.map((item) => item.id).toSet(),
+      hiddenAssignmentIds: _effectiveHiddenAssignmentIds(),
       unfollowedCourseKeys: _unfollowed,
       knownAssignmentIds: state.knownAssignmentIds,
       sentNewAssignmentIds: state.sentNewAssignmentIds,
@@ -4348,6 +4471,7 @@ class AssignmentStore extends ChangeNotifier {
     chaoxingClient.cancelActiveRequests();
     _clearHomePreview();
     _generation++;
+    _authNotifier.dispose();
     super.dispose();
   }
 }

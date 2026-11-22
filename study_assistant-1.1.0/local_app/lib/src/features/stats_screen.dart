@@ -6,13 +6,16 @@ import 'package:go_router/go_router.dart';
 
 import '../app/journal.dart';
 import '../app/journal_motion.dart';
+import '../app/transient_feedback.dart';
 import '../models/assignment.dart';
 import '../services/assignment_statistics.dart';
 import '../services/assignment_store.dart';
 import '../services/local_record_query.dart';
 import 'widgets/completion_pie_chart.dart';
+import 'widgets/journal_context_menu.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_info_popover.dart';
+import 'widgets/journal_swipe_tile.dart';
 
 class _StatsGroup {
   const _StatsGroup(
@@ -50,11 +53,26 @@ class _StatsScreenState extends State<StatsScreen> {
   Timer? _clock;
   late DateTime _now;
   StatsTimeRange _range = StatsTimeRange.all;
+  final _feedback = TransientFeedbackController();
+  late int _feedbackEpoch;
+  String? _feedbackAccount;
+
+  void _checkFeedbackAccount() {
+    if (_feedbackEpoch != widget.store.accountEpoch ||
+        _feedbackAccount != widget.store.account) {
+      _feedback.dismiss();
+      _feedbackEpoch = widget.store.accountEpoch;
+      _feedbackAccount = widget.store.account;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _now = widget.clock?.call() ?? DateTime.now();
+    _feedbackEpoch = widget.store.accountEpoch;
+    _feedbackAccount = widget.store.account;
+    widget.store.addListener(_checkFeedbackAccount);
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) {
         setState(() => _now = widget.clock?.call() ?? DateTime.now());
@@ -63,9 +81,85 @@ class _StatsScreenState extends State<StatsScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant StatsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.store != widget.store) {
+      oldWidget.store.removeListener(_checkFeedbackAccount);
+      _feedback.dismiss();
+      _feedbackEpoch = widget.store.accountEpoch;
+      _feedbackAccount = widget.store.account;
+      widget.store.addListener(_checkFeedbackAccount);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.store.removeListener(_checkFeedbackAccount);
+    _feedback.dispose();
     _clock?.cancel();
     super.dispose();
+  }
+
+  List<Assignment> _actionableRecords(_StatsGroup group, DateTime now) =>
+      group.records
+          .where((r) => AssignmentStatistics.isPendingCourseAttention(r, now))
+          .toList(growable: false);
+
+  Future<void> _unfollowCourseWithUndo(
+    BuildContext context,
+    String courseKey,
+    String displayName,
+  ) async {
+    final store = widget.store;
+    final epoch = store.accountEpoch;
+    await store.followCourse(courseKey, false);
+    if (!context.mounted || !mounted || store.accountEpoch != epoch) return;
+    _feedback.show(
+      context,
+      SnackBar(
+        content: Text('已将「$displayName」移出首页与统计'),
+        action: SnackBarAction(
+          label: '撤销',
+          onPressed: () {
+            if (store.accountEpoch == epoch) {
+              unawaited(store.followCourse(courseKey, true));
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _hideGroupWithUndo(
+    BuildContext context,
+    List<Assignment> actionable,
+    String displayName,
+  ) async {
+    final store = widget.store;
+    final epoch = store.accountEpoch;
+    final ids = <String>{
+      for (final r in actionable)
+        ...(store.courseworkGroupFor(r.id)?.sources.map((s) => s.id) ?? [r.id]),
+    };
+    if (ids.isEmpty) return;
+    final saved = await store.setAssignmentsHidden(ids, true);
+    if (!saved || !context.mounted || !mounted || store.accountEpoch != epoch) {
+      return;
+    }
+    _feedback.show(
+      context,
+      SnackBar(
+        content: Text('已在本机隐藏「$displayName」的 ${actionable.length} 项待处理'),
+        action: SnackBarAction(
+          label: '撤销',
+          onPressed: () {
+            if (store.accountEpoch == epoch) {
+              unawaited(store.setAssignmentsHidden(ids, false));
+            }
+          },
+        ),
+      ),
+    );
   }
 
   void _openRecords(
@@ -142,7 +236,10 @@ class _StatsScreenState extends State<StatsScreen> {
           ];
 
           final pendingGroups = groups.where((g) {
-            final own = AssignmentStatistics(g.records, now: now);
+            final own = AssignmentStatistics(
+              _actionableRecords(g, now),
+              now: now,
+            );
             return own.pending + own.expired + own.unknown > 0;
           }).toList(growable: false);
 
@@ -257,7 +354,7 @@ class _StatsScreenState extends State<StatsScreen> {
                                     '统计范围为已关注课程的作业/任务与账号级考试。',
                                     '已在本机隐藏的记录不计入统计；提交状态未知的记录计入总数，不折算为已完成。',
                                     '切换未来 7 天 / 30 天时，无确定时间的课业不参与时间窗口统计。',
-                                    '点击下方状态行或课程行可直接查看对应记录明细。',
+                                    '点击状态行或课程行查看明细；长按或左滑课程行可快捷取消关注或本机隐藏。',
                                   ],
                                 ),
                               ],
@@ -447,7 +544,8 @@ class _StatsScreenState extends State<StatsScreen> {
     required DateTime now,
     required JournalPalette journal,
   }) {
-    final own = AssignmentStatistics(group.records, now: now);
+    final actionable = _actionableRecords(group, now);
+    final own = AssignmentStatistics(actionable, now: now);
     final same = group.accountExam
         ? const <_StatsGroup>[]
         : allGroups
@@ -459,7 +557,7 @@ class _StatsScreenState extends State<StatsScreen> {
     final pillTexts = [
       if (own.pending > 0) '待完成 ${own.pending}',
       if (own.expired > 0) '已逾期 ${own.expired}',
-      if (own.unknown > 0) '未知 ${own.unknown}',
+      if (own.unknown > 0) '待核对 ${own.unknown}',
     ];
     Widget pillsFor({required bool stacked}) => Wrap(
           spacing: 5,
@@ -482,7 +580,7 @@ class _StatsScreenState extends State<StatsScreen> {
               ),
             if (own.unknown > 0)
               _CourseStatPill(
-                text: '未知 ${own.unknown}',
+                text: '待核对 ${own.unknown}',
                 fg: journal.muted,
                 bg: journal.parchment,
                 journal: journal,
@@ -490,82 +588,135 @@ class _StatsScreenState extends State<StatsScreen> {
           ],
         );
 
-    return InkWell(
-      key: ValueKey('stats-course-${group.courseKey ?? group.scope.name}'),
-      onTap: () => _openRecords(
-        context,
-        scope: group.scope,
-        courseKey: group.courseKey,
-        status: 'unfinished',
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
-          children: [
-            group.courseKey == null
-                ? SizedBox.square(
-                    dimension: 28,
-                    child: Center(
-                      child: Icon(
-                        Icons.description_outlined,
-                        size: 20,
-                        color: journal.muted,
+    Widget buildRowContent() => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              group.courseKey == null
+                  ? SizedBox.square(
+                      dimension: 28,
+                      child: Center(
+                        child: Icon(
+                          Icons.description_outlined,
+                          size: 20,
+                          color: journal.muted,
+                        ),
                       ),
-                    ),
-                  )
-                : CourseMark(group.name, size: 28),
-            const SizedBox(width: 8),
-            Expanded(
-              child: LayoutBuilder(builder: (context, constraints) {
-                const minNameWidth = 96.0;
-                const gap = 6.0;
-                final pillsWidth = _CourseStatPill.estimateRowWidth(
-                  context,
-                  pillTexts,
-                  spacing: 5,
-                );
-                final stacked = largeText ||
-                    constraints.maxWidth - gap - pillsWidth < minNameWidth;
-                if (stacked) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(name, style: journal.entryTitle),
-                      if (pillTexts.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        pillsFor(stacked: true),
+                    )
+                  : CourseMark(group.name, size: 28),
+              const SizedBox(width: 8),
+              Expanded(
+                child: LayoutBuilder(builder: (context, constraints) {
+                  const minNameWidth = 96.0;
+                  const gap = 6.0;
+                  final pillsWidth = _CourseStatPill.estimateRowWidth(
+                    context,
+                    pillTexts,
+                    spacing: 5,
+                  );
+                  final stacked = largeText ||
+                      constraints.maxWidth - gap - pillsWidth < minNameWidth;
+                  if (stacked) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: journal.entryTitle),
+                        if (pillTexts.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          pillsFor(stacked: true),
+                        ],
                       ],
+                    );
+                  }
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: journal.entryTitle,
+                        ),
+                      ),
+                      const SizedBox(width: gap),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: constraints.maxWidth - gap - minNameWidth,
+                        ),
+                        child: pillsFor(stacked: false),
+                      ),
                     ],
                   );
-                }
-                return Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: journal.entryTitle,
-                      ),
-                    ),
-                    const SizedBox(width: gap),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: constraints.maxWidth - gap - minNameWidth,
-                      ),
-                      child: pillsFor(stacked: false),
-                    ),
-                  ],
-                );
-              }),
-            ),
-            const SizedBox(width: 4),
-            Icon(
-              Icons.chevron_right_rounded,
-              size: 18,
-              color: journal.muted,
-            ),
-          ],
+                }),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: journal.muted,
+              ),
+            ],
+          ),
+        );
+
+    void triggerQuickRemove() {
+      if (group.courseKey != null) {
+        unawaited(_unfollowCourseWithUndo(context, group.courseKey!, name));
+      } else {
+        unawaited(_hideGroupWithUndo(context, actionable, name));
+      }
+    }
+
+    return Builder(
+      builder: (rowContext) => JournalSwipeTile(
+        key: ValueKey('stats-swipe-${group.courseKey ?? group.scope.name}'),
+        displayPrefs: widget.store.display,
+        leftAction: JournalSwipeAction(
+          label: group.courseKey != null ? '取消关注' : '本机隐藏',
+          icon: Icons.visibility_off_outlined,
+          color: journal.berry,
+          backgroundColor: journal.berryBg,
+          onTrigger: triggerQuickRemove,
+        ),
+        child: InkWell(
+          key: ValueKey('stats-course-${group.courseKey ?? group.scope.name}'),
+          onTap: () => _openRecords(
+            context,
+            scope: group.scope,
+            courseKey: group.courseKey,
+            status: 'unfinished',
+          ),
+          onLongPress: () {
+            final box = rowContext.findRenderObject() as RenderBox?;
+            final anchor = box == null || !box.hasSize
+                ? null
+                : box.localToGlobal(Offset.zero) & box.size;
+            unawaited(showJournalContextMenu(
+              context: rowContext,
+              anchorRect: anchor,
+              displayPrefs: widget.store.display,
+              previewCard: buildRowContent(),
+              actions: [
+                JournalContextMenuAction(
+                  label: group.courseKey != null ? '查看该课全部记录' : '查看本组全部记录',
+                  icon: Icons.list_alt_rounded,
+                  onSelected: () => _openRecords(
+                    context,
+                    scope: group.scope,
+                    courseKey: group.courseKey,
+                    status: 'all',
+                  ),
+                ),
+                JournalContextMenuAction(
+                  label: group.courseKey != null ? '取消关注（移出统计）' : '本机隐藏本组待处理',
+                  icon: Icons.visibility_off_outlined,
+                  destructive: true,
+                  onSelected: triggerQuickRemove,
+                ),
+              ],
+            ));
+          },
+          child: buildRowContent(),
         ),
       ),
     );
@@ -798,6 +949,7 @@ class _MultiSegmentStatsBar extends StatelessWidget {
                           widthFactor: factor,
                           alignment: Alignment.centerLeft,
                           child: Container(
+                            key: ValueKey('stats-bar-seg-${active[i].index}'),
                             height: 10,
                             color: colors[active[i].index],
                           ),

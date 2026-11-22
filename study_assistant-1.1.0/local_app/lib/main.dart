@@ -355,7 +355,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
         platformUri != null && AppDeepLinks.isOwnedNotificationUri(platformUri);
     return GoRouter(
       navigatorKey: _navigatorKey,
-      refreshListenable: assignmentStore,
+      refreshListenable: assignmentStore.authListenable,
       // go_router 14.8.1 _effectiveInitialLocation rebuilds an empty-path
       // platform URI as Uri(path: '/', queryParameters: {}). That loses the
       // scheme/host of native digest links and yields '/?' before redirect.

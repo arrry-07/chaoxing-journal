@@ -97,7 +97,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     with WidgetsBindingObserver {
   Timer? _clock;
   final _scrollController = ScrollController();
-  double _scrollOffset = 0.0;
+  final ValueNotifier<double> _scrollOffset = ValueNotifier<double>(0.0);
   final _feedback = TransientFeedbackController();
   late int _feedbackEpoch;
   String? _feedbackAccount;
@@ -113,10 +113,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final next = _scrollController.offset;
-    if ((next - _scrollOffset).abs() >= 1.5 &&
-        (next <= 80 || _scrollOffset <= 80)) {
-      setState(() => _scrollOffset = next);
+    final next = _scrollController.offset.clamp(0.0, 80.0);
+    if ((next - _scrollOffset.value).abs() >= 1.5 ||
+        (next == 0.0 && _scrollOffset.value != 0.0) ||
+        (next == 80.0 && _scrollOffset.value != 80.0)) {
+      _scrollOffset.value = next;
     }
   }
 
@@ -150,6 +151,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _scrollOffset.dispose();
     store.removeListener(_checkFeedbackAccount);
     _feedback.dispose();
     _clock?.cancel();
@@ -553,9 +555,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             ? sync.action
             : HomeSyncAction.retry;
 
-        Widget buildCardWidget(Assignment a, {bool pinned = false}) =>
+        Widget buildCard(
+          Assignment a, {
+          bool pinned = false,
+          bool preview = false,
+          bool previewOnly = false,
+          VoidCallback? onLongPress,
+        }) =>
             AssignmentCard(
-              key: ValueKey('assignment-${a.id}'),
+              key: preview ? null : ValueKey('assignment-${a.id}'),
               assignment: a,
               examSources: examSources,
               displayIndex: displayIndex,
@@ -566,87 +574,51 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               inPinnedSection: pinned,
               compact: store.display.compact,
               countdown: store.display.countdown,
-              deadlinePending: store.isHomeDeadlinePending(a.id),
-              previewOnly: store.isHomeAssignmentPreviewOnly(a.id),
-              previewSaving:
+              deadlinePending:
+                  preview ? false : store.isHomeDeadlinePending(a.id),
+              previewOnly: preview ? false : previewOnly,
+              previewSaving: !preview &&
                   store.homeSyncProgress?.stage == AssignmentSyncStage.saving,
               contentPadding: const EdgeInsets.symmetric(horizontal: 14),
-              onOpenAssignment: AssignmentWebLink.validatedUrl(a) == null
-                  ? null
-                  : () => openAssignment(a.id),
-              opening: _openingAssignments.contains(a.id),
-              onTap: () {
-                InteractionFeedback.trigger(store.display);
-                final path = '/assignments/${Uri.encodeComponent(a.id)}';
-                final scope = recoveryScope == null
-                    ? ''
-                    : '?${AssignmentRecoveryScope.queryParameter}=${recoveryScope.queryValue}';
-                context.push('$path$scope');
-              },
+              onOpenAssignment:
+                  preview || AssignmentWebLink.validatedUrl(a) == null
+                      ? null
+                      : () => openAssignment(a.id),
+              opening: !preview && _openingAssignments.contains(a.id),
+              onLongPress: preview ? null : onLongPress,
+              onTap: preview
+                  ? () {}
+                  : () {
+                      InteractionFeedback.trigger(store.display);
+                      final path = '/assignments/${Uri.encodeComponent(a.id)}';
+                      final scope = recoveryScope == null
+                          ? ''
+                          : '?${AssignmentRecoveryScope.queryParameter}=${recoveryScope.queryValue}';
+                      context.push('$path$scope');
+                    },
             );
 
         Widget card(Assignment a, {bool pinned = false}) {
           final previewOnly = store.isHomeAssignmentPreviewOnly(a.id);
+          if (previewOnly) {
+            return buildCard(a, pinned: pinned, previewOnly: true);
+          }
           final inTodayPlan = plannedIds.contains(a.id);
           final canPin = store.canTogglePin(a);
           final isPinned = store.isPinned(a);
-          final preview = AssignmentCard(
-            assignment: a,
-            examSources: examSources,
-            displayIndex: displayIndex,
-            now: now,
-            showFullDeadline: false,
-            showDivider: false,
-            enableTapFeedback: false,
-            inPinnedSection: pinned,
-            compact: store.display.compact,
-            countdown: store.display.countdown,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
-            onTap: () {},
-          );
 
           return Builder(
             builder: (itemContext) {
-              final interactiveCard = AssignmentCard(
-                key: ValueKey('assignment-${a.id}'),
-                assignment: a,
-                examSources: examSources,
-                displayIndex: displayIndex,
-                now: now,
-                showFullDeadline: false,
-                showDivider: false,
-                enableTapFeedback: false,
-                inPinnedSection: pinned,
-                compact: store.display.compact,
-                countdown: store.display.countdown,
-                deadlinePending: store.isHomeDeadlinePending(a.id),
-                previewOnly: previewOnly,
-                previewSaving:
-                    store.homeSyncProgress?.stage == AssignmentSyncStage.saving,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14),
-                onOpenAssignment: AssignmentWebLink.validatedUrl(a) == null
-                    ? null
-                    : () => openAssignment(a.id),
-                opening: _openingAssignments.contains(a.id),
-                onLongPress: previewOnly
-                    ? null
-                    : () => _openContextMenu(
-                          itemContext,
-                          a,
-                          preview,
-                          inTodayPlan: inTodayPlan,
-                        ),
-                onTap: () {
-                  InteractionFeedback.trigger(store.display);
-                  final path = '/assignments/${Uri.encodeComponent(a.id)}';
-                  final scope = recoveryScope == null
-                      ? ''
-                      : '?${AssignmentRecoveryScope.queryParameter}=${recoveryScope.queryValue}';
-                  context.push('$path$scope');
-                },
+              final interactiveCard = buildCard(
+                a,
+                pinned: pinned,
+                onLongPress: () => _openContextMenu(
+                  itemContext,
+                  a,
+                  buildCard(a, pinned: pinned, preview: true),
+                  inTodayPlan: inTodayPlan,
+                ),
               );
-
-              if (previewOnly) return buildCardWidget(a, pinned: pinned);
 
               return JournalSwipeTile(
                 key: ValueKey('swipe-${a.id}'),
@@ -679,28 +651,37 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           );
         }
 
-        List<Widget> timeline(List<Assignment> list) {
-          final widgets = <Widget>[];
+        List<
+            ({
+              String? heading,
+              _DayHeadingTone tone,
+              String? badge,
+              List<Assignment> items,
+              bool pinned,
+            })> buildTimelineSections(List<Assignment> list) {
+          final sections = <({
+            String? heading,
+            _DayHeadingTone tone,
+            String? badge,
+            List<Assignment> items,
+            bool pinned,
+          })>[];
           var regular = list;
 
           void flushGroup({
             String? heading,
             _DayHeadingTone tone = _DayHeadingTone.normal,
             String? badge,
-            required List<Widget> rows,
+            required List<Assignment> rows,
+            bool pinned = false,
           }) {
             if (rows.isEmpty) return;
-            if (heading != null) {
-              widgets.add(dayHeading(
-                heading,
-                top: widgets.isEmpty ? 8 : 18,
-                tone: tone,
-                badge: badge,
-              ));
-            }
-            widgets.add(JournalGroupedCard(
-              dividerIndent: 70.0,
-              children: rows,
+            sections.add((
+              heading: heading,
+              tone: tone,
+              badge: badge,
+              items: rows,
+              pinned: pinned,
             ));
           }
 
@@ -719,7 +700,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               flushGroup(
                 heading: '置顶',
                 tone: _DayHeadingTone.today,
-                rows: [for (final item in pinned) card(item, pinned: true)],
+                rows: pinned,
+                pinned: true,
               );
             }
           }
@@ -728,7 +710,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           String? activeHeading;
           String? activeBadge;
           var activeTone = _DayHeadingTone.normal;
-          var activeRows = <Widget>[];
+          var activeRows = <Assignment>[];
           var overdueTierAnnounced = false;
           final todayDay = AssignmentQuery.dayKey(now);
           final tomorrowDay =
@@ -766,8 +748,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             }
             if (heading == null && recoveryScope == null) {
               if (!a.isExam &&
-                  AssignmentQuery.timelineBucketAt(a, now) ==
-                      AssignmentDeadlineBucket.confirmedNoDeadline) {
+                  bucket == AssignmentDeadlineBucket.confirmedNoDeadline) {
                 key = 'noDeadline';
                 heading = '无截止日期';
               } else {
@@ -783,7 +764,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 badge: activeBadge,
                 rows: activeRows,
               );
-              activeRows = <Widget>[];
+              activeRows = <Assignment>[];
               activeHeading = heading;
               activeBadge = null;
               activeTone = _DayHeadingTone.normal;
@@ -804,7 +785,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
             }
             previousKey = effectiveKey;
-            activeRows.add(card(a));
+            activeRows.add(a);
           }
 
           flushGroup(
@@ -813,23 +794,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             badge: activeBadge,
             rows: activeRows,
           );
-          return widgets;
+          return sections;
         }
 
-        final listView = ListView(
-          controller: _scrollController,
-          physics: const BouncingScrollPhysics(
-            parent: AlwaysScrollableScrollPhysics(),
-          ),
-          key: PageStorageKey(recoveryScope == null
-              ? 'home-list'
-              : 'home-recovery-${recoveryScope.queryValue}'),
-          padding: EdgeInsets.fromLTRB(
-            16,
-            14,
-            16,
-            JournalLayout.floatingNavClearance(context),
-          ),
+        final timelineSections = sortedItems.isEmpty
+            ? const <({
+                String? heading,
+                _DayHeadingTone tone,
+                String? badge,
+                List<Assignment> items,
+                bool pinned,
+              })>[]
+            : buildTimelineSections(sortedItems);
+
+        final headerBlock = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Builder(builder: (context) {
               Widget action(String label, Widget button) => Stack(
@@ -1093,67 +1072,150 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
                       style: journal.metadata)),
-            if (sortedItems.isNotEmpty) ...[
-              if (recoveryScope == null) const SizedBox(height: 12),
-              ...timeline(sortedItems),
-            ] else if (recoveryScope != null) ...[
-              _emptyStateCard(
-                icon: Icons.event_available_outlined,
-                message: '当前范围没有课业',
-              ),
-            ] else if (filtersActive &&
-                (displayAssignments.isNotEmpty ||
-                    store.assignments.isNotEmpty)) ...[
-              _emptyStateCard(
-                icon: Icons.filter_alt_off_outlined,
-                message: '没有符合搜索、类型或期限条件的记录',
-                actions: [
-                  JournalPrimaryButton(
-                    expanded: false,
-                    label: '清除搜索与筛选条件',
-                    onPressed: () => _saveFilters(
-                      HomeFilters(sortOrder: _sortOrder),
-                      store.accountEpoch,
-                      store.account,
-                    ),
+            if (sortedItems.isNotEmpty && recoveryScope == null)
+              const SizedBox(height: 12),
+          ],
+        );
+
+        Widget buildEmptyState() {
+          if (recoveryScope != null) {
+            return _emptyStateCard(
+              icon: Icons.event_available_outlined,
+              message: '当前范围没有课业',
+            );
+          }
+          if (filtersActive &&
+              (displayAssignments.isNotEmpty || store.assignments.isNotEmpty)) {
+            return _emptyStateCard(
+              icon: Icons.filter_alt_off_outlined,
+              message: '没有符合搜索、类型或期限条件的记录',
+              actions: [
+                JournalPrimaryButton(
+                  expanded: false,
+                  label: '清除搜索与筛选条件',
+                  onPressed: () => _saveFilters(
+                    HomeFilters(sortOrder: _sortOrder),
+                    store.accountEpoch,
+                    store.account,
                   ),
-                ],
-              ),
-            ] else if (store.assignments.isNotEmpty) ...[
-              _emptyStateCard(
-                icon: Icons.inventory_2_outlined,
-                message: '本机有已完成、已结束、已隐藏、未关注、历史课堂练习或非课业来源的记录，可在本地记录查看。',
-                actions: [
-                  JournalPrimaryButton(
-                    expanded: false,
-                    label: '查看全部本地记录',
-                    onPressed: () => context.push('/records'),
-                  ),
-                  JournalSecondaryButton(
-                    expanded: false,
-                    label: '管理课程',
-                    onPressed: () => context.push('/courses'),
-                  ),
-                ],
-              ),
-            ] else
-              _emptyStateCard(
-                icon: busy
-                    ? Icons.hourglass_top_rounded
-                    : store.syncReport.phase == SyncPhase.success
-                        ? Icons.task_alt_rounded
-                        : Icons.menu_book_rounded,
-                message: store.isLoading ||
-                        store.syncReport.phase == SyncPhase.running
+                ),
+              ],
+            );
+          }
+          if (store.assignments.isNotEmpty) {
+            return _emptyStateCard(
+              icon: Icons.inventory_2_outlined,
+              message: '本机有已完成、已结束、已隐藏、未关注、历史课堂练习或非课业来源的记录，可在本地记录查看。',
+              actions: [
+                JournalPrimaryButton(
+                  expanded: false,
+                  label: '查看全部本地记录',
+                  onPressed: () => context.push('/records'),
+                ),
+                JournalSecondaryButton(
+                  expanded: false,
+                  label: '管理课程',
+                  onPressed: () => context.push('/courses'),
+                ),
+              ],
+            );
+          }
+          return _emptyStateCard(
+            icon: busy
+                ? Icons.hourglass_top_rounded
+                : store.syncReport.phase == SyncPhase.success
+                    ? Icons.task_alt_rounded
+                    : Icons.menu_book_rounded,
+            message:
+                store.isLoading || store.syncReport.phase == SyncPhase.running
                     ? '正在读取课程与作业，请稍候。'
                     : store.syncReport.phase == SyncPhase.success
                         ? '暂无待办，已读取的作业、任务与考试会显示在这里。'
                         : store.syncReport.phase == SyncPhase.failed
                             ? '本次尚未取得作业，请点击右上角刷新继续。'
                             : '点击右上角刷新，开始整理这本课业手记。',
-              ),
-          ],
+          );
+        }
+
+        final listView = ListView.builder(
+          controller: _scrollController,
+          physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics(),
+          ),
+          key: PageStorageKey(recoveryScope == null
+              ? 'home-list'
+              : 'home-recovery-${recoveryScope.queryValue}'),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            14,
+            16,
+            JournalLayout.floatingNavClearance(context),
+          ),
+          itemCount:
+              1 + (timelineSections.isEmpty ? 1 : timelineSections.length),
+          itemBuilder: (context, index) {
+            if (index == 0) return headerBlock;
+            if (timelineSections.isEmpty) return buildEmptyState();
+            final sectionIndex = index - 1;
+            final section = timelineSections[sectionIndex];
+            final groupCard = JournalGroupedCard(
+              dividerIndent: 70.0,
+              children: [
+                for (final item in section.items)
+                  card(item, pinned: section.pinned),
+              ],
+            );
+            if (section.heading == null) return groupCard;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                dayHeading(
+                  section.heading!,
+                  top: sectionIndex == 0 ? 8 : 18,
+                  tone: section.tone,
+                  badge: section.badge,
+                ),
+                groupCard,
+              ],
+            );
+          },
         );
+
+        final headerActions = [
+          IconButton(
+            tooltip: '今日计划',
+            iconSize: 20,
+            onPressed: () => context.push('/plan'),
+            icon: const Icon(Icons.checklist_rounded),
+          ),
+          IconButton(
+            tooltip: '刷新作业',
+            enableFeedback: false,
+            iconSize: 20,
+            onPressed: busy ? null : () => refresh(syncAction),
+            icon: busy
+                ? SizedBox.square(
+                    dimension: 17,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: journal.ink,
+                    ),
+                  )
+                : const Icon(Icons.sync_rounded),
+          ),
+          if (recoveryScope == null)
+            IconButton(
+              enableFeedback: false,
+              tooltip: '切换主题',
+              iconSize: 20,
+              onPressed: () => _cycleTheme(context),
+              icon: Icon(switch (store.display.themeMode) {
+                JournalThemeMode.system => Icons.brightness_auto_outlined,
+                JournalThemeMode.light => Icons.light_mode_outlined,
+                JournalThemeMode.dark => Icons.dark_mode_outlined,
+              }),
+            ),
+        ];
 
         return Stack(
           children: [
@@ -1162,45 +1224,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               top: 0,
               left: 0,
               right: 0,
-              child: JournalSliverHeader(
-                title: '课业手记',
-                scrollOffset: _scrollOffset,
-                actions: [
-                  IconButton(
-                    tooltip: '今日计划',
-                    iconSize: 20,
-                    onPressed: () => context.push('/plan'),
-                    icon: const Icon(Icons.checklist_rounded),
-                  ),
-                  IconButton(
-                    tooltip: '刷新作业',
-                    enableFeedback: false,
-                    iconSize: 20,
-                    onPressed: busy ? null : () => refresh(syncAction),
-                    icon: busy
-                        ? SizedBox.square(
-                            dimension: 17,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: journal.ink,
-                            ),
-                          )
-                        : const Icon(Icons.sync_rounded),
-                  ),
-                  if (recoveryScope == null)
-                    IconButton(
-                      enableFeedback: false,
-                      tooltip: '切换主题',
-                      iconSize: 20,
-                      onPressed: () => _cycleTheme(context),
-                      icon: Icon(switch (store.display.themeMode) {
-                        JournalThemeMode.system =>
-                          Icons.brightness_auto_outlined,
-                        JournalThemeMode.light => Icons.light_mode_outlined,
-                        JournalThemeMode.dark => Icons.dark_mode_outlined,
-                      }),
-                    ),
-                ],
+              child: ValueListenableBuilder<double>(
+                valueListenable: _scrollOffset,
+                builder: (context, offset, _) => JournalSliverHeader(
+                  title: '课业手记',
+                  scrollOffset: offset,
+                  actions: headerActions,
+                ),
               ),
             ),
           ],

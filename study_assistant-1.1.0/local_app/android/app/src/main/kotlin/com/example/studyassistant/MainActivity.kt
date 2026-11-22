@@ -28,6 +28,16 @@ class MainActivity : FlutterActivity() {
     private var personalFileBridge: PersonalFileBridge? = null
     private var verificationBrowser: VerificationBrowser? = null
     private var webSessionGeneration = 0L
+    override fun onStart() {
+        super.onStart()
+        interactionSoundBridge?.onResume()
+    }
+
+    override fun onStop() {
+        interactionSoundBridge?.onPause()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         personalFileBridge?.close()
         personalFileBridge = null

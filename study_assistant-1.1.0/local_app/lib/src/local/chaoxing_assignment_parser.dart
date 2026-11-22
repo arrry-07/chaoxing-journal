@@ -605,23 +605,31 @@ class ChaoxingAssignmentParser {
       value.replaceAll(RegExp(r'<[^>]+>'), ' ');
 
   static String _decodeEntities(String value) {
+    String decodeCodePoint(Match match, int radix) {
+      final codePoint = int.tryParse(match.group(1)!, radix: radix);
+      if (codePoint == null ||
+          codePoint <= 0 ||
+          codePoint > 0x10ffff ||
+          (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
+        return match.group(0)!;
+      }
+      return String.fromCharCode(codePoint);
+    }
+
     return value
         .replaceAll('&nbsp;', ' ')
         .replaceAll('&amp;', '&')
         .replaceAll('&lt;', '<')
         .replaceAll('&gt;', '>')
         .replaceAll('&quot;', '"')
-        .replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'), (match) {
-      final codePoint = int.tryParse(match.group(1)!, radix: 16);
-      return codePoint == null
-          ? match.group(0)!
-          : String.fromCharCode(codePoint);
-    }).replaceAllMapped(RegExp(r'&#(\d+);'), (match) {
-      final codePoint = int.tryParse(match.group(1)!);
-      return codePoint == null
-          ? match.group(0)!
-          : String.fromCharCode(codePoint);
-    });
+        .replaceAllMapped(
+          RegExp(r'&#x([0-9a-fA-F]+);'),
+          (match) => decodeCodePoint(match, 16),
+        )
+        .replaceAllMapped(
+          RegExp(r'&#(\d+);'),
+          (match) => decodeCodePoint(match, 10),
+        );
   }
 }
 

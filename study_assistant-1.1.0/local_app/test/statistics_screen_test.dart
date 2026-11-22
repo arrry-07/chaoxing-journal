@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,7 +12,6 @@ import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav
 import 'package:study_assistant_mobile/src/features/widgets/journal_grouped_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
-import 'package:study_assistant_mobile/src/services/assignment_statistics.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/local_record_query.dart';
@@ -128,7 +125,7 @@ void main() {
     expect(find.byKey(const ValueKey('stats-course-1:2')), findsOneWidget);
     expect(find.text('待完成 1'), findsOneWidget);
     expect(find.text('已逾期 1'), findsOneWidget);
-    expect(find.text('未知 1'), findsOneWidget);
+    expect(find.text('待核对 1'), findsOneWidget);
   });
 
   for (final scale in [1.0, 2.0]) {
@@ -153,6 +150,9 @@ void main() {
           home: Scaffold(body: StatsScreen(store: store))));
       await t.pumpAndSettle();
       expect(t.takeException(), isNull);
+      expect(find.text('课业统计'), findsOneWidget);
+      expect(find.textContaining('/ 2'), findsOneWidget);
+      expect(find.textContaining('高等数学与统计课程'), findsWidgets);
       await t.drag(find.byType(ListView), const Offset(0, -1000));
       await t.pumpAndSettle();
       expect(t.takeException(), isNull);
@@ -160,7 +160,7 @@ void main() {
   }
 
   testWidgets(
-      'unknown-only stats do not present a definite zero completion rate',
+      'unknown-only stats do not present a definite zero completion rate while pending-only renders real 0%',
       (t) async {
     final store = AssignmentStore(
         sessionStore: SecureSessionStore(),
@@ -177,29 +177,68 @@ void main() {
 
     expect(find.text('0%'), findsNothing);
     expect(find.text('待确认'), findsOneWidget);
+
+    store.replaceAssignmentsForTest([
+      work(0, 'pending', due: DateTime(2026, 12, 1)),
+      work(1, 'pending', due: DateTime(2026, 12, 2)),
+    ]);
+    await t.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(body: StatsScreen(store: store)),
+    ));
+    await t.pumpAndSettle();
+
+    expect(find.text('0%'), findsOneWidget);
+    expect(find.text('待确认'), findsNothing);
+    expect(find.textContaining('/ 2'), findsOneWidget);
   });
 
   testWidgets(
-      'unknown-only pie chart helper does not present a definite zero rate',
+      'multi-segment stats bar renders proportional segment widths and light/dark palette colors',
       (t) async {
-    await t.pumpWidget(MaterialApp(
-        home: Scaffold(
-            body: CompletionPieChart(
-                statistics: AssignmentStatistics([work(0, 'unknown')])))));
-    expect(find.text('0%'), findsNothing);
-    expect(find.text('待确认'), findsOneWidget);
-    final segment = CompletionPieChart.segments([0, 0, 0, 1]).single;
-    expect(segment.index, 3);
-    expect(segment.start, closeTo(-math.pi / 2, 1e-9));
-    expect(segment.sweep, closeTo(math.pi * 2, 1e-9));
-    expect(segment.color, CompletionPieChart.categoryColors[3]);
-  });
+    final now = DateTime.utc(2026, 11, 10, 2);
+    final store = AssignmentStore(
+        sessionStore: SecureSessionStore(),
+        notificationService: LocalNotificationService(),
+        widgetSnapshotService: WidgetSnapshotService());
+    addTearDown(store.dispose);
+    store.replaceAssignmentsForTest([
+      for (var i = 0; i < 8; i++) work(i * 2, 'submitted'),
+      work(16, 'pending', due: now.add(const Duration(days: 2))),
+      work(18, 'pending', due: now.add(const Duration(days: 4))),
+      work(20, 'pending', due: now.subtract(const Duration(days: 2))),
+    ]);
 
-  test('ring segments skip zero counts and preserve tiny true proportions', () {
-    expect(CompletionPieChart.segments([0, 0, 0, 0]), isEmpty);
-    final tiny = CompletionPieChart.segments([999, 1, 0, 0]);
-    expect(tiny.map((segment) => segment.index), [0, 1]);
-    expect(tiny[1].sweep, closeTo(math.pi * 2 / 1000, 1e-9));
+    for (final dark in [false, true]) {
+      await t.pumpWidget(MaterialApp(
+        theme: dark ? StudyAssistantTheme.dark : StudyAssistantTheme.light,
+        home: Scaffold(body: StatsScreen(store: store, clock: () => now)),
+      ));
+      await t.pumpAndSettle();
+
+      final expectedColors = CompletionPieChart.colorsFor(
+        dark ? JournalPalette.dark : JournalPalette.light,
+      );
+      final seg0 = find.byKey(const ValueKey('stats-bar-seg-0'));
+      final seg1 = find.byKey(const ValueKey('stats-bar-seg-1'));
+      final seg2 = find.byKey(const ValueKey('stats-bar-seg-2'));
+      final seg3 = find.byKey(const ValueKey('stats-bar-seg-3'));
+
+      expect(seg0, findsOneWidget);
+      expect(seg1, findsOneWidget);
+      expect(seg2, findsOneWidget);
+      expect(seg3, findsNothing, reason: 'zero-count unknown segment skipped');
+
+      expect(t.widget<Container>(seg0).color, expectedColors[0]);
+      expect(t.widget<Container>(seg1).color, expectedColors[1]);
+      expect(t.widget<Container>(seg2).color, expectedColors[2]);
+
+      final w0 = t.getSize(seg0).width;
+      final w1 = t.getSize(seg1).width;
+      final w2 = t.getSize(seg2).width;
+      expect(w0 / w1, closeTo(4.0, 0.15));
+      expect(w1 / w2, closeTo(2.0, 0.15));
+    }
   });
 
   testWidgets('empty statistics keep the empty card and no overview bar',
@@ -266,6 +305,8 @@ void main() {
     await t.pumpAndSettle();
 
     expect(t.takeException(), isNull);
+    expect(find.textContaining('/ 2'), findsOneWidget);
+    expect(find.text('高等数学与统计课程'), findsOneWidget);
     expect(find.text('账号考试'), findsOneWidget);
     expect(find.byIcon(Icons.description_outlined), findsOneWidget);
   });
