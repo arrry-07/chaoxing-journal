@@ -8,6 +8,7 @@ import 'package:study_assistant_mobile/src/local/local_assignment_repository.dar
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
+import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/models/reminder_rule_limits.dart';
 
 Assignment record(String id, String title) => Assignment(
@@ -273,6 +274,96 @@ void main() {
     await LocalAssignmentRepository().activateAccount('alice');
     expect((await repo.loadJournal()).single.title, '旧标题');
     expect(prefs.containsKey('journal_account_switch'), isFalse);
+  });
+
+  group('Phase 2A BackupSnapshot schema 8 pinned state', () {
+    test(
+        'schema 8 exports ordered pins, decodes v1-7 cleanly, and merges on restore',
+        () async {
+      final v5 = await repo.createBackupSnapshot('alice');
+      expect(jsonDecode(v5.encode())['schema'], 5);
+
+      await repo.mergeAndSave([
+        record('cx:work:1:2:4', '作业四')
+            .copyWith(publishedAt: DateTime.utc(2026, 11, 1)),
+        record('cx:work:1:2:5', '作业五'),
+      ]);
+      // v7 export when no pins exist stays schema 7.
+      final v7 = await repo.createBackupSnapshot('alice');
+      expect(jsonDecode(v7.encode())['schema'], 7);
+
+      // Pin & reorder -> schema 8.
+      await repo.savePinnedAssignments(
+        PinnedAssignments(
+          keys: ['cx:work:1:2:4', 'cx:work:1:2:3'],
+          manuallyOrdered: true,
+        ),
+        'alice',
+      );
+      final v8 = await repo.createBackupSnapshot('alice');
+      final rawV8 = jsonDecode(v8.encode()) as Map<String, dynamic>;
+      expect(rawV8['schema'], 8);
+      expect(rawV8['pinned'], {
+        'keys': ['cx:work:1:2:4', 'cx:work:1:2:3'],
+        'manuallyOrdered': true,
+      });
+
+      // Restoring schema 1-7 never overwrites existing local pins.
+      await repo.restoreBackupSnapshot(v5, 'alice');
+      await repo.restoreBackupSnapshot(v7, 'alice');
+      expect(
+        (await repo.loadPinnedAssignments('alice')).keys,
+        ['cx:work:1:2:4', 'cx:work:1:2:3'],
+      );
+
+      // Merging schema 8 preserves local manual order and appends imported unique keys.
+      await repo.savePinnedAssignments(
+        PinnedAssignments(
+          keys: ['cx:work:1:2:5'],
+          manuallyOrdered: true,
+        ),
+        'alice',
+      );
+      await repo.restoreBackupSnapshot(v8, 'alice');
+      final mergedLocalWins = await repo.loadPinnedAssignments('alice');
+      expect(mergedLocalWins.manuallyOrdered, isTrue);
+      expect(
+        mergedLocalWins.keys,
+        ['cx:work:1:2:5', 'cx:work:1:2:4', 'cx:work:1:2:3'],
+      );
+
+      // When local is not manually ordered, imported manual order leads.
+      await repo.savePinnedAssignments(
+        PinnedAssignments(
+          keys: ['cx:work:1:2:5'],
+          manuallyOrdered: false,
+        ),
+        'alice',
+      );
+      await repo.restoreBackupSnapshot(v8, 'alice');
+      final mergedImportLeads = await repo.loadPinnedAssignments('alice');
+      expect(mergedImportLeads.manuallyOrdered, isTrue);
+      expect(
+        mergedImportLeads.keys,
+        ['cx:work:1:2:4', 'cx:work:1:2:3', 'cx:work:1:2:5'],
+      );
+
+      // Malformed / URL-carrying pinned field is rejected strictly.
+      final badUrl = Map<String, dynamic>.from(rawV8)
+        ..['pinned'] = {
+          'keys': ['https://mooc1.chaoxing.com/work?enc=secret'],
+          'manuallyOrdered': true,
+        };
+      expect(() => BackupSnapshot.decode(jsonEncode(badUrl)),
+          throwsFormatException);
+      final badDup = Map<String, dynamic>.from(rawV8)
+        ..['pinned'] = {
+          'keys': ['cx:work:1:2:3', 'cx:work:1:2:3'],
+          'manuallyOrdered': true,
+        };
+      expect(() => BackupSnapshot.decode(jsonEncode(badDup)),
+          throwsFormatException);
+    });
   });
 }
 

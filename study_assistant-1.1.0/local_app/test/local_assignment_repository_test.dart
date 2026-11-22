@@ -1,7 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+// ignore: depend_on_referenced_packages
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 
 void main() {
   test('local pins follow the active account and clear with local data',
@@ -382,4 +385,60 @@ void main() {
     expect(await repository.loadHiddenAssignments(), isEmpty);
     expect((await repository.loadAssignments()).single.id, assignment.id);
   });
+
+  group('Phase 2A PinnedAssignments v2 persistence', () {
+    test(
+        'migrates v1 pins without manual order, preserves v2 order per account, and rolls back failed writes',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final repository = LocalAssignmentRepository();
+      await repository.activateAccount('alice');
+      await repository.savePinnedIds({'w-b', 'w-a'}, 'alice');
+
+      final migrated = await repository.loadPinnedAssignments('alice');
+      expect(migrated.manuallyOrdered, isFalse);
+      expect(migrated.keys, unorderedEquals(['w-a', 'w-b']));
+
+      final ordered = PinnedAssignments(
+        keys: ['w-b', 'w-c', 'w-a'],
+        manuallyOrdered: true,
+      );
+      await repository.savePinnedAssignments(ordered, 'alice');
+      expect((await repository.loadPinnedAssignments('alice')), ordered);
+      expect(await repository.loadPinnedIds('alice'), {'w-a', 'w-b', 'w-c'});
+
+      await repository.activateAccount('bob');
+      expect((await repository.loadPinnedAssignments('bob')).isEmpty, isTrue);
+
+      await repository.activateAccount('alice');
+      expect((await repository.loadPinnedAssignments('alice')), ordered);
+
+      // Failed write reloads SharedPreferences and preserves prior snapshot.
+      final prefs = await SharedPreferences.getInstance();
+      final originalStore = SharedPreferencesStorePlatform.instance;
+      addTearDown(
+          () => SharedPreferencesStorePlatform.instance = originalStore);
+      SharedPreferencesStorePlatform.instance = _FailingPinPreferences({
+        for (final k in prefs.getKeys()) 'flutter.$k': prefs.get(k)!,
+      });
+      await expectLater(
+        repository.savePinnedAssignments(
+          PinnedAssignments(keys: ['w-x'], manuallyOrdered: true),
+          'alice',
+        ),
+        throwsA(isA<LocalStorageWriteException>()),
+      );
+      expect((await repository.loadPinnedAssignments('alice')), ordered);
+    });
+  });
+}
+
+class _FailingPinPreferences extends InMemorySharedPreferencesStore {
+  _FailingPinPreferences(super.data) : super.withData();
+
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) async {
+    if (key == 'flutter.pinned_assignments_v2') return false;
+    return super.setValue(valueType, key, value);
+  }
 }

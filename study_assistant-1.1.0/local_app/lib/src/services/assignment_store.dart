@@ -37,6 +37,7 @@ import 'daytime_check_policy.dart';
 import '../models/assignment_change.dart';
 import '../models/backup_snapshot.dart';
 import '../models/personal_workspace.dart';
+import '../models/pinned_assignments.dart';
 import '../models/reminder_history.dart';
 import '../models/study_notebook.dart';
 import 'reminder_explanation.dart';
@@ -942,13 +943,20 @@ class AssignmentStore extends ChangeNotifier {
       List.unmodifiable(_reminderOffsetsMinutes);
   List<Assignment> get assignments => List.unmodifiable(_assignments);
   final Set<String> _unfollowed = {};
-  Set<String> _pinnedIds = {};
+  PinnedAssignments _pinned = const PinnedAssignments.empty();
   bool _pinsNeedSave = false;
+  bool _journalRestoreFailed = false;
 
   static String _pinKey(Assignment assignment) =>
       AssignmentGrouping.examKey(assignment) ??
       assignment.courseTaskKey ??
       assignment.id;
+
+  static String pinKeyOf(Assignment assignment) => _pinKey(assignment);
+
+  PinnedAssignments get pinnedAssignments => _pinned;
+  List<String> get pinnedKeys => _pinned.keys;
+  bool get hasManualPinOrder => _pinned.manuallyOrdered;
 
   Set<String> _pinAliases(Assignment assignment) {
     final key = _pinKey(assignment);
@@ -997,7 +1005,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   bool isPinned(Assignment assignment) =>
-      _authenticated && _pinAliases(assignment).any(_pinnedIds.contains);
+      _authenticated && _pinned.containsAny(_pinAliases(assignment));
 
   Set<String>? _pinnableKeysCache;
   int? _pinnableKeysCacheMinute;
@@ -1033,15 +1041,7 @@ class AssignmentStore extends ChangeNotifier {
           !canTogglePin(assignment)) {
         return;
       }
-      final aliases = _pinAliases(assignment);
-      final next = {..._pinnedIds};
-      if (isPinned(assignment)) {
-        next.removeAll(aliases);
-      } else {
-        next
-          ..removeAll(aliases)
-          ..add(key);
-      }
+      final next = _pinned.toggle(key, _pinAliases(assignment));
       await _savePins(next, account, generation);
       if (generation != _generation ||
           account != _account ||
@@ -1049,7 +1049,49 @@ class AssignmentStore extends ChangeNotifier {
           _disposed) {
         return;
       }
-      _pinnedIds = next;
+      _pinned = next;
+      _pinsNeedSave = false;
+      saved = true;
+    });
+    return saved;
+  }
+
+  Future<bool> reorderPinned(List<String> visibleOrderedKeys) async {
+    final account = _account;
+    final generation = _generation;
+    if (account == null || !_authenticated || !_manageBackgroundSchedule) {
+      return false;
+    }
+    final cleanOrdered = [
+      for (final raw in visibleOrderedKeys)
+        if (raw.trim().isNotEmpty) raw.trim(),
+    ];
+    final initialVisibleSet =
+        visibleAssignments.where(isPinned).map(_pinKey).toSet();
+    if (_pinned.reorderVisible(cleanOrdered, initialVisibleSet) == null) {
+      return false;
+    }
+    var saved = false;
+    await _run(() async {
+      if (generation != _generation ||
+          account != _account ||
+          !_authenticated ||
+          !_manageBackgroundSchedule ||
+          _disposed) {
+        return;
+      }
+      final latestVisibleSet =
+          visibleAssignments.where(isPinned).map(_pinKey).toSet();
+      final next = _pinned.reorderVisible(cleanOrdered, latestVisibleSet);
+      if (next == null) return;
+      await _savePins(next, account, generation);
+      if (generation != _generation ||
+          account != _account ||
+          !_authenticated ||
+          _disposed) {
+        return;
+      }
+      _pinned = next;
       _pinsNeedSave = false;
       saved = true;
     });
@@ -1057,9 +1099,9 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _savePins(
-      Set<String> ids, String account, int generation) async {
+      PinnedAssignments pins, String account, int generation) async {
     try {
-      await repository.savePinnedIds(ids, account);
+      await repository.savePinnedAssignments(pins, account);
     } on StaleSessionWriteException {
       return;
     } on LocalStorageLeaseReleaseException {
@@ -1072,22 +1114,49 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> _prunePins() async {
     final account = _account;
-    // Only the foreground store manages pins. A headless sync may have
-    // restored a snapshot from before a foreground pin operation.
+    // Only the foreground store manages pins, and never prune after a
+    // failed/damaged journal read. Keys absent merely due to unfollowed
+    // courses, partial sync frames, or filters must remain pinned on disk.
     if (!_manageBackgroundSchedule ||
         !_authenticated ||
         account == null ||
-        (_pinnedIds.isEmpty && !_pinsNeedSave) ||
+        (_pinned.isEmpty && !_pinsNeedSave) ||
+        _journalRestoreFailed ||
         repository.recoveryWarning != null) {
       return;
     }
-    final retained = visibleAssignments.where(isPinned).map(_pinKey).toSet();
-    if (setEquals(_pinnedIds, retained) && !_pinsNeedSave) return;
-    _pinnedIds = retained;
+    final aliasToCanonical = <String, String>{};
+    final explicitlyCompletedOrHiddenKeys = <String>{};
+    for (final group in localRecordGroups) {
+      final canonical = _pinKey(group.primary);
+      for (final alias in _pinAliases(group.primary)) {
+        aliasToCanonical[alias] = canonical;
+      }
+      for (final source in group.sources) {
+        for (final alias in _pinAliases(source)) {
+          aliasToCanonical[alias] = canonical;
+        }
+      }
+      if (group.hidden ||
+          group.primary.isCompleted ||
+          AssignmentQuery.isExamEnded(group.primary, _clock())) {
+        explicitlyCompletedOrHiddenKeys.add(canonical);
+        explicitlyCompletedOrHiddenKeys.addAll(_pinAliases(group.primary));
+        for (final source in group.sources) {
+          explicitlyCompletedOrHiddenKeys.addAll(_pinAliases(source));
+        }
+      }
+    }
+    final retained = _pinned.migrateAndPrune(
+      aliasToCanonical: aliasToCanonical,
+      explicitlyCompletedOrHiddenKeys: explicitlyCompletedOrHiddenKeys,
+    );
+    if (retained == _pinned && !_pinsNeedSave) return;
+    _pinned = retained;
     _pinsNeedSave = true;
     final generation = _generation;
     try {
-      await _savePins(_pinnedIds, account, generation);
+      await _savePins(_pinned, account, generation);
       if (generation == _generation) _pinsNeedSave = false;
     } catch (_) {
       // The next successful journal update can retry without restoring pins
@@ -1262,7 +1331,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   List<Assignment> get visibleAssignments =>
-      AssignmentQuery.currentDisplay(courseAssignments, DateTime.now());
+      AssignmentQuery.currentDisplay(courseAssignments, _clock());
   AssignmentSyncProgress? _homeSyncProgress;
   List<Assignment> _homePreviewAssignments = [];
   Set<String> _homePendingDeadlineIds = {};
@@ -1552,8 +1621,9 @@ class AssignmentStore extends ChangeNotifier {
     _hiddenAssignments = [];
     _courses = [];
     _unfollowed.clear();
-    _pinnedIds.clear();
+    _pinned = const PinnedAssignments.empty();
     _pinsNeedSave = false;
+    _journalRestoreFailed = false;
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
     _lastSyncAt = null;
     _lastSyncAttemptAt = null;
@@ -1603,7 +1673,7 @@ class AssignmentStore extends ChangeNotifier {
     await stage('置顶课业', () async {
       final account = _account;
       if (_manageBackgroundSchedule && _authenticated && account != null) {
-        _pinnedIds = await repository.loadPinnedIds(account);
+        _pinned = await repository.loadPinnedAssignments(account);
       }
     });
     await stage('提醒设置', () async {
@@ -1774,7 +1844,13 @@ class AssignmentStore extends ChangeNotifier {
       _courseChapters = await repository.loadCourseChapters();
     });
     await stage('作业记录', () async {
-      await _reloadJournal();
+      try {
+        await _reloadJournal();
+        _journalRestoreFailed = false;
+      } catch (_) {
+        _journalRestoreFailed = true;
+        rethrow;
+      }
       _hadCacheBeforeLastSync =
           _assignments.isNotEmpty || _hiddenAssignments.isNotEmpty;
     });
@@ -1953,7 +2029,7 @@ class AssignmentStore extends ChangeNotifier {
             _hiddenAssignments = [];
             _courses = [];
             _unfollowed.clear();
-            _pinnedIds.clear();
+            _pinned = const PinnedAssignments.empty();
             _pinsNeedSave = false;
             _courseNotices = CourseNoticeCollection();
             _courseChapters = CourseChapterCatalog();
@@ -2260,6 +2336,7 @@ class AssignmentStore extends ChangeNotifier {
       ..addAll(journal);
     _hiddenAssignments = await repository.loadHiddenAssignments();
     if (generation != _generation || _disposed) return;
+    _journalRestoreFailed = false;
     _invalidateHomeDisplayIndex();
     final durableSyncAt = await repository.lastSyncAt();
     if (generation != _generation || _disposed) return;
@@ -3030,7 +3107,7 @@ class AssignmentStore extends ChangeNotifier {
       _hiddenAssignments = [];
       _courses = [];
       _unfollowed.clear();
-      _pinnedIds.clear();
+      _pinned = const PinnedAssignments.empty();
       _pinsNeedSave = false;
       _invalidateHomeDisplayIndex();
       syncReport = const SyncReport();

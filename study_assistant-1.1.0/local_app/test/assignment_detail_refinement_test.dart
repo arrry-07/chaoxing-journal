@@ -16,6 +16,7 @@ import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
+import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -1087,6 +1088,13 @@ class _PinWriteFailureRepository extends LocalAssignmentRepository {
   Future<void> savePinnedIds(Set<String> ids, String account) async {
     if (failPinWrites) throw StateError('simulated pin write failure');
     await super.savePinnedIds(ids, account);
+  }
+
+  @override
+  Future<void> savePinnedAssignments(
+      PinnedAssignments pins, String account) async {
+    if (failPinWrites) throw StateError('simulated pin write failure');
+    await super.savePinnedAssignments(pins, account);
   }
 }
 

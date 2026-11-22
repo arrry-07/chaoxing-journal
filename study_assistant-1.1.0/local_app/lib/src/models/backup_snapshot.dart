@@ -5,6 +5,7 @@ import 'course.dart';
 import 'course_chapter_progress.dart';
 import 'course_notice.dart';
 import 'personal_workspace.dart';
+import 'pinned_assignments.dart';
 import 'reminder_rule_limits.dart';
 import 'study_notebook.dart';
 
@@ -24,7 +25,8 @@ class BackupSnapshot {
       this.notebook,
       Map<String, String> courseTaskKeys,
       this.notices,
-      this.chapters)
+      this.chapters,
+      this.pinned)
       : records = List.unmodifiable(records),
         hidden = Set.unmodifiable(hidden),
         courses = List.unmodifiable(courses),
@@ -46,6 +48,7 @@ class BackupSnapshot {
   final Map<String, String> courseTaskKeys;
   final CourseNoticeCollection notices;
   final CourseChapterCatalog chapters;
+  final PinnedAssignments pinned;
   static String ownerFor(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
 
@@ -70,7 +73,9 @@ class BackupSnapshot {
     List<Assignment> records,
     CourseNoticeCollection notices,
     CourseChapterCatalog chapters,
+    PinnedAssignments pinned,
   ) {
+    if (pinned.isNotEmpty || pinned.manuallyOrdered) return 8;
     if (records.any(_hasPortableTimeEvidence)) return 7;
     if (notices.items.isNotEmpty || chapters.byCourse.isNotEmpty) return 6;
     return 5;
@@ -133,17 +138,24 @@ class BackupSnapshot {
       PersonalWorkspace? personal,
       StudyNotebook? notebook,
       CourseNoticeCollection? notices,
-      CourseChapterCatalog? chapters}) {
+      CourseChapterCatalog? chapters,
+      PinnedAssignments? pinned}) {
     final effectiveNotices = notices ?? CourseNoticeCollection();
     final effectiveChapters = chapters ?? CourseChapterCatalog();
-    final version =
-        _schemaVersion(records, effectiveNotices, effectiveChapters);
+    final effectivePinned = pinned ?? const PinnedAssignments.empty();
+    final version = _schemaVersion(
+      records,
+      effectiveNotices,
+      effectiveChapters,
+      effectivePinned,
+    );
     return BackupSnapshot.decode(jsonEncode({
       'schema': version,
       'notebook': (notebook ?? StudyNotebook()).toJson(),
       'personal': (personal ?? PersonalWorkspace()).toJson(portable: true),
       if (version >= 6) 'notices': effectiveNotices.toJson(portable: true),
       if (version >= 6) 'chapters': effectiveChapters.toJson(portable: true),
+      if (version >= 8) 'pinned': effectivePinned.toJson(),
       'owner': owner,
       'createdAt': createdAt.toUtc().toIso8601String(),
       'records': records
@@ -159,13 +171,14 @@ class BackupSnapshot {
   }
 
   String encode() {
-    final version = _schemaVersion(records, notices, chapters);
+    final version = _schemaVersion(records, notices, chapters, pinned);
     return jsonEncode({
       'schema': version,
       'notebook': notebook.toJson(),
       'personal': personal.toJson(portable: true),
       if (version >= 6) 'notices': notices.toJson(portable: true),
       if (version >= 6) 'chapters': chapters.toJson(portable: true),
+      if (version >= 8) 'pinned': pinned.toJson(),
       'owner': owner,
       'createdAt': createdAt.toUtc().toIso8601String(),
       'records': records
@@ -226,12 +239,13 @@ class BackupSnapshot {
     }
     final decoded = jsonDecode(plaintext);
     final version = decoded is Map ? decoded['schema'] : null;
-    if (version is! int || !{1, 2, 3, 4, 5, 6, 7}.contains(version)) _bad();
+    if (version is! int || !{1, 2, 3, 4, 5, 6, 7, 8}.contains(version)) _bad();
     final j = _map(decoded, {
       if (version >= 2) 'personal',
       if (version >= 3) 'notebook',
       if (version >= 6) 'notices',
       if (version >= 6) 'chapters',
+      if (version >= 8) 'pinned',
       'schema',
       'owner',
       'createdAt',
@@ -379,6 +393,9 @@ class BackupSnapshot {
                 : node,
         ]),
     });
+    final decodedPinned = version < 8
+        ? const PinnedAssignments.empty()
+        : PinnedAssignments.fromJson(j['pinned'], strict: true);
     return BackupSnapshot._(
         owner,
         _date(j['createdAt']),
@@ -394,7 +411,8 @@ class BackupSnapshot {
         decodedNotebook,
         courseTaskKeys,
         cleanNotices,
-        cleanChapters);
+        cleanChapters,
+        decodedPinned);
   }
 
   static ExamInfo? _exam(dynamic value) {

@@ -10,6 +10,7 @@ import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
 import '../models/backup_snapshot.dart';
 import '../models/personal_workspace.dart';
+import '../models/pinned_assignments.dart';
 import '../models/study_notebook.dart';
 import '../models/home_filters.dart';
 import '../services/reminder_rule_store.dart';
@@ -69,6 +70,9 @@ class LocalAssignmentRepository {
   static const _noticesKey = 'course_notices_v1';
   static const _chaptersKey = 'course_chapters_v1';
   static const _pinnedKey = 'pinned_assignment_ids_v1';
+  static const _pinnedV2Key = 'pinned_assignments_v2';
+  static const _pinnedRecoveryWarning =
+      '部分置顶记录无法读取，原始数据已保留备份；本次以空列表临时显示，请勿覆盖原数据。';
   static const _maxAdditionalRecoveryBackups = 3;
   static const _maxRecoveryValueBytes = 4 * 1024 * 1024;
   static const _recoveryWriteFailedWarning =
@@ -103,6 +107,7 @@ class LocalAssignmentRepository {
     _notebookKey,
     _homeFiltersKey,
     _pinnedKey,
+    _pinnedV2Key,
     _noticesKey,
     _chaptersKey,
     '${_key}_recovery_backup',
@@ -112,6 +117,8 @@ class LocalAssignmentRepository {
     '${_personalKey}_recovery_backups',
     '${_notebookKey}_recovery_backup',
     '${_notebookKey}_recovery_backups',
+    '${_pinnedV2Key}_recovery_backup',
+    '${_pinnedV2Key}_recovery_backups',
     '${_noticesKey}_recovery_backup',
     '${_noticesKey}_recovery_backups',
     '${_chaptersKey}_recovery_backup',
@@ -141,32 +148,67 @@ class LocalAssignmentRepository {
         }
       });
 
-  Future<Set<String>> loadPinnedIds(String account) => _serialized(() async {
-        final prefs = await SharedPreferences.getInstance();
-        _checkOwner(prefs, account);
-        return (prefs.getStringList(_pinnedKey) ?? const <String>[])
-            .map((id) => id.trim())
-            .where((id) => id.isNotEmpty)
-            .toSet();
-      });
+  Future<PinnedAssignments> _readPinnedAssignments(
+      SharedPreferences prefs) async {
+    if (prefs.containsKey(_pinnedV2Key)) {
+      return _readProtected(
+        prefs,
+        _pinnedV2Key,
+        PinnedAssignments.decode,
+        PinnedAssignments.empty,
+        _pinnedRecoveryWarning,
+      );
+    }
+    final legacy = (prefs.getStringList(_pinnedKey) ?? const <String>[])
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty);
+    return PinnedAssignments.fromLegacyV1(legacy);
+  }
 
-  Future<void> savePinnedIds(Set<String> ids, String account) =>
+  Future<void> _writePinnedAssignments(
+    SharedPreferences prefs,
+    PinnedAssignments pins,
+  ) async {
+    await _protectExisting(
+      prefs,
+      _pinnedV2Key,
+      PinnedAssignments.decode,
+      _pinnedRecoveryWarning,
+    );
+    final raw = pins.encode();
+    PinnedAssignments.decode(raw);
+    await _writeVerified(prefs, _pinnedV2Key, raw, '置顶状态保存失败');
+    final sorted = pins.keys.toSet().toList()..sort();
+    try {
+      await _require(prefs.setStringList(_pinnedKey, sorted));
+    } catch (_) {
+      await prefs.reload();
+      rethrow;
+    }
+  }
+
+  Future<PinnedAssignments> loadPinnedAssignments(String account) =>
       _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
         _checkOwner(prefs, account);
-        final sorted = ids
-            .map((id) => id.trim())
-            .where((id) => id.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort();
-        try {
-          await _require(prefs.setStringList(_pinnedKey, sorted));
-        } catch (_) {
-          await prefs.reload();
-          rethrow;
-        }
+        return _readPinnedAssignments(prefs);
       });
+
+  Future<void> savePinnedAssignments(PinnedAssignments pins, String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        await _writePinnedAssignments(prefs, pins);
+      });
+
+  Future<Set<String>> loadPinnedIds(String account) => _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return (await _readPinnedAssignments(prefs)).keys.toSet();
+      });
+
+  Future<void> savePinnedIds(Set<String> ids, String account) =>
+      savePinnedAssignments(PinnedAssignments.fromLegacyV1(ids), account);
 
   Future<StudyNotebook> loadNotebook() => _serialized(() async {
         final p = await SharedPreferences.getInstance();
@@ -402,7 +444,8 @@ class LocalAssignmentRepository {
               CourseChapterCatalog.decode,
               CourseChapterCatalog.new,
               '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
-            ));
+            ),
+            pinned: await _readPinnedAssignments(prefs));
         if (recoveryWarning != null) {
           throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
         }
@@ -537,6 +580,11 @@ class LocalAssignmentRepository {
             final chaptersRaw = chapters.encode();
             CourseChapterCatalog.decode(chaptersRaw);
             await _require(prefs.setString(_chaptersKey, chaptersRaw));
+          }
+          if (validated.pinned.isNotEmpty || validated.pinned.manuallyOrdered) {
+            final localPins = await _readPinnedAssignments(prefs);
+            final mergedPins = localPins.mergeBackup(validated.pinned);
+            await _writePinnedAssignments(prefs, mergedPins);
           }
           await _require(prefs.remove(_switchKey));
           return true;

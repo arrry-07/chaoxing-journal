@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
@@ -10,6 +12,8 @@ import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
+
+import 'review_core_remediation_test.dart' as f;
 
 class _Store extends AssignmentStore {
   _Store()
@@ -369,6 +373,132 @@ void main() {
     expect(find.text('明天'), findsNothing);
     expect(find.text('置顶'), findsNothing);
   });
+
+  group('Phase 2A pinned ordering, drag reorder, context menu & 3-line rail',
+      () {
+    testWidgets(
+        'unmanual pins auto-sort by nearest remaining time with untrusted last, show 3-line rail and vermilion near-due',
+        (tester) async {
+      final now = DateTime.utc(2026, 11, 20, 4, 0); // Beijing 12:00
+      final session = f.Session();
+      final store = _PinTimelineStore(sessionStore: session, clock: () => now);
+      addTearDown(store.dispose);
+
+      final far = _work(
+        'far',
+        title: '远期置顶',
+        course: '语文',
+        due: now.add(const Duration(days: 5)),
+      );
+      final today = _work(
+        'today',
+        title: '今天置顶',
+        course: '高数',
+        due: now.add(const Duration(hours: 3)), // Beijing 15:00 today
+      );
+      final unknown = _work(
+        'unknown',
+        title: '无期限置顶',
+        course: '英语',
+        due: null,
+        trusted: false,
+      );
+      await store.repository.activateAccount('A');
+      await store.repository.mergeAndSave([far, unknown, today]);
+      await store.restoreSession();
+
+      // Single pin: no drag handle shown, left rail shows 3 lines with berry color.
+      await store.togglePin(today);
+      await _mountRoutedHomeWithClock(tester, store, () => now);
+      expect(find.byIcon(Icons.drag_indicator_rounded), findsNothing);
+      expect(find.text('今天'), findsOneWidget);
+      expect(find.text('15:00'), findsOneWidget);
+      expect(find.text('剩3小时'), findsOneWidget);
+      final todayText = tester.widget<Text>(find.text('今天'));
+      expect(todayText.style?.color, Journal.berry);
+
+      // Pin two more -> auto order: today, far, unknown; drag handle appears.
+      await store.togglePin(unknown);
+      await store.togglePin(far);
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.drag_indicator_rounded), findsNWidgets(3));
+
+      double topOf(String title) => tester.getTopLeft(find.text(title)).dy;
+      expect(topOf(today.title), lessThan(topOf(far.title)));
+      expect(topOf(far.title), lessThan(topOf(unknown.title)));
+      expect(find.text('待定'), findsOneWidget);
+
+      // Long-press menu offers non-drag '置顶下移' on item 0 and persists manual order.
+      await tester.longPress(find.text(today.title));
+      await tester.pumpAndSettle();
+      expect(find.text('置顶下移'), findsOneWidget);
+      expect(find.text('置顶上移'), findsNothing);
+      await tester.tap(find.text('置顶下移'));
+      await tester.pumpAndSettle();
+
+      expect(store.hasManualPinOrder, isTrue);
+      expect(topOf(far.title), lessThan(topOf(today.title)));
+      expect(
+        store.pinnedKeys,
+        [far.courseTaskKey, today.courseTaskKey, unknown.courseTaskKey],
+      );
+
+      // Direct drag on drag handle reorders pins and preserves order.
+      final lastHandle = find.byIcon(Icons.drag_indicator_rounded).last;
+      final dragDistance = tester.getCenter(find.text(far.title)).dy -
+          tester.getCenter(find.text(unknown.title)).dy -
+          30;
+      await tester.timedDrag(
+        lastHandle,
+        Offset(0, dragDistance),
+        const Duration(milliseconds: 300),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        store.pinnedKeys,
+        [unknown.courseTaskKey, far.courseTaskKey, today.courseTaskKey],
+      );
+    });
+  });
+}
+
+Future<GoRouter> _mountRoutedHomeWithClock(
+  WidgetTester tester,
+  AssignmentStore store,
+  DateTime Function() clock,
+) async {
+  final router = GoRouter(
+    initialLocation: '/assignments',
+    routes: [
+      GoRoute(
+        path: '/assignments',
+        builder: (_, __) =>
+            Scaffold(body: AssignmentListScreen(store: store, clock: clock)),
+      ),
+    ],
+  );
+  addTearDown(router.dispose);
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(390, 1400);
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(MaterialApp.router(
+    theme: StudyAssistantTheme.light,
+    routerConfig: router,
+  ));
+  await tester.pumpAndSettle();
+  return router;
+}
+
+class _PinTimelineStore extends AssignmentStore {
+  _PinTimelineStore({required super.sessionStore, required super.clock})
+      : super(
+          notificationService: f.Notifications(),
+          widgetSnapshotService: f.WidgetService(),
+          chaoxingClient: f.Client(),
+        );
+
+  @override
+  Future<bool> runDueAutoSync({DateTime? now}) async => false;
 }
 
 Future<GoRouter> _mountRoutedHome(

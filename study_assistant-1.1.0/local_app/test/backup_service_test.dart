@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/services/backup_service.dart';
 
 void main() {
@@ -115,6 +116,13 @@ void main() {
         lastSyncedAt: DateTime.utc(2026, 11, 8),
       )
     ]);
+    await repository.savePinnedAssignments(
+      PinnedAssignments(
+        keys: ['cx:work:synthetic-course:class:1', 'cx:work:other:2:9'],
+        manuallyOrdered: true,
+      ),
+      'alice',
+    );
     final snapshot = await repository.createBackupSnapshot('alice');
     final service = BackupService();
 
@@ -140,6 +148,11 @@ void main() {
     expect(restored.courses.single.name, '合成课程');
     expect(restored.unfollowed, {'synthetic-course:class'});
     expect(restored.autoSyncIntervalMinutes, 240);
+    expect(restored.pinned.manuallyOrdered, isTrue);
+    expect(restored.pinned.keys, [
+      'cx:work:synthetic-course:class:1',
+      'cx:work:other:2:9',
+    ]);
 
     await expectLater(
       service.decrypt(envelope, 'wrong-password'),

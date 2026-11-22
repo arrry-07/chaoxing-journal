@@ -324,6 +324,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     Assignment assignment,
     Widget previewCard, {
     required bool inTodayPlan,
+    bool pinned = false,
+    List<String> pinnedVisibleKeys = const [],
   }) async {
     final box = itemContext.findRenderObject() as RenderBox?;
     Rect? anchorRect;
@@ -333,7 +335,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     }
     final url = AssignmentWebLink.validatedUrl(assignment);
     final canPin = store.canTogglePin(assignment);
-    final pinned = store.isPinned(assignment);
+    final isPinned = store.isPinned(assignment);
+    final pinKey = AssignmentStore.pinKeyOf(assignment);
+    final pinIndex = pinnedVisibleKeys.indexOf(pinKey);
     final actions = <JournalContextMenuAction>[
       if (url != null)
         JournalContextMenuAction(
@@ -341,10 +345,37 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           icon: Icons.open_in_new_rounded,
           onSelected: () => openAssignment(assignment.id),
         ),
+      if (pinned && pinnedVisibleKeys.length >= 2 && pinIndex > 0)
+        JournalContextMenuAction(
+          label: '置顶上移',
+          icon: Icons.arrow_upward_rounded,
+          onSelected: () {
+            final next = List<String>.of(pinnedVisibleKeys);
+            final moved = next.removeAt(pinIndex);
+            next.insert(pinIndex - 1, moved);
+            JournalMotion.selectionTick(store.display);
+            unawaited(store.reorderPinned(next));
+          },
+        ),
+      if (pinned &&
+          pinnedVisibleKeys.length >= 2 &&
+          pinIndex >= 0 &&
+          pinIndex < pinnedVisibleKeys.length - 1)
+        JournalContextMenuAction(
+          label: '置顶下移',
+          icon: Icons.arrow_downward_rounded,
+          onSelected: () {
+            final next = List<String>.of(pinnedVisibleKeys);
+            final moved = next.removeAt(pinIndex);
+            next.insert(pinIndex + 1, moved);
+            JournalMotion.selectionTick(store.display);
+            unawaited(store.reorderPinned(next));
+          },
+        ),
       if (canPin)
         JournalContextMenuAction(
-          label: pinned ? '取消置顶' : '置顶',
-          icon: pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+          label: isPinned ? '取消置顶' : '置顶',
+          icon: isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
           onSelected: () => _togglePin(assignment),
         ),
       if (!assignment.isCompleted)
@@ -573,6 +604,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           bool pinned = false,
           bool preview = false,
           bool previewOnly = false,
+          Widget? dragHandle,
           VoidCallback? onLongPress,
         }) =>
             AssignmentCard(
@@ -585,6 +617,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               showDivider: false,
               enableTapFeedback: false,
               inPinnedSection: pinned,
+              dragHandle: preview ? null : dragHandle,
               compact: store.display.compact,
               countdown: store.display.countdown,
               deadlinePending:
@@ -611,7 +644,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     },
             );
 
-        Widget card(Assignment a, {bool pinned = false}) {
+        Widget card(
+          Assignment a, {
+          bool pinned = false,
+          Widget? dragHandle,
+          List<String> pinnedVisibleKeys = const [],
+        }) {
           final previewOnly = store.isHomeAssignmentPreviewOnly(a.id);
           if (previewOnly) {
             return buildCard(a, pinned: pinned, previewOnly: true);
@@ -625,11 +663,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final interactiveCard = buildCard(
                 a,
                 pinned: pinned,
+                dragHandle: dragHandle,
                 onLongPress: () => _openContextMenu(
                   itemContext,
                   a,
                   buildCard(a, pinned: pinned, preview: true),
                   inTodayPlan: inTodayPlan,
+                  pinned: pinned,
+                  pinnedVisibleKeys: pinnedVisibleKeys,
                 ),
               );
 
@@ -710,10 +751,39 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
             }
             if (pinned.isNotEmpty) {
+              DateTime? autoPinnedTime(Assignment a) {
+                if (a.isExam) {
+                  return a.exam?.startTrusted == true ? a.exam!.startAt : null;
+                }
+                return a.deadlineTrusted && !a.deadlineReadFailed
+                    ? a.deadlineAt
+                    : null;
+              }
+
+              int compareAutoPinned(Assignment left, Assignment right) {
+                final lt = autoPinnedTime(left);
+                final rt = autoPinnedTime(right);
+                if (lt != null && rt != null) {
+                  final cmp = lt.compareTo(rt);
+                  if (cmp != 0) return cmp;
+                } else if (lt != null) {
+                  return -1;
+                } else if (rt != null) {
+                  return 1;
+                }
+                return AssignmentStore.pinKeyOf(left)
+                    .compareTo(AssignmentStore.pinKeyOf(right));
+              }
+
+              final orderedPinned = store.pinnedAssignments.orderItems(
+                pinned,
+                keyOf: AssignmentStore.pinKeyOf,
+                defaultComparator: compareAutoPinned,
+              );
               flushGroup(
                 heading: '置顶',
                 tone: _DayHeadingTone.today,
-                rows: pinned,
+                rows: orderedPinned,
                 pinned: true,
               );
             }
@@ -1302,13 +1372,92 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             if (timelineSections.isEmpty) return buildEmptyState();
             final sectionIndex = index - 1;
             final section = timelineSections[sectionIndex];
-            final groupCard = JournalGroupedCard(
-              dividerIndent: 70.0,
-              children: [
-                for (final item in section.items)
-                  card(item, pinned: section.pinned),
-              ],
-            );
+            final groupCard = section.pinned && section.items.length >= 2
+                ? JournalGroupedCard(
+                    children: [
+                      Builder(
+                        builder: (context) {
+                          final visibleKeys = [
+                            for (final item in section.items)
+                              AssignmentStore.pinKeyOf(item),
+                          ];
+                          return ReorderableListView.builder(
+                            shrinkWrap: true,
+                            primary: false,
+                            physics: const NeverScrollableScrollPhysics(),
+                            buildDefaultDragHandles: false,
+                            proxyDecorator: (child, index, animation) =>
+                                Material(
+                              color: journal.sheetElevated,
+                              elevation: 4,
+                              shadowColor: Colors.black.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(12),
+                              clipBehavior: Clip.antiAlias,
+                              child: child,
+                            ),
+                            onReorderStart: (_) =>
+                                JournalMotion.selectionTick(store.display),
+                            onReorderItem: (oldIndex, newIndex) {
+                              if (oldIndex == newIndex) return;
+                              final nextKeys = List<String>.of(visibleKeys);
+                              final moved = nextKeys.removeAt(oldIndex);
+                              nextKeys.insert(newIndex, moved);
+                              unawaited(store.reorderPinned(nextKeys));
+                            },
+                            itemCount: section.items.length,
+                            itemBuilder: (context, itemIndex) {
+                              final item = section.items[itemIndex];
+                              final dragHandle = ReorderableDragStartListener(
+                                index: itemIndex,
+                                child: Tooltip(
+                                  message: '拖动调整置顶顺序',
+                                  child: SizedBox(
+                                    width: 34,
+                                    height: 48,
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.drag_indicator_rounded,
+                                        size: 18,
+                                        color: journal.muted,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                              return Column(
+                                key: ValueKey('pinned-reorder-${item.id}'),
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  card(
+                                    item,
+                                    pinned: true,
+                                    dragHandle: dragHandle,
+                                    pinnedVisibleKeys: visibleKeys,
+                                  ),
+                                  if (itemIndex < section.items.length - 1)
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 70),
+                                      child: Divider(
+                                        height: 1,
+                                        thickness: 0.8,
+                                        color: journal.rule,
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ],
+                  )
+                : JournalGroupedCard(
+                    dividerIndent: 70.0,
+                    children: [
+                      for (final item in section.items)
+                        card(item, pinned: section.pinned),
+                    ],
+                  );
             if (section.heading == null) return groupCard;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
