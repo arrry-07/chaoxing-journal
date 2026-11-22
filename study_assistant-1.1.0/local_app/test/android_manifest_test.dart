@@ -23,14 +23,16 @@ void main() {
     expect(manifest, contains('ScheduledNotificationBootReceiver'));
   });
 
-  test('Android manifest declares exact alarm permission for timely reminders',
-      () {
-    final manifest = File(
-      'android/app/src/main/AndroidManifest.xml',
-    ).readAsStringSync();
+  test(
+    'Android manifest declares exact alarm permission for timely reminders',
+    () {
+      final manifest = File(
+        'android/app/src/main/AndroidManifest.xml',
+      ).readAsStringSync();
 
-    expect(manifest, contains('android.permission.SCHEDULE_EXACT_ALARM'));
-  });
+      expect(manifest, contains('android.permission.SCHEDULE_EXACT_ALARM'));
+    },
+  );
 
   test('local notifications prefer exact alarm scheduling', () {
     final service = File(
@@ -38,8 +40,9 @@ void main() {
     ).readAsStringSync();
 
     expect(service, isNot(contains('requestExactAlarmsPermission')));
-    final settings = File('lib/src/services/permission_settings_service.dart')
-        .readAsStringSync();
+    final settings = File(
+      'lib/src/services/permission_settings_service.dart',
+    ).readAsStringSync();
     expect(settings, contains('openExactAlarmSettings'));
     expect(service, contains('AndroidScheduleMode.exactAllowWhileIdle'));
   });
@@ -76,8 +79,10 @@ void main() {
       manifest,
       contains('android.permission.BIND_NOTIFICATION_LISTENER_SERVICE'),
     );
-    expect(manifest,
-        contains('android.service.notification.NotificationListenerService'));
+    expect(
+      manifest,
+      contains('android.service.notification.NotificationListenerService'),
+    );
     expect(manifest, contains('android.intent.action.TIMEZONE_CHANGED'));
     final reminderSystemReceiver = RegExp(
       r'<receiver\s+android:name="\.ReminderSystemReceiver"[\s\S]*?</receiver>',
@@ -107,6 +112,56 @@ void main() {
     expect(mainActivity, contains('installApk'));
   });
 
+  test(
+    'widget palettes keep light colors and provide dark resource variants',
+    () {
+      const expectedLight = {
+        'surface': '#F7F5EC',
+        'border': '#D6D8C9',
+        'divider': '#E6E7DC',
+        'ink': '#243E34',
+        'muted': '#53645A',
+        'urgent': '#813E53',
+      };
+      const expectedDark = {
+        'surface': '#23221F',
+        'border': '#403E38',
+        'divider': '#32302B',
+        'ink': '#EAE6DF',
+        'muted': '#A09B93',
+        'urgent': '#E8827D',
+      };
+      const res = 'android/app/src/main/res';
+      final color = RegExp(
+        r'<color name="widget_(\w+)">(#[0-9a-fA-F]{6})</color>',
+      );
+
+      for (final (directory, palette) in [
+        ('values', expectedLight),
+        ('values-night', expectedDark),
+      ]) {
+        final file = File('$res/$directory/colors.xml');
+        expect(file.existsSync(), isTrue, reason: file.path);
+        expect({
+          for (final match in color.allMatches(file.readAsStringSync()))
+            match[1]!: match[2]!,
+        }, palette);
+      }
+
+      for (final path in [
+        'layout/assignment_widget.xml',
+        'layout/assignment_widget_medium.xml',
+        'layout/assignment_widget_large.xml',
+        'drawable/assignment_widget_background.xml',
+      ]) {
+        final markup = File('$res/$path').readAsStringSync();
+        for (final hardcoded in expectedLight.values) {
+          expect(markup, isNot(contains(hardcoded)), reason: path);
+        }
+      }
+    },
+  );
+
   test('Android FileProvider exposes update apk cache directory', () {
     final paths = File(
       'android/app/src/main/res/xml/update_file_paths.xml',
@@ -128,55 +183,55 @@ void main() {
       'android/app/src/main/kotlin/com/example/studyassistant/MainActivity.kt',
     ).readAsStringSync();
 
-    expect(
-      mainActivity,
-      contains('UpdateApkPolicy.hasSupportedFlutterEngine'),
-    );
+    expect(mainActivity, contains('UpdateApkPolicy.hasSupportedFlutterEngine'));
   });
 
   test(
-      'Android backup disables plaintext cloud backup and excludes shared prefs',
-      () {
-    final manifest = File(
-      'android/app/src/main/AndroidManifest.xml',
-    ).readAsStringSync();
-    expect(manifest, contains('android:allowBackup="false"'));
-    expect(manifest, isNot(contains('android:allowBackup="true"')));
+    'Android backup disables plaintext cloud backup and excludes shared prefs',
+    () {
+      final manifest = File(
+        'android/app/src/main/AndroidManifest.xml',
+      ).readAsStringSync();
+      expect(manifest, contains('android:allowBackup="false"'));
+      expect(manifest, isNot(contains('android:allowBackup="true"')));
 
-    void expectAllDomainsExcluded(String block, String label) {
-      expect(block, isNot(contains('<include')), reason: label);
-      for (final rule in [
-        '<exclude domain="sharedpref" path="FlutterSharedPreferences.xml"',
-        '<exclude domain="sharedpref" path="."',
-        '<exclude domain="database" path="."',
-        '<exclude domain="file" path="."',
-        '<exclude domain="external" path="."',
-        '<exclude domain="root" path="."',
-      ]) {
-        expect(block, contains(rule), reason: '$label missing $rule');
+      void expectAllDomainsExcluded(String block, String label) {
+        expect(block, isNot(contains('<include')), reason: label);
+        for (final rule in [
+          '<exclude domain="sharedpref" path="FlutterSharedPreferences.xml"',
+          '<exclude domain="sharedpref" path="."',
+          '<exclude domain="database" path="."',
+          '<exclude domain="file" path="."',
+          '<exclude domain="external" path="."',
+          '<exclude domain="root" path="."',
+        ]) {
+          expect(block, contains(rule), reason: '$label missing $rule');
+        }
       }
-    }
 
-    final legacyRules = File(
-      'android/app/src/main/res/xml/backup_rules.xml',
-    ).readAsStringSync();
-    expectAllDomainsExcluded(legacyRules, 'backup_rules.xml');
+      final legacyRules = File(
+        'android/app/src/main/res/xml/backup_rules.xml',
+      ).readAsStringSync();
+      expectAllDomainsExcluded(legacyRules, 'backup_rules.xml');
 
-    final extractionRules = File(
-      'android/app/src/main/res/xml/data_extraction_rules.xml',
-    ).readAsStringSync();
-    final cloudBlock = RegExp(
-      r'<cloud-backup\b[^>]*>([\s\S]*?)</cloud-backup>',
-    ).firstMatch(extractionRules)?.group(1);
-    final transferBlock = RegExp(
-      r'<device-transfer\b[^>]*>([\s\S]*?)</device-transfer>',
-    ).firstMatch(extractionRules)?.group(1);
-    expect(cloudBlock, isNotNull);
-    expect(transferBlock, isNotNull);
-    expectAllDomainsExcluded(cloudBlock!, 'data_extraction_rules.xml cloud');
-    expectAllDomainsExcluded(
-        transferBlock!, 'data_extraction_rules.xml device-transfer');
-  });
+      final extractionRules = File(
+        'android/app/src/main/res/xml/data_extraction_rules.xml',
+      ).readAsStringSync();
+      final cloudBlock = RegExp(
+        r'<cloud-backup\b[^>]*>([\s\S]*?)</cloud-backup>',
+      ).firstMatch(extractionRules)?.group(1);
+      final transferBlock = RegExp(
+        r'<device-transfer\b[^>]*>([\s\S]*?)</device-transfer>',
+      ).firstMatch(extractionRules)?.group(1);
+      expect(cloudBlock, isNotNull);
+      expect(transferBlock, isNotNull);
+      expectAllDomainsExcluded(cloudBlock!, 'data_extraction_rules.xml cloud');
+      expectAllDomainsExcluded(
+        transferBlock!,
+        'data_extraction_rules.xml device-transfer',
+      );
+    },
+  );
 
   test('BackupBridge opens overwrite output streams with truncate mode wt', () {
     final bridge = File(
@@ -187,16 +242,19 @@ void main() {
   });
 
   test(
-      'VerificationBrowser delegates host validation and main-frame http upgrade to BrowserPolicy',
-      () {
-    final browser = File(
-      'android/app/src/main/kotlin/com/example/studyassistant/VerificationBrowser.kt',
-    ).readAsStringSync();
-    expect(browser, contains('BrowserPolicy.isTrustedChaoxingUrl'));
-    expect(browser, contains('BrowserPolicy.upgradeChaoxingNavigationUrl'));
-    expect(browser, contains('request.isForMainFrame'));
-    expect(browser,
-        isNot(contains('filter { trusted(it) }.forEach { origins.add(it) }')));
-    expect(browser, isNot(contains('Uri.parse')));
-  });
+    'VerificationBrowser delegates host validation and main-frame http upgrade to BrowserPolicy',
+    () {
+      final browser = File(
+        'android/app/src/main/kotlin/com/example/studyassistant/VerificationBrowser.kt',
+      ).readAsStringSync();
+      expect(browser, contains('BrowserPolicy.isTrustedChaoxingUrl'));
+      expect(browser, contains('BrowserPolicy.upgradeChaoxingNavigationUrl'));
+      expect(browser, contains('request.isForMainFrame'));
+      expect(
+        browser,
+        isNot(contains('filter { trusted(it) }.forEach { origins.add(it) }')),
+      );
+      expect(browser, isNot(contains('Uri.parse')));
+    },
+  );
 }

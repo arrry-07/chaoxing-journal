@@ -115,6 +115,9 @@ class AssignmentWidgetProviderTest {
         val portraitCtx = context.createConfigurationContext(
             Configuration(context.resources.configuration).apply {
                 orientation = Configuration.ORIENTATION_PORTRAIT
+                uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                    Configuration.UI_MODE_NIGHT_NO
+                fontScale = 1.0f
             },
         )
         val mediumOptions = Bundle().apply {
@@ -156,6 +159,60 @@ class AssignmentWidgetProviderTest {
         assertEquals(android.graphics.Color.parseColor("#53645A"), meta2.currentTextColor)
         assertEquals(View.VISIBLE, footer.visibility)
         assertEquals("还有 4 项未展示 · 点击查看全部", footer.text.toString())
+    }
+
+    @Test
+    fun largerTextShowingOneRowKeepsTheOverflowCount() {
+        val items = JSONArray().apply {
+            repeat(6) { index -> put(sampleItem("w$index", "作业 $index")) }
+        }
+        context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
+            .edit()
+            .putString("assignment_snapshot", items.toString())
+            .putInt("assignment_total_count", 7)
+            .commit()
+        val largeTextContext = context.createConfigurationContext(
+            Configuration(context.resources.configuration).apply {
+                orientation = Configuration.ORIENTATION_PORTRAIT
+                fontScale = 1.5f
+            },
+        )
+        val options = Bundle().apply {
+            putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 150)
+        }
+        val inflated = AssignmentWidgetProvider().buildViews(largeTextContext, options)
+            .apply(largeTextContext, FrameLayout(largeTextContext))
+
+        assertEquals(View.VISIBLE, inflated.findViewById<View>(R.id.assignment_row_1).visibility)
+        assertEquals(View.GONE, inflated.findViewById<View>(R.id.assignment_row_2).visibility)
+        assertEquals("还有 6 项未展示 · 点击查看全部",
+            inflated.findViewById<TextView>(R.id.widget_footer).text.toString())
+    }
+
+    @Test
+    fun remoteViewsUsesNightPaletteForBaseAndUrgentText() {
+        val items = JSONArray().apply {
+            put(sampleItem("w1", "紧急作业", urgency = "critical"))
+            put(sampleItem("w2", "普通作业"))
+        }
+        context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
+            .edit().putString("assignment_snapshot", items.toString()).commit()
+        val night = context.createConfigurationContext(
+            Configuration(context.resources.configuration).apply {
+                uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                    Configuration.UI_MODE_NIGHT_YES
+                fontScale = 1.0f
+            },
+        )
+        val view = AssignmentWidgetProvider().buildViews(night, Bundle())
+            .apply(night, FrameLayout(night))
+
+        assertEquals(android.graphics.Color.parseColor("#EAE6DF"),
+            view.findViewById<TextView>(R.id.widget_header).currentTextColor)
+        assertEquals(android.graphics.Color.parseColor("#E8827D"),
+            view.findViewById<TextView>(R.id.assignment_meta_1).currentTextColor)
+        assertEquals(android.graphics.Color.parseColor("#A09B93"),
+            view.findViewById<TextView>(R.id.assignment_meta_2).currentTextColor)
     }
 
     @Test

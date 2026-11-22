@@ -7,8 +7,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
-import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -67,7 +67,15 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
         val maxHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) ?: 0
         val effectiveHeight =
             AssignmentWidgetLayoutPolicy.effectiveHeightDp(isPortrait, minHeightDp, maxHeightDp)
-        val tier = AssignmentWidgetLayoutPolicy.tierForHeightDp(effectiveHeight)
+        val maxRows = AssignmentWidgetLayoutPolicy.visibleRowCount(
+            effectiveHeight,
+            context.resources.configuration.fontScale,
+        )
+        val tier = when {
+            maxRows <= 2 -> 2
+            maxRows <= 4 -> 4
+            else -> 6
+        }
         val layoutId = when (tier) {
             6 -> R.layout.assignment_widget_large
             4 -> R.layout.assignment_widget_medium
@@ -128,7 +136,7 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
                 first.metaId,
                 if (!meta.authenticated) "打开 App 登录并同步学习通" else "打开 App 同步学习通",
             )
-            views.setTextColor(first.metaId, Color.parseColor(COLOR_MUTED))
+            applyTextColorRes(context, views, first.metaId, R.color.widget_muted)
             views.setOnClickPendingIntent(first.containerId, homePendingIntent)
             for (index in 1 until slots.size) {
                 views.setViewVisibility(slots[index].containerId, View.GONE)
@@ -137,7 +145,7 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
             return views
         }
 
-        val shownCount = minOf(tier, items.length())
+        val shownCount = minOf(maxRows, items.length())
         for (index in slots.indices) {
             val slot = slots[index]
             if (index >= shownCount) {
@@ -153,9 +161,11 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(slot.containerId, View.VISIBLE)
             views.setTextViewText(slot.titleId, item.optString("title"))
             views.setTextViewText(slot.metaId, itemMeta(item, resolvedRemaining))
-            views.setTextColor(
+            applyTextColorRes(
+                context,
+                views,
                 slot.metaId,
-                Color.parseColor(if (urgent) COLOR_BERRY else COLOR_MUTED),
+                if (urgent) R.color.widget_urgent else R.color.widget_muted,
             )
             val rowPendingIntent = createPendingIntent(
                 context = context,
@@ -176,6 +186,14 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.widget_footer, View.GONE)
         }
         return views
+    }
+
+    private fun applyTextColorRes(context: Context, views: RemoteViews, id: Int, color: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            views.setColor(id, "setTextColor", color)
+        } else {
+            views.setTextColor(id, context.getColor(color))
+        }
     }
 
     private fun createPendingIntent(
@@ -252,8 +270,6 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
     companion object {
         private const val TAG = "AssignmentWidgetProvider"
         private const val PREFS_NAME = "HomeWidgetPreferences"
-        private const val COLOR_MUTED = "#53645A"
-        private const val COLOR_BERRY = "#813E53"
 
         fun clearForUnauthenticated(context: Context) {
             val saved = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
@@ -313,6 +329,18 @@ internal object AssignmentWidgetLayoutPolicy {
         heightDp <= 0 || heightDp < 145 -> 2
         heightDp < 230 -> 4
         else -> 6
+    }
+
+    fun visibleRowCount(heightDp: Int, fontScale: Float): Int {
+        val baseTier = tierForHeightDp(heightDp)
+        val safeScale = fontScale.takeIf { it.isFinite() && it > 0f } ?: 1.0f
+        if (safeScale <= 1.05f || heightDp <= 0) return baseTier
+
+        // Reserve the header, footer and padding before fitting scaled rows.
+        val chromeDp = 33f + 30f * safeScale
+        val rowDp = 10f + 32.5f * safeScale
+        val fitting = ((heightDp - chromeDp) / rowDp).toInt().coerceIn(1, 6)
+        return minOf(baseTier, fitting)
     }
 
     fun headerText(authenticated: Boolean, rangeLabel: String, totalCount: Int): String {
