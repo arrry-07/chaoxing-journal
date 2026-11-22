@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+
+import '../app/journal.dart';
+import '../app/journal_motion.dart';
 import '../app/unsaved_edit_guard.dart';
 import '../models/study_notebook.dart';
-import '../services/assignment_store.dart';
 import '../services/assignment_query.dart';
+import '../services/assignment_store.dart';
 import 'reminder_status_screen.dart';
 import 'widgets/data_recovery_warning.dart';
+import 'widgets/journal_buttons.dart';
+import 'widgets/journal_grouped_card.dart';
 
 String manualTime(DateTime? at) => at == null
     ? '未安排时间'
@@ -30,6 +35,7 @@ class _AgendaState extends State<ManualAgendaScreen> {
   bool busy = false;
   String? message;
   String filter = 'all';
+
   Future<void> update(StudyNotebook Function(StudyNotebook) action) async {
     if (busy) return;
     setState(() => busy = true);
@@ -57,6 +63,10 @@ class _AgendaState extends State<ManualAgendaScreen> {
                       onPressed: () => Navigator.pop(c, false),
                       child: const Text('取消')),
                   FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Journal.of(c).berry,
+                        foregroundColor: Journal.of(c).onPrimaryFill,
+                      ),
                       onPressed: () => Navigator.pop(c, true),
                       child: const Text('删除'))
                 ]));
@@ -66,14 +76,15 @@ class _AgendaState extends State<ManualAgendaScreen> {
     }
   }
 
-  void edit([ManualEntry? e]) => Navigator.push(
-      context,
-      MaterialPageRoute<void>(
+  void edit([ManualEntry? e]) =>
+      Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => ManualEntryEditor(store: widget.store, entry: e)));
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
+        final journal = Journal.of(context);
         final rows = widget.store.notebook.entries
             .where((e) => filter == 'all' || e.kind == filter)
             .toList()
@@ -85,61 +96,96 @@ class _AgendaState extends State<ManualAgendaScreen> {
                     .compareTo(b.at ?? DateTime.utc(2200));
           });
         return Scaffold(
-            appBar: AppBar(title: const Text('个人待办与考试')),
-            body: ListView(padding: const EdgeInsets.all(16), children: [
-              if (widget.store.recoveryWarning case final warning?) ...[
-                DataRecoveryWarning(warning: warning),
-                const SizedBox(height: 12),
-              ],
-              const Text('手动记录的个人安排，与学习通作业分开；考试时间请自行核对教务通知。'),
-              const SizedBox(height: 12),
-              Wrap(spacing: 8, children: [
-                for (final item
-                    in {'all': '全部', 'todo': '待办', 'exam': '考试'}.entries)
-                  ChoiceChip(
-                      label: Text(item.value),
-                      selected: filter == item.key,
-                      onSelected: busy
-                          ? null
-                          : (_) => setState(() => filter = item.key))
-              ]),
-              const SizedBox(height: 12),
-              if (rows.isEmpty)
-                const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Text('还没有个人安排，添加一项待办或考试。')),
-              for (final e in rows) ...[
-                ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Checkbox(
-                        value: e.done,
-                        onChanged: busy
+            backgroundColor: journal.paper,
+            appBar: AppBar(
+              backgroundColor: journal.paper,
+              title: const Text('个人待办与考试'),
+            ),
+            body: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+                children: [
+                  if (widget.store.recoveryWarning case final warning?) ...[
+                    DataRecoveryWarning(warning: warning),
+                    const SizedBox(height: 12),
+                  ],
+                  Text(
+                    '手动记录独立于学习通作业；考试时间请以教务通知为准（北京时间）。',
+                    style: journal.metadata,
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(spacing: 8, children: [
+                    for (final item
+                        in {'all': '全部', 'todo': '待办', 'exam': '考试'}.entries)
+                      ChoiceChip(
+                          label: Text(item.value),
+                          selected: filter == item.key,
+                          onSelected: busy
+                              ? null
+                              : (_) => setState(() => filter = item.key))
+                  ]),
+                  const SizedBox(height: 12),
+                  if (rows.isEmpty)
+                    JournalGroupedCard(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 22),
+                      children: [
+                        Text('还没有个人安排，点击下方按钮添加待办或考试。', style: journal.metadata),
+                      ],
+                    )
+                  else
+                    JournalGroupedCard(
+                      dividerIndent: 52,
+                      children: [
+                        for (final e in rows)
+                          ListTile(
+                              leading: Checkbox(
+                                  value: e.done,
+                                  onChanged: busy
+                                      ? null
+                                      : (v) => update((n) => n.withEntries([
+                                            for (final q in n.entries)
+                                              q.id == e.id
+                                                  ? q.completed(v ?? false)
+                                                  : q
+                                          ]))),
+                              title: Text(
+                                '${e.kind == 'exam' ? '考试' : '待办'} · ${e.title}',
+                                style: journal.entryTitle,
+                              ),
+                              subtitle: Text(
+                                '${manualTime(e.at)}${e.course.isEmpty ? '' : '\n${e.course}'}${e.location.isEmpty ? '' : ' · ${e.location}'}${e.minutes == 0 ? '' : '\n预计 ${e.minutes} 分钟'}${e.done ? ' · 个人已完成' : ''}',
+                                style: journal.metadata,
+                              ),
+                              onTap: busy ? null : () => edit(e),
+                              trailing: IconButton(
+                                  tooltip: '删除个人日程',
+                                  onPressed: busy ? null : () => remove(e),
+                                  icon: const Icon(
+                                      Icons.delete_outline_rounded))),
+                      ],
+                    ),
+                  if (message != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Semantics(
+                          liveRegion: true,
+                          child: Text(message!, style: journal.metadata)),
+                    ),
+                  const SizedBox(height: 16),
+                  JournalPrimaryButton(
+                    icon: Icons.add_rounded,
+                    label: '添加个人安排',
+                    onPressed:
+                        busy || widget.store.notebook.entries.length >= 500
                             ? null
-                            : (v) => update((n) => n.withEntries([
-                                  for (final q in n.entries)
-                                    q.id == e.id ? q.completed(v ?? false) : q
-                                ]))),
-                    title:
-                        Text('${e.kind == 'exam' ? '考试' : '待办'} · ${e.title}'),
-                    subtitle: Text(
-                        '${manualTime(e.at)}${e.course.isEmpty ? '' : '\n${e.course}'}${e.location.isEmpty ? '' : ' · ${e.location}'}${e.minutes == 0 ? '' : '\n预计 ${e.minutes} 分钟'}${e.done ? ' · 个人已完成' : ''}'),
-                    onTap: busy ? null : () => edit(e),
-                    trailing: IconButton(
-                        tooltip: '删除个人日程',
-                        onPressed: busy ? null : () => remove(e),
-                        icon: const Icon(Icons.delete_outline))),
-                const Divider()
-              ],
-              if (message != null)
-                Semantics(liveRegion: true, child: Text(message!)),
-              FilledButton.icon(
-                  onPressed: busy || widget.store.notebook.entries.length >= 500
-                      ? null
-                      : () => edit(),
-                  icon: const Icon(Icons.add),
-                  label: const Text('添加个人安排')),
-              const Text('最多保存500项；勾选完成或删除后将移除该项未来提醒。')
-            ]));
+                            : () => edit(),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '最多保存 500 项；勾选完成或删除后将自动移除该项未来提醒。',
+                    style: journal.metadata,
+                  ),
+                ]));
       });
 }
 
@@ -321,133 +367,264 @@ class _EditorState extends State<ManualEntryEditor> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-      canPop: !_dirty && !_saving,
-      onPopInvokedWithResult: (didPop, result) async {
-        if (didPop || (!_dirty && !_saving)) return;
-        final leave = await _requestLeave();
-        if (leave && context.mounted) Navigator.of(context).pop();
-      },
-      child: Scaffold(
-          appBar:
-              AppBar(title: Text(widget.entry == null ? '添加个人安排' : '编辑个人安排')),
-          body: Form(
-              key: form,
-              child: ListView(padding: const EdgeInsets.all(16), children: [
-                const Text('仅记录个人安排，不会创建或提交学习通作业。所有时间使用北京时间。'),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                    initialValue: kind,
-                    decoration: const InputDecoration(labelText: '类型'),
-                    items: const [
-                      DropdownMenuItem(value: 'todo', child: Text('个人待办')),
-                      DropdownMenuItem(value: 'exam', child: Text('手动考试'))
-                    ],
-                    onChanged: busy
-                        ? null
-                        : (v) => setState(() {
-                              kind = v!;
-                              _dirty = true;
-                            })),
-                const SizedBox(height: 12),
-                TextFormField(
-                    controller: title,
-                    enabled: !busy,
-                    maxLength: 200,
-                    decoration: const InputDecoration(labelText: '标题'),
-                    validator: (s) =>
-                        s == null || s.trim().isEmpty ? '请填写标题' : null),
-                TextFormField(
-                    controller: course,
-                    enabled: !busy,
-                    maxLength: 200,
-                    decoration: const InputDecoration(labelText: '课程（可选）')),
-                TextFormField(
-                    controller: location,
-                    enabled: !busy,
-                    maxLength: 200,
-                    decoration: const InputDecoration(labelText: '地点（可选）')),
-                ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(manualTime(at)),
-                    subtitle: Text(kind == 'exam' ? '考试必须填写时间' : '待办可以暂不安排时间'),
-                    trailing: const Icon(Icons.calendar_today),
-                    onTap: busy ? null : chooseDate),
-                if (at != null && kind == 'todo')
-                  TextButton(
-                      onPressed: busy
-                          ? null
-                          : () => setState(() {
-                                at = null;
-                                remind = false;
-                                _dirty = true;
-                              }),
-                      child: const Text('清除时间')),
-                SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('提前30分钟提醒'),
-                    subtitle: const Text('受通知权限和系统调度限制'),
-                    value: remind,
-                    onChanged: busy || at == null
-                        ? null
-                        : (v) => setState(() {
-                              remind = v;
-                              _dirty = true;
-                            })),
-                if (widget.entry != null)
-                  TextButton.icon(
-                    onPressed: busy
-                        ? null
-                        : () {
-                            final router = GoRouter.maybeOf(context);
-                            if (router != null) {
-                              router.push(
-                                '/reminder-status/manual/${Uri.encodeComponent(widget.entry!.id)}?unsaved=${_dirty ? 1 : 0}',
-                              );
-                            } else {
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => ReminderStatusScreen(
-                                    store: widget.store,
-                                    kind: 'manual',
-                                    id: widget.entry!.id,
-                                    hasUnsavedEdits: _dirty,
-                                  ),
-                                ),
-                              );
-                            }
-                          },
-                    icon: const Icon(Icons.notifications_active_outlined),
-                    label: const Text('提醒状态'),
-                  ),
-                TextFormField(
-                    controller: minutes,
-                    enabled: !busy,
-                    keyboardType: TextInputType.number,
-                    decoration:
-                        const InputDecoration(labelText: '预计分钟（0表示未填写）'),
-                    validator: (s) {
-                      final v = int.tryParse(s?.trim() ?? '');
-                      return v == null || v < 0 || v > 1440
-                          ? '请输入0–1440的整数'
-                          : null;
-                    }),
-                const SizedBox(height: 12),
-                TextFormField(
-                    controller: note,
-                    enabled: !busy,
-                    maxLength: 10000,
-                    minLines: 3,
-                    maxLines: 8,
-                    decoration: const InputDecoration(labelText: '备注')),
-                if (error != null)
-                  Semantics(
-                    key: const ValueKey('manual-editor-feedback'),
-                    liveRegion: true,
-                    child: Text(error!),
-                  ),
-                FilledButton(
-                    onPressed: busy ? null : save,
-                    child: Text(busy ? '正在保存…' : '保存个人安排'))
-              ]))));
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    return PopScope(
+        canPop: !_dirty && !_saving,
+        onPopInvokedWithResult: (didPop, result) async {
+          if (didPop || (!_dirty && !_saving)) return;
+          final leave = await _requestLeave();
+          if (leave && context.mounted) Navigator.of(context).pop();
+        },
+        child: Scaffold(
+            backgroundColor: journal.paper,
+            appBar: AppBar(
+              backgroundColor: journal.paper,
+              title: Text(widget.entry == null ? '添加个人安排' : '编辑个人安排'),
+            ),
+            body: Form(
+                key: form,
+                child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+                    children: [
+                      _AgendaKindSegment(
+                        selected: kind,
+                        enabled: !busy,
+                        onChanged: (next) {
+                          JournalMotion.tap(widget.store.display);
+                          setState(() {
+                            kind = next;
+                            _dirty = true;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      JournalGroupedCard(
+                        padding: const EdgeInsets.all(14),
+                        children: [
+                          Column(
+                            children: [
+                              TextFormField(
+                                  controller: title,
+                                  enabled: !busy,
+                                  maxLength: 200,
+                                  decoration:
+                                      const InputDecoration(labelText: '标题'),
+                                  validator: (s) =>
+                                      s == null || s.trim().isEmpty
+                                          ? '请填写标题'
+                                          : null),
+                              TextFormField(
+                                  controller: course,
+                                  enabled: !busy,
+                                  maxLength: 200,
+                                  decoration: const InputDecoration(
+                                      labelText: '课程（可选）')),
+                              TextFormField(
+                                  controller: location,
+                                  enabled: !busy,
+                                  maxLength: 200,
+                                  decoration: const InputDecoration(
+                                      labelText: '地点（可选）')),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      JournalGroupedCard(
+                        dividerIndent: 16,
+                        children: [
+                          ListTile(
+                              title: Text(manualTime(at),
+                                  style: journal.entryTitle),
+                              subtitle: Text(
+                                kind == 'exam' ? '考试必须填写时间' : '待办可以暂不安排时间',
+                                style: journal.metadata,
+                              ),
+                              trailing: const Icon(Icons.calendar_today_rounded,
+                                  size: 19),
+                              onTap: busy ? null : chooseDate),
+                          if (at != null && kind == 'todo')
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                child: TextButton(
+                                    onPressed: busy
+                                        ? null
+                                        : () => setState(() {
+                                              at = null;
+                                              remind = false;
+                                              _dirty = true;
+                                            }),
+                                    child: const Text('清除时间')),
+                              ),
+                            ),
+                          SwitchListTile(
+                              title:
+                                  Text('提前30分钟提醒', style: journal.entryTitle),
+                              subtitle:
+                                  Text('受通知权限和系统调度限制', style: journal.metadata),
+                              value: remind,
+                              onChanged: busy || at == null
+                                  ? null
+                                  : (v) => setState(() {
+                                        remind = v;
+                                        _dirty = true;
+                                      })),
+                          if (widget.entry != null)
+                            JournalGroupTile(
+                              icon: Icons.notifications_active_outlined,
+                              title: '提醒状态',
+                              onTap: busy
+                                  ? null
+                                  : () {
+                                      final router = GoRouter.maybeOf(context);
+                                      if (router != null) {
+                                        router.push(
+                                          '/reminder-status/manual/${Uri.encodeComponent(widget.entry!.id)}?unsaved=${_dirty ? 1 : 0}',
+                                        );
+                                      } else {
+                                        Navigator.of(context,
+                                                rootNavigator: true)
+                                            .push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                ReminderStatusScreen(
+                                              store: widget.store,
+                                              kind: 'manual',
+                                              id: widget.entry!.id,
+                                              hasUnsavedEdits: _dirty,
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    },
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      JournalGroupedCard(
+                        padding: const EdgeInsets.all(14),
+                        children: [
+                          Column(
+                            children: [
+                              TextFormField(
+                                  controller: minutes,
+                                  enabled: !busy,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                      labelText: '预计分钟（0表示未填写）'),
+                                  validator: (s) {
+                                    final v = int.tryParse(s?.trim() ?? '');
+                                    return v == null || v < 0 || v > 1440
+                                        ? '请输入0–1440的整数'
+                                        : null;
+                                  }),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                  controller: note,
+                                  enabled: !busy,
+                                  maxLength: 10000,
+                                  minLines: 3,
+                                  maxLines: 8,
+                                  decoration:
+                                      const InputDecoration(labelText: '备注')),
+                            ],
+                          ),
+                        ],
+                      ),
+                      if (error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Semantics(
+                            key: const ValueKey('manual-editor-feedback'),
+                            liveRegion: true,
+                            child: Text(
+                              error!,
+                              style: journal.metadata
+                                  .copyWith(color: journal.berry),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+                      JournalPrimaryButton(
+                        loading: busy,
+                        label: busy ? '正在保存…' : '保存个人安排',
+                        onPressed: busy ? null : save,
+                      ),
+                    ]))));
+  }
+}
+
+class _AgendaKindSegment extends StatelessWidget {
+  const _AgendaKindSegment({
+    required this.selected,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String selected;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    Widget item(String value, String label) {
+      final active = selected == value;
+      return Expanded(
+        child: GestureDetector(
+          onTap: enabled ? () => onChanged(value) : null,
+          child: AnimatedContainer(
+            duration: JournalMotion.duration(
+              context,
+              const Duration(milliseconds: 180),
+            ),
+            curve: JournalMotion.easeOut,
+            padding: const EdgeInsets.symmetric(vertical: 9),
+            decoration: BoxDecoration(
+              color: active ? journal.sheet : Colors.transparent,
+              borderRadius: BorderRadius.circular(11),
+              boxShadow: active
+                  ? [
+                      BoxShadow(
+                        color: Colors.black.withValues(
+                          alpha: journal.isDark ? 0.22 : 0.05,
+                        ),
+                        blurRadius: 6,
+                        offset: const Offset(0, 1),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: journal.pillLabel.copyWith(
+                fontSize: 13.5,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                color: active ? journal.ink : journal.muted,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(3.5),
+      decoration: BoxDecoration(
+        color: journal.parchment,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          item('todo', '个人待办'),
+          item('exam', '手动考试'),
+        ],
+      ),
+    );
+  }
 }

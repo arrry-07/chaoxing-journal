@@ -53,7 +53,7 @@ bool _wrongRole({
   required TextStyle style,
 }) {
   if (title) {
-    return style.fontFamily != Journal.bodyFamily ||
+    return style.fontFamily != Journal.titleFamily ||
         style.fontWeight != FontWeight.w400;
   }
   return style.fontFamily != Journal.bodyFamily;
@@ -62,8 +62,10 @@ bool _wrongRole({
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('main page headings and UI copy use their contracted font roles',
+  testWidgets('main page headings and UI copy use WenKai across the app',
       (tester) async {
+    expect(Journal.titleFamily, 'LXGW WenKai Screen');
+    expect(Journal.bodyFamily, 'LXGW WenKai Screen');
     await initializeDateFormatting('zh_CN');
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     tester.view.physicalSize = const Size(420, 900);
@@ -100,37 +102,13 @@ void main() {
       ));
       await tester.pumpAndSettle();
       final titleStyle = _renderedStyle(tester, find.text(page.title));
-      expect(titleStyle.fontFamily, Journal.bodyFamily,
+      expect(titleStyle.fontFamily, Journal.titleFamily,
           reason: '${page.title} title family');
       expect(titleStyle.fontWeight, FontWeight.w400,
           reason: '${page.title} title weight');
       expect(titleStyle.fontSize, 30, reason: '${page.title} title size');
       expect(titleStyle.height, 1.25, reason: '${page.title} title height');
     }
-
-    await tester.pumpWidget(MaterialApp(
-      theme: StudyAssistantTheme.light,
-      home: Scaffold(
-        body: StatsScreen(store: store, clock: () => now),
-      ),
-    ));
-    await tester.pumpAndSettle();
-    expect(
-      _renderedStyle(tester, find.text('统计范围：已关注课程的课业与账号考试')).fontFamily,
-      Journal.bodyFamily,
-    );
-
-    await tester.pumpWidget(MaterialApp(
-      theme: StudyAssistantTheme.light,
-      home: Scaffold(
-        body: CalendarScreen(store: store, clock: () => now),
-      ),
-    ));
-    await tester.pumpAndSettle();
-    expect(
-      _renderedStyle(tester, find.text('个人待办与考试')).fontFamily,
-      Journal.bodyFamily,
-    );
 
     await tester.pumpWidget(MaterialApp(
       theme: StudyAssistantTheme.light,
@@ -143,7 +121,7 @@ void main() {
     );
   });
 
-  testWidgets('settings, form, dialog and bottom navigation use WenKai',
+  testWidgets('settings, inputs, dialogs and floating navigation use WenKai',
       (tester) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     tester.view.physicalSize = const Size(420, 900);
@@ -236,7 +214,7 @@ void main() {
           Text(
             '错误标题',
             style: TextStyle(
-              fontFamily: Journal.bodyFamily,
+              fontFamily: Journal.titleFamily,
               fontWeight: FontWeight.w700,
             ),
           ),

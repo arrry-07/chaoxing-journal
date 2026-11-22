@@ -12,6 +12,7 @@ import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dar
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/features/widgets/coursework_status_pill.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
@@ -61,7 +62,7 @@ void main() {
 
     final detail = find.byType(AssignmentDetailScreen);
     expect(detail, findsOneWidget);
-    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
     expect(
       find.descendant(
         of: detail,
@@ -170,10 +171,10 @@ void main() {
     await tester.tap(back);
     await tester.pumpAndSettle();
     expect(find.byType(AssignmentListScreen), findsOneWidget);
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
     expect(
-      tester.getRect(find.byType(NavigationBar)).bottom,
-      closeTo(safeBottom, 0.5),
+      tester.getRect(find.byType(JournalFloatingNavBar)).bottom,
+      lessThanOrEqualTo(safeBottom),
     );
   });
 
@@ -296,30 +297,24 @@ void main() {
           )
           .first;
       await tester.scrollUntilVisible(
-        find.text('安排每日计划'),
+        find.text('提醒状态'),
         240,
         scrollable: scroll,
       );
       expect(tester.takeException(), isNull);
+      expect(
+        tester.getTopLeft(find.text('个人清单与备注')).dy,
+        lessThan(tester.getTopLeft(find.text('安排每日计划')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('安排每日计划')).dy,
+        lessThan(tester.getTopLeft(find.text('提醒状态')).dy),
+      );
     }
 
     await render(const Size(360, 800), 1);
-    expect(
-      tester.getTopLeft(find.text('安排每日计划')).dy,
-      tester.getTopLeft(find.text('提醒状态')).dy,
-    );
-
     await render(const Size(393, 852), 1.3);
-    expect(
-      tester.getTopLeft(find.text('安排每日计划')).dy,
-      tester.getTopLeft(find.text('提醒状态')).dy,
-    );
-
     await render(const Size(320, 640), 2);
-    expect(
-      tester.getTopLeft(find.text('安排每日计划')).dy,
-      lessThan(tester.getTopLeft(find.text('提醒状态')).dy),
-    );
   });
 
   testWidgets(
@@ -666,6 +661,133 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('恢复到课业清单'), findsOneWidget);
     expect(pin, findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'exam notice detail suppresses redundant course eyebrow, orphan timezone line and duplicated notice lines',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    addTearDown(tester.view.reset);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+
+    final start = DateTime.utc(2026, 7, 14, 0, 0);
+    final end = DateTime.utc(2026, 7, 14, 0, 50);
+    const title = '2025-2026-2 《中国近现代史纲要》期末考试';
+    const rawNotice = '试卷名称：2025-2026-2 《中国近现代史纲要》期末考试\n'
+        '考试时间：2026-07-14 08:00 至 2026-07-14 08:50\n'
+        '答题时长：50分钟\n'
+        '提示：1、考试过程中如果出现页面卡死、题目空白情况，请尝试切换网络或退出重新进入考试。';
+    final notice = Assignment(
+      id: 'cx:examNotice:inbox:901',
+      source: AssignmentSource.exam,
+      courseName: '考试通知',
+      title: title,
+      deadlineAt: null,
+      requirementsText: rawNotice,
+      status: 'unknown',
+      submitUrl: 'https://notice.chaoxing.com/pc/notice/myNotice',
+      lastSyncedAt: DateTime.utc(2026, 7, 14, 2),
+      exam: ExamInfo(
+        examId: '901',
+        courseId: '1',
+        clazzId: '2',
+        noticeOnly: true,
+        startAt: start,
+        endAt: end,
+        startTrusted: true,
+        endTrusted: true,
+        durationMinutes: 50,
+        location: '',
+        lifecycle: 'ended',
+      ),
+    );
+    final store = _RefinementStore()..replaceAssignmentsForTest([notice]);
+    addTearDown(store.dispose);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(
+        body: AssignmentDetailScreen(
+          store: store,
+          assignmentId: notice.id,
+          clock: () => DateTime.utc(2026, 7, 14, 2),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(
+        find.byKey(const ValueKey('assignment-detail-course')), findsNothing);
+    expect(find.text(title), findsOneWidget);
+    expect(find.text('考试通知 · 已结束'), findsOneWidget);
+
+    expect(find.text('考试安排'), findsOneWidget);
+    expect(find.text('北京时间'), findsOneWidget);
+    expect(find.text('（北京时间）'), findsNothing);
+    expect(find.text('开考 2026年7月14日 08:00'), findsOneWidget);
+    expect(find.text('结束 2026年7月14日 08:50'), findsOneWidget);
+    expect(find.text('时长 50 分钟'), findsOneWidget);
+
+    expect(find.text('部分信息尚未核实'), findsOneWidget);
+    expect(find.byIcon(Icons.info_outline_rounded), findsOneWidget);
+
+    expect(find.text('考试提示'), findsOneWidget);
+    expect(
+      find.text('1、考试过程中如果出现页面卡死、题目空白情况，请尝试切换网络或退出重新进入考试。'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('试卷名称：2025-2026-2 《中国近现代史纲要》期末考试'),
+      findsNothing,
+    );
+    expect(find.textContaining('答题时长：50分钟'), findsNothing);
+
+    final rawToggle = find.text('查看通知原文');
+    await tester.ensureVisible(rawToggle);
+    await tester.tap(rawToggle);
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('考试时间：2026-07-14 08:00 至 2026-07-14 08:50'),
+      findsOneWidget,
+    );
+
+    final untrusted = AssignmentDetailScreen.formatRequirementsForDisplay(
+      notice.copyWith(
+        exam: ExamInfo(
+          examId: notice.exam!.examId,
+          courseId: notice.exam!.courseId,
+          clazzId: notice.exam!.clazzId,
+          noticeOnly: true,
+          startAt: start,
+          endAt: end,
+          startTrusted: false,
+          endTrusted: false,
+          durationMinutes: 50,
+          lifecycle: 'ended',
+        ),
+      ),
+      displayTitle: title,
+      displayCourse: '考试通知',
+      hasTrustedFullExamRange: false,
+    );
+    expect(
+        untrusted.body, contains('考试时间：2026-07-14 08:00 至 2026-07-14 08:50'));
+
+    final metadataOnly = AssignmentDetailScreen.formatRequirementsForDisplay(
+      notice.copyWith(
+        requirementsText:
+            '试卷名称：$title\n考试时间：2026-07-14 08:00 至 2026-07-14 08:50\n答题时长：50分钟',
+      ),
+      displayTitle: title,
+      displayCourse: '考试通知',
+      hasTrustedFullExamRange: true,
+    );
+    expect(metadataOnly.body, isEmpty);
+    expect(metadataOnly.trimmedRedundantLines, isTrue);
+
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

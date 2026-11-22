@@ -1201,4 +1201,76 @@ void main() {
     expect(client.sourceResults.singleWhere((s) => s.source == 'exam').phase,
         SyncSourcePhase.success);
   });
+
+  test(
+      'PC-only exam is discovered when course entry redirect uses camelCase clazzId',
+      () async {
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        dynamic body = '';
+        var status = 200;
+        final headers = <String, List<String>>{};
+        switch (o.uri.path) {
+          case '/mycourse/backclazzdata':
+            body = {
+              'courses': [
+                {'courseId': '7', 'clazzId': '11', 'courseName': '合成课程'}
+              ]
+            };
+          case '/visit/stucoursemiddle':
+            status = 302;
+            headers['location'] = [
+              'https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu?courseId=7&clazzId=11'
+            ];
+          case '/mooc2-ans/mycourse/stu':
+            body =
+                '<input id="workEnc" value="w"><input id="examEnc" value="synthetic">';
+          case '/mooc2/work/list':
+            body = '<div>暂无作业</div>';
+          case '/phone/moocAnalysis/examList':
+            body = phoneEmpty;
+          case '/exam/test':
+            body = pcRow();
+          case '/exam-ans/exam/test/examcode/examlist':
+            body = accountEmpty;
+          case '/pc/notice/getNoticeList':
+            body = {'status': true};
+          default:
+            throw StateError('unexpected ${o.uri.path}');
+        }
+        h.resolve(Response(
+            requestOptions: o,
+            statusCode: status,
+            data: body,
+            headers: Headers.fromMap(headers)));
+      }));
+
+    final client = ChaoxingLocalClient(
+      dio: dio,
+      enableClassroomTasks: false,
+      wait: (_) async {},
+    );
+    final rows = await client.fetchAssignments();
+    final exam = rows.singleWhere((a) => a.isExam && !a.exam!.noticeOnly);
+    expect(exam.id, 'cx:exam:7:11:99');
+    expect(exam.exam!.startTrusted, isTrue);
+  });
+
+  test('account exam inner refer link accepts camelCase clazzId', () {
+    final refer = Uri.encodeComponent(
+        '/exam-ans/exam/test/examcode/examnotes?courseId=7&clazzId=11&examId=99');
+    final html = '''
+<table class="dataTable">
+  <tr><th>序号</th><th>考试名称</th><th>时间</th><th>时长</th><th>考试状态</th><th>作答状态</th><th>分数</th><th>方式</th><th>操作</th></tr>
+  <tr class="dataTr">
+    <td>1</td><td>合成账号考试</td><td>2030-04-01 09:00 至 2030-04-01 11:00</td><td>100</td><td>未开始</td><td>未交</td><td>--</td><td>线上</td>
+    <td><a href="javascript:;" onclick="go('https://mooc1-api.chaoxing.com/exam-ans/mycourse/transfer?moocId=7&amp;clazzId=11&amp;refer=$refer', stopExam)">查看</a></td>
+  </tr>
+</table>
+<script>page.showPage(0/12+1,Math.ceil(1/12));</script>
+''';
+    final parsed = ChaoxingExamParser.account(html)!;
+    expect(parsed.rows.single.id, 'cx:exam:7:11:99');
+    expect(parsed.rows.single.clazzId, '11');
+  });
 }

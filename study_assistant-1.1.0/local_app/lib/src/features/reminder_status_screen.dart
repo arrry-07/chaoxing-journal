@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../app/journal.dart';
 import '../models/reminder_history.dart';
 import '../services/assignment_store.dart';
 import '../services/permission_settings_service.dart';
 import 'reminder_history_screen.dart';
+import 'widgets/journal_buttons.dart';
+import 'widgets/journal_grouped_card.dart';
 
 class ReminderStatusScreen extends StatefulWidget {
   const ReminderStatusScreen({
@@ -141,15 +144,43 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
         ReminderExplanationStatus.queryFailed => '查询失败',
       };
 
-  Color _statusColor(BuildContext context, ReminderExplanationStatus status) {
-    final scheme = Theme.of(context).colorScheme;
-    return switch (status) {
-      ReminderExplanationStatus.planned => scheme.primary,
-      ReminderExplanationStatus.deferred => scheme.tertiary,
-      ReminderExplanationStatus.ineligible => scheme.outline,
-      ReminderExplanationStatus.unconfirmed => scheme.error,
-      ReminderExplanationStatus.queryFailed => scheme.error,
-    };
+  ({Color fg, Color bg}) _statusColors(
+    JournalPalette journal,
+    ReminderExplanationStatus status,
+  ) =>
+      switch (status) {
+        ReminderExplanationStatus.planned => (
+            fg: journal.accent,
+            bg: journal.sage,
+          ),
+        ReminderExplanationStatus.deferred => (
+            fg: journal.ochre,
+            bg: journal.ochreBg,
+          ),
+        ReminderExplanationStatus.ineligible => (
+            fg: journal.muted,
+            bg: journal.parchment,
+          ),
+        ReminderExplanationStatus.unconfirmed => (
+            fg: journal.berry,
+            bg: journal.berryBg,
+          ),
+        ReminderExplanationStatus.queryFailed => (
+            fg: journal.berry,
+            bg: journal.berryBg,
+          ),
+      };
+
+  bool _needsRecovery(ReminderExplanation? explanation) {
+    if (_error != null) return true;
+    if (explanation == null) return false;
+    return explanation.categories.any(
+      (c) =>
+          c.status == ReminderExplanationStatus.unconfirmed ||
+          c.status == ReminderExplanationStatus.queryFailed ||
+          c.reasonCodes.contains('recoveryPending') ||
+          c.reasonCodes.contains('scheduleBatchFailed'),
+    );
   }
 
   Future<void> _openSystemSettings() async {
@@ -194,128 +225,117 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     final explanation = _explanation;
+    final needsRecovery = _needsRecovery(explanation);
     return Scaffold(
+      backgroundColor: journal.paper,
       appBar: AppBar(
+        backgroundColor: journal.paper,
         title: const Text('提醒状态'),
         actions: [
           IconButton(
             tooltip: '刷新',
             onPressed: _loading ? null : () => _load(force: true),
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
         children: [
-          if (_loading) const LinearProgressIndicator(),
+          if (_loading) ...[
+            const LinearProgressIndicator(minHeight: 2),
+            const SizedBox(height: 10),
+          ],
           if (widget.hasUnsavedEdits) ...[
-            const Padding(
-              padding: EdgeInsets.only(bottom: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: journal.ochreBg,
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: Text(
                 '当前展示已保存事项的提醒状态；编辑页中的未保存修改需保存后才会生效。',
+                style: journal.metadata.copyWith(color: journal.ochre),
               ),
             ),
+            const SizedBox(height: 12),
           ],
           if (_error != null) ...[
-            Semantics(
-              liveRegion: true,
-              child: Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
-            if (explanation == null) ...[
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: _loading ? null : () => _load(force: true),
-                child: const Text('重新查询'),
-              ),
-            ],
-          ],
-          if (explanation != null) ...[
-            Text(
-              explanation.displayName,
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '查询时间 ${DateFormat('yyyy-MM-dd HH:mm:ss').format(explanation.checkedAt)}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 16),
-            for (final category in explanation.categories) ...[
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              reminderCategoryLabels[category.category] ?? '提醒',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                          ),
-                          Chip(
-                            label: Text(_statusLabel(category.status)),
-                            labelStyle: TextStyle(
-                              color: _statusColor(context, category.status),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (category.nextScheduledAt != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          '下一次计划：${DateFormat('M月d日 HH:mm').format(category.nextScheduledAt!)}',
-                        ),
-                      ],
-                      if (category.evidenceAt != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          '系统排期证据：${DateFormat('M月d日 HH:mm:ss').format(category.evidenceAt!)}',
-                        ),
-                      ],
-                      if (category.reasonCodes.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        for (final reason in category.reasonCodes)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: Text(
-                              '· ${reminderReasonLabels[reason] ?? '其他原因'}',
-                            ),
-                          ),
-                      ],
-                    ],
+            JournalGroupedCard(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    _error!,
+                    style: journal.metadata.copyWith(color: journal.berry),
                   ),
                 ),
+                if (explanation == null) ...[
+                  const SizedBox(height: 12),
+                  JournalSecondaryButton(
+                    label: '重新查询',
+                    expanded: false,
+                    onPressed: _loading ? null : () => _load(force: true),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (explanation != null) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    explanation.displayName,
+                    style: journal.section.copyWith(fontSize: 21),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '查询时间 ${DateFormat('yyyy-MM-dd HH:mm:ss').format(explanation.checkedAt)}',
+                    style: journal.metadata,
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-            ],
+            ),
+            const SizedBox(height: 14),
+            if (explanation.categories.isNotEmpty)
+              JournalGroupedCard(
+                children: [
+                  for (final category in explanation.categories)
+                    _buildCategoryItem(journal, category),
+                ],
+              ),
             if (explanation.queryWarnings.isNotEmpty) ...[
-              const Divider(),
-              Text(
-                '部分证据未读取',
-                style: Theme.of(context).textTheme.titleSmall,
+              const SizedBox(height: 12),
+              JournalGroupedCard(
+                title: '部分证据未读取',
+                padding: const EdgeInsets.all(16),
+                children: [
+                  for (final warning in explanation.queryWarnings)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '· $warning',
+                        style: journal.metadata.copyWith(color: journal.ochre),
+                      ),
+                    ),
+                ],
               ),
-              for (final warning in explanation.queryWarnings)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text('· $warning'),
-                ),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             Wrap(
-              spacing: 12,
-              runSpacing: 8,
+              spacing: 10,
+              runSpacing: 10,
               children: [
                 if (widget.kind == 'assignment')
                   OutlinedButton(
+                    style: _secondaryStyle(journal),
                     onPressed: () async {
                       await context.push(
                         '/assignments/${Uri.encodeComponent(widget.id)}',
@@ -325,6 +345,7 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
                     child: const Text('查看课业详情'),
                   ),
                 OutlinedButton(
+                  style: _secondaryStyle(journal),
                   onPressed: () async {
                     await context.push('/reminders');
                     if (mounted) await _load(force: true);
@@ -332,24 +353,116 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
                   child: const Text('打开提醒设置'),
                 ),
                 OutlinedButton(
+                  style: _secondaryStyle(journal),
                   onPressed: _openSystemSettings,
                   child: const Text('系统通知设置'),
                 ),
-                FilledButton(
-                  onPressed: _loading || _retrying ? null : _retryRecovery,
-                  child: Text(_retrying ? '正在重试…' : '重试提醒恢复'),
-                ),
               ],
             ),
+            if (needsRecovery) ...[
+              const SizedBox(height: 14),
+              JournalPrimaryButton(
+                label: _retrying ? '正在重试…' : '重试提醒恢复',
+                loading: _retrying,
+                onPressed: _loading || _retrying ? null : _retryRecovery,
+              ),
+            ],
           ],
           if (_message != null)
             Padding(
-              padding: const EdgeInsets.only(top: 16),
-              child: Semantics(
-                liveRegion: true,
-                child: Text(_message!),
+              padding: const EdgeInsets.only(top: 14),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: journal.sage,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    _message!,
+                    style: journal.metadata.copyWith(color: journal.ink),
+                  ),
+                ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  ButtonStyle _secondaryStyle(JournalPalette journal) =>
+      OutlinedButton.styleFrom(
+        backgroundColor: journal.sheet,
+        foregroundColor: journal.ink,
+        side: BorderSide(color: journal.cardBorder, width: 0.8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      );
+
+  Widget _buildCategoryItem(
+    JournalPalette journal,
+    ReminderCategoryExplanation category,
+  ) {
+    final statusColors = _statusColors(journal, category.status);
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  reminderCategoryLabels[category.category] ?? '提醒',
+                  style: journal.entryTitle,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: statusColors.bg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  _statusLabel(category.status),
+                  style: journal.pillLabel.copyWith(
+                    fontSize: 12.5,
+                    color: statusColors.fg,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (category.nextScheduledAt != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              '下一次计划：${DateFormat('M月d日 HH:mm').format(category.nextScheduledAt!)}',
+              style: journal.time,
+            ),
+          ],
+          if (category.evidenceAt != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              '系统排期证据：${DateFormat('M月d日 HH:mm:ss').format(category.evidenceAt!)}',
+              style: journal.metadata,
+            ),
+          ],
+          if (category.reasonCodes.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            for (final reason in category.reasonCodes)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(
+                  '· ${reminderReasonLabels[reason] ?? '其他原因'}',
+                  style: journal.metadata.copyWith(color: journal.ink),
+                ),
+              ),
+          ],
         ],
       ),
     );

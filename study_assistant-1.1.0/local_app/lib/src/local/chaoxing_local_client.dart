@@ -357,29 +357,38 @@ class ChaoxingLocalClient {
         if (split < 1) continue;
         final name = pair.substring(0, split).trim(),
             value = pair.substring(split + 1).trim();
+        final Cookie validated;
+        try {
+          validated = Cookie(name, value)
+            ..path = path
+            ..secure = true;
+          if (isRootDomain) validated.domain = '.chaoxing.com';
+        } on FormatException {
+          // A single malformed WebView cookie must not abort verification import
+          // or erase an existing valid session cookie.
+          continue;
+        }
         final matches = _cookies
             .where((e) => e.cookie.name == name && e.matches(uri))
             .toList();
         if (matches.any((e) =>
-                e.cookie.value == value && (!isRootDomain || !e.hostOnly)) &&
+                e.cookie.value == validated.value &&
+                (!isRootDomain || !e.hostOnly)) &&
             matches.every((e) =>
                 e.domain != uri.host ||
                 e.path != path ||
-                e.cookie.value == value)) {
+                e.cookie.value == validated.value)) {
           continue;
         }
         if (matches.isNotEmpty && path == '/' && !isRootDomain) {
           for (final e in matches) {
-            e.cookie.value = value;
+            e.cookie.value = validated.value;
           }
         } else {
           _cookies.removeWhere((e) =>
               e.cookie.name == name && e.domain == uri.host && e.path == path);
-          final cookie = Cookie(name, value)
-            ..path = path
-            ..secure = true;
-          if (isRootDomain) cookie.domain = '.chaoxing.com';
-          _cookies.add(_SessionCookie(cookie, uri.host, path, !isRootDomain));
+          _cookies
+              .add(_SessionCookie(validated, uri.host, path, !isRootDomain));
         }
       }
     }
@@ -2094,6 +2103,7 @@ class ChaoxingLocalClient {
         final cId =
             uri.queryParameters['courseid'] ?? uri.queryParameters['courseId'];
         final clzId = uri.queryParameters['clazzid'] ??
+            uri.queryParameters['clazzId'] ??
             uri.queryParameters['classid'] ??
             uri.queryParameters['classId'];
         if (cId != null && clzId != null) {

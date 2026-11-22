@@ -99,9 +99,12 @@ class ExamNoticeRange {
 
   ExamNoticeRange withTrustedExam(ExamInfo? exam) {
     if (exam == null) return this;
-    final nextStart =
-        start?.withTrustedYear(exam.startAt, trusted: exam.startTrusted);
-    final nextEnd = end?.withTrustedYear(exam.endAt, trusted: exam.endTrusted);
+    final startAnchor = exam.noticeStartAt ?? exam.startAt;
+    final endAnchor = exam.noticeEndAt ?? exam.endAt;
+    final nextStart = start?.withTrustedYear(startAnchor,
+        trusted: exam.noticeStartAt != null || exam.startTrusted);
+    final nextEnd = end?.withTrustedYear(endAnchor,
+        trusted: exam.noticeEndAt != null || exam.endTrusted);
     if (identical(nextStart, start) && identical(nextEnd, end)) return this;
     return ExamNoticeRange(nextStart, nextEnd);
   }

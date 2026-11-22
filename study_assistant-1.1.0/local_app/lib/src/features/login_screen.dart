@@ -83,29 +83,27 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor:
-                          canLogin ? journal.accent : journal.parchment,
-                      foregroundColor: journal == JournalPalette.dark
-                          ? journal.paper
-                          : journal.sheet,
+                          canLogin ? journal.primaryFill : journal.parchment,
+                      foregroundColor: journal.onPrimaryFill,
                       disabledBackgroundColor: journal.parchment,
                       disabledForegroundColor: journal.muted,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(14),
                       ),
                     ),
                     onPressed: canLogin ? _login : null,
                     child: widget.store.isLoading
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: journal.onPrimaryFill,
                             ),
                           )
-                        : Text(
+                        : const Text(
                             '登录学习通',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 17,
                               fontWeight: FontWeight.w600,
                             ),
@@ -117,8 +115,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   accepted: _accepted,
                   enabled: !widget.store.isLoading,
                   onChanged: (value) => setState(() => _accepted = value),
-                  onOpen: (kind) =>
-                      Navigator.of(context).push(MaterialPageRoute<void>(
+                  onOpen: (kind) => Navigator.of(context, rootNavigator: true)
+                      .push(MaterialPageRoute<void>(
                     builder: (_) => AgreementScreen(kind: kind),
                   )),
                 ),
@@ -164,13 +162,7 @@ class _AgreementPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: journal.sheet,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: journal.ink.withValues(alpha: 0.055),
-            blurRadius: 18,
-            offset: const Offset(0, 7),
-          ),
-        ],
+        border: Border.all(color: journal.cardBorder, width: 0.8),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -282,8 +274,16 @@ class _LoginErrorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: Theme.of(context).colorScheme.errorContainer,
+    final journal = Journal.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: journal.berryBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: journal.berry.withValues(alpha: 0.25),
+          width: 0.8,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
@@ -291,15 +291,13 @@ class _LoginErrorCard extends StatelessWidget {
           children: [
             Icon(
               Icons.info_outline,
-              color: Theme.of(context).colorScheme.onErrorContainer,
+              color: journal.berry,
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 message,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onErrorContainer,
-                ),
+                style: TextStyle(color: journal.berry),
               ),
             ),
           ],
@@ -351,8 +349,12 @@ InputDecoration _fieldDecoration(BuildContext context, String hint) {
     fillColor: journal.sheet,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
     border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: BorderSide.none,
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: journal.cardBorder, width: 0.8),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: journal.cardBorder, width: 0.8),
     ),
   );
 }

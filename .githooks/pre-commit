@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+if command -v python3 >/dev/null 2>&1; then
+  py=python3
+elif command -v python >/dev/null 2>&1; then
+  py=python
+else
+  echo "[FAIL] Python is required for .githooks/pre-commit" >&2
+  exit 1
+fi
+
+exec "$py" "$repo_root/scripts/check_repo_safety.py" --staged

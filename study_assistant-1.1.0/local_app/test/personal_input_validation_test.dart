@@ -48,6 +48,8 @@ void main() {
     final save = find.text('保存个人记录');
     await tester.scrollUntilVisible(save, 300,
         scrollable: find.byType(Scrollable).first);
+    await tester.ensureVisible(save);
+    await tester.pumpAndSettle();
     await tester.tap(save);
     await tester.pumpAndSettle();
     expect(store.personal.work['cx:work:1:2:shared']!.steps.map((s) => s.text),
@@ -84,6 +86,8 @@ void main() {
     final save = find.text('保存个人记录');
     await tester.scrollUntilVisible(save, 300,
         scrollable: find.byType(Scrollable).first);
+    await tester.ensureVisible(save);
+    await tester.pumpAndSettle();
     await tester.tap(save);
     await tester.pumpAndSettle();
     expect(store.personal.work['cx:work:1:2:shared']!.links.single.url,

@@ -47,7 +47,7 @@
 
 ### 波次 A：安全护栏与 AI 协作门禁
 
-- **状态**：`待排期`
+- **状态**：`已完成（1.8.24）`（已落地 `.githooks/pre-commit`、`.githooks/pre-push`、`scripts/check_repo_safety.py`、`scripts/test_check_repo_safety.py` 与 `scripts/verify_local_gate.py`，本仓已启用 `core.hooksPath .githooks`）
 - **核心收益**：将目前依赖人工 / AI 复核的敏感文件防误入与交付前验证固化为底层硬拦截和统一一键入口，降低跨模型或新会话的规范漂移风险。
 - **建议触发时机**：轻巧优先，建议在下一轮大改动前询问落地。
 - **执行门禁**：落地前须先征求用户确认。

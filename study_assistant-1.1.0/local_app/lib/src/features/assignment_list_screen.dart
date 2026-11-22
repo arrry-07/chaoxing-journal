@@ -1,25 +1,35 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+
 import '../app/journal.dart';
+import '../app/journal_motion.dart';
 import '../app/transient_feedback.dart';
 import '../local/chaoxing_local_client.dart';
 import '../models/assignment.dart';
-import '../models/display_preferences.dart';
 import '../models/assignment_sync_progress.dart';
+import '../models/display_preferences.dart';
 import '../models/home_filters.dart';
-import '../models/sync_report.dart';
 import '../models/personal_workspace.dart';
-import '../services/assignment_store.dart';
-import '../services/interaction_feedback_service.dart';
+import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
+import '../services/assignment_store.dart';
+import '../services/assignment_web_link.dart';
 import '../services/exam_schedule_presentation.dart';
+import '../services/external_link_service.dart';
 import '../services/home_course_filter.dart';
 import '../services/home_sync_presentation.dart';
-import '../services/assignment_web_link.dart';
-import '../services/external_link_service.dart';
+import '../services/interaction_feedback_service.dart';
 import 'widgets/appearance_controls.dart';
 import 'widgets/assignment_card.dart';
+import 'widgets/journal_buttons.dart';
+import 'widgets/journal_context_menu.dart';
+import 'widgets/journal_grouped_card.dart';
+import 'widgets/journal_picker_sheet.dart';
+import 'widgets/journal_sliver_header.dart';
+import 'widgets/journal_swipe_tile.dart';
 
 /// A calendar recovery view. It is carried in the route query, never in
 /// [HomeFilters], so opening or leaving it cannot rewrite saved preferences.
@@ -49,7 +59,6 @@ enum AssignmentRecoveryScope {
         GoRouterState.of(context).uri.queryParameters[queryParameter],
       );
     } on GoError {
-      // The screen is also embedded in plain test hosts without a page state.
       return null;
     }
   }
@@ -86,6 +95,8 @@ class AssignmentListScreen extends StatefulWidget {
 class _AssignmentListScreenState extends State<AssignmentListScreen>
     with WidgetsBindingObserver {
   Timer? _clock;
+  final _scrollController = ScrollController();
+  double _scrollOffset = 0.0;
   final _feedback = TransientFeedbackController();
   late int _feedbackEpoch;
   String? _feedbackAccount;
@@ -96,6 +107,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       _feedback.dismiss();
       _feedbackEpoch = store.accountEpoch;
       _feedbackAccount = store.account;
+    }
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final next = _scrollController.offset;
+    if ((next - _scrollOffset).abs() >= 1.5 &&
+        (next <= 80 || _scrollOffset <= 80)) {
+      setState(() => _scrollOffset = next);
     }
   }
 
@@ -115,6 +135,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _scrollController.addListener(_onScroll);
     _feedbackEpoch = store.accountEpoch;
     _feedbackAccount = store.account;
     store.addListener(_checkFeedbackAccount);
@@ -126,6 +147,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     store.removeListener(_checkFeedbackAccount);
     _feedback.dispose();
     _clock?.cancel();
@@ -168,27 +191,188 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     feedback(target.message);
   }
 
-  void feedback(String message, {bool details = false}) {
+  void feedback(String message,
+      {bool details = false, VoidCallback? action, String? actionLabel}) {
     if (!mounted) return;
     final journal = Journal.of(context);
+    final effectiveAction = action ??
+        (details
+            ? () {
+                _feedback.dismiss();
+                if (mounted) context.push('/sync?expand=issues');
+              }
+            : null);
+    final effectiveLabel = actionLabel ?? (details ? '查看详情' : null);
     _feedback.show(
-        context,
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: journal.ink,
-          content: Text(message,
-              style: journal.metadata.copyWith(color: journal.sheet)),
-          action: details
-              ? SnackBarAction(
-                  label: '查看详情',
-                  textColor: journal.sheet,
-                  onPressed: () {
-                    _feedback.dismiss();
-                    if (mounted) context.push('/sync?expand=issues');
-                  },
-                )
-              : null,
-        ));
+      context,
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: journal.ink,
+        content: Text(
+          message,
+          style: journal.metadata.copyWith(color: journal.onPrimaryFill),
+        ),
+        action: effectiveAction != null && effectiveLabel != null
+            ? SnackBarAction(
+                label: effectiveLabel,
+                textColor: journal.isDark ? journal.slate : journal.slateBg,
+                onPressed: effectiveAction,
+              )
+            : null,
+      ),
+    );
+  }
+
+  Future<void> _togglePin(Assignment assignment) async {
+    if (!store.canTogglePin(assignment)) return;
+    final ok = await store.togglePin(assignment);
+    if (!mounted || !ok) return;
+    final pinned = store.isPinned(assignment);
+    JournalMotion.pin(store.display, pinned: pinned);
+    feedback(pinned ? '已置顶' : '已取消置顶');
+  }
+
+  Future<void> _toggleTodayPlan(Assignment assignment) async {
+    final epoch = store.accountEpoch;
+    final day = PersonalWorkspace.dayKey(DateTime.now());
+    final existing = store.personal.plans
+        .where((p) => p.day == day && p.assignmentId == assignment.id)
+        .firstOrNull;
+    final adding = existing == null;
+    final ok = await store.savePersonal(
+      (w) => w.withPlans(
+        adding
+            ? [
+                ...w.plans.where(
+                    (p) => p.day != day || p.assignmentId != assignment.id),
+                DailyPlanItem(assignment.id, day, 30, done: false),
+              ]
+            : w.plans
+                .where((p) => p.day != day || p.assignmentId != assignment.id)
+                .toList(),
+      ),
+      epoch,
+    );
+    if (!mounted || !ok) return;
+    if (adding) {
+      JournalMotion.complete(store.display);
+      feedback(
+        '已加入今日计划（30 分钟）',
+        actionLabel: '改时长',
+        action: () {
+          _feedback.dismiss();
+          if (mounted) context.push('/plan');
+        },
+      );
+    } else {
+      JournalMotion.tap(store.display);
+      feedback('已移出今日计划');
+    }
+  }
+
+  Future<void> _copyLinkWithConfirm(Assignment assignment) async {
+    final url = AssignmentWebLink.validatedUrl(assignment);
+    if (url == null) {
+      feedback('当前链接暂不可用，请刷新后再试');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('复制${assignment.isExam ? "考试" : "作业"}链接'),
+        content: const Text('链接含个人访问参数，请只在本人设备使用，勿转发或公开。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('确认复制'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await Clipboard.setData(ClipboardData(text: url));
+    if (mounted) feedback('链接已复制，请勿转发他人');
+  }
+
+  Future<void> _hideWithUndo(Assignment assignment) async {
+    final epoch = store.accountEpoch;
+    final group = store.courseworkGroupFor(assignment.id);
+    final sourceIds =
+        group?.sources.map((a) => a.id).toList() ?? [assignment.id];
+    final hidden = await store.setAssignmentsHidden(sourceIds, true);
+    if (!mounted || !hidden) return;
+    feedback(
+      '已在本机隐藏，可在本地记录中恢复',
+      actionLabel: '撤销',
+      action: () {
+        if (store.accountEpoch == epoch) {
+          unawaited(store.setAssignmentsHidden(sourceIds, false));
+        }
+      },
+    );
+  }
+
+  Future<void> _openContextMenu(
+    BuildContext itemContext,
+    Assignment assignment,
+    Widget previewCard, {
+    required bool inTodayPlan,
+  }) async {
+    final box = itemContext.findRenderObject() as RenderBox?;
+    Rect? anchorRect;
+    if (box != null && box.hasSize) {
+      final topLeft = box.localToGlobal(Offset.zero);
+      anchorRect = topLeft & box.size;
+    }
+    final url = AssignmentWebLink.validatedUrl(assignment);
+    final canPin = store.canTogglePin(assignment);
+    final pinned = store.isPinned(assignment);
+    final actions = <JournalContextMenuAction>[
+      if (url != null)
+        JournalContextMenuAction(
+          label: assignment.isExam ? '在学习通查看' : '在学习通打开',
+          icon: Icons.open_in_new_rounded,
+          onSelected: () => openAssignment(assignment.id),
+        ),
+      if (canPin)
+        JournalContextMenuAction(
+          label: pinned ? '取消置顶' : '置顶',
+          icon: pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+          onSelected: () => _togglePin(assignment),
+        ),
+      if (!assignment.isCompleted)
+        JournalContextMenuAction(
+          label: inTodayPlan ? '移出今日计划' : '加入今日计划',
+          icon: inTodayPlan
+              ? Icons.playlist_remove_rounded
+              : Icons.playlist_add_check_rounded,
+          onSelected: () => _toggleTodayPlan(assignment),
+        ),
+      if (url != null)
+        JournalContextMenuAction(
+          label: '复制链接',
+          icon: Icons.copy_outlined,
+          onSelected: () => _copyLinkWithConfirm(assignment),
+        ),
+      if (!assignment.isCompleted)
+        JournalContextMenuAction(
+          label: '在本机隐藏',
+          icon: Icons.visibility_off_outlined,
+          destructive: true,
+          onSelected: () => _hideWithUndo(assignment),
+        ),
+    ];
+    await showJournalContextMenu(
+      context: context,
+      anchorRect: anchorRect,
+      previewCard: previewCard,
+      actions: actions,
+      displayPrefs: store.display,
+    );
   }
 
   Future<bool> act(HomeSyncAction action) async {
@@ -228,8 +412,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   }
 
   Future<void> refresh(HomeSyncAction action) async {
-    // The store queues operations; give feedback and reject repeated taps even
-    // before it emits its first loading notification.
     if (_refreshing ||
         store.isLoading ||
         store.syncReport.phase == SyncPhase.running) {
@@ -247,10 +429,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           report.phase == SyncPhase.running) {
         feedback('刷新未完成，请查看同步详情', details: true);
       } else if (report.phase == SyncPhase.success) {
-        if (epoch == store.accountEpoch) {
-          InteractionFeedback.trigger(store.display,
-              kind: InteractionSoundKind.syncDone);
-        }
+        InteractionFeedback.triggerSyncDoneIfReady(
+          prefs: store.display,
+          before: before,
+          after: report,
+          beforeEpoch: epoch,
+          afterEpoch: store.accountEpoch,
+          operationError: store.operationError,
+        );
         feedback(store.error == null ? '作业已更新' : '作业已更新，本机服务需要处理',
             details: store.error != null);
       } else if (report.phase == SyncPhase.partial) {
@@ -275,6 +461,22 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     } else if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
+  }
+
+  void _cycleTheme(BuildContext context) {
+    final display = store.display;
+    final system = MediaQuery.platformBrightnessOf(context) == Brightness.dark
+        ? JournalThemeMode.dark
+        : JournalThemeMode.light;
+    final mode = switch (display.themeMode) {
+      JournalThemeMode.system => system == JournalThemeMode.dark
+          ? JournalThemeMode.light
+          : JournalThemeMode.dark,
+      final current when current != system => system,
+      _ => JournalThemeMode.system,
+    };
+    InteractionFeedback.trigger(display);
+    saveDisplaySetting(context, store, display.copyWith(themeMode: mode));
   }
 
   @override
@@ -305,10 +507,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           ],
           selectedCourseKey: _courseKey,
         );
-        // The home list shows unfinished work only; filters intersect the same
-        // unfinished catalog so all = homework union exam stays true. Completed
-        // and ended history lives in local records and statistics. Recovery
-        // views are route-scoped and never write saved preferences back.
         final items = recoveryScope == null
             ? AssignmentQuery.filterHome(
                 catalogAssignments,
@@ -335,6 +533,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         final today = PersonalWorkspace.dayKey(now);
         final plans =
             store.personal.plans.where((p) => p.day == today).toList();
+        final plannedIds = plans.map((p) => p.assignmentId).toSet();
         final sync = HomeSyncPresentation.from(store.syncReport,
             loading: store.isLoading,
             hasCache:
@@ -347,8 +546,50 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         final freshness = _freshnessLabel(sync.summary,
             store.syncReport.lastDataSuccessAt ?? store.lastSyncAt, now);
         final statusText = sync.showCached ? '$freshness · 显示上次记录' : freshness;
-        Widget card(Assignment a, {bool pinned = false}) => AssignmentCard(
-            key: ValueKey('assignment-${a.id}'),
+        final reduceMotion = MediaQuery.disableAnimationsOf(context);
+        final syncAction = sync.action == HomeSyncAction.login ||
+                sync.action == HomeSyncAction.verify
+            ? sync.action
+            : HomeSyncAction.retry;
+
+        Widget buildCardWidget(Assignment a, {bool pinned = false}) =>
+            AssignmentCard(
+              key: ValueKey('assignment-${a.id}'),
+              assignment: a,
+              examSources: examSources,
+              displayIndex: displayIndex,
+              now: now,
+              showFullDeadline: false,
+              showDivider: false,
+              enableTapFeedback: false,
+              inPinnedSection: pinned,
+              compact: store.display.compact,
+              countdown: store.display.countdown,
+              deadlinePending: store.isHomeDeadlinePending(a.id),
+              previewOnly: store.isHomeAssignmentPreviewOnly(a.id),
+              previewSaving:
+                  store.homeSyncProgress?.stage == AssignmentSyncStage.saving,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+              onOpenAssignment: AssignmentWebLink.validatedUrl(a) == null
+                  ? null
+                  : () => openAssignment(a.id),
+              opening: _openingAssignments.contains(a.id),
+              onTap: () {
+                InteractionFeedback.trigger(store.display);
+                final path = '/assignments/${Uri.encodeComponent(a.id)}';
+                final scope = recoveryScope == null
+                    ? ''
+                    : '?${AssignmentRecoveryScope.queryParameter}=${recoveryScope.queryValue}';
+                context.push('$path$scope');
+              },
+            );
+
+        Widget card(Assignment a, {bool pinned = false}) {
+          final previewOnly = store.isHomeAssignmentPreviewOnly(a.id);
+          final inTodayPlan = plannedIds.contains(a.id);
+          final canPin = store.canTogglePin(a);
+          final isPinned = store.isPinned(a);
+          final preview = AssignmentCard(
             assignment: a,
             examSources: examSources,
             displayIndex: displayIndex,
@@ -359,30 +600,108 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             inPinnedSection: pinned,
             compact: store.display.compact,
             countdown: store.display.countdown,
-            deadlinePending: store.isHomeDeadlinePending(a.id),
-            previewOnly: store.isHomeAssignmentPreviewOnly(a.id),
-            previewSaving:
-                store.homeSyncProgress?.stage == AssignmentSyncStage.saving,
-            onOpenAssignment: AssignmentWebLink.validatedUrl(a) == null
-                ? null
-                : () => openAssignment(a.id),
-            opening: _openingAssignments.contains(a.id),
-            onTap: () {
-              InteractionFeedback.trigger(store.display);
-              final path = '/assignments/${Uri.encodeComponent(a.id)}';
-              final scope = recoveryScope == null
-                  ? ''
-                  : '?${AssignmentRecoveryScope.queryParameter}=${recoveryScope.queryValue}';
-              context.push('$path$scope');
-            });
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+            onTap: () {},
+          );
+
+          return Builder(
+            builder: (itemContext) {
+              final interactiveCard = AssignmentCard(
+                key: ValueKey('assignment-${a.id}'),
+                assignment: a,
+                examSources: examSources,
+                displayIndex: displayIndex,
+                now: now,
+                showFullDeadline: false,
+                showDivider: false,
+                enableTapFeedback: false,
+                inPinnedSection: pinned,
+                compact: store.display.compact,
+                countdown: store.display.countdown,
+                deadlinePending: store.isHomeDeadlinePending(a.id),
+                previewOnly: previewOnly,
+                previewSaving:
+                    store.homeSyncProgress?.stage == AssignmentSyncStage.saving,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                onOpenAssignment: AssignmentWebLink.validatedUrl(a) == null
+                    ? null
+                    : () => openAssignment(a.id),
+                opening: _openingAssignments.contains(a.id),
+                onLongPress: previewOnly
+                    ? null
+                    : () => _openContextMenu(
+                          itemContext,
+                          a,
+                          preview,
+                          inTodayPlan: inTodayPlan,
+                        ),
+                onTap: () {
+                  InteractionFeedback.trigger(store.display);
+                  final path = '/assignments/${Uri.encodeComponent(a.id)}';
+                  final scope = recoveryScope == null
+                      ? ''
+                      : '?${AssignmentRecoveryScope.queryParameter}=${recoveryScope.queryValue}';
+                  context.push('$path$scope');
+                },
+              );
+
+              if (previewOnly) return buildCardWidget(a, pinned: pinned);
+
+              return JournalSwipeTile(
+                displayPrefs: store.display,
+                rightAction: a.isCompleted
+                    ? null
+                    : JournalSwipeAction(
+                        label: inTodayPlan ? '移出计划' : '今日计划',
+                        icon: inTodayPlan
+                            ? Icons.playlist_remove_rounded
+                            : Icons.playlist_add_check_rounded,
+                        color: journal.accent,
+                        backgroundColor: journal.sage,
+                        onTrigger: () => unawaited(_toggleTodayPlan(a)),
+                      ),
+                leftAction: !canPin
+                    ? null
+                    : JournalSwipeAction(
+                        label: isPinned ? '取消置顶' : '置顶',
+                        icon: isPinned
+                            ? Icons.push_pin_rounded
+                            : Icons.push_pin_outlined,
+                        color: journal.ink,
+                        backgroundColor: journal.parchment,
+                        onTrigger: () => unawaited(_togglePin(a)),
+                      ),
+                child: interactiveCard,
+              );
+            },
+          );
+        }
+
         List<Widget> timeline(List<Assignment> list) {
-          String? previous;
-          var overdueTierAnnounced = false;
-          final todayDay = AssignmentQuery.dayKey(now);
-          final tomorrowDay =
-              DateTime(todayDay.year, todayDay.month, todayDay.day + 1);
           final widgets = <Widget>[];
           var regular = list;
+
+          void flushGroup({
+            String? heading,
+            _DayHeadingTone tone = _DayHeadingTone.normal,
+            String? badge,
+            required List<Widget> rows,
+          }) {
+            if (rows.isEmpty) return;
+            if (heading != null) {
+              widgets.add(dayHeading(
+                heading,
+                top: widgets.isEmpty ? 8 : 18,
+                tone: tone,
+                badge: badge,
+              ));
+            }
+            widgets.add(JournalGroupedCard(
+              dividerIndent: 70.0,
+              children: rows,
+            ));
+          }
+
           if (recoveryScope == null && store.isAuthenticated) {
             final pinned = <Assignment>[];
             regular = <Assignment>[];
@@ -395,11 +714,24 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
             }
             if (pinned.isNotEmpty) {
-              widgets
-                  .add(dayHeading('置顶', top: 14, tone: _DayHeadingTone.today));
-              widgets.addAll(pinned.map((item) => card(item, pinned: true)));
+              flushGroup(
+                heading: '置顶',
+                tone: _DayHeadingTone.today,
+                rows: [for (final item in pinned) card(item, pinned: true)],
+              );
             }
           }
+
+          String? previousKey;
+          String? activeHeading;
+          String? activeBadge;
+          var activeTone = _DayHeadingTone.normal;
+          var activeRows = <Widget>[];
+          var overdueTierAnnounced = false;
+          final todayDay = AssignmentQuery.dayKey(now);
+          final tomorrowDay =
+              DateTime(todayDay.year, todayDay.month, todayDay.day + 1);
+
           for (final a in regular) {
             final bucket = AssignmentQuery.timelineBucketAt(a, now);
             final isOverdue = bucket == AssignmentDeadlineBucket.overdue;
@@ -424,7 +756,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               badgeDay = day;
               final showYear =
                   recoveryScope != null || day.year != todayDay.year;
-              // An exam on the same day can have a full-year heading.
               key =
                   '${showYear ? '' : 'work:'}${day.year}:${day.month}:${day.day}';
               heading =
@@ -443,212 +774,182 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
             }
             final effectiveKey = isOverdue ? 'overdue:$key' : key;
-            if (heading != null && effectiveKey != previous) {
-              String? tierBadge;
-              var tone = _DayHeadingTone.normal;
+            if (heading != null && effectiveKey != previousKey) {
+              flushGroup(
+                heading: activeHeading,
+                tone: activeTone,
+                badge: activeBadge,
+                rows: activeRows,
+              );
+              activeRows = <Widget>[];
+              activeHeading = heading;
+              activeBadge = null;
+              activeTone = _DayHeadingTone.normal;
               if (isOverdue) {
-                tone = _DayHeadingTone.overdue;
+                activeTone = _DayHeadingTone.overdue;
                 if (!overdueTierAnnounced && recoveryScope == null) {
-                  tierBadge = '已逾期置底';
+                  activeBadge = '已逾期置底';
                   overdueTierAnnounced = true;
                 }
               } else if (key == 'undated' || key == 'noDeadline') {
-                tone = _DayHeadingTone.undated;
+                activeTone = _DayHeadingTone.undated;
               } else if (badgeDay == todayDay) {
-                tone = _DayHeadingTone.today;
-                tierBadge = '今天';
+                activeTone = _DayHeadingTone.today;
+                activeBadge = '今天';
               } else if (recoveryScope == null && badgeDay == tomorrowDay) {
-                tone = _DayHeadingTone.today;
-                tierBadge = '明天';
+                activeTone = _DayHeadingTone.today;
+                activeBadge = '明天';
               }
-              widgets.add(dayHeading(
-                heading,
-                top: widgets.isEmpty ? 14 : 22,
-                tone: tone,
-                badge: tierBadge,
-              ));
             }
-            previous = effectiveKey;
-            widgets.add(card(a));
+            previousKey = effectiveKey;
+            activeRows.add(card(a));
           }
+
+          flushGroup(
+            heading: activeHeading,
+            tone: activeTone,
+            badge: activeBadge,
+            rows: activeRows,
+          );
           return widgets;
         }
 
-        final reduceMotion = MediaQuery.disableAnimationsOf(context);
-        final syncAction = sync.action == HomeSyncAction.login ||
-                sync.action == HomeSyncAction.verify
-            ? sync.action
-            : HomeSyncAction.retry;
-
-        // Scrolling must never trigger an implicit remote sync; keep explicit
-        // refresh on the header button only.
-        return ListView(
+        final listView = ListView(
+          controller: _scrollController,
+          physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics(),
+          ),
           key: PageStorageKey(recoveryScope == null
               ? 'home-list'
               : 'home-recovery-${recoveryScope.queryValue}'),
-          padding: const EdgeInsets.fromLTRB(18, 14, 18, 32),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            14,
+            16,
+            JournalLayout.floatingNavClearance(context),
+          ),
           children: [
-            Wrap(
-                alignment: WrapAlignment.spaceBetween,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Text('课业手记', style: journal.display),
-                  Builder(builder: (context) {
-                    Widget action(String label, Widget button) => Stack(
-                          alignment: Alignment.topCenter,
-                          children: [
-                            button,
-                            Positioned(
-                              bottom: 2,
-                              child: IgnorePointer(
-                                child: ExcludeSemantics(
-                                  child: Text(
-                                    label,
-                                    style: journal.metadata.copyWith(
-                                      fontSize: 11,
-                                      height: 1,
-                                    ),
-                                  ),
-                                ),
+            Builder(builder: (context) {
+              Widget action(String label, Widget button) => Stack(
+                    alignment: Alignment.topCenter,
+                    children: [
+                      button,
+                      Positioned(
+                        bottom: 2,
+                        child: IgnorePointer(
+                          child: ExcludeSemantics(
+                            child: Text(
+                              label,
+                              style: journal.metadata.copyWith(
+                                fontSize: 11,
+                                height: 1,
                               ),
                             ),
-                          ],
-                        );
-
-                    return Row(mainAxisSize: MainAxisSize.min, children: [
-                      if (plans.isEmpty)
-                        action(
-                          '计划',
-                          IconButton(
-                              key: const ValueKey('home-plan-entry'),
-                              tooltip: '今日计划',
-                              padding: const EdgeInsets.only(bottom: 12),
-                              iconSize: 21,
-                              constraints: const BoxConstraints(
-                                  minWidth: 48, minHeight: 48),
-                              onPressed: () => context.push('/plan'),
-                              icon: const Icon(Icons.checklist_rounded)),
-                        ),
-                      action(
-                        '刷新',
-                        IconButton(
-                            enableFeedback: false,
-                            tooltip: '刷新作业',
-                            padding: const EdgeInsets.only(bottom: 12),
-                            iconSize: 21,
-                            constraints: const BoxConstraints(
-                                minWidth: 48, minHeight: 48),
-                            onPressed: busy ? null : () => refresh(syncAction),
-                            icon: busy
-                                ? reduceMotion
-                                    ? Icon(Icons.hourglass_top_rounded,
-                                        size: 19, color: journal.ink)
-                                    : SizedBox.square(
-                                        dimension: 19,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2, color: journal.ink))
-                                : const Icon(Icons.sync_rounded)),
-                      ),
-                      if (recoveryScope == null)
-                        action(
-                          '主题',
-                          IconButton(
-                            key: const ValueKey('home-theme-toggle'),
-                            enableFeedback: false,
-                            padding: const EdgeInsets.only(bottom: 12),
-                            iconSize: 21,
-                            constraints: const BoxConstraints(
-                                minWidth: 48, minHeight: 48),
-                            tooltip:
-                                '切换主题（当前：${store.display.themeMode.label}）',
-                            icon: Icon(switch (store.display.themeMode) {
-                              JournalThemeMode.system =>
-                                Icons.brightness_auto_outlined,
-                              JournalThemeMode.light =>
-                                Icons.light_mode_outlined,
-                              JournalThemeMode.dark => Icons.dark_mode_outlined,
-                            }),
-                            onPressed: () {
-                              final display = store.display;
-                              final system =
-                                  MediaQuery.platformBrightnessOf(context) ==
-                                          Brightness.dark
-                                      ? JournalThemeMode.dark
-                                      : JournalThemeMode.light;
-                              final mode = switch (display.themeMode) {
-                                JournalThemeMode.system =>
-                                  system == JournalThemeMode.dark
-                                      ? JournalThemeMode.light
-                                      : JournalThemeMode.dark,
-                                final current when current != system => system,
-                                _ => JournalThemeMode.system,
-                              };
-                              InteractionFeedback.trigger(display);
-                              saveDisplaySetting(context, store,
-                                  display.copyWith(themeMode: mode));
-                            },
                           ),
                         ),
-                      action(
-                        '更多',
-                        IconButton(
-                            tooltip: '同步详情',
-                            padding: const EdgeInsets.only(bottom: 12),
-                            iconSize: 21,
-                            constraints: const BoxConstraints(
-                                minWidth: 48, minHeight: 48),
-                            onPressed: () => context.push('/sync'),
-                            icon: const Icon(Icons.more_horiz_rounded)),
                       ),
-                    ]);
-                  }),
-                ]),
-            const SizedBox(height: 4),
-            if (recoveryScope != null) ...[
-              _recoveryHeader(context, recoveryScope, items.length),
-              const SizedBox(height: 8),
-            ],
-            if (plans.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: journal.sage.withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(12),
+                    ],
+                  );
+
+              final actionsRow = Row(mainAxisSize: MainAxisSize.min, children: [
+                if (plans.isEmpty)
+                  action(
+                    '计划',
+                    IconButton(
+                        key: const ValueKey('home-plan-entry'),
+                        tooltip: '今日计划',
+                        padding: const EdgeInsets.only(bottom: 12),
+                        iconSize: 21,
+                        constraints:
+                            const BoxConstraints(minWidth: 48, minHeight: 48),
+                        onPressed: () => context.push('/plan'),
+                        icon: const Icon(Icons.checklist_rounded)),
                   ),
-                  child: Material(
-                    type: MaterialType.transparency,
-                    child: InkWell(
-                      key: const ValueKey('home-plan-summary'),
-                      borderRadius: BorderRadius.circular(10),
-                      onTap: () => context.push('/plan'),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(minHeight: 48),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          child: Row(children: [
-                            Icon(Icons.checklist_rounded,
-                                size: 18, color: journal.ink),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '今日计划 · 已完成${plans.where((p) => p.done).length}/${plans.length}',
-                                style: journal.metadata.copyWith(
-                                  color: journal.ink,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            Icon(Icons.chevron_right_rounded,
-                                color: journal.muted),
-                          ]),
-                        ),
-                      ),
+                action(
+                  '刷新',
+                  IconButton(
+                      enableFeedback: false,
+                      tooltip: '刷新作业',
+                      padding: const EdgeInsets.only(bottom: 12),
+                      iconSize: 21,
+                      constraints:
+                          const BoxConstraints(minWidth: 48, minHeight: 48),
+                      onPressed: busy ? null : () => refresh(syncAction),
+                      icon: busy
+                          ? reduceMotion
+                              ? Icon(Icons.hourglass_top_rounded,
+                                  size: 19, color: journal.ink)
+                              : SizedBox.square(
+                                  dimension: 19,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: journal.ink))
+                          : const Icon(Icons.sync_rounded)),
+                ),
+                if (recoveryScope == null)
+                  action(
+                    '主题',
+                    IconButton(
+                      key: const ValueKey('home-theme-toggle'),
+                      enableFeedback: false,
+                      padding: const EdgeInsets.only(bottom: 12),
+                      iconSize: 21,
+                      constraints:
+                          const BoxConstraints(minWidth: 48, minHeight: 48),
+                      tooltip: '切换主题（当前：${store.display.themeMode.label}）',
+                      icon: Icon(switch (store.display.themeMode) {
+                        JournalThemeMode.system =>
+                          Icons.brightness_auto_outlined,
+                        JournalThemeMode.light => Icons.light_mode_outlined,
+                        JournalThemeMode.dark => Icons.dark_mode_outlined,
+                      }),
+                      onPressed: () => _cycleTheme(context),
                     ),
                   ),
+                action(
+                  '更多',
+                  IconButton(
+                      tooltip: '同步详情',
+                      padding: const EdgeInsets.only(bottom: 12),
+                      iconSize: 21,
+                      constraints:
+                          const BoxConstraints(minWidth: 48, minHeight: 48),
+                      onPressed: () => context.push('/sync'),
+                      icon: const Icon(Icons.more_horiz_rounded)),
                 ),
-              ),
+              ]);
+
+              final title = Text('课业手记', style: journal.display);
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  if (!JournalLayout.isLargeText(context) &&
+                      constraints.maxWidth >= 300) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: title,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        actionsRow,
+                      ],
+                    );
+                  }
+                  return Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [title, actionsRow],
+                  );
+                },
+              );
+            }),
+            const SizedBox(height: 2),
             Material(
               type: MaterialType.transparency,
               child: InkWell(
@@ -659,7 +960,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 borderRadius: BorderRadius.circular(8),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    minHeight: sync.action == HomeSyncAction.none ? 24 : 48,
+                    minHeight: sync.action == HomeSyncAction.none ? 22 : 48,
                   ),
                   child: Semantics(
                     liveRegion: true,
@@ -672,7 +973,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             : store.syncReport.phase == SyncPhase.partial
                                 ? Icons.info_outline_rounded
                                 : Icons.schedule_rounded,
-                        size: 15,
+                        size: 14.5,
                         color: store.syncReport.phase == SyncPhase.failed
                             ? journal.berry
                             : store.syncReport.phase == SyncPhase.partial
@@ -681,9 +982,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       ),
                       const SizedBox(width: 6),
                       Expanded(
-                          child: ExcludeSemantics(
-                              child:
-                                  Text(statusText, style: journal.metadata))),
+                        child: ExcludeSemantics(
+                          child: Text(statusText, style: journal.metadata),
+                        ),
+                      ),
                       if (sync.action != HomeSyncAction.none)
                         Icon(Icons.chevron_right_rounded,
                             size: 18, color: journal.muted),
@@ -692,6 +994,54 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ),
               ),
             ),
+            if (recoveryScope != null) ...[
+              const SizedBox(height: 6),
+              _recoveryHeader(context, recoveryScope, items.length),
+              const SizedBox(height: 8),
+            ],
+            if (plans.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, bottom: 4),
+                child: JournalGroupedCard(
+                  backgroundColor: Color.lerp(
+                    journal.sheet,
+                    journal.sage,
+                    journal.isDark ? 0.35 : 0.45,
+                  ),
+                  children: [
+                    Material(
+                      type: MaterialType.transparency,
+                      child: InkWell(
+                        key: const ValueKey('home-plan-summary'),
+                        onTap: () => context.push('/plan'),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 46),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                            child: Row(children: [
+                              Icon(Icons.checklist_rounded,
+                                  size: 18, color: journal.ink),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '今日计划 · 已完成${plans.where((p) => p.done).length}/${plans.length}',
+                                  style: journal.metadata.copyWith(
+                                    color: journal.ink,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Icon(Icons.chevron_right_rounded,
+                                  color: journal.muted),
+                            ]),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (recoveryScope == null) ...[
               const SizedBox(height: 6),
               _homeActions(context, options, filtersActive, sortOrder),
@@ -738,11 +1088,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 _courseKey != null &&
                 !displayAssignments.any((a) => a.courseKey == _courseKey))
               Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
                       style: journal.metadata)),
             if (sortedItems.isNotEmpty) ...[
-              if (recoveryScope == null) const SizedBox(height: 16),
+              if (recoveryScope == null) const SizedBox(height: 12),
               ...timeline(sortedItems),
             ] else if (recoveryScope != null) ...[
               _emptyStateCard(
@@ -756,13 +1106,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 icon: Icons.filter_alt_off_outlined,
                 message: '没有符合搜索、类型或期限条件的记录',
                 actions: [
-                  FilledButton.tonal(
+                  JournalPrimaryButton(
+                    expanded: false,
+                    label: '清除搜索与筛选条件',
                     onPressed: () => _saveFilters(
                       HomeFilters(sortOrder: _sortOrder),
                       store.accountEpoch,
                       store.account,
                     ),
-                    child: const Text('清除搜索与筛选条件'),
                   ),
                 ],
               ),
@@ -771,13 +1122,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 icon: Icons.inventory_2_outlined,
                 message: '本机有已完成、已结束、已隐藏、未关注、历史课堂练习或非课业来源的记录，可在本地记录查看。',
                 actions: [
-                  FilledButton.tonal(
+                  JournalPrimaryButton(
+                    expanded: false,
+                    label: '查看全部本地记录',
                     onPressed: () => context.push('/records'),
-                    child: const Text('查看全部本地记录'),
                   ),
-                  OutlinedButton(
+                  JournalSecondaryButton(
+                    expanded: false,
+                    label: '管理课程',
                     onPressed: () => context.push('/courses'),
-                    child: const Text('管理课程'),
                   ),
                 ],
               ),
@@ -799,6 +1152,57 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               ),
           ],
         );
+
+        return Stack(
+          children: [
+            listView,
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: JournalSliverHeader(
+                title: '课业手记',
+                scrollOffset: _scrollOffset,
+                actions: [
+                  IconButton(
+                    tooltip: '今日计划',
+                    iconSize: 20,
+                    onPressed: () => context.push('/plan'),
+                    icon: const Icon(Icons.checklist_rounded),
+                  ),
+                  IconButton(
+                    tooltip: '刷新作业',
+                    enableFeedback: false,
+                    iconSize: 20,
+                    onPressed: busy ? null : () => refresh(syncAction),
+                    icon: busy
+                        ? SizedBox.square(
+                            dimension: 17,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: journal.ink,
+                            ),
+                          )
+                        : const Icon(Icons.sync_rounded),
+                  ),
+                  if (recoveryScope == null)
+                    IconButton(
+                      enableFeedback: false,
+                      tooltip: '切换主题',
+                      iconSize: 20,
+                      onPressed: () => _cycleTheme(context),
+                      icon: Icon(switch (store.display.themeMode) {
+                        JournalThemeMode.system =>
+                          Icons.brightness_auto_outlined,
+                        JournalThemeMode.light => Icons.light_mode_outlined,
+                        JournalThemeMode.dark => Icons.dark_mode_outlined,
+                      }),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        );
       });
 
   Widget _emptyStateCard({
@@ -807,38 +1211,43 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     List<Widget> actions = const [],
   }) =>
       Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 36),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        padding: const EdgeInsets.only(top: 18),
+        child: JournalGroupedCard(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
           children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: Journal.of(context).parchment,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, size: 22, color: Journal.of(context).muted),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: Journal.of(context).metadata.copyWith(
-                    color: Journal.of(context).ink,
-                    fontSize: 14.5,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Journal.of(context).parchment,
+                    shape: BoxShape.circle,
                   ),
+                  alignment: Alignment.center,
+                  child: Icon(icon, size: 22, color: Journal.of(context).muted),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: Journal.of(context).metadata.copyWith(
+                        color: Journal.of(context).ink,
+                        fontSize: 14.5,
+                      ),
+                ),
+                if (actions.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: actions,
+                  ),
+                ],
+              ],
             ),
-            if (actions.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 10,
-                runSpacing: 8,
-                children: actions,
-              ),
-            ],
           ],
         ),
       );
@@ -997,7 +1406,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     };
     final baseStyle = journal.dayHeading.copyWith(
       color: textColor,
-      fontSize: 14.5,
+      fontSize: 14,
     );
     final date = RegExp(r'^(\d{4}年)?(\d{1,2}月\d{1,2}日)(.*)$').firstMatch(label);
     final Widget labelWidget = date == null
@@ -1021,43 +1430,33 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             style: baseStyle,
           );
     return Padding(
-      padding: EdgeInsets.only(top: top, bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: EdgeInsets.only(top: top, bottom: 8, left: 2),
+      child: Row(
         children: [
-          Row(
-            children: [
-              Flexible(
-                child: labelWidget,
+          Flexible(child: labelWidget),
+          if (badge != null) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: tone == _DayHeadingTone.overdue
+                    ? journal.berryBg
+                    : journal.sage,
+                borderRadius: BorderRadius.circular(10),
               ),
-              if (badge != null) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: tone == _DayHeadingTone.overdue
-                        ? journal.berryBg
-                        : journal.sage,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    badge,
-                    style: journal.metadata.copyWith(
-                      fontSize: 11,
-                      height: 1.2,
-                      fontWeight: FontWeight.w600,
-                      color: tone == _DayHeadingTone.overdue
-                          ? journal.berry
-                          : journal.ink,
-                    ),
-                  ),
+              child: Text(
+                badge,
+                style: journal.metadata.copyWith(
+                  fontSize: 11,
+                  height: 1.2,
+                  fontWeight: FontWeight.w600,
+                  color: tone == _DayHeadingTone.overdue
+                      ? journal.berry
+                      : journal.ink,
                 ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 6),
-          Divider(height: 1, thickness: 0.8, color: journal.rule),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1147,7 +1546,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     final journal = Journal.of(context);
     final filterColor = filtersActive ? journal.accent : journal.muted;
     final filterStyle = journal.metadata.copyWith(
-      color: filterColor,
+      color: filtersActive ? journal.ink : journal.muted,
       fontWeight: FontWeight.w500,
     );
     final sortStyle = journal.metadata.copyWith(
@@ -1168,8 +1567,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       return width;
     }
 
-    final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 24;
-    final sortWidth = 17 + 7 + labelWidth(sortLabel, sortStyle) + 24;
+    final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 26;
+    final sortWidth = 17 + 7 + labelWidth(sortLabel, sortStyle) + 26;
 
     Widget buildFilterPill({bool fullWidth = false}) {
       final journal = Journal.of(context);
@@ -1185,7 +1584,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             child: Material(
               type: MaterialType.transparency,
               child: InkWell(
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(20),
                 onTap: onTap,
                 enableFeedback: false,
                 child: ConstrainedBox(
@@ -1198,10 +1597,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     widthFactor: fullWidth ? null : 1,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
+                          horizontal: 13, vertical: 6.5),
                       decoration: BoxDecoration(
                         color: filtersActive ? journal.sage : journal.parchment,
-                        borderRadius: BorderRadius.circular(22),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: filtersActive
+                              ? journal.sageBorder
+                              : Colors.transparent,
+                          width: 0.8,
+                        ),
                       ),
                       child: Row(
                         mainAxisSize:
@@ -1211,7 +1616,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             filtersActive
                                 ? Icons.tune_rounded
                                 : Icons.search_rounded,
-                            size: 17,
+                            size: 16,
                             color: filterColor,
                           ),
                           const SizedBox(width: 7),
@@ -1244,7 +1649,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             child: Material(
               type: MaterialType.transparency,
               child: InkWell(
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(20),
                 onTap: onTap,
                 enableFeedback: false,
                 child: ConstrainedBox(
@@ -1253,14 +1658,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     widthFactor: 1,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
+                          horizontal: 13, vertical: 6.5),
                       decoration: BoxDecoration(
                         color: journal.parchment,
-                        borderRadius: BorderRadius.circular(22),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.transparent,
+                          width: 0.8,
+                        ),
                       ),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Icon(Icons.swap_vert_rounded,
-                            size: 17, color: journal.muted),
+                            size: 16, color: journal.muted),
                         const SizedBox(width: 7),
                         Flexible(
                           child: Text(
@@ -1358,170 +1767,195 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       isScrollControlled: true,
       useSafeArea: true,
       builder: (sheetContext) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-              20, 16, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 14),
-                    decoration: BoxDecoration(
-                      color: Journal.of(context).ruleStrong,
-                      borderRadius: BorderRadius.circular(2),
+        builder: (context, setSheetState) {
+          final journal = Journal.of(context);
+          final selectedCourseLabel = courseKey == null
+              ? '全部课程'
+              : courseOptions
+                      .where((o) => o.courseKey == courseKey)
+                      .firstOrNull
+                      ?.label ??
+                  '全部课程';
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+                20, 14, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 14),
+                      decoration: BoxDecoration(
+                        color: journal.ruleStrong,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
-                Text('搜索、筛选与排序', style: Journal.of(context).section),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: controller,
-                  autofocus: _query.isNotEmpty,
-                  onChanged: (value) => setSheetState(() => query = value),
-                  textInputAction: TextInputAction.search,
-                  decoration: const InputDecoration(
-                    labelText: '搜索作业、任务、考试或课程',
-                    prefixIcon: Icon(Icons.search),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text('类型', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final option in homeTypeFilterChoices)
-                      ChoiceChip(
-                        key: ValueKey('type-${option.name}'),
-                        selected: type == option,
-                        onSelected: (_) => setSheetState(() => type = option),
-                        label: Text(option.label),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Text('期限', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final filter in homeDeadlineFilterChoices)
-                      ChoiceChip(
-                        key: ValueKey('deadline-${filter.name}'),
-                        selected: deadline == filter,
-                        onSelected: (_) =>
-                            setSheetState(() => deadline = filter),
-                        label: Text(_deadlineLabel(filter)),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  initialValue: courseKey ?? '',
-                  key: ValueKey(
-                      'course-${store.accountEpoch}-${courseKey ?? "all"}'),
-                  isExpanded: true,
-                  itemHeight: null,
-                  decoration: const InputDecoration(labelText: '课程筛选'),
-                  selectedItemBuilder: (context) => [
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text('全部课程'),
+                  Text('搜索、筛选与排序', style: journal.section),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: controller,
+                    autofocus: _query.isNotEmpty,
+                    onChanged: (value) => setSheetState(() => query = value),
+                    textInputAction: TextInputAction.search,
+                    decoration: const InputDecoration(
+                      labelText: '搜索作业、任务、考试或课程',
+                      prefixIcon: Icon(Icons.search_rounded),
                     ),
-                    for (final option in courseOptions)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          option.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Journal.of(context).metadata.copyWith(
-                                fontSize: 14,
-                                color: Journal.of(context).ink,
-                              ),
-                        ),
-                      ),
-                  ],
-                  items: [
-                    const DropdownMenuItem(value: '', child: Text('全部课程')),
-                    for (final option in courseOptions)
-                      DropdownMenuItem(
-                        key: ValueKey('course-option-${option.courseKey}'),
-                        value: option.courseKey,
-                        child: _CourseOptionLabel(option: option),
-                      ),
-                  ],
-                  onChanged: (value) => setSheetState(
-                      () => courseKey = value == '' ? null : value),
-                ),
-                const SizedBox(height: 16),
-                Text('排序', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 4),
-                RadioGroup<HomeSortOrder>(
-                  groupValue: sortOrder,
-                  onChanged: (value) {
-                    if (value != null) {
-                      setSheetState(() => sortOrder = value);
-                    }
-                  },
-                  child: Column(
+                  ),
+                  const SizedBox(height: 16),
+                  Text('类型', style: journal.dayHeading),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
-                      for (final order in homeSortOrderChoices)
-                        RadioListTile<HomeSortOrder>(
-                          key: ValueKey('sort-${order.name}'),
-                          value: order,
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          title: Text(_sortLabel(order)),
+                      for (final option in homeTypeFilterChoices)
+                        ChoiceChip(
+                          key: ValueKey('type-${option.name}'),
+                          selected: type == option,
+                          onSelected: (_) => setSheetState(() => type = option),
+                          label: Text(option.label),
                         ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 16),
-                Wrap(
-                  alignment: WrapAlignment.end,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    TextButton(
-                      onPressed: () => setSheetState(() {
-                        query = '';
-                        courseKey = null;
-                        deadline = AssignmentDeadlineFilter.all;
-                        type = AssignmentTypeFilter.all;
-                        controller.clear();
-                      }),
-                      child: const Text('清空筛选'),
-                    ),
-                    TextButton(
-                        onPressed: () => Navigator.pop(sheetContext),
-                        child: const Text('取消')),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(
-                          sheetContext,
-                          _HomeFilterSelection(
-                              query: query,
-                              courseKey: courseKey,
-                              deadline: deadline,
-                              type: type,
-                              sortOrder: sortOrder)),
-                      style: FilledButton.styleFrom(enableFeedback: false),
-                      child: const Text('应用'),
-                    ),
-                  ],
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  Text('期限', style: journal.dayHeading),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final filter in homeDeadlineFilterChoices)
+                        ChoiceChip(
+                          key: ValueKey('deadline-${filter.name}'),
+                          selected: deadline == filter,
+                          onSelected: (_) =>
+                              setSheetState(() => deadline = filter),
+                          label: Text(_deadlineLabel(filter)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text('课程筛选', style: journal.dayHeading),
+                  const SizedBox(height: 8),
+                  JournalGroupedCard(
+                    children: [
+                      JournalGroupTile(
+                        key: ValueKey(
+                            'course-${store.accountEpoch}-${courseKey ?? "all"}'),
+                        title: '所选课程',
+                        trailingText: selectedCourseLabel,
+                        icon: Icons.menu_book_outlined,
+                        onTap: () async {
+                          final picked = await showJournalPickerSheet<String>(
+                            context,
+                            title: '课程筛选',
+                            selectedValue: courseKey ?? '',
+                            searchable: courseOptions.length > 5,
+                            searchHint: '搜索课程名称...',
+                            displayPrefs: store.display,
+                            options: [
+                              const JournalPickerOption<String>(
+                                value: '',
+                                label: '全部课程',
+                              ),
+                              for (final option in courseOptions)
+                                JournalPickerOption<String>(
+                                  key: ValueKey(
+                                      'course-option-${option.courseKey}'),
+                                  value: option.courseKey,
+                                  label: option.name,
+                                  subtitle: option.showClass
+                                      ? option.classLabel
+                                      : null,
+                                  icon: courseIconFor(option.name),
+                                ),
+                            ],
+                          );
+                          if (picked != null) {
+                            setSheetState(
+                                () => courseKey = picked == '' ? null : picked);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text('排序', style: journal.dayHeading),
+                  const SizedBox(height: 8),
+                  JournalGroupedCard(
+                    children: [
+                      RadioGroup<HomeSortOrder>(
+                        groupValue: sortOrder,
+                        onChanged: (value) {
+                          if (value != null) {
+                            setSheetState(() => sortOrder = value);
+                          }
+                        },
+                        child: Column(
+                          children: [
+                            for (final order in homeSortOrderChoices)
+                              RadioListTile<HomeSortOrder>(
+                                key: ValueKey('sort-${order.name}'),
+                                value: order,
+                                contentPadding:
+                                    const EdgeInsets.symmetric(horizontal: 12),
+                                dense: true,
+                                title: Text(
+                                  _sortLabel(order),
+                                  style: journal.entryTitle
+                                      .copyWith(fontSize: 14.5),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      TextButton(
+                        onPressed: () => setSheetState(() {
+                          query = '';
+                          courseKey = null;
+                          deadline = AssignmentDeadlineFilter.all;
+                          type = AssignmentTypeFilter.all;
+                          controller.clear();
+                        }),
+                        child: const Text('清空筛选'),
+                      ),
+                      TextButton(
+                          onPressed: () => Navigator.pop(sheetContext),
+                          child: const Text('取消')),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(
+                            sheetContext,
+                            _HomeFilterSelection(
+                                query: query,
+                                courseKey: courseKey,
+                                deadline: deadline,
+                                type: type,
+                                sortOrder: sortOrder)),
+                        style: FilledButton.styleFrom(enableFeedback: false),
+                        child: const Text('应用'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
     Future<void>.delayed(const Duration(milliseconds: 350), controller.dispose);
@@ -1559,37 +1993,4 @@ class _HomeFilterSelection {
   final AssignmentDeadlineFilter deadline;
   final AssignmentTypeFilter type;
   final HomeSortOrder sortOrder;
-}
-
-class _CourseOptionLabel extends StatelessWidget {
-  const _CourseOptionLabel({required this.option});
-
-  final HomeCourseFilterOption option;
-
-  @override
-  Widget build(BuildContext context) => Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            option.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Journal.of(context).metadata.copyWith(
-                  fontSize: 14,
-                  color: Journal.of(context).ink,
-                ),
-          ),
-          if (option.showClass)
-            Text(
-              option.classLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Journal.of(context).metadata.copyWith(
-                    fontSize: 12,
-                    color: Journal.of(context).muted,
-                  ),
-            ),
-        ],
-      );
 }

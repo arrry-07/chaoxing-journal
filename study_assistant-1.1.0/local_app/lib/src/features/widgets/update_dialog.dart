@@ -192,12 +192,14 @@ class _UpdateDialogState extends State<UpdateDialog> {
           UpdatePhase.cancelled => '下载已取消',
           _ => update == null ? '应用更新' : '发现新版本',
         };
+        final journal = Journal.of(context);
         return Dialog(
-            backgroundColor: Journal.of(context).sheet,
+            backgroundColor: journal.sheetElevated,
             insetPadding:
                 const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+                side: BorderSide(color: journal.cardBorder, width: 0.8)),
             child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: LayoutBuilder(builder: (context, bounds) {

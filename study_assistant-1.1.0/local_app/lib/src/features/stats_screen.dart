@@ -1,14 +1,18 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app/journal.dart';
+import '../app/journal_motion.dart';
 import '../models/assignment.dart';
 import '../services/assignment_statistics.dart';
 import '../services/assignment_store.dart';
 import '../services/local_record_query.dart';
 import 'widgets/completion_pie_chart.dart';
+import 'widgets/journal_grouped_card.dart';
+import 'widgets/journal_info_popover.dart';
 
 class _StatsGroup {
   const _StatsGroup(
@@ -36,10 +40,6 @@ class StatsScreen extends StatefulWidget {
 }
 
 class _StatsScreenState extends State<StatsScreen> {
-  Color get _overviewCardColor =>
-      Color.lerp(Journal.of(context).paper, Journal.of(context).sheet, .70)!;
-  Color get _courseCardColor =>
-      Color.lerp(Journal.of(context).paper, Journal.of(context).sheet, .50)!;
   static const _bucketStatusParams = [
     'completed',
     'pending',
@@ -50,24 +50,6 @@ class _StatsScreenState extends State<StatsScreen> {
   Timer? _clock;
   late DateTime _now;
   StatsTimeRange _range = StatsTimeRange.all;
-
-  Widget _statsCard({
-    Key? key,
-    required Color color,
-    required Widget child,
-  }) =>
-      Card(
-        key: key,
-        color: color,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: Journal.of(context).rule, width: 0.8),
-        ),
-        child: child,
-      );
 
   @override
   void initState() {
@@ -115,8 +97,6 @@ class _StatsScreenState extends State<StatsScreen> {
           final journal = Journal.of(context);
           final store = widget.store;
           final now = _now;
-          // Use one instant for the overview and each course, including deadlines
-          // that pass while the widget is building.
           final rangeResult = LocalRecordQuery.filterStatsRecords(
             store.statsAssignments,
             _range,
@@ -161,206 +141,49 @@ class _StatsScreenState extends State<StatsScreen> {
               ),
           ];
 
-          Widget legend() => LayoutBuilder(
-                builder: (context, constraints) {
-                  final singleLine = constraints.maxWidth >= 170 &&
-                      !JournalLayout.isLargeText(context);
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (var i = 0; i < 4; i++)
-                        if (i < 3 || stats.unknown > 0)
-                          Builder(
-                            builder: (context) {
-                              final journal = Journal.of(context);
-                              final canTap = stats.counts[i] > 0;
-                              final label = CompletionPieChart.labels[i];
-                              final dot = Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color:
-                                      CompletionPieChart.colorsFor(journal)[i],
-                                  shape: BoxShape.circle,
-                                ),
-                              );
-                              final countText = Text(
-                                '${stats.counts[i]} 份',
-                                style: journal.metadata,
-                              );
-                              final sepText = Text(
-                                ' · ',
-                                style: journal.metadata.copyWith(
-                                  color: journal.muted.withValues(alpha: .55),
-                                ),
-                              );
-                              final pctText = Text(
-                                '${stats.percentages[i]}%',
-                                style: journal.metadata.copyWith(
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                ),
-                              );
-                              final row = Padding(
-                                padding: EdgeInsets.symmetric(
-                                  vertical: singleLine ? 5 : 3,
-                                  horizontal: 2,
-                                ),
-                                child: singleLine
-                                    ? Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.center,
-                                        children: [
-                                          dot,
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              label,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: journal.entryTitle,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          countText,
-                                          sepText,
-                                          pctText,
-                                          if (canTap) ...[
-                                            const SizedBox(width: 2),
-                                            Icon(
-                                              Icons.chevron_right,
-                                              size: 16,
-                                              color: journal.muted,
-                                            ),
-                                          ],
-                                        ],
-                                      )
-                                    : Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Padding(
-                                            padding:
-                                                const EdgeInsets.only(top: 7),
-                                            child: dot,
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.stretch,
-                                              children: [
-                                                Row(
-                                                  children: [
-                                                    Expanded(
-                                                      child: Text(
-                                                        label,
-                                                        style: journal.time,
-                                                      ),
-                                                    ),
-                                                    if (canTap)
-                                                      Icon(
-                                                        Icons.chevron_right,
-                                                        size: 16,
-                                                        color: journal.muted,
-                                                      ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 2),
-                                                Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Flexible(child: countText),
-                                                    sepText,
-                                                    pctText,
-                                                  ],
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                              );
-                              void open() => _openRecords(
-                                    context,
-                                    scope: LocalRecordScopeFilter.followedStats,
-                                    status: _bucketStatusParams[i],
-                                  );
-                              return Semantics(
-                                button: canTap,
-                                onTap: canTap ? open : null,
-                                label:
-                                    '$label ${stats.counts[i]} 份，${stats.percentages[i]}%',
-                                excludeSemantics: true,
-                                child: canTap
-                                    ? Material(
-                                        type: MaterialType.transparency,
-                                        child: InkWell(
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                          onTap: open,
-                                          child: row,
-                                        ),
-                                      )
-                                    : row,
-                              );
-                            },
-                          ),
-                    ],
-                  );
-                },
-              );
+          final pendingGroups = groups.where((g) {
+            final own = AssignmentStatistics(g.records, now: now);
+            return own.pending + own.expired + own.unknown > 0;
+          }).toList(growable: false);
+
+          final allUnknown = stats.total > 0 && stats.unknown == stats.total;
+          final barColors = CompletionPieChart.colorsFor(journal);
 
           return Material(
             type: MaterialType.transparency,
             child: ListView(
               key: const PageStorageKey('stats-list'),
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+              padding: EdgeInsets.fromLTRB(
+                18,
+                14,
+                18,
+                JournalLayout.floatingNavClearance(context),
+              ),
               children: [
-                const JournalHeading(
-                  '课业统计',
-                  bookTitle: true,
-                ),
-                const SizedBox(height: 4),
-                Text('统计范围：已关注课程的课业与账号考试', style: journal.metadata),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final range in StatsTimeRange.values)
-                      ChoiceChip(
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-                        label: Text(range.label),
-                        selected: _range == range,
-                        onSelected: (_) => setState(() => _range = range),
-                      ),
-                  ],
+                const JournalHeading('课业统计', bookTitle: true),
+                const SizedBox(height: 10),
+                _StatsRangeSegmentedBar(
+                  selected: _range,
+                  onChanged: (next) {
+                    JournalMotion.tap(store.display);
+                    setState(() => _range = next);
+                  },
                 ),
                 if (_range != StatsTimeRange.all &&
                     excludedUnscheduled > 0) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
                   Text(
-                    '不含 $excludedUnscheduled 项无确定时间课业（切回“全部”可查看）',
+                    '不含 $excludedUnscheduled 项无确定时间课业',
                     style: journal.metadata,
                   ),
                 ],
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 if (stats.total == 0)
-                  _statsCard(
+                  JournalGroupedCard(
                     key: const ValueKey('stats-empty-card'),
-                    color: _overviewCardColor,
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
+                    padding: const EdgeInsets.all(18),
+                    children: [
+                      Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('暂无可统计的作业', style: journal.entryTitle),
@@ -373,207 +196,577 @@ class _StatsScreenState extends State<StatsScreen> {
                           ],
                         ],
                       ),
-                    ),
+                    ],
                   )
                 else
-                  _statsCard(
+                  JournalGroupedCard(
                     key: const ValueKey('stats-overview-card'),
-                    color: _overviewCardColor,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (stats.unknown == stats.total)
-                            Padding(
-                              padding: EdgeInsets.only(bottom: 8),
-                              child: Text('全部状态待确认', style: journal.entryTitle),
-                            ),
-                          LayoutBuilder(
-                            builder: (context, c) {
-                              final stacked = c.maxWidth < 240 ||
-                                  MediaQuery.textScalerOf(context).scale(16) >
-                                      22;
-                              return stacked
-                                  ? Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        Center(
-                                          child: CompletionPieChart(
-                                              statistics: stats),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        legend(),
-                                      ],
-                                    )
-                                  : Row(
-                                      children: [
-                                        CompletionPieChart(
-                                          statistics: stats,
-                                          diameter: (c.maxWidth * .40)
-                                              .clamp(118, 140),
-                                        ),
-                                        const SizedBox(width: 14),
-                                        Expanded(child: legend()),
-                                      ],
-                                    );
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          Divider(height: 1, color: journal.rule),
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 2,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              Text(
-                                '共 ${stats.total} 项课业',
-                                style: journal.metadata,
-                              ),
-                              Text(
-                                '不含已隐藏；提交未知计入；点击图例或课程查看明细',
-                                style: journal.metadata,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                Text('各课程待处理', style: journal.section),
-                const SizedBox(height: 6),
-                if (!records.any((a) => !a.isCompleted))
-                  _statsCard(
-                    key: const ValueKey('stats-course-empty'),
-                    color: _overviewCardColor,
-                    child: Padding(
-                      padding: EdgeInsets.all(14),
-                      child: Text('当前没有待处理的课程', style: journal.metadata),
-                    ),
-                  ),
-                for (final group in groups)
-                  Builder(
-                    builder: (context) {
-                      final journal = Journal.of(context);
-                      final own = AssignmentStatistics(group.records, now: now);
-                      if (own.pending + own.expired + own.unknown == 0) {
-                        return const SizedBox.shrink();
-                      }
-                      final same = group.accountExam
-                          ? const <_StatsGroup>[]
-                          : groups
-                              .where((other) =>
-                                  !other.accountExam &&
-                                  other.name == group.name)
-                              .toList();
-                      final name =
-                          '${group.name}${same.length > 1 ? ' · 分组${same.indexOf(group) + 1}' : ''}';
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: _statsCard(
-                          key: ValueKey(
-                            'stats-course-${group.courseKey ?? group.scope.name}',
-                          ),
-                          color: _courseCardColor,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(12),
-                            onTap: () => _openRecords(
-                              context,
-                              scope: group.scope,
-                              courseKey: group.courseKey,
-                              status: 'unfinished',
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 8,
-                              ),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  group.courseKey == null
-                                      ? Container(
-                                          width: 30,
-                                          height: 30,
-                                          decoration: BoxDecoration(
-                                            color: journal.paper,
-                                            borderRadius:
-                                                BorderRadius.circular(30 * .28),
-                                            border: Border.all(
-                                              color: journal.rule,
-                                              width: 1,
-                                            ),
-                                          ),
-                                          alignment: Alignment.center,
-                                          child: Icon(
-                                            Icons.description_outlined,
-                                            size: 17,
-                                            color: journal.muted,
-                                          ),
-                                        )
-                                      : CourseMark(group.name, size: 30),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(name, style: journal.entryTitle),
-                                        const SizedBox(height: 3),
-                                        Wrap(
-                                          spacing: 14,
-                                          runSpacing: 4,
-                                          children: [
-                                            if (own.pending > 0)
-                                              Text(
-                                                '待完成 ${own.pending} 份',
-                                                style:
-                                                    journal.metadata.copyWith(
-                                                  color: journal.ink,
-                                                ),
-                                              ),
-                                            if (own.expired > 0)
-                                              Text(
-                                                '已逾期 ${own.expired} 份',
-                                                style:
-                                                    journal.metadata.copyWith(
-                                                  color: journal.berry,
-                                                ),
-                                              ),
-                                            if (own.unknown > 0)
-                                              Text(
-                                                '提交未知 ${own.unknown} 份',
-                                                style: journal.metadata,
-                                              ),
-                                          ],
-                                        ),
-                                      ],
+                    dividerIndent: 16,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Expanded(
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      alignment: Alignment.centerLeft,
+                                      child: _AnimatedRatioHero(
+                                        completed: stats.completed,
+                                        total: stats.total,
+                                        journal: journal,
+                                      ),
                                     ),
                                   ),
-                                  Padding(
-                                    padding: EdgeInsets.only(top: 4),
-                                    child: Icon(
-                                      Icons.chevron_right,
-                                      color: journal.muted,
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: allUnknown
+                                        ? journal.parchment
+                                        : journal.sage,
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: Text(
+                                    allUnknown
+                                        ? '待确认'
+                                        : '${stats.percentages[0]}%',
+                                    style: journal.pillLabel.copyWith(
+                                      color: allUnknown
+                                          ? journal.muted
+                                          : journal.isDark
+                                              ? journal.accent
+                                              : journal.ink,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                ],
+                                ),
+                                const JournalInfoButton(
+                                  title: '统计口径说明',
+                                  items: [
+                                    '统计范围为已关注课程的作业/任务与账号级考试。',
+                                    '已在本机隐藏的记录不计入统计；提交状态未知的记录计入总数，不折算为已完成。',
+                                    '切换未来 7 天 / 30 天时，无确定时间的课业不参与时间窗口统计。',
+                                    '点击下方状态行或课程行可直接查看对应记录明细。',
+                                  ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            _MultiSegmentStatsBar(
+                              counts: stats.counts,
+                              colors: barColors,
+                              trackColor: journal.parchment,
+                              animateDuration: JournalMotion.duration(
+                                context,
+                                const Duration(milliseconds: 340),
                               ),
                             ),
-                          ),
+                          ],
                         ),
-                      );
-                    },
+                      ),
+                      for (var i = 0; i < 4; i++)
+                        if (i < 3 || stats.unknown > 0)
+                          _buildStatusRow(
+                            context,
+                            index: i,
+                            label: CompletionPieChart.labels[i],
+                            count: stats.counts[i],
+                            percent: stats.percentages[i],
+                            dotColor: barColors[i],
+                            journal: journal,
+                          ),
+                    ],
+                  ),
+                const SizedBox(height: 18),
+                Padding(
+                  padding: const EdgeInsets.only(left: 2, bottom: 8),
+                  child: Text('各课程待处理', style: journal.section),
+                ),
+                if (pendingGroups.isEmpty)
+                  JournalGroupedCard(
+                    key: const ValueKey('stats-course-empty'),
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      Text('当前没有待处理的课程', style: journal.metadata),
+                    ],
+                  )
+                else
+                  JournalGroupedCard(
+                    dividerIndent: 52,
+                    children: [
+                      for (final group in pendingGroups)
+                        _buildCourseRow(
+                          context,
+                          group: group,
+                          allGroups: groups,
+                          now: now,
+                          journal: journal,
+                        ),
+                    ],
                   ),
               ],
             ),
           );
         },
       );
+
+  Widget _buildStatusRow(
+    BuildContext context, {
+    required int index,
+    required String label,
+    required int count,
+    required int percent,
+    required Color dotColor,
+    required JournalPalette journal,
+  }) {
+    final canTap = count > 0;
+    void open() => _openRecords(
+          context,
+          scope: LocalRecordScopeFilter.followedStats,
+          status: _bucketStatusParams[index],
+        );
+
+    final largeText = JournalLayout.isLargeText(context);
+    final content = ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 48),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        child: largeText
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: dotColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(label, style: journal.entryTitle),
+                            ),
+                            if (canTap)
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: 18,
+                                color: journal.muted,
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '$count 份 · $percent%',
+                          style: journal.metadata.copyWith(
+                            color: canTap ? journal.ink : journal.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: dotColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: journal.entryTitle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$count 份',
+                    style: journal.metadata.copyWith(
+                      color: canTap ? journal.ink : journal.muted,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  Text(
+                    ' · $percent%',
+                    style: journal.metadata,
+                  ),
+                  if (canTap) ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: journal.muted,
+                    ),
+                  ],
+                ],
+              ),
+      ),
+    );
+
+    return Semantics(
+      button: canTap,
+      onTap: canTap ? open : null,
+      label: '$label $count 份，$percent%',
+      excludeSemantics: true,
+      child: canTap ? InkWell(onTap: open, child: content) : content,
+    );
+  }
+
+  Widget _buildCourseRow(
+    BuildContext context, {
+    required _StatsGroup group,
+    required List<_StatsGroup> allGroups,
+    required DateTime now,
+    required JournalPalette journal,
+  }) {
+    final own = AssignmentStatistics(group.records, now: now);
+    final same = group.accountExam
+        ? const <_StatsGroup>[]
+        : allGroups
+            .where((other) => !other.accountExam && other.name == group.name)
+            .toList();
+    final name =
+        '${group.name}${same.length > 1 ? ' · 分组${same.indexOf(group) + 1}' : ''}';
+    final largeText = JournalLayout.isLargeText(context);
+    final pills = Wrap(
+      spacing: 5,
+      runSpacing: 4,
+      alignment: largeText ? WrapAlignment.start : WrapAlignment.end,
+      children: [
+        if (own.pending > 0)
+          _CourseStatPill(
+            text: '待完成 ${own.pending}',
+            fg: journal.ink,
+            bg: journal.parchment,
+            journal: journal,
+          ),
+        if (own.expired > 0)
+          _CourseStatPill(
+            text: '已逾期 ${own.expired}',
+            fg: journal.berry,
+            bg: journal.berryBg,
+            journal: journal,
+          ),
+        if (own.unknown > 0)
+          _CourseStatPill(
+            text: '未知 ${own.unknown}',
+            fg: journal.muted,
+            bg: journal.parchment,
+            journal: journal,
+          ),
+      ],
+    );
+
+    return InkWell(
+      key: ValueKey('stats-course-${group.courseKey ?? group.scope.name}'),
+      onTap: () => _openRecords(
+        context,
+        scope: group.scope,
+        courseKey: group.courseKey,
+        status: 'unfinished',
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            group.courseKey == null
+                ? SizedBox.square(
+                    dimension: 28,
+                    child: Center(
+                      child: Icon(
+                        Icons.description_outlined,
+                        size: 20,
+                        color: journal.muted,
+                      ),
+                    ),
+                  )
+                : CourseMark(group.name, size: 28),
+            const SizedBox(width: 8),
+            Expanded(
+              child: largeText
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: journal.entryTitle),
+                        const SizedBox(height: 6),
+                        pills,
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: journal.entryTitle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(flex: 0, child: pills),
+                      ],
+                    ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: journal.muted,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CourseStatPill extends StatelessWidget {
+  const _CourseStatPill({
+    required this.text,
+    required this.fg,
+    required this.bg,
+    required this.journal,
+  });
+
+  final String text;
+  final Color fg;
+  final Color bg;
+  final JournalPalette journal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        text,
+        style: journal.pillLabel.copyWith(
+          fontSize: 11.5,
+          color: fg,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _StatsRangeSegmentedBar extends StatelessWidget {
+  const _StatsRangeSegmentedBar({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final StatsTimeRange selected;
+  final ValueChanged<StatsTimeRange> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    return Container(
+      padding: const EdgeInsets.all(3.5),
+      decoration: BoxDecoration(
+        color: journal.isDark ? const Color(0xFF21201D) : journal.parchment,
+        borderRadius: BorderRadius.circular(14),
+        border: journal.isDark
+            ? Border.all(color: journal.cardBorder, width: 0.7)
+            : null,
+      ),
+      child: Row(
+        children: [
+          for (final range in StatsTimeRange.values)
+            Expanded(
+              child: GestureDetector(
+                onTap: () => onChanged(range),
+                child: AnimatedContainer(
+                  duration: JournalMotion.duration(
+                    context,
+                    const Duration(milliseconds: 180),
+                  ),
+                  curve: JournalMotion.easeOut,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: selected == range
+                        ? (journal.isDark
+                            ? journal.sheetElevated
+                            : journal.sheet)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(11),
+                    border: selected == range && journal.isDark
+                        ? Border.all(color: journal.cardBorder, width: 0.7)
+                        : null,
+                    boxShadow: selected == range
+                        ? [
+                            BoxShadow(
+                              color: Colors.black.withValues(
+                                alpha: journal.isDark ? 0.22 : 0.05,
+                              ),
+                              blurRadius: 6,
+                              offset: const Offset(0, 1),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Text(
+                    range.label,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: journal.pillLabel.copyWith(
+                      fontSize: 13,
+                      fontWeight:
+                          selected == range ? FontWeight.w600 : FontWeight.w500,
+                      color: selected == range ? journal.ink : journal.muted,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AnimatedRatioHero extends StatelessWidget {
+  const _AnimatedRatioHero({
+    required this.completed,
+    required this.total,
+    required this.journal,
+  });
+
+  final int completed;
+  final int total;
+  final JournalPalette journal;
+
+  @override
+  Widget build(BuildContext context) {
+    final dur = JournalMotion.duration(
+      context,
+      const Duration(milliseconds: 300),
+    );
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: completed.toDouble()),
+      duration: dur,
+      curve: JournalMotion.easeOut,
+      builder: (context, animatedDone, _) {
+        final doneVal = animatedDone.round();
+        return Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(text: '$doneVal', style: journal.statHero),
+              TextSpan(
+                text: ' / $total',
+                style: journal.entryTitle.copyWith(
+                  fontSize: 17,
+                  color: journal.muted,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MultiSegmentStatsBar extends StatelessWidget {
+  const _MultiSegmentStatsBar({
+    required this.counts,
+    required this.colors,
+    required this.trackColor,
+    required this.animateDuration,
+  });
+
+  final List<int> counts;
+  final List<Color> colors;
+  final Color trackColor;
+  final Duration animateDuration;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = counts.fold<int>(0, (s, c) => s + c);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth;
+        if (total <= 0 || maxWidth <= 0) {
+          return Container(
+            height: 10,
+            decoration: BoxDecoration(
+              color: trackColor,
+              borderRadius: BorderRadius.circular(5),
+            ),
+          );
+        }
+        final active = <({int index, int count})>[
+          for (var i = 0; i < counts.length; i++)
+            if (counts[i] > 0) (index: i, count: counts[i]),
+        ];
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(5),
+          child: SizedBox(
+            height: 10,
+            width: maxWidth,
+            child: ColoredBox(
+              color: trackColor,
+              child: Row(
+                children: [
+                  for (var i = 0; i < active.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 2),
+                    Expanded(
+                      flex: math.max(1, active[i].count),
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween<double>(begin: 0.0, end: 1.0),
+                        duration: animateDuration,
+                        curve: JournalMotion.easeOut,
+                        builder: (context, factor, _) => FractionallySizedBox(
+                          widthFactor: factor,
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                            height: 10,
+                            color: colors[active[i].index],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

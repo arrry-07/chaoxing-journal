@@ -7,6 +7,7 @@ import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/login_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -97,11 +98,15 @@ void main() {
     final toggle = find.byKey(const ValueKey('home-theme-toggle'));
     await tester.tap(toggle);
     await tester.pump();
+    // Mid-transition lerp must interpolate cleanly without TextStyle assertions.
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle();
     expect(homeHeadingColor(), JournalPalette.dark.ink);
     expect(Theme.of(tester.element(toggle)).scaffoldBackgroundColor,
         JournalPalette.dark.paper);
     await tester.tap(toggle);
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(homeHeadingColor(), Journal.ink);
     await tester.tap(toggle);
     await tester.pumpAndSettle();
@@ -129,16 +134,20 @@ void main() {
   });
 
   for (final location in ['/courses', '/records', '/help']) {
-    testWidgets('profile subpage $location selects my navigation destination',
+    testWidgets('secondary subpage $location hides floating navigation bar',
         (tester) async {
       await launch(tester, location, authenticated: true);
-      expect(
-          tester
-              .widget<NavigationBar>(find.byType(NavigationBar))
-              .selectedIndex,
-          3);
+      expect(find.byType(JournalFloatingNavBar), findsNothing);
     });
   }
+
+  testWidgets('profile root route displays floating navigation bar at index 3',
+      (tester) async {
+    await launch(tester, '/profile', authenticated: true);
+    final nav = tester
+        .widget<JournalFloatingNavBar>(find.byType(JournalFloatingNavBar));
+    expect(nav.selectedIndex, 3);
+  });
 }
 
 class _RouterStore extends AssignmentStore {

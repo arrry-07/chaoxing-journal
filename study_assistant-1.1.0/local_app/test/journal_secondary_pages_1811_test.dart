@@ -111,13 +111,16 @@ void main() {
     expect(find.byType(SwitchListTile), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    // 3. DisplaySettingsScreen updated responsive widget copy
+    // 3. DisplaySettingsScreen updated responsive widget & info sheet copy
     await tester.pumpWidget(wrap(DisplaySettingsScreen(store: store)));
     await tester.pumpAndSettle();
     expect(find.text('显示与小组件'), findsOneWidget);
-    await tester.scrollUntilVisible(find.textContaining('2、4 或 6 条'), 150);
+    await tester.tap(find.byTooltip('查看说明'));
+    await tester.pumpAndSettle();
     expect(find.textContaining('2、4 或 6 条'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
 
     // 4. DailyPlanScreen candidate picker bottom sheet renders overdue marker
     await tester.pumpWidget(wrap(DailyPlanScreen(store: store)));

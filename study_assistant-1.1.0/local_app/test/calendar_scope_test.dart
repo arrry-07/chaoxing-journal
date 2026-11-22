@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:study_assistant_mobile/src/services/interaction_feedback_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -100,9 +103,13 @@ class _CalendarRefreshStore extends AssignmentStore {
   List<String> nextServiceWarnings = const [];
   String? nextError;
   DateTime? nextLastSync;
+  int nextEpoch = 0;
 
   @override
   bool get isAuthenticated => true;
+
+  @override
+  int get accountEpoch => nextEpoch;
 
   @override
   SyncReport get syncReport => nextReport;
@@ -334,30 +341,20 @@ void main() {
     final title = tester.getRect(find.text('课业日历'));
     final agendaEntry = tester.getRect(find.text('个人待办与考试'));
     expect(agendaEntry.left, greaterThan(title.right));
-    expect(agendaEntry.center.dy, closeTo(title.center.dy, 2));
     final agendaHeading = find.text('11月18日 · 议程');
     expect(agendaHeading.hitTestable(), findsOneWidget);
-    final calendarCard = find
-        .ancestor(
-          of: find.byKey(const ValueKey('calendar-count-18')),
-          matching: find.byType(Card),
-        )
-        .first;
-    final explanation = find.text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。');
     expect(
-      tester.getTopLeft(explanation).dy,
-      greaterThan(tester.getBottomRight(calendarCard).dy),
+      find.text('日期下方数字为当天合计。考试按开考日，其余按截止日，均为北京时间。'),
+      findsNothing,
     );
-    expect(
-      tester.getTopLeft(agendaHeading).dy,
-      greaterThan(tester.getTopLeft(explanation).dy),
-    );
+    expect(find.byKey(const ValueKey('calendar-dots-18')), findsOneWidget);
 
-    final count = tester.widget<Text>(
-      find.byKey(const ValueKey('calendar-count-18')),
-    );
-    expect(count.data, '3');
-    expect(count.style?.color, Journal.muted);
+    await tester.tap(find.byTooltip('查看说明'));
+    await tester.pumpAndSettle();
+    expect(find.text('日历统计与圆点说明'), findsOneWidget);
+    expect(find.text('考试按开考日展示，作业与课堂任务按截止日展示，均使用北京时间。'), findsOneWidget);
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
       find.text('手动考试 · 高数考试'),
@@ -573,5 +570,75 @@ void main() {
     await tester.tap(find.byTooltip('刷新'));
     await tester.pumpAndSettle();
     expect(find.textContaining('本机提醒或小组件需处理'), findsOneWidget);
+  });
+
+  testWidgets(
+      'calendar refresh triggers syncDone feedback only on fresh same-epoch success without operationError',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    InteractionFeedback.debugReset();
+    addTearDown(InteractionFeedback.debugReset);
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      const channel = MethodChannel('study_assistant/interaction_sound');
+      final kinds = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'feedback') {
+          kinds.add((call.arguments as Map)['kind'] as String);
+        }
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null));
+
+      late _CalendarRefreshStore store;
+      var mode = 0;
+      store = _CalendarRefreshStore(() async {
+        switch (mode) {
+          case 0:
+            // Fresh SyncPhase.success in same epoch without operationError.
+            store.nextReport = SyncReport(
+                phase: SyncPhase.success,
+                attemptedAt: DateTime(2026, 11, 22, 10, 0, 1));
+            store.nextError = null;
+          case 1:
+            // Partial must not emit syncDone.
+            store.nextReport = SyncReport(
+                phase: SyncPhase.partial,
+                attemptedAt: DateTime(2026, 11, 22, 10, 0, 2));
+            store.nextError = null;
+          case 2:
+            // Success with operationError must not emit syncDone.
+            store.nextReport = SyncReport(
+                phase: SyncPhase.success,
+                attemptedAt: DateTime(2026, 11, 22, 10, 0, 3));
+            store.nextError = '保存失败';
+          case 3:
+            // Epoch switched mid-sync must not emit syncDone.
+            store.nextEpoch++;
+            store.nextReport = SyncReport(
+                phase: SyncPhase.success,
+                attemptedAt: DateTime(2026, 11, 22, 10, 0, 4));
+            store.nextError = null;
+        }
+      });
+      addTearDown(store.dispose);
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: CalendarScreen(store: store)),
+      ));
+      await tester.pumpAndSettle();
+
+      for (var i = 0; i < 4; i++) {
+        mode = i;
+        await tester.tap(find.byTooltip('刷新'));
+        await tester.pumpAndSettle();
+      }
+
+      expect(kinds.where((k) => k == 'syncDone'), ['syncDone']);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 }

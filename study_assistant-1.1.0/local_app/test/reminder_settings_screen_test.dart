@@ -9,7 +9,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:study_assistant_mobile/main.dart';
 import 'package:study_assistant_mobile/src/app/unsaved_edit_guard.dart';
-import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/reminder_settings_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
@@ -27,6 +26,17 @@ void main() {
     await initializeDateFormatting('zh_CN');
   });
 
+  Future<void> scrollTo(
+    WidgetTester tester,
+    Finder finder, [
+    double delta = 200,
+  ]) =>
+      tester.scrollUntilVisible(
+        finder,
+        delta,
+        scrollable: find.byType(Scrollable).first,
+      );
+
   testWidgets('shows permission controls needed for reminders', (tester) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     final notifService = _NoopNotificationService();
@@ -42,17 +52,26 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: ReminderSettingsScreen(assignmentStore: store),
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            initialExpandHealth: true,
+          ),
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
-    expect(find.text('提醒权限'), findsOneWidget);
+    expect(find.text('提醒状态与体检'), findsOneWidget);
+    await scrollTo(tester, find.text('通知权限'));
     expect(find.text('通知权限'), findsOneWidget);
+    await scrollTo(tester, find.text('精确闹钟'));
     expect(find.text('精确闹钟'), findsOneWidget);
+    await scrollTo(tester, find.text('截止提醒通知渠道'));
     expect(find.text('截止提醒通知渠道'), findsOneWidget);
+    await scrollTo(tester, find.text('本应用电池与后台设置'));
     expect(find.text('本应用电池与后台设置'), findsOneWidget);
-    expect(find.text('保存后会重新安排所有未完成作业的本地通知，自定义提醒支持精确到分钟'), findsOneWidget);
+    await scrollTo(tester, find.text('提前提醒时间'));
+    expect(find.text('提前提醒时间'), findsOneWidget);
   });
 
   testWidgets('missing setting activity explains where to search manually',
@@ -74,13 +93,16 @@ void main() {
           body: ReminderSettingsScreen(
             assignmentStore: store,
             permissionSettingsService: service,
+            initialExpandHealth: true,
           ),
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
     final tile = find.widgetWithText(ListTile, '精确闹钟').first;
-    await tester.ensureVisible(tile);
+    await scrollTo(tester, tile);
+    await Scrollable.ensureVisible(tester.element(tile), alignment: 0.5);
     await tester.pumpAndSettle();
     await tester.tap(tile);
     await tester.pump();
@@ -113,13 +135,16 @@ void main() {
           body: ReminderSettingsScreen(
             assignmentStore: store,
             permissionSettingsService: service,
+            initialExpandHealth: true,
           ),
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
     final tile = find.widgetWithText(ListTile, '截止提醒通知渠道').first;
-    await tester.ensureVisible(tile);
+    await scrollTo(tester, tile);
+    await Scrollable.ensureVisible(tester.element(tile), alignment: 0.5);
     await tester.pumpAndSettle();
     await tester.tap(tile);
     await tester.pump();
@@ -151,13 +176,16 @@ void main() {
           body: ReminderSettingsScreen(
             assignmentStore: store,
             permissionSettingsService: service,
+            initialExpandHealth: true,
           ),
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
     final tile = find.widgetWithText(ListTile, '本应用电池与后台设置').first;
-    await tester.ensureVisible(tile);
+    await scrollTo(tester, tile);
+    await Scrollable.ensureVisible(tester.element(tile), alignment: 0.5);
     await tester.pumpAndSettle();
     await tester.tap(tile);
     await tester.pump();
@@ -229,7 +257,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('已授权'), findsNWidgets(2));
+    await scrollTo(tester, find.textContaining('已授权'));
+    expect(find.textContaining('已授权'), findsOneWidget);
   });
 
   testWidgets('background checks expose only 2, 4 and 6 hour choices',
@@ -252,23 +281,37 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
     expect(store.backgroundCheckIntervalMinutes, 240);
+    await scrollTo(
+      tester,
+      find.byKey(const ValueKey('background-check-switch')),
+    );
     expect(
         find.byKey(const ValueKey('background-check-switch')), findsOneWidget);
+    await scrollTo(
+      tester,
+      find.byKey(const ValueKey('background-interval-360')),
+    );
     expect(
         find.byKey(const ValueKey('background-interval-120')), findsOneWidget);
     expect(
         find.byKey(const ValueKey('background-interval-240')), findsOneWidget);
     expect(
         find.byKey(const ValueKey('background-interval-360')), findsOneWidget);
+    await scrollTo(
+      tester,
+      find.byKey(const ValueKey('new-assignment-switch')),
+    );
     expect(find.byKey(const ValueKey('notification-listener-switch')),
         findsOneWidget);
     expect(find.byKey(const ValueKey('new-assignment-switch')), findsOneWidget);
 
-    await tester
-        .ensureVisible(find.byKey(const ValueKey('background-interval-120')));
-    await tester.tap(find.byKey(const ValueKey('background-interval-120')));
+    final choice120 = find.byKey(const ValueKey('background-interval-120'));
+    await Scrollable.ensureVisible(tester.element(choice120), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(choice120);
     await tester.pumpAndSettle();
     expect(store.backgroundCheckIntervalMinutes, 120);
   });
@@ -292,15 +335,24 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('添加'));
+    await scrollTo(tester, find.text('添加'));
+    await Scrollable.ensureVisible(
+      tester.element(find.text('添加')),
+      alignment: 0.5,
+    );
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(1), '45');
     await tester.tap(find.text('添加'));
     await tester.pumpAndSettle();
 
     expect(find.text('提前 45 分钟'), findsOneWidget);
-
+    await Scrollable.ensureVisible(
+      tester.element(find.byIcon(Icons.delete_outline).last),
+      alignment: 0.5,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.delete_outline).last);
     await tester.pumpAndSettle();
 
@@ -326,8 +378,13 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('添加'));
+    await scrollTo(tester, find.text('添加'));
+    await Scrollable.ensureVisible(
+      tester.element(find.text('添加')),
+      alignment: 0.5,
+    );
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(0), '1');
     await tester.enterText(find.byType(TextField).at(1), '30');
@@ -354,9 +411,15 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
     Future<void> add(String hours, String minutes) async {
-      await tester.ensureVisible(find.text('添加'));
+      await scrollTo(tester, find.text('添加'));
+      await Scrollable.ensureVisible(
+        tester.element(find.text('添加')),
+        alignment: 0.5,
+      );
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).at(0), hours);
       await tester.enterText(find.byType(TextField).at(1), minutes);
       await tester.tap(find.text('添加'));
@@ -580,11 +643,19 @@ void main() {
       ),
     );
 
-    await tester.ensureVisible(find.text('添加'));
+    await scrollTo(tester, find.text('添加'));
+    await Scrollable.ensureVisible(
+      tester.element(find.text('添加')),
+      alignment: 0.5,
+    );
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(1), '45');
     tester.testTextInput.hide();
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('添加'));
+    await Scrollable.ensureVisible(
+      tester.element(find.text('添加')),
+      alignment: 0.5,
+    );
     await tester.tap(find.text('添加'));
     await tester.pumpAndSettle();
 
@@ -592,8 +663,7 @@ void main() {
     expect(find.text('最多保存 32 条提醒规则'), findsOneWidget);
   });
 
-  testWidgets(
-      'legacy over-limit rules stay visible and require explicit review',
+  testWidgets('legacy over-limit rules stay visible and auto-save once trimmed',
       (tester) async {
     final legacyRules = [
       for (var value = 1; value <= 32; value++) '$value',
@@ -617,26 +687,26 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
     expect(store.reminderOffsetsMinutes, hasLength(33));
     expect(store.reminderOffsetsMinutes, contains(400 * 24 * 60));
     expect(find.textContaining('旧版提醒规则已保留'), findsOneWidget);
+    await scrollTo(tester, find.text('提前 400 天'));
     expect(find.text('提前 400 天'), findsOneWidget);
+    await scrollTo(tester, find.text('提前 32 分钟'));
     expect(find.text('提前 32 分钟'), findsOneWidget);
-    expect(
-      find.textContaining('超过365天的规则目前不会参与提醒调度'),
-      findsOneWidget,
-    );
-    await tester.ensureVisible(find.text('保存提醒规则'));
-    await tester.tap(find.text('保存提醒规则'));
-    await tester.pumpAndSettle();
 
-    expect(find.textContaining('请先移除超出 32 条或 365 天的规则'), findsOneWidget);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getStringList('reminder_offsets_minutes'), legacyRules);
 
+    await scrollTo(tester, find.text('提前 400 天'), -200);
     final legacyTile = find.widgetWithText(ListTile, '提前 400 天');
-    await tester.ensureVisible(legacyTile);
+    await Scrollable.ensureVisible(
+      tester.element(legacyTile),
+      alignment: 0.5,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(
       find.descendant(
         of: legacyTile,
@@ -645,12 +715,6 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('提前 400 天'), findsNothing);
-    await tester.pump(const Duration(seconds: 5));
-    final saveButton = find.widgetWithText(FilledButton, '保存提醒规则');
-    await tester.ensureVisible(saveButton);
-    await tester.pumpAndSettle();
-    await tester.tap(saveButton);
-    await tester.pumpAndSettle();
 
     final adjusted = prefs
         .getStringList('reminder_offsets_minutes')!
@@ -660,7 +724,7 @@ void main() {
     expect(adjusted, isNot(contains(400 * 24 * 60)));
   });
 
-  testWidgets('normal bounded reminder rules still save unchanged',
+  testWidgets('normal bounded reminder rule toggle saves immediately',
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'auto_sync_interval_minutes': 0,
@@ -682,13 +746,17 @@ void main() {
         ),
       ),
     );
-
-    expect(find.textContaining('旧版提醒规则已保留'), findsNothing);
-    await tester.ensureVisible(find.text('保存提醒规则'));
-    await tester.tap(find.text('保存提醒规则'));
     await tester.pumpAndSettle();
 
-    expect(store.reminderOffsetsMinutes, [1440, 180, 30]);
+    expect(find.textContaining('旧版提醒规则已保留'), findsNothing);
+    final choice = find.widgetWithText(CheckboxListTile, '提前 10 分钟');
+    await scrollTo(tester, choice);
+    await Scrollable.ensureVisible(tester.element(choice), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(choice);
+    await tester.pumpAndSettle();
+
+    expect(store.reminderOffsetsMinutes, [1440, 180, 30, 10]);
     expect(find.textContaining('提醒时间已保存'), findsOneWidget);
     expect(notifications.assignmentsScheduled, 1);
   });
@@ -717,13 +785,20 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('保存提醒规则'));
-    await tester.tap(find.text('保存提醒规则'));
+    await scrollTo(tester, find.text('添加'));
+    await Scrollable.ensureVisible(
+      tester.element(find.text('添加')),
+      alignment: 0.5,
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '24');
+    await tester.tap(find.text('添加'));
     await tester.pumpAndSettle();
 
     expect(store.reminderOffsetsMinutes, [1440]);
-    expect(find.textContaining('提醒设置未能保存'), findsNothing);
+    expect(find.textContaining('保存失败'), findsNothing);
     expect(find.textContaining('提醒时间已保存'), findsOneWidget);
   });
 
@@ -749,60 +824,35 @@ void main() {
         ),
       ),
     );
-
-    await tester.ensureVisible(find.text('保存提醒规则'));
-    await tester.tap(find.text('保存提醒规则'));
     await tester.pumpAndSettle();
 
-    expect(store.reminderOffsetsMinutes, [1440]);
-    expect(
-      find.textContaining('提醒时间已保存；提醒安排失败'),
-      findsOneWidget,
-    );
+    final choice = find.widgetWithText(CheckboxListTile, '提前 30 分钟');
+    await scrollTo(tester, choice);
+    await Scrollable.ensureVisible(tester.element(choice), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(choice);
+    await tester.pumpAndSettle();
+
+    expect(store.reminderOffsetsMinutes, [1440, 30]);
+    expect(find.text('提醒时间已保存'), findsOneWidget);
     expect(find.textContaining('保存失败'), findsNothing);
   });
 
-  testWidgets('reminderRuleDraftAsksBeforeLeaving', (tester) async {
+  testWidgets('instant-save reminder change leaves without a discard prompt',
+      (tester) async {
     final store = await _launchApp(tester, '/reminders');
     final preset = find.widgetWithText(CheckboxListTile, '提前 1 天');
-    await tester.ensureVisible(preset);
+    await scrollTo(tester, preset);
+    await Scrollable.ensureVisible(tester.element(preset), alignment: 0.5);
     await tester.pumpAndSettle();
     await tester.tap(preset);
-    await tester.pump();
+    await tester.pumpAndSettle();
+
     expect(tester.widget<CheckboxListTile>(preset).value, isTrue);
-    expect(store.reminderOffsetsMinutes, [30]);
-
-    final calendarTab = find.descendant(
-        of: find.byType(NavigationBar), matching: find.text('日历'));
-    await tester.tap(calendarTab);
+    expect(store.reminderOffsetsMinutes, [1440, 30]);
+    unawaited(tester.binding.handlePopRoute());
     await tester.pumpAndSettle();
-    expect(find.text('放弃未保存的提醒规则？'), findsOneWidget);
-    expect(find.byType(ReminderSettingsScreen), findsOneWidget);
-
-    await tester.tap(find.text('继续编辑'));
-    await tester.pumpAndSettle();
-    expect(find.byType(ReminderSettingsScreen), findsOneWidget);
-    expect(tester.widget<CheckboxListTile>(preset).value, isTrue);
-    expect(store.reminderOffsetsMinutes, [30]);
-
-    await tester.tap(calendarTab);
-    await tester.pumpAndSettle();
-    expect(find.text('放弃未保存的提醒规则？'), findsOneWidget);
-    await tester.tap(find.text('放弃修改'));
-    await tester.pumpAndSettle();
-    expect(find.byType(CalendarScreen), findsOneWidget);
-    expect(find.byType(ReminderSettingsScreen), findsNothing);
-  });
-
-  testWidgets('clean reminder rules leave without a prompt', (tester) async {
-    await _launchApp(tester, '/reminders');
-    final calendarTab = find.descendant(
-        of: find.byType(NavigationBar), matching: find.text('日历'));
-    await tester.tap(calendarTab);
-    await tester.pumpAndSettle();
-
     expect(find.text('放弃未保存的提醒规则？'), findsNothing);
-    expect(find.byType(CalendarScreen), findsOneWidget);
   });
 
   testWidgets('ruleControlsLockedWhileSavePending', (tester) async {
@@ -817,21 +867,16 @@ void main() {
         ),
       ),
     ));
-    await tester.ensureVisible(find.text('添加'));
-    await tester.enterText(find.byType(TextField).at(1), '45');
-    await tester.tap(find.text('添加'));
     await tester.pumpAndSettle();
-    expect(find.text('提前 45 分钟'), findsOneWidget);
-    expect(guard.hasUnsavedChanges, isTrue);
+    final preset = find.widgetWithText(CheckboxListTile, '提前 1 天');
+    await scrollTo(tester, preset);
+    await Scrollable.ensureVisible(tester.element(preset), alignment: 0.5);
+    await tester.pumpAndSettle();
 
-    final saveButton = find.widgetWithText(FilledButton, '保存提醒规则');
-    await tester.ensureVisible(saveButton);
-    await tester.tap(saveButton);
+    await tester.tap(preset);
     await tester.pump();
     expect(store.calls, hasLength(1));
-    expect(find.text('保存中'), findsOneWidget);
 
-    final preset = find.widgetWithText(CheckboxListTile, '提前 1 天');
     expect(tester.widget<CheckboxListTile>(preset).onChanged, isNull);
     for (final field in tester.widgetList<TextField>(find.byType(TextField))) {
       expect(field.enabled, isFalse);
@@ -841,114 +886,76 @@ void main() {
             .widget<FilledButton>(find.widgetWithText(FilledButton, '添加'))
             .onPressed,
         isNull);
-    final deleteButton = find.ancestor(
-        of: find.byIcon(Icons.delete_outline),
-        matching: find.byType(IconButton));
-    expect(tester.widget<IconButton>(deleteButton).onPressed, isNull);
-    expect(
-        tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, '保存中'))
-            .onPressed,
-        isNull);
 
-    // A second tap cannot start another save while the first is pending.
-    await tester.tap(find.widgetWithText(FilledButton, '保存中'));
+    await tester.tap(preset);
     await tester.pump();
     expect(store.calls, hasLength(1));
 
     store.gate.complete(true);
     await tester.pumpAndSettle();
-    expect(store.calls.single.toSet(), {30, 45});
+    expect(store.calls.single.toSet(), {30, 1440});
     expect(find.textContaining('提醒时间已保存'), findsOneWidget);
     expect(guard.hasUnsavedChanges, isFalse);
     expect(await guard.confirmLeave(), isTrue);
-    expect(find.text('放弃未保存的提醒规则？'), findsNothing);
   });
 
-  testWidgets('failedSaveKeepsDraftDirty', (tester) async {
+  testWidgets('failedInstantSaveRollsBackAndAllowsRetry', (tester) async {
     final store = await _gatedStore();
     addTearDown(store.dispose);
-    final guard = UnsavedEditGuard();
-    await tester.pumpWidget(UnsavedEditGuardScope(
-      guard: guard,
-      child: MaterialApp(
-        home: Scaffold(
-          body: ReminderSettingsScreen(assignmentStore: store),
-        ),
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ReminderSettingsScreen(assignmentStore: store),
       ),
     ));
-    final preset = find.widgetWithText(CheckboxListTile, '提前 1 天');
-    await tester.ensureVisible(preset);
-    await tester.tap(preset);
-    await tester.pump();
-    await tester.ensureVisible(find.text('添加'));
-    await tester.enterText(find.byType(TextField).at(1), '45');
-    await tester.tap(find.text('添加'));
     await tester.pumpAndSettle();
-    final expected = {30, 45, 1440};
+    final preset = find.widgetWithText(CheckboxListTile, '提前 1 天');
+    await scrollTo(tester, preset);
+    await Scrollable.ensureVisible(tester.element(preset), alignment: 0.5);
+    await tester.pumpAndSettle();
 
-    final saveButton = find.widgetWithText(FilledButton, '保存提醒规则');
-    await tester.ensureVisible(saveButton);
-    await tester.tap(saveButton);
+    await tester.tap(preset);
     await tester.pump();
     expect(store.calls, hasLength(1));
     store.gate.complete(false);
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('当前选择已保留'), findsOneWidget);
-    expect(find.text('提前 45 分钟'), findsOneWidget);
-    expect(tester.widget<CheckboxListTile>(preset).value, isTrue);
-    expect(guard.hasUnsavedChanges, isTrue);
+    expect(find.textContaining('保存失败'), findsOneWidget);
+    expect(tester.widget<CheckboxListTile>(preset).value, isFalse);
 
-    // Let the failure banner dismiss before retrying from the same controls.
     await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
     store.gate = Completer<bool>();
-    await tester.ensureVisible(saveButton);
-    await tester.tap(saveButton);
+    await tester.tap(preset);
     await tester.pump();
     expect(store.calls, hasLength(2));
     store.gate.complete(true);
     await tester.pumpAndSettle();
 
-    expect(store.calls.last.toSet(), expected);
+    expect(store.calls.last.toSet(), {30, 1440});
+    expect(tester.widget<CheckboxListTile>(preset).value, isTrue);
     expect(find.textContaining('提醒时间已保存'), findsOneWidget);
-    expect(guard.hasUnsavedChanges, isFalse);
   });
 
-  testWidgets('reminderRuleLeavingBlockedWhileSavePending', (tester) async {
+  testWidgets('blockingRemovalOfFinalReminderOffset', (tester) async {
     final store = await _gatedStore();
     addTearDown(store.dispose);
-    final guard = UnsavedEditGuard();
-    await tester.pumpWidget(UnsavedEditGuardScope(
-      guard: guard,
-      child: MaterialApp(
-        home: Scaffold(
-          body: ReminderSettingsScreen(assignmentStore: store),
-        ),
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ReminderSettingsScreen(assignmentStore: store),
       ),
     ));
-    final preset = find.widgetWithText(CheckboxListTile, '提前 1 天');
-    await tester.ensureVisible(preset);
-    await tester.tap(preset);
-    await tester.pump();
-
-    final saveButton = find.widgetWithText(FilledButton, '保存提醒规则');
-    await tester.ensureVisible(saveButton);
-    await tester.tap(saveButton);
-    await tester.pump();
-    expect(store.calls, hasLength(1));
-
-    // A discard dialog must not offer to leave while the write is running.
-    expect(await guard.confirmLeave(), isFalse);
-    await tester.pump();
-    expect(find.text('放弃未保存的提醒规则？'), findsNothing);
-    expect(find.textContaining('正在保存'), findsOneWidget);
-    expect(find.byType(ReminderSettingsScreen), findsOneWidget);
-
-    store.gate.complete(true);
     await tester.pumpAndSettle();
-    expect(guard.hasUnsavedChanges, isFalse);
+    final preset = find.widgetWithText(CheckboxListTile, '提前 30 分钟');
+    await scrollTo(tester, preset);
+    await Scrollable.ensureVisible(tester.element(preset), alignment: 0.5);
+    await tester.pumpAndSettle();
+
+    await tester.tap(preset);
+    await tester.pumpAndSettle();
+
+    expect(store.calls, isEmpty);
+    expect(tester.widget<CheckboxListTile>(preset).value, isTrue);
+    expect(find.text('至少保留 1 个提前提醒时间'), findsOneWidget);
   });
 
   testWidgets('immediate settings do not dirty the reminder rule draft',
@@ -973,9 +980,12 @@ void main() {
         ),
       ),
     ));
+    await tester.pumpAndSettle();
 
     final detailsTile = find.widgetWithText(SwitchListTile, '通知显示详细内容');
-    await tester.ensureVisible(detailsTile);
+    await scrollTo(tester, detailsTile);
+    await Scrollable.ensureVisible(tester.element(detailsTile), alignment: 0.5);
+    await tester.pumpAndSettle();
     await tester.tap(detailsTile);
     await tester.pumpAndSettle();
 

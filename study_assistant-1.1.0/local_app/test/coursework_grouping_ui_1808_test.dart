@@ -93,6 +93,7 @@ void main() {
   });
 
   testWidgets('statistics use one raw primary per exam group', (tester) async {
+    final semantics = tester.ensureSemantics();
     final store = _store();
     addTearDown(store.dispose);
     store.replaceAssignmentsForTest([formal, noticeA, noticeB, work]);
@@ -101,10 +102,12 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: StatsScreen(store: store, clock: () => now)),
     );
+    await tester.pumpAndSettle();
 
-    expect(find.text('共 2 项课业'), findsOneWidget);
-    expect(find.text('提交未知 1 份'), findsOneWidget);
-    expect(find.text('待完成 1 份'), findsOneWidget);
+    expect(find.textContaining('/ 2'), findsOneWidget);
+    expect(find.bySemanticsLabel('提交未知 1 份，50%'), findsOneWidget);
+    expect(find.bySemanticsLabel('待完成 1 份，50%'), findsOneWidget);
+    semantics.dispose();
   });
 
   testWidgets('profile summary counts grouped coursework', (tester) async {

@@ -11,6 +11,7 @@ import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/features/course_study_hub_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/features/sync_status_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_sync_diagnostics_exporter.dart';
@@ -412,7 +413,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+    expect(find.text('已关联课程'), findsOneWidget);
     expect(find.text('全部 (2)'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('已关联通知一'),
@@ -423,8 +424,7 @@ void main() {
     expect(find.text('已关联通知二'), findsOneWidget);
     expect(find.text('平台竞赛邀请'), findsNothing);
 
-    await tester.ensureVisible(find.text('全部标为已读'));
-    await tester.tap(find.text('全部标为已读'));
+    await tester.tap(find.byTooltip('全部标为已读'));
     await tester.pumpAndSettle();
     expect(
       store.courseNotices.items
@@ -439,10 +439,10 @@ void main() {
       isFalse,
     );
 
-    await tester.ensureVisible(find.byType(DropdownButtonFormField<String>));
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.ensureVisible(find.text('已关联课程'));
+    await tester.tap(find.text('已关联课程'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('收件箱').last);
+    await tester.tap(find.text('收件箱（全部）').last);
     await tester.pumpAndSettle();
     expect(find.text('全部 (3)'), findsOneWidget);
     await tester.scrollUntilVisible(
@@ -452,8 +452,7 @@ void main() {
     );
     expect(find.text('平台竞赛邀请'), findsOneWidget);
 
-    await tester.ensureVisible(find.text('全部标为已读'));
-    await tester.tap(find.text('全部标为已读'));
+    await tester.tap(find.byTooltip('全部标为已读'));
     await tester.pumpAndSettle();
     expect(store.courseNotices.items.every((n) => n.localRead), isTrue);
   }, timeout: const Timeout(Duration(seconds: 15)));
@@ -478,9 +477,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('全部 (0)'), findsOneWidget);
     expect(find.text('当前通知范围内没有记录，可切换到「收件箱」查看平台消息。'), findsOneWidget);
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.tap(find.text('已关联课程'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('收件箱').last);
+    await tester.tap(find.text('收件箱（全部）').last);
     await tester.pumpAndSettle();
     expect(find.text('全部 (1)'), findsOneWidget);
     await tester.scrollUntilVisible(
@@ -685,8 +684,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('《人工智能导论》实验提交说明'), findsOneWidget);
-    final nav = tester.widget<NavigationBar>(find.byType(NavigationBar));
-    expect(nav.selectedIndex, 3);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
 
     // Filter chips, search, and tapping detail marks notice locally read.
     await tester.tap(find.text('含识别时间'));
@@ -710,7 +708,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.textContaining('章节任务点'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('刷新已关注课程章节'));
+    await tester.tap(find.byTooltip('刷新课程章节'));
     await tester.pumpAndSettle();
     expect(find.textContaining('已完成 2/4 任务点'), findsOneWidget);
 
@@ -727,6 +725,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('1.1 感知机'), findsNothing);
     expect(find.text('1.2 反向传播'), findsOneWidget);
+
+    // Returning to /profile restores bottom floating nav on 我的 tab.
+    router.pop();
+    await tester.pumpAndSettle();
+    final nav = tester
+        .widget<JournalFloatingNavBar>(find.byType(JournalFloatingNavBar));
+    expect(nav.selectedIndex, 3);
 
     // Verify SyncStatusScreen diagnostic copy button.
     router.go('/sync');
@@ -762,5 +767,20 @@ void main() {
     expect(ok, isTrue);
     store.cancelSynchronization();
     expect(store.syncReport.phase, SyncPhase.success);
+  });
+
+  test('cleanNoticeSummary strips duplicate leading course-name prefixes', () {
+    expect(
+      CourseStudyHubScreen.cleanNoticeSummary('课程名称：数据结构\n请周五前完成实验报告。'),
+      '请周五前完成实验报告。',
+    );
+    expect(
+      CourseStudyHubScreen.cleanNoticeSummary('课程名称: 数据结构'),
+      '',
+    );
+    expect(
+      CourseStudyHubScreen.cleanNoticeSummary('正文内容\n课程名称：保留中间引用'),
+      '正文内容\n课程名称：保留中间引用',
+    );
   });
 }

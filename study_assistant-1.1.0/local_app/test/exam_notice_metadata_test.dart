@@ -553,4 +553,77 @@ void main() {
         records: [anchored2025, anchored2026]);
     expect(conflictingRanges, hasLength(2));
   });
+
+  test('newer yearless notice preserves anchor and venue through enrichNotices',
+      () {
+    final formal2025 = ChaoxingExamParser.make(
+      id: '99',
+      title: '跨年测试考试',
+      courseId: '7',
+      clazzId: '11',
+      status: 'pending',
+      now: DateTime.utc(2025, 6, 1),
+      start: DateTime.utc(2025, 6, 10, 0),
+      end: DateTime.utc(2025, 6, 10, 2),
+    );
+    final anchored2026 = parse(noticePayload(
+        '考试时间：06-10 08:00 至 06-10 10:00\r考试地点：新教学楼',
+        uuid: 'notice:2026',
+        sendTime: '2026-06-09 12:00:00'));
+    final enriched =
+        ChaoxingExamParser.enrichNotices([formal2025, anchored2026]);
+    final display =
+        ExamSchedulePresentation.build(formal2025, records: enriched);
+    expect(display.verificationNote, '有较新的通知与本机考试时间不一致，请核对官方最新安排');
+    expect(display.detailTimeLines,
+        contains('考试时间：2026-06-10 08:00 至 2026-06-10 10:00'));
+    final projected = AssignmentQuery.projectDisplay(enriched).single;
+    expect(projected.exam!.location, '新通知地点：新教学楼（请核对）');
+  });
+
+  test(
+      'same-sync batch and title-anchored yearless notice preserve anchor across enrichNotices and JSON round-trip',
+      () {
+    final formal2026 = ChaoxingExamParser.make(
+      id: '99',
+      title: '跨年正式考试',
+      courseId: '7',
+      clazzId: '11',
+      status: 'pending',
+      now: DateTime.utc(2026, 6, 10),
+      start: DateTime.utc(2026, 6, 10, 0),
+      end: DateTime.utc(2026, 6, 10, 2),
+    );
+    final anchored2025 = parse(noticePayload('考试时间：06-10 08:00 至 06-10 10:00',
+        uuid: 'notice:2025', sendTime: '2025-06-09 12:00:00'));
+    final enrichedSameBatch =
+        ChaoxingExamParser.enrichNotices([formal2026, anchored2025]);
+    final restoredSameBatch = [
+      for (final row in enrichedSameBatch) Assignment.fromJson(row.toJson()),
+    ];
+    final batchDisplay = ExamSchedulePresentation.build(restoredSameBatch.first,
+        records: restoredSameBatch);
+    expect(batchDisplay.verificationNote, '官方考试时间与原通知不一致，请以最新安排为准');
+    expect(batchDisplay.detailTimeLines,
+        contains('考试时间：2025-06-10 08:00 至 2025-06-10 10:00'));
+
+    final titleAnchored2025 = ChaoxingExamParser.notices(
+            noticePayload('考试时间：06-10 08:00 至 06-10 10:00',
+                uuid: 'notice:title-2025',
+                title: '期末考试20250609120000',
+                sendTime: ''),
+            now: DateTime.utc(2026, 6, 10))!
+        .rows
+        .single;
+    final enrichedTitle =
+        ChaoxingExamParser.enrichNotices([formal2026, titleAnchored2025]);
+    final restoredTitle = [
+      for (final row in enrichedTitle) Assignment.fromJson(row.toJson()),
+    ];
+    final titleDisplay = ExamSchedulePresentation.build(restoredTitle.first,
+        records: restoredTitle);
+    expect(titleDisplay.verificationNote, '官方考试时间与原通知不一致，请以最新安排为准');
+    expect(titleDisplay.detailTimeLines,
+        contains('考试时间：2025-06-10 08:00 至 2025-06-10 10:00'));
+  });
 }

@@ -80,14 +80,14 @@ void main() {
       home: StatsScreen(store: store, clock: () => now),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('待完成 1 份'), findsOneWidget);
-    expect(find.text('已逾期 0 份'), findsNothing);
+    expect(find.text('待完成 1'), findsOneWidget);
+    expect(find.text('已逾期 0'), findsNothing);
 
     now = now.add(const Duration(minutes: 1));
     await tester.pump(const Duration(minutes: 1));
     await tester.pump();
 
-    expect(find.text('待完成 0 份'), findsNothing);
-    expect(find.text('已逾期 1 份'), findsOneWidget);
+    expect(find.text('待完成 1'), findsNothing);
+    expect(find.text('已逾期 1'), findsOneWidget);
   });
 }

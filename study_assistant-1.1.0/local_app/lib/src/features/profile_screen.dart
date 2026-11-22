@@ -49,7 +49,7 @@ class ProfileScreen extends StatelessWidget {
                 children: [
                   Card(
                     key: const ValueKey('profile-group-courses'),
-                    color: Color.lerp(journal.sheet, journal.sage, .35),
+                    color: journal.sheet,
                     clipBehavior: Clip.antiAlias,
                     child: IconTheme.merge(
                       data: IconThemeData(color: journal.ink),
@@ -71,11 +71,18 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   AppearanceControls(
                     store: store,
-                    onMore: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => DisplaySettingsScreen(store: store),
-                      ),
-                    ),
+                    onMore: () {
+                      final router = GoRouter.maybeOf(context);
+                      if (router != null) {
+                        router.push('/profile/display');
+                      } else {
+                        Navigator.of(context, rootNavigator: true).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => DisplaySettingsScreen(store: store),
+                          ),
+                        );
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
                   _SettingsCard(
@@ -121,15 +128,9 @@ class ProfileScreen extends StatelessWidget {
                     headerColor: journal.sage,
                     children: [
                       _SettingsTile(
-                        icon: Icons.health_and_safety_outlined,
-                        title: '提醒体检',
-                        subtitle: '权限、测试通知与每日摘要',
-                        onTap: () => context.push('/reminder-health'),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.notifications_none,
-                        title: '提醒设置',
-                        subtitle: '管理作业提醒时间与通知权限',
+                        icon: Icons.notifications_none_rounded,
+                        title: '提醒与通知',
+                        subtitle: '权限状态、提前提醒时间与每日摘要',
                         compactSubtitle: true,
                         onTap: () => context.push('/reminders'),
                       ),
@@ -162,13 +163,23 @@ class ProfileScreen extends StatelessWidget {
                         onTap: () => _showAbout(context),
                       ),
                       _SettingsTile(
-                          icon: Icons.description_outlined,
-                          title: '开源许可',
-                          subtitle: '查看应用使用的开源组件及许可证',
-                          compactSubtitle: true,
-                          onTap: () => Navigator.of(context).push(
+                        icon: Icons.description_outlined,
+                        title: '开源许可',
+                        subtitle: '查看应用使用的开源组件及许可证',
+                        compactSubtitle: true,
+                        onTap: () {
+                          final router = GoRouter.maybeOf(context);
+                          if (router != null) {
+                            router.push('/open-source');
+                          } else {
+                            Navigator.of(context, rootNavigator: true).push(
                               MaterialPageRoute<void>(
-                                  builder: (_) => const OpenSourceScreen()))),
+                                builder: (_) => const OpenSourceScreen(),
+                              ),
+                            );
+                          }
+                        },
+                      ),
                       _SettingsTile(
                         icon: Icons.system_update_alt,
                         title: '检查更新',
@@ -217,7 +228,7 @@ class ProfileScreen extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 28),
+                  SizedBox(height: JournalLayout.floatingNavClearance(context)),
                 ],
               ),
             ),
@@ -456,7 +467,12 @@ class _SettingsCard extends StatelessWidget {
             Container(
               key: ValueKey('profile-group-$title'),
               width: double.infinity,
-              color: Color.lerp(journal.sheet, headerColor, .35),
+              decoration: BoxDecoration(
+                color: journal.sectionHeaderFill,
+                border: Border(
+                  bottom: BorderSide(color: journal.divider, width: 0.6),
+                ),
+              ),
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
               child: Text(
                 title,

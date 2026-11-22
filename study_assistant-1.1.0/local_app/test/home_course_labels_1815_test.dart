@@ -111,9 +111,10 @@ Future<void> _openFilters(WidgetTester tester) async {
 }
 
 Future<void> _openCourseMenu(WidgetTester tester) async {
-  final dropdown = find.byType(DropdownButtonFormField<String>);
-  await tester.ensureVisible(dropdown);
-  await tester.tap(dropdown);
+  final courseRow = find.text('所选课程');
+  await Scrollable.ensureVisible(tester.element(courseRow), alignment: 0.5);
+  await tester.pumpAndSettle();
+  await tester.tap(courseRow);
   await tester.pumpAndSettle();
 }
 

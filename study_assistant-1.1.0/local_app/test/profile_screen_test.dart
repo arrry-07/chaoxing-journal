@@ -59,16 +59,16 @@ void main() {
 
     final courses = tester
         .widget<Card>(find.byKey(const ValueKey('profile-group-courses')));
-    expect(courses.color, Color.lerp(Journal.sheet, Journal.sage, .35));
+    expect(courses.color, JournalPalette.light.sheet);
     expect(
       tester.widget<Icon>(find.byIcon(Icons.school_outlined)).color,
       Journal.ink,
     );
 
-    for (final (title, accent, header) in [
-      ('学习与同步', Journal.ink, Journal.sage),
-      ('数据与安全', Journal.ink, Journal.sage),
-      ('关于与更新', Journal.ink, Journal.sage),
+    for (final (title, accent) in [
+      ('学习与同步', Journal.ink),
+      ('数据与安全', Journal.ink),
+      ('关于与更新', Journal.ink),
     ]) {
       await tester.scrollUntilVisible(
         find.text(title),
@@ -81,9 +81,12 @@ void main() {
       expect(titleText.style?.color, foreground);
       final headerBox = tester
           .widget<Container>(find.byKey(ValueKey('profile-group-$title')));
-      expect(headerBox.color, Color.lerp(Journal.sheet, header, .35));
+      expect(
+        (headerBox.decoration as BoxDecoration?)?.color,
+        JournalPalette.light.sectionHeaderFill,
+      );
       if (title == '数据与安全') {
-        final healthIcon = find.byIcon(Icons.health_and_safety_outlined);
+        final healthIcon = find.byIcon(Icons.notifications_none_rounded);
         expect(tester.widget<Icon>(healthIcon).color, foreground);
       }
       if (title == '关于与更新') {
@@ -462,7 +465,7 @@ void main() {
     );
 
     expect(find.text('设置'), findsOneWidget);
-    expect(find.text('提醒设置'), findsOneWidget);
+    expect(find.text('提醒与通知'), findsOneWidget);
     expect(find.text('同步学习通'), findsOneWidget);
     for (final label in ['外观与交互', '显示与小组件', '个人安排', '学习记录']) {
       await tester.scrollUntilVisible(find.text(label), 180);
@@ -535,7 +538,7 @@ void main() {
         addTearDown(store.dispose);
         const entries = {
           '同步学习通': ('更新课程与作业等学习数据', '/sync'),
-          '提醒设置': ('管理作业提醒时间与通知权限', '/reminders'),
+          '提醒与通知': ('权限状态、提前提醒时间与每日摘要', '/reminders'),
           '帮助与反馈': ('查看使用说明，反馈问题与建议', '/help'),
           '开源许可': ('查看应用使用的开源组件及许可证', null),
         };
@@ -548,6 +551,9 @@ void main() {
                 path: path,
                 builder: (_, __) =>
                     Scaffold(appBar: AppBar(title: Text('目标 $path')))),
+          GoRoute(
+              path: '/open-source',
+              builder: (_, __) => const OpenSourceScreen()),
         ]);
         addTearDown(router.dispose);
         await tester.pumpWidget(MaterialApp.router(

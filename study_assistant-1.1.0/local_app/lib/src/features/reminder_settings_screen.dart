@@ -2,23 +2,29 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import '../app/journal.dart';
-import '../app/unsaved_edit_guard.dart';
-import '../models/reminder_rule_limits.dart';
 
+import '../app/journal.dart';
+import '../app/journal_motion.dart';
+import '../models/reminder_rule_limits.dart';
 import '../services/assignment_store.dart';
+import '../services/background_reminder_gateway.dart';
+import '../services/daily_summary.dart';
 import '../services/permission_settings_service.dart';
 import '../services/reminder_rule_store.dart';
+import 'widgets/journal_buttons.dart';
+import 'widgets/journal_grouped_card.dart';
 
 class ReminderSettingsScreen extends StatefulWidget {
   const ReminderSettingsScreen({
     super.key,
     required this.assignmentStore,
     this.permissionSettingsService = const PermissionSettingsService(),
+    this.initialExpandHealth = false,
   });
 
   final AssignmentStore assignmentStore;
   final PermissionSettingsService permissionSettingsService;
+  final bool initialExpandHealth;
 
   @override
   State<ReminderSettingsScreen> createState() => _ReminderSettingsScreenState();
@@ -36,92 +42,127 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   final _customHoursController = TextEditingController();
   final _customMinutesController = TextEditingController();
   final Set<int> _offsets = {};
-  late final Set<int> _savedOffsets;
-  late final int epoch;
-  late final String? _accountHashAtStart;
+
   bool _saving = false;
   bool _savingRules = false;
-  UnsavedEditGuard? _leaveGuard;
+  bool _healthBusy = false;
+  bool _testingNotification = false;
   bool? _listenerGranted;
 
-  bool get _ruleDirty =>
-      _offsets.length != _savedOffsets.length ||
-      !_offsets.every(_savedOffsets.contains);
+  ReminderHealth? _health;
+  BackgroundReminderHealth? _backgroundHealth;
+  String? _healthMessage;
+  String? _healthError;
+  String? _backgroundError;
+  DateTime? _healthCheckedAt;
+  DateTime? _backgroundCheckedAt;
+  bool _backgroundUnsupported = false;
+  int _requestToken = 0;
+
+  String? _accountHash;
+  int _accountEpoch = 0;
+  int _nativeEpoch = 0;
+  int _historyGeneration = 0;
+
+  (String?, int, int, int) _currentIdentity() => (
+        widget.assignmentStore.accountHash,
+        widget.assignmentStore.accountEpoch,
+        widget.assignmentStore.nativeSessionEpoch,
+        widget.assignmentStore.reminderHistoryGeneration,
+      );
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    epoch = widget.assignmentStore.accountEpoch;
-    _accountHashAtStart = widget.assignmentStore.accountHash;
+    final id = _currentIdentity();
+    _accountHash = id.$1;
+    _accountEpoch = id.$2;
+    _nativeEpoch = id.$3;
+    _historyGeneration = id.$4;
     _offsets.addAll(widget.assignmentStore.reminderOffsetsMinutes);
-    _savedOffsets = Set<int>.of(widget.assignmentStore.reminderOffsetsMinutes);
+    WidgetsBinding.instance.addObserver(this);
+    widget.assignmentStore.addListener(_handleStoreChanged);
     unawaited(_refreshListenerGranted());
+    unawaited(_loadHealth(force: true));
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final guard = UnsavedEditGuardScope.maybeOf(context);
-    if (identical(guard, _leaveGuard)) return;
-    _leaveGuard?.unregister(this);
-    _leaveGuard = guard;
-    _leaveGuard?.register(
-      this,
-      routeScope: '/reminders',
-      hasUnsavedChanges: () => _ruleDirty || _savingRules,
-      draftRevision: () => (_offsets.toList()..sort()).join(','),
-      blocksNavigation: () => _savingRules,
-      confirmDiscard: _confirmLeaveDraft,
-      isStale: () =>
-          !widget.assignmentStore.isAuthenticated ||
-          widget.assignmentStore.accountEpoch != epoch ||
-          widget.assignmentStore.accountHash != _accountHashAtStart,
-    );
+  void didUpdateWidget(covariant ReminderSettingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.assignmentStore, widget.assignmentStore)) {
+      oldWidget.assignmentStore.removeListener(_handleStoreChanged);
+      final id = _currentIdentity();
+      _accountHash = id.$1;
+      _accountEpoch = id.$2;
+      _nativeEpoch = id.$3;
+      _historyGeneration = id.$4;
+      _offsets
+        ..clear()
+        ..addAll(widget.assignmentStore.reminderOffsetsMinutes);
+      widget.assignmentStore.addListener(_handleStoreChanged);
+      unawaited(_refreshListenerGranted());
+      unawaited(_loadHealth(force: true));
+    }
   }
 
   @override
   void dispose() {
-    _leaveGuard?.unregister(this);
     WidgetsBinding.instance.removeObserver(this);
+    widget.assignmentStore.removeListener(_handleStoreChanged);
     _customHoursController.dispose();
     _customMinutesController.dispose();
     super.dispose();
   }
 
-  Future<bool> _requestLeave() async {
-    final guard = _leaveGuard;
-    if (guard != null) return guard.confirmLeave();
-    return _confirmLeaveDraft();
-  }
-
-  Future<bool> _confirmLeaveDraft() async {
-    if (_savingRules) {
-      _showMessage('提醒规则正在保存，请稍候');
-      return false;
-    }
-    final result = await showUnsavedEditDialog(
-      context: context,
-      guard: _leaveGuard,
-      builder: (c) => AlertDialog(
-        title: const Text('放弃未保存的提醒规则？'),
-        content: const Text('当前勾选和自定义提醒尚未保存，已保存的规则集仍会保留。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('继续编辑')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('放弃修改')),
-        ],
-      ),
-    );
-    return result == true;
-  }
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _refreshListenerGranted();
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshListenerGranted());
+      unawaited(_loadHealth(force: true));
+    }
+  }
+
+  void _handleStoreChanged() {
+    final next = _currentIdentity();
+    final identityChanged =
+        next != (_accountHash, _accountEpoch, _nativeEpoch, _historyGeneration);
+    if (identityChanged) {
+      _accountHash = next.$1;
+      _accountEpoch = next.$2;
+      _nativeEpoch = next.$3;
+      _historyGeneration = next.$4;
+      if (mounted) {
+        setState(() {
+          _health = null;
+          _backgroundHealth = null;
+          _healthMessage = null;
+          _healthError = null;
+          _backgroundError = null;
+          _healthCheckedAt = null;
+          _backgroundCheckedAt = null;
+          _backgroundUnsupported = false;
+          _offsets
+            ..clear()
+            ..addAll(widget.assignmentStore.reminderOffsetsMinutes);
+        });
+        unawaited(_loadHealth(force: true));
+      }
+      return;
+    }
+
+    if (!_savingRules &&
+        !ReminderRuleStore.requiresReview(_offsets.toList()) &&
+        mounted) {
+      final stored = widget.assignmentStore.reminderOffsetsMinutes.toSet();
+      if (_offsets.length != stored.length ||
+          !_offsets.every(stored.contains)) {
+        setState(() {
+          _offsets
+            ..clear()
+            ..addAll(stored);
+        });
+      }
+    }
   }
 
   Future<void> _refreshListenerGranted() async {
@@ -130,422 +171,905 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     if (mounted) setState(() => _listenerGranted = granted);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final customOffsets = _offsets
-        .where((item) => !_presetOffsets.containsKey(item))
-        .toList()
-      ..sort((a, b) => b.compareTo(a));
+  Future<void> _loadHealth({required bool force}) async {
+    if (!mounted || (_healthBusy && !force)) return;
+    final token = ++_requestToken;
+    final startIdentity = _currentIdentity();
+    setState(() => _healthBusy = true);
+    ReminderHealth? value;
+    String? healthFailure;
+    BackgroundReminderHealth? nativeValue;
+    String? nativeFailure;
+    try {
+      value = await widget.assignmentStore.notificationService.inspectHealth();
+    } catch (_) {
+      healthFailure = '系统通知与排期体检暂时无法读取，可重试';
+    }
+    try {
+      nativeValue =
+          await widget.assignmentStore.inspectBackgroundReminderHealth();
+    } catch (_) {
+      nativeFailure = '原生后台提醒状态暂时无法读取，可重试';
+    }
+    if (!mounted ||
+        token != _requestToken ||
+        startIdentity != _currentIdentity()) {
+      return;
+    }
+    final now = DateTime.now();
+    setState(() {
+      _healthBusy = false;
+      _healthError = healthFailure;
+      if (healthFailure == null && value != null) {
+        _health = value;
+        _healthCheckedAt = now;
+      }
+      _backgroundError = nativeFailure;
+      if (nativeFailure == null) {
+        _backgroundHealth = nativeValue;
+        _backgroundUnsupported = nativeValue == null;
+        _backgroundCheckedAt = nativeValue == null ? null : now;
+      }
+    });
+  }
 
-    return PopScope(
-        canPop: !_ruleDirty && !_savingRules,
-        onPopInvokedWithResult: (didPop, result) async {
-          if (didPop) return;
-          if (_savingRules) {
-            _showMessage('提醒规则正在保存，请稍候');
-            return;
-          }
-          if (!_ruleDirty) return;
-          final router = GoRouter.maybeOf(context);
-          final guard = _leaveGuard;
-          if (guard != null) {
-            await guard.navigate(
-              owner: this,
-              isCurrent: () => mounted,
-              action: () {
-                if (!context.mounted) return;
-                if (router != null && router.canPop()) {
-                  router.pop();
-                } else if (router != null) {
-                  router.go('/profile');
-                } else if (Navigator.of(context).canPop()) {
-                  Navigator.of(context).pop();
-                }
-              },
-            );
-            return;
-          }
-          final leave = await _requestLeave();
-          if (!leave || !context.mounted) return;
-          if (router != null && router.canPop()) {
-            router.pop();
-          } else if (router != null) {
-            router.go('/profile');
-          } else if (Navigator.of(context).canPop()) {
-            Navigator.of(context).pop();
-          }
-        },
-        child: Scaffold(
-            appBar: AppBar(
-                leading: IconButton(
-                    tooltip: '返回我的',
-                    icon: const Icon(Icons.arrow_back),
-                    onPressed: () => context.canPop()
-                        ? context.pop()
-                        : context.go('/profile'))),
-            body: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+  String get _inspectionError => [
+        if (_healthError != null) _healthError!,
+        if (_backgroundError != null) _backgroundError!,
+      ].join('；');
+
+  bool get _hasStaleResult =>
+      (_healthError != null && _health != null) ||
+      (_backgroundError != null && _backgroundHealth != null);
+
+  static String _clock(DateTime value) =>
+      '${value.hour.toString().padLeft(2, '0')}:'
+      '${value.minute.toString().padLeft(2, '0')}';
+
+  String get _lastResultLabel {
+    final times = [
+      if (_healthError != null && _health != null) _healthCheckedAt,
+      if (_backgroundError != null && _backgroundHealth != null)
+        _backgroundCheckedAt,
+    ].whereType<DateTime>().toList()
+      ..sort();
+    final latest = times.isEmpty ? null : times.last;
+    return latest == null
+        ? '以下标注“上次结果”的数据来自上次成功读取，本次未更新。'
+        : '以下标注“上次结果”的数据来自上次成功读取（${_clock(latest)}），本次未更新。';
+  }
+
+  String _stateText(bool? v) => v == null
+      ? (_healthError != null ? '暂时无法读取，可重试' : '暂时无法读取')
+      : v
+          ? _healthError != null
+              ? '已开启（上次结果）'
+              : '已开启'
+          : _healthError != null
+              ? '未开启（上次结果）'
+              : '未开启';
+
+  String _channelStateText(ReminderChannelHealth? value) {
+    if (value == null) {
+      return _healthError != null ? '暂时无法读取，可重试' : '状态未知';
+    }
+    return _healthError != null ? '${value.label}（上次结果）' : value.label;
+  }
+
+  String _nativeText(String Function(BackgroundReminderHealth) read) {
+    final value = _backgroundHealth;
+    if (value == null) {
+      if (_backgroundUnsupported) return '当前平台不适用';
+      return _backgroundError != null ? '暂时无法读取，可重试' : '暂时无法读取';
+    }
+    final text = read(value);
+    return _backgroundError != null ? '$text（上次结果）' : text;
+  }
+
+  String get _notificationListenerText =>
+      _nativeText((value) => value.notificationListenerEnabled
+          ? value.notificationListenerGranted
+              ? '应用开关已开启，系统已授权'
+              : '应用开关已开启，但系统尚未授权'
+          : '应用中默认关闭');
+
+  String get _baselineText =>
+      _nativeText((value) => value.baselineCompleted ? '已建立' : '待首次完整同步');
+
+  String _localCount(int? value) {
+    if (value == null) {
+      return _healthError != null ? '暂时无法读取，可重试' : '未知';
+    }
+    return _healthError != null ? '$value 条（上次结果）' : '$value 条';
+  }
+
+  String get _recoveryText {
+    final value = _health;
+    if (value == null) {
+      return _healthError != null ? '暂时无法读取，可重试' : '状态未知';
+    }
+    final text = value.scheduleRecoveryPending
+        ? '有未完成的调度事务，旧提醒已保留或正在清理；请重试恢复'
+        : '没有待恢复的调度事务';
+    return _healthError != null ? '$text（上次结果）' : text;
+  }
+
+  Future<void> _updateSummary(bool enabled, int hour, int minute) async {
+    if (_saving || _healthBusy) return;
+    setState(() => _healthBusy = true);
+    final ok = await widget.assignmentStore.savePersonal(
+        (w) => w.withSummary(enabled, hour, minute),
+        widget.assignmentStore.accountEpoch);
+    if (!mounted) return;
+    setState(() {
+      _healthBusy = false;
+      _healthMessage = ok
+          ? widget.assignmentStore.error == null
+              ? '每日摘要设置已保存'
+              : '设置已保存，但提醒仍需处理：${widget.assignmentStore.error}'
+          : '保存失败，请重试';
+    });
+    await _loadHealth(force: true);
+  }
+
+  Widget _buildHealthSummaryCard(JournalPalette journal) {
+    final current = _health;
+    final issues = <String>[];
+    if (current?.notifications == false) {
+      issues.add('系统通知权限未开启');
+    }
+    final channels = <(String, ReminderChannelHealth?)>[
+      ('作业变化渠道', current?.assignmentUpdatesChannel),
+      ('截止提醒渠道', current?.assignmentChannel),
+      ('每日摘要渠道', current?.summaryChannel),
+      ('个人日程渠道', current?.manualChannel),
+    ];
+    for (final (name, channel) in channels) {
+      switch (channel?.status) {
+        case ReminderChannelStatus.disabled:
+          issues.add('$name已关闭');
+        case ReminderChannelStatus.missing:
+          issues.add('$name尚未创建');
+        case ReminderChannelStatus.queryFailed:
+          issues.add('$name读取失败');
+        case ReminderChannelStatus.enabled:
+        case ReminderChannelStatus.unsupported:
+        case null:
+          break;
+      }
+    }
+    if (current?.scheduleRecoveryPending == true) {
+      issues.add('存在待恢复的调度事务');
+    }
+
+    final hasPositiveSignal = current != null &&
+        (current.notifications == true ||
+            channels.any(
+              (entry) => entry.$2?.status == ReminderChannelStatus.enabled,
+            ));
+
+    final String title;
+    final String detail;
+    final Color accent;
+    final IconData icon;
+
+    if (current == null && _healthError == null) {
+      title = _healthBusy ? '正在核对系统通知与渠道状态…' : '通知体检准备就绪';
+      detail = '自动检查通知权限、通知渠道与精确闹钟状态。';
+      accent = journal.muted;
+      icon = Icons.hourglass_top_outlined;
+    } else if (issues.isNotEmpty) {
+      title = '有 ${issues.length} 项提醒状态需关注';
+      detail = issues.join('、');
+      accent = journal.berry;
+      icon = Icons.warning_amber_rounded;
+    } else if (_healthError != null) {
+      title = '部分通知体检项尚未确认';
+      detail = '可点击“重新体检”再次核对。';
+      accent = journal.berry;
+      icon = Icons.error_outline_rounded;
+    } else if (hasPositiveSignal) {
+      title = '基础通知权限与渠道已开启';
+      detail = current.exact == false
+          ? '精确闹钟未开启，提醒可能受系统省电策略顺延。'
+          : '建议发一条测试通知，确认锁屏与横幅正常显示。';
+      accent = journal.ink;
+      icon = Icons.verified_outlined;
+    } else {
+      title = '基础通知状态暂待系统确认';
+      detail = '当前环境未返回明确状态，可发送测试通知确认。';
+      accent = journal.muted;
+      icon = Icons.info_outline_rounded;
+    }
+
+    return JournalGroupedCard(
+      title: '提醒状态与体检',
+      infoTitle: '提醒边界说明',
+      infoItems: const [
+        '权限开启与已安排不等于绝对准时送达：厂商省电策略、锁屏限制或应用被强制停止都可能拦截后台提醒。',
+        '每日摘要按当前快照预安排未来 7 天，超过 7 天未打开应用将停止摘要，且不会在后台自动拉取新作业。',
+        '若某条课业提醒异常，可在下方查看「提醒记录与原因」。',
+      ],
+      dividerIndent: 16,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const JournalHeading('提醒设置',
-                      eyebrow: 'CAMPUS JOURNAL   /   MEMO'),
-                  const SizedBox(height: 6),
-                  Text(
-                    '保存后会重新安排所有未完成作业的本地通知，自定义提醒支持精确到分钟',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  const Card(
-                    child: Padding(
-                      padding: EdgeInsets.all(12),
-                      child: Text(
-                        '即时保存：通知详情、后台检查、通知监听和新增提醒开关，切换后立即生效。\n'
-                        '需要保存：下方“提醒时间规则”，修改后必须点击“保存提醒规则”。',
-                      ),
-                    ),
-                  ),
-                  if (ReminderRuleStore.requiresReview(_offsets.toList())) ...[
-                    const SizedBox(height: 12),
-                    Card(
-                      color: Theme.of(context).colorScheme.secondaryContainer,
-                      child: const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: Text(
-                          '旧版提醒规则已保留，但超过365天的规则目前不会参与提醒调度。请调整到365天以内后再使用。\n'
-                          '当前版本每份作业最多使用32条、最长365天；保存前请移除超出范围的规则。',
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  if (widget.assignmentStore.notificationPrivacyPending) ...[
-                    const Text('旧详细提醒尚未清理，隐私设置未完全生效。'),
-                    TextButton(
-                        onPressed: _saving ? null : () => _savePrivacy(false),
-                        child: const Text('重试清理旧提醒')),
-                  ],
-                  SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('通知显示详细内容'),
-                      subtitle:
-                          const Text('默认隐藏课程、作业与个人事项详情；开启后可能在锁屏显示。系统设置仍会影响显示。'),
-                      value: widget.assignmentStore.notificationDetails,
-                      onChanged: _saving ? null : _savePrivacy),
-                  OutlinedButton.icon(
-                      onPressed: () => context.push('/reminder-health'),
-                      icon: const Icon(Icons.health_and_safety_outlined),
-                      label: const Text('提醒体检与每日摘要')),
-                  const SizedBox(height: 16),
-                  Text(
-                    '作业后台检查',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  Card(
+                  Icon(icon, color: accent, size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SwitchListTile(
-                          key: const ValueKey('background-check-switch'),
-                          contentPadding:
-                              const EdgeInsets.symmetric(horizontal: 12),
-                          title: const Text('白天后台检查'),
-                          subtitle: const Text(
-                            '08:00 至次日 00:00 低频检查；默认每 4 小时，不承诺整点执行',
-                          ),
-                          value: widget.assignmentStore.backgroundCheckEnabled,
-                          onChanged:
-                              _saving ? null : _saveBackgroundCheckEnabled,
+                        Text(
+                          title,
+                          style: journal.entryTitle.copyWith(color: accent),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final option in const {
-                                120: '2 小时',
-                                240: '4 小时',
-                                360: '6 小时',
-                              }.entries)
-                                ChoiceChip(
-                                  key: ValueKey(
-                                      'background-interval-${option.key}'),
-                                  label: Text(option.value),
-                                  selected: widget.assignmentStore
-                                          .backgroundCheckIntervalMinutes ==
-                                      option.key,
-                                  onSelected: _saving ||
-                                          !widget.assignmentStore
-                                              .backgroundCheckEnabled
-                                      ? null
-                                      : (_) =>
-                                          _saveBackgroundInterval(option.key),
-                                ),
-                            ],
-                          ),
-                        ),
-                        const Divider(height: 1),
-                        SwitchListTile(
-                          key: const ValueKey('notification-listener-switch'),
-                          contentPadding:
-                              const EdgeInsets.symmetric(horizontal: 12),
-                          title: const Text('学习通通知触发核对'),
-                          subtitle: Text(
-                            _listenerGranted == true
-                                ? '已授权；只处理学习通通知信号，正文不落盘'
-                                : '需单独授予系统通知使用权；默认关闭',
-                          ),
-                          value: widget
-                              .assignmentStore.notificationListenerEnabled,
-                          onChanged: _saving ? null : _saveNotificationListener,
-                        ),
-                        const Divider(height: 1),
-                        SwitchListTile(
-                          key: const ValueKey('new-assignment-switch'),
-                          contentPadding:
-                              const EdgeInsets.symmetric(horizontal: 12),
-                          title: const Text('新增正式作业提醒'),
-                          subtitle: const Text(
-                            '首次完整同步只建立基线；之后同一次检查发现多条时合并提醒',
-                          ),
-                          value: widget
-                              .assignmentStore.newAssignmentReminderEnabled,
-                          onChanged:
-                              _saving ? null : _saveNewAssignmentReminder,
-                        ),
+                        const SizedBox(height: 3),
+                        Text(detail, style: journal.metadata),
                       ],
                     ),
-                  ),
-                  Text(
-                    '提醒权限',
-                    style: Theme.of(
-                      context,
-                    )
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 10),
-                  Card(
-                    child: Column(
-                      children: [
-                        ListTile(
-                          leading:
-                              const Icon(Icons.notifications_active_outlined),
-                          title: const Text('通知权限'),
-                          subtitle: const Text('允许系统通知，关闭后不会弹出提醒'),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: _requestNotificationPermission,
-                        ),
-                        const Divider(height: 1),
-                        ListTile(
-                          leading:
-                              const Icon(Icons.notifications_paused_outlined),
-                          title: const Text('通知使用权'),
-                          subtitle: Text(
-                            _listenerGranted == true
-                                ? '系统已授权学习通通知信号核对'
-                                : '未授权；不影响白天定时检查',
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () async {
-                            await _openPermissionSettings(
-                                widget.permissionSettingsService
-                                    .openNotificationListenerSettingsResult,
-                                destination: '通知使用权设置');
-                            await _refreshListenerGranted();
-                          },
-                        ),
-                        const Divider(height: 1),
-                        ListTile(
-                          leading: const Icon(Icons.alarm_on_outlined),
-                          title: const Text('精确闹钟'),
-                          subtitle: const Text('用于按分钟准时提醒，关闭后系统可能延迟通知'),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _openPermissionSettings(
-                            widget.permissionSettingsService
-                                .openExactAlarmSettingsResult,
-                            destination: '精确闹钟设置',
-                          ),
-                        ),
-                        const Divider(height: 1),
-                        ListTile(
-                          leading: const Icon(Icons.lock_clock_outlined),
-                          title: const Text('截止提醒通知渠道'),
-                          subtitle: const Text(
-                            '控制截止提醒的锁屏、横幅和声音；不提供独立锁屏设置页',
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _openPermissionSettings(
-                            widget.permissionSettingsService
-                                .openLockScreenNotificationSettingsResult,
-                            destination: '截止提醒通知渠道',
-                          ),
-                        ),
-                        const Divider(height: 1),
-                        ListTile(
-                          leading: const Icon(Icons.battery_saver_outlined),
-                          title: const Text('本应用电池与后台设置'),
-                          subtitle: const Text(
-                            '打开应用详情后，请进入电池或后台运行设置自行核对',
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _openPermissionSettings(
-                            widget.permissionSettingsService
-                                .openBatterySettingsResult,
-                            destination: '本应用电池与后台设置',
-                            batterySettings: true,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '提醒时间规则（需保存）',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _savingRules
-                        ? '正在提交提醒规则…'
-                        : _ruleDirty
-                            ? '当前有未保存的提醒规则修改'
-                            : '提醒规则已保存',
-                    style: TextStyle(
-                      color: _ruleDirty
-                          ? Theme.of(context).colorScheme.error
-                          : Journal.of(context).muted,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Column(
-                        children: [
-                          for (final item in _presetOffsets.entries)
-                            CheckboxListTile(
-                              value: _offsets.contains(item.key),
-                              onChanged: _saving
-                                  ? null
-                                  : (checked) =>
-                                      _toggleOffset(item.key, checked),
-                              title: Text(item.value),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '自定义提醒',
-                    style: Theme.of(
-                      context,
-                    )
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _customHoursController,
-                          enabled: !_saving,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            hintText: '小时',
-                            prefixIcon: Icon(Icons.schedule),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _customMinutesController,
-                          enabled: !_saving,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            hintText: '分钟',
-                            prefixIcon: Icon(Icons.timer_outlined),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: _saving ? null : _addCustomOffset,
-                        child: const Text('添加'),
-                      ),
-                    ],
-                  ),
-                  if (customOffsets.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Card(
-                      child: Column(
-                        children: [
-                          for (final offset in customOffsets)
-                            ListTile(
-                              leading: const Icon(
-                                  Icons.notifications_active_outlined),
-                              title: Text(_labelFor(offset)),
-                              trailing: IconButton(
-                                onPressed: _saving
-                                    ? null
-                                    : () => _removeOffset(offset),
-                                icon: const Icon(Icons.delete_outline),
-                                tooltip: '删除',
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  FilledButton.icon(
-                    onPressed: _offsets.isEmpty || _saving ? null : _save,
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save),
-                    label: Text(_saving ? '保存中' : '保存提醒规则'),
                   ),
                 ],
               ),
-            )));
+              if (_inspectionError.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    _inspectionError,
+                    style: journal.metadata.copyWith(color: journal.berry),
+                  ),
+                ),
+              ],
+              if (_hasStaleResult) ...[
+                const SizedBox(height: 4),
+                Text(_lastResultLabel, style: journal.metadata),
+              ],
+              if (current?.scheduleRecoveryPending == true) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '提醒批次恢复状态：$_recoveryText',
+                  style: journal.metadata.copyWith(color: journal.berry),
+                ),
+              ],
+              if (_healthMessage != null) ...[
+                const SizedBox(height: 8),
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    _healthMessage!,
+                    style: journal.metadata.copyWith(color: journal.ink),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  JournalPrimaryButton(
+                    expanded: false,
+                    height: 42,
+                    label: '发送测试通知',
+                    loading: _testingNotification,
+                    onPressed: _healthBusy || _testingNotification
+                        ? null
+                        : () async {
+                            setState(() => _testingNotification = true);
+                            try {
+                              final ok = await widget
+                                  .assignmentStore.notificationService
+                                  .showTestNotification();
+                              if (!mounted) return;
+                              setState(() {
+                                _healthMessage = ok
+                                    ? '已请求系统显示测试通知。请下拉通知栏核对。'
+                                    : '未能请求测试通知，请检查通知权限与渠道。';
+                              });
+                            } finally {
+                              if (mounted) {
+                                setState(() => _testingNotification = false);
+                              }
+                            }
+                          },
+                  ),
+                  JournalSecondaryButton(
+                    expanded: false,
+                    height: 42,
+                    label: '重新体检',
+                    onPressed:
+                        _healthBusy ? null : () => _loadHealth(force: false),
+                  ),
+                  if (current?.scheduleRecoveryPending == true)
+                    JournalSecondaryButton(
+                      expanded: false,
+                      height: 42,
+                      label: '重试提醒恢复',
+                      onPressed: _healthBusy
+                          ? null
+                          : () async {
+                              setState(() => _healthBusy = true);
+                              try {
+                                await widget.assignmentStore.notificationService
+                                    .recoverPendingSchedules();
+                                if (mounted) {
+                                  setState(
+                                      () => _healthMessage = '提醒恢复已执行，请核对状态');
+                                }
+                              } catch (error) {
+                                if (mounted) {
+                                  setState(
+                                      () => _healthMessage = '提醒恢复仍未完成：$error');
+                                }
+                              }
+                              if (mounted) setState(() => _healthBusy = false);
+                              if (mounted) await _loadHealth(force: true);
+                            },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        JournalGroupTile(
+          icon: Icons.history_rounded,
+          title: '提醒记录与原因',
+          subtitle: '查看最近安排、延后、撤销和受阻记录',
+          onTap: () => context.push('/reminder-history'),
+        ),
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            initiallyExpanded: widget.initialExpandHealth,
+            tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+            title: Text('权限、通知渠道与技术详情', style: journal.entryTitle),
+            subtitle: Text('点击核对系统权限、四条通知渠道与后台计数', style: journal.metadata),
+            children: [
+              Divider(
+                  height: 0.6,
+                  thickness: 0.6,
+                  indent: 16,
+                  endIndent: 16,
+                  color: journal.divider),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.notifications_active_outlined),
+                title: const Text('通知权限'),
+                subtitle: Text(_stateText(_health?.notifications)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: _requestNotificationPermission,
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.lock_clock_outlined),
+                title: const Text('截止提醒通知渠道'),
+                subtitle: Text(_channelStateText(_health?.assignmentChannel)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _openNotificationChannel(
+                  'assignment_deadlines',
+                  '截止提醒通知渠道',
+                ),
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.sync_outlined),
+                title: const Text('作业变化通知渠道'),
+                subtitle:
+                    Text(_channelStateText(_health?.assignmentUpdatesChannel)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _openNotificationChannel(
+                  'assignment_updates',
+                  '作业变化通知渠道',
+                ),
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.summarize_outlined),
+                title: const Text('每日摘要通知渠道'),
+                subtitle: Text(_channelStateText(_health?.summaryChannel)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _openNotificationChannel(
+                  'daily_summary',
+                  '每日摘要通知渠道',
+                ),
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.event_note_outlined),
+                title: const Text('个人日程通知渠道'),
+                subtitle: Text(_channelStateText(_health?.manualChannel)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _openNotificationChannel(
+                  'personal_schedule',
+                  '个人日程通知渠道',
+                ),
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.alarm_on_outlined),
+                title: const Text('精确闹钟'),
+                subtitle: Text(_stateText(_health?.exact)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _openPermissionSettings(
+                  widget.permissionSettingsService.openExactAlarmSettingsResult,
+                  destination: '精确闹钟设置',
+                ),
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.notifications_paused_outlined),
+                title: const Text('学习通通知使用权'),
+                subtitle: Text(_notificationListenerText),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () async {
+                  await _openPermissionSettings(
+                    widget.permissionSettingsService
+                        .openNotificationListenerSettingsResult,
+                    destination: '通知使用权设置',
+                  );
+                  await _refreshListenerGranted();
+                },
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.battery_saver_outlined),
+                title: const Text('本应用电池与后台设置'),
+                subtitle: const Text('打开应用详情后，请进入电池或后台运行设置自行核对'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _openPermissionSettings(
+                  widget.permissionSettingsService.openBatterySettingsResult,
+                  destination: '本应用电池与后台设置',
+                  batterySettings: true,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '技术状态 · 调度事务：$_recoveryText\n'
+                      '原生作业截止事件：${_nativeText((v) => '${v.pendingDeadlineCount} 条')} · 待处理新增作业事件：${_nativeText((v) => '${v.pendingNewCount} 条')}\n'
+                      '已安排摘要：${_localCount(_health?.summaryPending)} · 个人提醒：${_localCount(_health?.manualPending)} · 新增基线：$_baselineText\n'
+                      '下次后台检查：${_backgroundHealth?.nextCheckAt == null ? widget.assignmentStore.nextBackgroundCheckAt?.toLocal().toString().substring(0, 16) ?? '未安排' : _backgroundHealth!.nextCheckAt!.toLocal().toString().substring(0, 16)}'
+                      '${_backgroundError != null && _backgroundHealth?.nextCheckAt != null ? '（上次结果）' : ''}\n'
+                      '最近完整同步：${widget.assignmentStore.lastSyncAt?.toLocal().toString().substring(0, 16) ?? '尚无完整同步'}',
+                      style: journal.metadata.copyWith(fontSize: 12),
+                    ),
+                    if (_backgroundHealth?.migrationPending == true) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        '提醒迁移或快照恢复尚未完成，系统已暂停不确定的作业自动投递。',
+                        style: journal.metadata.copyWith(color: journal.berry),
+                      ),
+                    ],
+                    if (_backgroundHealth?.lastFailure != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        '最近后台失败：${_backgroundHealth!.lastFailure}',
+                        style: journal.metadata.copyWith(color: journal.berry),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.assignmentStore,
+      builder: (context, _) {
+        final journal = Journal.of(context);
+        final p = widget.assignmentStore.personal;
+        final customOffsets = _offsets
+            .where((item) => !_presetOffsets.containsKey(item))
+            .toList()
+          ..sort((a, b) => b.compareTo(a));
+        final needsReview = ReminderRuleStore.requiresReview(_offsets.toList());
+
+        return Scaffold(
+          backgroundColor: journal.paper,
+          appBar: AppBar(
+            backgroundColor: journal.paper,
+            leading: IconButton(
+              tooltip: '返回我的',
+              icon: const Icon(Icons.arrow_back_rounded),
+              onPressed: () =>
+                  context.canPop() ? context.pop() : context.go('/profile'),
+            ),
+            title: const Text('提醒与通知'),
+          ),
+          body: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+            children: [
+              _buildHealthSummaryCard(journal),
+              const SizedBox(height: 14),
+              if (needsReview) ...[
+                JournalGroupedCard(
+                  backgroundColor: journal.berryBg,
+                  padding: const EdgeInsets.all(14),
+                  children: [
+                    Text(
+                      '旧版提醒规则已保留（超过 32 条或 365 天不会参与调度）。请删除超限规则，删至合规后将自动保存生效。',
+                      style: journal.metadata.copyWith(color: journal.berry),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+              ],
+              JournalGroupedCard(
+                title: '提前提醒时间',
+                infoTitle: '提前提醒规则说明',
+                infoItems: const [
+                  '勾选或增减提醒时间后立即保存生效，并重新安排所有未完成课业的本机通知。',
+                  '自定义提醒支持精确到分钟，最长提前 365 天，最多保留 32 条规则（至少保留 1 条）。',
+                ],
+                dividerIndent: 16,
+                children: [
+                  for (final item in _presetOffsets.entries)
+                    CheckboxListTile(
+                      value: _offsets.contains(item.key),
+                      onChanged: _saving
+                          ? null
+                          : (checked) => _toggleOffset(item.key, checked),
+                      title: Text(item.value, style: journal.entryTitle),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        InputDecoration buildTimeInputDecoration(
+                          String hint,
+                          IconData icon,
+                        ) =>
+                            InputDecoration(
+                              hintText: hint,
+                              isDense: true,
+                              contentPadding:
+                                  const EdgeInsets.fromLTRB(4, 11, 8, 11),
+                              prefixIconConstraints: const BoxConstraints(
+                                minWidth: 30,
+                                minHeight: 36,
+                              ),
+                              prefixIcon: Padding(
+                                padding:
+                                    const EdgeInsets.only(left: 10, right: 4),
+                                child: Icon(
+                                  icon,
+                                  size: 17,
+                                  color: journal.muted,
+                                ),
+                              ),
+                            );
+
+                        final hoursField = TextField(
+                          controller: _customHoursController,
+                          enabled: !_saving,
+                          keyboardType: TextInputType.number,
+                          decoration: buildTimeInputDecoration(
+                            '小时',
+                            Icons.schedule_rounded,
+                          ),
+                        );
+                        final minutesField = TextField(
+                          controller: _customMinutesController,
+                          enabled: !_saving,
+                          keyboardType: TextInputType.number,
+                          decoration: buildTimeInputDecoration(
+                            '分钟',
+                            Icons.timer_outlined,
+                          ),
+                        );
+
+                        final stacked = constraints.maxWidth < 276 ||
+                            JournalLayout.isLargeText(context);
+                        if (stacked) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(child: hoursField),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: minutesField),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              JournalPrimaryButton(
+                                expanded: true,
+                                height: 44,
+                                label: '添加',
+                                onPressed: _saving ? null : _addCustomOffset,
+                              ),
+                            ],
+                          );
+                        }
+                        return Row(
+                          children: [
+                            Expanded(child: hoursField),
+                            const SizedBox(width: 8),
+                            Expanded(child: minutesField),
+                            const SizedBox(width: 8),
+                            JournalPrimaryButton(
+                              expanded: false,
+                              height: 44,
+                              label: '添加',
+                              onPressed: _saving ? null : _addCustomOffset,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                  for (final offset in customOffsets)
+                    ListTile(
+                      leading: const Icon(
+                        Icons.notifications_active_outlined,
+                        size: 20,
+                      ),
+                      title: Text(_labelFor(offset), style: journal.entryTitle),
+                      trailing: IconButton(
+                        onPressed: _saving ? null : () => _removeOffset(offset),
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: '删除',
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              JournalGroupedCard(
+                title: '后台检查与每日摘要',
+                dividerIndent: 16,
+                children: [
+                  if (widget.assignmentStore.notificationPrivacyPending)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '旧详细提醒尚未清理，隐私设置未完全生效。',
+                              style: journal.metadata
+                                  .copyWith(color: journal.berry),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed:
+                                _saving ? null : () => _savePrivacy(false),
+                            child: const Text('重试清理'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  SwitchListTile(
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    title: Text('通知显示详细内容', style: journal.entryTitle),
+                    subtitle: Text(
+                      '开启后可能在锁屏显示课程与作业名称（系统锁屏设置仍会限制）',
+                      style: journal.metadata,
+                    ),
+                    value: widget.assignmentStore.notificationDetails,
+                    onChanged: _saving ? null : _savePrivacy,
+                  ),
+                  SwitchListTile(
+                    key: const ValueKey('background-check-switch'),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    title: Text('白天后台检查', style: journal.entryTitle),
+                    subtitle: Text(
+                      '08:00 至次日 00:00 低频检查；不承诺整点准时执行',
+                      style: journal.metadata,
+                    ),
+                    value: widget.assignmentStore.backgroundCheckEnabled,
+                    onChanged: _saving ? null : _saveBackgroundCheckEnabled,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final option in const {
+                          120: '2 小时',
+                          240: '4 小时',
+                          360: '6 小时',
+                        }.entries)
+                          ChoiceChip(
+                            key: ValueKey('background-interval-${option.key}'),
+                            label: Text(option.value),
+                            selected: widget.assignmentStore
+                                    .backgroundCheckIntervalMinutes ==
+                                option.key,
+                            onSelected: _saving ||
+                                    !widget
+                                        .assignmentStore.backgroundCheckEnabled
+                                ? null
+                                : (_) => _saveBackgroundInterval(option.key),
+                          ),
+                      ],
+                    ),
+                  ),
+                  SwitchListTile(
+                    key: const ValueKey('notification-listener-switch'),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    title: Text('学习通通知触发核对', style: journal.entryTitle),
+                    subtitle: Text(
+                      _listenerGranted == true
+                          ? '已授权；只处理学习通通知信号，正文不落盘'
+                          : '需单独授予系统通知使用权；默认关闭',
+                      style: journal.metadata,
+                    ),
+                    value: widget.assignmentStore.notificationListenerEnabled,
+                    onChanged: _saving ? null : _saveNotificationListener,
+                  ),
+                  SwitchListTile(
+                    key: const ValueKey('new-assignment-switch'),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    title: Text('新增正式作业提醒', style: journal.entryTitle),
+                    subtitle: Text(
+                      '首次完整同步建立基线；单次检查发现多条时合并提醒',
+                      style: journal.metadata,
+                    ),
+                    value: widget.assignmentStore.newAssignmentReminderEnabled,
+                    onChanged: _saving ? null : _saveNewAssignmentReminder,
+                  ),
+                  SwitchListTile(
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    title: Text('每天一次课业摘要', style: journal.entryTitle),
+                    subtitle: Text(
+                      '按当前快照预排未来 7 天（不会在后台自动拉取新作业）',
+                      style: journal.metadata,
+                    ),
+                    value: p.summaryEnabled,
+                    onChanged: _healthBusy || _saving
+                        ? null
+                        : (v) =>
+                            _updateSummary(v, p.summaryHour, p.summaryMinute),
+                  ),
+                  JournalGroupTile(
+                    icon: Icons.schedule_rounded,
+                    title: '每日摘要发送时间',
+                    trailingText:
+                        '北京时间 ${p.summaryHour.toString().padLeft(2, '0')}:${p.summaryMinute.toString().padLeft(2, '0')}',
+                    onTap: _healthBusy || _saving
+                        ? null
+                        : () async {
+                            final t = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay(
+                                hour: p.summaryHour,
+                                minute: p.summaryMinute,
+                              ),
+                            );
+                            if (mounted && t != null) {
+                              await _updateSummary(
+                                  p.summaryEnabled, t.hour, t.minute);
+                            }
+                          },
+                  ),
+                  JournalGroupTile(
+                    icon: Icons.fact_check_outlined,
+                    title: '每日摘要提醒状态',
+                    subtitle: '查看摘要规则、系统渠道与最近排期证据',
+                    onTap: () => context.push('/reminder-status/summary/0'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _applyOffsetMutation(Set<int> next) async {
+    // Safeguard 1: ReminderRuleStore.normalizeOffsets([]) resets to default
+    // [1440, 180, 30]; block removing the final remaining offset explicitly.
+    if (next.isEmpty) {
+      _showMessage('至少保留 1 个提前提醒时间');
+      return;
+    }
+
+    // Safeguard 2: Legacy out-of-range rules (>32 or >365d) must be trimmed
+    // in local state before invoking saveReminderRule.
+    if (ReminderRuleStore.requiresReview(next.toList())) {
+      setState(() {
+        _offsets
+          ..clear()
+          ..addAll(next);
+      });
+      _showMessage('请继续删除超出 32 条或 365 天的旧规则，删至合规后将自动保存');
+      return;
+    }
+
+    // Safeguard 3: Serialize rule saves and roll back on failure.
+    final previous = Set<int>.of(_offsets);
+    final snapshot = next.toList();
+    setState(() {
+      _offsets
+        ..clear()
+        ..addAll(next);
+      _saving = true;
+      _savingRules = true;
+    });
+    JournalMotion.tap(widget.assignmentStore.display);
+
+    try {
+      final saved = await widget.assignmentStore.saveReminderRule(snapshot);
+      if (!mounted) return;
+      if (!saved) {
+        setState(() {
+          _offsets
+            ..clear()
+            ..addAll(previous);
+        });
+        final operationError = widget.assignmentStore.operationError;
+        _showMessage(operationError == null
+            ? '保存失败，已恢复原提醒时间'
+            : '保存失败：$operationError；已恢复原提醒时间');
+        return;
+      }
+      final hasWarnings = widget.assignmentStore.serviceWarnings.isNotEmpty ||
+          widget.assignmentStore.recoveryWarning != null;
+      _showMessage(hasWarnings ? '提醒时间已保存' : '提醒时间已保存，作业通知已更新');
+      unawaited(_loadHealth(force: true));
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _offsets
+            ..clear()
+            ..addAll(previous);
+        });
+        _showMessage('保存失败，已恢复原提醒时间');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _savingRules = false;
+        });
+      }
+    }
   }
 
   void _toggleOffset(int offset, bool? checked) {
     if (_saving) return;
     if ((checked ?? false) &&
         !_offsets.contains(offset) &&
-        _offsets.length >= ReminderRuleLimits.maxRuleCount) {
+        _offsets.length >= ReminderRuleLimits.maxRuleCount &&
+        !ReminderRuleStore.requiresReview(_offsets.toList())) {
       _showMessage('最多保存 32 条提醒规则');
       return;
     }
-    setState(() {
-      if (checked ?? false) {
-        _offsets.add(offset);
-      } else {
-        _offsets.remove(offset);
-      }
-    });
+    final next = Set<int>.of(_offsets);
+    if (checked ?? false) {
+      next.add(offset);
+    } else {
+      next.remove(offset);
+    }
+    unawaited(_applyOffsetMutation(next));
   }
 
   void _removeOffset(int offset) {
     if (_saving) return;
-    setState(() => _offsets.remove(offset));
+    final next = Set<int>.of(_offsets)..remove(offset);
+    unawaited(_applyOffsetMutation(next));
   }
 
   void _addCustomOffset() {
@@ -570,11 +1094,10 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       _showMessage('最多保存 32 条提醒规则');
       return;
     }
-    setState(() {
-      _offsets.add(totalMinutes);
-      _customHoursController.clear();
-      _customMinutesController.clear();
-    });
+    final next = Set<int>.of(_offsets)..add(totalMinutes);
+    _customHoursController.clear();
+    _customMinutesController.clear();
+    unawaited(_applyOffsetMutation(next));
   }
 
   Future<void> _saveBackgroundCheckEnabled(bool value) async {
@@ -588,6 +1111,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                 ? '白天后台检查已开启'
                 : '白天后台检查已关闭；通知监听和缓存截止提醒不受影响'
             : widget.assignmentStore.operationError ?? '设置保存失败，请重试');
+        if (saved) unawaited(_loadHealth(force: true));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -606,6 +1130,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
         );
       } else {
         _showMessage('通知权限已开启');
+        unawaited(_loadHealth(force: true));
       }
     } catch (_) {
       if (mounted) {
@@ -626,6 +1151,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
         _showMessage(saved
             ? '后台检查间隔已保存'
             : widget.assignmentStore.operationError ?? '设置保存失败，请重试');
+        if (saved) unawaited(_loadHealth(force: true));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -658,6 +1184,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       } else {
         _showMessage(value ? '通知触发核对已开启' : '通知触发核对已关闭');
       }
+      unawaited(_loadHealth(force: true));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -692,49 +1219,15 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     }
   }
 
-  Future<void> _save() async {
-    if (_saving) return;
-    if (ReminderRuleStore.requiresReview(_offsets.toList())) {
-      _showMessage('旧版提醒规则已保留，请先移除超出 32 条或 365 天的规则再保存');
-      return;
-    }
-    final snapshot = List<int>.of(_offsets);
-    setState(() {
-      _saving = true;
-      _savingRules = true;
-    });
-    try {
-      final saved = await widget.assignmentStore.saveReminderRule(snapshot);
-      if (!mounted) return;
-      if (saved) {
-        // What was saved is the new clean baseline. Rule controls stay locked
-        // while the write is pending, so the success feedback describes this
-        // exact snapshot.
-        _savedOffsets
-          ..clear()
-          ..addAll(snapshot);
-      }
-      final operationError = widget.assignmentStore.operationError;
-      final hasWarnings = widget.assignmentStore.serviceWarnings.isNotEmpty ||
-          widget.assignmentStore.recoveryWarning != null;
-      _showMessage(widget.assignmentStore.saveFeedback(
-        saved,
-        successMessage: hasWarnings ? '提醒时间已保存' : '提醒时间已保存，作业通知已更新',
-        failureMessage: operationError == null
-            ? '保存失败，请稍后重试；当前选择已保留'
-            : '保存失败：$operationError；当前选择已保留',
-      ));
-    } catch (_) {
-      if (mounted) _showMessage('保存失败，请稍后重试；当前选择已保留');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _saving = false;
-          _savingRules = false;
-        });
-      }
-    }
-  }
+  Future<void> _openNotificationChannel(
+    String channelId,
+    String destination,
+  ) =>
+      _openPermissionSettings(
+        () => widget.permissionSettingsService
+            .openNotificationChannelSettingsResult(channelId),
+        destination: destination,
+      );
 
   Future<void> _openPermissionSettings(
     Future<SettingsOpenResult> Function() openSettings, {
@@ -742,8 +1235,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     bool batterySettings = false,
   }) async {
     final result = await openSettings();
-    if (!mounted) return;
-    if (result == SettingsOpenResult.direct) return;
+    if (!mounted || result == SettingsOpenResult.direct) return;
     _showMessage(switch (result) {
       SettingsOpenResult.direct => '',
       SettingsOpenResult.listFallback =>
@@ -757,9 +1249,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   String _labelFor(int offsetMinutes) {

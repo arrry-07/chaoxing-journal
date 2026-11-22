@@ -226,7 +226,8 @@ void main() {
 
       await tester.tap(find.text('搜索与筛选'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester
+          .tap(find.byKey(ValueKey('course-${store.accountEpoch}-all')));
       await tester.pumpAndSettle();
       expect(find.text('历史课程'), findsNothing);
       expect(find.text('当前课程'), findsWidgets);

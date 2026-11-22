@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../app/journal.dart';
 import '../models/backup_snapshot.dart';
 import '../services/assignment_store.dart';
 import '../services/backup_service.dart';
+import 'widgets/journal_buttons.dart';
+import 'widgets/journal_grouped_card.dart';
 
 class BackupScreen extends StatefulWidget {
   const BackupScreen({super.key, required this.store, this.service});
@@ -125,7 +128,6 @@ class _BackupScreenState extends State<BackupScreen> {
             snapshot.owner != BackupSnapshot.ownerFor(account)) {
           throw StateError('此备份不属于当前账号，请切换到备份所属账号后重试');
         }
-        // Check the active local owner as well as the login displayed by the UI.
         await widget.store.repository.validateBackupOwner(snapshot, account);
         if (mounted && _accountEpoch == epoch) {
           setState(() {
@@ -150,8 +152,7 @@ class _BackupScreenState extends State<BackupScreen> {
             context: context,
             builder: (context) => AlertDialog(
                   title: const Text('确认恢复本机记录？'),
-                  content: const Text(
-                      '只补入本机缺少的作业和课程；已有记录保留。新增记录的提交状态和截止时间需重新同步确认。提醒和关注设置仅在本机未设置时补入。'),
+                  content: const Text('只补入本机缺少的记录；已有记录保留。新增课业需同步后再安排提醒。'),
                   actions: [
                     TextButton(
                         onPressed: () => Navigator.pop(context, false),
@@ -188,80 +189,136 @@ class _BackupScreenState extends State<BackupScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        backgroundColor: Journal.of(context).paper,
-        appBar: AppBar(title: const Text('加密备份')),
-        body: SafeArea(
-            child: ListView(padding: const EdgeInsets.all(20), children: [
-          Text('给课业记录留一份副本', style: Journal.of(context).section),
-          const SizedBox(height: 8),
-          Text(
-              '备份当前账号的作业、课程、计划、个人清单备注、手动安排、学期快照与提醒设置。登录凭据、个人资料、作业访问签名、说明正文和本地文件关联不导出；手动添加的资料链接会随加密备份保存。',
-              style: Journal.of(context).metadata),
-          const SizedBox(height: 24),
-          TextField(
-              controller: _password,
-              obscureText: true,
-              enabled: !_busy,
-              enableSuggestions: false,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                  labelText: '备份口令',
-                  helperText: '导出至少8个字符；口令只用于本次操作，不会保存。',
-                  helperMaxLines: 3)),
-          const SizedBox(height: 16),
-          TextField(
-              controller: _confirmation,
-              obscureText: true,
-              enabled: !_busy,
-              enableSuggestions: false,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                  labelText: '确认口令',
-                  helperText: '仅导出时填写，须与上方口令相同。',
-                  helperMaxLines: 3)),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-              onPressed: _busy ? null : _export,
-              icon: const Icon(Icons.lock_outline),
-              label: const Text('导出加密备份')),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-              onPressed: _busy ? null : _import,
-              icon: const Icon(Icons.folder_open),
-              label: const Text('选择备份并预览')),
-          const SizedBox(height: 12),
-          Text('忘记口令无法恢复。请将备份文件与口令分开保管。', style: Journal.of(context).metadata),
-          if (_busy)
-            const Padding(
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    return Scaffold(
+      backgroundColor: journal.paper,
+      appBar: AppBar(
+        backgroundColor: journal.paper,
+        title: const Text('加密备份'),
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+          children: [
+            JournalGroupedCard(
+              title: '备份口令与操作',
+              infoTitle: '加密备份包含范围',
+              infoItems: const [
+                '导出当前账号的作业、课程、计划、个人清单备注、手动安排、学期快照、资料链接与提醒设置。',
+                '不包含登录凭据、个人资料、作业访问签名、说明正文及本地文件授权关联。',
+                '口令仅用于本次加解密，不会保存到设备；忘记口令无法找回。',
+              ],
+              padding: const EdgeInsets.all(16),
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: _password,
+                      obscureText: true,
+                      enabled: !_busy,
+                      enableSuggestions: false,
+                      autocorrect: false,
+                      decoration: const InputDecoration(
+                        labelText: '备份口令',
+                        helperText: '导出至少 8 个字符；口令只用于本次操作，不会保存。',
+                        helperMaxLines: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: _confirmation,
+                      obscureText: true,
+                      enabled: !_busy,
+                      enableSuggestions: false,
+                      autocorrect: false,
+                      decoration: const InputDecoration(
+                        labelText: '确认口令',
+                        helperText: '仅导出时填写，须与上方口令相同。',
+                        helperMaxLines: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    JournalPrimaryButton(
+                      icon: Icons.lock_outline_rounded,
+                      label: '导出加密备份',
+                      loading: _busy,
+                      onPressed: _busy ? null : _export,
+                    ),
+                    const SizedBox(height: 10),
+                    JournalSecondaryButton(
+                      icon: Icons.folder_open_rounded,
+                      label: '选择备份并预览',
+                      onPressed: _busy ? null : _import,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '忘记口令无法恢复。请将备份文件与口令分开保管。',
+                      style: journal.metadata.copyWith(color: journal.ink),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            if (_busy)
+              const Padding(
                 padding: EdgeInsets.symmetric(vertical: 16),
-                child: LinearProgressIndicator()),
-          if (_message != null)
-            Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Text(_message!, semanticsLabel: _message)),
-          if (_preview case final snapshot?) ...[
-            const Divider(height: 40),
-            Text('恢复预览', style: Journal.of(context).section),
-            const SizedBox(height: 8),
-            Text(
-                '所属账号：$_previewAccount（已与本机核对）\n备份日期：${snapshot.createdAt.toLocal().toString().substring(0, 19)}\n作业 ${snapshot.records.length} 条 · 隐藏 ${snapshot.hidden.length} 条\n课程 ${snapshot.courses.length} 门 · 不关注 ${snapshot.unfollowed.length} 门',
-                style: Journal.of(context).metadata),
-            const SizedBox(height: 12),
-            Text(
-                '提醒：${snapshot.reminderOffsets.map((m) => "$m 分钟前").join("、")}\n备份的自动同步间隔：${snapshot.autoSyncIntervalMinutes == 0 ? "关闭" : "${snapshot.autoSyncIntervalMinutes} 分钟"}。恢复保留本机自动同步设置。',
-                style: Journal.of(context).metadata),
-            const SizedBox(height: 12),
-            Text(
-                '个人备注 ${snapshot.personal.work.length} 份 · 计划 ${snapshot.personal.plans.length} 项。手动安排 ${snapshot.notebook.entries.length} 项 · 学期快照 ${snapshot.notebook.terms.length} 份。个人记录仅补缺，摘要设置保持本机当前值；文件关联不迁移。',
-                style: Journal.of(context).metadata),
-            Text('现有记录保持不变。补入的作业需同步确认状态与截止时间，确认前不会安排提醒。预览10分钟后失效。',
-                style: Journal.of(context).metadata),
-            const SizedBox(height: 16),
-            FilledButton(
+                child: LinearProgressIndicator(),
+              ),
+            if (_message != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 14),
+                child: JournalGroupedCard(
+                  padding: const EdgeInsets.all(14),
+                  children: [
+                    Text(
+                      _message!,
+                      semanticsLabel: _message,
+                      style: journal.entryTitle.copyWith(fontSize: 14.5),
+                    ),
+                  ],
+                ),
+              ),
+            if (_preview case final snapshot?) ...[
+              const SizedBox(height: 14),
+              JournalGroupedCard(
+                title: '恢复预览',
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '所属账号：$_previewAccount（已核对）\n'
+                        '备份时间：${snapshot.createdAt.toLocal().toString().substring(0, 19)}\n'
+                        '作业 ${snapshot.records.length} 条 · 隐藏 ${snapshot.hidden.length} 条 · 课程 ${snapshot.courses.length} 门',
+                        style: journal.metadata.copyWith(color: journal.ink),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        '提醒：${snapshot.reminderOffsets.map((m) => "$m 分钟前").join("、")}\n'
+                        '个人备注 ${snapshot.personal.work.length} 份 · 计划 ${snapshot.personal.plans.length} 项 · 手动安排 ${snapshot.notebook.entries.length} 项 · 学期快照 ${snapshot.notebook.terms.length} 份',
+                        style: journal.metadata,
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        '现有记录与自动同步设置保持不变；补入作业需同步后再安排提醒（预览 10 分钟后失效）。',
+                        style: journal.metadata,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              JournalPrimaryButton(
+                label: '恢复缺少的记录',
                 onPressed: _busy ? null : _restore,
-                child: const Text('恢复缺少的记录')),
+              ),
+            ],
           ],
-        ])),
-      );
+        ),
+      ),
+    );
+  }
 }

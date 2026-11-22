@@ -38,6 +38,46 @@ jobs:
           flutter-version: '3.44.9'
           channel: stable
           cache: true
+      - name: Configure CI Maven Central mirror
+        run: |
+          mkdir -p "$HOME/.gradle/init.d"
+          cat <<'EOF' > "$HOME/.gradle/init.d/ci-maven-mirror.gradle"
+          gradle.beforeSettings { settings ->
+              settings.pluginManagement.repositories {
+                  maven {
+                      name = "GoogleMavenCentralMirror"
+                      url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                  }
+                  if (settings.gradle.parent != null) {
+                      gradlePluginPortal()
+                  }
+              }
+              if (settings.gradle.parent != null) {
+                  settings.dependencyResolutionManagement.repositories {
+                      maven {
+                          name = "GoogleMavenCentralMirror"
+                          url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                      }
+                  }
+              }
+          }
+          allprojects { project ->
+              project.buildscript.repositories {
+                  maven {
+                      name = "GoogleMavenCentralMirror"
+                      url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                  }
+              }
+              if (project.gradle.parent == null) {
+                  project.repositories {
+                      maven {
+                          name = "GoogleMavenCentralMirror"
+                          url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                      }
+                  }
+              }
+          }
+          EOF
       - name: Install locked dependencies
         run: flutter pub get --enforce-lockfile
       - name: Check release metadata and changed Dart formatting
@@ -56,7 +96,9 @@ jobs:
           python3 scripts/test_gitee_workflow.py
       - name: Run synthetic JVM checks
         run: |
-          curl --fail --location --retry 2 https://repo.maven.apache.org/maven2/org/json/json/20180813/json-20180813.jar -o "$RUNNER_TEMP/json.jar"
+          if ! curl --fail --location --retry 2 https://maven-central.storage-download.googleapis.com/maven2/org/json/json/20180813/json-20180813.jar -o "$RUNNER_TEMP/json.jar"; then
+            curl --fail --location --retry 2 https://repo.maven.apache.org/maven2/org/json/json/20180813/json-20180813.jar -o "$RUNNER_TEMP/json.jar"
+          fi
           echo "518080049ba83181914419d11a25d9bc9833a2d729b6a6e7469fa52851356da8  $RUNNER_TEMP/json.jar" | sha256sum --check
           python3 tool/run_native_checks.py --json-jar "$RUNNER_TEMP/json.jar"
       - name: Run application native unit tests and lint

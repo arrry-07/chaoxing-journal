@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../app/journal.dart';
+import '../app/journal_motion.dart';
 import '../models/reminder_history.dart';
 import '../services/assignment_store.dart';
+import 'widgets/journal_grouped_card.dart';
 
 const reminderCategoryLabels = <String, String>{
   'newAssignment': '新增课业',
@@ -271,14 +274,17 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final journal = Journal.of(context);
     return Scaffold(
+      backgroundColor: journal.paper,
       appBar: AppBar(
+        backgroundColor: journal.paper,
         title: const Text('提醒记录'),
         actions: [
           IconButton(
             tooltip: '刷新',
             onPressed: _loading ? null : () => _load(reset: true),
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),
@@ -286,20 +292,20 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
         children: [
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
             child: Row(
               children: [
-                ChoiceChip(
-                  label: const Text('全部'),
+                _HistoryCategoryPill(
+                  label: '全部',
                   selected: _category == null,
-                  onSelected: (_) => _selectCategory(null),
+                  onTap: () => _selectCategory(null),
                 ),
                 for (final entry in reminderCategoryLabels.entries) ...[
                   const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: Text(entry.value),
+                  _HistoryCategoryPill(
+                    label: entry.value,
                     selected: _category == entry.key,
-                    onSelected: (_) => _selectCategory(entry.key),
+                    onTap: () => _selectCategory(entry.key),
                   ),
                 ],
               ],
@@ -307,34 +313,39 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
           ),
           if (_checkedAt != null)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   '查询时间 ${DateFormat('yyyy-MM-dd HH:mm:ss').format(_checkedAt!)}',
-                  style: Theme.of(context).textTheme.bodySmall,
+                  style: journal.metadata.copyWith(fontSize: 12),
                 ),
               ),
             ),
           if (_error != null && _items.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: JournalGroupedCard(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 children: [
-                  Expanded(
-                    child: Semantics(
-                      liveRegion: true,
-                      child: Text(
-                        _error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Semantics(
+                          liveRegion: true,
+                          child: Text(
+                            _error!,
+                            style:
+                                journal.metadata.copyWith(color: journal.berry),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _loading ? null : () => _load(reset: true),
-                    child: const Text('重试'),
+                      TextButton(
+                        onPressed: _loading ? null : () => _load(reset: true),
+                        child: const Text('重试'),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -346,17 +357,16 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
                     ? Center(
                         child: Padding(
                           padding: const EdgeInsets.all(24),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
+                          child: JournalGroupedCard(
+                            padding: const EdgeInsets.all(20),
                             children: [
                               Semantics(
                                 liveRegion: true,
                                 child: Text(
                                   _error!,
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
+                                  style: journal.metadata
+                                      .copyWith(color: journal.berry),
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -370,56 +380,118 @@ class _ReminderHistoryScreenState extends State<ReminderHistoryScreen> {
                         ),
                       )
                     : _items.isEmpty
-                        ? const Center(
-                            child: Text('最近 30 天没有符合条件的提醒记录'),
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                '最近 30 天没有符合条件的提醒记录',
+                                style: journal.metadata,
+                              ),
+                            ),
                           )
                         : RefreshIndicator(
                             onRefresh: () => _load(reset: true),
-                            child: ListView.separated(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: _items.length +
-                                  (_nextBeforeId == null ? 0 : 1),
-                              separatorBuilder: (_, __) =>
-                                  const Divider(height: 1),
-                              itemBuilder: (context, index) {
-                                if (index >= _items.length) {
-                                  return Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 12),
-                                    child: OutlinedButton(
-                                      onPressed: _loading
-                                          ? null
-                                          : () => _load(reset: false),
-                                      child: Text(_loading ? '正在加载…' : '加载更多'),
-                                    ),
-                                  );
-                                }
-                                final item = _items[index];
-                                final canOpen = item.subjectKind != 'account' &&
-                                    (item.subjectId != null ||
-                                        item.subjectKind == 'summary');
-                                return ListTile(
-                                  contentPadding: EdgeInsets.zero,
-                                  title: Text(_subjectTitle(item)),
-                                  subtitle: Text(
-                                    '${DateFormat('yyyy-MM-dd HH:mm:ss').format(item.observedAt.toLocal())}\n${_line(item)}',
+                            child: ListView(
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                8,
+                                16,
+                                28,
+                              ),
+                              children: [
+                                JournalGroupedCard(
+                                  children: [
+                                    for (final item in _items)
+                                      _buildHistoryTile(context, journal, item),
+                                  ],
+                                ),
+                                if (_nextBeforeId != null) ...[
+                                  const SizedBox(height: 12),
+                                  OutlinedButton(
+                                    onPressed: _loading
+                                        ? null
+                                        : () => _load(reset: false),
+                                    child: Text(_loading ? '正在加载…' : '加载更多'),
                                   ),
-                                  isThreeLine: true,
-                                  trailing: canOpen
-                                      ? const Icon(Icons.chevron_right)
-                                      : null,
-                                  onTap: canOpen
-                                      ? () => context.push(
-                                            '/reminder-status/${Uri.encodeComponent(item.subjectKind)}/'
-                                            '${Uri.encodeComponent(item.subjectId ?? '0')}',
-                                          )
-                                      : null,
-                                );
-                              },
+                                ],
+                              ],
                             ),
                           ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildHistoryTile(
+    BuildContext context,
+    JournalPalette journal,
+    ReminderHistoryItem item,
+  ) {
+    final canOpen = item.subjectKind != 'account' &&
+        (item.subjectId != null || item.subjectKind == 'summary');
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      title: Text(_subjectTitle(item), style: journal.entryTitle),
+      subtitle: Text(
+        '${DateFormat('yyyy-MM-dd HH:mm:ss').format(item.observedAt.toLocal())}\n${_line(item)}',
+        style: journal.metadata,
+      ),
+      isThreeLine: true,
+      trailing: canOpen
+          ? Icon(Icons.chevron_right_rounded, size: 20, color: journal.muted)
+          : null,
+      onTap: canOpen
+          ? () => context.push(
+                '/reminder-status/${Uri.encodeComponent(item.subjectKind)}/'
+                '${Uri.encodeComponent(item.subjectId ?? '0')}',
+              )
+          : null,
+    );
+  }
+}
+
+class _HistoryCategoryPill extends StatelessWidget {
+  const _HistoryCategoryPill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    return Material(
+      color: selected ? journal.sage : journal.parchment,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: selected ? journal.sageBorder : Colors.transparent,
+          width: 0.9,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: AnimatedPadding(
+          duration: JournalMotion.duration(
+            context,
+            const Duration(milliseconds: 140),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Text(
+            label,
+            style: journal.pillLabel.copyWith(
+              color: selected
+                  ? (journal.isDark ? journal.accent : journal.ink)
+                  : journal.muted,
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -19,10 +19,10 @@ void main() {
     expect(courseIconFor('未知专题研讨'), Icons.menu_book_outlined);
   });
 
-  testWidgets('CourseMark renders bordered minimal icon in light and dark mode',
+  testWidgets('CourseMark renders clean linear icon without grey box',
       (tester) async {
-    Future<(Color? bg, Color? border, Color? iconColor, IconData? icon)>
-        renderMark(ThemeData theme, String name) async {
+    Future<(int containerCount, Color? iconColor, IconData? icon)> renderMark(
+        ThemeData theme, String name) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: theme,
@@ -30,33 +30,29 @@ void main() {
           home: Scaffold(body: CourseMark(name, size: 30)),
         ),
       );
-      final box = tester.widget<Container>(find.descendant(
+      final containers = find.descendant(
         of: find.byType(CourseMark),
         matching: find.byType(Container),
-      ));
-      final decoration = box.decoration! as BoxDecoration;
+      );
       final icon = tester.widget<Icon>(find.descendant(
         of: find.byType(CourseMark),
         matching: find.byType(Icon),
       ));
       return (
-        decoration.color,
-        (decoration.border! as Border).top.color,
+        containers.evaluate().length,
         icon.color,
         icon.icon,
       );
     }
 
     final light = await renderMark(StudyAssistantTheme.light, '大学物理B（下）');
-    expect(light.$1, JournalPalette.light.paper);
-    expect(light.$2, JournalPalette.light.rule);
-    expect(light.$3, JournalPalette.light.ink);
-    expect(light.$4, Icons.bolt_outlined);
+    expect(light.$1, 0);
+    expect(light.$2, JournalPalette.light.ink);
+    expect(light.$3, Icons.bolt_outlined);
 
     final dark = await renderMark(StudyAssistantTheme.dark, '大学物理B（下）');
-    expect(dark.$1, JournalPalette.dark.paper);
-    expect(dark.$2, JournalPalette.dark.rule);
-    expect(dark.$3, JournalPalette.dark.ink);
-    expect(dark.$4, Icons.bolt_outlined);
+    expect(dark.$1, 0);
+    expect(dark.$2, JournalPalette.dark.ink);
+    expect(dark.$3, Icons.bolt_outlined);
   });
 }

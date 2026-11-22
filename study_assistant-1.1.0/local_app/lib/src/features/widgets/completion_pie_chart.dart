@@ -27,20 +27,19 @@ class CompletionPieChart extends StatelessWidget {
   static final categoryColors = colorsFor(JournalPalette.light);
   static final legendColors = categoryColors;
 
-  static List<Color> colorsFor(JournalPalette journal) =>
-      journal == JournalPalette.dark
-          ? const [
-              Color(0xFF7B9AE0),
-              Color(0xFF475E8E),
-              Color(0xFFD97E7E),
-              Color(0xFF42464F),
-            ]
-          : const [
-              Color(0xFF4B6CB7),
-              Color(0xFF9EB5E5),
-              Color(0xFFD47474),
-              Color(0xFFD8DCE2),
-            ];
+  static List<Color> colorsFor(JournalPalette journal) => journal.isDark
+      ? const [
+          Color(0xFF88A8F8),
+          Color(0xFF5F7DB8),
+          Color(0xFFE8827D),
+          Color(0xFF6E6A63),
+        ]
+      : const [
+          Color(0xFF4B6CB7),
+          Color(0xFF9EB5E5),
+          Color(0xFFD47474),
+          Color(0xFFD8DCE2),
+        ];
   static const labels = ['已完成', '待完成', '已逾期', '提交未知'];
 
   @visibleForTesting

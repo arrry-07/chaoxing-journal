@@ -103,7 +103,7 @@ void main() {
     await t.pumpAndSettle();
     expect(find.byType(AlertDialog), findsOneWidget);
     expect(find.textContaining('隐藏状态'), findsOneWidget);
-    expect(find.textContaining('提醒设置'), findsWidgets);
+    expect(find.textContaining('提醒与摘要设置'), findsWidgets);
     await t.tap(find.text('取消'));
     await t.pumpAndSettle();
     expect(s.isAuthenticated, isTrue);
@@ -138,24 +138,28 @@ void main() {
         home: Scaffold(
       body: ReminderSettingsScreen(assignmentStore: s),
     )));
-    await t.ensureVisible(find.text('添加'));
+    await t.pumpAndSettle();
+    await t.scrollUntilVisible(
+      find.text('添加'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await Scrollable.ensureVisible(t.element(find.text('添加')), alignment: 0.5);
+    await t.pumpAndSettle();
     await t.enterText(find.byType(TextField).last, '45');
     await t.tap(find.text('添加'));
     await t.pumpAndSettle();
-    await t.ensureVisible(find.text('保存提醒规则'));
-    await t.tap(find.text('保存提醒规则'));
-    await t.pumpAndSettle();
     expect(t.takeException(), isNull);
     expect(find.textContaining('保存失败'), findsOneWidget);
-    expect(find.text('提前 45 分钟'), findsOneWidget);
-    final button = find.widgetWithText(FilledButton, '保存提醒规则');
-    expect(t.widget<FilledButton>(button).onPressed, isNotNull);
+    expect(s.reminderOffsetsMinutes, isNot(contains(45)));
+    expect(find.text('提前 45 分钟'), findsNothing);
     await t.pump(const Duration(seconds: 5));
     await t.pumpAndSettle();
-    await t.ensureVisible(button);
-    await t.tap(button);
+    await t.enterText(find.byType(TextField).last, '45');
+    await t.tap(find.text('添加'));
     await t.pumpAndSettle();
     expect(s.reminderOffsetsMinutes, contains(45));
+    expect(find.text('提前 45 分钟'), findsOneWidget);
     expect(find.text('提醒时间已保存，作业通知已更新'), findsOneWidget);
   });
 
@@ -244,7 +248,11 @@ void main() {
       await t.tap(find.text('取消'));
       await t.pumpAndSettle();
       await mount(Scaffold(body: ReminderSettingsScreen(assignmentStore: s)));
-      await t.ensureVisible(find.text('保存提醒规则'));
+      await t.scrollUntilVisible(
+        find.text('提前提醒时间'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await t.pumpAndSettle();
       await capture('reminders');
       await mount(Scaffold(body: SyncStatusScreen(store: s)));

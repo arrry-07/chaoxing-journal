@@ -412,4 +412,73 @@ void main() {
     expect(RegExp(r'\bantispider=cleared\b').allMatches(updatedMiddleCookie),
         hasLength(1));
   });
+
+  test(
+      'verifyInBrowser skips malformed cookies without losing valid or prior cookies',
+      () async {
+    const channel = MethodChannel('study_assistant/external_links');
+    var round = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'verifySession');
+      round++;
+      if (round == 1) {
+        return [
+          {
+            'url': 'https://mooc1.chaoxing.com/',
+            'cookies': 'route=mooc1; antispider=cleared',
+          },
+        ];
+      }
+      return [
+        {
+          'url': 'https://mooc1.chaoxing.com/',
+          'cookies':
+              'bad name=1; broken=has space; cn=中文; route=bad value; recovered=ok',
+        },
+      ];
+    });
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+
+    String? sentCookie;
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        sentCookie = o.headers['Cookie']?.toString() ?? '';
+        final body = switch (o.uri.path) {
+          '/mycourse/backclazzdata' => {
+              'courses': [
+                {'courseId': '1', 'clazzId': '2', 'courseName': '课程'}
+              ]
+            },
+          '/visit/stucoursemiddle' => round == 0
+              ? '<html><body>请完成安全验证</body></html>'
+              : '<input id="workEnc" value="w">',
+          '/mooc2/work/list' => '<div>暂无作业</div>',
+          _ => '',
+        };
+        h.resolve(Response(requestOptions: o, data: body, statusCode: 200));
+      }));
+
+    final c = ChaoxingLocalClient(
+      dio: dio,
+      enableExams: false,
+      enableClassroomTasks: false,
+      wait: (_) async {},
+    );
+    await expectLater(c.fetchAssignments(), throwsA(isA<SyncReadException>()));
+
+    expect(await c.verifyInBrowser(), isTrue);
+    await c.fetchAssignments();
+    expect(sentCookie, contains('route=mooc1'));
+    expect(sentCookie, contains('antispider=cleared'));
+
+    expect(await c.verifyInBrowser(courseInspection: true), isTrue);
+    await c.fetchAssignments();
+    expect(sentCookie, contains('route=mooc1'));
+    expect(sentCookie, contains('recovered=ok'));
+    expect(sentCookie, isNot(contains('bad value')));
+    expect(sentCookie, isNot(contains('bad name')));
+  });
 }

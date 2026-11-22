@@ -40,7 +40,12 @@ class AppearanceControls extends StatelessWidget {
           children: [
             Container(
               width: double.infinity,
-              color: Color.lerp(journal.sheet, journal.sage, .35),
+              decoration: BoxDecoration(
+                color: journal.sectionHeaderFill,
+                border: Border(
+                  bottom: BorderSide(color: journal.divider, width: 0.6),
+                ),
+              ),
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
               child: Text(
                 '外观与交互',

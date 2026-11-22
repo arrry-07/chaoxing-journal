@@ -5,12 +5,13 @@ import 'src/features/assignment_changes_screen.dart';
 import 'src/features/backup_screen.dart';
 import 'src/features/course_study_hub_screen.dart';
 import 'src/features/daily_plan_screen.dart';
+import 'src/features/display_settings_screen.dart';
 import 'src/features/manual_agenda_screen.dart';
+import 'src/features/open_source_screen.dart';
 import 'src/features/term_archives_screen.dart';
 import 'src/features/personal_work_screen.dart';
 import 'src/features/profile_arrangements_screen.dart';
 import 'src/features/profile_records_screen.dart';
-import 'src/features/reminder_health_screen.dart';
 import 'src/features/reminder_history_screen.dart';
 import 'src/features/reminder_status_screen.dart';
 import 'src/features/widgets/update_scope.dart';
@@ -26,6 +27,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'src/app/app_deep_links.dart';
 import 'src/app/app_shell.dart';
 import 'src/app/journal_binding.dart';
+import 'src/app/journal_motion.dart';
 import 'src/app/transient_feedback.dart';
 import 'src/app/unsaved_edit_guard.dart';
 import 'src/features/assignment_detail_screen.dart';
@@ -273,7 +275,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     // an in-place account restore would let edits appear to belong to the new
     // account even though the page is stale.
     if (authenticated) {
-      final location = _router.routeInformationProvider.value.uri.path;
+      final location = AppShell.currentLocationOf(_router);
       if (location.startsWith('/personal/') ||
           location == '/agenda' ||
           location == '/reminders' ||
@@ -331,7 +333,9 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             debugShowCheckedModeBanner: false,
             theme: StudyAssistantTheme.light,
             darkTheme: StudyAssistantTheme.dark,
-            themeAnimationDuration: Duration.zero,
+            themeAnimationDuration:
+                JournalMotion.themeTransitionDuration(context),
+            themeAnimationCurve: JournalMotion.easeOut,
             themeMode: switch (_themeMode) {
               JournalThemeMode.system => ThemeMode.system,
               JournalThemeMode.light => ThemeMode.light,
@@ -394,9 +398,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                     store: assignmentStore,
                     assignmentId: s.pathParameters['id']!)),
             GoRoute(
-                path: '/reminder-health',
-                builder: (_, __) =>
-                    ReminderHealthScreen(store: assignmentStore)),
+                path: '/reminder-health', redirect: (_, __) => '/reminders'),
             GoRoute(
                 path: '/reminder-history',
                 builder: (_, __) =>
@@ -445,8 +447,6 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             ),
             GoRoute(
               path: '/reminders',
-              onExit: (_, __) =>
-                  _leaveGuard.confirmLeave(routeScope: '/reminders'),
               builder: (_, __) => ReminderSettingsScreen(
                 assignmentStore: assignmentStore,
               ),
@@ -477,6 +477,14 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             GoRoute(
               path: '/profile/records',
               builder: (_, __) => ProfileRecordsScreen(store: assignmentStore),
+            ),
+            GoRoute(
+              path: '/profile/display',
+              builder: (_, __) => DisplaySettingsScreen(store: assignmentStore),
+            ),
+            GoRoute(
+              path: '/open-source',
+              builder: (_, __) => const OpenSourceScreen(),
             ),
             GoRoute(
               path: '/course-hub',
@@ -556,7 +564,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     final target = _notificationTarget(payload);
     // A notification for the current route must not ask to discard a draft or
     // approve a future exit; a later different destination asks normally.
-    if (_router.routeInformationProvider.value.uri.path == target) return;
+    if (AppShell.currentLocationOf(_router) == target) return;
     // A dirty editor must not be replaced by a notification deep link without
     // the same confirmation used for back navigation. `navigate` also makes
     // concurrent notifications/tabs resolve to one winning destination.

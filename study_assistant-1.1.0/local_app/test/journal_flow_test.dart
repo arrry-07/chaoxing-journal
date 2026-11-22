@@ -72,7 +72,7 @@ void main() {
         routerConfig: router,
       ),
     );
-    final reminderRow = find.widgetWithText(ListTile, '提醒设置');
+    final reminderRow = find.widgetWithText(ListTile, '提醒与通知');
     await t.scrollUntilVisible(
       reminderRow,
       240,
@@ -83,11 +83,14 @@ void main() {
     await t.tap(reminderRow);
     await t.pumpAndSettle();
     final choice = find.text('提前 10 分钟');
-    await t.ensureVisible(choice);
+    await t.scrollUntilVisible(
+      choice,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await Scrollable.ensureVisible(t.element(choice), alignment: 0.5);
+    await t.pumpAndSettle();
     await t.tap(choice);
-    final save = find.text('保存提醒规则');
-    await t.ensureVisible(save);
-    await t.tap(save);
     await t.pumpAndSettle();
     expect(store.reminderOffsetsMinutes, contains(10));
     await t.tap(find.byTooltip('返回我的'));
@@ -106,9 +109,9 @@ void main() {
     expect(find.byType(ProfileScreen), findsOneWidget);
     expect(store.backgroundCheckIntervalMinutes, 240);
     expect(await store.reminderRuleStore.loadOffsetsMinutes(), contains(10));
-    await t.ensureVisible(find.widgetWithText(ListTile, '提醒设置'));
+    await t.ensureVisible(find.widgetWithText(ListTile, '提醒与通知'));
     await t.pumpAndSettle();
-    await t.tap(find.widgetWithText(ListTile, '提醒设置'));
+    await t.tap(find.widgetWithText(ListTile, '提醒与通知'));
     await t.pumpAndSettle();
     final persisted = find.widgetWithText(CheckboxListTile, '提前 10 分钟');
     expect(t.widget<CheckboxListTile>(persisted).value, isTrue);
