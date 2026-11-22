@@ -201,15 +201,9 @@ class CourseTermCatalog {
   final Set<String> _hiddenAssignmentIds;
   final LocalCourseworkState _coursework;
 
-  static final RegExp _systemHomeworkTitlePattern =
-      RegExp(r'^作业\s*[:：]\s*《.+》');
-
   /// Matches Chaoxing automated reminder broadcasts verified in Phase 3A.
-  static bool isSystemReminderNotice(CourseNotice notice) {
-    if (notice.senderName.trim() != '学习通知') return false;
-    final title = notice.title.trim();
-    return title == '作业结束提醒' || _systemHomeworkTitlePattern.hasMatch(title);
-  }
+  static bool isSystemReminderNotice(CourseNotice notice) =>
+      notice.isSystemReminder;
 
   static List<DateTime> _trustedAssignmentTimestampsUtc(Assignment a) {
     final times = <DateTime>[];

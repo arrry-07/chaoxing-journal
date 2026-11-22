@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../app/journal.dart';
+import '../app/journal_motion.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -800,6 +801,11 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
         final showCourseLabel = displayCourse.isNotEmpty &&
             displayCourse != displayTitle &&
             !isGenericExamLabel;
+        final rawCourseKey = assignment.courseKey?.trim();
+        final verifiedCourseKey = rawCourseKey != null &&
+                RegExp(r'^[1-9]\d*:[1-9]\d*$').hasMatch(rawCourseKey)
+            ? rawCourseKey
+            : null;
         final hasTrustedFullExamRange = exam != null &&
             exam.startTrusted &&
             exam.startAt != null &&
@@ -1009,11 +1015,56 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (showCourseLabel) ...[
-                            Text(
-                              displayCourse,
-                              key: const ValueKey('assignment-detail-course'),
-                              style: journal.metadata,
-                            ),
+                            if (verifiedCourseKey != null)
+                              InkWell(
+                                key: const ValueKey(
+                                  'assignment-detail-course-link',
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () {
+                                  JournalMotion.tap(widget.store.display);
+                                  GoRouter.maybeOf(context)?.push(
+                                    Uri(
+                                      path: '/course-hub',
+                                      queryParameters: {
+                                        'courseKey': verifiedCourseKey,
+                                      },
+                                    ).toString(),
+                                  );
+                                },
+                                child: Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 2),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          displayCourse,
+                                          key: const ValueKey(
+                                            'assignment-detail-course',
+                                          ),
+                                          style: journal.metadata.copyWith(
+                                            color: journal.ink,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 2),
+                                      Icon(
+                                        Icons.chevron_right_rounded,
+                                        size: 16,
+                                        color: journal.muted,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                            else
+                              Text(
+                                displayCourse,
+                                key: const ValueKey('assignment-detail-course'),
+                                style: journal.metadata,
+                              ),
                             const SizedBox(height: 4),
                           ],
                           if (displayTitle.isNotEmpty)

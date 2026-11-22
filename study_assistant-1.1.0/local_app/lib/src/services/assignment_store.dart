@@ -157,7 +157,7 @@ class AssignmentStore extends ChangeNotifier {
   String? _chapterSyncProgressText;
 
   CourseNoticeCollection get courseNotices => _courseNotices;
-  int get unreadCourseNoticeCount => _courseNotices.unreadCount;
+  int get unreadCourseNoticeCount => _courseNotices.primaryUnreadCount;
   CourseChapterCatalog get courseChapters => _courseChapters;
   int get pendingChapterSectionCount => _courseChapters.totalPendingSections;
   bool get isChapterSyncing => _isChapterSyncing;

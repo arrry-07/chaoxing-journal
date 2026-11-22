@@ -195,4 +195,71 @@ void main() {
     expect(updated.items.single.linkedManualEntryId, 'notice-1234');
     expect(updated.unreadCount, 0);
   });
+
+  test(
+      'CourseNotice.isSystemReminder partitions verified system reminders while leaving storage unchanged',
+      () {
+    final t = DateTime.utc(2026, 11, 20, 4);
+    CourseNotice makeNotice(
+      String id, {
+      required String senderName,
+      required String title,
+      bool localRead = false,
+      String? courseId = '1',
+      String? clazzId = '10',
+    }) =>
+        CourseNotice(
+          id: id,
+          courseId: courseId,
+          clazzId: clazzId,
+          courseName: '高等数学',
+          senderName: senderName,
+          title: title,
+          localRead: localRead,
+          lastSyncedAt: t,
+        );
+
+    final sysEnd = makeNotice('cx:notice:${'a'.padLeft(64, '0')}',
+        senderName: '学习通知', title: '作业结束提醒');
+    final sysPrefixHalf = makeNotice('cx:notice:${'b'.padLeft(64, '0')}',
+        senderName: '学习通知', title: '作业:《高等数学》即将截止');
+    final sysPrefixFull = makeNotice('cx:notice:${'c'.padLeft(64, '0')}',
+        senderName: '学习通知', title: '作业：《高等数学》第三章已发布');
+    final examNotice = makeNotice('cx:notice:${'d'.padLeft(64, '0')}',
+        senderName: '学习通知', title: '期末考试安排');
+    final emptySenderSameTitle = makeNotice('cx:notice:${'e'.padLeft(64, '0')}',
+        senderName: '', title: '作业结束提醒');
+    final humanSameTitle = makeNotice('cx:notice:${'f'.padLeft(64, '0')}',
+        senderName: '张老师', title: '作业结束提醒');
+
+    expect(sysEnd.isSystemReminder, isTrue);
+    expect(sysPrefixHalf.isSystemReminder, isTrue);
+    expect(sysPrefixFull.isSystemReminder, isTrue);
+    expect(examNotice.isSystemReminder, isFalse);
+    expect(emptySenderSameTitle.isSystemReminder, isFalse);
+    expect(humanSameTitle.isSystemReminder, isFalse);
+
+    final collection = CourseNoticeCollection(items: [
+      sysEnd,
+      sysPrefixHalf,
+      sysPrefixFull,
+      examNotice,
+      emptySenderSameTitle,
+      humanSameTitle,
+    ]);
+    expect(
+        collection.primaryItems.map((e) => e.id),
+        unorderedEquals(
+            [examNotice.id, emptySenderSameTitle.id, humanSameTitle.id]));
+    expect(collection.systemReminderItems.map((e) => e.id),
+        unorderedEquals([sysEnd.id, sysPrefixHalf.id, sysPrefixFull.id]));
+    expect(collection.primaryUnreadCount, 3);
+    expect(collection.systemReminderUnreadCount, 3);
+    expect(collection.unreadCount, 6);
+
+    final decoded = CourseNoticeCollection.decode(collection.encode());
+    expect(decoded.items, hasLength(6));
+    expect(decoded.primaryUnreadCount, 3);
+    expect(decoded.systemReminderUnreadCount, 3);
+  });
 }
