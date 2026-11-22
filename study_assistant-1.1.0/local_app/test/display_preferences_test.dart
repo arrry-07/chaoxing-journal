@@ -16,6 +16,7 @@ import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/models/widget_snapshot.dart';
 
 class _CourseSession extends SecureSessionStore {
@@ -175,6 +176,69 @@ void main() {
       InteractionFeedback.trigger(prefs, kind: InteractionSoundKind.pin);
       await t.pump();
       expect(calls, ['tap', 'tap', 'tap', 'pin']);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets(
+      'triggerSyncDoneIfReady guards identical reports, errors, non-success phases, and epoch switches',
+      (t) async {
+    InteractionFeedback.debugReset();
+    addTearDown(InteractionFeedback.debugReset);
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      final messenger = t.binding.defaultBinaryMessenger;
+      const sound = MethodChannel('study_assistant/interaction_sound');
+      final calls = <String>[];
+      messenger.setMockMethodCallHandler(sound, (call) async {
+        calls.add((call.arguments as Map)['kind'] as String);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(sound, null));
+
+      const prefs = DisplayPreferences();
+      const base = SyncReport(phase: SyncPhase.idle);
+      final ok = SyncReport(
+          phase: SyncPhase.success, attemptedAt: DateTime(2026, 11, 22, 10, 0));
+
+      InteractionFeedback.triggerSyncDoneIfReady(
+          prefs: prefs,
+          before: base,
+          after: base,
+          beforeEpoch: 1,
+          afterEpoch: 1,
+          operationError: null);
+      InteractionFeedback.triggerSyncDoneIfReady(
+          prefs: prefs,
+          before: base,
+          after: const SyncReport(phase: SyncPhase.partial),
+          beforeEpoch: 1,
+          afterEpoch: 1,
+          operationError: null);
+      InteractionFeedback.triggerSyncDoneIfReady(
+          prefs: prefs,
+          before: base,
+          after: ok,
+          beforeEpoch: 1,
+          afterEpoch: 1,
+          operationError: '保存失败');
+      InteractionFeedback.triggerSyncDoneIfReady(
+          prefs: prefs,
+          before: base,
+          after: ok,
+          beforeEpoch: 1,
+          afterEpoch: 2,
+          operationError: null);
+      InteractionFeedback.triggerSyncDoneIfReady(
+          prefs: prefs,
+          before: base,
+          after: ok,
+          beforeEpoch: 1,
+          afterEpoch: 1,
+          operationError: null);
+      await t.pump();
+      expect(calls, ['syncDone']);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }

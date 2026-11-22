@@ -429,10 +429,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           report.phase == SyncPhase.running) {
         feedback('刷新未完成，请查看同步详情', details: true);
       } else if (report.phase == SyncPhase.success) {
-        if (epoch == store.accountEpoch) {
-          InteractionFeedback.trigger(store.display,
-              kind: InteractionSoundKind.syncDone);
-        }
+        InteractionFeedback.triggerSyncDoneIfReady(
+          prefs: store.display,
+          before: before,
+          after: report,
+          beforeEpoch: epoch,
+          afterEpoch: store.accountEpoch,
+          operationError: store.operationError,
+        );
         feedback(store.error == null ? '作业已更新' : '作业已更新，本机服务需要处理',
             details: store.error != null);
       } else if (report.phase == SyncPhase.partial) {

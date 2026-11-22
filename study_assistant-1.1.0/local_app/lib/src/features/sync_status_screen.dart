@@ -7,6 +7,7 @@ import '../app/journal.dart';
 import '../local/chaoxing_local_client.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import '../services/sync_issue_presentation.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
@@ -27,6 +28,21 @@ class SyncStatusScreen extends StatefulWidget {
 
 class _SyncStatusScreenState extends State<SyncStatusScreen> {
   AssignmentStore get store => widget.store;
+
+  Future<void> _runSync() async {
+    final before = store.syncReport;
+    final epoch = store.accountEpoch;
+    await store.syncAssignments();
+    if (!mounted) return;
+    InteractionFeedback.triggerSyncDoneIfReady(
+      prefs: store.display,
+      before: before,
+      after: store.syncReport,
+      beforeEpoch: epoch,
+      afterEpoch: store.accountEpoch,
+      operationError: store.operationError,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -158,7 +174,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                 icon: Icons.sync_rounded,
                 label: store.isLoading ? '正在刷新...' : '刷新作业数据',
                 loading: store.isLoading,
-                onPressed: store.isLoading ? null : store.syncAssignments,
+                onPressed: store.isLoading ? null : _runSync,
               ),
               if (needsVerification || canInspectCoursePage) ...[
                 const SizedBox(height: 10),
@@ -172,7 +188,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                             final continued = await store.chaoxingClient
                                 .verifyInBrowser(
                                     courseInspection: !needsVerification);
-                            if (continued) await store.syncAssignments();
+                            if (continued) await _runSync();
                           } on VerificationTargetUnavailable {
                             if (context.mounted) {
                               _showMessage(needsVerification

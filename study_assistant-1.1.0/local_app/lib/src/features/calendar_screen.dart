@@ -12,6 +12,7 @@ import '../models/study_notebook.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
+import '../services/interaction_feedback_service.dart';
 import 'assignment_list_screen.dart';
 import 'manual_agenda_screen.dart';
 import 'widgets/assignment_card.dart';
@@ -146,6 +147,8 @@ class _CalendarScreenState extends State<CalendarScreen>
       _refreshing = true;
       _refreshMessage = null;
     });
+    final before = widget.store.syncReport;
+    final epoch = widget.store.accountEpoch;
     try {
       await widget.store.syncAssignments();
       if (!mounted) return;
@@ -156,6 +159,14 @@ class _CalendarScreenState extends State<CalendarScreen>
       final String message;
       switch (report.phase) {
         case SyncPhase.success:
+          InteractionFeedback.triggerSyncDoneIfReady(
+            prefs: widget.store.display,
+            before: before,
+            after: report,
+            beforeEpoch: epoch,
+            afterEpoch: widget.store.accountEpoch,
+            operationError: widget.store.operationError,
+          );
           if (widget.store.operationError != null) {
             message = last == null
                 ? '本次刷新失败，且没有可用的本机缓存；请到同步详情重试'

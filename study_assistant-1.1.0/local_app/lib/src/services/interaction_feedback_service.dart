@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/display_preferences.dart';
+import '../models/sync_report.dart';
 
 enum InteractionSoundKind { tap, pin, unpin, syncDone, complete }
 
@@ -27,6 +28,24 @@ class InteractionFeedback {
   static void systemClick() {
     final p = systemClickPrefs?.call();
     if (p != null) trigger(p);
+  }
+
+  /// Trigger `syncDone` only after a genuine, clean refresh in the same account epoch.
+  static void triggerSyncDoneIfReady({
+    required DisplayPreferences prefs,
+    required SyncReport before,
+    required SyncReport after,
+    required int beforeEpoch,
+    required int afterEpoch,
+    required String? operationError,
+  }) {
+    if (identical(after, before) ||
+        after.phase != SyncPhase.success ||
+        operationError != null ||
+        beforeEpoch != afterEpoch) {
+      return;
+    }
+    trigger(prefs, kind: InteractionSoundKind.syncDone);
   }
 
   static void trigger(

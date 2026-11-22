@@ -1,7 +1,10 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:study_assistant_mobile/src/services/interaction_feedback_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -544,6 +547,103 @@ void main() {
     );
     expect(find.textContaining('部分历史账号考试缺少唯一标识已跳过'), findsOneWidget);
   });
+
+  testWidgets(
+      'sync status refresh triggers syncDone only on fresh same-epoch success without operationError',
+      (tester) async {
+    InteractionFeedback.debugReset();
+    addTearDown(InteractionFeedback.debugReset);
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      const channel = MethodChannel('study_assistant/interaction_sound');
+      final kinds = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        if (call.method == 'feedback') {
+          kinds.add((call.arguments as Map)['kind'] as String);
+        }
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null));
+
+      late _SyncRefreshStore store;
+      var mode = 0;
+      store = _SyncRefreshStore(() async {
+        switch (mode) {
+          case 0:
+            store.nextReport = SyncReport(
+                phase: SyncPhase.success,
+                attemptedAt: DateTime(2026, 11, 22, 10, 0, 1));
+            store.nextError = null;
+          case 1:
+            store.nextReport = SyncReport(
+                phase: SyncPhase.failed,
+                attemptedAt: DateTime(2026, 11, 22, 10, 0, 2));
+            store.nextError = null;
+          case 2:
+            store.nextReport = SyncReport(
+                phase: SyncPhase.success,
+                attemptedAt: DateTime(2026, 11, 22, 10, 0, 3));
+            store.nextError = '写入失败';
+          case 3:
+            store.nextEpoch++;
+            store.nextReport = SyncReport(
+                phase: SyncPhase.success,
+                attemptedAt: DateTime(2026, 11, 22, 10, 0, 4));
+            store.nextError = null;
+        }
+      });
+      addTearDown(store.dispose);
+
+      await tester
+          .pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
+      await tester.pumpAndSettle();
+
+      for (var i = 0; i < 4; i++) {
+        mode = i;
+        await tester.tap(find.text('刷新作业数据'));
+        await tester.pumpAndSettle();
+      }
+
+      expect(kinds.where((k) => k == 'syncDone'), ['syncDone']);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+}
+
+class _SyncRefreshStore extends AssignmentStore {
+  _SyncRefreshStore(this._onSync)
+      : super(
+          sessionStore: _MemorySessionStore(),
+          notificationService: _NoopNotificationService(),
+          widgetSnapshotService: _NoopWidgetSnapshotService(),
+          manageBackgroundSchedule: false,
+        );
+
+  final Future<void> Function() _onSync;
+  SyncReport nextReport = const SyncReport(phase: SyncPhase.idle);
+  String? nextError;
+  int nextEpoch = 0;
+
+  @override
+  bool get isAuthenticated => true;
+
+  @override
+  int get accountEpoch => nextEpoch;
+
+  @override
+  SyncReport get syncReport => nextReport;
+
+  @override
+  String? get operationError => nextError;
+
+  @override
+  String? get error => nextError;
+
+  @override
+  Future<void> syncAssignments({bool complete = false}) => _onSync();
 }
 
 Future<void> _pumpRestoredReport(
