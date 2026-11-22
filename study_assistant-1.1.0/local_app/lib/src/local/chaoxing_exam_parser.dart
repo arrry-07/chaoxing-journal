@@ -377,7 +377,8 @@ class ChaoxingExamParser {
     }
 
     final courseId = _singleQueryValue(inner, ['courseId', 'courseid']);
-    final classId = _singleQueryValue(inner, ['classId', 'classid', 'clazzid']);
+    final classId =
+        _singleQueryValue(inner, ['classId', 'classid', 'clazzId', 'clazzid']);
     final examId = _singleQueryValue(inner, ['examId', 'examid']);
     if (courseId == null ||
         classId == null ||
@@ -894,6 +895,9 @@ class ChaoxingExamParser {
       if (k == null) return a;
       final current = exams[k];
       final info = a.exam!;
+      final ownStart =
+          info.noticeStartAt ?? (info.startTrusted ? info.startAt : null);
+      final ownEnd = info.noticeEndAt ?? (info.endTrusted ? info.endAt : null);
       var start = info.startAt, end = info.endAt;
       var startTrusted = info.startTrusted, endTrusted = info.endTrusted;
       var location = info.location, duration = info.durationMinutes;
@@ -910,20 +914,24 @@ class ChaoxingExamParser {
                 end != null &&
                 ref.endAt != null &&
                 !end.isAtSameMomentAs(ref.endAt!));
-        if (ref.startTrusted) {
-          start = ref.startAt;
-          startTrusted = true;
-        }
-        if (ref.endTrusted) {
-          end = ref.endAt;
-          endTrusted = true;
-        }
-        if (changed && !ref.startTrusted) startTrusted = false;
-        if (changed && !ref.endTrusted) endTrusted = false;
-        if (ref.location.isNotEmpty) {
-          location = ref.location;
-        } else if (changed && location.isNotEmpty) {
-          location = '通知原地点：$location（已改期，请核对）';
+        final newerNoticeThanCurrent = a.publishedAt != null &&
+            a.publishedAt!.isAfter(current.lastSyncedAt);
+        if (!(changed && newerNoticeThanCurrent)) {
+          if (ref.startTrusted) {
+            start = ref.startAt;
+            startTrusted = true;
+          }
+          if (ref.endTrusted) {
+            end = ref.endAt;
+            endTrusted = true;
+          }
+          if (changed && !ref.startTrusted) startTrusted = false;
+          if (changed && !ref.endTrusted) endTrusted = false;
+          if (ref.location.isNotEmpty) {
+            location = ref.location;
+          } else if (changed && location.isNotEmpty) {
+            location = '通知原地点：$location（已改期，请核对）';
+          }
         }
         duration = ref.durationMinutes ?? duration;
         courseName = current.courseName;
@@ -995,7 +1003,9 @@ class ChaoxingExamParser {
           location: location,
           lifecycle: current?.exam?.lifecycle ??
               lifecycle('', start, end, DateTime.now()),
-          noticeOnly: true);
+          noticeOnly: true,
+          noticeStartAt: ownStart,
+          noticeEndAt: ownEnd);
       return a.copyWith(
           exam: next,
           courseName: courseName,

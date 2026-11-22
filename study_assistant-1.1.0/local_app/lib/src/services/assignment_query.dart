@@ -510,6 +510,8 @@ class AssignmentQuery {
         noticeOnly: true,
         location: '',
         durationMinutes: null,
+        noticeStartAt: e.noticeStartAt,
+        noticeEndAt: e.noticeEndAt,
       ));
     }
     final conflictingNotices = <Assignment>[];
@@ -569,6 +571,8 @@ class AssignmentQuery {
       location: location,
       durationMinutes: e.durationMinutes ??
           (canSupplement && durations.length == 1 ? durations.single : null),
+      noticeStartAt: e.noticeStartAt,
+      noticeEndAt: e.noticeEndAt,
     ));
   }
 

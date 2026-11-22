@@ -12,13 +12,16 @@ class ExamInfo {
       this.durationMinutes,
       this.location = '',
       this.lifecycle = 'unknown',
-      this.noticeOnly = false});
+      this.noticeOnly = false,
+      this.noticeStartAt,
+      this.noticeEndAt});
   final String examId;
 
   /// Verified exam identity referenced by a notice; never its business ID.
   final String? relatedExamId;
   final String? courseId, clazzId;
   final DateTime? startAt, endAt;
+  final DateTime? noticeStartAt, noticeEndAt;
   final bool startTrusted, endTrusted, noticeOnly;
   final int? durationMinutes;
   final String location, lifecycle;
@@ -27,18 +30,17 @@ class ExamInfo {
   ExamInfo retainingHistoricalTimes(ExamInfo previous) {
     final start = startAt ?? previous.startAt, end = endAt ?? previous.endAt;
     final ordered = start == null || end == null || !end.isBefore(start);
+    final keepNoticeAnchor = noticeOnly &&
+        previous.noticeOnly &&
+        examId == previous.examId &&
+        courseId != null &&
+        clazzId != null &&
+        courseId == previous.courseId &&
+        clazzId == previous.clazzId;
     return ExamInfo(
         examId: examId,
-        relatedExamId: relatedExamId ??
-            (noticeOnly &&
-                    previous.noticeOnly &&
-                    examId == previous.examId &&
-                    courseId != null &&
-                    clazzId != null &&
-                    courseId == previous.courseId &&
-                    clazzId == previous.clazzId
-                ? previous.relatedExamId
-                : null),
+        relatedExamId:
+            relatedExamId ?? (keepNoticeAnchor ? previous.relatedExamId : null),
         courseId: courseId,
         clazzId: clazzId,
         startAt: start,
@@ -48,7 +50,11 @@ class ExamInfo {
         durationMinutes: durationMinutes ?? previous.durationMinutes,
         location: location.isEmpty ? previous.location : location,
         lifecycle: lifecycle,
-        noticeOnly: noticeOnly);
+        noticeOnly: noticeOnly,
+        noticeStartAt:
+            noticeStartAt ?? (keepNoticeAnchor ? previous.noticeStartAt : null),
+        noticeEndAt:
+            noticeEndAt ?? (keepNoticeAnchor ? previous.noticeEndAt : null));
   }
 
   Map<String, dynamic> toJson() => {
@@ -64,6 +70,10 @@ class ExamInfo {
         'location': location,
         'lifecycle': lifecycle,
         'noticeOnly': noticeOnly,
+        if (noticeOnly && noticeStartAt != null)
+          'noticeStartAt': noticeStartAt!.toUtc().toIso8601String(),
+        if (noticeOnly && noticeEndAt != null)
+          'noticeEndAt': noticeEndAt!.toUtc().toIso8601String(),
       };
   factory ExamInfo.fromJson(Map<String, dynamic> j) {
     DateTime? time(String key) {
@@ -76,12 +86,21 @@ class ExamInfo {
 
     final start = time('startAt'), end = time('endAt');
     final validRange = start == null || end == null || !end.isBefore(start);
+    final noticeOnly = j['noticeOnly'] == true;
+    var noticeStart = noticeOnly ? time('noticeStartAt') : null;
+    var noticeEnd = noticeOnly ? time('noticeEndAt') : null;
+    if (noticeStart != null &&
+        noticeEnd != null &&
+        noticeEnd.isBefore(noticeStart)) {
+      noticeStart = null;
+      noticeEnd = null;
+    }
     final related = j['relatedExamId'];
     final course = j['courseId'] as String?, clazz = j['clazzId'] as String?;
     if (related != null &&
         (related is! String ||
             RegExp(r'[0-9]+').matchAsPrefix(related)?.end != related.length ||
-            j['noticeOnly'] != true ||
+            !noticeOnly ||
             course == null ||
             course.trim().isEmpty ||
             clazz == null ||
@@ -111,6 +130,8 @@ class ExamInfo {
         }.contains(j['lifecycle'])
             ? j['lifecycle'] as String
             : 'unknown',
-        noticeOnly: j['noticeOnly'] == true);
+        noticeOnly: noticeOnly,
+        noticeStartAt: noticeStart,
+        noticeEndAt: noticeEnd);
   }
 }
