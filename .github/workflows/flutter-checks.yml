@@ -47,6 +47,10 @@ jobs:
                   maven {
                       name = "GoogleMavenCentralMirror"
                       url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                      content {
+                          excludeGroupByRegex("com\\.android.*")
+                          excludeGroupByRegex("androidx.*")
+                      }
                   }
                   if (settings.gradle.parent != null) {
                       gradlePluginPortal()
@@ -57,6 +61,10 @@ jobs:
                       maven {
                           name = "GoogleMavenCentralMirror"
                           url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                          content {
+                              excludeGroupByRegex("com\\.android.*")
+                              excludeGroupByRegex("androidx.*")
+                          }
                       }
                   }
               }
@@ -66,6 +74,10 @@ jobs:
                   maven {
                       name = "GoogleMavenCentralMirror"
                       url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                      content {
+                          excludeGroupByRegex("com\\.android.*")
+                          excludeGroupByRegex("androidx.*")
+                      }
                   }
               }
               if (project.gradle.parent == null) {
@@ -73,6 +85,10 @@ jobs:
                       maven {
                           name = "GoogleMavenCentralMirror"
                           url = uri("https://maven-central.storage-download.googleapis.com/maven2")
+                          content {
+                              excludeGroupByRegex("com\\.android.*")
+                              excludeGroupByRegex("androidx.*")
+                          }
                       }
                   }
               }
@@ -88,12 +104,16 @@ jobs:
             python3 tool/check_release_metadata.py
           fi
           python3 tool/check_changed_format.py
-      - name: Check Gitee distribution scripts
+      - name: Check repo safety, scripts and L0 doc budget
         working-directory: ${{ github.workspace }}
         run: |
-          python3 -m py_compile scripts/gitee_release_sync.py
+          python3 scripts/check_repo_safety.py --worktree
+          python3 -m py_compile scripts/*.py study_assistant-1.1.0/local_app/tool/*.py
+          python3 scripts/test_check_repo_safety.py
+          python3 scripts/test_verify_apk_and_report.py
           python3 scripts/test_gitee_release_sync.py
           python3 scripts/test_gitee_workflow.py
+          python3 -c 'from pathlib import Path; a = len(Path("AGENTS.md").read_text(encoding="utf-8").splitlines()); s = len(Path("docs/ai-workflow/PROJECT_STATE.md").read_text(encoding="utf-8").splitlines()); assert a + s <= 80, f"L0 doc line budget exceeded: {a} + {s} = {a + s} > 80"; print(f"[PASS] L0 doc line budget: {a} + {s} = {a + s} <= 80")'
       - name: Run synthetic JVM checks
         run: |
           if ! curl --fail --location --retry 2 https://maven-central.storage-download.googleapis.com/maven2/org/json/json/20180813/json-20180813.jar -o "$RUNNER_TEMP/json.jar"; then

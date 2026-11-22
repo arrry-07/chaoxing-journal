@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import re
 import shutil
@@ -66,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip running flutter test (useful for docs/tooling-only commits)",
     )
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Enforce formal release version metadata (never pass --allow-dev)",
+    )
     args = parser.parse_args(argv)
 
     repo = Path(__file__).resolve().parents[1]
@@ -75,6 +81,22 @@ def main(argv: list[str] | None = None) -> int:
     flutter_cmd = _resolve_tool("flutter.bat", "flutter")
 
     try:
+        # 0. Git hooks activation check (local developer machines)
+        if os.environ.get("CI", "").lower() != "true":
+            hooks_proc = subprocess.run(
+                ["git", "config", "--get", "core.hooksPath"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+            )
+            hooks_path = hooks_proc.stdout.strip().replace("\\", "/")
+            if hooks_path != ".githooks":
+                raise RuntimeError(
+                    "[FAIL] Git hooks not configured: expected core.hooksPath=.githooks "
+                    f"(got {hooks_path!r}). Run: git config core.hooksPath .githooks"
+                )
+            print("[PASS] Git hooksPath (.githooks)")
+
         # 1. Repo safety check
         _run_step(
             "Repo safety scan (--worktree)",
@@ -102,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         pubspec = (app_dir / "pubspec.yaml").read_text(encoding="utf-8")
         is_dev = bool(re.search(r"^version:\s*\d+\.\d+\.\d+-dev\.", pubspec, re.M))
         meta_cmd = [py, str(app_dir / "tool" / "check_release_metadata.py")]
-        if is_dev:
+        if is_dev and not args.release:
             meta_cmd.append("--allow-dev")
         _run_step("Release metadata check", meta_cmd, app_dir)
 
@@ -121,7 +143,13 @@ def main(argv: list[str] | None = None) -> int:
         _run_step("Dart static analysis (lib, test)", [dart_cmd, "analyze", "lib", "test"], app_dir)
 
         # 6. Python scripts compile + unit tests
-        py_files = sorted(str(p) for p in (repo / "scripts").glob("*.py"))
+        py_files = sorted(
+            str(p)
+            for p in [
+                *(repo / "scripts").glob("*.py"),
+                *(app_dir / "tool").glob("*.py"),
+            ]
+        )
         _run_step("Python syntax compile", [py, "-m", "py_compile", *py_files], repo)
         for test_name in (
             "test_gitee_release_sync.py",

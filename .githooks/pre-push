@@ -20,9 +20,7 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   commit_sha=$(git rev-parse "${local_sha}^{commit}" 2>/dev/null || printf '%s' "$local_sha")
   if [ "$remote_sha" != "$zero_oid" ]; then
     "$py" "$repo_root/scripts/check_repo_safety.py" --range "${remote_sha}..${commit_sha}"
-  elif git rev-parse --verify -q origin/main >/dev/null 2>&1 && git merge-base --is-ancestor origin/main "$commit_sha"; then
-    "$py" "$repo_root/scripts/check_repo_safety.py" --range "origin/main..${commit_sha}"
   else
-    "$py" "$repo_root/scripts/check_repo_safety.py" --range "$commit_sha"
+    "$py" "$repo_root/scripts/check_repo_safety.py" --unpushed "$commit_sha"
   fi
 done

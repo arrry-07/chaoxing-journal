@@ -86,8 +86,9 @@ enum AssignmentRecoveryScope {
 }
 
 class AssignmentListScreen extends StatefulWidget {
-  const AssignmentListScreen({super.key, required this.store});
+  const AssignmentListScreen({super.key, required this.store, this.clock});
   final AssignmentStore store;
+  final DateTime Function()? clock;
   @override
   State<AssignmentListScreen> createState() => _AssignmentListScreenState();
 }
@@ -234,7 +235,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
   Future<void> _toggleTodayPlan(Assignment assignment) async {
     final epoch = store.accountEpoch;
-    final day = PersonalWorkspace.dayKey(DateTime.now());
+    final day =
+        PersonalWorkspace.dayKey(widget.clock?.call() ?? DateTime.now());
     final existing = store.personal.plans
         .where((p) => p.day == day && p.assignmentId == assignment.id)
         .firstOrNull;
@@ -488,7 +490,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             store.isLoading ||
             store.syncReport.phase == SyncPhase.running;
         final recoveryScope = AssignmentRecoveryScope.of(context);
-        final now = DateTime.now();
+        final now = widget.clock?.call() ?? DateTime.now();
         final filtersActive = _query.trim().isNotEmpty ||
             _typeFilter != AssignmentTypeFilter.all ||
             _courseKey != null ||
