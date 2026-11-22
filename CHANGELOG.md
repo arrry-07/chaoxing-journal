@@ -9,6 +9,7 @@
 - **考试通知详情页梳理**：隐藏冗余通用「考试通知」课程眉标，考试安排由结构化图标分条展示并去重同义时间/时长/地点行，提示条改为轻描边样式，完整通知原文收进默认折叠面板。
 - **解析、会话与音频可靠性加固**：升级 Gradle 8.14.2 / AGP 8.11.1 / Kotlin 2.2.20 工具链并消除跨盘符增量编译异常；在 `ChaoxingExamParser.enrichNotices` 与序列化中保留缺年改期锚点、在 `verifyInBrowser` 为单条异常 Cookie 增加 `FormatException` 容错、兼容课程入口与账号考试内链驼峰 `clazzId`；统一首页、日历与同步详情的 `syncDone` 刷新完成反馈口径并补齐原生音频策略 `InteractionSoundPolicyTest` JVM 单测。
 - **工程化安全门禁与原因核清**：查明设备端剩余 2 条「提交未知」均为预期真实未知（无正式记录的纯广播通知与无补充来源的已结束竞赛考试）；落地版本化 `.githooks/` 防误提交安全钩子与 `scripts/verify_local_gate.py` 一键本地验证门禁。
+- PR [#61](https://github.com/arrry-07/chaoxing-journal/pull/61) 合入 `a20a072`，已发布 [v1.8.24](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.24)。[验收与发布记录](docs/reviews/2026-11-22-v1.8.24-全应用UI升级详情页精修与可靠性加固验收与发布记录.md)
 
 ## 1.8.23（102） — 主题外观、交互反馈、随堂练习状态修复与置顶继承收口（正式发布，2026-11-22）
 
