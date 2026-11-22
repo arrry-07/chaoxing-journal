@@ -6,6 +6,13 @@
 
 ---
 
+## 2026-11-23 · 1.8.25 发布后滚动归档
+
+- **上一正式发布版本：1.8.23+102（2026-11-22）**：
+  - [PR #60](https://github.com/arrry-07/chaoxing-journal/pull/60) 合入 `b298dbb`，annotated Tag `v1.8.23` 对象 `f74f291bc95927c19a87c5614da31c8c6a93e1bf`，GitHub Release `453840184` 已公开。原签名包 `61,057,710` 字节，SHA-256 `a6a7dbdab7941021449d3be8656ae24f5c1da0677569ab08caa91fd8d373ce02`。
+  - 交付三档主题即时切换、48 kHz 原生交互音效与短振、未提交随堂练习修复、无框恢复顶栏/日历、同身份考试置顶继承与异步防串号边界；PR/main/Tag CI 通过，MuMu 与华为实机保数据覆盖验证通过，Gitee `manual` 曾更新至 `1.8.23+102`。详见[验收与发布记录](reviews/2026-11-22-v1.8.23-主题交互与随堂练习状态修复验收与发布记录.md)。
+  - **1.8.25-dev 迭代与收口**：完成[原八维治理总方案](plans/2026-11-22-v1.8.25-全仓八维审查问题分期治理与工程化方案.md) Phase 0–2 全部可修代码与门禁（安全钩子/本地门禁/`ui_design_system_guard_test`、并发写租约与 `_SessionSnapshot` 回滚隔离、`FB-007` 统计归类与 `FB-008` 快捷隐藏、首页/日历/记录懒加载性能优化、缺年改期锚点/全仓 `clazzId`/通知仅信 `sendTime`、SQLite v7 离主线程提醒/降级与小组件字体适配、Cookie 父域/APK 下载逐跳 HTTPS/外链 `BrowserPolicy` 及 CI Gradle 官方源路径修复），最终由 [PR #62](https://github.com/arrry-07/chaoxing-journal/pull/62)（`233a8b0`）/ `v1.8.25`（`1.8.25+114`）正式交付。
+
 ## 2026-11-22 · 1.8.24 发布后滚动归档
 
 - **上一正式发布版本：1.8.22+89（2026-11-21）**：
