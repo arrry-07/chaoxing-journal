@@ -6,9 +6,9 @@
 
 - [x] Android 构建工具链与噪音治理：升级 Gradle 8.14.2 / AGP 8.11.1 / Kotlin 2.2.20、迁移 Kotlin `compilerOptions` DSL 并设置 `kotlin.incremental=false` 根治跨盘符缓存异常，核实 `lib/` 零 `CupertinoIcons` 引用；下一轮预览从 `1.8.24-dev.1+103` 起步。
 - [x] 全应用 UI/UX 与灵动交互升级（M1–M4）：`JournalPalette` 宣纸浅色 / 深夜台灯暖灰双色、`JournalMotion` 弹簧阻尼与触感、`JournalFloatingNavBar`（一级 Tab 专属 + 二级页自动隐藏）、`JournalGroupedCard` / `JournalPickerSheet` / 墨黑象牙主按钮（`bf61c0c`）；首页单行筛选与右滑加计划 / 左滑置顶 / 长按浮起快捷菜单（`548a5e7`）；日历单行顶栏 + 三色圆点 + 滑月收周、A+B 无衬线统计进度条与 `FB-001` 考试分组（`32a97e5`）；二级页与弹窗统一白卡、合并「提醒与通知」即点即存并消除全量原生 `DropdownButton`/`PopupMenuButton` 及英文眉标（`756153f`）。
-- [x] 双端验收与细节精修打磨（`1.8.24-dev.2+104` → `1.8.24-dev.3+105`）：原签名双架构包在 MuMu（API 35）与华为实机 `CDY-AN00`（API 29）完成 `-r` 保数据覆盖、`base.apk` 哈希与 logcat 零异常核验；修通 `AppShell.currentLocationOf` 防 `push` 二级页随刷新弹出底栏（`2be8cd2`），并基于真机/模拟器实屏反馈完成 360dp 单行顶栏、卡片整行宽度释放、日历月栏对齐与抓手滑动释放 `ListView` 滚动、提醒 `小时/分钟` 提示恢复、悬浮底栏渐变羽化、暖色深色分组头/统计对比度提亮及按钮轻按与快收曲线打磨（`dev.3+105` 双端全项复验绿灯；真机握持振感/外放音效/通知栏主观手感待用户确认）。
+- [x] 双端验收与细节精修打磨（`1.8.24-dev.2+104` → `1.8.24-dev.4+106`）：原签名双架构包在 MuMu（API 35）与华为实机 `CDY-AN00`（API 29）完成 `-r` 保数据覆盖、`base.apk` 哈希与 logcat 零异常核验；修通 `AppShell.currentLocationOf` 防 `push` 二级页随刷新弹出底栏（`2be8cd2`）；完成 360dp 单行顶栏/日历抓手/暖色深色对比度与按压手感打磨（`dc75a09`）；`1.8.24-dev.4+106` 重构考试通知详情页（16dp 边框主卡、结构化考试安排去孤立时区行、通知正文智能去重与原文折叠、主/次规范按钮并同步 `coursework_grouping_ui_1808_test.dart` 过时 M3 统计断言），双端复验绿灯；真机握持振感/外放音效/通知栏主观手感待用户确认。
 
-按独立改动随代码更新对应进度；当前无活跃交接或待执行计划。
+按独立改动随代码更新对应进度；下一步正式发版交接见 [v1.8.24 发版交接](handoffs/2026-11-22-v1.8.24-UI升级与详情页精修发版交接.md)。
 
 ## 最近 2 个正式发布版本
 

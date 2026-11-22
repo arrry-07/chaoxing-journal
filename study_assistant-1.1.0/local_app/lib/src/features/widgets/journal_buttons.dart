@@ -82,6 +82,7 @@ class JournalPrimaryButton extends StatelessWidget {
 class JournalSecondaryButton extends StatelessWidget {
   const JournalSecondaryButton({
     super.key,
+    this.buttonKey,
     required this.label,
     required this.onPressed,
     this.icon,
@@ -89,6 +90,7 @@ class JournalSecondaryButton extends StatelessWidget {
     this.height = 46.0,
   });
 
+  final Key? buttonKey;
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
@@ -114,12 +116,14 @@ class JournalSecondaryButton extends StatelessWidget {
 
     final Widget button = icon != null
         ? OutlinedButton.icon(
+            key: buttonKey,
             onPressed: onPressed,
             style: style,
             icon: Icon(icon, size: 18),
             label: Text(label),
           )
         : OutlinedButton(
+            key: buttonKey,
             onPressed: onPressed,
             style: style,
             child: Text(label),
