@@ -1100,10 +1100,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               if (fitsSingleRow) {
                 return Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Flexible(fit: FlexFit.loose, child: statusControl),
                     if (summaryControl != null) ...[
-                      const Spacer(),
                       const SizedBox(width: 6),
                       summaryControl,
                     ],

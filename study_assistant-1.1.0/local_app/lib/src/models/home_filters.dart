@@ -96,7 +96,6 @@ class HomeFilters {
       final deadline = switch (encodedDeadline) {
         AssignmentDeadlineFilter.noDeadline =>
           AssignmentDeadlineFilter.notExpired,
-        AssignmentDeadlineFilter.next7Days ||
         AssignmentDeadlineFilter.next30Days ||
         AssignmentDeadlineFilter.uncertain =>
           AssignmentDeadlineFilter.all,
