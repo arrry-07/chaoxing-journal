@@ -360,6 +360,25 @@ class AppUpdateService {
         uri.path.startsWith('/arrry-07/chaoxing-journal-updates/raw/master/');
   }
 
+  bool _isAllowedOfficialGiteeApkUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        uri.userInfo.isNotEmpty ||
+        uri.port != 443) {
+      return false;
+    }
+    return switch (uri.host) {
+      'gitee.com' => uri.path.startsWith(
+          '/arrry-07/chaoxing-journal-updates/releases/download/',
+        ),
+      'github.com' => uri.path.startsWith(
+          '/arrry-07/chaoxing-journal/releases/download/',
+        ),
+      _ => false,
+    };
+  }
+
   Future<UpdateCheckResult> _checkManifest({
     required String manifestUrl,
     required String currentVersionName,
@@ -370,6 +389,9 @@ class AppUpdateService {
     if (!_isSecureUrl(manifestUrl)) {
       return const UpdateCheckResult(UpdateCheckStatus.invalidManifest);
     }
+    final isAllowedApkUrl = _isOfficialGiteeManifest(manifestUrl)
+        ? _isAllowedOfficialGiteeApkUrl
+        : _isSecureUrl;
     try {
       // Read the manifest as text so COS metadata differences and a UTF-8 BOM
       // cannot make Dio's automatic JSON transformer reject a valid document.
@@ -402,14 +424,18 @@ class AppUpdateService {
           hash = j['sha256'],
           app = j['applicationId'],
           size = j['size'];
-      final backupUrls = _parseBackupApkUrls(j, primaryUrl: url);
+      final backupUrls = _parseBackupApkUrls(
+        j,
+        primaryUrl: url,
+        isAllowedApkUrl: isAllowedApkUrl,
+      );
       if (code is! int ||
           code <= 0 ||
           code > 0x7fffffff ||
           name is! String ||
           !_releaseVersionPattern.hasMatch(name) ||
           url is! String ||
-          !_isSecureUrl(url) ||
+          !isAllowedApkUrl(url) ||
           hash is! String ||
           !RegExp(r'^[a-fA-F0-9]{64}$').hasMatch(hash) ||
           app is! String ||
@@ -1056,6 +1082,7 @@ class AppUpdateService {
   List<String>? _parseBackupApkUrls(
     Map<String, dynamic> json, {
     required dynamic primaryUrl,
+    required bool Function(String) isAllowedApkUrl,
   }) {
     final rawSingle = json['backupApkUrl'];
     final rawList = json['backupApkUrls'];
@@ -1069,7 +1096,7 @@ class AppUpdateService {
     if (values.length > 4) return null;
     final result = <String>[];
     for (final value in values) {
-      if (value is! String || !_isSecureUrl(value)) return null;
+      if (value is! String || !isAllowedApkUrl(value)) return null;
       if (value == primaryUrl || result.contains(value)) continue;
       result.add(value);
     }

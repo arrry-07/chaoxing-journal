@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import io.flutter.plugin.common.MethodChannel
 
 /** User-selected read-only document grants, never filesystem paths. */
@@ -59,9 +60,32 @@ class PersonalFileBridge(
                         result.success(false)
                     }
                 }
+                "releaseAll" -> result.success(releaseAll())
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun releaseAll(): Boolean {
+        val resolver = activity.contentResolver
+        val permissions = try {
+            resolver.persistedUriPermissions.toList()
+        } catch (error: Exception) {
+            Log.w(TAG, "uri_grant_query_failed:${error.javaClass.simpleName}")
+            return false
+        }
+        for (permission in permissions) {
+            var flags = 0
+            if (permission.isReadPermission) flags = flags or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            if (permission.isWritePermission) flags = flags or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            if (flags == 0) continue
+            try {
+                resolver.releasePersistableUriPermission(permission.uri, flags)
+            } catch (error: Exception) {
+                Log.w(TAG, "uri_grant_release_failed:${error.javaClass.simpleName}")
+            }
+        }
+        return true
     }
 
     fun onActivityResult(code: Int, status: Int, data: Intent?): Boolean {
@@ -102,5 +126,9 @@ class PersonalFileBridge(
         channel.setMethodCallHandler(null)
         pending?.error("file_closed", "文件选择已中止", null)
         pending = null
+    }
+
+    companion object {
+        private const val TAG = "PersonalFileBridge"
     }
 }

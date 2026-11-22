@@ -390,7 +390,7 @@ class BackupSnapshot {
         interval,
         version == 1
             ? PersonalWorkspace()
-            : PersonalWorkspace.fromJson(j['personal']),
+            : PersonalWorkspace.fromJson(j['personal'], portable: true),
         decodedNotebook,
         courseTaskKeys,
         cleanNotices,

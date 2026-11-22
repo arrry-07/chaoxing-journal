@@ -23,6 +23,7 @@ import '../models/course.dart';
 import 'assignment_query.dart';
 import 'assignment_grouping.dart';
 import 'local_notification_service.dart';
+import 'personal_file_service.dart';
 import 'reminder_rule_store.dart';
 import 'secure_session_store.dart';
 import 'widget_snapshot_service.dart';
@@ -80,6 +81,7 @@ class AssignmentStore extends ChangeNotifier {
     required this.sessionStore,
     required this.notificationService,
     required this.widgetSnapshotService,
+    this.personalFileService = const PersonalFileService(),
     LocalAssignmentRepository? repository,
     ChaoxingLocalClient? chaoxingClient,
     ReminderRuleStore? reminderRuleStore,
@@ -109,6 +111,7 @@ class AssignmentStore extends ChangeNotifier {
   final SecureSessionStore sessionStore;
   final LocalNotificationService notificationService;
   final WidgetSnapshotService widgetSnapshotService;
+  final PersonalFileService personalFileService;
   final LocalAssignmentRepository repository;
   final ChaoxingLocalClient chaoxingClient;
   final ReminderRuleStore reminderRuleStore;
@@ -1953,6 +1956,10 @@ class AssignmentStore extends ChangeNotifier {
           if (error is _LoginInterruptedException) return;
           rethrow;
         }
+        // The account and credentials are committed at this point.
+        if (oldAccount != null && oldAccount.trim() != normalizedAccount) {
+          await personalFileService.releaseAll();
+        }
         if (generation != _generation || _disposed) {
           chaoxingClient.clearSession();
           return;
@@ -2971,6 +2978,8 @@ class AssignmentStore extends ChangeNotifier {
         // a later refresh or app start can retry cancellable notifications.
         _privacyCleanupPending = true;
       }
+      if (logoutGen != _generation || _disposed) return;
+      await personalFileService.releaseAll();
       if (logoutGen != _generation || _disposed) return;
       chaoxingClient.clearSession();
       chaoxingClient.previousAssignments = {};

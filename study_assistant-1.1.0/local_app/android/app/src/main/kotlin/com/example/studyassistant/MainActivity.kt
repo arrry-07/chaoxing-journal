@@ -263,10 +263,12 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun openExternalUrl(url: String?): Boolean {
-        if (url.isNullOrBlank()) {
+        if (url.isNullOrBlank() || !BrowserPolicy.isAllowed(url)) {
             return false
         }
-        return openIntent(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+        return openIntent(intent)
     }
 
     private fun composeFeedbackEmail(subject: String?, body: String?): Boolean {

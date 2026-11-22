@@ -61,13 +61,15 @@ public final class NativePoliciesTest {
       "https://evil.com\\@mooc1.chaoxing.com/", "https://evil.com\\.chaoxing.com/",
       "https://mooc1.chaoxing.com\\@evil.com/", "https://-bad.chaoxing.com/",
       "https://a..chaoxing.com/", "https://mooc1.chaoxing.com./",
-      "https://127.0.0.1/", "https://169.254.169.254/latest/meta-data/"}) {
+      "https://127.0.0.1/", "https://169.254.169.254/latest/meta-data/",
+      "file:///example.txt", "content://example.invalid/document/1", "intent://example.invalid/", "tel:10086"}) {
       if (BrowserPolicy.isAllowed(bad)) throw new AssertionError("Accepted invalid browser URL: " + bad);
       checks++;
     }
     if (!BrowserPolicy.isAllowed("https://mooc1.chaoxing.com/work?id=synthetic") ||
         !BrowserPolicy.isAllowed("HTTPS://mooc1.chaoxing.com/work") ||
-        !BrowserPolicy.isAllowed("https://example.invalid:443/")) throw new AssertionError("HTTPS rejected");
+        !BrowserPolicy.isAllowed("https://example.invalid:443/") ||
+        !BrowserPolicy.isAllowed("https://github.com/arrry-07/chaoxing-journal/issues")) throw new AssertionError("HTTPS rejected");
     checks++;
     for (String trusted : new String[]{
       "https://chaoxing.com/",

@@ -2,6 +2,8 @@ import 'package:flutter/services.dart';
 import '../models/personal_workspace.dart';
 
 class PersonalFileService {
+  const PersonalFileService();
+
   static const channel = MethodChannel('study_assistant/personal_files');
   Future<PersonalLink?> pick() async {
     final data = await channel.invokeMapMethod<String, dynamic>('pick');
@@ -21,6 +23,16 @@ class PersonalFileService {
     try {
       return await channel.invokeMethod<bool>('open', {'uri': uri}) ?? false;
     } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> releaseAll() async {
+    try {
+      return await channel.invokeMethod<bool>('releaseAll') ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
       return false;
     }
   }

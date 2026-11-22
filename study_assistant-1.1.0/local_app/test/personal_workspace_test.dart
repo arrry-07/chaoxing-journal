@@ -24,6 +24,11 @@ void main() {
     final store = f.makeStore(f.Session(), notifications: notifications);
     addTearDown(store.dispose);
     await store.restoreSession();
+    expect(
+        await store.savePersonal(
+            (w) => w.withSummary(true, 20, 0), store.accountEpoch),
+        isTrue);
+    expect(store.personal.summaryEnabled, isTrue);
     notifications.fail = true;
     expect(
         await store.savePersonal(

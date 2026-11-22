@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.util.SizeF
 import android.view.View
 import android.widget.RemoteViews
 import java.time.DateTimeException
@@ -61,28 +62,7 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
     }
 
     internal fun buildViews(context: Context, options: Bundle?): RemoteViews {
-        val isPortrait =
-            context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
-        val minHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0
-        val maxHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) ?: 0
-        val effectiveHeight =
-            AssignmentWidgetLayoutPolicy.effectiveHeightDp(isPortrait, minHeightDp, maxHeightDp)
-        val maxRows = AssignmentWidgetLayoutPolicy.visibleRowCount(
-            effectiveHeight,
-            context.resources.configuration.fontScale,
-        )
-        val tier = when {
-            maxRows <= 2 -> 2
-            maxRows <= 4 -> 4
-            else -> 6
-        }
-        val layoutId = when (tier) {
-            6 -> R.layout.assignment_widget_large
-            4 -> R.layout.assignment_widget_medium
-            else -> R.layout.assignment_widget
-        }
-
-        val views = RemoteViews(context.packageName, layoutId)
+        val configuration = context.resources.configuration
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val items = loadItems(prefs)
         val meta = AssignmentWidgetLayoutPolicy.resolveSnapshotMeta(
@@ -104,7 +84,50 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
             Log.w(TAG, "snapshot_time_parse_failed:${error.javaClass.simpleName}")
             null
         }
+        val availableRows = minOf(rowSlots.size, items.length())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            options?.containsKey(AppWidgetManager.OPTION_APPWIDGET_SIZES) == true &&
+            meta.authenticated && availableRows > 1
+        ) {
+            // Some launchers report grid sizes larger than the area they render.
+            // Let the host choose a layout using its measured content size.
+            val variants = (1..availableRows).associate { rows ->
+                val height = if (rows == 1) 0f else {
+                    AssignmentWidgetLayoutPolicy.minimumHeightDp(rows, configuration.fontScale)
+                }
+                SizeF(0f, height) to renderViews(context, rows, items, meta, stamp)
+            }
+            return RemoteViews(variants)
+        }
+        val effectiveHeight = AssignmentWidgetLayoutPolicy.effectiveHeightDp(
+            isPortrait = configuration.orientation != Configuration.ORIENTATION_LANDSCAPE,
+            minHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0,
+            maxHeightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) ?: 0,
+        )
+        val maxRows = AssignmentWidgetLayoutPolicy.visibleRowCount(
+            effectiveHeight, configuration.fontScale,
+        )
+        return renderViews(context, maxRows, items, meta, stamp)
+    }
 
+    private fun renderViews(
+        context: Context,
+        maxRows: Int,
+        items: JSONArray,
+        meta: WidgetSnapshotMeta,
+        stamp: String?,
+    ): RemoteViews {
+        val tier = when {
+            maxRows <= 2 -> 2
+            maxRows <= 4 -> 4
+            else -> 6
+        }
+        val layoutId = when (tier) {
+            6 -> R.layout.assignment_widget_large
+            4 -> R.layout.assignment_widget_medium
+            else -> R.layout.assignment_widget
+        }
+        val views = RemoteViews(context.packageName, layoutId)
         views.setTextViewText(
             R.id.widget_header,
             AssignmentWidgetLayoutPolicy.headerText(
@@ -333,15 +356,25 @@ internal object AssignmentWidgetLayoutPolicy {
 
     fun visibleRowCount(heightDp: Int, fontScale: Float): Int {
         val baseTier = tierForHeightDp(heightDp)
-        val safeScale = fontScale.takeIf { it.isFinite() && it > 0f } ?: 1.0f
+        val safeScale = safeFontScale(fontScale)
         if (safeScale <= 1.05f || heightDp <= 0) return baseTier
 
-        // Reserve the header, footer and padding before fitting scaled rows.
-        val chromeDp = 33f + 30f * safeScale
-        val rowDp = 10f + 32.5f * safeScale
-        val fitting = ((heightDp - chromeDp) / rowDp).toInt().coerceIn(1, 6)
-        return minOf(baseTier, fitting)
+        return (baseTier downTo 2).firstOrNull {
+            heightDp >= minimumHeightDp(it, safeScale)
+        } ?: 1
     }
+
+    fun minimumHeightDp(rows: Int, fontScale: Float): Float {
+        val safeScale = safeFontScale(fontScale)
+        // Include CJK font padding for both lines and keep the footer clear
+        // even when the launcher's density rounds each child's size separately.
+        val chromeDp = 35f + 34f * safeScale
+        val rowDp = 10f + 40f * safeScale
+        return ceil(chromeDp + rows * rowDp)
+    }
+
+    private fun safeFontScale(fontScale: Float): Float =
+        fontScale.takeIf { it.isFinite() && it > 0f } ?: 1.0f
 
     fun headerText(authenticated: Boolean, rangeLabel: String, totalCount: Int): String {
         if (!authenticated) return "课业手记 · 未登录"

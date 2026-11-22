@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -27,6 +28,7 @@ import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/background_check_settings.dart';
 import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
+import 'package:study_assistant_mobile/src/services/personal_file_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
@@ -671,8 +673,153 @@ void main() {
     });
   });
 
+  group('Batch 2E: file grants follow the committed account switch', () {
+    const oldAccount = 'account-a';
+    const newAccount = 'account-b';
+    const workId = 'cx:work:1:2:33';
+    const file = PersonalLink('旧账号文件', 'content://documents/switch-fixture');
+    final oldHash = AccountIdentity.hash(oldAccount);
+    final newHash = AccountIdentity.hash(newAccount);
+    late _ObservableGrantSessionStore session;
+    late LocalAssignmentRepository repo;
+    late _FakeGateway gateway;
+    late AssignmentStore store;
+    late SharedPreferences prefs;
+    late PersonalFileService service;
+    late List<({String? credentials, String? native, String? journal})>
+        releases;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      prefs = await SharedPreferences.getInstance();
+      session = _ObservableGrantSessionStore(account: oldAccount);
+      gateway = _FakeGateway();
+      repo = LocalAssignmentRepository(backgroundReminderGateway: gateway);
+      await repo.activateAccount(oldAccount);
+      await repo.savePersonalWorkspace(
+        PersonalWorkspace(work: {
+          workId: const PersonalWork(files: [file]),
+        }),
+        oldAccount,
+      );
+      service = PersonalFileService();
+      releases = [];
+      var grantHeld = true;
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(PersonalFileService.channel,
+          (call) async {
+        switch (call.method) {
+          case 'open':
+            return grantHeld && call.arguments['uri'] == file.url;
+          case 'releaseAll':
+            releases.add((
+              credentials: session.account,
+              native: gateway.activeAccountHash,
+              journal: prefs.getString('journal_account_owner'),
+            ));
+            grantHeld = false;
+            return true;
+          default:
+            throw MissingPluginException(call.method);
+        }
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(
+          PersonalFileService.channel, null));
+      store = AssignmentStore(
+        sessionStore: session,
+        repository: repo,
+        chaoxingClient: _FixedClient(const []),
+        notificationService: _NoopNotifications(),
+        widgetSnapshotService: _RecordingWidgetSnapshot(),
+        backgroundReminderGateway: gateway,
+        nativeReminderDeliveryEnabled: true,
+      );
+      addTearDown(store.dispose);
+      await store.restoreSession();
+      expect(store.account, oldAccount);
+      expect(gateway.activeAccountHash, oldHash);
+      expect(prefs.getString('journal_account_owner'), oldHash);
+      expect(store.personal.work[workId]!.files.single.url, file.url);
+      expect(await service.open(file.url), isTrue);
+    });
+
+    test(
+        'successful cross-account login releases after the new account commits',
+        () async {
+      await store.loginChaoxing(
+        account: newAccount,
+        password: 'pass-b',
+        agreementAccepted: true,
+      );
+
+      expect(store.account, newAccount);
+      expect(session.account, newAccount);
+      expect(releases, [
+        (credentials: newAccount, native: newHash, journal: newHash),
+      ]);
+      expect(await service.open(file.url), isFalse);
+    });
+
+    test('credential write failure rolls back without revoking the old grant',
+        () async {
+      final failure =
+          StateError('synthetic new-account credential write failure');
+      session.beforeSave = (account) {
+        if (account != newAccount) return;
+        expect(session.account, oldAccount);
+        expect(prefs.getString('journal_account_owner'), newHash);
+        expect(gateway.activeAccountHash, newHash);
+        throw failure;
+      };
+
+      await store.loginChaoxing(
+        account: newAccount,
+        password: 'pass-b',
+        agreementAccepted: true,
+      );
+
+      expect(store.operationError, failure.message);
+      expect(store.isAuthenticated, isTrue);
+      expect(store.account, oldAccount);
+      expect(session.account, oldAccount);
+      expect(gateway.activeAccountHash, oldHash);
+      expect(prefs.getString('journal_account_owner'), oldHash);
+      expect(
+          (await repo.loadPersonalWorkspace()).work[workId]!.files.single.url,
+          file.url);
+      expect(releases, isEmpty);
+      expect(await service.open(file.url), isTrue);
+    });
+
+    test('same-account reauthentication keeps the existing file grant',
+        () async {
+      await store.loginChaoxing(
+        account: ' $oldAccount ',
+        password: 'pass-a-renewed',
+        agreementAccepted: true,
+      );
+
+      expect(store.account, oldAccount);
+      expect(session.account, oldAccount);
+      expect(session.password, 'pass-a-renewed');
+      expect(releases, isEmpty);
+      expect(await service.open(file.url), isTrue);
+    });
+  });
+
   group('Batch 1B P1-05: CourseStudyHub notice sheet & StudyNotebook isolation',
       () {
+    setUp(() {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      // Widget tests await account switches inside FakeAsync.
+      messenger.setMockMethodCallHandler(
+          PersonalFileService.channel, (_) async => true);
+      addTearDown(() => messenger.setMockMethodCallHandler(
+          PersonalFileService.channel, null));
+    });
+
     test('stale createReminderFromNotice cannot write into switched account',
         () async {
       SharedPreferences.setMockInitialValues({});
@@ -1640,6 +1787,28 @@ class _NeedsInitRefreshClient extends ChaoxingLocalClient {
 
   @override
   Future<List<Assignment>> fetchAssignments() async => const [];
+}
+
+class _ObservableGrantSessionStore extends _MemSessionStore {
+  _ObservableGrantSessionStore({required super.account});
+
+  void Function(String account)? beforeSave;
+
+  @override
+  Future<void> saveChaoxingAccount({
+    required String account,
+    required String password,
+    String? displayName,
+    String? avatarUrl,
+  }) async {
+    beforeSave?.call(account);
+    await super.saveChaoxingAccount(
+      account: account,
+      password: password,
+      displayName: displayName,
+      avatarUrl: avatarUrl,
+    );
+  }
 }
 
 class _GatedActivateRepository extends LocalAssignmentRepository {
