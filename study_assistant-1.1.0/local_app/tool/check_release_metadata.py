@@ -10,12 +10,17 @@ args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 repo = root.parents[1]
 version = re.search(
-    r"^version: (\d+\.\d+\.\d+)(-dev\.[1-9]\d*)?\+([1-9]\d*)$",
+    r"^version: ((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))"
+    r"(-dev\.[1-9]\d*)?\+([1-9]\d*)$",
     (root / "pubspec.yaml").read_text(encoding="utf-8"),
     re.M,
 )
 if version is None:
-    parser.exit(1, "Expected X.Y.Z+build or X.Y.Z-dev.N+build in pubspec.yaml\n")
+    parser.exit(
+        1,
+        "Expected X.Y.Z+build or X.Y.Z-dev.N+build without leading zeros "
+        "(for example 1.9.0+121, not 1.9.00+121) in pubspec.yaml\n",
+    )
 
 base_name, dev_suffix, code = version.groups()
 if dev_suffix and not args.allow_dev:
