@@ -6,22 +6,23 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.8.25+114](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.25/chaoxing-journal-1.8.25.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.25) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.8.26+120](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.26/chaoxing-journal-1.8.26.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.26) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
-**1.8.25+114 已正式发布。**修复课业统计「未知 1」归类误导并新增统计页左滑/长按快捷隐藏，大幅优化首页、日历与长列表滚动性能，收口缺年考试改期锚点、全仓 `clazzId` 解析与课程通知 `sendTime` 口径；同时加固账号并发写租约与切换隔离、原生提醒 SQLite v7 离主线程与降级保护、桌面小组件字号适配、Cookie 父域保护与更新下载逐跳 HTTPS 校验。历次变更见[版本记录](CHANGELOG.md)。
+**1.8.26+120 已正式发布。**完成五阶段体验升级：作业详情单次「北京时间」与 Android 返回优先级、本机有序置顶/手动截止/本机完成、完整学期归档与精选同步、`[23:30, 07:30)` 夜间静音与三档提醒预设、原生有声 `v2` 渠道、首页近期考试细条、日历扎堆日与脱敏复制近 7 天待办，以及随系统深浅色和字号即时重排的桌面小组件。历次变更见[版本记录](CHANGELOG.md)。
 
 ## 功能
 
 - **作业时间轴**：按北京时间用日期标题分隔作业，卡片左栏只显示截止时刻，按所选时间或课程排序；不确定的日期或提交状态单独保留，不靠猜测补全。
 - **搜索、期限筛选与排序**：按作业标题或课程搜索，期限固定为“全部 / 未逾期 / 已逾期”；可按时间近到远、时间远到近或课程排序，中文拼音、英文和数字自然排序，并记住账号隔离偏好。
 - **明确的同步反馈**：首次同步先显示课程和作业，逐份确认截止时间时即时更新；完成、部分成功和失败分别提示，并支持登录失效和安全验证后的恢复。
-- **白天后台检查与本地提醒**：学习通作业默认每 4 小时在 08:00—次日 00:00 内由 WorkManager 兜底检查，可选 2/4/6 小时；新增作业/任务与截止提醒分别设置，桌面小组件显示最近保存的本机快照。
+- **近期考试与快捷操作**：首页展示未来 14 天近期考试细条；右上角「更多」浮层可脱敏复制近 7 天待办，并保留同步详情入口。
+- **白天后台检查与本地提醒**：学习通作业默认每 4 小时在 08:00—次日 00:00 内由 WorkManager 兜底检查，可选 2/4/6 小时；新增作业/任务与截止提醒分别设置，截止提醒默认在 `[23:30, 07:30)` 夜间静音顺延并支持三档频率预设，桌面小组件显示最近保存的本机快照。
 - **每日计划与个人记录**：安排作业日期和预计耗时，保存个人清单、备注、HTTPS资料链接及本机文件关联；规则规划可按预算预览候选，用户填写耗时并确认后才保存，个人完成与学习通提交状态分开。
 - **提醒体检与每日摘要**：核对系统权限与通知数量，主动发送测试通知；可选的每日摘要默认关闭。
 - **个人待办、考试与学期快照**：手动安排日程并接入日历与提醒，命名保存只读学期快照，回看作业、个人笔记和填写过的预计耗时。
-- **课程与本机记录**：按课程及班级管理关注范围，查看全部课程与本地记录，隐藏和恢复作业。隐藏不等于提交。
+- **课程、学期与本机记录**：按课程及班级管理关注范围；支持按当前学期优先同步、批量归档与往期召回，查看全部课程与本地记录，隐藏和恢复作业。隐藏不等于提交。
 - **完成率统计**：以细环和清晰图例区分已完成、待完成、已逾期和提交未知，课程行使用低对比书本或文档描边图标。
 - **考试来源合并**：同一场考试的正式记录和关联通知只计一项实际课业，原始来源数量与详情仍保留；整组隐藏/恢复，来源追溯可查看类型、状态和读取时间。
 
@@ -35,20 +36,20 @@
 
 ## 下载安装
 
-**当前正式包为 1.8.25（114）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**当前正式包为 1.8.26（120）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.8.25.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.25/chaoxing-journal-1.8.25.apk)。发布说明及校验文件见 [1.8.25 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.25)。
+1. [下载 chaoxing-journal-1.8.26.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.8.26/chaoxing-journal-1.8.26.apk)。发布说明及校验文件见 [1.8.26 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.26)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到 1.8.25？</summary>
+<summary>已经安装：如何升级到 1.8.26？</summary>
 
 1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；本版继续把 manual 小索引更新到 GitHub 同版本正式包，stable 保持 1.8.0，APK 批量镜像点仍由维护者单独选择。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
-正式包使用 `com.example.studyassistant.journal` 包名，是非 debuggable 的 Release 构建，但证书沿用维护者既有的 Android Debug 体验证书（证书主题仍为 Android Debug）；这不是生产或应用商店签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.25 继续沿用既有包名与体验证书。
+正式包使用 `com.example.studyassistant.journal` 包名，是非 debuggable 的 Release 构建，但证书沿用维护者既有的 Android Debug 体验证书（证书主题仍为 Android Debug）；这不是生产或应用商店签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.8.26 继续沿用既有包名与体验证书。
 
 ## 使用边界
 
