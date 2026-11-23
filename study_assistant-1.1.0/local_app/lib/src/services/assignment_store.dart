@@ -1811,16 +1811,20 @@ class AssignmentStore extends ChangeNotifier {
     final effectiveCoursework = snap.authenticated
         ? _courseworkState
         : const LocalCourseworkState.empty();
+    final now = _clock();
+    final activeCatalog = snap.authenticated ? termCatalog : null;
     final items = next.forWidget(
       snap.authenticated ? courseAssignments : <Assignment>[],
-      _clock(),
+      now,
       coursework: effectiveCoursework,
     );
     try {
       await _runScopedWrite(
         snap,
         (_) {
+          widgetSnapshotService.clock = _clock;
           widgetSnapshotService.courseworkState = effectiveCoursework;
+          widgetSnapshotService.termCatalog = activeCatalog;
           return widgetSnapshotService.saveAssignmentsForContext(
             items,
             authenticated: snap.authenticated,
@@ -2110,6 +2114,22 @@ class AssignmentStore extends ChangeNotifier {
       _assignments.clear();
       _hiddenAssignments = [];
       _recoveryWarnings.add('账号本机记录暂时无法恢复，请重新登录后重试');
+      widgetSnapshotService.clock = _clock;
+      widgetSnapshotService.courseworkState =
+          const LocalCourseworkState.empty();
+      widgetSnapshotService.termCatalog = null;
+      if (_manageBackgroundSchedule) {
+        try {
+          await widgetSnapshotService.saveAssignmentsForContext(
+            const [],
+            authenticated: false,
+            range: display.widgetRange,
+          );
+        } catch (widgetError) {
+          debugPrint(
+              '[WidgetSnapshot] restore_clear: ${widgetError.runtimeType}');
+        }
+      }
     }
     try {
       _chaoxingDisplayName = await sessionStore.readChaoxingDisplayName();
@@ -2530,6 +2550,10 @@ class AssignmentStore extends ChangeNotifier {
             if (generation != _generation || _disposed) {
               throw const _LoginInterruptedException();
             }
+            widgetSnapshotService.clock = _clock;
+            widgetSnapshotService.courseworkState =
+                const LocalCourseworkState.empty();
+            widgetSnapshotService.termCatalog = null;
             await widgetSnapshotService.saveAssignmentsForContext(
               const [],
               authenticated: false,
@@ -3792,6 +3816,10 @@ class AssignmentStore extends ChangeNotifier {
       }
       _accountHash = null;
       _nativeSessionEpoch = 0;
+      widgetSnapshotService.clock = _clock;
+      widgetSnapshotService.courseworkState =
+          const LocalCourseworkState.empty();
+      widgetSnapshotService.termCatalog = null;
       try {
         await repository.runScopedWrite(
           (_) => widgetSnapshotService.saveAssignmentsForContext(
@@ -4031,9 +4059,11 @@ class AssignmentStore extends ChangeNotifier {
     if (!_isSessionCurrent(snap) || !updateWidget) {
       return manualRescheduleSucceeded;
     }
+    final now = _clock();
+    final activeCatalog = snap.authenticated ? termCatalog : null;
     final widgetItems = display.forWidget(
       scoped,
-      DateTime.now(),
+      now,
       coursework: effectiveCoursework,
     );
     if (_manageBackgroundSchedule) {
@@ -4041,7 +4071,9 @@ class AssignmentStore extends ChangeNotifier {
         await _runScopedWrite(
           snap,
           (_) {
+            widgetSnapshotService.clock = _clock;
             widgetSnapshotService.courseworkState = effectiveCoursework;
+            widgetSnapshotService.termCatalog = activeCatalog;
             return widgetSnapshotService.saveAssignmentsForContext(
               widgetItems,
               authenticated: snap.authenticated,
@@ -4061,7 +4093,9 @@ class AssignmentStore extends ChangeNotifier {
         await _runScopedWrite(
           snap,
           (_) {
+            widgetSnapshotService.clock = _clock;
             widgetSnapshotService.courseworkState = effectiveCoursework;
+            widgetSnapshotService.termCatalog = activeCatalog;
             return widgetSnapshotService.saveAssignmentsForContext(
               widgetItems,
               authenticated: true,

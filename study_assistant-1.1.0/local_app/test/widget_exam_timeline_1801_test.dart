@@ -5,6 +5,7 @@ import 'package:study_assistant_mobile/src/models/widget_snapshot.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 class Capture extends WidgetSnapshotService {
+  Capture({super.clock});
   List<WidgetSnapshotItem> items = [];
   @override
   Future<void> saveSnapshot(List<WidgetSnapshotItem> items) async {
@@ -86,5 +87,52 @@ void main() {
     expect(service.items.single.deadlineAt!.toUtc(), a.timelineAt!.toUtc());
     expect(service.items.single.remainingText, startsWith('距开考'));
     expect(service.items.single.remainingText, isNot(contains('截止')));
+  });
+
+  test(
+      'cross-day in-progress exam stays in widget range with started copy and normal urgency',
+      () async {
+    // Start and now cross Beijing midnight (UTC 15:30 = 23:30 BJT, UTC 17:30 = 01:30+1d BJT).
+    final fixedNow = DateTime.utc(2026, 11, 20, 17, 30);
+    final start = DateTime.utc(2026, 11, 20, 15, 30);
+    final end = DateTime.utc(2026, 11, 21, 1, 0);
+    final ongoingExam = Assignment(
+      id: 'cx:exam:1:2:cross1',
+      source: AssignmentSource.exam,
+      courseName: '计算机网络',
+      title: '跨天在线机考',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: fixedNow,
+      exam: ExamInfo(
+        examId: 'cross1',
+        courseId: '1',
+        clazzId: '2',
+        lifecycle: 'inProgress',
+        startAt: start,
+        startTrusted: true,
+        endAt: end,
+        endTrusted: true,
+      ),
+    );
+    final filtered = const DisplayPreferences(widgetRange: WidgetRange.today)
+        .forWidget([ongoingExam], fixedNow);
+    expect(filtered, hasLength(1));
+
+    final service = Capture(clock: () => fixedNow);
+    await service.saveAssignmentsForContext(
+      filtered,
+      authenticated: true,
+      range: WidgetRange.today,
+    );
+    expect(service.items, hasLength(1));
+    final item = service.items.single;
+    expect(item.eventKind, 'examStart');
+    expect(item.deadlineSource, 'official');
+    expect(item.remainingText, '已开考');
+    expect(item.urgencyLevel, 'normal');
+    expect(item.deepLinkUrl,
+        'studyassistant:///assignments/cx%3Aexam%3A1%3A2%3Across1');
   });
 }

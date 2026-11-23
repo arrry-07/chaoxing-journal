@@ -11,6 +11,7 @@ class WidgetSnapshotItem {
     required this.urgencyLevel,
     required this.deepLinkUrl,
     this.eventKind = 'deadline',
+    this.deadlineSource = 'official',
   });
 
   final String assignmentId;
@@ -21,9 +22,13 @@ class WidgetSnapshotItem {
   final String urgencyLevel;
   final String deepLinkUrl;
   final String eventKind;
+  final String deadlineSource;
+
+  bool get isManualDeadline => deadlineSource == 'manual';
 
   factory WidgetSnapshotItem.fromJson(Map<String, dynamic> json) {
     final rawEventKind = json['eventKind'];
+    final rawDeadlineSource = json['deadlineSource'];
     return WidgetSnapshotItem(
       assignmentId: json['assignmentId'] as String,
       title: json['title'] as String,
@@ -35,6 +40,7 @@ class WidgetSnapshotItem {
       urgencyLevel: json['urgencyLevel'] as String,
       deepLinkUrl: json['deepLinkUrl'] as String,
       eventKind: rawEventKind == 'examStart' ? 'examStart' : 'deadline',
+      deadlineSource: rawDeadlineSource == 'manual' ? 'manual' : 'official',
     );
   }
 
@@ -50,5 +56,6 @@ class WidgetSnapshotItem {
         'urgencyLevel': urgencyLevel,
         'deepLinkUrl': deepLinkUrl,
         'eventKind': eventKind,
+        'deadlineSource': deadlineSource,
       };
 }

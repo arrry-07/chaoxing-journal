@@ -79,4 +79,35 @@ class AssignmentWidgetTimeTextTest {
             ),
         )
     }
+
+    @Test
+    fun crossDayInProgressExamAndDeadlineBoundaryTransitionCleanly() {
+        assertEquals(
+            "已开考",
+            AssignmentWidgetTimeText.remainingText(
+                anchorAtMillis = now - 3 * hour,
+                eventKind = "examStart",
+                nowMillis = now,
+                fallback = "考试时间未知",
+            ),
+        )
+        assertEquals(
+            "30分钟",
+            AssignmentWidgetTimeText.remainingText(
+                anchorAtMillis = now + 30 * minute,
+                eventKind = "deadline",
+                nowMillis = now,
+                fallback = "截止时间待确认",
+            ),
+        )
+        assertEquals(
+            "已截止",
+            AssignmentWidgetTimeText.remainingText(
+                anchorAtMillis = now - 5 * minute,
+                eventKind = "deadline",
+                nowMillis = now,
+                fallback = "截止时间待确认",
+            ),
+        )
+    }
 }

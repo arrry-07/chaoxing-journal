@@ -5,8 +5,10 @@ import android.content.pm.PackageManager
 import java.util.zip.ZipFile
 import android.content.Intent
 import android.content.ComponentName
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
@@ -29,6 +31,26 @@ class MainActivity : FlutterActivity() {
     private var personalFileBridge: PersonalFileBridge? = null
     private var verificationBrowser: VerificationBrowser? = null
     private var webSessionGeneration = 0L
+    private var lastUiNightMode = Configuration.UI_MODE_NIGHT_UNDEFINED
+    private var lastFontScale = 0f
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val config = resources.configuration
+        lastUiNightMode = config.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        lastFontScale = config.fontScale
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val nightMode = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (nightMode != lastUiNightMode || newConfig.fontScale != lastFontScale) {
+            lastUiNightMode = nightMode
+            lastFontScale = newConfig.fontScale
+            AssignmentWidgetProvider.refreshAll(this)
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         interactionSoundBridge?.onResume()

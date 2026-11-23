@@ -9,8 +9,12 @@ import '../models/display_preferences.dart';
 import '../models/local_coursework_state.dart';
 import '../models/widget_snapshot.dart';
 import 'assignment_query.dart';
+import 'course_term_catalog.dart';
 
 class WidgetSnapshotService {
+  WidgetSnapshotService({DateTime Function()? clock})
+      : clock = clock ?? DateTime.now;
+
   static const _groupId = 'group.com.example.studyassistant';
   static const _snapshotKey = 'assignment_snapshot';
   static const _snapshotAtKey = 'assignment_snapshot_at';
@@ -18,14 +22,20 @@ class WidgetSnapshotService {
   static const _totalCountKey = 'assignment_total_count';
   static const _rangeLabelKey = 'assignment_range_label';
 
+  DateTime Function() clock;
   Future<void>? _snapshotWrites;
   bool _pendingAuthenticated = true;
   WidgetRange _pendingRange = WidgetRange.all;
   int? _pendingTotalCount;
-  LocalCourseworkState _pendingCoursework = const LocalCourseworkState.empty();
+  LocalCourseworkState? _pendingCoursework;
+  CourseTermCatalog? _pendingTermCatalog;
+  DateTime? _pendingNow;
 
   /// Account-scoped local coursework overrides applied during widget sync.
   LocalCourseworkState courseworkState = const LocalCourseworkState.empty();
+
+  /// Account-scoped active course term catalog applied during widget sync.
+  CourseTermCatalog? termCatalog;
 
   @visibleForTesting
   bool lastSavedAuthenticated = true;
@@ -56,7 +66,7 @@ class WidgetSnapshotService {
       jsonEncode(items.map((item) => item.toJson()).toList()),
     );
     await HomeWidget.saveWidgetData<String>(_snapshotAtKey,
-        authenticated ? DateTime.now().toUtc().toIso8601String() : null);
+        authenticated ? clock().toUtc().toIso8601String() : null);
     await HomeWidget.saveWidgetData<bool>(_authenticatedKey, authenticated);
     await HomeWidget.saveWidgetData<int>(_totalCountKey, totalCount);
     await HomeWidget.saveWidgetData<String>(_rangeLabelKey, rangeLabelText);
@@ -75,17 +85,25 @@ class WidgetSnapshotService {
     bool authenticated = true,
     WidgetRange range = WidgetRange.all,
   }) {
+    final capturedCoursework =
+        authenticated ? courseworkState : const LocalCourseworkState.empty();
+    final capturedCatalog = authenticated ? termCatalog : null;
+    final capturedNow = clock();
     final write = (_snapshotWrites ?? Future<void>.value()).then((_) async {
       _pendingAuthenticated = authenticated;
       _pendingRange = range;
-      _pendingCoursework = courseworkState;
+      _pendingCoursework = capturedCoursework;
+      _pendingTermCatalog = capturedCatalog;
+      _pendingNow = capturedNow;
       try {
-        await saveAssignments(assignments);
+        await saveAssignments(authenticated ? assignments : const []);
       } finally {
         _pendingAuthenticated = true;
         _pendingRange = WidgetRange.all;
         _pendingTotalCount = null;
-        _pendingCoursework = const LocalCourseworkState.empty();
+        _pendingCoursework = null;
+        _pendingTermCatalog = null;
+        _pendingNow = null;
       }
     });
     _snapshotWrites = write.then<void>((_) {}, onError: (Object _) {});
@@ -93,11 +111,22 @@ class WidgetSnapshotService {
   }
 
   Future<void> saveAssignments(List<Assignment> assignments) {
-    final now = DateTime.now();
-    final coursework =
-        _pendingCoursework.isNotEmpty ? _pendingCoursework : courseworkState;
-    final groups =
-        AssignmentQuery.home(assignments, now, {}, coursework: coursework);
+    final effectiveNow = _pendingNow ?? clock();
+    final coursework = _pendingCoursework ?? courseworkState;
+    final activeCatalog = _pendingTermCatalog ?? termCatalog;
+    final scopedAssignments = activeCatalog == null
+        ? assignments
+        : assignments
+            .where((a) =>
+                a.courseKey == null ||
+                activeCatalog.isActiveOrRecalled(a.courseKey!))
+            .toList();
+    final groups = AssignmentQuery.home(
+      scopedAssignments,
+      effectiveNow,
+      {},
+      coursework: coursework,
+    );
     final pending = [
       ...groups.near,
       ...groups.far,
@@ -113,30 +142,35 @@ class WidgetSnapshotService {
       (assignment) {
         final bucket = AssignmentQuery.timelineBucketAt(
           assignment,
-          now,
+          effectiveNow,
           coursework: coursework,
         );
-        final resolvedAt = assignment.isExam
-            ? assignment.timelineAt
+        final effectiveDeadline = assignment.isExam
+            ? null
             : AssignmentQuery.effectiveDeadline(
                 assignment,
                 coursework: coursework,
-              )?.at;
-        final hasTrustedTime =
+              );
+        final resolvedAt =
+            assignment.isExam ? assignment.timelineAt : effectiveDeadline?.at;
+        final hasEffectiveTime =
             bucket == AssignmentDeadlineBucket.notExpiredWithDeadline ||
                 bucket == AssignmentDeadlineBucket.overdue;
+        final isManualDeadline = hasEffectiveTime &&
+            !assignment.isExam &&
+            effectiveDeadline?.isManual == true;
         return WidgetSnapshotItem(
           assignmentId: assignment.id,
           title: assignment.title,
           courseName: assignment.courseName,
-          deadlineAt: hasTrustedTime ? resolvedAt : null,
+          deadlineAt: hasEffectiveTime ? resolvedAt : null,
           remainingText: switch (bucket) {
             AssignmentDeadlineBucket.overdue => '已逾期',
             AssignmentDeadlineBucket.notExpiredWithDeadline => assignment.isExam
-                ? (assignment.timelineAt!.isAfter(now)
-                    ? '距开考 ${_remainingText(assignment.timelineAt!, now)}'
+                ? (resolvedAt!.isAfter(effectiveNow)
+                    ? '距开考 ${_remainingText(resolvedAt, effectiveNow)}'
                     : '已开考')
-                : _remainingText(resolvedAt!, now),
+                : _remainingText(resolvedAt!, effectiveNow),
             AssignmentDeadlineBucket.confirmedNoDeadline =>
               assignment.deadlineLabel,
             AssignmentDeadlineBucket.unconfirmed => assignment.isExam
@@ -147,15 +181,16 @@ class WidgetSnapshotService {
             AssignmentDeadlineBucket.completed => '已完成',
           },
           urgencyLevel: assignment.isExam &&
-                  assignment.timelineAt != null &&
-                  !assignment.timelineAt!.isAfter(now)
+                  resolvedAt != null &&
+                  !resolvedAt.isAfter(effectiveNow)
               ? 'normal'
               : _urgencyLevel(
-                  hasTrustedTime ? resolvedAt : null,
-                  now,
+                  hasEffectiveTime ? resolvedAt : null,
+                  effectiveNow,
                 ),
           deepLinkUrl: AppDeepLinks.assignmentUri(assignment.id),
           eventKind: assignment.isExam ? 'examStart' : 'deadline',
+          deadlineSource: isManualDeadline ? 'manual' : 'official',
         );
       },
     ).toList();
