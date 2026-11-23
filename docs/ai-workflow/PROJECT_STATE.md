@@ -2,11 +2,11 @@
 
 <a id="dev-当前迭代进度"></a>
 
-## dev 当前迭代进度（阶段四 `4A–4C` 已过门禁；下一步阶段四 MuMu 验收）
+## dev 当前迭代进度（阶段四 `4A–4C` 已过 MuMu 验收；下一步阶段五 `5A–5C`）
 
-- **1.8.25+114 已正式发布收口**（PR `#62` / `233a8b0`，收口 `f25dc57`），八维方案 Phase 0–2 已归档。当前预览版 `1.8.26-dev.3+117` 已过阶段三 MuMu 实测（正式目标版本待定）。
+- **1.8.25+114 已正式发布收口**（PR `#62` / `233a8b0`，收口 `f25dc57`），八维方案 Phase 0–2 已归档。当前预览版 `1.8.26-dev.4+118` 已过阶段四 MuMu 实测（正式目标版本待定）。
 - [x] **阶段一至阶段三已全部完成并过 MuMu 实测**（`1.8.26-dev.1+115` / `dev.2+116` / `dev.3+117`）：详见[总迭代方案](../plans/2026-11-22-v1.8.25-产品与体验分期升级方案.md)。
-- [ ] **阶段四（`4A–4C` Android 冲刺提醒）门禁通过，待 MuMu 验收**：`4A` 夜间静音/穿透/SQLite v8（13 组 271 项 + Gradle）、`4B` 频率三档预设（8 组 128 项）与 `4C` v2 有声渠道/体检/测试提醒（9 组 203 项、`dart analyze` 0 问题及隔离 Gradle `:app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest` `BUILD SUCCESSFUL`，`androidTest` 待隔离设备/CI）均已过门禁；下一步构建 `1.8.26-dev.4+118` 执行阶段四 MuMu 验收，详见[总迭代方案](../plans/2026-11-22-v1.8.25-产品与体验分期升级方案.md)。
+- [x] **阶段四（`4A–4C` Android 冲刺提醒）门禁与 MuMu 验收通过**：`4A–4C` Dart 单测、`dart analyze`、隔离 Gradle（`:app:testDebugUnitTest` 12 组 73 项 / `:app:lintDebug` / `:app:assembleDebugAndroidTest`）与 `1.8.26-dev.4+118` MuMu 实测（夜间静音穿透、三档预设、v1 保守保留、健康详情与 `1900000008` 测试提醒、双色主题、0 `logcat` 异常）均已通过（`androidTest` 与 API 26/31/33/OEM 真机矩阵待补验）；下一步按[总迭代方案](../plans/2026-11-22-v1.8.25-产品与体验分期升级方案.md)推进阶段五（`5A–5C`）。
 
 ## 最近 2 个正式发布版本
 
