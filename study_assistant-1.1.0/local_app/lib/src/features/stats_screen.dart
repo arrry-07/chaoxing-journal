@@ -190,6 +190,7 @@ class _StatsScreenState extends State<StatsScreen> {
           'status': status,
           if (courseKey != null && courseKey.isNotEmpty) 'courseKey': courseKey,
           'range': _range.name,
+          'term': _termScope.name,
         },
       ).toString(),
     );
@@ -567,7 +568,13 @@ class _StatsScreenState extends State<StatsScreen> {
       onTap: canTap ? open : null,
       label: '$label $count 份，$percent%',
       excludeSemantics: true,
-      child: canTap ? InkWell(onTap: open, child: content) : content,
+      child: canTap
+          ? InkWell(
+              key: ValueKey('stats-status-$index'),
+              onTap: open,
+              child: content,
+            )
+          : content,
     );
   }
 

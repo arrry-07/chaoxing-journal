@@ -525,9 +525,29 @@ void main() {
     ], completeSync: true);
     await store.restoreSession();
 
-    await t.pumpWidget(MaterialApp(
+    final router = GoRouter(
+      initialLocation: '/stats',
+      routes: [
+        GoRoute(
+          path: '/stats',
+          builder: (_, __) => StatsScreen(store: store, clock: () => now),
+        ),
+        GoRoute(
+          path: '/records',
+          builder: (_, state) => LocalRecordsScreen(
+            store: store,
+            initialFilter: LocalRecordFilterSpec.fromQueryParameters(
+              state.uri.queryParameters,
+            ),
+            clock: () => now,
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await t.pumpWidget(MaterialApp.router(
       theme: StudyAssistantTheme.light,
-      home: Scaffold(body: StatsScreen(store: store, clock: () => now)),
+      routerConfig: router,
     ));
     await t.pumpAndSettle();
 
@@ -541,6 +561,27 @@ void main() {
     await t.pumpAndSettle();
     expect(find.textContaining('/ 1'), findsOneWidget);
     expect(find.text('100%'), findsOneWidget);
+
+    // Past-term drill-down keeps the term scope and the archived record.
+    await t.scrollUntilVisible(
+      find.byKey(const ValueKey('stats-status-0')),
+      100,
+    );
+    await t.tap(find.byKey(const ValueKey('stats-status-0')));
+    await t.pumpAndSettle();
+    expect(
+      find.byType(LocalRecordsScreen),
+      findsOneWidget,
+      reason: 'router uri: ${router.state.uri}',
+    );
+    final recordsSpec = t
+        .widget<LocalRecordsScreen>(find.byType(LocalRecordsScreen))
+        .initialFilter;
+    expect(recordsSpec.termScope, CourseTermScope.pastTerms);
+    expect(find.text('1 条记录'), findsOneWidget);
+    expect(find.text('去年已完成作业'), findsOneWidget);
+    await t.tap(find.byTooltip('返回'));
+    await t.pumpAndSettle();
 
     // Switch to 全部学期: all 3 records = 1/3 = 33%.
     await t.tap(find
