@@ -114,6 +114,8 @@ jobs:
           python3 scripts/test_verify_apk_and_report.py
           python3 scripts/test_gitee_release_sync.py
           python3 scripts/test_gitee_workflow.py
+          python3 scripts/test_run_android_tests.py
+          python3 scripts/run_android_tests.py --verify-manifest-only
           python3 -c 'from pathlib import Path; a = len(Path("AGENTS.md").read_text(encoding="utf-8").splitlines()); s = len(Path("docs/ai-workflow/PROJECT_STATE.md").read_text(encoding="utf-8").splitlines()); assert a + s <= 80, f"L0 doc line budget exceeded: {a} + {s} = {a + s} > 80"; print(f"[PASS] L0 doc line budget: {a} + {s} = {a + s} <= 80")'
       - name: Run synthetic JVM checks
         run: |

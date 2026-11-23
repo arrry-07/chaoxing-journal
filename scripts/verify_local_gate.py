@@ -182,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
             "test_verify_apk_and_report.py",
             "test_check_repo_safety.py",
             "test_verify_local_gate.py",
+            "test_run_android_tests.py",
         ):
             _run_step(f"Python tests ({test_name})", [py, str(repo / "scripts" / test_name)], repo)
 
