@@ -407,6 +407,7 @@ class _EditorState extends State<ManualEntryEditor> {
     final entry = _entry;
     if (entry == null || busy) return;
     final journal = Journal.of(context);
+    final editorRoute = ModalRoute.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -429,7 +430,10 @@ class _EditorState extends State<ManualEntryEditor> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() => busy = true);
+    setState(() {
+      busy = true;
+      _saving = true;
+    });
     final ok = await widget.store.saveNotebook(
       (n) => n.withEntries([
         for (final item in n.entries)
@@ -437,12 +441,22 @@ class _EditorState extends State<ManualEntryEditor> {
       ]),
       epoch,
     );
+    if (ok) {
+      _saving = false;
+      _dirty = false;
+      await WidgetsBinding.instance.endOfFrame;
+    }
     if (!mounted || !ok) {
-      if (mounted) setState(() => busy = false);
+      if (mounted) {
+        setState(() {
+          busy = false;
+          _saving = false;
+        });
+      }
       return;
     }
     final router = GoRouter.maybeOf(context);
-    if (router != null && router.canPop()) {
+    if (editorRoute?.settings is Page && router != null && router.canPop()) {
       router.pop();
     } else {
       Navigator.of(context).pop();

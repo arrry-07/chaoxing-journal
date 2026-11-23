@@ -157,7 +157,8 @@ void main() {
     expect(ids(deadline: AssignmentDeadlineFilter.uncertain), isEmpty);
   });
 
-  test('mixed timeline keeps overdue last in both directions and layers dates',
+  test(
+      'FB-005 mixed timeline keeps overdue last in both directions and layers dates',
       () {
     final assignments = [
       _assignment(
@@ -230,9 +231,11 @@ void main() {
     final asc = titles(HomeSortOrder.deadlineAsc);
     expect(asc.take(2), ['手动今日', '学习通今日']);
     expect(asc.sublist(asc.length - 2), ['学习通逾期', '手动逾期']);
+    // A confirmed-no-deadline record has no start anchor, so it stays in the
+    // undated tier after every dated tier.
     expect(
-      asc.indexOf('学习通无截止'),
-      lessThan(asc.indexOf('学习通远期')),
+      asc.indexOf('学习通远期'),
+      lessThan(asc.indexOf('学习通无截止')),
     );
     expect(asc.indexOf('学习通有开始锚点'), lessThan(asc.indexOf('学习通远期')));
     expect(asc.indexOf('学习通远期'), lessThan(asc.indexOf('学习通待确认')));
@@ -240,9 +243,63 @@ void main() {
 
     final desc = titles(HomeSortOrder.deadlineDesc);
     expect(desc.sublist(desc.length - 2), ['手动逾期', '学习通逾期']);
+    expect(desc.first, '学习通远期');
     expect(
       desc.indexOf('学习通远期'),
       lessThan(desc.indexOf('学习通无截止')),
+    );
+  });
+
+  test('untrusted deadlines never join tiers or expose a display time', () {
+    final untrusted = _assignment(
+      'a-untrusted',
+      title: '学习通待确认',
+      due: now.add(const Duration(hours: 1)),
+      trusted: false,
+    );
+    final trusted = _assignment(
+      'a-trusted',
+      title: '学习通可信',
+      due: now.add(const Duration(days: 2)),
+    );
+    final items = HomeManualTimeline.mergeAndSort(
+      assignments: [untrusted, trusted],
+      manualEntries: const [],
+      order: HomeSortOrder.deadlineAsc,
+      now: now,
+    );
+    final untrustedItem =
+        items.firstWhere((item) => item.assignment?.id == untrusted.id);
+    expect(untrustedItem.displayAt, isNull);
+    expect(items.map((item) => item.title), ['学习通可信', '学习通待确认']);
+  });
+
+  test('title ordering keeps bucket ranks before natural title order', () {
+    final future = _assignment(
+      'a-future',
+      title: 'B 近期',
+      due: now.add(const Duration(hours: 2)),
+    );
+    final overdue = _assignment(
+      'a-overdue',
+      title: 'A 逾期',
+      due: now.subtract(const Duration(hours: 1)),
+    );
+    final untrusted = _assignment(
+      'a-untrusted',
+      title: 'C 待确认',
+      trusted: false,
+      readFailed: true,
+    );
+    final items = HomeManualTimeline.mergeAndSort(
+      assignments: [overdue, untrusted, future],
+      manualEntries: const [],
+      order: HomeSortOrder.title,
+      now: now,
+    );
+    expect(
+      items.map((item) => item.title),
+      ['B 近期', 'C 待确认', 'A 逾期'],
     );
   });
 

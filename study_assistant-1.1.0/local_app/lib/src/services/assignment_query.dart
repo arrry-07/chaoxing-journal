@@ -270,6 +270,10 @@ class AssignmentQuery {
   static int compareNaturalPinyin(String left, String right) =>
       _compareKey(_NaturalKey(left), _NaturalKey(right));
 
+  /// Deadline-bucket rank used by name-only home orderings.
+  static int nameGroupRank(AssignmentDeadlineBucket bucket) =>
+      _nameGroupRank(bucket);
+
   static DateTime _beijingInstant(int year, int month, int day) =>
       DateTime.utc(year, month, day).subtract(const Duration(hours: 8));
 

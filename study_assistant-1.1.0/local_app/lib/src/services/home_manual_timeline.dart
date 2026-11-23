@@ -34,10 +34,10 @@ class HomeTimelineItem {
   final int sortIndex;
 
   bool get isManual => manual != null;
-  bool get isExam => assignment?.isExam ?? manual?.kind == 'exam';
-  String get itemId => assignment?.id ?? 'manual:${manual!.id}';
+  bool get isExam => assignment?.isExam ?? manual?.kind == ManualEntry.kindExam;
+  String get itemId => assignment?.id ?? manual!.pinKey;
   String get pinKey => assignment == null
-      ? 'manual:${manual!.id}'
+      ? manual!.pinKey
       : AssignmentGrouping.examKey(assignment!) ??
           assignment!.courseTaskKey ??
           assignment!.id;
@@ -51,9 +51,9 @@ class HomeTimelineItem {
     return '手动考试';
   }
 
-  DateTime? get displayAt =>
-      preparedDisplayAt ?? assignment?.timelineAt ?? manual?.at;
-  DateTime? get sortAt => displayAt;
+  /// Manual entries use their stored instant; Chaoxing records only use the
+  /// trusted display projection, never the raw untrusted deadline.
+  DateTime? get displayAt => isManual ? manual!.at : preparedDisplayAt;
 
   AssignmentDeadlineBucket bucketAt(
     DateTime now, {
@@ -166,10 +166,10 @@ class HomeManualTimeline {
         AssignmentTypeFilter.all => true,
         AssignmentTypeFilter.homework ||
         AssignmentTypeFilter.task =>
-          entry.kind == 'todo',
+          entry.kind == ManualEntry.kindTodo,
         AssignmentTypeFilter.exam ||
         AssignmentTypeFilter.examNotice =>
-          entry.kind == 'exam',
+          entry.kind == ManualEntry.kindExam,
       };
 
   static bool _matchesDeadline(
@@ -207,15 +207,15 @@ class HomeManualTimeline {
     LocalCourseworkState coursework,
   ) {
     if (order == HomeSortOrder.title) {
-      final title =
-          AssignmentQuery.compareNaturalPinyin(left.title, right.title);
-      if (title != 0) return title;
-      final course = AssignmentQuery.compareNaturalPinyin(
-        left.displayCourse,
-        right.displayCourse,
-      );
-      if (course != 0) return course;
-      return AssignmentQuery.compareNaturalPinyin(left.itemId, right.itemId);
+      // Name-only ordering still keeps untrusted and overdue records in their
+      // bucket rank, matching AssignmentQuery.sortHome.
+      final group = AssignmentQuery.nameGroupRank(
+        left.bucketAt(now, coursework: coursework),
+      ).compareTo(AssignmentQuery.nameGroupRank(
+        right.bucketAt(now, coursework: coursework),
+      ));
+      if (group != 0) return group;
+      return _compareNameKeys(left, right, courseFirst: false);
     }
     if (order == HomeSortOrder.courseName) {
       final course = AssignmentQuery.compareNaturalPinyin(
@@ -225,7 +225,7 @@ class HomeManualTimeline {
       if (course != 0) return course;
       final time = _compareAscending(left.displayAt, right.displayAt);
       if (time != 0) return time;
-      return _compareNameKeys(left, right);
+      return _compareNameKeys(left, right, courseFirst: true);
     }
 
     final leftTier = _homeTier(
@@ -259,7 +259,7 @@ class HomeManualTimeline {
         return reverse ? -time : time;
       }
     }
-    return _compareNameKeys(left, right);
+    return _compareNameKeys(left, right, courseFirst: true);
   }
 
   static int _homeTier(
@@ -285,7 +285,8 @@ class HomeManualTimeline {
     final assignment = item.assignment;
     if (prioritizeStartOnly &&
         assignment != null &&
-        _isUndatedActiveWork(assignment)) {
+        _isUndatedActiveWork(assignment) &&
+        _hasStartAnchor(assignment)) {
       return 1;
     }
     return 3;
@@ -315,14 +316,30 @@ class HomeManualTimeline {
       assignment.availableFromAt != null ||
       (assignment.availableFromText?.trim().isNotEmpty ?? false);
 
-  static int _compareNameKeys(HomeTimelineItem left, HomeTimelineItem right) {
-    final course = AssignmentQuery.compareNaturalPinyin(
-      left.displayCourse,
-      right.displayCourse,
+  static int _compareNameKeys(
+    HomeTimelineItem left,
+    HomeTimelineItem right, {
+    required bool courseFirst,
+  }) {
+    final first = courseFirst
+        ? AssignmentQuery.compareNaturalPinyin(
+            left.displayCourse,
+            right.displayCourse,
+          )
+        : AssignmentQuery.compareNaturalPinyin(left.title, right.title);
+    if (first != 0) return first;
+    final second = courseFirst
+        ? AssignmentQuery.compareNaturalPinyin(left.title, right.title)
+        : AssignmentQuery.compareNaturalPinyin(
+            left.displayCourse,
+            right.displayCourse,
+          );
+    if (second != 0) return second;
+    final courseKey = AssignmentQuery.compareNaturalPinyin(
+      left.courseKey,
+      right.courseKey,
     );
-    if (course != 0) return course;
-    final title = AssignmentQuery.compareNaturalPinyin(left.title, right.title);
-    if (title != 0) return title;
+    if (courseKey != 0) return courseKey;
     final itemId =
         AssignmentQuery.compareNaturalPinyin(left.itemId, right.itemId);
     if (itemId != 0) return itemId;

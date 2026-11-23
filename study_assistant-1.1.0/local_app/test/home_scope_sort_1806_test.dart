@@ -1131,21 +1131,16 @@ void main() {
             tester.getRect(find.byKey(const ValueKey('home-sync-status')));
         final summaryRect =
             tester.getRect(find.byKey(const ValueKey('home-due-summary')));
-        final sortPill = find
-            .ancestor(
-              of: find.byKey(const ValueKey('current-home-sort')),
-              matching: find.byType(InkWell),
-            )
-            .first;
-        final sortRect = tester.getRect(sortPill);
         expect((statusRect.center.dy - summaryRect.center.dy).abs(),
             lessThanOrEqualTo(4.0),
             reason: 'status and due summary must sit on the same row @$scale');
         expect(statusRect.right, lessThanOrEqualTo(summaryRect.left));
         if (scale == 1.0) {
-          expect((summaryRect.right - sortRect.right).abs(),
-              lessThanOrEqualTo(4.0),
-              reason: 'due summary aligns flush right with sort pill edge');
+          final addRect =
+              tester.getRect(find.byKey(const ValueKey('home-add-manual')));
+          expect(
+              (summaryRect.right - addRect.right).abs(), lessThanOrEqualTo(4.0),
+              reason: 'due summary aligns with the trailing add pill edge');
         }
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());

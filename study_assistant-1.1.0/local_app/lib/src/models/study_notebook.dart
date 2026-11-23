@@ -16,6 +16,15 @@ DateTime? notebookDate(dynamic value) {
 }
 
 class ManualEntry {
+  /// Shared identity for manual entries outside assignment storage.
+  static const pinPrefix = 'manual:';
+  static const kindTodo = 'todo';
+  static const kindExam = 'exam';
+
+  static bool isManualKey(String key) => key.startsWith(pinPrefix);
+
+  String get pinKey => '$pinPrefix$id';
+
   const ManualEntry(
       {required this.id,
       required this.title,
@@ -220,6 +229,9 @@ class StudyNotebook {
         terms = List.unmodifiable(terms);
   final List<ManualEntry> entries;
   final List<TermArchive> terms;
+
+  bool hasActiveEntry(String id) =>
+      entries.any((entry) => entry.id == id && !entry.done);
   Map<String, dynamic> toJson() => {
         'version': 1,
         'entries': entries.map((v) => v.toJson()).toList(),

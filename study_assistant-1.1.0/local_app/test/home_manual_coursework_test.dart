@@ -1,12 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/unsaved_edit_guard.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/manual_agenda_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/manual_home_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
@@ -145,7 +150,7 @@ void main() {
   final now = DateTime(2026, 11, 23, 10, 0);
 
   testWidgets('home add entry opens the shared manual editor', (tester) async {
-    final store = await _store([]);
+    final store = await _store([], clock: () => now);
     addTearDown(store.dispose);
     await _pumpHome(tester, store, now);
 
@@ -157,7 +162,10 @@ void main() {
 
   testWidgets('saving a new manual todo from the editor returns to home',
       (tester) async {
-    final store = await _store([]);
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = await _store([], clock: () => now);
     addTearDown(store.dispose);
     await _pumpHome(tester, store, now);
 
@@ -165,19 +173,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).at(0), '新手动待办');
     await tester.enterText(find.byType(TextFormField).at(1), '高等数学');
-    final editorList = find
-        .descendant(
-          of: find.byType(ManualEntryEditor),
-          matching: find.byType(ListView),
-        )
-        .first;
-    for (var i = 0; i < 3; i++) {
-      await tester.drag(editorList, const Offset(0, -500));
-      await tester.pumpAndSettle();
-    }
     await tester.tap(find.text('保存个人安排'));
     await tester.pumpAndSettle();
 
+    expect(find.text('保存个人安排'), findsNothing);
+    expect(store.notebook.entries, hasLength(1));
     expect(find.text('新手动待办'), findsOneWidget);
     expect(find.text('无截止日期'), findsWidgets);
     expect(store.notebook.entries.single.title, '新手动待办');
@@ -197,7 +197,8 @@ void main() {
       title: '手动复习',
       at: now.add(const Duration(hours: 2)),
     );
-    final store = await _store([assignment], entries: [manual]);
+    final store =
+        await _store([assignment], entries: [manual], clock: () => now);
     addTearDown(store.dispose);
     await _pumpHome(tester, store, now);
 
@@ -217,7 +218,7 @@ void main() {
       title: '需要完成的手动待办',
       at: now.add(const Duration(hours: 2)),
     );
-    final store = await _store([], entries: [manual]);
+    final store = await _store([], entries: [manual], clock: () => now);
     addTearDown(store.dispose);
     await _pumpHome(tester, store, now);
 
@@ -240,7 +241,7 @@ void main() {
       title: '可置顶手动待办',
       at: now.add(const Duration(hours: 2)),
     );
-    final store = await _store([], entries: [manual]);
+    final store = await _store([], entries: [manual], clock: () => now);
     addTearDown(store.dispose);
     await _pumpHome(tester, store, now);
 
@@ -283,7 +284,8 @@ void main() {
       kind: 'exam',
       at: now.add(const Duration(days: 1)),
     );
-    final store = await _store([assignment], entries: [todo, overdue, exam]);
+    final store = await _store([assignment],
+        entries: [todo, overdue, exam], clock: () => now);
     addTearDown(store.dispose);
     await _pumpHome(tester, store, now);
 
@@ -318,7 +320,7 @@ void main() {
     );
   });
 
-  testWidgets('manual card stays overflow-free at 360dp and 1.5x text',
+  testWidgets('manual card stays overflow-free at 360dp for 1.5x and 2.0x text',
       (tester) async {
     tester.view.physicalSize = const Size(360, 800);
     tester.view.devicePixelRatio = 1;
@@ -332,32 +334,175 @@ void main() {
       at: now.add(const Duration(hours: 2)),
     );
 
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: StudyAssistantTheme.light,
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: const TextScaler.linear(1.5),
-          ),
-          child: child!,
-        ),
-        home: Scaffold(
-          body: SizedBox(
-            width: 360,
-            child: ManualHomeCard(
-              entry: entry,
-              now: now,
-              countdown: true,
-              onTap: () {},
-              onToggleDone: () {},
+    for (final scale in [1.5, 2.0]) {
+      for (final pinned in [false, true]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: StudyAssistantTheme.light,
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: TextScaler.linear(scale),
+              ),
+              child: child!,
+            ),
+            home: Scaffold(
+              body: SizedBox(
+                width: 360,
+                child: ManualHomeCard(
+                  entry: entry,
+                  now: now,
+                  countdown: true,
+                  inPinnedSection: pinned,
+                  dragHandle:
+                      pinned ? const SizedBox(width: 34, height: 48) : null,
+                  onTap: () {},
+                  onToggleDone: () {},
+                ),
+              ),
             ),
           ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: '$scale/$pinned');
+        expect(find.text(entry.title), findsOneWidget);
+        expect(find.text('标记完成'), findsOneWidget);
+      }
+    }
+  });
+
+  testWidgets('home page keeps header and add entry overflow-free at 360dp',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final assignments = [
+      for (var index = 0; index < 12; index++)
+        _work(
+          'w$index',
+          title: '学习通作业 $index',
+          due: now.add(Duration(hours: 3 + index)),
+          syncedAt: now,
         ),
+    ];
+    final manual = _manual(
+      'm1',
+      title: '窄屏手动待办',
+      at: now.add(const Duration(hours: 2)),
+    );
+    final store =
+        await _store(assignments, entries: [manual], clock: () => now);
+    addTearDown(store.dispose);
+    await _pumpHome(
+      tester,
+      store,
+      now,
+      textScaler: const TextScaler.linear(1.5),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('home-add-manual')), findsOneWidget);
+    expect(find.text('窄屏手动待办'), findsOneWidget);
+
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -320));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(
+        find.byKey(const ValueKey('home-sliver-add-manual')), findsOneWidget);
+  });
+
+  test('manual editor routes register before the assignment detail route', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    final newIndex = source.indexOf("path: '/assignments/new'");
+    final manualIndex = source.indexOf("path: '/assignments/manual/:id'");
+    final detailIndex = source.indexOf("path: '/assignments/:id'");
+    expect(newIndex, greaterThanOrEqualTo(0));
+    expect(manualIndex, greaterThan(newIndex));
+    expect(detailIndex, greaterThan(manualIndex));
+  });
+
+  testWidgets('editor reports a deleted manual entry instead of creating one',
+      (tester) async {
+    final store = await _store([], clock: () => now);
+    addTearDown(store.dispose);
+    await tester.pumpWidget(
+      MaterialApp(home: ManualEntryEditor(store: store, entryId: 'gone')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('个人安排不存在'), findsOneWidget);
+  });
+
+  testWidgets('editor course picker fills the course field', (tester) async {
+    final store = await _store([], clock: () => now);
+    addTearDown(store.dispose);
+    await store.repository.saveCourses(
+      const [CourseRef(courseId: '1', clazzId: '2', name: '高等数学')],
+      account: store.account,
+    );
+    await store.restoreSession();
+    await tester.pumpWidget(
+      MaterialApp(home: ManualEntryEditor(store: store)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('从我的课程选择'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('高等数学').last);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextFormField, '高等数学'), findsOneWidget);
+  });
+
+  testWidgets('deleting after editing leaves without an unsaved dialog',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final entry = _manual(
+      'm-del',
+      title: '待删除待办',
+      at: now.add(const Duration(hours: 2)),
+    );
+    final store = await _store([], entries: [entry], clock: () => now);
+    addTearDown(store.dispose);
+    final guard = UnsavedEditGuard();
+    final router = GoRouter(
+      initialLocation: '/assignments',
+      routes: [
+        GoRoute(
+          path: '/assignments',
+          builder: (_, __) => const Scaffold(body: Text('home')),
+        ),
+        GoRoute(
+          path: '/assignments/manual/:id',
+          onExit: (_, __) => guard.confirmLeave(routeScope: '/assignments'),
+          builder: (_, state) => ManualEntryEditor(
+            store: store,
+            entryId: state.pathParameters['id'],
+            routeScope: '/assignments',
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      UnsavedEditGuardScope(
+        guard: guard,
+        child: MaterialApp.router(routerConfig: router),
       ),
     );
     await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(find.text(entry.title), findsOneWidget);
-    expect(find.text('标记完成'), findsOneWidget);
+    router.push('/assignments/manual/m-del');
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextFormField).first, '改过标题');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除个人安排'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('放弃未保存的修改？'), findsNothing);
+    expect(find.text('home'), findsOneWidget);
+    expect(store.notebook.entries, isEmpty);
   });
 }

@@ -5,14 +5,37 @@ import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 
 import 'review_core_remediation_test.dart' as core;
 
+final _now = DateTime.utc(2026, 11, 23, 6); // Beijing 14:00
+
 ManualEntry _manual(String id, {bool done = false}) => ManualEntry(
       id: id,
       title: '手动 $id',
       kind: 'todo',
       course: '个人',
-      at: DateTime(2030, 11, 7, 9),
+      at: _now.add(const Duration(hours: 2)),
       done: done,
     );
+
+class _FixedStore extends AssignmentStore {
+  _FixedStore()
+      : super(
+          sessionStore: core.Session(),
+          notificationService: core.Notifications(),
+          widgetSnapshotService: core.WidgetService(),
+          chaoxingClient: core.Client(),
+          clock: () => _now,
+        );
+
+  @override
+  Future<bool> runDueAutoSync({DateTime? now}) async => false;
+}
+
+Future<_FixedStore> _store() async {
+  final store = _FixedStore();
+  addTearDown(store.dispose);
+  await store.restoreSession();
+  return store;
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -21,9 +44,7 @@ void main() {
   test('manual pin mixes with coursework reorder and prunes on completion',
       () async {
     final assignment = core.sample('pin-a');
-    final store = core.makeStore(core.Session());
-    addTearDown(store.dispose);
-    await store.restoreSession();
+    final store = await _store();
     await store.repository.mergeAndSave([assignment]);
     await store.restoreSession();
 
@@ -78,7 +99,7 @@ void main() {
   test('deleting a manual entry clears its pin and logout isolates account',
       () async {
     final session = core.Session();
-    final store = core.makeStore(session);
+    final store = _FixedStore();
     addTearDown(store.dispose);
     await store.restoreSession();
     final entry = _manual('m2');
@@ -115,5 +136,36 @@ void main() {
     await store.restoreSession();
     expect(store.notebook.entries, isEmpty);
     expect(store.isManualPinned(entry), isFalse);
+  });
+
+  test('reorderPinned accepts a filtered subset and rejects bad keys',
+      () async {
+    final assignment = core.sample('pin-c');
+    final store = await _store();
+    await store.repository.mergeAndSave([assignment]);
+    await store.restoreSession();
+    final first = _manual('m-first');
+    final second = _manual('m-second');
+    expect(
+      await store.saveNotebook(
+        (_) => StudyNotebook(entries: [first, second]),
+        store.accountEpoch,
+      ),
+      isTrue,
+    );
+    expect(await store.togglePin(assignment), isTrue);
+    expect(await store.toggleManualPin(first), isTrue);
+    expect(await store.toggleManualPin(second), isTrue);
+    final pinned = store.pinnedKeys.take(3).toList();
+    expect(pinned, hasLength(3));
+
+    // A course/type filter can show only part of the pinned block.
+    expect(await store.reorderPinned([pinned[1]]), isTrue);
+    expect(await store.reorderPinned([pinned[1], pinned[0]]), isTrue);
+    expect(store.pinnedKeys.take(2), [pinned[1], pinned[0]]);
+
+    expect(await store.reorderPinned([pinned[0], pinned[0]]), isFalse);
+    expect(await store.reorderPinned(['manual:missing']), isFalse);
+    expect(await store.reorderPinned([]), isFalse);
   });
 }

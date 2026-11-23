@@ -67,7 +67,11 @@ class ManualHomeCard extends StatelessWidget {
             ? journal.muted
             : overdue
                 ? journal.muted
-                : journal.ink.withValues(alpha: 0.88);
+                : today
+                    ? journal.berry
+                    : journal.ink.withValues(alpha: 0.88);
+    final overdueDays = overdue ? now.difference(at!).inDays : 0;
+    final overdueLabel = overdueDays > 0 ? '已逾期$overdueDays天' : '已逾期';
 
     Widget buildRail() {
       if (at == null) {
@@ -100,7 +104,7 @@ class ManualHomeCard extends StatelessWidget {
               ? '明天'
               : '${beijingAt.month}/${beijingAt.day}';
       final remaining =
-          overdue ? '已逾期' : AssignmentCard.compactRemaining(at, now);
+          overdue ? overdueLabel : AssignmentCard.compactRemaining(at, now);
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -138,8 +142,9 @@ class ManualHomeCard extends StatelessWidget {
       );
     }
 
-    final typeLabel = entry.kind == 'exam' ? '手动考试' : '手动待办';
-    final typePill = entry.kind == 'exam'
+    final isExam = entry.kind == ManualEntry.kindExam;
+    final typeLabel = isExam ? '手动考试' : '手动待办';
+    final typePill = isExam
         ? const CourseworkStatusPill(
             label: '手动考试',
             tone: CourseworkPillTone.exam,
@@ -158,9 +163,18 @@ class ManualHomeCard extends StatelessWidget {
     ];
 
     final inlineActions = !largeText;
+    final contentRight =
+        contentPadding.resolve(Directionality.of(context)).right;
     final topRightReserve = (inlineActions ? 48.0 : 0.0) +
         (inlineActions && dragHandle != null ? 34.0 : 0.0) +
         ((inlineActions && dragHandle != null) ? 6.0 : 0.0);
+    final titlePadding = EdgeInsets.only(
+      right: inlineActions
+          ? (topRightReserve - contentRight)
+              .clamp(0.0, topRightReserve)
+              .toDouble()
+          : 0.0,
+    );
 
     Widget completeButton() => Semantics(
           container: true,
@@ -187,15 +201,18 @@ class ManualHomeCard extends StatelessWidget {
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          entry.title.trim(),
-          maxLines: largeText ? null : 2,
-          overflow: largeText ? null : TextOverflow.ellipsis,
-          style: overdue
-              ? journal.entryTitle.copyWith(
-                  color: journal.isDark ? journal.muted : journal.ochre,
-                )
-              : journal.entryTitle,
+        Padding(
+          padding: titlePadding,
+          child: Text(
+            entry.title.trim(),
+            maxLines: largeText ? null : 2,
+            overflow: largeText ? null : TextOverflow.ellipsis,
+            style: overdue
+                ? journal.entryTitle.copyWith(
+                    color: journal.isDark ? journal.muted : journal.ochre,
+                  )
+                : journal.entryTitle,
+          ),
         ),
         const SizedBox(height: 4),
         Wrap(
@@ -207,8 +224,8 @@ class ManualHomeCard extends StatelessWidget {
               Text(entry.course.trim(), style: journal.metadata),
             typePill,
             if (overdue)
-              const CourseworkStatusPill(
-                label: '已逾期',
+              CourseworkStatusPill(
+                label: overdueLabel,
                 tone: CourseworkPillTone.overdue,
               ),
           ],
@@ -234,7 +251,7 @@ class ManualHomeCard extends StatelessWidget {
                   entry.title,
                   if (entry.course.trim().isNotEmpty) entry.course.trim(),
                   typeLabel,
-                  if (overdue) '已逾期',
+                  if (overdue) overdueLabel,
                   if (at == null) '无截止日期',
                 ].join('，'),
                 onTap: onTap,
@@ -254,14 +271,7 @@ class ManualHomeCard extends StatelessWidget {
                         children: [
                           SizedBox(width: railWidth, child: buildRail()),
                           const SizedBox(width: 10),
-                          Expanded(
-                            child: Padding(
-                              padding: EdgeInsets.only(
-                                right: inlineActions ? topRightReserve : 0,
-                              ),
-                              child: body,
-                            ),
-                          ),
+                          Expanded(child: body),
                         ],
                       ),
                     ),

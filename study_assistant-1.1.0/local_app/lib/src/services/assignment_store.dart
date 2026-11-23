@@ -235,12 +235,9 @@ class AssignmentStore extends ChangeNotifier {
       if (_generation != expectedEpoch || !_authenticated) return;
       final previous = notebook;
       notebook = StudyNotebook.decode(next.encode());
-      _pinnableKeysCache = null;
-      _pinnableKeysCacheMinute = null;
+      _invalidatePinnableKeys();
       saved = true;
-      if (_pinned.keys.any((key) => key.startsWith('manual:'))) {
-        await _prunePins();
-      }
+      if (_pinned.keys.any(ManualEntry.isManualKey)) await _prunePins();
       final manualSucceeded = await _afterAssignmentsChanged(
         updateAssignmentReminders: false,
         updateSummary: false,
@@ -566,8 +563,7 @@ class AssignmentStore extends ChangeNotifier {
       }
       final previous = notebook;
       notebook = StudyNotebook.decode(nextNotebook.encode());
-      _pinnableKeysCache = null;
-      _pinnableKeysCacheMinute = null;
+      _invalidatePinnableKeys();
       final manualSucceeded = await _afterAssignmentsChanged();
       await _recordManualCancellationOutcomes(
         previous,
@@ -663,8 +659,7 @@ class AssignmentStore extends ChangeNotifier {
       }
       final previous = notebook;
       notebook = StudyNotebook.decode(nextNotebook.encode());
-      _pinnableKeysCache = null;
-      _pinnableKeysCacheMinute = null;
+      _invalidatePinnableKeys();
       final manualSucceeded = await _afterAssignmentsChanged();
       await _recordManualCancellationOutcomes(
         previous,
@@ -1062,7 +1057,7 @@ class AssignmentStore extends ChangeNotifier {
 
   static String pinKeyOf(Assignment assignment) => _pinKey(assignment);
 
-  static String manualPinKeyOf(ManualEntry entry) => 'manual:${entry.id}';
+  static String manualPinKeyOf(ManualEntry entry) => entry.pinKey;
 
   PinnedAssignments get pinnedAssignments => _pinned;
   List<String> get pinnedKeys => _pinned.keys;
@@ -1349,6 +1344,9 @@ class AssignmentStore extends ChangeNotifier {
   Set<String>? _pinnableKeysCache;
   int? _pinnableKeysCacheMinute;
 
+  void _invalidatePinnableKeys() =>
+      _pinnableKeysCache = _pinnableKeysCacheMinute = null;
+
   Set<String> _pinnableKeys() {
     final now = _clock();
     final minute = now.millisecondsSinceEpoch ~/ 60000;
@@ -1369,33 +1367,11 @@ class AssignmentStore extends ChangeNotifier {
       _account != null &&
       _pinnableKeys().contains(_pinKey(assignment));
 
-  Future<bool> togglePin(Assignment assignment) async {
-    final account = _account;
-    final generation = _generation;
-    if (account == null || !canTogglePin(assignment)) return false;
-    final key = _pinKey(assignment);
-    var saved = false;
-    await _run(() async {
-      if (generation != _generation ||
-          account != _account ||
-          !_authenticated ||
-          !canTogglePin(assignment)) {
-        return;
-      }
-      final next = _pinned.toggle(key, _pinAliases(assignment));
-      await _savePins(next, account, generation);
-      if (generation != _generation ||
-          account != _account ||
-          !_authenticated ||
-          _disposed) {
-        return;
-      }
-      _pinned = next;
-      _pinsNeedSave = false;
-      saved = true;
-    });
-    return saved;
-  }
+  Future<bool> togglePin(Assignment assignment) => _togglePinKey(
+        _pinKey(assignment),
+        _pinAliases(assignment),
+        () => canTogglePin(assignment),
+      );
 
   bool isManualPinned(ManualEntry entry) =>
       _authenticated && _pinned.containsAny([manualPinKeyOf(entry)]);
@@ -1405,29 +1381,33 @@ class AssignmentStore extends ChangeNotifier {
       _authenticated &&
       _account != null &&
       !entry.done &&
-      notebook.entries.any((item) => item.id == entry.id && !item.done);
+      _pinnableKeys().contains(manualPinKeyOf(entry));
 
-  Future<bool> toggleManualPin(ManualEntry entry) async {
+  Future<bool> toggleManualPin(ManualEntry entry) {
+    final key = manualPinKeyOf(entry);
+    return _togglePinKey(key, [key], () => canToggleManualPin(entry));
+  }
+
+  Future<bool> _togglePinKey(
+    String key,
+    Iterable<String> aliases,
+    bool Function() canToggle,
+  ) async {
     final account = _account;
     final generation = _generation;
-    if (account == null || !canToggleManualPin(entry)) return false;
-    final key = manualPinKeyOf(entry);
+    if (account == null || !canToggle()) return false;
     var saved = false;
     await _run(() async {
-      if (generation != _generation ||
-          account != _account ||
-          !_authenticated ||
-          !canToggleManualPin(entry)) {
-        return;
-      }
-      final next = _pinned.toggle(key, [key]);
+      bool valid() =>
+          generation == _generation &&
+          account == _account &&
+          _authenticated &&
+          !_disposed &&
+          canToggle();
+      if (!valid()) return;
+      final next = _pinned.toggle(key, aliases);
       await _savePins(next, account, generation);
-      if (generation != _generation ||
-          account != _account ||
-          !_authenticated ||
-          _disposed) {
-        return;
-      }
+      if (!valid()) return;
       _pinned = next;
       _pinsNeedSave = false;
       saved = true;
@@ -1445,14 +1425,15 @@ class AssignmentStore extends ChangeNotifier {
       for (final raw in visibleOrderedKeys)
         if (raw.trim().isNotEmpty) raw.trim(),
     ];
-    final initialVisibleSet = {
-      ...visibleAssignments.where(isPinned).map(_pinKey),
-      for (final entry in notebook.entries)
-        if (!entry.done && isManualPinned(entry)) manualPinKeyOf(entry),
-    };
-    if (_pinned.reorderVisible(cleanOrdered, initialVisibleSet) == null) {
+    // Filters may hide pinned slots; only the visible subset is reordered.
+    final pinnable = _pinnableKeys();
+    if (cleanOrdered.isEmpty ||
+        cleanOrdered.toSet().length != cleanOrdered.length ||
+        cleanOrdered.any(
+            (key) => !pinnable.contains(key) || !_pinned.keys.contains(key))) {
       return false;
     }
+    final visibleKeySet = cleanOrdered.toSet();
     var saved = false;
     await _run(() async {
       if (generation != _generation ||
@@ -1462,12 +1443,7 @@ class AssignmentStore extends ChangeNotifier {
           _disposed) {
         return;
       }
-      final latestVisibleSet = {
-        ...visibleAssignments.where(isPinned).map(_pinKey),
-        for (final entry in notebook.entries)
-          if (!entry.done && isManualPinned(entry)) manualPinKeyOf(entry),
-      };
-      final next = _pinned.reorderVisible(cleanOrdered, latestVisibleSet);
+      final next = _pinned.reorderVisible(cleanOrdered, visibleKeySet);
       if (next == null) return;
       await _savePins(next, account, generation);
       if (generation != _generation ||
@@ -1533,11 +1509,9 @@ class AssignmentStore extends ChangeNotifier {
         }
       }
     }
-    for (final key in _pinned.keys) {
-      if (!key.startsWith('manual:')) continue;
-      final id = key.substring('manual:'.length);
-      final entry = notebook.entries.where((item) => item.id == id).firstOrNull;
-      if (entry == null || entry.done) {
+    for (final key in _pinned.keys.where(ManualEntry.isManualKey)) {
+      final id = key.substring(ManualEntry.pinPrefix.length);
+      if (!notebook.hasActiveEntry(id)) {
         explicitlyCompletedOrHiddenKeys.add(key);
       }
     }
@@ -2492,8 +2466,7 @@ class AssignmentStore extends ChangeNotifier {
     });
     await stage('个人待办与学期归档', () async {
       notebook = await repository.loadNotebook();
-      _pinnableKeysCache = null;
-      _pinnableKeysCacheMinute = null;
+      _invalidatePinnableKeys();
     });
     await stage('课程通知', () async {
       _courseNotices = await repository.loadCourseNotices();
