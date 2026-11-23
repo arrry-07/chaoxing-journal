@@ -13,6 +13,7 @@ import 'reminder_status_screen.dart';
 import 'widgets/data_recovery_warning.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
+import 'widgets/journal_picker_sheet.dart';
 
 String manualTime(DateTime? at) => at == null
     ? '未安排时间'
@@ -195,11 +196,13 @@ class ManualEntryEditor extends StatefulWidget {
     super.key,
     required this.store,
     this.entry,
+    this.entryId,
     this.initialDay,
     this.routeScope = '/agenda',
   });
   final AssignmentStore store;
   final ManualEntry? entry;
+  final String? entryId;
   final DateTime? initialDay;
   final String routeScope;
   @override
@@ -216,16 +219,16 @@ class _EditorState extends State<ManualEntryEditor> {
   late final int epoch;
   late final String? _accountHashAtStart;
 
-  late final title = TextEditingController(text: widget.entry?.title);
-  late final course = TextEditingController(text: widget.entry?.course);
-  late final location = TextEditingController(text: widget.entry?.location);
-  late final note = TextEditingController(text: widget.entry?.note);
-  late final minutes =
-      TextEditingController(text: '${widget.entry?.minutes ?? 0}');
-  late String kind = widget.entry?.kind ?? 'todo';
-  late bool remind = widget.entry?.remind ?? false;
-  late DateTime? at = widget.entry?.at ??
-      (widget.initialDay == null ? null : _defaultAtForDay(widget.initialDay!));
+  late final TextEditingController title;
+  late final TextEditingController course;
+  late final TextEditingController location;
+  late final TextEditingController note;
+  late final TextEditingController minutes;
+  late String kind;
+  late bool remind;
+  late DateTime? at;
+  ManualEntry? _entry;
+  bool _missingEntry = false;
   bool busy = false;
   bool _dirty = false;
   bool _saving = false;
@@ -237,6 +240,25 @@ class _EditorState extends State<ManualEntryEditor> {
     super.initState();
     epoch = widget.store.accountEpoch;
     _accountHashAtStart = widget.store.accountHash;
+    _entry = widget.entry ??
+        (widget.entryId == null
+            ? null
+            : widget.store.notebook.entries
+                .where((item) => item.id == widget.entryId)
+                .firstOrNull);
+    _missingEntry =
+        widget.entry == null && widget.entryId != null && _entry == null;
+    title = TextEditingController(text: _entry?.title);
+    course = TextEditingController(text: _entry?.course);
+    location = TextEditingController(text: _entry?.location);
+    note = TextEditingController(text: _entry?.note);
+    minutes = TextEditingController(text: '${_entry?.minutes ?? 0}');
+    kind = _entry?.kind ?? 'todo';
+    remind = _entry?.remind ?? false;
+    at = _entry?.at ??
+        (widget.initialDay == null
+            ? null
+            : _defaultAtForDay(widget.initialDay!));
     for (final c in [title, course, location, note, minutes]) {
       c.addListener(_markDirty);
     }
@@ -333,6 +355,100 @@ class _EditorState extends State<ManualEntryEditor> {
     }
   }
 
+  Future<void> chooseCourse() async {
+    final names = <String>[];
+    final seen = <String>{};
+    for (final item in widget.store.courses) {
+      if (seen.add(item.name)) names.add(item.name);
+    }
+    final picked = await showJournalPickerSheet<String>(
+      context,
+      title: '选择课程',
+      selectedValue: course.text.trim(),
+      searchable: names.length > 5,
+      searchHint: '搜索课程...',
+      displayPrefs: widget.store.display,
+      options: [
+        for (final name in names)
+          JournalPickerOption<String>(value: name, label: name),
+      ],
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        course.text = picked;
+        _dirty = true;
+      });
+    }
+  }
+
+  Future<void> toggleDone() async {
+    final entry = _entry;
+    if (entry == null || busy) return;
+    final nextDone = !entry.done;
+    setState(() => busy = true);
+    final ok = await widget.store.saveNotebook(
+      (n) => n.withEntries([
+        for (final item in n.entries)
+          item.id == entry.id ? item.completed(nextDone) : item,
+      ]),
+      epoch,
+    );
+    if (!mounted) return;
+    setState(() {
+      busy = false;
+      if (ok) _entry = entry.completed(nextDone);
+    });
+    if (ok) {
+      showJournalMessage(context, nextDone ? '已标记完成' : '已恢复未完成');
+    }
+  }
+
+  Future<void> deleteEntry() async {
+    final entry = _entry;
+    if (entry == null || busy) return;
+    final journal = Journal.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除这项个人安排？'),
+        content: Text(entry.title),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: journal.berry,
+              foregroundColor: journal.onPrimaryFill,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => busy = true);
+    final ok = await widget.store.saveNotebook(
+      (n) => n.withEntries([
+        for (final item in n.entries)
+          if (item.id != entry.id) item,
+      ]),
+      epoch,
+    );
+    if (!mounted || !ok) {
+      if (mounted) setState(() => busy = false);
+      return;
+    }
+    final router = GoRouter.maybeOf(context);
+    if (router != null && router.canPop()) {
+      router.pop();
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
   Future<void> save() async {
     if (busy || !form.currentState!.validate()) return;
     if (kind == 'exam' && at == null) {
@@ -346,7 +462,7 @@ class _EditorState extends State<ManualEntryEditor> {
       error = null;
     });
     final e = ManualEntry(
-        id: widget.entry?.id ?? 'm${DateTime.now().microsecondsSinceEpoch}',
+        id: _entry?.id ?? 'm${DateTime.now().microsecondsSinceEpoch}',
         title: title.text.trim(),
         kind: kind,
         course: course.text.trim(),
@@ -355,7 +471,7 @@ class _EditorState extends State<ManualEntryEditor> {
         minutes: int.parse(minutes.text.trim()),
         at: at,
         remind: at != null && remind,
-        done: widget.entry?.done ?? false);
+        done: _entry?.done ?? false);
     final ok = await widget.store.saveNotebook(
         (n) => n.withEntries([...n.entries.where((v) => v.id != e.id), e]),
         epoch);
@@ -392,6 +508,37 @@ class _EditorState extends State<ManualEntryEditor> {
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
+    if (_missingEntry) {
+      return Scaffold(
+        backgroundColor: journal.paper,
+        appBar: AppBar(
+          backgroundColor: journal.paper,
+          title: const Text('个人安排不存在'),
+        ),
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              JournalGroupedCard(
+                padding: const EdgeInsets.all(18),
+                children: [
+                  Text(
+                    '这条个人安排已被删除，无法继续编辑。',
+                    style: journal.metadata.copyWith(color: journal.ink),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              JournalPrimaryButton(
+                label: '返回',
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return PopScope(
         canPop: !_dirty && !_saving,
         onPopInvokedWithResult: (didPop, result) async {
@@ -420,7 +567,7 @@ class _EditorState extends State<ManualEntryEditor> {
             backgroundColor: journal.paper,
             appBar: AppBar(
               backgroundColor: journal.paper,
-              title: Text(widget.entry == null ? '添加个人安排' : '编辑个人安排'),
+              title: Text(_entry == null ? '添加个人安排' : '编辑个人安排'),
             ),
             body: Form(
                 key: form,
@@ -458,8 +605,19 @@ class _EditorState extends State<ManualEntryEditor> {
                                   controller: course,
                                   enabled: !busy,
                                   maxLength: 200,
-                                  decoration: const InputDecoration(
-                                      labelText: '课程（可选）')),
+                                  decoration: InputDecoration(
+                                    labelText: '课程（可选）',
+                                    suffixIcon: widget.store.courses.isEmpty
+                                        ? null
+                                        : IconButton(
+                                            tooltip: '从我的课程选择',
+                                            onPressed:
+                                                busy ? null : chooseCourse,
+                                            icon: const Icon(
+                                              Icons.menu_book_outlined,
+                                            ),
+                                          ),
+                                  )),
                               TextFormField(
                                   controller: location,
                                   enabled: !busy,
@@ -513,7 +671,7 @@ class _EditorState extends State<ManualEntryEditor> {
                                         remind = v;
                                         _dirty = true;
                                       })),
-                          if (widget.entry != null)
+                          if (_entry != null)
                             JournalGroupTile(
                               icon: Icons.notifications_active_outlined,
                               title: '提醒状态',
@@ -523,7 +681,7 @@ class _EditorState extends State<ManualEntryEditor> {
                                       final router = GoRouter.maybeOf(context);
                                       if (router != null) {
                                         router.push(
-                                          '/reminder-status/manual/${Uri.encodeComponent(widget.entry!.id)}?unsaved=${_dirty ? 1 : 0}',
+                                          '/reminder-status/manual/${Uri.encodeComponent(_entry!.id)}?unsaved=${_dirty ? 1 : 0}',
                                         );
                                       } else {
                                         Navigator.of(context,
@@ -534,7 +692,7 @@ class _EditorState extends State<ManualEntryEditor> {
                                                 ReminderStatusScreen(
                                               store: widget.store,
                                               kind: 'manual',
-                                              id: widget.entry!.id,
+                                              id: _entry!.id,
                                               hasUnsavedEdits: _dirty,
                                             ),
                                           ),
@@ -594,6 +752,34 @@ class _EditorState extends State<ManualEntryEditor> {
                         label: busy ? '正在保存…' : '保存个人安排',
                         onPressed: busy ? null : save,
                       ),
+                      if (_entry != null) ...[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: busy ? null : toggleDone,
+                              icon: Icon(
+                                _entry!.done
+                                    ? Icons.undo_rounded
+                                    : Icons.check_rounded,
+                              ),
+                              label: Text(
+                                _entry!.done ? '恢复未完成' : '标记完成',
+                              ),
+                            ),
+                            TextButton.icon(
+                              style: TextButton.styleFrom(
+                                foregroundColor: journal.berry,
+                              ),
+                              onPressed: busy ? null : deleteEntry,
+                              icon: const Icon(Icons.delete_outline_rounded),
+                              label: const Text('删除个人安排'),
+                            ),
+                          ],
+                        ),
+                      ],
                     ]))));
   }
 }

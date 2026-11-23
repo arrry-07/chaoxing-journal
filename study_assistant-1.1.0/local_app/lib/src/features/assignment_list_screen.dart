@@ -14,6 +14,7 @@ import '../models/display_preferences.dart';
 import '../models/home_filters.dart';
 import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
+import '../models/study_notebook.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
@@ -22,10 +23,12 @@ import '../services/course_term_catalog.dart';
 import '../services/exam_schedule_presentation.dart';
 import '../services/external_link_service.dart';
 import '../services/home_course_filter.dart';
+import '../services/home_manual_timeline.dart';
 import '../services/home_sync_presentation.dart';
 import '../services/home_upcoming_exam.dart';
 import '../services/interaction_feedback_service.dart';
 import '../services/todo_copy_formatter.dart';
+import 'manual_agenda_screen.dart';
 import 'widgets/appearance_controls.dart';
 import 'widgets/assignment_card.dart';
 import 'widgets/journal_buttons.dart';
@@ -34,6 +37,15 @@ import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_picker_sheet.dart';
 import 'widgets/journal_sliver_header.dart';
 import 'widgets/journal_swipe_tile.dart';
+import 'widgets/manual_home_card.dart';
+
+typedef _TimelineSection = ({
+  String? heading,
+  _DayHeadingTone tone,
+  String? badge,
+  List<HomeTimelineItem> items,
+  bool pinned,
+});
 
 /// A calendar recovery view. It is carried in the route query, never in
 /// [HomeFilters], so opening or leaving it cannot rewrite saved preferences.
@@ -248,6 +260,182 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     feedback(pinned ? '已置顶' : '已取消置顶');
   }
 
+  Future<void> _openManualEditor({ManualEntry? entry}) async {
+    if (!mounted) return;
+    if (entry == null && store.notebook.entries.length >= 500) {
+      feedback('个人待办已达 500 条上限，请清理后再添加');
+      return;
+    }
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      await router.push(
+        entry == null
+            ? '/assignments/new'
+            : '/assignments/manual/${Uri.encodeComponent(entry.id)}',
+      );
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ManualEntryEditor(
+          store: store,
+          entry: entry,
+          routeScope: '/assignments',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _completeManualWithUndo(ManualEntry entry) async {
+    final epoch = store.accountEpoch;
+    final ok = await store.saveNotebook(
+      (n) => n.withEntries([
+        for (final item in n.entries)
+          item.id == entry.id ? item.completed(true) : item,
+      ]),
+      epoch,
+    );
+    if (!mounted || !ok) return;
+    JournalMotion.complete(store.display);
+    feedback(
+      '已完成「${entry.title}」，可在个人待办查看',
+      actionLabel: '撤销',
+      action: () {
+        if (store.accountEpoch != epoch) return;
+        unawaited(store.saveNotebook(
+          (n) => n.withEntries([
+            for (final item in n.entries)
+              item.id == entry.id ? item.completed(false) : item,
+          ]),
+          epoch,
+        ));
+      },
+    );
+  }
+
+  Future<void> _deleteManualWithConfirm(ManualEntry entry) async {
+    final journal = Journal.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('删除这项个人安排？'),
+        content: Text(entry.title),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: journal.berry,
+              foregroundColor: journal.onPrimaryFill,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final ok = await store.saveNotebook(
+      (n) => n.withEntries([
+        for (final item in n.entries)
+          if (item.id != entry.id) item,
+      ]),
+      store.accountEpoch,
+    );
+    if (!mounted || !ok) return;
+    feedback('已删除个人安排');
+  }
+
+  Future<void> _toggleManualPin(ManualEntry entry) async {
+    if (!store.canToggleManualPin(entry)) return;
+    final ok = await store.toggleManualPin(entry);
+    if (!mounted || !ok) return;
+    final pinned = store.isManualPinned(entry);
+    JournalMotion.pin(store.display, pinned: pinned);
+    feedback(pinned ? '已置顶' : '已取消置顶');
+  }
+
+  Future<void> _openManualContextMenu(
+    BuildContext itemContext,
+    ManualEntry entry,
+    Widget previewCard, {
+    bool pinned = false,
+    List<String> pinnedVisibleKeys = const [],
+  }) async {
+    final box = itemContext.findRenderObject() as RenderBox?;
+    Rect? anchorRect;
+    if (box != null && box.hasSize) {
+      final topLeft = box.localToGlobal(Offset.zero);
+      anchorRect = topLeft & box.size;
+    }
+    final canPin = store.canToggleManualPin(entry);
+    final isPinned = store.isManualPinned(entry);
+    final pinKey = AssignmentStore.manualPinKeyOf(entry);
+    final pinIndex = pinnedVisibleKeys.indexOf(pinKey);
+    final actions = <JournalContextMenuAction>[
+      JournalContextMenuAction(
+        label: '编辑',
+        icon: Icons.edit_outlined,
+        onSelected: () => _openManualEditor(entry: entry),
+      ),
+      if (pinned && pinnedVisibleKeys.length >= 2 && pinIndex > 0)
+        JournalContextMenuAction(
+          label: '置顶上移',
+          icon: Icons.arrow_upward_rounded,
+          onSelected: () {
+            final next = List<String>.of(pinnedVisibleKeys);
+            final moved = next.removeAt(pinIndex);
+            next.insert(pinIndex - 1, moved);
+            JournalMotion.selectionTick(store.display);
+            unawaited(store.reorderPinned(next));
+          },
+        ),
+      if (pinned &&
+          pinnedVisibleKeys.length >= 2 &&
+          pinIndex >= 0 &&
+          pinIndex < pinnedVisibleKeys.length - 1)
+        JournalContextMenuAction(
+          label: '置顶下移',
+          icon: Icons.arrow_downward_rounded,
+          onSelected: () {
+            final next = List<String>.of(pinnedVisibleKeys);
+            final moved = next.removeAt(pinIndex);
+            next.insert(pinIndex + 1, moved);
+            JournalMotion.selectionTick(store.display);
+            unawaited(store.reorderPinned(next));
+          },
+        ),
+      if (canPin)
+        JournalContextMenuAction(
+          label: isPinned ? '取消置顶' : '置顶',
+          icon: isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+          onSelected: () => _toggleManualPin(entry),
+        ),
+      if (!entry.done)
+        JournalContextMenuAction(
+          label: '标记完成',
+          icon: Icons.check_circle_outline_rounded,
+          onSelected: () => _completeManualWithUndo(entry),
+        ),
+      JournalContextMenuAction(
+        label: '删除',
+        icon: Icons.delete_outline_rounded,
+        destructive: true,
+        onSelected: () => _deleteManualWithConfirm(entry),
+      ),
+    ];
+    await showJournalContextMenu(
+      context: context,
+      anchorRect: anchorRect,
+      previewCard: previewCard,
+      actions: actions,
+      displayPrefs: store.display,
+    );
+  }
+
   Future<void> _toggleTodayPlan(Assignment assignment) async {
     final epoch = store.accountEpoch;
     final day =
@@ -370,11 +558,23 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       displayPrefs: store.display,
       actions: [
         JournalContextMenuAction(
+          label: '添加课业或待办',
+          icon: Icons.add_rounded,
+          onSelected: () => _openManualEditor(),
+        ),
+        JournalContextMenuAction(
           label: '复制近 7 天待办',
           icon: Icons.copy_all_outlined,
           onSelected: () => unawaited(
             _copyNext7DaysTodos(now: widget.clock?.call() ?? DateTime.now()),
           ),
+        ),
+        JournalContextMenuAction(
+          label: '管理个人待办与考试',
+          icon: Icons.event_note_outlined,
+          onSelected: () {
+            if (mounted) context.push('/agenda');
+          },
         ),
         JournalContextMenuAction(
           label: '同步详情',
@@ -655,9 +855,28 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ))
                 .toList();
         final sortOrder = _sortOrder;
-        final sortedItems = AssignmentQuery.sortHome(
-          items,
-          sortOrder,
+        final selectedCourseName = _courseKey == null
+            ? null
+            : options
+                .where((option) => option.courseKey == _courseKey)
+                .firstOrNull
+                ?.name;
+        final manualItems = recoveryScope == null
+            ? HomeManualTimeline.filterManualEntries(
+                store.isAuthenticated
+                    ? store.notebook.entries
+                    : const <ManualEntry>[],
+                query: _query,
+                selectedCourseName: selectedCourseName,
+                deadline: _deadlineFilter,
+                type: _typeFilter,
+                now: now,
+              )
+            : const <ManualEntry>[];
+        final sortedTimelineItems = HomeManualTimeline.mergeAndSort(
+          assignments: items,
+          manualEntries: manualItems,
+          order: sortOrder,
           now: now,
           sourceRecords: catalogAssignments,
           displayIndex: displayIndex,
@@ -682,10 +901,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           now: now,
           index: displayIndex,
           coursework: coursework,
+          manualEntries:
+              store.isAuthenticated ? store.notebook.entries : const [],
         );
         final showDueSummary = recoveryScope == null &&
             (catalogAssignments.isNotEmpty ||
                 displayAssignments.isNotEmpty ||
+                manualItems.isNotEmpty ||
                 store.syncReport.phase == SyncPhase.success ||
                 store.syncReport.lastDataSuccessAt != null ||
                 store.lastSyncAt != null);
@@ -818,28 +1040,104 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           );
         }
 
-        List<
-            ({
-              String? heading,
-              _DayHeadingTone tone,
-              String? badge,
-              List<Assignment> items,
-              bool pinned,
-            })> buildTimelineSections(List<Assignment> list) {
-          final sections = <({
-            String? heading,
-            _DayHeadingTone tone,
-            String? badge,
-            List<Assignment> items,
-            bool pinned,
-          })>[];
+        Widget manualCard(
+          ManualEntry entry, {
+          bool pinned = false,
+          Widget? dragHandle,
+          List<String> pinnedVisibleKeys = const [],
+        }) {
+          final isPinned = store.isManualPinned(entry);
+          final canPin = store.canToggleManualPin(entry);
+          return Builder(
+            builder: (itemContext) {
+              final preview = IgnorePointer(
+                child: ManualHomeCard(
+                  entry: entry,
+                  now: now,
+                  onTap: () {},
+                  onToggleDone: () {},
+                  inPinnedSection: pinned,
+                  compact: store.display.compact,
+                  countdown: store.display.countdown,
+                ),
+              );
+              return JournalSwipeTile(
+                key: ValueKey('manual-swipe-${entry.id}'),
+                displayPrefs: store.display,
+                rightAction: JournalSwipeAction(
+                  label: '标记完成',
+                  icon: Icons.check_rounded,
+                  color: journal.ink,
+                  backgroundColor: journal.sage,
+                  onTrigger: () => unawaited(_completeManualWithUndo(entry)),
+                ),
+                leftAction: !canPin
+                    ? null
+                    : JournalSwipeAction(
+                        label: isPinned ? '取消置顶' : '置顶',
+                        icon: isPinned
+                            ? Icons.push_pin_rounded
+                            : Icons.push_pin_outlined,
+                        color: journal.ink,
+                        backgroundColor: journal.parchment,
+                        onTrigger: () => unawaited(_toggleManualPin(entry)),
+                      ),
+                child: ManualHomeCard(
+                  key: ValueKey('manual-${entry.id}'),
+                  entry: entry,
+                  now: now,
+                  inPinnedSection: pinned,
+                  compact: store.display.compact,
+                  countdown: store.display.countdown,
+                  dragHandle: dragHandle,
+                  onTap: () => _openManualEditor(entry: entry),
+                  onToggleDone: () => unawaited(_completeManualWithUndo(entry)),
+                  onLongPress: () => _openManualContextMenu(
+                    itemContext,
+                    entry,
+                    preview,
+                    pinned: pinned,
+                    pinnedVisibleKeys: pinnedVisibleKeys,
+                  ),
+                ),
+              );
+            },
+          );
+        }
+
+        Widget timelineCard(
+          HomeTimelineItem item, {
+          bool pinned = false,
+          Widget? dragHandle,
+          List<String> pinnedVisibleKeys = const [],
+        }) {
+          if (item.isManual) {
+            return manualCard(
+              item.manual!,
+              pinned: pinned,
+              dragHandle: dragHandle,
+              pinnedVisibleKeys: pinnedVisibleKeys,
+            );
+          }
+          return card(
+            item.assignment!,
+            pinned: pinned,
+            dragHandle: dragHandle,
+            pinnedVisibleKeys: pinnedVisibleKeys,
+          );
+        }
+
+        List<_TimelineSection> buildTimelineSections(
+          List<HomeTimelineItem> list,
+        ) {
+          final sections = <_TimelineSection>[];
           var regular = list;
 
           void flushGroup({
             String? heading,
             _DayHeadingTone tone = _DayHeadingTone.normal,
             String? badge,
-            required List<Assignment> rows,
+            required List<HomeTimelineItem> rows,
             bool pinned = false,
           }) {
             if (rows.isEmpty) return;
@@ -853,28 +1151,26 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           }
 
           if (recoveryScope == null && store.isAuthenticated) {
-            final pinned = <Assignment>[];
-            regular = <Assignment>[];
-            for (final a in list) {
-              if (store.isPinned(a) &&
-                  !store.isHomeAssignmentPreviewOnly(a.id)) {
-                pinned.add(a);
+            final pinned = <HomeTimelineItem>[];
+            regular = <HomeTimelineItem>[];
+            for (final item in list) {
+              final isPinned = item.isManual
+                  ? store.isManualPinned(item.manual!)
+                  : store.isPinned(item.assignment!) &&
+                      !store.isHomeAssignmentPreviewOnly(item.assignment!.id);
+              if (isPinned) {
+                pinned.add(item);
               } else {
-                regular.add(a);
+                regular.add(item);
               }
             }
             if (pinned.isNotEmpty) {
-              DateTime? autoPinnedTime(Assignment a) {
-                if (a.isExam) {
-                  return a.exam?.startTrusted == true ? a.exam!.startAt : null;
-                }
-                return AssignmentQuery.effectiveDeadline(
-                  a,
-                  coursework: coursework,
-                )?.at;
-              }
+              DateTime? autoPinnedTime(HomeTimelineItem item) => item.sortAt;
 
-              int compareAutoPinned(Assignment left, Assignment right) {
+              int compareAutoPinned(
+                HomeTimelineItem left,
+                HomeTimelineItem right,
+              ) {
                 final lt = autoPinnedTime(left);
                 final rt = autoPinnedTime(right);
                 if (lt != null && rt != null) {
@@ -885,13 +1181,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 } else if (rt != null) {
                   return 1;
                 }
-                return AssignmentStore.pinKeyOf(left)
-                    .compareTo(AssignmentStore.pinKeyOf(right));
+                return left.pinKey.compareTo(right.pinKey);
               }
 
               final orderedPinned = store.pinnedAssignments.orderItems(
                 pinned,
-                keyOf: AssignmentStore.pinKeyOf,
+                keyOf: (item) => item.pinKey,
                 defaultComparator: compareAutoPinned,
               );
               flushGroup(
@@ -907,41 +1202,50 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           String? activeHeading;
           String? activeBadge;
           var activeTone = _DayHeadingTone.normal;
-          var activeRows = <Assignment>[];
+          var activeRows = <HomeTimelineItem>[];
           var overdueTierAnnounced = false;
           final todayDay = AssignmentQuery.dayKey(now);
           final tomorrowDay =
               DateTime(todayDay.year, todayDay.month, todayDay.day + 1);
 
-          for (final a in regular) {
-            final bucket = AssignmentQuery.timelineBucketAt(
-              a,
-              now,
-              coursework: coursework,
-            );
+          for (final item in regular) {
+            final assignment = item.assignment;
+            final bucket = item.bucketAt(now, coursework: coursework);
             final isOverdue = bucket == AssignmentDeadlineBucket.overdue;
             DateTime? badgeDay;
             String? key;
             String? heading;
-            if (a.isExam) {
-              final stamp = ExamSchedulePresentation.build(a,
-                      records: examSources, index: displayIndex)
-                  .timeline;
+            if (item.isManual) {
+              final at = item.manual!.at;
+              if (at != null) {
+                final day = AssignmentQuery.dayKey(at);
+                badgeDay = day;
+                final showYear =
+                    recoveryScope != null || day.year != todayDay.year;
+                key =
+                    '${showYear ? '' : 'work:'}${day.year}:${day.month}:${day.day}';
+                heading =
+                    '${showYear ? '${day.year}年' : ''}${day.month}月${day.day}日 '
+                    '周${'一二三四五六日'[day.weekday - 1]}';
+              } else {
+                key = 'noDeadline';
+                heading = '无截止日期';
+              }
+            } else if (assignment!.isExam) {
+              final stamp = ExamSchedulePresentation.build(
+                assignment,
+                records: examSources,
+                index: displayIndex,
+              ).timeline;
               key = stamp?.key;
               heading = stamp?.heading;
-              final start = a.timelineAt;
+              final start = assignment.timelineAt;
               if (start != null &&
-                  (a.timelineTrusted || recoveryScope != null)) {
+                  (assignment.timelineTrusted || recoveryScope != null)) {
                 badgeDay = AssignmentQuery.dayKey(start);
               }
             } else {
-              final resolvedWorkAt = AssignmentQuery.displayTimelineAt(
-                a,
-                records: examSources,
-                index: displayIndex,
-                now: now,
-                coursework: coursework,
-              );
+              final resolvedWorkAt = item.displayAt;
               if (resolvedWorkAt != null) {
                 final day = AssignmentQuery.dayKey(resolvedWorkAt);
                 badgeDay = day;
@@ -955,7 +1259,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
             }
             if (heading == null && recoveryScope == null) {
-              if (!a.isExam &&
+              if (assignment != null &&
+                  !assignment.isExam &&
                   bucket == AssignmentDeadlineBucket.confirmedNoDeadline) {
                 key = 'noDeadline';
                 heading = '无截止日期';
@@ -972,7 +1277,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 badge: activeBadge,
                 rows: activeRows,
               );
-              activeRows = <Assignment>[];
+              activeRows = <HomeTimelineItem>[];
               activeHeading = heading;
               activeBadge = null;
               activeTone = _DayHeadingTone.normal;
@@ -993,7 +1298,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
             }
             previousKey = effectiveKey;
-            activeRows.add(a);
+            activeRows.add(item);
           }
 
           flushGroup(
@@ -1005,15 +1310,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           return sections;
         }
 
-        final timelineSections = sortedItems.isEmpty
-            ? const <({
-                String? heading,
-                _DayHeadingTone tone,
-                String? badge,
-                List<Assignment> items,
-                bool pinned,
-              })>[]
-            : buildTimelineSections(sortedItems);
+        final timelineSections = sortedTimelineItems.isEmpty
+            ? const <_TimelineSection>[]
+            : buildTimelineSections(sortedTimelineItems);
 
         final headerBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1420,7 +1719,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
                       style: journal.metadata)),
-            if (sortedItems.isNotEmpty && recoveryScope == null)
+            if (sortedTimelineItems.isNotEmpty && recoveryScope == null)
               const SizedBox(height: 12),
           ],
         );
@@ -1482,6 +1781,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                         : store.syncReport.phase == SyncPhase.failed
                             ? '本次尚未取得作业，请点击右上角刷新继续。'
                             : '点击右上角刷新，开始整理这本课业手记。',
+            actions: [
+              JournalSecondaryButton(
+                expanded: false,
+                label: '添加课业或待办',
+                onPressed: () => _openManualEditor(),
+              ),
+            ],
           );
         }
 
@@ -1512,8 +1818,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       Builder(
                         builder: (context) {
                           final visibleKeys = [
-                            for (final item in section.items)
-                              AssignmentStore.pinKeyOf(item),
+                            for (final item in section.items) item.pinKey,
                           ];
                           return ReorderableListView.builder(
                             shrinkWrap: true,
@@ -1559,10 +1864,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                 ),
                               );
                               return Column(
-                                key: ValueKey('pinned-reorder-${item.id}'),
+                                key: ValueKey('pinned-reorder-${item.pinKey}'),
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  card(
+                                  timelineCard(
                                     item,
                                     pinned: true,
                                     dragHandle: dragHandle,
@@ -1589,7 +1894,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     dividerIndent: 70.0,
                     children: [
                       for (final item in section.items)
-                        card(item, pinned: section.pinned),
+                        timelineCard(item, pinned: section.pinned),
                     ],
                   );
             if (section.heading == null) return groupCard;
@@ -1609,6 +1914,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         );
 
         final headerActions = [
+          if (recoveryScope == null)
+            IconButton(
+              key: const ValueKey('home-sliver-add-manual'),
+              tooltip: '添加课业或待办',
+              iconSize: 20,
+              onPressed: () => _openManualEditor(),
+              icon: const Icon(Icons.add_rounded),
+            ),
           IconButton(
             tooltip: '今日计划',
             iconSize: 20,
@@ -2130,9 +2443,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       color: journal.muted,
       fontWeight: FontWeight.w500,
     );
+    final addStyle = journal.metadata.copyWith(
+      color: journal.ink,
+      fontWeight: FontWeight.w600,
+    );
     final scaler = MediaQuery.textScalerOf(context);
     final filterLabel = filtersActive ? '已筛选' : '搜索与筛选';
     final sortLabel = _shortSortLabel(sortOrder);
+    const addLabel = '添加';
     double labelWidth(String text, TextStyle style) {
       final painter = TextPainter(
         text: TextSpan(text: text, style: style),
@@ -2146,6 +2464,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
     final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 26;
     final sortWidth = 17 + 7 + labelWidth(sortLabel, sortStyle) + 26;
+    final addWidth = 16 + 7 + labelWidth(addLabel, addStyle) + 26;
 
     Widget buildFilterPill({bool fullWidth = false}) {
       final journal = Journal.of(context);
@@ -2266,18 +2585,79 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       );
     }
 
+    Widget buildAddButton() {
+      const message = '添加课业或待办';
+      void onTap() => _openManualEditor();
+      return Semantics(
+        button: true,
+        label: message,
+        onTap: onTap,
+        child: ExcludeSemantics(
+          child: Tooltip(
+            message: message,
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                key: const ValueKey('home-add-manual'),
+                borderRadius: BorderRadius.circular(20),
+                onTap: onTap,
+                enableFeedback: false,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Center(
+                    widthFactor: 1,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 13,
+                        vertical: 6.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: journal.sage,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: journal.sageBorder,
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.add_rounded,
+                            size: 16,
+                            color: journal.ink,
+                          ),
+                          const SizedBox(width: 7),
+                          Text(addLabel, style: addStyle),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return LayoutBuilder(builder: (context, constraints) {
-      if (filterWidth + sortWidth + 10 <= constraints.maxWidth) {
+      if (filterWidth + sortWidth + addWidth + 20 <= constraints.maxWidth) {
         return Row(children: [
           Expanded(child: buildFilterPill(fullWidth: true)),
           const SizedBox(width: 10),
+          buildAddButton(),
+          const SizedBox(width: 8),
           buildSortButton(),
         ]);
       }
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      return Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           buildFilterPill(),
+          buildAddButton(),
           buildSortButton(),
         ],
       );

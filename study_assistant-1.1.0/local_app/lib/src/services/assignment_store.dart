@@ -235,7 +235,12 @@ class AssignmentStore extends ChangeNotifier {
       if (_generation != expectedEpoch || !_authenticated) return;
       final previous = notebook;
       notebook = StudyNotebook.decode(next.encode());
+      _pinnableKeysCache = null;
+      _pinnableKeysCacheMinute = null;
       saved = true;
+      if (_pinned.keys.any((key) => key.startsWith('manual:'))) {
+        await _prunePins();
+      }
       final manualSucceeded = await _afterAssignmentsChanged(
         updateAssignmentReminders: false,
         updateSummary: false,
@@ -561,6 +566,8 @@ class AssignmentStore extends ChangeNotifier {
       }
       final previous = notebook;
       notebook = StudyNotebook.decode(nextNotebook.encode());
+      _pinnableKeysCache = null;
+      _pinnableKeysCacheMinute = null;
       final manualSucceeded = await _afterAssignmentsChanged();
       await _recordManualCancellationOutcomes(
         previous,
@@ -656,6 +663,8 @@ class AssignmentStore extends ChangeNotifier {
       }
       final previous = notebook;
       notebook = StudyNotebook.decode(nextNotebook.encode());
+      _pinnableKeysCache = null;
+      _pinnableKeysCacheMinute = null;
       final manualSucceeded = await _afterAssignmentsChanged();
       await _recordManualCancellationOutcomes(
         previous,
@@ -1053,6 +1062,8 @@ class AssignmentStore extends ChangeNotifier {
 
   static String pinKeyOf(Assignment assignment) => _pinKey(assignment);
 
+  static String manualPinKeyOf(ManualEntry entry) => 'manual:${entry.id}';
+
   PinnedAssignments get pinnedAssignments => _pinned;
   List<String> get pinnedKeys => _pinned.keys;
   bool get hasManualPinOrder => _pinned.manuallyOrdered;
@@ -1347,6 +1358,8 @@ class AssignmentStore extends ChangeNotifier {
     _pinnableKeysCacheMinute = minute;
     return _pinnableKeysCache = {
       for (final item in visibleAssignments) _pinKey(item),
+      for (final entry in notebook.entries)
+        if (!entry.done) manualPinKeyOf(entry),
     };
   }
 
@@ -1384,6 +1397,44 @@ class AssignmentStore extends ChangeNotifier {
     return saved;
   }
 
+  bool isManualPinned(ManualEntry entry) =>
+      _authenticated && _pinned.containsAny([manualPinKeyOf(entry)]);
+
+  bool canToggleManualPin(ManualEntry entry) =>
+      _manageBackgroundSchedule &&
+      _authenticated &&
+      _account != null &&
+      !entry.done &&
+      notebook.entries.any((item) => item.id == entry.id && !item.done);
+
+  Future<bool> toggleManualPin(ManualEntry entry) async {
+    final account = _account;
+    final generation = _generation;
+    if (account == null || !canToggleManualPin(entry)) return false;
+    final key = manualPinKeyOf(entry);
+    var saved = false;
+    await _run(() async {
+      if (generation != _generation ||
+          account != _account ||
+          !_authenticated ||
+          !canToggleManualPin(entry)) {
+        return;
+      }
+      final next = _pinned.toggle(key, [key]);
+      await _savePins(next, account, generation);
+      if (generation != _generation ||
+          account != _account ||
+          !_authenticated ||
+          _disposed) {
+        return;
+      }
+      _pinned = next;
+      _pinsNeedSave = false;
+      saved = true;
+    });
+    return saved;
+  }
+
   Future<bool> reorderPinned(List<String> visibleOrderedKeys) async {
     final account = _account;
     final generation = _generation;
@@ -1394,8 +1445,11 @@ class AssignmentStore extends ChangeNotifier {
       for (final raw in visibleOrderedKeys)
         if (raw.trim().isNotEmpty) raw.trim(),
     ];
-    final initialVisibleSet =
-        visibleAssignments.where(isPinned).map(_pinKey).toSet();
+    final initialVisibleSet = {
+      ...visibleAssignments.where(isPinned).map(_pinKey),
+      for (final entry in notebook.entries)
+        if (!entry.done && isManualPinned(entry)) manualPinKeyOf(entry),
+    };
     if (_pinned.reorderVisible(cleanOrdered, initialVisibleSet) == null) {
       return false;
     }
@@ -1408,8 +1462,11 @@ class AssignmentStore extends ChangeNotifier {
           _disposed) {
         return;
       }
-      final latestVisibleSet =
-          visibleAssignments.where(isPinned).map(_pinKey).toSet();
+      final latestVisibleSet = {
+        ...visibleAssignments.where(isPinned).map(_pinKey),
+        for (final entry in notebook.entries)
+          if (!entry.done && isManualPinned(entry)) manualPinKeyOf(entry),
+      };
       final next = _pinned.reorderVisible(cleanOrdered, latestVisibleSet);
       if (next == null) return;
       await _savePins(next, account, generation);
@@ -1474,6 +1531,14 @@ class AssignmentStore extends ChangeNotifier {
         for (final source in group.sources) {
           explicitlyCompletedOrHiddenKeys.addAll(_pinAliases(source));
         }
+      }
+    }
+    for (final key in _pinned.keys) {
+      if (!key.startsWith('manual:')) continue;
+      final id = key.substring('manual:'.length);
+      final entry = notebook.entries.where((item) => item.id == id).firstOrNull;
+      if (entry == null || entry.done) {
+        explicitlyCompletedOrHiddenKeys.add(key);
       }
     }
     final retained = _pinned.migrateAndPrune(
@@ -2427,6 +2492,8 @@ class AssignmentStore extends ChangeNotifier {
     });
     await stage('个人待办与学期归档', () async {
       notebook = await repository.loadNotebook();
+      _pinnableKeysCache = null;
+      _pinnableKeysCacheMinute = null;
     });
     await stage('课程通知', () async {
       _courseNotices = await repository.loadCourseNotices();

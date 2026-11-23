@@ -460,6 +460,25 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
               builder: (_, __) => AssignmentListScreen(store: assignmentStore),
             ),
             GoRoute(
+              path: '/assignments/new',
+              onExit: (_, __) =>
+                  _leaveGuard.confirmLeave(routeScope: '/assignments'),
+              builder: (_, __) => ManualEntryEditor(
+                store: assignmentStore,
+                routeScope: '/assignments',
+              ),
+            ),
+            GoRoute(
+              path: '/assignments/manual/:id',
+              onExit: (_, __) =>
+                  _leaveGuard.confirmLeave(routeScope: '/assignments'),
+              builder: (_, state) => ManualEntryEditor(
+                store: assignmentStore,
+                entryId: state.pathParameters['id'],
+                routeScope: '/assignments',
+              ),
+            ),
+            GoRoute(
               path: '/assignments/:id',
               builder: (_, state) => AssignmentDetailScreen(
                 store: assignmentStore,

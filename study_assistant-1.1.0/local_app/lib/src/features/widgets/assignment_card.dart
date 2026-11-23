@@ -91,6 +91,20 @@ class AssignmentCard extends StatelessWidget {
     return width;
   }
 
+  static double measureRailWidth(
+    BuildContext context, {
+    required bool inPinnedSection,
+  }) {
+    final journal = Journal.of(context);
+    return _measureRailWidth(
+      journal.time,
+      journal.metadata,
+      Directionality.of(context),
+      MediaQuery.textScalerOf(context),
+      inPinnedSection: inPinnedSection,
+    );
+  }
+
   static String _compactRemaining(DateTime deadline, DateTime now) {
     final diff = deadline.difference(now);
     if (diff.isNegative || diff.inSeconds <= 0) return '已逾期';
@@ -99,6 +113,9 @@ class AssignmentCard extends StatelessWidget {
     if (minutes < 1440) return '剩${(minutes / 60).ceil()}小时';
     return '剩${(minutes / 1440).ceil()}天';
   }
+
+  static String compactRemaining(DateTime deadline, DateTime now) =>
+      _compactRemaining(deadline, now);
 
   static String examStateLabel(Assignment assignment, DateTime now) {
     final exam = assignment.exam!;

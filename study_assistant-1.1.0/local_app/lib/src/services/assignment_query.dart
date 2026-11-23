@@ -266,6 +266,10 @@ class AssignmentQuery {
     return DateTime(d.year, d.month, d.day);
   }
 
+  /// Public natural-order comparison for mixed home timeline consumers.
+  static int compareNaturalPinyin(String left, String right) =>
+      _compareKey(_NaturalKey(left), _NaturalKey(right));
+
   static DateTime _beijingInstant(int year, int month, int day) =>
       DateTime.utc(year, month, day).subtract(const Duration(hours: 8));
 
