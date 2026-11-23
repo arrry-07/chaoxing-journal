@@ -923,4 +923,48 @@ void main() {
       expect(find.byType(CalendarScreen), findsOneWidget);
     });
   });
+
+  testWidgets(
+      'Phase 5A quick-add ManualEntryEditor from CalendarScreen guards dirty exit on back and notification',
+      (tester) async {
+    final notifications = _CapturingNotifications();
+    final store = await _launchApp(
+      tester,
+      '/calendar',
+      notifications: notifications,
+    );
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('calendar-quick-add-entry')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualEntryEditor), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
+
+    await tester.enterText(find.byType(TextFormField).first, '日历未保存待办');
+    await tester.pump();
+
+    unawaited(tester.binding.handlePopRoute());
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualEntryEditor), findsOneWidget);
+
+    notifications.handler!('d:summary');
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualEntryEditor), findsOneWidget);
+
+    notifications.handler!('d:summary');
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    await tester.tap(find.text('放弃修改'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualEntryEditor), findsNothing);
+    expect(find.byType(AssignmentListScreen), findsOneWidget);
+    expect(store.notebook.entries, isEmpty);
+  });
 }

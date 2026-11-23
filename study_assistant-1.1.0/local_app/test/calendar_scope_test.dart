@@ -18,6 +18,7 @@ import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/calendar_day_workload.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -39,6 +40,9 @@ class _Session extends SecureSessionStore {
 class _Notifications extends LocalNotificationService {
   @override
   Future<void> cancelPrivateSchedules() async {}
+
+  @override
+  Future<void> rescheduleManual(List<ManualEntry> entries) async {}
 }
 
 class _Snapshot extends WidgetSnapshotService {
@@ -983,5 +987,214 @@ void main() {
     expect(find.text('手动'), findsOneWidget);
     expect(find.textContaining('官方待确认'), findsOneWidget);
     expect(find.text('00:30'), findsOneWidget);
+  });
+
+  test(
+      'Phase 5A CalendarDayWorkload dedupes exam identity, includes manual deadlines/entries, and excludes completed/ended',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final now = DateTime.utc(2026, 12, 20, 2); // Beijing 10:00
+    final day1Start = DateTime.utc(2026, 12, 22, 1); // Beijing Dec 22 09:00
+
+    final w1 = _assignment('w1', title: '作业1', deadlineAt: day1Start);
+    final completedWork = _assignment(
+      'done',
+      title: '已完成作业',
+      deadlineAt: day1Start,
+      status: 'submitted',
+    );
+    final untrustedWork = _assignment(
+      'manual-work',
+      title: '2B 手动期限作业',
+      deadlineAt: null,
+      trusted: false,
+    );
+    final endedExam = Assignment(
+      id: 'cx:exam:1:2:ended',
+      source: AssignmentSource.exam,
+      courseName: '课程',
+      title: '已结束考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: 'ended',
+        courseId: '1',
+        clazzId: '2',
+        startAt: day1Start,
+        endAt: day1Start.add(const Duration(hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'ended',
+      ),
+    );
+    final formalExam = Assignment(
+      id: 'cx:exam:1:2:55',
+      source: AssignmentSource.exam,
+      courseName: '课程',
+      title: '正式考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: '55',
+        courseId: '1',
+        clazzId: '2',
+        startAt: day1Start,
+        endAt: day1Start.add(const Duration(hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    final dupNotice = Assignment(
+      id: 'cx:examNotice:inbox:n55',
+      source: AssignmentSource.exam,
+      courseName: '课程',
+      title: '考试通知副本',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: 'n55',
+        relatedExamId: '55',
+        courseId: '1',
+        clazzId: '2',
+        noticeOnly: true,
+        startAt: day1Start,
+        endAt: day1Start.add(const Duration(hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('A');
+    await repo.mergeAndSave([untrustedWork], completeSync: true);
+    final store = _makeStore(_Session());
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    expect(await store.setManualDeadline(untrustedWork, day1Start), isTrue);
+
+    // 2 items: formalExam (+ dupNotice deduped) + w1 -> not busy
+    expect(
+      CalendarDayWorkload.countForDay(
+        assignments: [w1, completedWork, endedExam, formalExam, dupNotice],
+        manualEntries: [
+          ManualEntry(
+              id: 'done-m',
+              title: '已完成手动',
+              kind: 'todo',
+              at: day1Start,
+              done: true),
+          const ManualEntry(id: 'nodate-m', title: '无日期手动', kind: 'todo'),
+        ],
+        now: now,
+        coursework: store.courseworkState,
+      ),
+      2,
+    );
+    expect(CalendarDayWorkload.isBusyCount(2), isFalse);
+
+    // Adding 2B manual deadline makes 3 items -> busy!
+    final count3 = CalendarDayWorkload.countForDay(
+      assignments: [w1, untrustedWork, formalExam, dupNotice],
+      manualEntries: const [],
+      now: now,
+      coursework: store.courseworkState,
+    );
+    expect(count3, 3);
+    expect(CalendarDayWorkload.isBusyCount(count3), isTrue);
+  });
+
+  testWidgets(
+      'Phase 5A calendar + 记一条 creates todo or manual exam on selected Beijing day including blank cross-year day',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(420, 900);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    final now = DateTime.utc(2026, 12, 20, 2); // Beijing 2026-12-20 10:00
+    final store = _makeStore(_Session());
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    store.replaceAssignmentsForTest([
+      _assignment(
+        'dec-other',
+        title: '十二月其他作业',
+        deadlineAt: DateTime.utc(2026, 12, 15, 1),
+      ),
+    ]);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(body: CalendarScreen(store: store, clock: () => now)),
+    ));
+    await tester.pumpAndSettle();
+
+    // Navigate to Jan 2027 (cross-year) and select blank day Jan 2.
+    await tester.tap(find.byTooltip('下个月'));
+    await tester.pumpAndSettle();
+    expect(find.text('2027年1月'), findsOneWidget);
+
+    final jan2 = find.descendant(
+      of: find.byKey(const ValueKey('calendar-grid-viewport')),
+      matching: find.text('2'),
+    );
+    await tester.tap(jan2);
+    await tester.pumpAndSettle();
+    expect(find.text('1月2日 · 议程'), findsOneWidget);
+    expect(find.text('所选范围没有已知日期的课业'), findsOneWidget);
+
+    // Open + 记一条 and immediately cancel without saving: writes nothing.
+    final quickAdd = find.byKey(const ValueKey('calendar-quick-add-entry'));
+    expect(quickAdd, findsOneWidget);
+    await tester.tap(quickAdd);
+    await tester.pumpAndSettle();
+    expect(find.text('2027-01-02 09:00 北京时间'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(store.notebook.entries, isEmpty);
+
+    // Open + 记一条 again, save a personal todo on 2027-01-02.
+    await tester.tap(quickAdd);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '跨年二日复习');
+    await tester.pump();
+    final saveBtn = find.text('保存个人安排');
+    await tester.ensureVisible(saveBtn);
+    await tester.tap(saveBtn);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('个人待办 · 跨年二日复习'), findsOneWidget);
+    expect(store.notebook.entries, hasLength(1));
+    expect(
+      AssignmentQuery.dayKey(store.notebook.entries.single.at!),
+      DateTime(2027, 1, 2),
+    );
+
+    // Open + 记一条 and add a manual exam on the same blank day.
+    await tester.tap(quickAdd);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('手动考试'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '跨年口试');
+    await tester.pump();
+    await tester.ensureVisible(saveBtn);
+    await tester.tap(saveBtn);
+    await tester.pumpAndSettle();
+
+    expect(find.text('手动考试 · 跨年口试'), findsOneWidget);
+    expect(store.notebook.entries, hasLength(2));
+    expect(tester.takeException(), isNull);
   });
 }

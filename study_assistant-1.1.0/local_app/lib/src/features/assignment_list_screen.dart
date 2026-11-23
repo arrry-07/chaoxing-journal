@@ -23,6 +23,7 @@ import '../services/exam_schedule_presentation.dart';
 import '../services/external_link_service.dart';
 import '../services/home_course_filter.dart';
 import '../services/home_sync_presentation.dart';
+import '../services/home_upcoming_exam.dart';
 import '../services/interaction_feedback_service.dart';
 import 'widgets/appearance_controls.dart';
 import 'widgets/assignment_card.dart';
@@ -109,11 +110,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   final _feedback = TransientFeedbackController();
   late int _feedbackEpoch;
   String? _feedbackAccount;
+  HomeFilters? _preExamStripFilters;
+  int? _preExamStripEpoch;
 
   void _checkFeedbackAccount() {
     if (_feedbackEpoch != store.accountEpoch ||
         _feedbackAccount != store.account) {
       _feedback.dismiss();
+      _preExamStripFilters = null;
+      _preExamStripEpoch = null;
       _feedbackEpoch = store.accountEpoch;
       _feedbackAccount = store.account;
     }
@@ -639,6 +644,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 sync.action == HomeSyncAction.verify
             ? sync.action
             : HomeSyncAction.retry;
+        final upcomingExam = recoveryScope == null
+            ? HomeUpcomingExam.select(
+                catalogAssignments,
+                now: now,
+                index: displayIndex,
+                coursework: coursework,
+                courseKey: _courseKey,
+              )
+            : null;
 
         Widget buildCard(
           Assignment a, {
@@ -1293,6 +1307,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   ],
                 ),
               ),
+            if (upcomingExam != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: _buildUpcomingExamStrip(context, upcomingExam, journal),
+              ),
             if (recoveryScope == null) ...[
               const SizedBox(height: 6),
               _homeActions(context, options, filtersActive, sortOrder),
@@ -1711,17 +1730,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         if (_typeFilter != AssignmentTypeFilter.all)
           removableTag(
             '类型：${_typeFilter.label}',
-            () => _saveFilters(
-              HomeFilters(
-                query: _query,
-                courseKey: _courseKey,
-                deadline: _deadlineFilter,
-                type: AssignmentTypeFilter.all,
-                sortOrder: _sortOrder,
-              ),
-              epoch,
-              account,
-            ),
+            () {
+              _preExamStripFilters = null;
+              _preExamStripEpoch = null;
+              unawaited(_saveFilters(
+                HomeFilters(
+                  query: _query,
+                  courseKey: _courseKey,
+                  deadline: _deadlineFilter,
+                  type: AssignmentTypeFilter.all,
+                  sortOrder: _sortOrder,
+                ),
+                epoch,
+                account,
+              ));
+            },
           ),
         if (_deadlineFilter != AssignmentDeadlineFilter.all)
           removableTag(
@@ -1761,11 +1784,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             tapTargetSize: MaterialTapTargetSize.padded,
             foregroundColor: Journal.of(context).muted,
           ),
-          onPressed: () => _saveFilters(
-            HomeFilters(sortOrder: _sortOrder),
-            epoch,
-            account,
-          ),
+          onPressed: () {
+            _preExamStripFilters = null;
+            _preExamStripEpoch = null;
+            unawaited(_saveFilters(
+              HomeFilters(sortOrder: _sortOrder),
+              epoch,
+              account,
+            ));
+          },
           child: const Text('重置条件'),
         ),
       ],
@@ -1839,6 +1866,116 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildUpcomingExamStrip(
+    BuildContext context,
+    HomeUpcomingExam upcomingExam,
+    JournalPalette journal,
+  ) {
+    final inExamView = _typeFilter == AssignmentTypeFilter.exam;
+    void onTap() {
+      final epoch = store.accountEpoch;
+      final account = store.account;
+      if (!inExamView) {
+        _preExamStripFilters = store.homeFilters;
+        _preExamStripEpoch = epoch;
+        unawaited(_saveFilters(
+          HomeFilters(
+            query: _query,
+            courseKey: _courseKey,
+            deadline: AssignmentDeadlineFilter.all,
+            type: AssignmentTypeFilter.exam,
+            sortOrder: _sortOrder,
+          ),
+          epoch,
+          account,
+        ));
+      } else {
+        final previous =
+            _preExamStripEpoch == epoch ? _preExamStripFilters : null;
+        _preExamStripFilters = null;
+        _preExamStripEpoch = null;
+        unawaited(_saveFilters(
+          previous ??
+              HomeFilters(
+                query: _query,
+                courseKey: _courseKey,
+                deadline: _deadlineFilter,
+                type: AssignmentTypeFilter.all,
+                sortOrder: _sortOrder,
+              ),
+          epoch,
+          account,
+        ));
+      }
+    }
+
+    return Semantics(
+      button: true,
+      label: '${upcomingExam.label}，点击${inExamView ? '返回全部课业' : '查看考试筛选视图'}',
+      onTap: onTap,
+      child: Material(
+        color: inExamView ? journal.sage : journal.parchment,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: inExamView ? journal.sageBorder : journal.rule,
+            width: 0.8,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: const ValueKey('home-upcoming-exam-strip'),
+          onTap: onTap,
+          enableFeedback: false,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 44),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: ExcludeSemantics(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.school_outlined,
+                      size: 16,
+                      color: inExamView ? journal.accent : journal.muted,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        upcomingExam.label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: journal.metadata.copyWith(
+                          color: journal.ink,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    if (inExamView)
+                      Text(
+                        '返回',
+                        style: journal.metadata.copyWith(
+                          color: journal.accent,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      )
+                    else
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 18,
+                        color: journal.muted,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2364,6 +2501,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         store.account != openingAccount) {
       return;
     }
+    _preExamStripFilters = null;
+    _preExamStripEpoch = null;
     await _saveFilters(
         HomeFilters(
             query: selection.query.trim(),

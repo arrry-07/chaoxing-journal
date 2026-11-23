@@ -359,6 +359,24 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     );
   }
 
+  DateTime? _parseDayQuery(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(raw);
+    if (match == null) return null;
+    final year = int.tryParse(match.group(1)!);
+    final month = int.tryParse(match.group(2)!);
+    final day = int.tryParse(match.group(3)!);
+    if (year == null || month == null || day == null) return null;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    final candidate = DateTime(year, month, day);
+    if (candidate.year != year ||
+        candidate.month != month ||
+        candidate.day != day) {
+      return null;
+    }
+    return candidate;
+  }
+
   GoRouter _buildRouter() {
     final platformUri = Uri.tryParse(
         WidgetsBinding.instance.platformDispatcher.defaultRouteName);
@@ -450,7 +468,19 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             ),
             GoRoute(
               path: '/calendar',
+              onExit: (_, __) =>
+                  _leaveGuard.confirmLeave(routeScope: '/calendar'),
               builder: (_, __) => CalendarScreen(store: assignmentStore),
+            ),
+            GoRoute(
+              path: '/calendar/new',
+              onExit: (_, __) =>
+                  _leaveGuard.confirmLeave(routeScope: '/calendar'),
+              builder: (_, state) => ManualEntryEditor(
+                store: assignmentStore,
+                initialDay: _parseDayQuery(state.uri.queryParameters['day']),
+                routeScope: '/calendar',
+              ),
             ),
             GoRoute(
               path: '/stats',

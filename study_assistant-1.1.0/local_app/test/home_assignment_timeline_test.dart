@@ -564,6 +564,102 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('时间变更'), findsNothing);
   });
+
+  testWidgets(
+      'Phase 5A upcoming exam strip respects selected course scope and restores previous deadline filter at 360dp',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 16, 2); // Beijing 10:00
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final session = f.Session();
+    final store = _PinTimelineStore(sessionStore: session, clock: () => now);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final mathExam = Assignment(
+      id: 'cx:exam:1:2:10',
+      source: AssignmentSource.exam,
+      courseName: '高等数学',
+      title: '高数期中考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: '10',
+        courseId: '1',
+        clazzId: '2',
+        startAt: now.add(const Duration(days: 3)),
+        endAt: now.add(const Duration(days: 3, hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    final staleNotice = Assignment(
+      id: 'cx:examNotice:inbox:n10',
+      source: AssignmentSource.exam,
+      courseName: '高等数学',
+      title: '高数期中考试（通知）',
+      deadlineAt: null,
+      requirementsText: '考试时间：2026-11-17 09:00 至 2026-11-17 11:00',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: 'n10',
+        relatedExamId: '10',
+        courseId: '1',
+        clazzId: '2',
+        noticeOnly: true,
+        startAt: now.add(const Duration(days: 1)),
+        endAt: now.add(const Duration(days: 1, hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    final otherCourseWork = _work(
+      'other-course',
+      title: '大学英语作文',
+      course: '大学英语',
+      due: now.add(const Duration(days: 2)),
+    ).copyWith(id: 'cx:work:9:9:w1');
+
+    store
+      ..replaceAssignmentsForTest([mathExam, staleNotice, otherCourseWork])
+      ..homeFilters = const HomeFilters(
+        courseKey: '1:2',
+        deadline: AssignmentDeadlineFilter.notExpired,
+      );
+
+    await _mountRoutedHomeWithClock(tester, store, () => now);
+    tester.view.physicalSize = const Size(360, 780);
+    await tester.pumpAndSettle();
+
+    // Formal exam wins over stale notice at day +1; shows +3 days.
+    expect(find.text('近期考试 · 《高数期中考试》3 天后'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('home-upcoming-exam-strip')));
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.type, AssignmentTypeFilter.exam);
+    expect(store.homeFilters.courseKey, '1:2');
+
+    // Return restores previous deadline filter + clears exam type.
+    await tester.tap(find.byKey(const ValueKey('home-upcoming-exam-strip')));
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.type, AssignmentTypeFilter.all);
+    expect(store.homeFilters.courseKey, '1:2');
+    expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
+
+    // Selecting unrelated course removes the strip with zero placeholder.
+    await store.saveHomeFilters(
+      const HomeFilters(courseKey: '9:9'),
+      store.accountEpoch,
+    );
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(const ValueKey('home-upcoming-exam-strip')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 Future<GoRouter> _mountRoutedHomeWithClock(
