@@ -1653,6 +1653,7 @@ class AssignmentStore extends ChangeNotifier {
       _statsAssignmentsCache ??= List.unmodifiable([
         for (final group in localRecordGroups)
           if (!group.hidden &&
+              group.primary.isInAssignmentScope &&
               (group.primary.courseKey == null ||
                   follows(group.primary.courseKey!)))
             group.primary,
