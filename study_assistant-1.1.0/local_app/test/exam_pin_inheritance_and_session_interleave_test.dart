@@ -13,6 +13,7 @@ import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
 import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
+import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
@@ -580,6 +581,198 @@ void main() {
     expect(fgStore.isPinned(completedLater), isFalse);
     expect(await fgRepo.loadPinnedIds(account), {pendingWork.courseTaskKey});
   });
+
+  group('Phase 2A pin-loss diagnosis, ordered pins, and reorder', () {
+    test(
+        'partial sync, streaming preview, and temporary unfollow preserve durable pins while exam replacement keeps slot',
+        () async {
+      const account = 'pin-loss-repro-student';
+      final gateway = _TestGateway();
+      final session = _MemorySessionStore(account: account, password: 'pw');
+      final now = DateTime.utc(2026, 11, 20, 4);
+      final workA = Assignment(
+        id: 'cx:work:10:20:a',
+        courseName: '高等数学',
+        title: '高数练习 A',
+        deadlineAt: now.add(const Duration(days: 3)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+      final noticeB = _examNotice(
+        id: '801',
+        relatedExamId: '3',
+        courseId: '1',
+        clazzId: '2',
+        now: now,
+      );
+      final workC = Assignment(
+        id: 'cx:work:30:40:c',
+        courseName: '大学物理',
+        title: '大物实验 C',
+        deadlineAt: now.add(const Duration(days: 1)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+      final formalB = _formalExam(
+        examId: '3',
+        courseId: '1',
+        clazzId: '2',
+        now: now,
+      );
+
+      final client = _QueuedClient([
+        // Streaming partial sync omitting workA must NOT drop workA's pin.
+        [noticeB, workC],
+        // Formal exam replacing noticeB while workA & workC return.
+        [workA, formalB, workC],
+      ]);
+      final repo =
+          LocalAssignmentRepository(backgroundReminderGateway: gateway);
+      await repo.activateAccount(account);
+      await repo.mergeAndSave([workA, noticeB, workC], completeSync: true);
+
+      final store = AssignmentStore(
+        sessionStore: session,
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _RecordingWidgetSnapshotService(),
+        repository: repo,
+        chaoxingClient: client,
+        backgroundReminderGateway: gateway,
+        clock: () => now,
+      );
+      addTearDown(store.dispose);
+      await store.restoreSession();
+
+      // Pin order intentionally: workA (slot 0), noticeB (slot 1), workC (slot 2).
+      // Linked noticeB shares canonical exam key with formalB.
+      final examKeyB = AssignmentStore.pinKeyOf(noticeB);
+      expect(examKeyB, 'exam:1:2:3');
+      expect(await store.togglePin(workA), isTrue);
+      expect(await store.togglePin(noticeB), isTrue);
+      expect(await store.togglePin(workC), isTrue);
+      expect(
+        store.pinnedKeys,
+        [workA.courseTaskKey, examKeyB, workC.courseTaskKey],
+      );
+
+      // Reorder manually: examKeyB first, workC second, workA third.
+      expect(
+        await store.reorderPinned([
+          examKeyB,
+          workC.courseTaskKey!,
+          workA.courseTaskKey!,
+        ]),
+        isTrue,
+      );
+      expect(store.hasManualPinOrder, isTrue);
+
+      // Temporarily unfollowing workA's course must NOT purge workA's pin from disk.
+      await store.followCourse('10:20', false);
+      expect(store.isPinned(workA), isTrue);
+      expect(
+        (await repo.loadPinnedAssignments(account)).keys,
+        [examKeyB, workC.courseTaskKey, workA.courseTaskKey],
+      );
+
+      // Partial sync missing workA also leaves disk pin intact.
+      await store.syncAssignments();
+      expect(
+        (await repo.loadPinnedAssignments(account)).keys,
+        [examKeyB, workC.courseTaskKey, workA.courseTaskKey],
+      );
+
+      // Refollow & next sync where formalB replaces noticeB: formalB inherits slot 0!
+      await store.followCourse('10:20', true);
+      await store.syncAssignments();
+      expect(
+        store.pinnedKeys,
+        [examKeyB, workC.courseTaskKey, workA.courseTaskKey],
+      );
+
+      // Reopen cold store: manual order and all 3 pins survive restart.
+      final coldStore = AssignmentStore(
+        sessionStore: session,
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _RecordingWidgetSnapshotService(),
+        repository:
+            LocalAssignmentRepository(backgroundReminderGateway: gateway),
+        chaoxingClient: client,
+        backgroundReminderGateway: gateway,
+        clock: () => now,
+      );
+      addTearDown(coldStore.dispose);
+      await coldStore.restoreSession();
+      expect(coldStore.hasManualPinOrder, isTrue);
+      expect(
+        coldStore.pinnedKeys,
+        [examKeyB, workC.courseTaskKey, workA.courseTaskKey],
+      );
+
+      // Hidden/filtered pins keep their hidden slot when reordering visible subset.
+      await coldStore.followCourse('10:20', false);
+      expect(
+        await coldStore.reorderPinned([workC.courseTaskKey!, examKeyB]),
+        isTrue,
+      );
+      expect(
+        coldStore.pinnedKeys,
+        [workC.courseTaskKey, examKeyB, workA.courseTaskKey],
+      );
+      await coldStore.followCourse('10:20', true);
+
+      // Legacy notice raw ID pre-seeded in slot 1 migrates in-place to examKeyB.
+      final legacyRepo =
+          LocalAssignmentRepository(backgroundReminderGateway: _TestGateway());
+      const legacyAccount = 'pin-legacy-slot-student';
+      await legacyRepo.activateAccount(legacyAccount);
+      await legacyRepo
+          .mergeAndSave([workA, noticeB, workC], completeSync: true);
+      await legacyRepo.savePinnedAssignments(
+        PinnedAssignments(
+          keys: [workA.courseTaskKey!, noticeB.id, workC.courseTaskKey!],
+          manuallyOrdered: true,
+        ),
+        legacyAccount,
+      );
+      final legacyStore = AssignmentStore(
+        sessionStore:
+            _MemorySessionStore(account: legacyAccount, password: 'pw'),
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _RecordingWidgetSnapshotService(),
+        repository: legacyRepo,
+        chaoxingClient: _QueuedClient([
+          [workA, formalB, workC],
+        ]),
+        clock: () => now,
+      );
+      addTearDown(legacyStore.dispose);
+      await legacyStore.restoreSession();
+      expect(
+        legacyStore.pinnedKeys,
+        [workA.courseTaskKey, examKeyB, workC.courseTaskKey],
+      );
+      expect(legacyStore.hasManualPinOrder, isTrue);
+
+      // Stale epoch reorder or mismatched visible keys must be rejected cleanly.
+      final staleSession =
+          _MemorySessionStore(account: 'other', password: 'pw');
+      final otherStore = AssignmentStore(
+        sessionStore: staleSession,
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _RecordingWidgetSnapshotService(),
+        repository:
+            LocalAssignmentRepository(backgroundReminderGateway: gateway),
+        chaoxingClient: client,
+        backgroundReminderGateway: gateway,
+        clock: () => now,
+      );
+      addTearDown(otherStore.dispose);
+      await otherStore.restoreSession();
+      expect(await otherStore.reorderPinned([workA.courseTaskKey!]), isFalse);
+    });
+  });
 }
 
 class _MemorySessionStore extends SecureSessionStore {
@@ -866,6 +1059,8 @@ class _TestGateway extends BackgroundReminderGateway {
     BackgroundCheckSettings settings, {
     required bool showDetails,
     bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
   }) async {
     mutationVersion++;
   }

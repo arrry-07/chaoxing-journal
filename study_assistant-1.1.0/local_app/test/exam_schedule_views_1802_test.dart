@@ -7,6 +7,7 @@ import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_grouping.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/exam_schedule_presentation.dart';
+import 'package:study_assistant_mobile/src/services/home_upcoming_exam.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -249,4 +250,90 @@ void main() {
       expect(t.takeException(), isNull);
     });
   }
+
+  test(
+      'Phase 5A HomeUpcomingExam rejects standalone noticeOnly, yearless notice times, and stale conflicting notices after reschedule',
+      () {
+    final now = DateTime.utc(2026, 11, 16, 2); // Beijing 10:00
+    final standaloneNotice = Assignment(
+      id: 'cx:examNotice:inbox:99',
+      source: AssignmentSource.exam,
+      courseName: '高等数学',
+      title: '仅通知考试',
+      deadlineAt: null,
+      requirementsText: '考试时间：11-18 09:00:00 至 11-18 11:00:00',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: '99',
+        courseId: '1',
+        clazzId: '2',
+        noticeOnly: true,
+        startAt: now.add(const Duration(days: 2)),
+        endAt: now.add(const Duration(days: 2, hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    expect(HomeUpcomingExam.select([standaloneNotice], now: now), isNull);
+
+    final unverifiedWithNoticeRange = _exam(notice: false, trusted: false);
+    final linkedNotice = _exam(notice: true, trusted: false);
+    expect(
+      HomeUpcomingExam.select(
+        [unverifiedWithNoticeRange, linkedNotice],
+        now: now,
+      ),
+      isNull,
+    );
+
+    final formalMovedOut = Assignment(
+      id: 'cx:exam:1:2:3',
+      source: AssignmentSource.exam,
+      courseName: '合成课程',
+      title: '改期后的考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: '3',
+        courseId: '1',
+        clazzId: '2',
+        noticeOnly: false,
+        startAt: now.add(const Duration(days: 16)),
+        endAt: now.add(const Duration(days: 16, hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    final staleNoticeDay3 = Assignment(
+      id: 'cx:examNotice:inbox:n2',
+      source: AssignmentSource.exam,
+      courseName: '合成课程',
+      title: '改期后的考试',
+      deadlineAt: null,
+      requirementsText: '考试时间：2026-11-19 09:00 至 2026-11-19 11:00',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: 'n2',
+        relatedExamId: '3',
+        courseId: '1',
+        clazzId: '2',
+        noticeOnly: true,
+        startAt: now.add(const Duration(days: 3)),
+        endAt: now.add(const Duration(days: 3, hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    expect(
+      HomeUpcomingExam.select([formalMovedOut, staleNoticeDay3], now: now),
+      isNull,
+    );
+  });
 }

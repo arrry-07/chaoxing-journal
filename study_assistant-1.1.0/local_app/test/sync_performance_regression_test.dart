@@ -1,8 +1,13 @@
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/course_notice.dart';
+import 'package:study_assistant_mobile/src/models/course_term_preferences.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
-import 'exam_sync_test.dart' show ExamFixture;
+import 'package:study_assistant_mobile/src/models/sync_scope.dart';
+import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
+import 'exam_sync_test.dart' show ExamFixture, accountGoRow;
 
 void omitFirstExamCredential(ExamFixture f) {
   var first = true;
@@ -123,5 +128,119 @@ void main() {
     f.gate = null;
     await c.fetchAssignments();
     expect(f.middleReads, 2);
+  });
+
+  test(
+      'current scope skips archived course requests while preserving account exams and shrinking HTTP count vs all',
+      () async {
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final rawCatalog = [
+      {
+        'courseId': '7',
+        'clazzId': '11',
+        'courseName': '本学期课程A',
+        'folderName': '2026年秋'
+      },
+      {
+        'courseId': '8',
+        'clazzId': '11',
+        'courseName': '本学期课程B',
+        'folderName': '2026年秋'
+      },
+      {
+        'courseId': '9',
+        'clazzId': '11',
+        'courseName': '往期课程C',
+        'folderName': '2025年秋'
+      },
+      {
+        'courseId': '10',
+        'clazzId': '11',
+        'courseName': '往期课程D',
+        'folderName': '2025年秋'
+      },
+    ];
+    final termCatalog = CourseTermCatalog.build(
+      courses: [
+        for (final row in rawCatalog)
+          CourseRef(
+            courseId: row['courseId']!,
+            clazzId: row['clazzId']!,
+            name: row['courseName']!,
+            folderName: row['folderName'],
+          ),
+      ],
+      assignments: const [],
+      notices: const <CourseNotice>[],
+      preferences: const CourseTermPreferences.empty(),
+      now: now,
+    );
+
+    ExamFixture buildFixture() {
+      final f = ExamFixture()
+        ..accountHtml = accountGoRow(
+          title: '全国统考',
+          time: '2030-06-09 09:00 至 2030-06-09 11:00',
+          courseId: '7',
+          clazzId: '11',
+          examId: '501',
+        );
+      f.dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (o, h) {
+        if (o.uri.path == '/mycourse/backclazzdata') {
+          f.requests.add(o);
+          h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: {'courses': rawCatalog},
+          ));
+          return;
+        }
+        h.next(o);
+      }));
+      return f;
+    }
+
+    final currentFx = buildFixture();
+    final currentClient = currentFx.client()
+      ..nextSyncCourseSelector = (catalog) => SyncScopeSelection.select(
+            catalog: catalog,
+            scope: AssignmentSyncScope.current,
+            termCatalog: termCatalog,
+          );
+    final currentRows = await currentClient.fetchAssignments();
+
+    final allFx = buildFixture();
+    final allClient = allFx.client()
+      ..nextSyncCourseSelector = (catalog) => SyncScopeSelection.select(
+            catalog: catalog,
+            scope: AssignmentSyncScope.all,
+            termCatalog: termCatalog,
+          );
+    final allRows = await allClient.fetchAssignments();
+
+    expect(currentClient.plannedCourses, 2);
+    expect(currentClient.skippedCourses, 2);
+    expect(allClient.plannedCourses, 4);
+    expect(allClient.skippedCourses, 0);
+    expect(currentFx.requests.length, lessThan(allFx.requests.length));
+    expect(
+      currentFx.requests.where((r) => const {'9', '10'}.contains(
+          r.uri.queryParameters['courseId'] ??
+              r.uri.queryParameters['courseid'])),
+      isEmpty,
+    );
+    expect(
+      currentFx.requests
+          .where((r) => r.uri.path == '/exam-ans/exam/test/examcode/examlist'),
+      hasLength(1),
+    );
+    expect(
+      currentRows.any((a) => a.id == 'cx:exam:7:11:501'),
+      isTrue,
+    );
+    expect(
+        allRows.where((a) => a.isExam && !a.exam!.noticeOnly).length,
+        greaterThan(
+            currentRows.where((a) => a.isExam && !a.exam!.noticeOnly).length));
   });
 }

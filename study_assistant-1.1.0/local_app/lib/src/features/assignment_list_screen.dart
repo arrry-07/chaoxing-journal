@@ -12,16 +12,20 @@ import '../models/assignment.dart';
 import '../models/assignment_sync_progress.dart';
 import '../models/display_preferences.dart';
 import '../models/home_filters.dart';
+import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_web_link.dart';
+import '../services/course_term_catalog.dart';
 import '../services/exam_schedule_presentation.dart';
 import '../services/external_link_service.dart';
 import '../services/home_course_filter.dart';
 import '../services/home_sync_presentation.dart';
+import '../services/home_upcoming_exam.dart';
 import '../services/interaction_feedback_service.dart';
+import '../services/todo_copy_formatter.dart';
 import 'widgets/appearance_controls.dart';
 import 'widgets/assignment_card.dart';
 import 'widgets/journal_buttons.dart';
@@ -65,7 +69,11 @@ enum AssignmentRecoveryScope {
 
   /// Retained historical dates remain visible here even though the trusted
   /// calendar grid excludes them.
-  bool matches(Assignment assignment, DateTime now) {
+  bool matches(
+    Assignment assignment,
+    DateTime now, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
     if (AssignmentQuery.isArchivedPastTerm(assignment, now)) return false;
     if (assignment.isExam) {
       return this == examUnknown &&
@@ -76,10 +84,12 @@ enum AssignmentRecoveryScope {
       return false;
     }
     return switch (this) {
-      noDeadline => AssignmentQuery.timelineBucketAt(assignment, now) ==
+      noDeadline => AssignmentQuery.timelineBucketAt(assignment, now,
+              coursework: coursework) ==
           AssignmentDeadlineBucket.confirmedNoDeadline,
       examUnknown => false,
-      deadlinePending => AssignmentQuery.timelineBucketAt(assignment, now) ==
+      deadlinePending => AssignmentQuery.timelineBucketAt(assignment, now,
+              coursework: coursework) ==
           AssignmentDeadlineBucket.unconfirmed,
     };
   }
@@ -101,11 +111,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   final _feedback = TransientFeedbackController();
   late int _feedbackEpoch;
   String? _feedbackAccount;
+  HomeFilters? _preExamStripFilters;
+  int? _preExamStripEpoch;
 
   void _checkFeedbackAccount() {
     if (_feedbackEpoch != store.accountEpoch ||
         _feedbackAccount != store.account) {
       _feedback.dismiss();
+      _preExamStripFilters = null;
+      _preExamStripEpoch = null;
       _feedbackEpoch = store.accountEpoch;
       _feedbackAccount = store.account;
     }
@@ -319,11 +333,67 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     );
   }
 
+  Future<void> _copyNext7DaysTodos({required DateTime now}) async {
+    final result = TodoCopyFormatter.formatNext7Days(
+      store.homeCatalogAssignments,
+      manualEntries: store.isAuthenticated ? store.notebook.entries : const [],
+      now: now,
+      index: store.homeDisplayIndex,
+      coursework: store.courseworkState,
+    );
+    if (result.isEmpty) {
+      feedback('近 7 天暂无可复制的待办');
+      return;
+    }
+    try {
+      await Clipboard.setData(ClipboardData(text: result.text!));
+      if (mounted) {
+        feedback('已复制近 7 天待办（共 ${result.count} 项）');
+      }
+    } catch (_) {
+      if (mounted) {
+        feedback('复制失败，请稍后重试');
+      }
+    }
+  }
+
+  Future<void> _openMoreMenu(BuildContext anchorContext) async {
+    final box = anchorContext.findRenderObject() as RenderBox?;
+    Rect? anchorRect;
+    if (box != null && box.hasSize) {
+      final topLeft = box.localToGlobal(Offset.zero);
+      anchorRect = topLeft & box.size;
+    }
+    await showJournalContextMenu(
+      context: context,
+      anchorRect: anchorRect,
+      displayPrefs: store.display,
+      actions: [
+        JournalContextMenuAction(
+          label: '复制近 7 天待办',
+          icon: Icons.copy_all_outlined,
+          onSelected: () => unawaited(
+            _copyNext7DaysTodos(now: widget.clock?.call() ?? DateTime.now()),
+          ),
+        ),
+        JournalContextMenuAction(
+          label: '同步详情',
+          icon: Icons.sync_alt_rounded,
+          onSelected: () {
+            if (mounted) context.push('/sync');
+          },
+        ),
+      ],
+    );
+  }
+
   Future<void> _openContextMenu(
     BuildContext itemContext,
     Assignment assignment,
     Widget previewCard, {
     required bool inTodayPlan,
+    bool pinned = false,
+    List<String> pinnedVisibleKeys = const [],
   }) async {
     final box = itemContext.findRenderObject() as RenderBox?;
     Rect? anchorRect;
@@ -333,7 +403,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     }
     final url = AssignmentWebLink.validatedUrl(assignment);
     final canPin = store.canTogglePin(assignment);
-    final pinned = store.isPinned(assignment);
+    final isPinned = store.isPinned(assignment);
+    final pinKey = AssignmentStore.pinKeyOf(assignment);
+    final pinIndex = pinnedVisibleKeys.indexOf(pinKey);
     final actions = <JournalContextMenuAction>[
       if (url != null)
         JournalContextMenuAction(
@@ -341,10 +413,37 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           icon: Icons.open_in_new_rounded,
           onSelected: () => openAssignment(assignment.id),
         ),
+      if (pinned && pinnedVisibleKeys.length >= 2 && pinIndex > 0)
+        JournalContextMenuAction(
+          label: '置顶上移',
+          icon: Icons.arrow_upward_rounded,
+          onSelected: () {
+            final next = List<String>.of(pinnedVisibleKeys);
+            final moved = next.removeAt(pinIndex);
+            next.insert(pinIndex - 1, moved);
+            JournalMotion.selectionTick(store.display);
+            unawaited(store.reorderPinned(next));
+          },
+        ),
+      if (pinned &&
+          pinnedVisibleKeys.length >= 2 &&
+          pinIndex >= 0 &&
+          pinIndex < pinnedVisibleKeys.length - 1)
+        JournalContextMenuAction(
+          label: '置顶下移',
+          icon: Icons.arrow_downward_rounded,
+          onSelected: () {
+            final next = List<String>.of(pinnedVisibleKeys);
+            final moved = next.removeAt(pinIndex);
+            next.insert(pinIndex + 1, moved);
+            JournalMotion.selectionTick(store.display);
+            unawaited(store.reorderPinned(next));
+          },
+        ),
       if (canPin)
         JournalContextMenuAction(
-          label: pinned ? '取消置顶' : '置顶',
-          icon: pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+          label: isPinned ? '取消置顶' : '置顶',
+          icon: isPinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
           onSelected: () => _togglePin(assignment),
         ),
       if (!assignment.isCompleted)
@@ -496,19 +595,45 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             _typeFilter != AssignmentTypeFilter.all ||
             _courseKey != null ||
             _deadlineFilter != AssignmentDeadlineFilter.all;
-        final catalogAssignments = store.homeCatalogAssignments;
+        final coursework = store.courseworkState;
+        final termCatalog = store.termCatalog;
+        final catalogAssignments = _courseKey == null
+            ? store.homeCatalogAssignments
+            : store.homeCatalogAssignmentsWithSelectedCourse(_courseKey);
         final examSources = catalogAssignments;
-        final displayIndex = store.homeDisplayIndex;
+        final displayIndex = _courseKey == null
+            ? store.homeDisplayIndex
+            : AssignmentDisplayIndex.from(catalogAssignments);
         final displayAssignments = AssignmentQuery.currentDisplay(
-            catalogAssignments, now,
-            index: displayIndex);
+          catalogAssignments,
+          now,
+          index: displayIndex,
+          coursework: coursework,
+        );
+        final allFollowedSources = [
+          for (final group in store.localRecordGroups)
+            if (!group.hidden &&
+                (group.primary.courseKey == null ||
+                    store.follows(group.primary.courseKey!)))
+              ...group.sources,
+        ];
+        final pickerAssignments = AssignmentQuery.currentDisplay(
+          AssignmentQuery.scope(allFollowedSources, {}),
+          now,
+          index: allFollowedSources.isEmpty
+              ? displayIndex
+              : AssignmentDisplayIndex.from(allFollowedSources),
+          coursework: coursework,
+        );
         final options = buildHomeCourseFilterOptions(
-          assignments: displayAssignments,
-          catalog: store.courses,
-          records: [
-            for (final group in store.localRecordGroups) ...group.sources,
+          assignments: pickerAssignments,
+          catalog: [
+            for (final course in store.courses)
+              if (store.follows(course.key)) course,
           ],
+          records: allFollowedSources,
           selectedCourseKey: _courseKey,
+          termCatalog: termCatalog,
         );
         final items = recoveryScope == null
             ? AssignmentQuery.filterHome(
@@ -520,9 +645,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 includeHistorical: false,
                 index: displayIndex,
                 now: now,
+                coursework: coursework,
               )
             : displayAssignments
-                .where((assignment) => recoveryScope.matches(assignment, now))
+                .where((assignment) => recoveryScope.matches(
+                      assignment,
+                      now,
+                      coursework: coursework,
+                    ))
                 .toList();
         final sortOrder = _sortOrder;
         final sortedItems = AssignmentQuery.sortHome(
@@ -532,6 +662,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           sourceRecords: catalogAssignments,
           displayIndex: displayIndex,
           prioritizeStartOnly: recoveryScope == null,
+          coursework: coursework,
         );
         final today = PersonalWorkspace.dayKey(now);
         final plans =
@@ -546,20 +677,44 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             successAt: store.lastSyncAt,
             serviceWarning: store.error != null &&
                 store.syncReport.phase == SyncPhase.success);
-        final freshness = _freshnessLabel(sync.summary,
-            store.syncReport.lastDataSuccessAt ?? store.lastSyncAt, now);
-        final statusText = sync.showCached ? '$freshness · 显示上次记录' : freshness;
+        final dueSummary = HomeDueSummary.from(
+          catalogAssignments,
+          now: now,
+          index: displayIndex,
+          coursework: coursework,
+        );
+        final showDueSummary = recoveryScope == null &&
+            (catalogAssignments.isNotEmpty ||
+                displayAssignments.isNotEmpty ||
+                store.syncReport.phase == SyncPhase.success ||
+                store.syncReport.lastDataSuccessAt != null ||
+                store.lastSyncAt != null);
+        final statusText = sync.gentle && sync.action == HomeSyncAction.retry
+            ? '${sync.summary} · 重试'
+            : sync.showCached
+                ? '${sync.summary} · 显示上次记录'
+                : sync.summary;
         final reduceMotion = MediaQuery.disableAnimationsOf(context);
         final syncAction = sync.action == HomeSyncAction.login ||
                 sync.action == HomeSyncAction.verify
             ? sync.action
             : HomeSyncAction.retry;
+        final upcomingExam = recoveryScope == null
+            ? HomeUpcomingExam.select(
+                catalogAssignments,
+                now: now,
+                index: displayIndex,
+                coursework: coursework,
+                courseKey: _courseKey,
+              )
+            : null;
 
         Widget buildCard(
           Assignment a, {
           bool pinned = false,
           bool preview = false,
           bool previewOnly = false,
+          Widget? dragHandle,
           VoidCallback? onLongPress,
         }) =>
             AssignmentCard(
@@ -567,15 +722,19 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               assignment: a,
               examSources: examSources,
               displayIndex: displayIndex,
+              courseworkEntry: store.courseworkEntryFor(a),
               now: now,
               showFullDeadline: false,
               showDivider: false,
               enableTapFeedback: false,
               inPinnedSection: pinned,
+              dragHandle: preview ? null : dragHandle,
               compact: store.display.compact,
               countdown: store.display.countdown,
               deadlinePending:
                   preview ? false : store.isHomeDeadlinePending(a.id),
+              hasDeadlineAlert:
+                  preview ? false : store.activeDeadlineAlertFor(a) != null,
               previewOnly: preview ? false : previewOnly,
               previewSaving: !preview &&
                   store.homeSyncProgress?.stage == AssignmentSyncStage.saving,
@@ -598,7 +757,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     },
             );
 
-        Widget card(Assignment a, {bool pinned = false}) {
+        Widget card(
+          Assignment a, {
+          bool pinned = false,
+          Widget? dragHandle,
+          List<String> pinnedVisibleKeys = const [],
+        }) {
           final previewOnly = store.isHomeAssignmentPreviewOnly(a.id);
           if (previewOnly) {
             return buildCard(a, pinned: pinned, previewOnly: true);
@@ -612,11 +776,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final interactiveCard = buildCard(
                 a,
                 pinned: pinned,
+                dragHandle: dragHandle,
                 onLongPress: () => _openContextMenu(
                   itemContext,
                   a,
                   buildCard(a, pinned: pinned, preview: true),
                   inTodayPlan: inTodayPlan,
+                  pinned: pinned,
+                  pinnedVisibleKeys: pinnedVisibleKeys,
                 ),
               );
 
@@ -697,10 +864,40 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
             }
             if (pinned.isNotEmpty) {
+              DateTime? autoPinnedTime(Assignment a) {
+                if (a.isExam) {
+                  return a.exam?.startTrusted == true ? a.exam!.startAt : null;
+                }
+                return AssignmentQuery.effectiveDeadline(
+                  a,
+                  coursework: coursework,
+                )?.at;
+              }
+
+              int compareAutoPinned(Assignment left, Assignment right) {
+                final lt = autoPinnedTime(left);
+                final rt = autoPinnedTime(right);
+                if (lt != null && rt != null) {
+                  final cmp = lt.compareTo(rt);
+                  if (cmp != 0) return cmp;
+                } else if (lt != null) {
+                  return -1;
+                } else if (rt != null) {
+                  return 1;
+                }
+                return AssignmentStore.pinKeyOf(left)
+                    .compareTo(AssignmentStore.pinKeyOf(right));
+              }
+
+              final orderedPinned = store.pinnedAssignments.orderItems(
+                pinned,
+                keyOf: AssignmentStore.pinKeyOf,
+                defaultComparator: compareAutoPinned,
+              );
               flushGroup(
                 heading: '置顶',
                 tone: _DayHeadingTone.today,
-                rows: pinned,
+                rows: orderedPinned,
                 pinned: true,
               );
             }
@@ -717,7 +914,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               DateTime(todayDay.year, todayDay.month, todayDay.day + 1);
 
           for (final a in regular) {
-            final bucket = AssignmentQuery.timelineBucketAt(a, now);
+            final bucket = AssignmentQuery.timelineBucketAt(
+              a,
+              now,
+              coursework: coursework,
+            );
             final isOverdue = bucket == AssignmentDeadlineBucket.overdue;
             DateTime? badgeDay;
             String? key;
@@ -733,18 +934,25 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   (a.timelineTrusted || recoveryScope != null)) {
                 badgeDay = AssignmentQuery.dayKey(start);
               }
-            } else if (a.timelineAt != null &&
-                a.timelineTrusted &&
-                !a.deadlineReadFailed) {
-              final day = AssignmentQuery.dayKey(a.timelineAt!);
-              badgeDay = day;
-              final showYear =
-                  recoveryScope != null || day.year != todayDay.year;
-              key =
-                  '${showYear ? '' : 'work:'}${day.year}:${day.month}:${day.day}';
-              heading =
-                  '${showYear ? '${day.year}年' : ''}${day.month}月${day.day}日 '
-                  '周${'一二三四五六日'[day.weekday - 1]}';
+            } else {
+              final resolvedWorkAt = AssignmentQuery.displayTimelineAt(
+                a,
+                records: examSources,
+                index: displayIndex,
+                now: now,
+                coursework: coursework,
+              );
+              if (resolvedWorkAt != null) {
+                final day = AssignmentQuery.dayKey(resolvedWorkAt);
+                badgeDay = day;
+                final showYear =
+                    recoveryScope != null || day.year != todayDay.year;
+                key =
+                    '${showYear ? '' : 'work:'}${day.year}:${day.month}:${day.day}';
+                heading =
+                    '${showYear ? '${day.year}年' : ''}${day.month}月${day.day}日 '
+                    '周${'一二三四五六日'[day.weekday - 1]}';
+              }
             }
             if (heading == null && recoveryScope == null) {
               if (!a.isExam &&
@@ -888,14 +1096,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   ),
                 action(
                   '更多',
-                  IconButton(
-                      tooltip: '同步详情',
+                  Builder(
+                    builder: (moreContext) => IconButton(
+                      key: const ValueKey('home-more-menu'),
+                      tooltip: '更多',
                       padding: const EdgeInsets.only(bottom: 12),
                       iconSize: 21,
                       constraints:
                           const BoxConstraints(minWidth: 48, minHeight: 48),
-                      onPressed: () => context.push('/sync'),
-                      icon: const Icon(Icons.more_horiz_rounded)),
+                      onPressed: () => unawaited(_openMoreMenu(moreContext)),
+                      icon: const Icon(Icons.more_horiz_rounded),
+                    ),
+                  ),
                 ),
               ]);
 
@@ -931,50 +1143,181 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               );
             }),
             const SizedBox(height: 2),
-            Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                key: const ValueKey('home-sync-status'),
-                onTap: sync.action == HomeSyncAction.none
-                    ? null
-                    : () => context.push('/sync?expand=issues'),
-                borderRadius: BorderRadius.circular(8),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: sync.action == HomeSyncAction.none ? 22 : 48,
-                  ),
-                  child: Semantics(
-                    liveRegion: true,
-                    button: sync.action != HomeSyncAction.none,
-                    label: statusText,
-                    child: Row(children: [
-                      Icon(
-                        store.syncReport.phase == SyncPhase.failed
-                            ? Icons.error_outline_rounded
-                            : store.syncReport.phase == SyncPhase.partial
-                                ? Icons.info_outline_rounded
-                                : Icons.schedule_rounded,
-                        size: 14.5,
-                        color: store.syncReport.phase == SyncPhase.failed
-                            ? journal.berry
-                            : store.syncReport.phase == SyncPhase.partial
-                                ? journal.ochre
-                                : journal.muted,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: ExcludeSemantics(
-                          child: Text(statusText, style: journal.metadata),
+            LayoutBuilder(builder: (context, constraints) {
+              final nearDueActive =
+                  _deadlineFilter == AssignmentDeadlineFilter.next7Days;
+              final compactSummary = constraints.maxWidth <= 360 ||
+                  JournalLayout.isLargeText(context);
+              final summaryLabel = dueSummary.label(compact: compactSummary);
+              final statusIcon = sync.gentle
+                  ? Icons.wifi_off_rounded
+                  : store.syncReport.phase == SyncPhase.failed
+                      ? Icons.error_outline_rounded
+                      : store.syncReport.phase == SyncPhase.partial
+                          ? Icons.info_outline_rounded
+                          : Icons.schedule_rounded;
+              final statusColor = sync.gentle
+                  ? journal.muted
+                  : store.syncReport.phase == SyncPhase.failed
+                      ? journal.berry
+                      : store.syncReport.phase == SyncPhase.partial
+                          ? journal.ochre
+                          : journal.muted;
+              final VoidCallback? onSyncTap =
+                  sync.gentle && sync.action == HomeSyncAction.retry
+                      ? (busy ? null : () => refresh(HomeSyncAction.retry))
+                      : sync.action == HomeSyncAction.none
+                          ? null
+                          : () => context.push('/sync?expand=issues');
+              final showChevron =
+                  sync.action != HomeSyncAction.none && !sync.gentle;
+
+              final scaler = MediaQuery.textScalerOf(context);
+              final direction = Directionality.of(context);
+              double measureWidth(String text, TextStyle style) {
+                final painter = TextPainter(
+                  text: TextSpan(text: text, style: style),
+                  textScaler: scaler,
+                  textDirection: direction,
+                )..layout();
+                final width = painter.width.ceilToDouble();
+                painter.dispose();
+                return width;
+              }
+
+              final summaryStyle = journal.metadata.copyWith(
+                color: nearDueActive
+                    ? journal.accent
+                    : dueSummary.dueToday > 0
+                        ? journal.berry
+                        : journal.muted,
+                fontWeight: nearDueActive || dueSummary.dueToday > 0
+                    ? FontWeight.w600
+                    : FontWeight.w400,
+              );
+              final leftWidth = 14.5 +
+                  5.0 +
+                  measureWidth(statusText, journal.metadata) +
+                  (showChevron ? 18.0 : 0.0) +
+                  4.0;
+              final rightWidth = showDueSummary
+                  ? measureWidth(summaryLabel, summaryStyle) + 4.0
+                  : 0.0;
+              final fitsSingleRow = !showDueSummary ||
+                  (leftWidth + rightWidth + 6.0 <= constraints.maxWidth);
+
+              final statusControl = Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  key: const ValueKey('home-sync-status'),
+                  onTap: onSyncTap,
+                  borderRadius: BorderRadius.circular(8),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight:
+                          onSyncTap == null ? (showDueSummary ? 40 : 22) : 48,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Semantics(
+                        liveRegion: true,
+                        button: onSyncTap != null,
+                        label: statusText,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(statusIcon, size: 14.5, color: statusColor),
+                            const SizedBox(width: 5),
+                            Flexible(
+                              fit: FlexFit.loose,
+                              child: ExcludeSemantics(
+                                child: Text(
+                                  statusText,
+                                  style: journal.metadata,
+                                ),
+                              ),
+                            ),
+                            if (showChevron)
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: 18,
+                                color: journal.muted,
+                              ),
+                          ],
                         ),
                       ),
-                      if (sync.action != HomeSyncAction.none)
-                        Icon(Icons.chevron_right_rounded,
-                            size: 18, color: journal.muted),
-                    ]),
+                    ),
                   ),
                 ),
-              ),
-            ),
+              );
+
+              final summaryControl = !showDueSummary
+                  ? null
+                  : Material(
+                      type: MaterialType.transparency,
+                      child: InkWell(
+                        key: const ValueKey('home-due-summary'),
+                        onTap: () {
+                          final nextDeadline = nearDueActive
+                              ? AssignmentDeadlineFilter.all
+                              : AssignmentDeadlineFilter.next7Days;
+                          unawaited(_saveFilters(
+                            HomeFilters(
+                              query: _query,
+                              courseKey: _courseKey,
+                              deadline: nextDeadline,
+                              type: _typeFilter,
+                              sortOrder: _sortOrder,
+                            ),
+                            store.accountEpoch,
+                            store.account,
+                          ));
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 40),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            child: Semantics(
+                              button: true,
+                              label: '$summaryLabel，点击筛选7天内临期课业',
+                              child: ExcludeSemantics(
+                                child: Center(
+                                  widthFactor: 1,
+                                  child: Text(
+                                    summaryLabel,
+                                    style: summaryStyle,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+
+              if (fitsSingleRow) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(fit: FlexFit.loose, child: statusControl),
+                    if (summaryControl != null) ...[
+                      const SizedBox(width: 6),
+                      summaryControl,
+                    ],
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  statusControl,
+                  if (summaryControl != null) summaryControl,
+                ],
+              );
+            }),
             if (recoveryScope != null) ...[
               const SizedBox(height: 6),
               _recoveryHeader(context, recoveryScope, items.length),
@@ -1022,6 +1365,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ),
                   ],
                 ),
+              ),
+            if (upcomingExam != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: _buildUpcomingExamStrip(context, upcomingExam, journal),
               ),
             if (recoveryScope == null) ...[
               const SizedBox(height: 6),
@@ -1158,13 +1506,92 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             if (timelineSections.isEmpty) return buildEmptyState();
             final sectionIndex = index - 1;
             final section = timelineSections[sectionIndex];
-            final groupCard = JournalGroupedCard(
-              dividerIndent: 70.0,
-              children: [
-                for (final item in section.items)
-                  card(item, pinned: section.pinned),
-              ],
-            );
+            final groupCard = section.pinned && section.items.length >= 2
+                ? JournalGroupedCard(
+                    children: [
+                      Builder(
+                        builder: (context) {
+                          final visibleKeys = [
+                            for (final item in section.items)
+                              AssignmentStore.pinKeyOf(item),
+                          ];
+                          return ReorderableListView.builder(
+                            shrinkWrap: true,
+                            primary: false,
+                            physics: const NeverScrollableScrollPhysics(),
+                            buildDefaultDragHandles: false,
+                            proxyDecorator: (child, index, animation) =>
+                                Material(
+                              color: journal.sheetElevated,
+                              elevation: 4,
+                              shadowColor: Colors.black.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(12),
+                              clipBehavior: Clip.antiAlias,
+                              child: child,
+                            ),
+                            onReorderStart: (_) =>
+                                JournalMotion.selectionTick(store.display),
+                            onReorderItem: (oldIndex, newIndex) {
+                              if (oldIndex == newIndex) return;
+                              final nextKeys = List<String>.of(visibleKeys);
+                              final moved = nextKeys.removeAt(oldIndex);
+                              nextKeys.insert(newIndex, moved);
+                              unawaited(store.reorderPinned(nextKeys));
+                            },
+                            itemCount: section.items.length,
+                            itemBuilder: (context, itemIndex) {
+                              final item = section.items[itemIndex];
+                              final dragHandle = ReorderableDragStartListener(
+                                index: itemIndex,
+                                child: Tooltip(
+                                  message: '拖动调整置顶顺序',
+                                  child: SizedBox(
+                                    width: 34,
+                                    height: 48,
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.drag_indicator_rounded,
+                                        size: 18,
+                                        color: journal.muted,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                              return Column(
+                                key: ValueKey('pinned-reorder-${item.id}'),
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  card(
+                                    item,
+                                    pinned: true,
+                                    dragHandle: dragHandle,
+                                    pinnedVisibleKeys: visibleKeys,
+                                  ),
+                                  if (itemIndex < section.items.length - 1)
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 70),
+                                      child: Divider(
+                                        height: 1,
+                                        thickness: 0.8,
+                                        color: journal.rule,
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ],
+                  )
+                : JournalGroupedCard(
+                    dividerIndent: 70.0,
+                    children: [
+                      for (final item in section.items)
+                        card(item, pinned: section.pinned),
+                    ],
+                  );
             if (section.heading == null) return groupCard;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1362,17 +1789,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         if (_typeFilter != AssignmentTypeFilter.all)
           removableTag(
             '类型：${_typeFilter.label}',
-            () => _saveFilters(
-              HomeFilters(
-                query: _query,
-                courseKey: _courseKey,
-                deadline: _deadlineFilter,
-                type: AssignmentTypeFilter.all,
-                sortOrder: _sortOrder,
-              ),
-              epoch,
-              account,
-            ),
+            () {
+              _preExamStripFilters = null;
+              _preExamStripEpoch = null;
+              unawaited(_saveFilters(
+                HomeFilters(
+                  query: _query,
+                  courseKey: _courseKey,
+                  deadline: _deadlineFilter,
+                  type: AssignmentTypeFilter.all,
+                  sortOrder: _sortOrder,
+                ),
+                epoch,
+                account,
+              ));
+            },
           ),
         if (_deadlineFilter != AssignmentDeadlineFilter.all)
           removableTag(
@@ -1412,11 +1843,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             tapTargetSize: MaterialTapTargetSize.padded,
             foregroundColor: Journal.of(context).muted,
           ),
-          onPressed: () => _saveFilters(
-            HomeFilters(sortOrder: _sortOrder),
-            epoch,
-            account,
-          ),
+          onPressed: () {
+            _preExamStripFilters = null;
+            _preExamStripEpoch = null;
+            unawaited(_saveFilters(
+              HomeFilters(sortOrder: _sortOrder),
+              epoch,
+              account,
+            ));
+          },
           child: const Text('重置条件'),
         ),
       ],
@@ -1490,6 +1925,116 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildUpcomingExamStrip(
+    BuildContext context,
+    HomeUpcomingExam upcomingExam,
+    JournalPalette journal,
+  ) {
+    final inExamView = _typeFilter == AssignmentTypeFilter.exam;
+    void onTap() {
+      final epoch = store.accountEpoch;
+      final account = store.account;
+      if (!inExamView) {
+        _preExamStripFilters = store.homeFilters;
+        _preExamStripEpoch = epoch;
+        unawaited(_saveFilters(
+          HomeFilters(
+            query: _query,
+            courseKey: _courseKey,
+            deadline: AssignmentDeadlineFilter.all,
+            type: AssignmentTypeFilter.exam,
+            sortOrder: _sortOrder,
+          ),
+          epoch,
+          account,
+        ));
+      } else {
+        final previous =
+            _preExamStripEpoch == epoch ? _preExamStripFilters : null;
+        _preExamStripFilters = null;
+        _preExamStripEpoch = null;
+        unawaited(_saveFilters(
+          previous ??
+              HomeFilters(
+                query: _query,
+                courseKey: _courseKey,
+                deadline: _deadlineFilter,
+                type: AssignmentTypeFilter.all,
+                sortOrder: _sortOrder,
+              ),
+          epoch,
+          account,
+        ));
+      }
+    }
+
+    return Semantics(
+      button: true,
+      label: '${upcomingExam.label}，点击${inExamView ? '返回全部课业' : '查看考试筛选视图'}',
+      onTap: onTap,
+      child: Material(
+        color: inExamView ? journal.sage : journal.parchment,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: inExamView ? journal.sageBorder : journal.rule,
+            width: 0.8,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: const ValueKey('home-upcoming-exam-strip'),
+          onTap: onTap,
+          enableFeedback: false,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 44),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: ExcludeSemantics(
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.school_outlined,
+                      size: 16,
+                      color: inExamView ? journal.accent : journal.muted,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        upcomingExam.label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: journal.metadata.copyWith(
+                          color: journal.ink,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    if (inExamView)
+                      Text(
+                        '返回',
+                        style: journal.metadata.copyWith(
+                          color: journal.accent,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      )
+                    else
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 18,
+                        color: journal.muted,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1757,14 +2302,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     return progress.stageLabel;
   }
 
-  String _freshnessLabel(String summary, DateTime? updatedAt, DateTime now) {
-    if (updatedAt != null &&
-        now.difference(updatedAt) >= const Duration(hours: 24)) {
-      return '$summary · 超过24小时未更新';
-    }
-    return summary;
-  }
-
   Future<void> _saveFilters(
       HomeFilters filters, int epoch, String? expectedAccount) async {
     if (store.accountEpoch != epoch || store.account != expectedAccount) {
@@ -1888,9 +2425,36 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             context,
                             title: '课程筛选',
                             selectedValue: courseKey ?? '',
-                            searchable: courseOptions.length > 5,
-                            searchHint: '搜索课程名称...',
+                            searchable: courseOptions.length > 5 ||
+                                courseOptions
+                                    .any((o) => o.teacherNames.isNotEmpty),
+                            searchHint: '搜索课程或教师...',
                             displayPrefs: store.display,
+                            filterOptions: const [
+                              JournalPickerFilterOption(
+                                id: 'currentTerm',
+                                label: '本学期',
+                              ),
+                              JournalPickerFilterOption(
+                                id: 'pastTerms',
+                                label: '往期',
+                              ),
+                              JournalPickerFilterOption(
+                                id: 'allTerms',
+                                label: '全部学期',
+                              ),
+                            ],
+                            initialFilterId: 'currentTerm',
+                            filterPredicate: (option, filterId) {
+                              if (option.value.isEmpty) return true;
+                              final scope = switch (filterId) {
+                                'pastTerms' => CourseTermScope.pastTerms,
+                                'allTerms' => CourseTermScope.allTerms,
+                                _ => CourseTermScope.currentTerm,
+                              };
+                              return store.termCatalog.matchesCoursePickerScope(
+                                  option.value, scope);
+                            },
                             options: [
                               const JournalPickerOption<String>(
                                 value: '',
@@ -1902,9 +2466,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                       'course-option-${option.courseKey}'),
                                   value: option.courseKey,
                                   label: option.name,
-                                  subtitle: option.showClass
-                                      ? option.classLabel
-                                      : null,
+                                  subtitle: option.subtitle,
+                                  keywords: option.searchKeywords,
                                   icon: courseIconFor(option.name),
                                 ),
                             ],
@@ -1997,6 +2560,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         store.account != openingAccount) {
       return;
     }
+    _preExamStripFilters = null;
+    _preExamStripEpoch = null;
     await _saveFilters(
         HomeFilters(
             query: selection.query.trim(),

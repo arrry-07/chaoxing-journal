@@ -235,9 +235,12 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
     }
 
     private fun itemMeta(item: JSONObject, resolvedRemaining: String): String =
-        listOf(item.optString("deadlineText"), resolvedRemaining, item.optString("courseName"))
-            .filter { it.isNotEmpty() }
-            .joinToString(" · ")
+        AssignmentWidgetLayoutPolicy.formatItemMeta(
+            deadlineText = item.optString("deadlineText"),
+            resolvedRemaining = resolvedRemaining,
+            courseName = item.optString("courseName"),
+            deadlineSource = item.optString("deadlineSource"),
+        )
 
     private fun remainingText(item: JSONObject): String {
         val fallback = item.optString("remainingText")
@@ -265,20 +268,8 @@ class AssignmentWidgetProvider : AppWidgetProvider() {
         )
     }
 
-    private fun normalizeDeepLink(target: String): Uri {
-        if (target.startsWith("studyassistant://assignments/")) {
-            return Uri.parse(
-                target.replaceFirst(
-                    "studyassistant://assignments/",
-                    "studyassistant:///assignments/",
-                ),
-            )
-        }
-        if (target == "studyassistant://assignments") {
-            return Uri.parse("studyassistant:///assignments")
-        }
-        return Uri.parse(target)
-    }
+    private fun normalizeDeepLink(target: String): Uri =
+        Uri.parse(AssignmentWidgetLayoutPolicy.normalizeDeepLinkString(target))
 
     private fun loadItems(prefs: android.content.SharedPreferences): JSONArray {
         val raw = prefs.getString("assignment_snapshot", "[]") ?: "[]"
@@ -388,9 +379,55 @@ internal object AssignmentWidgetLayoutPolicy {
     }
 
     fun isUrgent(urgencyLevel: String, remainingText: String): Boolean {
+        if (remainingText == "已开考") return false
         return urgencyLevel == "critical" ||
             remainingText.contains("已逾期") ||
             remainingText.contains("已截止")
+    }
+
+    fun formatItemMeta(
+        deadlineText: String,
+        resolvedRemaining: String,
+        courseName: String,
+        deadlineSource: String = "official",
+    ): String {
+        val formattedDeadline = if (deadlineSource == "manual") {
+            if (deadlineText.isNotEmpty()) "手动 $deadlineText" else "手动"
+        } else {
+            deadlineText
+        }
+        return listOf(formattedDeadline, resolvedRemaining, courseName)
+            .filter { it.isNotEmpty() }
+            .joinToString(" · ")
+    }
+
+    fun normalizeDeepLinkString(target: String): String {
+        val trimmed = target.trim()
+        if (trimmed.isEmpty() || trimmed.any { it.isISOControl() || it.isWhitespace() }) {
+            return "studyassistant:///assignments"
+        }
+        if (trimmed == "studyassistant://assignments" ||
+            trimmed == "studyassistant:///assignments"
+        ) {
+            return "studyassistant:///assignments"
+        }
+        val twoSlashPrefix = "studyassistant://assignments/"
+        if (trimmed.startsWith(twoSlashPrefix)) {
+            val suffix = trimmed.removePrefix(twoSlashPrefix)
+            if (suffix.isNotEmpty() && suffix != "." && suffix != ".." && !suffix.contains('/')) {
+                return "studyassistant:///assignments/$suffix"
+            }
+            return "studyassistant:///assignments"
+        }
+        val threeSlashPrefix = "studyassistant:///assignments/"
+        if (trimmed.startsWith(threeSlashPrefix)) {
+            val suffix = trimmed.removePrefix(threeSlashPrefix)
+            if (suffix.isNotEmpty() && suffix != "." && suffix != ".." && !suffix.contains('/')) {
+                return trimmed
+            }
+            return "studyassistant:///assignments"
+        }
+        return "studyassistant:///assignments"
     }
 
     fun resolveSnapshotMeta(

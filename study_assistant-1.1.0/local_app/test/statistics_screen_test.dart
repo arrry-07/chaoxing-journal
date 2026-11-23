@@ -11,8 +11,10 @@ import 'package:study_assistant_mobile/src/features/widgets/completion_pie_chart
 import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav_bar.dart';
 import 'package:study_assistant_mobile/src/features/widgets/journal_grouped_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/local_record_query.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -470,5 +472,122 @@ void main() {
     expect(store.homeFilters.deadline, initialFilters.deadline);
     expect(store.homeFilters.type, initialFilters.type);
     expect(store.homeFilters.query, initialFilters.query);
+  });
+
+  testWidgets(
+      'StatsScreen filters across currentTerm, currentAcademicYear, pastTerms, and allTerms and splits recalled courses cleanly',
+      (t) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final now = DateTime.utc(2026, 11, 20, 4); // 2026-2027 fall
+    final store = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      clock: () => now,
+    );
+    addTearDown(store.dispose);
+    await store.repository.activateAccount('A');
+    await store.repository.saveCourses(const [
+      CourseRef(
+          courseId: '1', clazzId: '10', name: '本学期算法', folderName: '2026年秋'),
+      CourseRef(
+          courseId: '2', clazzId: '20', name: '往期微积分', folderName: '2025年秋'),
+    ], account: 'A');
+    await store.repository.mergeAndSave([
+      Assignment(
+        id: 'cx:work:1:10:1',
+        courseName: '本学期算法',
+        title: '在学作业',
+        deadlineAt: now.add(const Duration(days: 2)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:work:2:20:1',
+        courseName: '往期微积分',
+        title: '去年已完成作业',
+        deadlineAt: DateTime.utc(2025, 11, 10),
+        requirementsText: '',
+        status: 'submitted',
+        lastSyncedAt: now,
+      ),
+      // Pending future extension recalls course 2:20 cleanly for currentTerm only.
+      Assignment(
+        id: 'cx:work:2:20:2',
+        courseName: '往期微积分',
+        title: '补交扩展任务',
+        deadlineAt: now.add(const Duration(days: 3)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+    ], completeSync: true);
+    await store.restoreSession();
+
+    final router = GoRouter(
+      initialLocation: '/stats',
+      routes: [
+        GoRoute(
+          path: '/stats',
+          builder: (_, __) => StatsScreen(store: store, clock: () => now),
+        ),
+        GoRoute(
+          path: '/records',
+          builder: (_, state) => LocalRecordsScreen(
+            store: store,
+            initialFilter: LocalRecordFilterSpec.fromQueryParameters(
+              state.uri.queryParameters,
+            ),
+            clock: () => now,
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await t.pumpWidget(MaterialApp.router(
+      theme: StudyAssistantTheme.light,
+      routerConfig: router,
+    ));
+    await t.pumpAndSettle();
+
+    // Default 本学期: currentWork (pending) + recalled extension (pending) = 2 total, 0% done.
+    expect(find.textContaining('/ 2'), findsOneWidget);
+    expect(find.text('0%'), findsOneWidget);
+
+    // Switch to 往期: historical submitted record stays in past terms (1 total, 100%).
+    await t.tap(find
+        .byKey(ValueKey('stats-term-scope-${CourseTermScope.pastTerms.name}')));
+    await t.pumpAndSettle();
+    expect(find.textContaining('/ 1'), findsOneWidget);
+    expect(find.text('100%'), findsOneWidget);
+
+    // Past-term drill-down keeps the term scope and the archived record.
+    await t.scrollUntilVisible(
+      find.byKey(const ValueKey('stats-status-0')),
+      100,
+    );
+    await t.tap(find.byKey(const ValueKey('stats-status-0')));
+    await t.pumpAndSettle();
+    expect(
+      find.byType(LocalRecordsScreen),
+      findsOneWidget,
+      reason: 'router uri: ${router.state.uri}',
+    );
+    final recordsSpec = t
+        .widget<LocalRecordsScreen>(find.byType(LocalRecordsScreen))
+        .initialFilter;
+    expect(recordsSpec.termScope, CourseTermScope.pastTerms);
+    expect(find.text('1 条记录'), findsOneWidget);
+    expect(find.text('去年已完成作业'), findsOneWidget);
+    await t.tap(find.byTooltip('返回'));
+    await t.pumpAndSettle();
+
+    // Switch to 全部学期: all 3 records = 1/3 = 33%.
+    await t.tap(find
+        .byKey(ValueKey('stats-term-scope-${CourseTermScope.allTerms.name}')));
+    await t.pumpAndSettle();
+    expect(find.textContaining('/ 3'), findsOneWidget);
+    expect(find.text('33%'), findsOneWidget);
   });
 }

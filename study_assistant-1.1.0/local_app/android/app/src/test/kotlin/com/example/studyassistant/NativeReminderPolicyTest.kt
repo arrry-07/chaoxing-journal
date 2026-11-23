@@ -123,4 +123,153 @@ class NativeReminderPolicyTest {
                 1_100_000_000,
         )
     }
+
+    @Test
+    fun quietHoursExactBoundariesAcrossUtcShanghaiAndLosAngelesDst() {
+        for (zoneId in listOf("UTC", "Asia/Shanghai", "America/Los_Angeles")) {
+            val z = ZoneId.of(zoneId)
+            for (date in listOf(
+                java.time.LocalDate.of(2026, 3, 8),
+                java.time.LocalDate.of(2026, 11, 1),
+            )) {
+                assertFalse(
+                    DeadlineQuietHoursPolicy.isQuiet(
+                        ZonedDateTime.of(date.year, date.monthValue, date.dayOfMonth, 23, 29, 0, 0, z).toInstant(),
+                        z,
+                    ),
+                )
+                assertTrue(
+                    DeadlineQuietHoursPolicy.isQuiet(
+                        ZonedDateTime.of(date.year, date.monthValue, date.dayOfMonth, 23, 30, 0, 0, z).toInstant(),
+                        z,
+                    ),
+                )
+                assertTrue(
+                    DeadlineQuietHoursPolicy.isQuiet(
+                        ZonedDateTime.of(date.year, date.monthValue, date.dayOfMonth, 7, 29, 0, 0, z).toInstant(),
+                        z,
+                    ),
+                )
+                assertFalse(
+                    DeadlineQuietHoursPolicy.isQuiet(
+                        ZonedDateTime.of(date.year, date.monthValue, date.dayOfMonth, 7, 30, 0, 0, z).toInstant(),
+                        z,
+                    ),
+                )
+                assertEquals(
+                    ZonedDateTime.of(date.plusDays(1), java.time.LocalTime.of(7, 30), z).toInstant(),
+                    DeadlineQuietHoursPolicy.nextQuietEnd(
+                        ZonedDateTime.of(date, java.time.LocalTime.of(23, 30), z).toInstant(),
+                        z,
+                    ),
+                )
+                assertEquals(
+                    ZonedDateTime.of(date, java.time.LocalTime.of(7, 30), z).toInstant(),
+                    DeadlineQuietHoursPolicy.nextQuietEnd(
+                        ZonedDateTime.of(date, java.time.LocalTime.of(7, 29), z).toInstant(),
+                        z,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun deadlineDeliveryReCheckSuppressesLateQuietBlocksUnknownAndHonorsBreakthrough() {
+        val shanghai = ZoneId.of("Asia/Shanghai")
+        val deadline = ZonedDateTime.of(2026, 11, 21, 0, 30, 0, 0, shanghai).toInstant()
+        val quietNow = ZonedDateTime.of(2026, 11, 21, 0, 0, 0, 0, shanghai).toInstant()
+        val lateScheduledDaytime = ZonedDateTime.of(2026, 11, 20, 22, 30, 0, 0, shanghai).toInstant()
+
+        assertEquals(
+            DeadlineQuietHoursPolicy.DeliveryDecision.BLOCK_MISSING_SOURCE,
+            DeadlineQuietHoursPolicy.evaluateDeadlineDelivery(
+                now = quietNow,
+                scheduledNotifyAt = quietNow,
+                deadlineAt = deadline,
+                deadlineSource = "unknown",
+                allowUrgentNightBreakthrough = true,
+                zone = shanghai,
+            ).decision,
+        )
+
+        assertEquals(
+            DeadlineQuietHoursPolicy.DeliveryDecision.SUPPRESS_LATE_QUIET,
+            DeadlineQuietHoursPolicy.evaluateDeadlineDelivery(
+                now = quietNow,
+                scheduledNotifyAt = lateScheduledDaytime,
+                deadlineAt = deadline,
+                deadlineSource = "official",
+                allowUrgentNightBreakthrough = false,
+                zone = shanghai,
+            ).decision,
+        )
+
+        assertEquals(
+            DeadlineQuietHoursPolicy.DeliveryDecision.DELIVER,
+            DeadlineQuietHoursPolicy.evaluateDeadlineDelivery(
+                now = quietNow,
+                scheduledNotifyAt = lateScheduledDaytime,
+                deadlineAt = deadline,
+                deadlineSource = "manual",
+                allowUrgentNightBreakthrough = true,
+                zone = shanghai,
+            ).decision,
+        )
+
+        val quietNotify = ZonedDateTime.of(2026, 11, 20, 23, 34, 0, 0, shanghai)
+        assertTrue(
+            DeadlineQuietHoursPolicy.canBreakThroughQuiet(
+                notifyAt = quietNotify.toInstant(),
+                deadlineAt = quietNotify.plusMinutes(60).toInstant(),
+                deadlineSource = "official",
+                allowUrgentNightBreakthrough = true,
+            ),
+        )
+        assertFalse(
+            DeadlineQuietHoursPolicy.canBreakThroughQuiet(
+                notifyAt = quietNotify.toInstant(),
+                deadlineAt = quietNotify.plusMinutes(61).toInstant(),
+                deadlineSource = "official",
+                allowUrgentNightBreakthrough = true,
+            ),
+        )
+
+        val quietScheduled = ZonedDateTime.of(2026, 11, 21, 2, 0, 0, 0, shanghai).toInstant()
+        val noonDeadline = ZonedDateTime.of(2026, 11, 21, 12, 0, 0, 0, shanghai).toInstant()
+        val deferred = DeadlineQuietHoursPolicy.evaluateDeadlineDelivery(
+            now = quietScheduled,
+            scheduledNotifyAt = quietScheduled,
+            deadlineAt = noonDeadline,
+            deadlineSource = "official",
+            allowUrgentNightBreakthrough = false,
+            zone = shanghai,
+        )
+        assertEquals(DeadlineQuietHoursPolicy.DeliveryDecision.DEFER_TO_QUIET_END, deferred.decision)
+        assertEquals(
+            ZonedDateTime.of(2026, 11, 21, 7, 30, 0, 0, shanghai).toInstant(),
+            deferred.deferredAt,
+        )
+    }
+
+    @Test
+    fun recomputeForTimezoneChangeAppliesQuietShiftAndPreNight() {
+        val la = ZoneId.of("America/Los_Angeles")
+        val now = ZonedDateTime.of(2026, 11, 1, 18, 0, 0, 0, la).toInstant()
+        val earlyNextDay = ZonedDateTime.of(2026, 11, 2, 1, 0, 0, 0, la).toInstant()
+
+        val earliest = DeadlineQuietHoursPolicy.recomputeEarliestSlot(
+            deadlineAt = earlyNextDay,
+            now = now,
+            offsets = listOf(30),
+            deadlineSource = "official",
+            eventKind = "deadline",
+            allowUrgentNightBreakthrough = false,
+            zone = la,
+        )
+        assertEquals(
+            ZonedDateTime.of(2026, 11, 1, 22, 30, 0, 0, la).toInstant(),
+            earliest,
+        )
+    }
 }

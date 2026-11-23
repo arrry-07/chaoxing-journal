@@ -10,6 +10,7 @@ import '../app/transient_feedback.dart';
 import '../models/assignment.dart';
 import '../services/assignment_statistics.dart';
 import '../services/assignment_store.dart';
+import '../services/course_term_catalog.dart';
 import '../services/local_record_query.dart';
 import 'widgets/completion_pie_chart.dart';
 import 'widgets/journal_context_menu.dart';
@@ -52,6 +53,7 @@ class _StatsScreenState extends State<StatsScreen> {
 
   Timer? _clock;
   late DateTime _now;
+  CourseTermScope _termScope = CourseTermScope.currentTerm;
   StatsTimeRange _range = StatsTimeRange.all;
   final _feedback = TransientFeedbackController();
   late int _feedbackEpoch;
@@ -102,7 +104,11 @@ class _StatsScreenState extends State<StatsScreen> {
 
   List<Assignment> _actionableRecords(_StatsGroup group, DateTime now) =>
       group.records
-          .where((r) => AssignmentStatistics.isPendingCourseAttention(r, now))
+          .where((r) => AssignmentStatistics.isPendingCourseAttention(
+                r,
+                now,
+                coursework: widget.store.courseworkState,
+              ))
           .toList(growable: false);
 
   Future<void> _unfollowCourseWithUndo(
@@ -113,7 +119,12 @@ class _StatsScreenState extends State<StatsScreen> {
     final store = widget.store;
     final epoch = store.accountEpoch;
     await store.followCourse(courseKey, false);
-    if (!context.mounted || !mounted || store.accountEpoch != epoch) return;
+    if (store.error != null ||
+        !context.mounted ||
+        !mounted ||
+        store.accountEpoch != epoch) {
+      return;
+    }
     _feedback.show(
       context,
       SnackBar(
@@ -179,6 +190,7 @@ class _StatsScreenState extends State<StatsScreen> {
           'status': status,
           if (courseKey != null && courseKey.isNotEmpty) 'courseKey': courseKey,
           'range': _range.name,
+          'term': _termScope.name,
         },
       ).toString(),
     );
@@ -192,13 +204,15 @@ class _StatsScreenState extends State<StatsScreen> {
           final store = widget.store;
           final now = _now;
           final rangeResult = LocalRecordQuery.filterStatsRecords(
-            store.statsAssignments,
+            store.statsAssignmentsForScope(_termScope, now: now),
             _range,
             now,
           );
+          final coursework = store.courseworkState;
           final records = rangeResult.records;
           final excludedUnscheduled = rangeResult.excludedUnscheduledCount;
-          final stats = AssignmentStatistics(records, now: now);
+          final stats =
+              AssignmentStatistics(records, now: now, coursework: coursework);
           final keyed = <String, List<Assignment>>{};
           final accountExams = <Assignment>[];
           final otherUnkeyed = <Assignment>[];
@@ -239,6 +253,7 @@ class _StatsScreenState extends State<StatsScreen> {
             final own = AssignmentStatistics(
               _actionableRecords(g, now),
               now: now,
+              coursework: coursework,
             );
             return own.pending + own.expired + own.unknown > 0;
           }).toList(growable: false);
@@ -259,6 +274,24 @@ class _StatsScreenState extends State<StatsScreen> {
               children: [
                 const JournalHeading('课业统计', bookTitle: true),
                 const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    for (final scope in CourseTermScope.values)
+                      ChoiceChip(
+                        key: ValueKey('stats-term-scope-${scope.name}'),
+                        selected: _termScope == scope,
+                        onSelected: (_) {
+                          if (_termScope == scope) return;
+                          JournalMotion.tap(store.display);
+                          setState(() => _termScope = scope);
+                        },
+                        label: Text(scope.label),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
                 _StatsRangeSegmentedBar(
                   selected: _range,
                   onChanged: (next) {
@@ -377,7 +410,9 @@ class _StatsScreenState extends State<StatsScreen> {
                           _buildStatusRow(
                             context,
                             index: i,
-                            label: CompletionPieChart.labels[i],
+                            label: i == 0 && stats.localCompleted > 0
+                                ? '${CompletionPieChart.labels[i]}（含本机标记 ${stats.localCompleted}）'
+                                : CompletionPieChart.labels[i],
                             count: stats.counts[i],
                             percent: stats.percentages[i],
                             dotColor: barColors[i],
@@ -533,7 +568,13 @@ class _StatsScreenState extends State<StatsScreen> {
       onTap: canTap ? open : null,
       label: '$label $count 份，$percent%',
       excludeSemantics: true,
-      child: canTap ? InkWell(onTap: open, child: content) : content,
+      child: canTap
+          ? InkWell(
+              key: ValueKey('stats-status-$index'),
+              onTap: open,
+              child: content,
+            )
+          : content,
     );
   }
 
@@ -545,7 +586,11 @@ class _StatsScreenState extends State<StatsScreen> {
     required JournalPalette journal,
   }) {
     final actionable = _actionableRecords(group, now);
-    final own = AssignmentStatistics(actionable, now: now);
+    final own = AssignmentStatistics(
+      actionable,
+      now: now,
+      coursework: widget.store.courseworkState,
+    );
     final same = group.accountExam
         ? const <_StatsGroup>[]
         : allGroups

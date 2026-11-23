@@ -39,6 +39,16 @@ class CourseNotice {
   String? get courseKey =>
       courseId != null && clazzId != null ? '$courseId:$clazzId' : null;
 
+  static final RegExp _systemHomeworkTitlePattern =
+      RegExp(r'^作业\s*[:：]\s*《.+》');
+
+  /// Matches Chaoxing automated homework reminder broadcasts verified in Phase 3A.
+  bool get isSystemReminder {
+    if (senderName.trim() != '学习通知') return false;
+    final trimmed = title.trim();
+    return trimmed == '作业结束提醒' || _systemHomeworkTitlePattern.hasMatch(trimmed);
+  }
+
   CourseNotice copyWith({
     String? courseId,
     String? clazzId,
@@ -197,6 +207,18 @@ class CourseNoticeCollection {
   final List<CourseNotice> items;
 
   int get unreadCount => items.where((item) => !item.localRead).length;
+
+  List<CourseNotice> get primaryItems =>
+      List.unmodifiable(items.where((item) => !item.isSystemReminder));
+
+  List<CourseNotice> get systemReminderItems =>
+      List.unmodifiable(items.where((item) => item.isSystemReminder));
+
+  int get primaryUnreadCount =>
+      items.where((item) => !item.isSystemReminder && !item.localRead).length;
+
+  int get systemReminderUnreadCount =>
+      items.where((item) => item.isSystemReminder && !item.localRead).length;
 
   static List<CourseNotice> _normalize(List<CourseNotice> source) {
     final deduped = <String, CourseNotice>{};

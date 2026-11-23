@@ -12,6 +12,7 @@ import '../models/study_notebook.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
+import '../services/calendar_day_workload.dart';
 import '../services/interaction_feedback_service.dart';
 import 'assignment_list_screen.dart';
 import 'manual_agenda_screen.dart';
@@ -210,11 +211,16 @@ class _CalendarScreenState extends State<CalendarScreen>
         builder: (context, _) {
           final journal = Journal.of(context);
           final now = _now;
+          final coursework = widget.store.courseworkState;
           final courseSources = widget.store.courseAssignments;
           final displayIndex = widget.store.homeDisplayIndex;
           final all = AssignmentQuery.projectDisplay(courseSources,
               index: displayIndex);
-          final assignmentsByDay = AssignmentQuery.groupCalendarByDay(all, now);
+          final assignmentsByDay = AssignmentQuery.groupCalendarByDay(
+            all,
+            now,
+            coursework: coursework,
+          );
           final manualByDay = <DateTime, List<ManualEntry>>{};
           for (final entry in widget.store.notebook.entries) {
             final at = entry.at;
@@ -225,12 +231,25 @@ class _CalendarScreenState extends State<CalendarScreen>
           for (final entries in manualByDay.values) {
             entries.sort((a, b) => a.at!.compareTo(b.at!));
           }
+          final dayWorkloadCounts = CalendarDayWorkload.countsByDay(
+            assignmentsByDay: assignmentsByDay,
+            manualByDay: manualByDay,
+            now: now,
+            coursework: coursework,
+          );
           final noDeadlineCount = all
-              .where((a) => AssignmentRecoveryScope.noDeadline.matches(a, now))
+              .where((a) => AssignmentRecoveryScope.noDeadline.matches(
+                    a,
+                    now,
+                    coursework: coursework,
+                  ))
               .length;
           final pendingDeadlineCount = all
-              .where((a) =>
-                  AssignmentRecoveryScope.deadlinePending.matches(a, now))
+              .where((a) => AssignmentRecoveryScope.deadlinePending.matches(
+                    a,
+                    now,
+                    coursework: coursework,
+                  ))
               .length;
           final selectedDay = selected;
           final List<Assignment> agenda;
@@ -254,12 +273,15 @@ class _CalendarScreenState extends State<CalendarScreen>
               month.year != today.year ||
               month.month != today.month;
           final busy = _refreshing || widget.store.isLoading;
+          final effectiveLastSync =
+              widget.store.syncReport.lastCurrentSuccessAt ??
+                  widget.store.lastSyncAt;
           final syncStatusText = busy
-              ? '正在刷新${widget.store.lastSyncAt == null ? '' : ' · 上次 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}'}…'
+              ? '正在刷新${effectiveLastSync == null ? '' : ' · 上次 ${DateFormat('M月d日 HH:mm').format(effectiveLastSync.toLocal())}'}…'
               : _refreshMessage ??
-                  (widget.store.lastSyncAt == null
+                  (effectiveLastSync == null
                       ? '尚未同步 · 当前显示本机记录'
-                      : '上次同步 ${DateFormat('M月d日 HH:mm').format(widget.store.lastSyncAt!.toLocal())}');
+                      : '上次同步 ${DateFormat('M月d日 HH:mm').format(effectiveLastSync.toLocal())}');
 
           final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
           final leading = month.weekday % 7;
@@ -424,6 +446,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                             title: '日历统计与圆点说明',
                             items: [
                               '蓝色圆点表示当天有待交或待确认课业，珊瑚红圆点表示考试或已逾期，中性灰点表示个人待办。',
+                              '当天有效未完成条目达到 3 项时，日期格显示暖朱砂淡底。',
                               '考试按开考日展示，作业与课堂任务按截止日展示，均使用北京时间。',
                               '左右滑动可切换月份；上滑或轻点底部横条可收拢为单周视图。',
                             ],
@@ -586,6 +609,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                   pageMonth: pageMonth,
                                   assignmentsByDay: assignmentsByDay,
                                   manualByDay: manualByDay,
+                                  dayWorkloadCounts: dayWorkloadCounts,
                                   now: now,
                                   cellHeight: cellHeight,
                                 );
@@ -635,12 +659,67 @@ class _CalendarScreenState extends State<CalendarScreen>
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 18, bottom: 8, left: 2),
-                child: Text(
-                  selected == null
-                      ? '本月议程'
-                      : '${DateFormat('M月d日').format(selected!)} · 议程',
-                  style: journal.section,
-                ),
+                child: Builder(builder: (context) {
+                  final heading = Text(
+                    selected == null
+                        ? '本月议程'
+                        : '${DateFormat('M月d日').format(selected!)} · 议程',
+                    style: journal.section,
+                  );
+                  final canQuickAdd =
+                      widget.store.notebook.entries.length < 500;
+                  final targetDay = selected ??
+                      ((month.year == today.year && month.month == today.month)
+                          ? today
+                          : DateTime(month.year, month.month, 1));
+                  final quickAddBtn = JournalPillButton(
+                    key: const ValueKey('calendar-quick-add-entry'),
+                    label: '+ 记一条',
+                    onPressed: canQuickAdd
+                        ? () {
+                            JournalMotion.tap(widget.store.display);
+                            final router = GoRouter.maybeOf(context);
+                            if (router != null) {
+                              final dayParam =
+                                  DateFormat('yyyy-MM-dd').format(targetDay);
+                              router.push('/calendar/new?day=$dayParam');
+                            } else {
+                              Navigator.of(context, rootNavigator: true).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ManualEntryEditor(
+                                    store: widget.store,
+                                    initialDay: targetDay,
+                                    routeScope: '/calendar',
+                                  ),
+                                ),
+                              );
+                            }
+                          }
+                        : null,
+                  );
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      if (!JournalLayout.isLargeText(context) &&
+                          constraints.maxWidth >= 240) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(child: heading),
+                            const SizedBox(width: 8),
+                            quickAddBtn,
+                          ],
+                        );
+                      }
+                      return Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [heading, quickAddBtn],
+                      );
+                    },
+                  );
+                }),
               ),
               if (agenda.isEmpty && manualAgenda.isEmpty)
                 JournalGroupedCard(
@@ -666,6 +745,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                         assignment: a,
                         examSources: courseSources,
                         displayIndex: displayIndex,
+                        courseworkEntry: widget.store.courseworkEntryFor(a),
                         now: now,
                         compact: widget.store.display.compact,
                         countdown: widget.store.display.countdown,
@@ -723,6 +803,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     required DateTime pageMonth,
     required Map<DateTime, List<Assignment>> assignmentsByDay,
     required Map<DateTime, List<ManualEntry>> manualByDay,
+    required Map<DateTime, int> dayWorkloadCounts,
     required DateTime now,
     required double cellHeight,
   }) {
@@ -760,6 +841,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                     daysInMonth: days,
                     assignmentsByDay: assignmentsByDay,
                     manualByDay: manualByDay,
+                    dayWorkloadCounts: dayWorkloadCounts,
                     now: now,
                     cellHeight: cellHeight,
                   ),
@@ -777,6 +859,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     required int daysInMonth,
     required Map<DateTime, List<Assignment>> assignmentsByDay,
     required Map<DateTime, List<ManualEntry>> manualByDay,
+    required Map<DateTime, int> dayWorkloadCounts,
     required DateTime now,
     required double cellHeight,
   }) {
@@ -789,12 +872,15 @@ class _CalendarScreenState extends State<CalendarScreen>
     final unknown =
         items.where((a) => !a.isExam && !a.isPendingConfirmed).length;
     final exams = items.where((a) => a.isExam).length;
+    final coursework = widget.store.courseworkState;
     final overdueCount = items
         .where((a) =>
-            AssignmentQuery.timelineBucketAt(a, now) ==
+            AssignmentQuery.timelineBucketAt(a, now, coursework: coursework) ==
             AssignmentDeadlineBucket.overdue)
         .length;
     final personalCount = manualByDay[date]?.length ?? 0;
+    final activeCount = dayWorkloadCounts[date] ?? 0;
+    final isBusy = CalendarDayWorkload.isBusyCount(activeCount);
     final isSelected = selected == date;
     final isToday = date == today;
 
@@ -810,7 +896,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         (MediaQuery.textScalerOf(context).scale(14) * 1.9).clamp(32.0, 46.0);
     return Semantics(
       label:
-          '${pageMonth.month}月$day日${isToday ? '，今天' : ''}，${items.length - unknown - exams}份待交，$unknown份待确认，$exams项考试或考试通知，$personalCount项个人安排',
+          '${pageMonth.month}月$day日${isToday ? '，今天' : ''}，${items.length - unknown - exams}份待交，$unknown份待确认，$exams项考试或考试通知，$personalCount项个人安排${isBusy ? '，安排较满（共$activeCount项）' : ''}',
       selected: isSelected,
       button: true,
       onTap: () {
@@ -828,68 +914,87 @@ class _CalendarScreenState extends State<CalendarScreen>
           borderRadius: BorderRadius.circular(12),
           child: SizedBox(
             height: cellHeight,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedContainer(
-                  duration: JournalMotion.duration(
-                    context,
-                    const Duration(milliseconds: 160),
-                  ),
-                  curve: JournalMotion.easeOut,
-                  width: circleSize,
-                  height: circleSize,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isSelected ? journal.accent : Colors.transparent,
-                    border: !isSelected && isToday
-                        ? Border.all(color: journal.accent, width: 1.3)
-                        : null,
-                  ),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      '$day',
-                      maxLines: 1,
-                      softWrap: false,
-                      style: _dateStyle.copyWith(
-                        color: isSelected
-                            ? journal.onPrimaryFill
-                            : isToday
-                                ? journal.accent
-                                : journal.ink,
-                        fontWeight: isSelected || isToday
-                            ? FontWeight.w700
-                            : FontWeight.w500,
+            child: Container(
+              key: isBusy
+                  ? ValueKey(
+                      'calendar-busy-day-${pageMonth.year}-${pageMonth.month}-$day')
+                  : null,
+              margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 1.5),
+              decoration: isBusy
+                  ? BoxDecoration(
+                      color: journal.berryBg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: journal.berryBorder,
+                        width: 0.7,
+                      ),
+                    )
+                  : null,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: JournalMotion.duration(
+                      context,
+                      const Duration(milliseconds: 160),
+                    ),
+                    curve: JournalMotion.easeOut,
+                    width: circleSize,
+                    height: circleSize,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isSelected ? journal.accent : Colors.transparent,
+                      border: !isSelected && isToday
+                          ? Border.all(color: journal.accent, width: 1.3)
+                          : null,
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '$day',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: _dateStyle.copyWith(
+                          color: isSelected
+                              ? journal.onPrimaryFill
+                              : isToday
+                                  ? journal.accent
+                                  : isBusy
+                                      ? journal.berry
+                                      : journal.ink,
+                          fontWeight: isSelected || isToday || isBusy
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                SizedBox(
-                  height: 6,
-                  child: dots.isEmpty
-                      ? const SizedBox.shrink()
-                      : Row(
-                          key: ValueKey('calendar-dots-$day'),
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            for (var i = 0; i < dots.length; i++) ...[
-                              if (i > 0) const SizedBox(width: 2.5),
-                              Container(
-                                width: 4.5,
-                                height: 4.5,
-                                decoration: BoxDecoration(
-                                  color: dots[i],
-                                  shape: BoxShape.circle,
+                  const SizedBox(height: 3),
+                  SizedBox(
+                    height: 6,
+                    child: dots.isEmpty
+                        ? const SizedBox.shrink()
+                        : Row(
+                            key: ValueKey('calendar-dots-$day'),
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (var i = 0; i < dots.length; i++) ...[
+                                if (i > 0) const SizedBox(width: 2.5),
+                                Container(
+                                  width: 4.5,
+                                  height: 4.5,
+                                  decoration: BoxDecoration(
+                                    color: dots[i],
+                                    shape: BoxShape.circle,
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
-                          ],
-                        ),
-                ),
-              ],
+                          ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

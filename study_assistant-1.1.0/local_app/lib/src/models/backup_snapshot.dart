@@ -4,7 +4,10 @@ import 'assignment.dart';
 import 'course.dart';
 import 'course_chapter_progress.dart';
 import 'course_notice.dart';
+import 'course_term_preferences.dart';
+import 'local_coursework_state.dart';
 import 'personal_workspace.dart';
+import 'pinned_assignments.dart';
 import 'reminder_rule_limits.dart';
 import 'study_notebook.dart';
 
@@ -24,7 +27,10 @@ class BackupSnapshot {
       this.notebook,
       Map<String, String> courseTaskKeys,
       this.notices,
-      this.chapters)
+      this.chapters,
+      this.pinned,
+      this.courseworkState,
+      this.courseTermPreferences)
       : records = List.unmodifiable(records),
         hidden = Set.unmodifiable(hidden),
         courses = List.unmodifiable(courses),
@@ -46,6 +52,9 @@ class BackupSnapshot {
   final Map<String, String> courseTaskKeys;
   final CourseNoticeCollection notices;
   final CourseChapterCatalog chapters;
+  final PinnedAssignments pinned;
+  final LocalCourseworkState courseworkState;
+  final CourseTermPreferences courseTermPreferences;
   static String ownerFor(String account) =>
       sha256.convert(utf8.encode(account.trim())).toString();
 
@@ -70,7 +79,19 @@ class BackupSnapshot {
     List<Assignment> records,
     CourseNoticeCollection notices,
     CourseChapterCatalog chapters,
+    PinnedAssignments pinned,
+    LocalCourseworkState courseworkState,
+    List<CourseRef> courses,
+    CourseTermPreferences courseTermPreferences,
   ) {
+    if (courses.any((c) => c.hasMetadata) || courseTermPreferences.isNotEmpty) {
+      return 9;
+    }
+    if (pinned.isNotEmpty ||
+        pinned.manuallyOrdered ||
+        courseworkState.isNotEmpty) {
+      return 8;
+    }
     if (records.any(_hasPortableTimeEvidence)) return 7;
     if (notices.items.isNotEmpty || chapters.byCourse.isNotEmpty) return 6;
     return 5;
@@ -133,17 +154,37 @@ class BackupSnapshot {
       PersonalWorkspace? personal,
       StudyNotebook? notebook,
       CourseNoticeCollection? notices,
-      CourseChapterCatalog? chapters}) {
+      CourseChapterCatalog? chapters,
+      PinnedAssignments? pinned,
+      LocalCourseworkState? courseworkState,
+      CourseTermPreferences? courseTermPreferences}) {
     final effectiveNotices = notices ?? CourseNoticeCollection();
     final effectiveChapters = chapters ?? CourseChapterCatalog();
-    final version =
-        _schemaVersion(records, effectiveNotices, effectiveChapters);
+    final effectivePinned = pinned ?? const PinnedAssignments.empty();
+    final effectiveCoursework =
+        courseworkState ?? const LocalCourseworkState.empty();
+    final effectiveTermPrefs =
+        courseTermPreferences ?? const CourseTermPreferences.empty();
+    final version = _schemaVersion(
+      records,
+      effectiveNotices,
+      effectiveChapters,
+      effectivePinned,
+      effectiveCoursework,
+      courses,
+      effectiveTermPrefs,
+    );
     return BackupSnapshot.decode(jsonEncode({
       'schema': version,
       'notebook': (notebook ?? StudyNotebook()).toJson(),
       'personal': (personal ?? PersonalWorkspace()).toJson(portable: true),
       if (version >= 6) 'notices': effectiveNotices.toJson(portable: true),
       if (version >= 6) 'chapters': effectiveChapters.toJson(portable: true),
+      if (version >= 8) 'pinned': effectivePinned.toJson(),
+      if (version >= 8 && effectiveCoursework.isNotEmpty)
+        'courseworkState': effectiveCoursework.toJson(),
+      if (version >= 9 && effectiveTermPrefs.isNotEmpty)
+        'courseTermPreferences': effectiveTermPrefs.toJson(),
       'owner': owner,
       'createdAt': createdAt.toUtc().toIso8601String(),
       'records': records
@@ -159,13 +200,26 @@ class BackupSnapshot {
   }
 
   String encode() {
-    final version = _schemaVersion(records, notices, chapters);
+    final version = _schemaVersion(
+      records,
+      notices,
+      chapters,
+      pinned,
+      courseworkState,
+      courses,
+      courseTermPreferences,
+    );
     return jsonEncode({
       'schema': version,
       'notebook': notebook.toJson(),
       'personal': personal.toJson(portable: true),
       if (version >= 6) 'notices': notices.toJson(portable: true),
       if (version >= 6) 'chapters': chapters.toJson(portable: true),
+      if (version >= 8) 'pinned': pinned.toJson(),
+      if (version >= 8 && courseworkState.isNotEmpty)
+        'courseworkState': courseworkState.toJson(),
+      if (version >= 9 && courseTermPreferences.isNotEmpty)
+        'courseTermPreferences': courseTermPreferences.toJson(),
       'owner': owner,
       'createdAt': createdAt.toUtc().toIso8601String(),
       'records': records
@@ -173,7 +227,15 @@ class BackupSnapshot {
               includeTimeEvidence: version >= 7))
           .toList(),
       'hidden': hidden.toList(),
-      'courses': courses.map((c) => c.toJson()).toList(),
+      'courses': version >= 9
+          ? courses.map((c) => c.toJson()).toList()
+          : courses
+              .map((c) => {
+                    'courseId': c.courseId,
+                    'clazzId': c.clazzId,
+                    'name': c.name,
+                  })
+              .toList(),
       'unfollowed': unfollowed.toList(),
       'reminderOffsets': reminderOffsets,
       'autoSyncIntervalMinutes': autoSyncIntervalMinutes,
@@ -226,12 +288,23 @@ class BackupSnapshot {
     }
     final decoded = jsonDecode(plaintext);
     final version = decoded is Map ? decoded['schema'] : null;
-    if (version is! int || !{1, 2, 3, 4, 5, 6, 7}.contains(version)) _bad();
+    if (version is! int || !{1, 2, 3, 4, 5, 6, 7, 8, 9}.contains(version)) {
+      _bad();
+    }
+    final hasCourseworkState = version >= 8 &&
+        decoded is Map &&
+        decoded.containsKey('courseworkState');
+    final hasCourseTermPreferences = version >= 9 &&
+        decoded is Map &&
+        decoded.containsKey('courseTermPreferences');
     final j = _map(decoded, {
       if (version >= 2) 'personal',
       if (version >= 3) 'notebook',
       if (version >= 6) 'notices',
       if (version >= 6) 'chapters',
+      if (version >= 8) 'pinned',
+      if (hasCourseworkState) 'courseworkState',
+      if (hasCourseTermPreferences) 'courseTermPreferences',
       'schema',
       'owner',
       'createdAt',
@@ -334,11 +407,44 @@ class BackupSnapshot {
     if (!hidden.every(ids.contains)) _bad();
     final courses = <CourseRef>[];
     for (final value in _list(j['courses'], max: 2000)) {
-      final c = _map(value, {'courseId', 'clazzId', 'name'});
-      courses.add(CourseRef(
+      if (version < 9) {
+        final c = _map(value, {'courseId', 'clazzId', 'name'});
+        courses.add(CourseRef(
+            courseId: _text(c['courseId']),
+            clazzId: _text(c['clazzId']),
+            name: _text(c['name'])));
+      } else {
+        if (value is! Map<String, dynamic>) _bad();
+        final c = _map(value, {
+          'courseId',
+          'clazzId',
+          'name',
+          if (value.containsKey('teacherNames')) 'teacherNames',
+          if (value.containsKey('folderName')) 'folderName',
+        });
+        final teacherRaw = c['teacherNames'];
+        final teacherList = <String>[];
+        if (c.containsKey('teacherNames')) {
+          final items = _list(teacherRaw, max: 10);
+          if (items.isEmpty) _bad();
+          final seenTeachers = <String>{};
+          for (final item in items) {
+            final name = _text(item, max: 80);
+            if (!seenTeachers.add(name)) _bad();
+            teacherList.add(name);
+          }
+        }
+        final folderName = c.containsKey('folderName')
+            ? _text(c['folderName'], max: 120)
+            : null;
+        courses.add(CourseRef(
           courseId: _text(c['courseId']),
           clazzId: _text(c['clazzId']),
-          name: _text(c['name'])));
+          name: _text(c['name']),
+          teacherNames: List.unmodifiable(teacherList),
+          folderName: folderName,
+        ));
+      }
     }
     if (courses.map((c) => c.key).toSet().length != courses.length) _bad();
     final offsets =
@@ -379,6 +485,18 @@ class BackupSnapshot {
                 : node,
         ]),
     });
+    final decodedPinned = version < 8
+        ? const PinnedAssignments.empty()
+        : PinnedAssignments.fromJson(j['pinned'], strict: true);
+    final decodedCoursework = !hasCourseworkState
+        ? const LocalCourseworkState.empty()
+        : LocalCourseworkState.fromJson(j['courseworkState'], strict: true);
+    final decodedTermPrefs = !hasCourseTermPreferences
+        ? const CourseTermPreferences.empty()
+        : CourseTermPreferences.fromJson(
+            j['courseTermPreferences'],
+            strict: true,
+          );
     return BackupSnapshot._(
         owner,
         _date(j['createdAt']),
@@ -394,7 +512,10 @@ class BackupSnapshot {
         decodedNotebook,
         courseTaskKeys,
         cleanNotices,
-        cleanChapters);
+        cleanChapters,
+        decodedPinned,
+        decodedCoursework,
+        decodedTermPrefs);
   }
 
   static ExamInfo? _exam(dynamic value) {

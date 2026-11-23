@@ -8,17 +8,88 @@ class ChaoxingCourseRef {
     required this.clazzId,
     required this.courseName,
     this.cpi,
+    this.teacherNames = const [],
+    this.folderName,
   });
 
   final String courseId;
   final String clazzId;
   final String courseName;
   final String? cpi;
+  final List<String> teacherNames;
+  final String? folderName;
 }
 
 class ChaoxingApiParser {
   static List<ChaoxingCourseRef> parseCourseRefs(dynamic payload) {
     return parseCourseRefsDetailed(payload).refs;
+  }
+
+  static final Set<String> _placeholderTeachers = {
+    '-',
+    '—',
+    '--',
+    '无',
+    '暂无',
+    '未知',
+    '待定',
+    'null',
+    'nil',
+    'n/a',
+    'na',
+  };
+
+  static List<String> _parseTeacherNames(dynamic raw) {
+    final tokens = <String>[];
+    void addFromString(String text) {
+      for (final piece in text.split(RegExp(r'[,，、;；/\r\n]+'))) {
+        final trimmed = piece.trim();
+        if (trimmed.isEmpty ||
+            trimmed.length > 80 ||
+            _placeholderTeachers.contains(trimmed.toLowerCase()) ||
+            RegExp(r'^\d+$').hasMatch(trimmed)) {
+          continue;
+        }
+        tokens.add(trimmed);
+      }
+    }
+
+    if (raw is String) {
+      addFromString(raw);
+    } else if (raw is List) {
+      for (final entry in raw) {
+        if (entry is String) {
+          addFromString(entry);
+        }
+      }
+    }
+    if (tokens.isEmpty) return const [];
+    final unique = <String>[];
+    final seen = <String>{};
+    for (final name in tokens) {
+      if (seen.add(name)) {
+        unique.add(name);
+        if (unique.length >= 10) break;
+      }
+    }
+    return List.unmodifiable(unique);
+  }
+
+  static ({List<String> names, bool conflicted}) _extractTeachers(
+    Map<String, dynamic>? courseData,
+    Map<String, dynamic> content,
+  ) {
+    final target = courseData ?? content;
+    final tfNames = _parseTeacherNames(target['teacherfactor']);
+    final tnNames = _parseTeacherNames(target['teacherName']);
+    if (tfNames.isNotEmpty && tnNames.isNotEmpty) {
+      final tfSet = tfNames.toSet();
+      final tnSet = tnNames.toSet();
+      if (tfSet.length != tnSet.length || !tfSet.containsAll(tnSet)) {
+        return (names: const <String>[], conflicted: true);
+      }
+    }
+    return (names: tfNames, conflicted: false);
   }
 
   static ({
@@ -35,7 +106,10 @@ class ChaoxingApiParser {
         _asList(roots['data']) ??
         _asList(roots['courses']) ??
         const [];
-    Iterable<dynamic> flattenChannels(List<dynamic> items) sync* {
+    Iterable<({dynamic item, String? folderName})> flattenChannels(
+      List<dynamic> items, {
+      String? parentFolder,
+    }) sync* {
       const childKeys = ['channelList', 'children', 'childList', 'courseList'];
       for (final item in items) {
         final channel = _asMap(item);
@@ -45,6 +119,9 @@ class ChaoxingApiParser {
           if (content != channel)
             for (final key in childKeys) ...?_asList(content?[key]),
         ];
+        final ownFolder =
+            _stringValue(content?['folderName'] ?? channel?['folderName']);
+        final nextFolder = ownFolder ?? parentFolder;
         final markedFolder = content?['folderName'] != null ||
             content?['datatype']?.toString() == '1' ||
             channel?['cataName'] == '文件夹';
@@ -61,17 +138,24 @@ class ChaoxingApiParser {
             childKeys.any((key) =>
                 _asList(channel?[key]) != null ||
                 _asList(content?[key]) != null);
-        if (hasCourse || !isFolder) yield item;
-        if (children.isNotEmpty) yield* flattenChannels(children);
+        if (hasCourse || !isFolder) {
+          yield (item: item, folderName: isFolder ? nextFolder : parentFolder);
+        }
+        if (children.isNotEmpty) {
+          yield* flattenChannels(children, parentFolder: nextFolder);
+        }
       }
     }
 
     final courses = <ChaoxingCourseRef>[];
-    final seen = <String>{};
+    final indexByKey = <String, int>{};
+    final foldersByKey = <String, Set<String>>{};
+    final teacherSignaturesByKey = <String, Set<String>>{};
+    final teacherConflictKeys = <String>{};
     var rejected = 0;
     var duplicates = 0;
-    for (final item in flattenChannels(channels)) {
-      final channel = _asMap(item);
+    for (final entry in flattenChannels(channels)) {
+      final channel = _asMap(entry.item);
       if (channel == null) {
         rejected++;
         continue;
@@ -114,17 +198,53 @@ class ChaoxingApiParser {
         rejected++;
         continue;
       }
-      if (!seen.add('$courseId:$clazzId')) {
+
+      final key = '$courseId:$clazzId';
+      final teacherInfo = _extractTeachers(courseData, content);
+      final folders = foldersByKey.putIfAbsent(key, () => <String>{});
+      if (entry.folderName != null && entry.folderName!.isNotEmpty) {
+        folders.add(entry.folderName!);
+      }
+      if (teacherInfo.conflicted) {
+        teacherConflictKeys.add(key);
+      } else if (teacherInfo.names.isNotEmpty) {
+        final sig = (teacherInfo.names.toList()..sort()).join('\u0000');
+        teacherSignaturesByKey.putIfAbsent(key, () => <String>{}).add(sig);
+      }
+
+      final existingIdx = indexByKey[key];
+      if (existingIdx != null) {
         duplicates++;
+        final existing = courses[existingIdx];
+        final resolvedFolder = folders.length == 1 ? folders.single : null;
+        final teacherConflict = teacherConflictKeys.contains(key) ||
+            (teacherSignaturesByKey[key]?.length ?? 0) > 1;
+        final resolvedTeachers = teacherConflict
+            ? const <String>[]
+            : existing.teacherNames.isNotEmpty
+                ? existing.teacherNames
+                : teacherInfo.names;
+        courses[existingIdx] = ChaoxingCourseRef(
+          courseId: existing.courseId,
+          clazzId: existing.clazzId,
+          courseName: existing.courseName,
+          cpi: existing.cpi,
+          teacherNames: resolvedTeachers,
+          folderName: resolvedFolder,
+        );
         continue;
       }
 
+      indexByKey[key] = courses.length;
       courses.add(
         ChaoxingCourseRef(
           courseId: courseId,
           clazzId: clazzId,
           courseName: courseName,
           cpi: _stringValue(content['cpi'] ?? channel['cpi']),
+          teacherNames:
+              teacherInfo.conflicted ? const <String>[] : teacherInfo.names,
+          folderName: entry.folderName,
         ),
       );
     }

@@ -86,6 +86,8 @@ class _Store extends AssignmentStore {
     notifyListeners();
     return true;
   }
+
+  void notify() => notifyListeners();
 }
 
 Future<void> _tap(WidgetTester tester, String text) async {
@@ -470,6 +472,122 @@ void main() {
     expect(find.text('课程考试'), findsOneWidget);
     expect(find.text('账号考试'), findsOneWidget);
     expect(find.text('考试通知'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'Phase 5A upcoming exam strip covers 14-day boundaries, exclusions, toggle/return and zero placeholder at 360dp',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 780);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    final now = DateTime.utc(2026, 11, 16, 2); // Beijing 10:00
+    final day14Plus1Min = _exam('too-far',
+        start: now.add(const Duration(days: 14, minutes: 1)),
+        end: now.add(const Duration(days: 14, hours: 2)),
+        title: '第15天超窗考试');
+    final pastExam = _exam('past',
+        start: now.subtract(const Duration(minutes: 1)),
+        end: now.add(const Duration(hours: 2)),
+        title: '已开考中考试');
+    final endedExam = _exam('ended',
+        lifecycle: 'ended',
+        start: now.add(const Duration(days: 1)),
+        end: now.add(const Duration(days: 1, hours: 2)),
+        title: '已结束考试');
+    final cancelledExam = _exam('cancelled',
+        lifecycle: 'cancelled',
+        start: now.add(const Duration(days: 2)),
+        end: now.add(const Duration(days: 2, hours: 2)),
+        title: '已取消考试');
+    final untrustedExam = _exam('untrusted',
+        trusted: false,
+        start: now.add(const Duration(days: 2)),
+        title: '未核实考试');
+    final noticeOnlyExam = _exam('notice-only',
+        notice: true,
+        start: now.add(const Duration(days: 1)),
+        end: now.add(const Duration(days: 1, hours: 2)),
+        title: '纯通知考试');
+    final completedExam = _exam('completed',
+        status: 'submitted',
+        start: now.add(const Duration(days: 1)),
+        end: now.add(const Duration(days: 1, hours: 2)),
+        title: '已完成考试');
+
+    final store = _Store()
+      ..replaceAssignmentsForTest([
+        _task('work-1'),
+        day14Plus1Min,
+        pastExam,
+        endedExam,
+        cancelledExam,
+        untrustedExam,
+        noticeOnlyExam,
+        completedExam,
+      ]);
+    addTearDown(store.dispose);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home:
+          Scaffold(body: AssignmentListScreen(store: store, clock: () => now)),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(
+        find.byKey(const ValueKey('home-upcoming-exam-strip')), findsNothing);
+    final baselineActionsTop = tester.getTopLeft(find.text('搜索与筛选')).dy;
+
+    final exactDay14 = _exam('boundary-14',
+        start: now.add(const Duration(days: 14)),
+        end: now.add(const Duration(days: 14, hours: 2)),
+        title: '第十四天边界期末综合测评考试');
+    store.replaceAssignmentsForTest(
+        [_task('work-1'), day14Plus1Min, exactDay14]);
+    store.notify();
+    await tester.pumpAndSettle();
+
+    final stripFinder = find.byKey(const ValueKey('home-upcoming-exam-strip'));
+    expect(stripFinder, findsOneWidget);
+    expect(find.text('近期考试 · 《第十四天边界期末综合测评考试》14 天后'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('搜索与筛选')).dy,
+        greaterThan(baselineActionsTop));
+    expect(tester.takeException(), isNull);
+
+    // Same-day and nearer 3-day exams beat day-14 exam.
+    final day3Exam = _exam('day3',
+        start: now.add(const Duration(days: 3)),
+        end: now.add(const Duration(days: 3, hours: 2)),
+        title: '离散数学期中测试');
+    store.replaceAssignmentsForTest([_task('work-1'), exactDay14, day3Exam]);
+    store.notify();
+    await tester.pumpAndSettle();
+    expect(find.text('近期考试 · 《离散数学期中测试》3 天后'), findsOneWidget);
+
+    final sameDayExam = _exam('today',
+        start: now.add(const Duration(hours: 1)),
+        end: now.add(const Duration(hours: 3)),
+        title: '数据结构上机考试');
+    store.replaceAssignmentsForTest([_task('work-1'), day3Exam, sameDayExam]);
+    store.notify();
+    await tester.pumpAndSettle();
+    expect(find.text('近期考试 · 《数据结构上机考试》今天'), findsOneWidget);
+
+    // Tap enters exam filter view; tap again returns to previous filters.
+    await tester.tap(stripFinder);
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.type, AssignmentTypeFilter.exam);
+    expect(find.text('返回'), findsOneWidget);
+    expect(find.text('课后作业'), findsNothing);
+    expect(find.text('数据结构上机考试'), findsOneWidget);
+
+    await tester.tap(stripFinder);
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.type, AssignmentTypeFilter.all);
+    expect(find.text('课后作业'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

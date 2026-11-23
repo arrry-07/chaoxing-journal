@@ -3,9 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
+import 'package:study_assistant_mobile/src/features/course_study_hub_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -168,10 +172,15 @@ void main() {
       return true;
     });
     await launch(tester, url: 'https://evil.example/work/task?workId=3');
-    final open = find.widgetWithText(OutlinedButton, '打开作业网页');
-    await reveal(tester, open);
-    final button = tester.widget<OutlinedButton>(open);
-    expect(button.onPressed, isNull);
+    final openPrimary = find.byKey(const ValueKey('assignment-detail-open'));
+    await reveal(tester, openPrimary);
+    expect(tester.widget<FilledButton>(openPrimary).onPressed, isNull);
+    final openWeb = find.byKey(const ValueKey('assignment-detail-open-web'));
+    await reveal(tester, openWeb);
+    final webButton = tester.widget<TextButton>(openWeb);
+    expect(webButton.onPressed, isNull);
+    await tester.tap(openWeb, warnIfMissed: false);
+    await tester.pump();
     expect(calls, 0);
     expect(find.textContaining('链接暂不可用'), findsOneWidget);
     final copyFinder = find.widgetWithText(TextButton, '复制作业链接');
@@ -220,22 +229,104 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+      'tapping verified course label pushes /course-hub?courseKey=1:2 while unverified identity stays plain non-tappable text',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = _DetailStore(_url);
+    addTearDown(store.dispose);
+
+    final router = GoRouter(
+      initialLocation: '/assignments/cx%3Awork%3A1%3A2%3A3',
+      routes: [
+        GoRoute(
+          path: '/assignments/:id',
+          builder: (_, state) => AssignmentDetailScreen(
+            store: store,
+            assignmentId: state.pathParameters['id']!,
+          ),
+        ),
+        GoRoute(
+          path: '/course-hub',
+          builder: (_, state) => CourseStudyHubScreen(
+            store: store,
+            initialTab: state.uri.queryParameters['tab'],
+            initialCourseKey: state.uri.queryParameters['courseKey'],
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('assignment-detail-course-link')),
+        findsOneWidget);
+
+    await tester
+        .tap(find.byKey(const ValueKey('assignment-detail-course-link')));
+    await tester.pumpAndSettle();
+    expect(find.byType(CourseStudyHubScreen), findsOneWidget);
+    expect(find.byKey(const ValueKey('course-hub-course-slice')),
+        findsNothing); // Unauthenticated _DetailStore hides private slice safely.
+
+    await tester.tap(find.byTooltip('返回我的'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AssignmentDetailScreen), findsOneWidget);
+
+    // Account-level exam without verified numeric courseId:clazzId stays non-clickable.
+    final unverified = Assignment(
+      id: 'cx:exam:account:account:500',
+      source: AssignmentSource.exam,
+      courseName: '同名合成课程',
+      title: '无课程键考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: DateTime.utc(2026),
+      exam: ExamInfo(
+        examId: '500',
+        startAt: DateTime.utc(2026, 12, 1, 1),
+        endAt: DateTime.utc(2026, 12, 1, 3),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    final noCourseStore = _DetailStore(null, overrideItem: unverified);
+    addTearDown(noCourseStore.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentDetailScreen(
+          store: noCourseStore,
+          assignmentId: unverified.id,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(const ValueKey('assignment-detail-course')), findsOneWidget);
+    expect(find.byKey(const ValueKey('assignment-detail-course-link')),
+        findsNothing);
+  });
 }
 
 const _url =
     'https://mooc1.chaoxing.com/mooc-ans/work/task?courseId=1&classId=2&workId=3&enc=a%2Bb%3D&x=1&x=2';
 
 class _DetailStore extends AssignmentStore {
-  _DetailStore(String? url)
-      : item = Assignment(
-            id: 'cx:work:1:2:3',
-            courseName: '合成课程',
-            title: '合成作业',
-            deadlineAt: DateTime.utc(2026, 11, 5, 0, 30),
-            requirementsText: '',
-            status: 'pending',
-            submitUrl: url,
-            lastSyncedAt: DateTime.utc(2026)),
+  _DetailStore(String? url, {Assignment? overrideItem})
+      : item = overrideItem ??
+            Assignment(
+                id: 'cx:work:1:2:3',
+                courseName: '合成课程',
+                title: '合成作业',
+                deadlineAt: DateTime.utc(2026, 11, 5, 0, 30),
+                requirementsText: '',
+                status: 'pending',
+                submitUrl: url,
+                lastSyncedAt: DateTime.utc(2026)),
         super(
             sessionStore: SecureSessionStore(),
             notificationService: LocalNotificationService(),
@@ -243,6 +334,10 @@ class _DetailStore extends AssignmentStore {
   final Assignment item;
   bool missing = false;
   int refreshes = 0;
+  @override
+  List<CourseRef> get courses => const [
+        CourseRef(courseId: '1', clazzId: '2', name: '合成课程'),
+      ];
   @override
   Assignment? findAssignment(String id) =>
       !missing && id == item.id ? item : null;

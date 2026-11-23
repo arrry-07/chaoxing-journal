@@ -254,7 +254,7 @@ class _LoginErrorCard extends StatelessWidget {
         color: journal.berryBg,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: journal.berry.withValues(alpha: 0.25),
+          color: journal.berryBorder,
           width: 0.8,
         ),
       ),

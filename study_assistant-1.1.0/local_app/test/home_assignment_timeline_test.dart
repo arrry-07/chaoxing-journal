@@ -2,14 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/assignment_change.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
+
+import 'review_core_remediation_test.dart' as f;
 
 class _Store extends AssignmentStore {
   _Store()
@@ -369,6 +375,330 @@ void main() {
     expect(find.text('明天'), findsNothing);
     expect(find.text('置顶'), findsNothing);
   });
+
+  group('Phase 2A pinned ordering, drag reorder, context menu & 3-line rail',
+      () {
+    testWidgets(
+        'unmanual pins auto-sort by nearest remaining time with untrusted last, show 3-line rail and vermilion near-due',
+        (tester) async {
+      final now = DateTime.utc(2026, 11, 20, 4, 0); // Beijing 12:00
+      final session = f.Session();
+      final store = _PinTimelineStore(sessionStore: session, clock: () => now);
+      addTearDown(store.dispose);
+
+      final far = _work(
+        'far',
+        title: '远期置顶',
+        course: '语文',
+        due: now.add(const Duration(days: 5)),
+      );
+      final today = _work(
+        'today',
+        title: '今天置顶',
+        course: '高数',
+        due: now.add(const Duration(hours: 3)), // Beijing 15:00 today
+      );
+      final unknown = _work(
+        'unknown',
+        title: '无期限置顶',
+        course: '英语',
+        due: null,
+        trusted: false,
+      );
+      await store.repository.activateAccount('A');
+      await store.repository.mergeAndSave([far, unknown, today]);
+      await store.restoreSession();
+
+      // Single pin: no drag handle shown, left rail shows 3 lines with berry color.
+      await store.togglePin(today);
+      await _mountRoutedHomeWithClock(tester, store, () => now);
+      expect(find.byIcon(Icons.drag_indicator_rounded), findsNothing);
+      expect(find.text('今天'), findsOneWidget);
+      expect(find.text('15:00'), findsOneWidget);
+      expect(find.text('剩3小时'), findsOneWidget);
+      final todayText = tester.widget<Text>(find.text('今天'));
+      expect(todayText.style?.color, Journal.berry);
+
+      // Pin two more -> auto order: today, far, unknown; drag handle appears.
+      await store.togglePin(unknown);
+      await store.togglePin(far);
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.drag_indicator_rounded), findsNWidgets(3));
+
+      double topOf(String title) => tester.getTopLeft(find.text(title)).dy;
+      expect(topOf(today.title), lessThan(topOf(far.title)));
+      expect(topOf(far.title), lessThan(topOf(unknown.title)));
+      expect(find.text('待定'), findsOneWidget);
+
+      // Long-press menu offers non-drag '置顶下移' on item 0 and persists manual order.
+      await tester.longPress(find.text(today.title));
+      await tester.pumpAndSettle();
+      expect(find.text('置顶下移'), findsOneWidget);
+      expect(find.text('置顶上移'), findsNothing);
+      await tester.tap(find.text('置顶下移'));
+      await tester.pumpAndSettle();
+
+      expect(store.hasManualPinOrder, isTrue);
+      expect(topOf(far.title), lessThan(topOf(today.title)));
+      expect(
+        store.pinnedKeys,
+        [far.courseTaskKey, today.courseTaskKey, unknown.courseTaskKey],
+      );
+
+      // Direct drag on drag handle reorders pins and preserves order.
+      final lastHandle = find.byIcon(Icons.drag_indicator_rounded).last;
+      final dragDistance = tester.getCenter(find.text(far.title)).dy -
+          tester.getCenter(find.text(unknown.title)).dy -
+          30;
+      await tester.timedDrag(
+        lastHandle,
+        Offset(0, dragDistance),
+        const Duration(milliseconds: 300),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        store.pinnedKeys,
+        [unknown.courseTaskKey, far.courseTaskKey, today.courseTaskKey],
+      );
+    });
+  });
+
+  testWidgets(
+      'Phase 2B home card displays manual label with official pending and keeps manual overdue at bottom',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 20, 4); // 12:00 Beijing
+    final session = f.Session()..account = 'home-manual-student';
+    final futureUntrusted = _work(
+      'future-m',
+      title: '未确认但设了未来手动截止',
+      course: '离散数学',
+      due: null,
+      trusted: false,
+    );
+    final pastUntrusted = _work(
+      'past-m',
+      title: '已过手动截止的作业',
+      course: '算法设计',
+      due: null,
+      trusted: false,
+    );
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('home-manual-student');
+    await repo
+        .mergeAndSave([futureUntrusted, pastUntrusted], completeSync: true);
+    final store = _PinTimelineStore(sessionStore: session, clock: () => now);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    expect(
+      await store.setManualDeadline(
+        futureUntrusted,
+        now.add(const Duration(days: 1)),
+      ),
+      isTrue,
+    );
+    expect(
+      await store.setManualDeadline(
+        pastUntrusted,
+        now.subtract(const Duration(hours: 3)),
+      ),
+      isTrue,
+    );
+
+    await _mountRoutedHomeWithClock(tester, store, () => now);
+    expect(find.text('手动'), findsNWidgets(2));
+    expect(find.textContaining('官方待确认'), findsNWidgets(2));
+    expect(find.text('手动截止已过'), findsOneWidget);
+    expect(find.text('已逾期置底'), findsOneWidget);
+
+    final cards =
+        tester.widgetList<AssignmentCard>(find.byType(AssignmentCard)).toList();
+    expect(
+      cards.map((c) => c.assignment.title).toList(),
+      ['未确认但设了未来手动截止', '已过手动截止的作业'],
+    );
+  });
+
+  testWidgets(
+      'Phase 2D home card shows 时间变更 pill for advance deadline and clears after acknowledgment or local completion',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final session = f.Session()..account = 'home-alert-student';
+    final work = _work(
+      'adv',
+      title: '教师提前截止的作业',
+      course: '编译原理',
+      due: now.add(const Duration(days: 1)),
+    );
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('home-alert-student');
+    await repo.mergeAndSave([work], completeSync: true);
+    final store = _PinTimelineStore(sessionStore: session, clock: () => now);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    final event = AssignmentChange(
+      assignmentId: work.id,
+      title: work.title,
+      courseName: work.courseName,
+      kind: AssignmentChangeKind.deadline,
+      at: now,
+      before: now.add(const Duration(days: 5)).toIso8601String(),
+      after: now.add(const Duration(days: 1)).toIso8601String(),
+      beforeDeadlineUtc: now.add(const Duration(days: 5)),
+      afterDeadlineUtc: now.add(const Duration(days: 1)),
+    );
+    store.changes = [event];
+
+    await _mountRoutedHomeWithClock(tester, store, () => now);
+    expect(find.text('时间变更'), findsOneWidget);
+
+    await store.setLocallyCompleted(work, true);
+    await tester.pumpAndSettle();
+    expect(find.text('时间变更'), findsNothing);
+
+    await store.setLocallyCompleted(work, false);
+    await tester.pumpAndSettle();
+    expect(find.text('时间变更'), findsOneWidget);
+
+    expect(
+        await store.acknowledgeDeadlineAlert(event.effectiveChangeId), isTrue);
+    await tester.pumpAndSettle();
+    expect(find.text('时间变更'), findsNothing);
+  });
+
+  testWidgets(
+      'Phase 5A upcoming exam strip respects selected course scope and restores previous deadline filter at 360dp',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 16, 2); // Beijing 10:00
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final session = f.Session();
+    final store = _PinTimelineStore(sessionStore: session, clock: () => now);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final mathExam = Assignment(
+      id: 'cx:exam:1:2:10',
+      source: AssignmentSource.exam,
+      courseName: '高等数学',
+      title: '高数期中考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: '10',
+        courseId: '1',
+        clazzId: '2',
+        startAt: now.add(const Duration(days: 3)),
+        endAt: now.add(const Duration(days: 3, hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    final staleNotice = Assignment(
+      id: 'cx:examNotice:inbox:n10',
+      source: AssignmentSource.exam,
+      courseName: '高等数学',
+      title: '高数期中考试（通知）',
+      deadlineAt: null,
+      requirementsText: '考试时间：2026-11-17 09:00 至 2026-11-17 11:00',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: 'n10',
+        relatedExamId: '10',
+        courseId: '1',
+        clazzId: '2',
+        noticeOnly: true,
+        startAt: now.add(const Duration(days: 1)),
+        endAt: now.add(const Duration(days: 1, hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    final otherCourseWork = _work(
+      'other-course',
+      title: '大学英语作文',
+      course: '大学英语',
+      due: now.add(const Duration(days: 2)),
+    ).copyWith(id: 'cx:work:9:9:w1');
+
+    store
+      ..replaceAssignmentsForTest([mathExam, staleNotice, otherCourseWork])
+      ..homeFilters = const HomeFilters(
+        courseKey: '1:2',
+        deadline: AssignmentDeadlineFilter.notExpired,
+      );
+
+    await _mountRoutedHomeWithClock(tester, store, () => now);
+    tester.view.physicalSize = const Size(360, 780);
+    await tester.pumpAndSettle();
+
+    // Formal exam wins over stale notice at day +1; shows +3 days.
+    expect(find.text('近期考试 · 《高数期中考试》3 天后'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('home-upcoming-exam-strip')));
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.type, AssignmentTypeFilter.exam);
+    expect(store.homeFilters.courseKey, '1:2');
+
+    // Return restores previous deadline filter + clears exam type.
+    await tester.tap(find.byKey(const ValueKey('home-upcoming-exam-strip')));
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.type, AssignmentTypeFilter.all);
+    expect(store.homeFilters.courseKey, '1:2');
+    expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
+
+    // Selecting unrelated course removes the strip with zero placeholder.
+    await store.saveHomeFilters(
+      const HomeFilters(courseKey: '9:9'),
+      store.accountEpoch,
+    );
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(const ValueKey('home-upcoming-exam-strip')), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+Future<GoRouter> _mountRoutedHomeWithClock(
+  WidgetTester tester,
+  AssignmentStore store,
+  DateTime Function() clock,
+) async {
+  final router = GoRouter(
+    initialLocation: '/assignments',
+    routes: [
+      GoRoute(
+        path: '/assignments',
+        builder: (_, __) =>
+            Scaffold(body: AssignmentListScreen(store: store, clock: clock)),
+      ),
+    ],
+  );
+  addTearDown(router.dispose);
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(390, 1400);
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(MaterialApp.router(
+    theme: StudyAssistantTheme.light,
+    routerConfig: router,
+  ));
+  await tester.pumpAndSettle();
+  return router;
+}
+
+class _PinTimelineStore extends AssignmentStore {
+  _PinTimelineStore({required super.sessionStore, required super.clock})
+      : super(
+          notificationService: f.Notifications(),
+          widgetSnapshotService: f.WidgetService(),
+          chaoxingClient: f.Client(),
+        );
+
+  @override
+  Future<bool> runDueAutoSync({DateTime? now}) async => false;
 }
 
 Future<GoRouter> _mountRoutedHome(

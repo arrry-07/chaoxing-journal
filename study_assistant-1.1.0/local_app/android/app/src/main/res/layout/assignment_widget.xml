@@ -24,6 +24,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:ellipsize="end"
+            android:fontFeatureSettings="tnum"
             android:maxLines="1"
             android:text="课业手记"
             android:textColor="@color/widget_ink"
@@ -36,6 +37,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
             android:ellipsize="end"
+            android:fontFeatureSettings="tnum"
             android:maxLines="1"
             android:textColor="@color/widget_muted"
             android:textSize="11sp" />
@@ -71,6 +73,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="1dp"
             android:ellipsize="end"
+            android:fontFeatureSettings="tnum"
             android:maxLines="1"
             android:textColor="@color/widget_muted"
             android:textSize="11sp" />
@@ -106,6 +109,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="1dp"
             android:ellipsize="end"
+            android:fontFeatureSettings="tnum"
             android:maxLines="1"
             android:textColor="@color/widget_muted"
             android:textSize="11sp" />
@@ -117,6 +121,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="2dp"
         android:ellipsize="end"
+        android:fontFeatureSettings="tnum"
         android:maxLines="1"
         android:textColor="@color/widget_muted"
         android:textSize="11sp"

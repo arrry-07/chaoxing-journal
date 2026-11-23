@@ -3,12 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../app/journal.dart';
+import '../app/journal_motion.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../models/assignment.dart';
+import '../models/assignment_change.dart';
+import '../models/personal_workspace.dart';
 import '../services/assignment_grouping.dart';
 import '../services/assignment_store.dart';
+import '../services/coursework_deadline.dart';
 import '../services/interaction_feedback_service.dart';
 import '../services/assignment_query.dart';
 import '../services/exam_schedule_presentation.dart';
@@ -149,10 +153,13 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   final _links = ExternalLinkService();
   bool _opening = false, _hiding = false, _refreshing = false;
   bool _togglingPin = false;
+  bool _savingManualDeadline = false;
   String? _actionMessage;
   _DetailNoticeTarget? _actionMessageTarget;
   Timer? _clock;
   late DateTime _now;
+  AssignmentChange? _presentedDeadlineAlert;
+  final Set<String> _attemptedAckChangeIds = <String>{};
 
   @override
   void initState() {
@@ -160,6 +167,16 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     WidgetsBinding.instance.addObserver(this);
     _now = widget.clock?.call() ?? DateTime.now();
     _clock = Timer.periodic(const Duration(minutes: 1), (_) => _refreshClock());
+  }
+
+  @override
+  void didUpdateWidget(covariant AssignmentDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.assignmentId != widget.assignmentId ||
+        oldWidget.store != widget.store) {
+      _presentedDeadlineAlert = null;
+      _attemptedAckChangeIds.clear();
+    }
   }
 
   void _refreshClock() {
@@ -345,6 +362,140 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
       if (saved || !current) return;
       _actionMessage = wasPinned ? '取消置顶失败，请稍后重试。' : '置顶失败，请稍后重试。';
       _actionMessageTarget = _DetailNoticeTarget.pin;
+    });
+  }
+
+  Future<void> _pickManualDeadline(
+    Assignment assignment, {
+    DateTime? existing,
+  }) async {
+    if (_savingManualDeadline) return;
+    final store = widget.store;
+    final epoch = store.accountEpoch;
+    final routeId = widget.assignmentId;
+    final beijing = AssignmentQuery.beijing(existing ?? _now);
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime(beijing.year, beijing.month, beijing.day),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2200, 12, 31),
+    );
+    if (!mounted || pickedDate == null) return;
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: existing != null
+          ? TimeOfDay(hour: beijing.hour, minute: beijing.minute)
+          : const TimeOfDay(hour: 23, minute: 59),
+    );
+    if (!mounted || pickedTime == null) return;
+    final utcInstant = DateTime.utc(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      pickedTime.hour,
+      pickedTime.minute,
+    ).subtract(const Duration(hours: 8));
+    setState(() {
+      _savingManualDeadline = true;
+      if (_actionMessageTarget == _DetailNoticeTarget.manual) {
+        _actionMessage = null;
+        _actionMessageTarget = null;
+      }
+    });
+    var saved = false;
+    try {
+      saved = await store.setManualDeadline(assignment, utcInstant.toLocal());
+    } catch (_) {
+      saved = false;
+    }
+    if (!mounted) return;
+    final current = widget.store == store &&
+        store.accountEpoch == epoch &&
+        widget.assignmentId == routeId;
+    if (saved && current) {
+      InteractionFeedback.trigger(store.display);
+    }
+    setState(() {
+      _savingManualDeadline = false;
+      if (!current) return;
+      _actionMessage = saved ? '已保存手动截止时间，官方截止仍待确认。' : '手动截止时间保存失败，请稍后重试。';
+      _actionMessageTarget = _DetailNoticeTarget.manual;
+    });
+  }
+
+  Future<void> _clearManualDeadline(Assignment assignment) async {
+    if (_savingManualDeadline) return;
+    final store = widget.store;
+    final epoch = store.accountEpoch;
+    final routeId = widget.assignmentId;
+    setState(() {
+      _savingManualDeadline = true;
+      if (_actionMessageTarget == _DetailNoticeTarget.manual) {
+        _actionMessage = null;
+        _actionMessageTarget = null;
+      }
+    });
+    var cleared = false;
+    try {
+      cleared = await store.setManualDeadline(assignment, null);
+    } catch (_) {
+      cleared = false;
+    }
+    if (!mounted) return;
+    final current = widget.store == store &&
+        store.accountEpoch == epoch &&
+        widget.assignmentId == routeId;
+    if (cleared && current) {
+      InteractionFeedback.trigger(store.display);
+    }
+    setState(() {
+      _savingManualDeadline = false;
+      if (!current) return;
+      _actionMessage = cleared ? '已清除手动截止记录。' : '清除手动截止失败，请稍后重试。';
+      _actionMessageTarget = _DetailNoticeTarget.manual;
+    });
+  }
+
+  Future<void> _toggleLocallyCompleted(
+    Assignment assignment,
+    bool completed,
+  ) async {
+    if (_savingManualDeadline) return;
+    final store = widget.store;
+    final epoch = store.accountEpoch;
+    final routeId = widget.assignmentId;
+    setState(() {
+      _savingManualDeadline = true;
+      if (_actionMessageTarget == _DetailNoticeTarget.records) {
+        _actionMessage = null;
+        _actionMessageTarget = null;
+      }
+    });
+    var saved = false;
+    try {
+      saved = await store.setLocallyCompleted(assignment, completed);
+    } catch (_) {
+      saved = false;
+    }
+    if (!mounted) return;
+    final current = widget.store == store &&
+        store.accountEpoch == epoch &&
+        widget.assignmentId == routeId;
+    if (saved && current) {
+      InteractionFeedback.trigger(
+        store.display,
+        kind: completed
+            ? InteractionSoundKind.complete
+            : InteractionSoundKind.tap,
+      );
+    }
+    setState(() {
+      _savingManualDeadline = false;
+      if (!current) return;
+      _actionMessage = saved
+          ? (completed ? '已标记为本机已完成，待办提醒已暂停并退顶。' : '已撤销本机完成标记。')
+          : '本机完成状态更新失败，请稍后重试。';
+      _actionMessageTarget = _DetailNoticeTarget.records;
     });
   }
 
@@ -543,21 +694,87 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
           if (exam != null && exam.endAt != null && !exam.endTrusted)
             '结束（未核实） ${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(exam.endAt!))}',
         ];
-        final bucket = AssignmentQuery.timelineBucketAt(assignment, _now);
-        final overdue = bucket == AssignmentDeadlineBucket.overdue;
-        final today = assignment.timelineAt != null &&
-            bucket != AssignmentDeadlineBucket.unconfirmed &&
-            AssignmentQuery.dayKey(assignment.timelineAt!) ==
-                AssignmentQuery.dayKey(_now);
-        final urgentLabel = overdue
-            ? '已逾期${_now.difference(assignment.timelineAt!).inDays > 0 ? '${_now.difference(assignment.timelineAt!).inDays}天' : ''}'
-            : !assignment.isExam &&
-                    assignment.isPendingConfirmed &&
-                    assignment.deadlineTrusted &&
-                    !assignment.deadlineReadFailed &&
-                    today
-                ? '今天截止'
+        final courseworkTarget = original ?? assignment;
+        final courseworkEntry =
+            widget.store.courseworkEntryFor(courseworkTarget);
+        final localDoneOnly = !assignment.isExam &&
+            CourseworkDeadline.isLocallyCompletedEntry(
+              assignment,
+              courseworkEntry,
+            );
+        final effectivelyCompleted = assignment.isCompleted || localDoneOnly;
+        final latestDeadlineChange =
+            widget.store.latestDeadlineChangeFor(assignment);
+        final liveDeadlineAlert = effectivelyCompleted
+            ? null
+            : widget.store.activeDeadlineAlertFor(assignment);
+        final displayDeadlineAlert = effectivelyCompleted ||
+                (_presentedDeadlineAlert != null &&
+                    latestDeadlineChange != null &&
+                    latestDeadlineChange.effectiveChangeId !=
+                        _presentedDeadlineAlert!.effectiveChangeId &&
+                    liveDeadlineAlert == null)
+            ? null
+            : (liveDeadlineAlert ?? _presentedDeadlineAlert);
+        if (liveDeadlineAlert != null) {
+          final changeId = liveDeadlineAlert.effectiveChangeId;
+          if (_presentedDeadlineAlert?.effectiveChangeId != changeId ||
+              !_attemptedAckChangeIds.contains(changeId)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              _presentedDeadlineAlert = liveDeadlineAlert;
+              if (_attemptedAckChangeIds.add(changeId)) {
+                unawaited(widget.store.acknowledgeDeadlineAlert(changeId));
+              }
+            });
+          }
+        }
+        final directPersonal = widget.store.personal.work[widget.assignmentId];
+        final fallbackPersonal =
+            directPersonal == null && assignment.id != widget.assignmentId
+                ? widget.store.personal.work[assignment.id]
                 : null;
+        final personalTargetId =
+            directPersonal != null ? widget.assignmentId : assignment.id;
+        final personalWork = directPersonal ?? fallbackPersonal;
+        final notePreviewText = personalWork?.note.trim() ?? '';
+        final personalSteps = personalWork?.steps ?? const <PersonalStep>[];
+        final showPersonalPreview = personalWork != null &&
+            (notePreviewText.isNotEmpty || personalSteps.isNotEmpty);
+        final resolvedDeadline = assignment.isExam
+            ? null
+            : CourseworkDeadline.resolveEntry(assignment, courseworkEntry);
+        final manualAt = courseworkEntry?.manualDeadlineAt;
+        final hasActiveManual = resolvedDeadline?.isManual == true;
+        final canEditManual = !assignment.isExam &&
+            CourseworkDeadline.canSetManualDeadline(
+              assignment,
+              entry: courseworkEntry,
+            );
+        final effectiveAt =
+            assignment.isExam ? assignment.timelineAt : resolvedDeadline?.at;
+        final bucket = assignment.isExam
+            ? AssignmentQuery.timelineBucketAt(assignment, _now)
+            : CourseworkDeadline.bucketAt(
+                assignment,
+                _now,
+                entry: courseworkEntry,
+              );
+        final overdue =
+            !effectivelyCompleted && bucket == AssignmentDeadlineBucket.overdue;
+        final today = effectiveAt != null &&
+            bucket != AssignmentDeadlineBucket.unconfirmed &&
+            AssignmentQuery.dayKey(effectiveAt) == AssignmentQuery.dayKey(_now);
+        final urgentLabel = effectivelyCompleted
+            ? null
+            : overdue
+                ? '${hasActiveManual ? '手动截止已过' : '已逾期'}${_now.difference(effectiveAt!).inDays > 0 ? '${_now.difference(effectiveAt).inDays}天' : ''}'
+                : !assignment.isExam &&
+                        assignment.isPendingConfirmed &&
+                        resolvedDeadline != null &&
+                        today
+                    ? '今天截止'
+                    : null;
         final statusLabel = assignment.isExam
             ? AssignmentCard.examStateLabel(assignment, _now)
             : assignment.statusLabel;
@@ -567,8 +784,9 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                 ? CourseworkPillTone.completed
                 : (bucket == AssignmentDeadlineBucket.unconfirmed ||
                         assignment.status == 'unknown' ||
-                        !assignment.deadlineTrusted ||
-                        assignment.deadlineReadFailed)
+                        (!hasActiveManual &&
+                            (!assignment.deadlineTrusted ||
+                                assignment.deadlineReadFailed)))
                     ? CourseworkPillTone.unconfirmed
                     : CourseworkPillTone.neutral;
         final cleanRequirements = assignment.requirementsText.trim();
@@ -583,6 +801,11 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
         final showCourseLabel = displayCourse.isNotEmpty &&
             displayCourse != displayTitle &&
             !isGenericExamLabel;
+        final rawCourseKey = assignment.courseKey?.trim();
+        final verifiedCourseKey = rawCourseKey != null &&
+                RegExp(r'^[1-9]\d*:[1-9]\d*$').hasMatch(rawCourseKey)
+            ? rawCourseKey
+            : null;
         final hasTrustedFullExamRange = exam != null &&
             exam.startTrusted &&
             exam.startAt != null &&
@@ -604,6 +827,18 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
               label: statusLabel,
               tone: statusTone,
             ),
+          if (localDoneOnly)
+            const CourseworkStatusPill(
+              label: '本机标记',
+              tone: CourseworkPillTone.completed,
+              icon: Icons.check_circle_outline_rounded,
+            ),
+          if (hasActiveManual)
+            const CourseworkStatusPill(
+              label: '手动截止',
+              tone: CourseworkPillTone.neutral,
+              icon: Icons.edit_calendar_outlined,
+            ),
           if (urgentLabel != null)
             CourseworkStatusPill(
               label: urgentLabel,
@@ -622,9 +857,11 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
             schedule!.verificationNote!
           else if (unverified)
             '部分信息尚未核实',
+          if (hasActiveManual) '官方截止仍待确认，当前日历与提醒已按手动截止投影。',
           if (!assignment.isExam &&
               !assignment.deadlineTrusted &&
-              assignment.deadlineAt != null)
+              assignment.deadlineAt != null &&
+              !hasActiveManual)
             '历史截止时间待确认，不参与日历和提醒',
           if (showRawDeadline) assignment.deadlineRawText!,
           if (!assignment.isExam &&
@@ -633,31 +870,72 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
             assignment.deadlineLabel,
         ];
         final hasTimeLine = assignment.isExam ? examLines.isNotEmpty : true;
-        final String timeText;
-        if (assignment.isExam) {
-          timeText = '${examLines.join('\n')}${hasExamTime ? '\n（北京时间）' : ''}';
-        } else {
-          String fullBeijingTime(DateTime value) =>
-              '${DateFormat('yyyy年M月d日 HH:mm', 'zh_CN').format(AssignmentQuery.beijing(value))}（北京时间）';
-
-          final start = assignment.availableFromAt;
-          final startText = assignment.availableFromText?.trim() ?? '';
-          final deadline = assignment.deadlineAt;
-          final deadlinePrefix =
-              !assignment.deadlineTrusted || assignment.deadlineReadFailed
-                  ? '历史截止（未核实） '
-                  : '截止：';
-          timeText = [
-            if (start != null)
-              '开始：${fullBeijingTime(start)}'
-            else if (startText.isNotEmpty)
-              '开始：$startText',
-            if (deadline != null)
-              '$deadlinePrefix${fullBeijingTime(deadline)}'
-            else
-              assignment.deadlineLabel,
-          ].join('\n');
-        }
+        final workStart = assignment.availableFromAt;
+        final workStartText = assignment.availableFromText?.trim() ?? '';
+        final workDeadline = assignment.deadlineAt;
+        final hasWorkBeijingTime = !assignment.isExam &&
+            (workStart != null || workDeadline != null || manualAt != null);
+        final workTimeRows = assignment.isExam
+            ? const <({
+                IconData icon,
+                Color iconColor,
+                String label,
+                String value,
+              })>[]
+            : <({
+                IconData icon,
+                Color iconColor,
+                String label,
+                String value,
+              })>[
+                if (workStart != null)
+                  (
+                    icon: Icons.play_circle_outline_rounded,
+                    iconColor: journal.muted,
+                    label: '开始',
+                    value: DateFormat('yyyy年M月d日 HH:mm', 'zh_CN')
+                        .format(AssignmentQuery.beijing(workStart)),
+                  )
+                else if (workStartText.isNotEmpty)
+                  (
+                    icon: Icons.play_circle_outline_rounded,
+                    iconColor: journal.muted,
+                    label: '开始',
+                    value: workStartText,
+                  ),
+                if (workDeadline != null)
+                  (
+                    icon: Icons.schedule_rounded,
+                    iconColor: !hasActiveManual && overdue
+                        ? journal.berry
+                        : journal.muted,
+                    label: !assignment.deadlineTrusted ||
+                            assignment.deadlineReadFailed
+                        ? '历史截止（未核实）'
+                        : '截止',
+                    value: DateFormat('yyyy年M月d日 HH:mm', 'zh_CN')
+                        .format(AssignmentQuery.beijing(workDeadline)),
+                  )
+                else
+                  (
+                    icon: Icons.schedule_rounded,
+                    iconColor: journal.muted,
+                    label: '截止',
+                    value: assignment.deadlineLabel,
+                  ),
+                if (manualAt != null)
+                  (
+                    icon: Icons.edit_calendar_outlined,
+                    iconColor: hasActiveManual && overdue
+                        ? journal.berry
+                        : journal.ink,
+                    label: hasActiveManual ? '手动截止（官方待确认）' : '手动旧记录（已被官方接管）',
+                    value: DateFormat('yyyy年M月d日 HH:mm', 'zh_CN')
+                        .format(AssignmentQuery.beijing(manualAt)),
+                  ),
+              ];
+        final showManualNotice = _actionMessage != null &&
+            _actionMessageTarget == _DetailNoticeTarget.manual;
         final pinTarget = original != null &&
                 !isHidden &&
                 AssignmentRecoveryScope.of(context) == null &&
@@ -737,11 +1015,56 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (showCourseLabel) ...[
-                            Text(
-                              displayCourse,
-                              key: const ValueKey('assignment-detail-course'),
-                              style: journal.metadata,
-                            ),
+                            if (verifiedCourseKey != null)
+                              InkWell(
+                                key: const ValueKey(
+                                  'assignment-detail-course-link',
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () {
+                                  JournalMotion.tap(widget.store.display);
+                                  GoRouter.maybeOf(context)?.push(
+                                    Uri(
+                                      path: '/course-hub',
+                                      queryParameters: {
+                                        'courseKey': verifiedCourseKey,
+                                      },
+                                    ).toString(),
+                                  );
+                                },
+                                child: Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 2),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          displayCourse,
+                                          key: const ValueKey(
+                                            'assignment-detail-course',
+                                          ),
+                                          style: journal.metadata.copyWith(
+                                            color: journal.ink,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 2),
+                                      Icon(
+                                        Icons.chevron_right_rounded,
+                                        size: 16,
+                                        color: journal.muted,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                            else
+                              Text(
+                                displayCourse,
+                                key: const ValueKey('assignment-detail-course'),
+                                style: journal.metadata,
+                              ),
                             const SizedBox(height: 4),
                           ],
                           if (displayTitle.isNotEmpty)
@@ -807,32 +1130,161 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                 ],
                               )
                             else
-                              Row(
+                              Column(
+                                key: const ValueKey('assignment-detail-time'),
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2),
-                                    child: Icon(
-                                      Icons.schedule_rounded,
-                                      size: 18,
-                                      color: overdue
-                                          ? journal.berry
-                                          : journal.muted,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      timeText,
-                                      key: const ValueKey(
-                                          'assignment-detail-time'),
-                                      style: journal.time.copyWith(
-                                        fontWeight: FontWeight.w600,
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          '时间安排',
+                                          style: journal.metadata.copyWith(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
                                       ),
-                                    ),
+                                      if (hasWorkBeijingTime)
+                                        Text(
+                                          '北京时间',
+                                          style: journal.metadata.copyWith(
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                    ],
                                   ),
+                                  const SizedBox(height: 8),
+                                  for (var i = 0;
+                                      i < workTimeRows.length;
+                                      i++) ...[
+                                    if (i > 0) const SizedBox(height: 8),
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 2),
+                                          child: Icon(
+                                            workTimeRows[i].icon,
+                                            size: 17,
+                                            color: workTimeRows[i].iconColor,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                workTimeRows[i].label,
+                                                style:
+                                                    journal.metadata.copyWith(
+                                                  fontSize: 12.5,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 1),
+                                              Text(
+                                                workTimeRows[i].value,
+                                                style: journal.time.copyWith(
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                  if (!assignment.isExam &&
+                                      (canEditManual || manualAt != null)) ...[
+                                    const SizedBox(height: 10),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 6,
+                                      crossAxisAlignment:
+                                          WrapCrossAlignment.center,
+                                      children: [
+                                        if (canEditManual)
+                                          OutlinedButton.icon(
+                                            key: const ValueKey(
+                                                'assignment-set-manual-deadline'),
+                                            style: OutlinedButton.styleFrom(
+                                              minimumSize: const Size(48, 48),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 8),
+                                              foregroundColor: journal.ink,
+                                              backgroundColor:
+                                                  journal.parchment,
+                                              side: BorderSide(
+                                                color: journal.cardBorder,
+                                                width: 0.8,
+                                              ),
+                                            ),
+                                            onPressed: _savingManualDeadline ||
+                                                    _refreshing ||
+                                                    _hiding
+                                                ? null
+                                                : () => _pickManualDeadline(
+                                                      courseworkTarget,
+                                                      existing: manualAt,
+                                                    ),
+                                            icon: const Icon(
+                                              Icons.edit_calendar_outlined,
+                                              size: 17,
+                                            ),
+                                            label: Text(hasActiveManual
+                                                ? '修改手动截止'
+                                                : '手动设置截止时间'),
+                                          ),
+                                        if (manualAt != null)
+                                          TextButton.icon(
+                                            key: const ValueKey(
+                                                'assignment-clear-manual-deadline'),
+                                            style: TextButton.styleFrom(
+                                              minimumSize: const Size(48, 48),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 8),
+                                              foregroundColor: journal.berry,
+                                            ),
+                                            onPressed: _savingManualDeadline ||
+                                                    _refreshing ||
+                                                    _hiding
+                                                ? null
+                                                : () => _clearManualDeadline(
+                                                    courseworkTarget),
+                                            icon: const Icon(
+                                                Icons.clear_rounded,
+                                                size: 17),
+                                            label: Text(hasActiveManual
+                                                ? '清除手动截止'
+                                                : '清除手动旧记录'),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                  if (showManualNotice) ...[
+                                    const SizedBox(height: 8),
+                                    _DetailActionNotice(
+                                      key: const ValueKey(
+                                          'assignment-manual-deadline-result'),
+                                      message: _actionMessage!,
+                                    ),
+                                  ],
                                 ],
                               ),
+                          ],
+                          if (displayDeadlineAlert != null) ...[
+                            const SizedBox(height: 12),
+                            _DetailDeadlineAlertBanner(
+                              alert: displayDeadlineAlert,
+                            ),
                           ],
                           if (verificationNotes.isNotEmpty) ...[
                             const SizedBox(height: 12),
@@ -940,6 +1392,14 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                       ),
                     ),
                   ),
+                  if (showPersonalPreview) ...[
+                    const SizedBox(height: 12),
+                    _DetailPersonalNotePreviewCard(
+                      targetAssignmentId: personalTargetId,
+                      note: notePreviewText,
+                      steps: personalSteps,
+                    ),
+                  ],
                   if (isHidden) ...[
                     const SizedBox(height: 16),
                     Container(
@@ -1069,7 +1529,13 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                   const SizedBox(height: 16),
                   JournalPrimaryButton(
                     buttonKey: const ValueKey('assignment-detail-open'),
-                    height: 50,
+                    height: 46,
+                    backgroundColor: journal.isDark
+                        ? journal.primaryFill
+                        : const Color(0xFF34322F),
+                    foregroundColor: journal.isDark
+                        ? journal.onPrimaryFill
+                        : const Color(0xFFFFF7EC),
                     onPressed: _opening || _hiding || _currentUrl == null
                         ? null
                         : _openAssignment,
@@ -1080,15 +1546,27 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                             ? '在学习通内查看$_itemLabel'
                             : '在学习通内打开作业',
                   ),
-                  const SizedBox(height: 8),
-                  JournalSecondaryButton(
-                    buttonKey: const ValueKey('assignment-detail-open-web'),
-                    height: 48,
-                    onPressed: _opening || _hiding || _currentUrl == null
-                        ? null
-                        : _openWeb,
-                    icon: Icons.open_in_browser_rounded,
-                    label: _opening ? '正在请求浏览器…' : '打开$_itemLabel网页',
+                  const SizedBox(height: 6),
+                  Center(
+                    child: TextButton.icon(
+                      key: const ValueKey('assignment-detail-open-web'),
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        foregroundColor: journal.ink,
+                        disabledForegroundColor: journal.muted,
+                        textStyle: journal.metadata.copyWith(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      onPressed: _opening || _hiding || _currentUrl == null
+                          ? null
+                          : _openWeb,
+                      icon: const Icon(Icons.open_in_browser_rounded, size: 17),
+                      label: Text(_opening ? '正在请求浏览器…' : '打开$_itemLabel网页'),
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Padding(
@@ -1135,6 +1613,28 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                           iconSize: 20,
                         ),
                       ),
+                      if (!isHidden &&
+                          !assignment.isExam &&
+                          !assignment.isCompleted)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          child: _DetailToolButton(
+                            key: const ValueKey(
+                                'assignment-detail-local-complete'),
+                            onPressed:
+                                _savingManualDeadline || _hiding || _refreshing
+                                    ? null
+                                    : () => _toggleLocallyCompleted(
+                                          courseworkTarget,
+                                          !localDoneOnly,
+                                        ),
+                            icon: localDoneOnly
+                                ? Icons.undo_rounded
+                                : Icons.check_circle_outline_rounded,
+                            label: localDoneOnly ? '撤销本机完成标记' : '标记为本机已完成',
+                          ),
+                        ),
                       if (!isHidden)
                         Padding(
                           padding: const EdgeInsets.symmetric(
@@ -1222,7 +1722,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   }
 }
 
-enum _DetailNoticeTarget { opening, records, restore, pin }
+enum _DetailNoticeTarget { opening, records, restore, pin, manual }
 
 class _DetailActionNotice extends StatelessWidget {
   const _DetailActionNotice({super.key, required this.message});
@@ -1381,6 +1881,210 @@ class _RawNoticeTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DetailDeadlineAlertBanner extends StatelessWidget {
+  const _DetailDeadlineAlertBanner({required this.alert});
+
+  final AssignmentChange alert;
+
+  static String _formatBeijing(DateTime utcTime) =>
+      DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(utcTime));
+
+  @override
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    final beforeUtc = alert.effectiveBeforeUtc;
+    final afterUtc = alert.effectiveAfterUtc;
+    final oldLabel = beforeUtc == null ? '待确认' : _formatBeijing(beforeUtc);
+    final newLabel = afterUtc == null ? '待确认' : _formatBeijing(afterUtc);
+    final headline = beforeUtc == null ? '时间变更：官方截止已明确' : '时间变更：官方截止已提前';
+    return Container(
+      key: const ValueKey('assignment-detail-deadline-alert'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      decoration: BoxDecoration(
+        color: journal.berryBg.withValues(
+          alpha: journal.isDark ? 0.65 : 0.85,
+        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: journal.berryBorder,
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(
+              Icons.update_rounded,
+              size: 16,
+              color: journal.berry,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  headline,
+                  style: journal.metadata.copyWith(
+                    color: journal.berry,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '原截止：$oldLabel → 新截止：$newLabel（北京时间）',
+                  style: journal.metadata.copyWith(
+                    color: journal.ink,
+                    fontSize: 12.5,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DetailPersonalNotePreviewCard extends StatelessWidget {
+  const _DetailPersonalNotePreviewCard({
+    required this.targetAssignmentId,
+    required this.note,
+    required this.steps,
+  });
+
+  final String targetAssignmentId;
+  final String note;
+  final List<PersonalStep> steps;
+
+  @override
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    final doneSteps = steps.where((s) => s.done).length;
+    return Material(
+      key: const ValueKey('assignment-detail-personal-preview'),
+      color: journal.sheet,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: journal.cardBorder, width: 0.8),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => GoRouter.maybeOf(context)?.push(
+          '/personal/${Uri.encodeComponent(targetAssignmentId)}',
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(
+                    Icons.edit_note_rounded,
+                    size: 19,
+                    color: journal.accent,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            '个人便签',
+                            style: journal.metadata.copyWith(
+                              color: journal.ink,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (steps.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 1.5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: journal.parchment,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '清单 $doneSteps/${steps.length}',
+                                style: journal.metadata.copyWith(
+                                  fontSize: 11.5,
+                                  color: journal.muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (note.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          note,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: journal.metadata.copyWith(
+                            color: journal.ink,
+                            fontSize: 13.5,
+                            height: 1.45,
+                          ),
+                        ),
+                      ] else if (steps.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          steps
+                              .firstWhere(
+                                (s) => !s.done,
+                                orElse: () => steps.first,
+                              )
+                              .text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: journal.metadata.copyWith(
+                            color: journal.muted,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: journal.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

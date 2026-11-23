@@ -1,8 +1,10 @@
 import '../models/assignment.dart';
+import '../models/local_coursework_state.dart';
 import 'assignment_grouping.dart';
 import 'assignment_query.dart';
 import 'assignment_statistics.dart';
 import 'assignment_store.dart';
+import 'course_term_catalog.dart';
 
 enum StatsTimeRange {
   all,
@@ -92,6 +94,7 @@ class LocalRecordFilterSpec {
     this.scope = LocalRecordScopeFilter.allLocal,
     this.courseKey,
     this.timeRange = StatsTimeRange.all,
+    this.termScope = CourseTermScope.allTerms,
     this.query = '',
     this.sort = LocalRecordSortOrder.timeAsc,
   });
@@ -102,6 +105,7 @@ class LocalRecordFilterSpec {
   final LocalRecordScopeFilter scope;
   final String? courseKey;
   final StatsTimeRange timeRange;
+  final CourseTermScope termScope;
   final String query;
   final LocalRecordSortOrder sort;
 
@@ -111,6 +115,7 @@ class LocalRecordFilterSpec {
     final statusRaw = params['status'];
     final scopeRaw = params['scope'];
     final rangeRaw = params['range'];
+    final termRaw = params['term'];
     final sortRaw = params['sort'];
     final fromRaw = params['from'];
     final courseKeyRaw = params['courseKey']?.trim();
@@ -140,6 +145,11 @@ class LocalRecordFilterSpec {
             .firstOrNull ??
         StatsTimeRange.all;
 
+    final termScope = CourseTermScope.values
+            .where((value) => value.name == termRaw)
+            .firstOrNull ??
+        CourseTermScope.allTerms;
+
     final sort = LocalRecordSortOrder.values
             .where((value) => value.name == sortRaw)
             .firstOrNull ??
@@ -153,6 +163,7 @@ class LocalRecordFilterSpec {
       courseKey:
           courseKeyRaw == null || courseKeyRaw.isEmpty ? null : courseKeyRaw,
       timeRange: timeRange,
+      termScope: termScope,
       query: params['q'] ?? '',
       sort: sort,
     );
@@ -280,10 +291,12 @@ class LocalRecordQuery {
   static bool matchesStatusFilter(
     Assignment a,
     LocalRecordStatusFilter status,
-    DateTime now,
-  ) {
+    DateTime now, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
     if (status == LocalRecordStatusFilter.all) return true;
-    final bucket = AssignmentStatistics.classify(a, now);
+    final bucket =
+        AssignmentStatistics.classify(a, now, coursework: coursework);
     return switch (status) {
       LocalRecordStatusFilter.all => true,
       LocalRecordStatusFilter.unfinished =>
@@ -326,10 +339,13 @@ class LocalRecordQuery {
       return LocalRecordQueryResult(groups: sorted);
     }
 
-    // Coursework category: align base collection with stats scope when scoped.
-    final baseGroups = spec.scope == LocalRecordScopeFilter.allLocal
-        ? store.localCourseTaskGroups
-        : store.courseworkGroups.where((g) => !g.hidden).toList();
+    // Coursework category: align base collection with the same term-scoped
+    // statistics source used by StatsScreen, including archived courses.
+    final statsScoped =
+        spec.from == 'stats' || spec.scope != LocalRecordScopeFilter.allLocal;
+    final baseGroups = statsScoped
+        ? _statsScopedGroups(store, spec, now)
+        : store.localCourseTaskGroups;
 
     final courseOptions = _buildCourseOptions(
       baseGroups,
@@ -352,7 +368,12 @@ class LocalRecordQuery {
       if (!matchesStatsTimeRange(primary, spec.timeRange, now)) {
         return false;
       }
-      if (!matchesStatusFilter(primary, spec.status, now)) {
+      if (!matchesStatusFilter(
+        primary,
+        spec.status,
+        now,
+        coursework: store.courseworkState,
+      )) {
         return false;
       }
       if (needle.isNotEmpty) {
@@ -370,6 +391,22 @@ class LocalRecordQuery {
       groups: sorted,
       courseOptions: courseOptions,
     );
+  }
+
+  static List<CourseworkGroup> _statsScopedGroups(
+    AssignmentStore store,
+    LocalRecordFilterSpec spec,
+    DateTime now,
+  ) {
+    final allowed = {
+      for (final assignment
+          in store.statsAssignmentsForScope(spec.termScope, now: now))
+        assignment.id,
+    };
+    return [
+      for (final group in store.localRecordGroups)
+        if (!group.hidden && allowed.contains(group.primary.id)) group,
+    ];
   }
 
   static List<LocalRecordCourseOption> _buildCourseOptions(

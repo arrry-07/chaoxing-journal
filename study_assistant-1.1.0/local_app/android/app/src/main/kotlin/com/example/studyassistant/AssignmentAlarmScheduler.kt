@@ -63,7 +63,8 @@ object AssignmentAlarmScheduler {
         now: Instant = Instant.now(),
         zone: ZoneId = ZoneId.systemDefault(),
     ) {
-        val triggerAt = NativeReminderPolicy.nextWindowStart(now, zone).toEpochMilli()
+        val triggerAt = DeadlineQuietHoursPolicy.nextAudibleNewWindowStart(now, zone)
+            .toEpochMilli()
         val requestCode = stableRequestCode("new-window:$accountHash")
         val intent = Intent(context, NewAssignmentWindowReceiver::class.java)
             .setAction(NEW_WINDOW_ACTION)
@@ -128,16 +129,21 @@ object AssignmentAlarmScheduler {
         if (!database.isSessionCurrent(account.accountHash, account.sessionEpoch)) return
         database.pendingDeadlineEvents(account.accountHash).forEach { event ->
             val deadline = event.deadlineAt?.let(Instant::ofEpochMilli) ?: return@forEach
-            if (!deadline.isAfter(now)) {
-                database.cancelEvent(event.eventId)
-                cancelDeadline(context, event)
-                return@forEach
+            val snapshot = database.snapshot(account.accountHash, event.assignmentId)
+            val verifiedSource = if (snapshot != null && snapshot.deadlineSource == event.deadlineSource) {
+                snapshot.deadlineSource
+            } else {
+                "unknown"
             }
-            val earliest = event.offsets.asSequence()
-                .map { deadline.minusSeconds(it.toLong() * 60) }
-                .map { NativeReminderPolicy.moveToDaytime(it, zone) }
-                .filter { it.isAfter(now) && it.isBefore(deadline) }
-                .minOrNull()
+            val earliest = DeadlineQuietHoursPolicy.recomputeEarliestSlot(
+                deadlineAt = deadline,
+                now = now,
+                offsets = event.offsets,
+                deadlineSource = verifiedSource,
+                eventKind = event.eventKind,
+                allowUrgentNightBreakthrough = account.allowUrgentNightBreakthrough,
+                zone = zone,
+            )
             if (earliest == null) {
                 database.cancelEvent(event.eventId)
                 cancelDeadline(context, event)
@@ -160,7 +166,7 @@ object AssignmentAlarmScheduler {
         val accountHash = account.accountHash
         if (!account.newAssignmentEnabled || database.pendingNewEvents(accountHash).isEmpty()) {
             cancelNewAssignmentWindow(context, accountHash)
-        } else if (NativeReminderPolicy.isInDaytimeWindow(now, zone)) {
+        } else if (DeadlineQuietHoursPolicy.isInAudibleNewWindow(now, zone)) {
             cancelNewAssignmentWindow(context, accountHash)
             AssignmentNotificationPublisher.publishPendingNewAssignments(
                 context,

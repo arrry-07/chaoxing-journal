@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/features/course_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/course_study_hub_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/features/sync_status_screen.dart';
@@ -15,7 +16,9 @@ import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav
 import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_sync_diagnostics_exporter.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/course_chapter_progress.dart';
 import 'package:study_assistant_mobile/src/models/course_notice.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
@@ -23,6 +26,7 @@ import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
+import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -999,5 +1003,277 @@ void main() {
       CourseStudyHubScreen.cleanNoticeSummary('正文内容\n课程名称：保留中间引用'),
       '正文内容\n课程名称：保留中间引用',
     );
+  });
+
+  testWidgets(
+      'CourseListScreen and CourseStudyHubScreen show teacher names, clip long teacher lists at 320w@2x, and search by teacher',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _TestSessionStore(),
+      notificationService: _TestNotificationService(),
+      widgetSnapshotService: _TestWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.repository.activateAccount('13800000001');
+    await store.repository.saveCourses(
+      const [
+        CourseRef(
+          courseId: '10',
+          clazzId: '100',
+          name: '大学英语',
+          teacherNames: ['Alice教师', 'Bob教师', 'Carol教师', 'Dave教师'],
+          folderName: '2026年秋',
+        ),
+        CourseRef(
+          courseId: '11',
+          clazzId: '101',
+          name: '大学英语',
+          teacherNames: ['Eve导师'],
+        ),
+      ],
+      account: '13800000001',
+    );
+    await store.restoreSession();
+
+    tester.view.physicalSize = const Size(320, 760);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    Widget wrap(Widget child) => MaterialApp(
+          builder: (context, inner) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: const TextScaler.linear(2.0)),
+            child: inner!,
+          ),
+          home: child,
+        );
+
+    // 1. CourseListScreen displays class + teacher names, clips long lists, and filters by teacher.
+    await tester.pumpWidget(wrap(CourseListScreen(store: store)));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('班级 100 · Alice教师'), findsOneWidget);
+    expect(find.textContaining('班级 101 · Eve导师'), findsOneWidget);
+    final listSub =
+        tester.widget<Text>(find.textContaining('班级 100 · Alice教师'));
+    expect(listSub.maxLines, 2);
+    expect(listSub.overflow, TextOverflow.ellipsis);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(
+      find.byKey(const ValueKey('course-list-search-toggle')),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('course-list-search')),
+      'Eve导师',
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('班级 101 · Eve导师'), findsOneWidget);
+    expect(find.textContaining('班级 100 · Alice教师'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    // 2. CourseStudyHubScreen chapters show teacher names and notice picker searches by teacher.
+    await tester.pumpWidget(wrap(CourseStudyHubScreen(store: store)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('已关联课程'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('班级 100 · Alice教师'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, 'Eve导师');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('班级 101 · Eve导师'), findsOneWidget);
+    expect(find.textContaining('班级 100 · Alice教师'), findsNothing);
+    await tester.tap(find.byTooltip('关闭'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.textContaining('章节任务点'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('班级 100 · Alice教师'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'Phase 3E collapses system reminders, keeps primary unread badge accurate, isolates single-course slice by verified courseKey, and resets on account change',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('13800000001');
+    await repo.saveCourses(
+      const [
+        CourseRef(
+          courseId: '1',
+          clazzId: '10',
+          name: '线性代数',
+          teacherNames: ['陈老师'],
+          folderName: '2026年秋',
+        ),
+        CourseRef(
+          courseId: '1',
+          clazzId: '11',
+          name: '线性代数',
+          teacherNames: ['李教授'],
+          folderName: '2025年秋',
+        ),
+      ],
+      account: '13800000001',
+    );
+
+    final activeWork = Assignment(
+      id: 'cx:work:1:10:w1',
+      courseName: '线性代数',
+      title: '10班进行中作业',
+      deadlineAt: now.add(const Duration(days: 2)),
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final submittedWork = Assignment(
+      id: 'cx:work:1:10:w2',
+      courseName: '线性代数',
+      title: '10班已完成旧作业',
+      deadlineAt: now.subtract(const Duration(days: 300)),
+      requirementsText: '',
+      status: 'submitted',
+      lastSyncedAt: now,
+    );
+    final wrongClassWork = Assignment(
+      id: 'cx:work:1:11:w9',
+      courseName: '线性代数',
+      title: '11班不应混入作业',
+      deadlineAt: now.subtract(const Duration(days: 300)),
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    await repo.mergeAndSave([activeWork, submittedWork, wrongClassWork]);
+
+    await repo.saveCourseNotices(
+      CourseNoticeCollection(items: [
+        CourseNotice(
+          id: 'cx:notice:${'1'.padLeft(64, '0')}',
+          courseId: '1',
+          clazzId: '10',
+          courseName: '线性代数',
+          senderName: '陈老师',
+          title: '陈老师调课通知',
+          lastSyncedAt: now,
+        ),
+        CourseNotice(
+          id: 'cx:notice:${'2'.padLeft(64, '0')}',
+          courseId: '1',
+          clazzId: '10',
+          courseName: '线性代数',
+          senderName: '陈老师',
+          title: '作业结束提醒',
+          lastSyncedAt: now.subtract(const Duration(minutes: 1)),
+        ),
+        CourseNotice(
+          id: 'cx:notice:${'3'.padLeft(64, '0')}',
+          courseId: '1',
+          clazzId: '11',
+          courseName: '线性代数',
+          senderName: '学习通知',
+          title: '作业结束提醒',
+          lastSyncedAt: now,
+        ),
+        CourseNotice(
+          id: 'cx:notice:${'4'.padLeft(64, '0')}',
+          courseId: '1',
+          clazzId: '10',
+          courseName: '线性代数',
+          senderName: '学习通知',
+          title: '作业：《线性代数》第七章提交提醒',
+          lastSyncedAt: now.subtract(const Duration(minutes: 2)),
+        ),
+      ]),
+      '13800000001',
+    );
+
+    final store = AssignmentStore(
+      repository: repo,
+      sessionStore: _TestSessionStore(),
+      notificationService: _TestNotificationService(),
+      widgetSnapshotService: _TestWidgetSnapshotService(),
+      chaoxingClient: _WidgetHubClient(),
+      clock: () => now,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    // System reminder alone must not recall past course 1:11, and global badge excludes system reminders.
+    expect(
+        store.termCatalog.entryFor('1:11')!.state, CourseCatalogState.archived);
+    expect(store.unreadCourseNoticeCount, 2);
+
+    await tester.pumpWidget(MaterialApp.router(
+      routerConfig: GoRouter(
+        initialLocation: '/course-hub',
+        routes: [
+          GoRoute(
+            path: '/course-hub',
+            builder: (_, state) => CourseStudyHubScreen(
+              store: store,
+              initialTab: state.uri.queryParameters['tab'],
+              initialCourseKey: state.uri.queryParameters['courseKey'],
+            ),
+          ),
+          GoRoute(
+            path: '/assignment/:id',
+            builder: (_, state) => Scaffold(
+              body: Text('detail:${state.pathParameters['id']}'),
+            ),
+          ),
+        ],
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('课程通知 (2)'), findsOneWidget);
+    expect(find.text('陈老师调课通知'), findsOneWidget);
+    expect(find.text('作业结束提醒'),
+        findsOneWidget); // Human teacher same-title stays visible.
+    expect(find.text('作业：《线性代数》第七章提交提醒'), findsNothing);
+    expect(find.byKey(const ValueKey('notice-system-reminders-card')),
+        findsOneWidget);
+    expect(find.text('系统提醒（2）'), findsOneWidget);
+
+    // Expand collapsed system reminders section and mark them read independently.
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('notice-system-reminders-toggle')),
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('notice-system-reminders-toggle')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('作业：《线性代数》第七章提交提醒'), findsOneWidget);
+    expect(store.unreadCourseNoticeCount, 2);
+
+    await tester.tap(
+      find.byKey(const ValueKey('notice-system-reminders-mark-read')),
+    );
+    await tester.pumpAndSettle();
+    expect(store.courseNotices.systemReminderUnreadCount, 0);
+    expect(store.unreadCourseNoticeCount, 2);
+
+    // Navigate to single-course slice for 1:10 and verify strict class isolation.
+    final ctx = tester.element(find.byType(CourseStudyHubScreen));
+    GoRouter.of(ctx).push('/course-hub?courseKey=1:10');
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(const ValueKey('course-hub-course-slice')), findsOneWidget);
+    expect(find.textContaining('教师：陈老师'), findsOneWidget);
+    expect(find.text('10班进行中作业'), findsOneWidget);
+    expect(find.text('10班已完成旧作业'), findsOneWidget);
+    expect(find.text('11班不应混入作业'), findsNothing);
+
+    // Logout removes private single-course slice immediately.
+    await store.logout();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('course-hub-course-slice')), findsNothing);
+    expect(store.courseNotices.items, isEmpty);
   });
 }

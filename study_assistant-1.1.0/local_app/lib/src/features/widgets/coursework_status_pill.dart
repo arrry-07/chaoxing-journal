@@ -29,31 +29,37 @@ class CourseworkStatusPill extends StatelessWidget {
       CourseworkPillTone.overdue => (
           fg: journal.berry,
           bg: journal.berryBg,
+          border: journal.berryBorder,
           defaultIcon: Icons.warning_amber_rounded,
         ),
       CourseworkPillTone.urgentToday => (
           fg: journal.berry,
           bg: journal.berryBg,
+          border: journal.berryBorder,
           defaultIcon: Icons.schedule_rounded,
         ),
       CourseworkPillTone.unconfirmed => (
           fg: journal.ochre,
           bg: journal.ochreBg,
+          border: null,
           defaultIcon: Icons.help_outline_rounded,
         ),
       CourseworkPillTone.exam => (
           fg: journal.slate,
           bg: journal.slateBg,
+          border: null,
           defaultIcon: Icons.school_outlined,
         ),
       CourseworkPillTone.completed => (
           fg: journal.ink,
           bg: journal.sage,
+          border: null,
           defaultIcon: Icons.check_circle_outline_rounded,
         ),
       CourseworkPillTone.neutral => (
           fg: journal.muted,
           bg: journal.parchment,
+          border: null,
           defaultIcon: null,
         ),
     };
@@ -63,6 +69,9 @@ class CourseworkStatusPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: palette.bg,
         borderRadius: BorderRadius.circular(6),
+        border: palette.border == null
+            ? null
+            : Border.all(color: palette.border!, width: 0.7),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

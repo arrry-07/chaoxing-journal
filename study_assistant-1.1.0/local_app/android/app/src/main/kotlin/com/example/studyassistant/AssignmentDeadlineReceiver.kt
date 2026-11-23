@@ -3,6 +3,7 @@ package com.example.studyassistant
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import java.time.Instant
 import java.time.ZonedDateTime
 
 class AssignmentDeadlineReceiver : BroadcastReceiver() {
@@ -41,24 +42,57 @@ class AssignmentDeadlineReceiver : BroadcastReceiver() {
             )
             return
         }
-        if (now.hour < 8) {
-            val windowStart = BackgroundWorkScheduler.nextWindowStart(now)
-            val deadline = event.deadlineAt
-            if (deadline != null && deadline > windowStart) {
-                database.updateEventNotifyAt(event.eventId, windowStart)
+        val snapshot = database.snapshot(accountHash, event.assignmentId)
+        val verifiedSource = if (snapshot != null && snapshot.deadlineSource == event.deadlineSource) {
+            snapshot.deadlineSource
+        } else {
+            "unknown"
+        }
+        val evaluation = DeadlineQuietHoursPolicy.evaluateDeadlineDelivery(
+            now = now.toInstant(),
+            scheduledNotifyAt = Instant.ofEpochMilli(event.notifyAt),
+            deadlineAt = event.deadlineAt?.let(Instant::ofEpochMilli),
+            deadlineSource = verifiedSource,
+            allowUrgentNightBreakthrough = account.allowUrgentNightBreakthrough,
+            zone = now.zone,
+        )
+        when (evaluation.decision) {
+            DeadlineQuietHoursPolicy.DeliveryDecision.DELIVER -> {
+                AssignmentNotificationPublisher.publishDeadline(
+                    appContext,
+                    database,
+                    event,
+                    now.toInstant(),
+                    now.zone,
+                )
+            }
+            DeadlineQuietHoursPolicy.DeliveryDecision.DEFER_TO_QUIET_END -> {
+                val nextAt = evaluation.deferredAt!!.toEpochMilli()
+                database.updateEventNotifyAt(event.eventId, nextAt)
                 AssignmentAlarmScheduler.scheduleDeadline(
                     appContext,
-                    event.copy(notifyAt = windowStart),
+                    event.copy(notifyAt = nextAt),
                 )
                 AssignmentNotificationPublisher.recordReceiverReason(
                     appContext,
                     database,
                     listOf(event),
                     "deferred",
-                    "outsideWindow",
-                    scheduledAtOverride = windowStart,
+                    "quietHours",
+                    scheduledAtOverride = nextAt,
                 )
-            } else {
+            }
+            DeadlineQuietHoursPolicy.DeliveryDecision.SUPPRESS_LATE_QUIET -> {
+                database.cancelEvent(event.eventId)
+                AssignmentNotificationPublisher.recordReceiverReason(
+                    appContext,
+                    database,
+                    listOf(event),
+                    "cancelled",
+                    "lateQuietSuppressed",
+                )
+            }
+            DeadlineQuietHoursPolicy.DeliveryDecision.CANCEL_DEADLINE_PASSED -> {
                 database.cancelEvent(event.eventId)
                 AssignmentNotificationPublisher.recordReceiverReason(
                     appContext,
@@ -68,14 +102,17 @@ class AssignmentDeadlineReceiver : BroadcastReceiver() {
                     "deadlinePassed",
                 )
             }
-            return
+            DeadlineQuietHoursPolicy.DeliveryDecision.BLOCK_MISSING_SOURCE -> {
+                database.cancelEvent(event.eventId)
+                AssignmentNotificationPublisher.recordReceiverReason(
+                    appContext,
+                    database,
+                    listOf(event),
+                    "blocked",
+                    "missingDeadlineSource",
+                )
+            }
         }
-        AssignmentNotificationPublisher.publishDeadline(
-            appContext,
-            database,
-            event,
-            now.toInstant(),
-        )
     }
 
     companion object {

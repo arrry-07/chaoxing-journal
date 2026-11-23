@@ -53,6 +53,8 @@ class _CapturingGateway extends BackgroundReminderGateway {
     BackgroundCheckSettings settings, {
     required bool showDetails,
     bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
   }) async {}
 
   @override

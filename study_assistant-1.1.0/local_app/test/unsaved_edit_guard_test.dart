@@ -856,4 +856,115 @@ void main() {
       expect(find.byType(AssignmentListScreen), findsOneWidget);
     });
   });
+
+  group('Phase 1B system back with dirty editor', () {
+    testWidgets(
+        'stackless dirty personal editor returns to /assignments after single confirm without exiting',
+        (tester) async {
+      await initializeDateFormatting('zh_CN');
+      SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+      final store = _LaunchStore();
+      addTearDown(store.dispose);
+      await store.restoreSession();
+      await store.repository.mergeAndSave([f.sample('shared')]);
+      await store.refreshAssignments();
+      tester.binding.platformDispatcher.defaultRouteNameTestValue =
+          _personalLocation;
+      addTearDown(
+          tester.binding.platformDispatcher.clearDefaultRouteNameTestValue);
+
+      var exitCalls = 0;
+      await tester.pumpWidget(StudyAssistantApp(
+        assignmentStore: store,
+        notificationService: f.Notifications(),
+        onExitApp: () async => exitCalls++,
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(PersonalWorkScreen), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField).first, '无栈系统返回单次确认');
+      await tester.pump();
+
+      unawaited(tester.binding.handlePopRoute());
+      await tester.pumpAndSettle();
+      expect(find.text('放弃未保存的修改？'), findsOneWidget);
+
+      await tester.tap(find.text('放弃修改'));
+      await tester.pumpAndSettle();
+      expect(exitCalls, 0);
+      expect(find.text('放弃未保存的修改？'), findsNothing);
+      expect(find.byType(PersonalWorkScreen), findsNothing);
+      expect(find.byType(AssignmentListScreen), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'pushed dirty personal editor pops back to source tab after single confirm',
+        (tester) async {
+      await _launchApp(tester, '/calendar');
+      expect(find.byType(CalendarScreen), findsOneWidget);
+
+      final router = GoRouter.of(tester.element(find.byType(AppShell)));
+      unawaited(router.push(_personalLocation));
+      await tester.pumpAndSettle();
+      expect(find.byType(PersonalWorkScreen), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField).first, '带栈系统返回源标签');
+      await tester.pump();
+
+      unawaited(tester.binding.handlePopRoute());
+      await tester.pumpAndSettle();
+      expect(find.text('放弃未保存的修改？'), findsOneWidget);
+
+      await tester.tap(find.text('放弃修改'));
+      await tester.pumpAndSettle();
+      expect(find.text('放弃未保存的修改？'), findsNothing);
+      expect(find.byType(PersonalWorkScreen), findsNothing);
+      expect(find.byType(CalendarScreen), findsOneWidget);
+    });
+  });
+
+  testWidgets(
+      'Phase 5A quick-add ManualEntryEditor from CalendarScreen guards dirty exit on back and notification',
+      (tester) async {
+    final notifications = _CapturingNotifications();
+    final store = await _launchApp(
+      tester,
+      '/calendar',
+      notifications: notifications,
+    );
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('calendar-quick-add-entry')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualEntryEditor), findsOneWidget);
+    expect(find.byType(JournalFloatingNavBar), findsNothing);
+
+    await tester.enterText(find.byType(TextFormField).first, '日历未保存待办');
+    await tester.pump();
+
+    unawaited(tester.binding.handlePopRoute());
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualEntryEditor), findsOneWidget);
+
+    notifications.handler!('d:summary');
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    await tester.tap(find.text('继续编辑'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualEntryEditor), findsOneWidget);
+
+    notifications.handler!('d:summary');
+    await tester.pumpAndSettle();
+    expect(find.text('放弃未保存的修改？'), findsOneWidget);
+    await tester.tap(find.text('放弃修改'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ManualEntryEditor), findsNothing);
+    expect(find.byType(AssignmentListScreen), findsOneWidget);
+    expect(store.notebook.entries, isEmpty);
+  });
 }

@@ -27,6 +27,7 @@ class ReminderSystemReceiver : BroadcastReceiver() {
                     Intent.ACTION_BOOT_COMPLETED,
                     Intent.ACTION_USER_UNLOCKED,
                     Intent.ACTION_MY_PACKAGE_REPLACED,
+                    "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED",
                     "android.intent.action.QUICKBOOT_POWERON",
                     "com.htc.intent.action.QUICKBOOT_POWERON" -> {
                         try {

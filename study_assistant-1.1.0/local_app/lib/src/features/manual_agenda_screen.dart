@@ -191,14 +191,27 @@ class _AgendaState extends State<ManualAgendaScreen> {
 }
 
 class ManualEntryEditor extends StatefulWidget {
-  const ManualEntryEditor({super.key, required this.store, this.entry});
+  const ManualEntryEditor({
+    super.key,
+    required this.store,
+    this.entry,
+    this.initialDay,
+    this.routeScope = '/agenda',
+  });
   final AssignmentStore store;
   final ManualEntry? entry;
+  final DateTime? initialDay;
+  final String routeScope;
   @override
   State<ManualEntryEditor> createState() => _EditorState();
 }
 
 class _EditorState extends State<ManualEntryEditor> {
+  static DateTime _defaultAtForDay(DateTime day) =>
+      DateTime.utc(day.year, day.month, day.day, 9, 0)
+          .subtract(const Duration(hours: 8))
+          .toLocal();
+
   final form = GlobalKey<FormState>();
   late final int epoch;
   late final String? _accountHashAtStart;
@@ -211,7 +224,8 @@ class _EditorState extends State<ManualEntryEditor> {
       TextEditingController(text: '${widget.entry?.minutes ?? 0}');
   late String kind = widget.entry?.kind ?? 'todo';
   late bool remind = widget.entry?.remind ?? false;
-  late DateTime? at = widget.entry?.at;
+  late DateTime? at = widget.entry?.at ??
+      (widget.initialDay == null ? null : _defaultAtForDay(widget.initialDay!));
   bool busy = false;
   bool _dirty = false;
   bool _saving = false;
@@ -237,7 +251,7 @@ class _EditorState extends State<ManualEntryEditor> {
     _leaveGuard = guard;
     _leaveGuard?.register(
       this,
-      routeScope: '/agenda',
+      routeScope: widget.routeScope,
       hasUnsavedChanges: () => _dirty || _saving,
       draftRevision: () =>
           '${title.text}|${course.text}|${location.text}|${note.text}|'
@@ -296,7 +310,11 @@ class _EditorState extends State<ManualEntryEditor> {
   }
 
   Future<void> chooseDate() async {
-    final start = AssignmentQuery.beijing(at ?? DateTime.now());
+    final anchor = at ??
+        (widget.initialDay == null
+            ? DateTime.now()
+            : _defaultAtForDay(widget.initialDay!));
+    final start = AssignmentQuery.beijing(anchor);
     final d = await showDatePicker(
         context: context,
         initialDate: DateTime(start.year, start.month, start.day),
@@ -356,7 +374,12 @@ class _EditorState extends State<ManualEntryEditor> {
       if (widget.store.serviceWarnings.isNotEmpty) {
         showJournalMessage(context, feedback);
       }
-      Navigator.pop(context);
+      final router = GoRouter.maybeOf(context);
+      if (editorRoute?.settings is Page && router != null && router.canPop()) {
+        router.pop();
+      } else {
+        Navigator.pop(context);
+      }
       return;
     }
     setState(() {
@@ -373,6 +396,23 @@ class _EditorState extends State<ManualEntryEditor> {
         canPop: !_dirty && !_saving,
         onPopInvokedWithResult: (didPop, result) async {
           if (didPop || (!_dirty && !_saving)) return;
+          final editorRoute = ModalRoute.of(context);
+          final router = GoRouter.maybeOf(context);
+          final guard = _leaveGuard;
+          if (editorRoute?.settings is Page &&
+              guard != null &&
+              router != null &&
+              router.canPop()) {
+            await guard.navigate(
+              owner: this,
+              isCurrent: () => mounted,
+              action: () {
+                if (!context.mounted) return;
+                if (router.canPop()) router.pop();
+              },
+            );
+            return;
+          }
           final leave = await _requestLeave();
           if (leave && context.mounted) Navigator.of(context).pop();
         },

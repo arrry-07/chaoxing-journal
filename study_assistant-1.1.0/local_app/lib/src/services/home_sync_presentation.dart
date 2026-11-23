@@ -1,13 +1,24 @@
+import '../models/assignment.dart';
+import '../models/local_coursework_state.dart';
 import '../models/sync_report.dart';
+import 'assignment_query.dart';
+import 'coursework_deadline.dart';
 
 enum HomeSyncAction { none, read, retry, login, verify, settings }
 
 class HomeSyncPresentation {
-  const HomeSyncPresentation(this.summary, this.action,
-      {this.showCached = false});
+  const HomeSyncPresentation(
+    this.summary,
+    this.action, {
+    this.showCached = false,
+    this.gentle = false,
+  });
+
   final String summary;
   final HomeSyncAction action;
   final bool showCached;
+  final bool gentle;
+
   String? get actionLabel => switch (action) {
         HomeSyncAction.none => null,
         HomeSyncAction.read => '读取作业',
@@ -109,6 +120,18 @@ class HomeSyncPresentation {
                             : hasClassroomFailure
                                 ? '部分课堂任务未更新'
                                 : '部分课程作业未更新';
+        final pureNetworkFailure = report.phase == SyncPhase.failed &&
+            hasCache &&
+            report.issues.isNotEmpty &&
+            report.issues.every((i) => i.kind == SyncIssueKind.network);
+        if (pureNetworkFailure) {
+          return const HomeSyncPresentation(
+            '网络暂不可用',
+            HomeSyncAction.retry,
+            showCached: true,
+            gentle: true,
+          );
+        }
         return HomeSyncPresentation(
             report.phase == SyncPhase.partial
                 ? partialSummary
@@ -126,13 +149,107 @@ class HomeSyncPresentation {
     }
     final updated = report.lastDataSuccessAt ?? successAt;
     if (report.phase == SyncPhase.success || updated != null) {
-      final local = updated?.toLocal();
+      if (updated == null) {
+        return const HomeSyncPresentation('刚刚更新', HomeSyncAction.none);
+      }
+      final elapsed = now.difference(updated);
+      if (!elapsed.isNegative && elapsed > const Duration(hours: 24)) {
+        return HomeSyncPresentation(
+          '${elapsed.inDays}天前更新',
+          HomeSyncAction.none,
+        );
+      }
+      final local = updated.toLocal();
       return HomeSyncPresentation(
-          local == null || now.difference(updated!).inMinutes < 1
+          elapsed.inMinutes < 1
               ? '刚刚更新'
               : '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')} 更新',
           HomeSyncAction.none);
     }
     return const HomeSyncPresentation('尚未读取作业', HomeSyncAction.read);
+  }
+}
+
+class HomeDueSummary {
+  const HomeDueSummary({
+    required this.dueToday,
+    required this.dueIn3Days,
+    required this.completedToday,
+  });
+
+  final int dueToday;
+  final int dueIn3Days;
+  final int completedToday;
+
+  factory HomeDueSummary.from(
+    List<Assignment> catalogAssignments, {
+    required DateTime now,
+    AssignmentDisplayIndex? index,
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
+    final todayDay = AssignmentQuery.dayKey(now);
+    final day3End = DateTime(todayDay.year, todayDay.month, todayDay.day + 2);
+    final projected = AssignmentQuery.projectDisplay(
+      catalogAssignments,
+      index: index,
+    );
+    final seenKeys = <String>{};
+    var dueToday = 0;
+    var dueIn3Days = 0;
+    var completedToday = 0;
+
+    for (final assignment in projected) {
+      if (assignment.isExam) continue;
+      if (!assignment.isFormal && !assignment.isSupportedClassroomTask) {
+        continue;
+      }
+      if (assignment.availability == AssignmentAvailability.unavailable) {
+        continue;
+      }
+      final dedupeKey = assignment.courseTaskKey ?? assignment.id;
+      if (!seenKeys.add(dedupeKey)) continue;
+      if (AssignmentQuery.isArchivedPastTerm(assignment, now) ||
+          AssignmentQuery.isArchivedClassroomPractice(assignment, now)) {
+        continue;
+      }
+      final resolved =
+          AssignmentQuery.effectiveDeadline(assignment, coursework: coursework);
+      if (resolved == null) continue;
+      final deadline = resolved.at;
+      final dueDay = AssignmentQuery.dayKey(deadline);
+      if (CourseworkDeadline.isEffectivelyCompleted(assignment, coursework)) {
+        if (dueDay == todayDay && resolved.isOfficial) completedToday++;
+        continue;
+      }
+      if (!assignment.isPendingConfirmed ||
+          assignment.status == 'overdue' ||
+          !deadline.isAfter(now)) {
+        continue;
+      }
+      if (dueDay == todayDay) {
+        dueToday++;
+        dueIn3Days++;
+      } else if (!dueDay.isBefore(todayDay) && !dueDay.isAfter(day3End)) {
+        dueIn3Days++;
+      }
+    }
+    return HomeDueSummary(
+      dueToday: dueToday,
+      dueIn3Days: dueIn3Days,
+      completedToday: completedToday,
+    );
+  }
+
+  String label({required bool compact}) {
+    if (dueToday > 0) {
+      return compact
+          ? '今日 $dueToday · 3日 $dueIn3Days'
+          : '今日待交 $dueToday · 3日内 $dueIn3Days';
+    }
+    final prefix = completedToday > 0 ? '今日已交完' : '今日无待交';
+    if (dueIn3Days > 0) {
+      return compact ? '$prefix · 3日 $dueIn3Days' : '$prefix · 3日内 $dueIn3Days';
+    }
+    return prefix;
   }
 }

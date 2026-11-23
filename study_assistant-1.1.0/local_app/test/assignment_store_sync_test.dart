@@ -8,8 +8,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
 import 'package:study_assistant_mobile/src/models/course_notice.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
+import 'package:study_assistant_mobile/src/models/sync_scope.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/home_sync_presentation.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -59,6 +61,7 @@ void main() {
         sessionStore: _MemorySessionStore(account: 'student'),
         notificationService: _NoopNotificationService(),
         widgetSnapshotService: _NoopWidgetSnapshotService(),
+        clock: () => DateTime(2026, 5, 25, 12),
         chaoxingClient: ChaoxingLocalClient(
             enableExams: false, enableClassroomTasks: false, dio: dio));
     addTearDown(store.dispose);
@@ -397,6 +400,423 @@ void main() {
     expect(store.courseworkGroups.single.sourceCount, 4);
     expect(store.statsAssignments.single.id, formal.id);
   });
+
+  test(
+      'deadline alert tracks official advance/unknown->72h per account, ignores manual/extension/backup/fail, and preserves unacknowledged on write error',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    var now = DateTime.utc(2026, 11, 20, 4);
+    final client = _MutableSyncClient([
+      Assignment(
+        id: 'cx:work:1:2:10',
+        courseName: '操作系统',
+        title: '实验报告一',
+        deadlineAt: now.add(const Duration(days: 5)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:work:1:2:11',
+        courseName: '计算机网络',
+        title: '抓包实验',
+        deadlineAt: null,
+        deadlineTrusted: false,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+    ]);
+    final repo = _FailingAckRepository();
+    AssignmentStore makeBoundStore(String account) => AssignmentStore(
+          sessionStore: _MemorySessionStore(account: account, password: 'pw'),
+          notificationService: _NoopNotificationService(),
+          widgetSnapshotService: _NoopWidgetSnapshotService(),
+          repository: repo,
+          chaoxingClient: client,
+          clock: () => now,
+        );
+
+    var store = makeBoundStore('student-a');
+    await store.restoreSession();
+    // Baseline sync creates no alerts.
+    await store.syncAssignments();
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:10')!),
+        isNull);
+
+    // Manual deadline change does not trigger teacher advance alert.
+    expect(
+      await store.setManualDeadline(
+        store.findAssignment('cx:work:1:2:11')!,
+        now.add(const Duration(hours: 12)),
+      ),
+      isTrue,
+    );
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:11')!),
+        isNull);
+
+    // Failed sync & backup restore do not trigger alerts.
+    client.shouldFail = true;
+    await store.syncAssignments();
+    client.shouldFail = false;
+    final backup = BackupSnapshot.create(
+      owner: BackupSnapshot.ownerFor('student-a'),
+      createdAt: now,
+      records: [
+        Assignment(
+          id: 'cx:work:1:2:99',
+          courseName: '备份课',
+          title: '旧备份作业',
+          deadlineAt: now.add(const Duration(hours: 10)),
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: now,
+        ),
+      ],
+      hidden: const {},
+      courses: const [],
+      unfollowed: const {},
+      reminderOffsets: const [120],
+      autoSyncIntervalMinutes: 60,
+      personal: PersonalWorkspace(),
+      notebook: StudyNotebook(),
+    );
+    expect(await store.restoreLocalBackup(backup), isTrue);
+    expect(store.changes, isEmpty);
+
+    // Next sync: 10 is moved earlier (+5d -> +2d); 11 gets unknown->within 72h.
+    now = now.add(const Duration(hours: 1));
+    client.nextAssignments = [
+      Assignment(
+        id: 'cx:work:1:2:10',
+        courseName: '操作系统',
+        title: '实验报告一',
+        deadlineAt: now.add(const Duration(days: 2)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:work:1:2:11',
+        courseName: '计算机网络',
+        title: '抓包实验',
+        deadlineAt: now.add(const Duration(hours: 36)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+    ];
+    await store.syncAssignments();
+    final hw10 = store.findAssignment('cx:work:1:2:10')!;
+    final hw11 = store.findAssignment('cx:work:1:2:11')!;
+    final alert10 = store.activeDeadlineAlertFor(hw10);
+    final alert11 = store.activeDeadlineAlertFor(hw11);
+    expect(alert10, isNotNull);
+    expect(alert11, isNotNull);
+
+    // Persistence failure leaves badge unacknowledged.
+    repo.failAckWrites = true;
+    expect(await store.acknowledgeDeadlineAlert(alert10!.effectiveChangeId),
+        isFalse);
+    expect(store.activeDeadlineAlertFor(hw10)?.effectiveChangeId,
+        alert10.effectiveChangeId);
+    repo.failAckWrites = false;
+
+    // Succeeding persist hides alert across cold restart of same account.
+    expect(await store.acknowledgeDeadlineAlert(alert10.effectiveChangeId),
+        isTrue);
+    expect(store.activeDeadlineAlertFor(hw10), isNull);
+    store.dispose();
+
+    store = makeBoundStore('student-a');
+    await store.restoreSession();
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:10')!),
+        isNull);
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:11')!),
+        isNotNull);
+
+    // Later official advance event on 10 requires fresh confirmation; extension clears it.
+    now = now.add(const Duration(hours: 2));
+    client.nextAssignments = [
+      Assignment(
+        id: 'cx:work:1:2:10',
+        courseName: '操作系统',
+        title: '实验报告一',
+        deadlineAt: now.add(const Duration(hours: 18)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+    ];
+    await store.syncAssignments();
+    final alert10Second =
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:10')!);
+    expect(alert10Second, isNotNull);
+    expect(alert10Second!.effectiveChangeId, isNot(alert10.effectiveChangeId));
+
+    // Teacher extending 10 cancels urgent advance alert.
+    now = now.add(const Duration(hours: 1));
+    client.nextAssignments = [
+      Assignment(
+        id: 'cx:work:1:2:10',
+        courseName: '操作系统',
+        title: '实验报告一',
+        deadlineAt: now.add(const Duration(days: 6)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+    ];
+    await store.syncAssignments();
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:10')!),
+        isNull);
+
+    // Account switch isolates change acks & logs.
+    client.nextAssignments = const [];
+    await store.loginChaoxing(
+        account: 'student-b', password: 'pw', agreementAccepted: true);
+    expect(store.account, 'student-b');
+    expect(store.changes, isEmpty);
+    await store.loginChaoxing(
+        account: 'student-a', password: 'pw', agreementAccepted: true);
+    expect(store.account, 'student-a');
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:10')!),
+        isNull);
+    expect(
+        store.activeDeadlineAlertFor(store.findAssignment('cx:work:1:2:11')!),
+        isNotNull);
+    store.dispose();
+  });
+
+  test(
+      'Phase 3D sync scopes separate current vs full timestamps, keep skipped course data intact, bootstrap ungrouped first sync, and preserve verification scope',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final requestedCourseIds = <String>[];
+    var accountExamRequests = 0;
+    var triggerVerificationOnAll = false;
+    var rawCourses = [
+      {
+        'courseId': '1',
+        'clazzId': '10',
+        'courseName': '本学期算法',
+        'folderName': '2026年秋',
+      },
+      {
+        'courseId': '2',
+        'clazzId': '20',
+        'courseName': '往期高数',
+        'folderName': '2025年秋',
+      },
+    ];
+
+    final dio = Dio()
+      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+        final path = o.uri.path;
+        if (path == '/mycourse/backclazzdata') {
+          h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: {'courses': rawCourses},
+          ));
+          return;
+        }
+        final cid = o.uri.queryParameters['courseId'] ??
+            o.uri.queryParameters['courseid'];
+        if (cid != null) requestedCourseIds.add('$path:$cid');
+        if (triggerVerificationOnAll && cid == '2') {
+          h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: '<html><p>请完成安全验证</p></html>',
+          ));
+          return;
+        }
+        if (path == '/visit/stucoursemiddle') {
+          h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: '<input id="workEnc" value="w">',
+          ));
+          return;
+        }
+        if (path == '/mooc2/work/list') {
+          final workId = cid == '2' ? 'past99' : 'curr1';
+          final title = cid == '2' ? '往期刷新作业' : '本周作业';
+          h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data:
+                '<li onclick="goTask(this);" data="https://mooc1.chaoxing.com/work/task?courseId=$cid&classId=${cid}0&workId=$workId"><p class="overHidden2 fl">$title</p><p class="status fl">未提交</p></li>',
+          ));
+          return;
+        }
+        if (path == '/work/task' || path.contains('/mooc2/work/')) {
+          h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data:
+                cid == '2' ? '截止时间：2025-11-20 20:00' : '截止时间：2026-11-28 20:00',
+          ));
+          return;
+        }
+        if (path == '/phone/moocAnalysis/examList') {
+          h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data:
+                '<div class="ybox"><p class="blankTips">您好，本课程下暂未收到考试</p></div>',
+          ));
+          return;
+        }
+        if (path == '/exam-ans/exam/test/examcode/examlist') {
+          accountExamRequests++;
+          final refer = Uri.encodeComponent(
+              '/exam-ans/exam/test/examcode/examnotes?courseId=1&classId=10&examId=500');
+          h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: '''
+<table class="dataTable">
+  <tr><th>序号</th><th>考试名称</th><th>时间</th><th>时长</th><th>考试状态</th><th>作答状态</th><th>分数</th><th>方式</th><th>操作</th></tr>
+  <tr class="dataTr">
+    <td>1</td><td>全国统考</td><td>2026-12-01 09:00 至 2026-12-01 11:00</td><td>120</td><td>未开始</td><td>未交</td><td>--</td><td>线上</td>
+    <td><a href="javascript:;" onclick="go('https://mooc1-api.chaoxing.com/exam-ans/mycourse/transfer?moocId=1&amp;clazzid=10&amp;refer=$refer', stopExam)">查看</a></td>
+  </tr>
+</table>
+<script>page.showPage(0/12+1,Math.ceil(1/12));</script>
+''',
+          ));
+          return;
+        }
+        if (path == '/pc/notice/getNoticeList') {
+          h.resolve(Response(
+            requestOptions: o,
+            statusCode: 200,
+            data: {'status': true},
+          ));
+          return;
+        }
+        throw StateError('unexpected $path');
+      }));
+
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('student');
+    final pastWork = Assignment(
+      id: 'cx:work:2:20:cached',
+      courseName: '往期高数',
+      title: '往期缓存习题',
+      deadlineAt: DateTime.utc(2025, 11, 20),
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: DateTime.utc(2025, 11, 1),
+    );
+    final pastExam = Assignment(
+      id: 'cx:exam:2:20:88',
+      source: AssignmentSource.exam,
+      courseName: '往期高数',
+      title: '往期考试',
+      deadlineAt: DateTime.utc(2025, 11, 22),
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: DateTime.utc(2025, 11, 1),
+      exam: ExamInfo(
+        examId: '88',
+        courseId: '2',
+        clazzId: '20',
+        startAt: DateTime.utc(2025, 11, 22, 1),
+        endAt: DateTime.utc(2025, 11, 22, 3),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'ended',
+      ),
+    );
+    await repo.mergeAndSave([pastWork, pastExam], completeSync: false);
+
+    final client = _ScopedSyncClient(
+      dio: dio,
+      enableClassroomTasks: false,
+      wait: (_) async {},
+    );
+    final store = AssignmentStore(
+      repository: repo,
+      sessionStore: _MemorySessionStore(account: 'student', password: 'pw'),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      chaoxingClient: client,
+      clock: () => now,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await store.syncAssignments();
+
+    expect(store.syncReport.syncScope, AssignmentSyncScope.current);
+    expect(store.syncReport.plannedCourses, 1);
+    expect(store.syncReport.skippedCourses, 1);
+    expect(store.syncReport.lastCurrentSuccessAt, isNotNull);
+    expect(store.syncReport.lastFullSuccessAt, isNull);
+    expect(store.lastSyncAt, isNull);
+    expect(requestedCourseIds.any((e) => e.endsWith(':2')), isFalse);
+    expect(accountExamRequests, 1);
+    // Skipped course cached work & exam remain completely untouched.
+    expect(store.findAssignment(pastWork.id)?.status, 'pending');
+    expect(store.findAssignment(pastExam.id)?.status, 'pending');
+    expect(store.findAssignment('cx:exam:1:10:500'), isNotNull);
+
+    final currentSuccessBeforeTargeted = store.syncReport.lastCurrentSuccessAt!;
+
+    // Targeted sync touches only course 2:20 and preserves both current & full timestamps.
+    requestedCourseIds.clear();
+    await store.syncTargetedCourses({'2:20'});
+    expect(store.syncReport.syncScope, AssignmentSyncScope.targeted);
+    expect(store.syncReport.plannedCourses, 1);
+    expect(store.syncReport.skippedCourses, 1);
+    expect(requestedCourseIds.any((e) => e.endsWith(':1')), isFalse);
+    expect(requestedCourseIds.any((e) => e.endsWith(':2')), isTrue);
+    expect(accountExamRequests, 1);
+    expect(store.syncReport.lastCurrentSuccessAt, currentSuccessBeforeTargeted);
+    expect(store.syncReport.lastFullSuccessAt, isNull);
+
+    // Full scan touches both courses and advances both timestamps; verification retry preserves 'all' scope.
+    triggerVerificationOnAll = true;
+    await store.syncAllTerms();
+    expect(
+      store.syncReport.issues
+          .any((i) => i.kind == SyncIssueKind.verificationRequired),
+      isTrue,
+    );
+    triggerVerificationOnAll = false;
+    requestedCourseIds.clear();
+    await store.retryLastSyncAfterVerification();
+    expect(store.syncReport.syncScope, AssignmentSyncScope.all);
+    expect(store.syncReport.plannedCourses, 2);
+    expect(store.syncReport.skippedCourses, 0);
+    expect(store.syncReport.lastCurrentSuccessAt, isNotNull);
+    expect(store.syncReport.lastFullSuccessAt, isNotNull);
+    expect(store.lastSyncAt, isNotNull);
+
+    // First-run ungrouped folder still participates in current scope bootstrap.
+    rawCourses = [
+      {
+        'courseId': '3',
+        'clazzId': '30',
+        'courseName': '自定义分组课',
+        'folderName': '大二专业课',
+      },
+    ];
+    await store.syncAssignments();
+    expect(store.syncReport.plannedCourses, 1);
+    expect(store.syncReport.skippedCourses, 0);
+  });
 }
 
 Assignment _assignment({required String id, required String title}) {
@@ -566,11 +986,28 @@ class _MemorySessionStore extends SecureSessionStore {
     this.password,
   });
 
-  @override
-  Future<void> clear() async {}
+  String? account;
+  String? password;
 
-  final String? account;
-  final String? password;
+  @override
+  Future<void> saveChaoxingAccount({
+    required String account,
+    required String password,
+    String? displayName,
+    String? avatarUrl,
+  }) async {
+    this.account = account;
+    this.password = password;
+  }
+
+  @override
+  Future<void> clear() async {
+    account = null;
+    password = null;
+  }
+
+  @override
+  Future<void> clearWebSession() async {}
 
   @override
   Future<String?> readChaoxingAccount() async => account;
@@ -605,4 +1042,48 @@ class _NoopNotificationService extends LocalNotificationService {
 class _NoopWidgetSnapshotService extends WidgetSnapshotService {
   @override
   Future<void> saveAssignments(List<Assignment> assignments) async {}
+}
+
+class _MutableSyncClient extends ChaoxingLocalClient {
+  _MutableSyncClient(this.nextAssignments);
+
+  List<Assignment> nextAssignments;
+  bool shouldFail = false;
+
+  @override
+  Future<ChaoxingLoginResult> login({
+    required String account,
+    required String password,
+  }) async =>
+      const ChaoxingLoginResult(success: true);
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async {
+    if (shouldFail) throw StateError('模拟读取失败');
+    return nextAssignments;
+  }
+}
+
+class _FailingAckRepository extends LocalAssignmentRepository {
+  bool failAckWrites = false;
+
+  @override
+  Future<void> writeAcknowledgedDeadlineChangeIdsInPrefs(
+    SharedPreferences prefs,
+    Iterable<String> orderedIds,
+  ) async {
+    if (failAckWrites) throw StateError('模拟确认状态写入失败');
+    await super.writeAcknowledgedDeadlineChangeIdsInPrefs(prefs, orderedIds);
+  }
+}
+
+class _ScopedSyncClient extends ChaoxingLocalClient {
+  _ScopedSyncClient({
+    required super.dio,
+    super.enableClassroomTasks = false,
+    super.wait,
+  });
+
+  @override
+  bool get needsSessionInitialization => false;
 }

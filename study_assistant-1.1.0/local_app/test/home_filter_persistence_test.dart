@@ -149,12 +149,12 @@ void main() {
   });
 
   test('legacy deadline values migrate without discarding other fields', () {
-    final legacy = HomeFilters.decode(
+    final next7Days = HomeFilters.decode(
         '{"query":" 数学 ","courseKey":"c:k","deadline":"next7Days"}');
-    expect(legacy.query, '数学');
-    expect(legacy.courseKey, 'c:k');
-    expect(legacy.deadline, AssignmentDeadlineFilter.all);
-    expect(legacy.sortOrder, HomeSortOrder.deadlineAsc);
+    expect(next7Days.query, '数学');
+    expect(next7Days.courseKey, 'c:k');
+    expect(next7Days.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(next7Days.sortOrder, HomeSortOrder.deadlineAsc);
 
     final unknown = HomeFilters.decode(
         '{"query":"英语","courseKey":"b:k","deadline":"next30Days","sortOrder":"removed"}');
@@ -181,6 +181,33 @@ void main() {
     expect(decoded.courseKey, 'a:k');
     expect(decoded.deadline, AssignmentDeadlineFilter.overdue);
     expect(decoded.sortOrder, HomeSortOrder.deadlineAsc);
+  });
+
+  test('next7Days summary filter persists across save and reload', () async {
+    final session = Session();
+    final store = makeStore(session);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    expect(
+      await store.saveHomeFilters(
+        const HomeFilters(deadline: AssignmentDeadlineFilter.next7Days),
+        store.accountEpoch,
+      ),
+      isTrue,
+    );
+    expect(store.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+    final reopened = makeStore(session);
+    addTearDown(reopened.dispose);
+    await reopened.restoreSession();
+    expect(reopened.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+    expect(
+      await reopened.saveHomeFilters(
+        const HomeFilters(deadline: AssignmentDeadlineFilter.all),
+        reopened.accountEpoch,
+      ),
+      isTrue,
+    );
+    expect(reopened.homeFilters.deadline, AssignmentDeadlineFilter.all);
   });
 
   test('failed saving preserves last applied filters and reports failure',

@@ -43,6 +43,8 @@ data class ReminderAccountState(
     val baselinedSources: Set<String> =
         if (baselineCompleted) setOf("courseWork") else emptySet(),
     val claimToken: String? = null,
+    val allowUrgentNightBreakthrough: Boolean = false,
+    val deadlineChannelId: String = AssignmentNotificationPublisher.CHANNEL_DEADLINES,
 )
 
 data class NotificationSignalClaim(
@@ -105,6 +107,7 @@ data class StoredReminderSnapshot(
     val formal: Boolean,
     val inAssignmentScope: Boolean = formal,
     val eventKind: String = "deadline",
+    val deadlineSource: String = "official",
 ) {
     fun eligibleAt(now: Long): Boolean =
         inAssignmentScope && followed && !completed && !hidden &&
@@ -120,6 +123,8 @@ data class StoredReminderSnapshot(
             eventKind == event.eventKind && deadlineAt == event.deadlineAt &&
             (event.type == ReminderDatabase.EVENT_NEW ||
                 (event.type == ReminderDatabase.EVENT_DEADLINE &&
+                    DeadlineQuietHoursPolicy.isTrustedSource(deadlineSource) &&
+                    deadlineSource == event.deadlineSource &&
                     deadlineAt != null && event.notifyAt < deadlineAt))
 }
 
@@ -139,6 +144,7 @@ data class StoredReminderEvent(
     val notificationId: Int,
     val eventKind: String = "deadline",
     val updatedAt: Long = 0L,
+    val deadlineSource: String = "official",
 )
 
 data class ReminderHistoryRow(
@@ -217,6 +223,8 @@ class ReminderDatabase private constructor(
                 last_failure TEXT,
                 next_check_at INTEGER,
                 migration_state TEXT NOT NULL DEFAULT 'legacy_pending',
+                allow_urgent_night_breakthrough INTEGER NOT NULL DEFAULT 0,
+                deadline_channel_id TEXT NOT NULL DEFAULT 'assignment_deadlines',
                 updated_at INTEGER NOT NULL
             )
             """.trimIndent(),
@@ -231,6 +239,7 @@ class ReminderDatabase private constructor(
                 title TEXT NOT NULL,
                 deadline_at INTEGER,
                 event_kind TEXT NOT NULL DEFAULT 'deadline',
+                deadline_source TEXT NOT NULL DEFAULT 'unknown',
                 deadline_trusted INTEGER NOT NULL,
                 deadline_read_failed INTEGER NOT NULL,
                 completed INTEGER NOT NULL,
@@ -256,6 +265,7 @@ class ReminderDatabase private constructor(
                 notify_at INTEGER NOT NULL,
                 deadline_at INTEGER,
                 event_kind TEXT NOT NULL DEFAULT 'deadline',
+                deadline_source TEXT NOT NULL DEFAULT 'unknown',
                 offsets TEXT NOT NULL DEFAULT '[]',
                 batch_id TEXT,
                 status TEXT NOT NULL,
@@ -326,6 +336,24 @@ class ReminderDatabase private constructor(
         }
         if (oldVersion < 7 && newVersion >= 7) {
             ensureV7Indices(db)
+        }
+        if (oldVersion < 8 && newVersion >= 8) {
+            db.execSQL(
+                "ALTER TABLE accounts ADD COLUMN allow_urgent_night_breakthrough " +
+                    "INTEGER NOT NULL DEFAULT 0",
+            )
+            db.execSQL(
+                "ALTER TABLE accounts ADD COLUMN deadline_channel_id " +
+                    "TEXT NOT NULL DEFAULT 'assignment_deadlines'",
+            )
+            db.execSQL(
+                "ALTER TABLE snapshots ADD COLUMN deadline_source " +
+                    "TEXT NOT NULL DEFAULT 'unknown'",
+            )
+            db.execSQL(
+                "ALTER TABLE events ADD COLUMN deadline_source " +
+                    "TEXT NOT NULL DEFAULT 'unknown'",
+            )
         }
     }
 
@@ -543,6 +571,8 @@ class ReminderDatabase private constructor(
                 put("sent_new_ids", "[]")
                 putNull("last_failure")
                 put("pending_update", 0)
+                put("allow_urgent_night_breakthrough", 0)
+                put("deadline_channel_id", AssignmentNotificationPublisher.CHANNEL_DEADLINES)
             },
             keepAccountHash?.let { "account_hash != ?" },
             keepAccountHash?.let { arrayOf(it) },
@@ -595,9 +625,12 @@ class ReminderDatabase private constructor(
         listenerEnabled: Boolean,
         newAssignmentEnabled: Boolean,
         showDetails: Boolean,
+        allowUrgentNightBreakthrough: Boolean? = null,
+        deadlineChannelId: String? = null,
     ): ReminderAccountState {
         validateSession(accountHash, sessionEpoch)
-        val mutationVersion = readAccount(accountHash)!!.mutationVersion + 1
+        val currentAccount = readAccount(accountHash)!!
+        val mutationVersion = currentAccount.mutationVersion + 1
         writableDatabase.update(
             "accounts",
             ContentValues().apply {
@@ -606,6 +639,15 @@ class ReminderDatabase private constructor(
                 put("listener_enabled", if (listenerEnabled) 1 else 0)
                 put("new_assignment_enabled", if (newAssignmentEnabled) 1 else 0)
                 put("show_details", if (showDetails) 1 else 0)
+                if (allowUrgentNightBreakthrough != null) {
+                    put(
+                        "allow_urgent_night_breakthrough",
+                        if (allowUrgentNightBreakthrough) 1 else 0,
+                    )
+                }
+                if (!deadlineChannelId.isNullOrBlank()) {
+                    put("deadline_channel_id", deadlineChannelId)
+                }
                 put("mutation_version", mutationVersion)
                 put("updated_at", System.currentTimeMillis())
             },
@@ -741,6 +783,7 @@ class ReminderDatabase private constructor(
                     put("course_name", snapshot.courseName)
                     put("title", snapshot.title)
                     put("event_kind", snapshot.eventKind)
+                    put("deadline_source", snapshot.deadlineSource)
                     snapshot.deadlineAt?.let { put("deadline_at", it) }
                         ?: putNull("deadline_at")
                     put("deadline_trusted", if (snapshot.deadlineTrusted) 1 else 0)
@@ -796,6 +839,7 @@ class ReminderDatabase private constructor(
                     val scheduleChanged =
                         current.notifyAt != event.notifyAt ||
                             current.deadlineAt != event.deadlineAt ||
+                            current.deadlineSource != event.deadlineSource ||
                             current.sessionEpoch != sessionEpoch
                     updateEvent(event, sessionEpoch, now)
                     if (scheduleChanged) {
@@ -876,6 +920,7 @@ class ReminderDatabase private constructor(
                 put("notify_at", event.notifyAt)
                 put("deadline_at", event.deadlineAt)
                 put("event_kind", event.eventKind)
+                put("deadline_source", event.deadlineSource)
                 put("offsets", JSONArray(event.offsets).toString())
                 put("status", status)
                 put("updated_at", now)
@@ -1060,6 +1105,27 @@ class ReminderDatabase private constructor(
                 },
                 "account_hash = ? AND status IN (?, ?)",
                 arrayOf(accountHash, STATUS_PENDING, STATUS_SUBMITTED),
+            )
+            cancelled
+        }
+
+    @Synchronized
+    fun cancelDeadlineReminders(accountHash: String): List<StoredReminderEvent> =
+        transaction {
+            val cancelled = eventsForAccount(accountHash)
+                .filter {
+                    it.type == EVENT_DEADLINE &&
+                        (it.status == STATUS_PENDING || it.status == STATUS_SUBMITTED)
+                }
+            val now = System.currentTimeMillis()
+            writableDatabase.update(
+                "events",
+                ContentValues().apply {
+                    put("status", STATUS_CANCELLED)
+                    put("updated_at", now)
+                },
+                "account_hash = ? AND type = ? AND status IN (?, ?)",
+                arrayOf(accountHash, EVENT_DEADLINE, STATUS_PENDING, STATUS_SUBMITTED),
             )
             cancelled
         }
@@ -1981,6 +2047,7 @@ class ReminderDatabase private constructor(
                 put("title", event.title)
                 put("notify_at", event.notifyAt)
                 put("event_kind", event.eventKind)
+                put("deadline_source", event.deadlineSource)
                 event.deadlineAt?.let { put("deadline_at", it) } ?: putNull("deadline_at")
                 put("offsets", JSONArray(event.offsets).toString())
                 event.batchId?.let { put("batch_id", it) } ?: putNull("batch_id")
@@ -2044,6 +2111,8 @@ class ReminderDatabase private constructor(
         nextCheckAt = nullableLong("next_check_at"),
         migrationState = getString(getColumnIndexOrThrow("migration_state")),
         claimToken = nullableString("claim_token"),
+        allowUrgentNightBreakthrough = getInt(getColumnIndexOrThrow("allow_urgent_night_breakthrough")) == 1,
+        deadlineChannelId = getString(getColumnIndexOrThrow("deadline_channel_id")),
     )
 
     private fun Cursor.toNotificationAttempt(): NotificationAttempt {
@@ -2096,6 +2165,7 @@ class ReminderDatabase private constructor(
         formal = getInt(getColumnIndexOrThrow("formal")) == 1,
         inAssignmentScope = getInt(getColumnIndexOrThrow("in_assignment_scope")) == 1,
         eventKind = getString(getColumnIndexOrThrow("event_kind")),
+        deadlineSource = getString(getColumnIndexOrThrow("deadline_source")),
     )
 
     private fun Cursor.toEvent() = StoredReminderEvent(
@@ -2114,6 +2184,7 @@ class ReminderDatabase private constructor(
         notificationId = getInt(getColumnIndexOrThrow("notification_id")),
         eventKind = getString(getColumnIndexOrThrow("event_kind")),
         updatedAt = getLong(getColumnIndexOrThrow("updated_at")),
+        deadlineSource = getString(getColumnIndexOrThrow("deadline_source")),
     )
 
     private fun Cursor.toReminderHistory() = ReminderHistoryRow(
@@ -2170,7 +2241,7 @@ class ReminderDatabase private constructor(
         const val STATUS_INVALID = "invalid"
 
         private const val DATABASE_NAME = "assignment_reminders_v1.db"
-        private const val DATABASE_VERSION = 7
+        private const val DATABASE_VERSION = 8
         private const val DAY_MILLIS = 86_400_000L
         private const val TAG = "ReminderDatabase"
 
@@ -2241,6 +2312,8 @@ class ReminderDatabase private constructor(
                 sessionEpoch = sessionEpoch,
                 type = json.getString("type"),
                 eventKind = json.optString("eventKind", "deadline"),
+                deadlineSource = json.optString("deadlineSource", "unknown")
+                    .ifBlank { "unknown" },
                 assignmentId = json.getString("assignmentId"),
                 courseName = json.optString("courseName"),
                 title = json.optString("title"),
@@ -2272,6 +2345,8 @@ class ReminderDatabase private constructor(
             followed = json.optBoolean("followed", true),
             formal = json.optBoolean("formal"),
             eventKind = json.optString("eventKind", "deadline"),
+            deadlineSource = json.optString("deadlineSource", "unknown")
+                .ifBlank { "unknown" },
             inAssignmentScope = json.optBoolean("inAssignmentScope", json.optBoolean("formal")),
         )
 

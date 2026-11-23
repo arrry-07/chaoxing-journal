@@ -6,8 +6,11 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/main.dart';
 import 'package:study_assistant_mobile/src/app/app_deep_links.dart';
+import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
+import 'package:study_assistant_mobile/src/features/course_study_hub_screen.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'review_core_remediation_test.dart' as f;
 
 class _Store extends AssignmentStore {
@@ -138,5 +141,86 @@ void main() {
       expect(find.textContaining('no routes for location'), findsWidgets);
       await tester.pumpWidget(const SizedBox());
     });
+  }
+
+  testWidgets(
+      'system back from stackless notification detail link returns to home without exiting',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final notifications = _RecordingNotifications();
+    final store = _Store()..replaceAssignmentsForTest([f.sample('restored')]);
+    await store.restoreSession();
+    await store.repository.activateAccount('A');
+    await store.repository.mergeAndSave([f.sample('restored')]);
+    await store.refreshAssignments();
+    addTearDown(store.dispose);
+
+    tester.binding.platformDispatcher.defaultRouteNameTestValue =
+        'studyassistant:///assignments/cx%3Awork%3A1%3A2%3Arestored';
+    addTearDown(
+        tester.binding.platformDispatcher.clearDefaultRouteNameTestValue);
+
+    var exitCalls = 0;
+    await tester.pumpWidget(StudyAssistantApp(
+      assignmentStore: store,
+      notificationService: notifications,
+      onExitApp: () async => exitCalls++,
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(AssignmentDetailScreen), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(exitCalls, 0);
+    expect(find.byType(AssignmentDetailScreen), findsNothing);
+    expect(find.byType(AssignmentListScreen), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'deep link detail pushes /course-hub?courseKey=1:2 slice and returns cleanly to detail',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = _Store();
+    await store.restoreSession();
+    await store.repository.activateAccount('A');
+    await store.repository.mergeAndSave([f.sample('restored')]);
+    await store.refreshAssignments();
+    addTearDown(store.dispose);
+
+    tester.binding.platformDispatcher.defaultRouteNameTestValue =
+        'studyassistant:///assignments/cx%3Awork%3A1%3A2%3Arestored';
+    addTearDown(
+        tester.binding.platformDispatcher.clearDefaultRouteNameTestValue);
+
+    await tester.pumpWidget(StudyAssistantApp(
+      assignmentStore: store,
+      notificationService: f.Notifications(),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(AssignmentDetailScreen), findsOneWidget);
+
+    await tester
+        .tap(find.byKey(const ValueKey('assignment-detail-course-link')));
+    await tester.pumpAndSettle();
+    expect(find.byType(CourseStudyHubScreen), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('course-hub-course-slice')), findsOneWidget);
+
+    await tester.tap(find.byTooltip('返回我的'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AssignmentDetailScreen), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+}
+
+class _RecordingNotifications extends f.Notifications {
+  NotificationPayloadHandler? handler;
+
+  @override
+  void setPayloadHandler(NotificationPayloadHandler? onPayload) {
+    handler = onPayload;
   }
 }

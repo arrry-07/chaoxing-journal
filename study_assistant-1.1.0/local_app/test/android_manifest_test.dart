@@ -84,6 +84,11 @@ void main() {
       contains('android.service.notification.NotificationListenerService'),
     );
     expect(manifest, contains('android.intent.action.TIMEZONE_CHANGED'));
+    expect(
+      manifest,
+      contains(
+          'android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED'),
+    );
     final reminderSystemReceiver = RegExp(
       r'<receiver\s+android:name="\.ReminderSystemReceiver"[\s\S]*?</receiver>',
     ).firstMatch(manifest)?.group(0);
@@ -113,23 +118,23 @@ void main() {
   });
 
   test(
-    'widget palettes keep light colors and provide dark resource variants',
+    'widget palettes use Phase 1 paper light and warm dark semantic tokens without hardcoded hexes',
     () {
       const expectedLight = {
-        'surface': '#F7F5EC',
-        'border': '#D6D8C9',
-        'divider': '#E6E7DC',
-        'ink': '#243E34',
-        'muted': '#53645A',
-        'urgent': '#813E53',
+        'surface': '#F5F5F2',
+        'border': '#D6D5CE',
+        'divider': '#ECEBE6',
+        'ink': '#1F2328',
+        'muted': '#4E545C',
+        'urgent': '#B5493A',
       };
       const expectedDark = {
         'surface': '#23221F',
         'border': '#403E38',
         'divider': '#32302B',
         'ink': '#EAE6DF',
-        'muted': '#A09B93',
-        'urgent': '#E8827D',
+        'muted': '#BAB5AC',
+        'urgent': '#E27D70',
       };
       const res = 'android/app/src/main/res';
       final color = RegExp(
@@ -155,7 +160,10 @@ void main() {
         'drawable/assignment_widget_background.xml',
       ]) {
         final markup = File('$res/$path').readAsStringSync();
-        for (final hardcoded in expectedLight.values) {
+        for (final hardcoded in [
+          ...expectedLight.values,
+          ...expectedDark.values,
+        ]) {
           expect(markup, isNot(contains(hardcoded)), reason: path);
         }
       }

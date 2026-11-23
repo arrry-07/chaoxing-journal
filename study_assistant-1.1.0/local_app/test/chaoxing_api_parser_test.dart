@@ -400,4 +400,136 @@ void main() {
     expect(assignments.single.id, 'cx:exam:111:222:891');
     expect(assignments.single.deadlineAt, DateTime(2026, 6, 20, 9, 30));
   });
+
+  group('Phase 3B course directory folder and teacher propagation', () {
+    test(
+        'recursively inherits innermost parent folderName, splits valid teacherfactor, and filters placeholders',
+        () {
+      final result = ChaoxingApiParser.parseCourseRefsDetailed({
+        'channelList': [
+          {
+            'content': {
+              'folderName': '2026年秋季学期',
+              'datatype': 1,
+              'children': [
+                {
+                  'content': {
+                    'folderName': '专业核心课',
+                    'children': [
+                      {
+                        'content': {
+                          'clazz': {'id': 201},
+                          'course': {
+                            'data': [
+                              {
+                                'id': 101,
+                                'name': '操作系统',
+                                'teacherfactor': '张老师、李老师 / 暂无 / 10086 / 张老师',
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            'cataName': '文件夹',
+            'folderName': '未标注嵌套空名容器',
+            'channelList': [
+              {
+                'folderName': '  ',
+                'courseList': [
+                  {
+                    'courseId': '101',
+                    'clazzId': '202',
+                    'courseName': '操作系统',
+                    'teacherfactor': '王老师, 赵老师',
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      });
+
+      expect(result.refs, hasLength(2));
+      expect(result.refs[0].clazzId, '201');
+      expect(result.refs[0].folderName, '专业核心课');
+      expect(result.refs[0].teacherNames, ['张老师', '李老师']);
+
+      expect(result.refs[1].clazzId, '202');
+      expect(result.refs[1].folderName, '未标注嵌套空名容器');
+      expect(result.refs[1].teacherNames, ['王老师', '赵老师']);
+    });
+
+    test(
+        'drops ambiguous metadata on field drift or conflicting duplicate folders/teachers',
+        () {
+      final result = ChaoxingApiParser.parseCourseRefsDetailed({
+        'channelList': [
+          {
+            'folderName': '2026春',
+            'channelList': [
+              {
+                'courseId': '10',
+                'clazzId': '20',
+                'courseName': '多文件夹冲突课',
+                'teacherfactor': '周老师',
+              },
+              {
+                'courseId': '11',
+                'clazzId': '21',
+                'courseName': '字段漂移课',
+                'teacherfactor': '陈老师',
+                'teacherName': '刘老师',
+              },
+            ],
+          },
+          {
+            'folderName': '2026秋',
+            'channelList': [
+              {
+                'courseId': '10',
+                'clazzId': '20',
+                'courseName': '多文件夹冲突课',
+                'teacherfactor': '吴老师',
+              },
+            ],
+          },
+          {
+            'folderName': '单文件夹保留课容器',
+            'channelList': [
+              {
+                'courseId': '12',
+                'clazzId': '22',
+                'courseName': '同目录重复课',
+                'teacherfactor': '孙老师',
+              },
+            ],
+          },
+          {
+            'courseId': '12',
+            'clazzId': '22',
+            'courseName': '同目录重复课',
+          },
+        ]
+      });
+
+      expect(result.duplicates, 2);
+      final conflictCourse = result.refs.singleWhere((c) => c.courseId == '10');
+      expect(conflictCourse.folderName, isNull);
+      expect(conflictCourse.teacherNames, isEmpty);
+
+      final driftCourse = result.refs.singleWhere((c) => c.courseId == '11');
+      expect(driftCourse.teacherNames, isEmpty);
+
+      final retainedCourse = result.refs.singleWhere((c) => c.courseId == '12');
+      expect(retainedCourse.folderName, '单文件夹保留课容器');
+      expect(retainedCourse.teacherNames, ['孙老师']);
+    });
+  });
 }

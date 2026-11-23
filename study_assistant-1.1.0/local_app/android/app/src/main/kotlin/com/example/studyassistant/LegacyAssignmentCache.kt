@@ -65,7 +65,11 @@ internal class LegacyAssignmentCache private constructor(
         private fun isAssignment(item: JSONObject): Boolean =
             validOwnershipFields(item) && item.getString("payload").let {
                 it.startsWith("a:") && it.length > 2
-            } && item.getString("channelId") in setOf("assignment_deadlines", "assignment_updates") &&
+            } && item.getString("channelId") in setOf(
+                DeadlineChannelPolicy.CHANNEL_DEADLINES,
+                DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+                DeadlineChannelPolicy.CHANNEL_UPDATES,
+            ) &&
                 (!item.has("tag") || item.isNull("tag"))
     }
 }

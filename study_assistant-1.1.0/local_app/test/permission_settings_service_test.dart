@@ -249,4 +249,29 @@ void main() {
       isNot(contains('outcome != SettingsOpenOutcome.UNAVAILABLE')),
     );
   });
+
+  test('openNotificationChannelSettingsResult forwards v2 channel id',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return 'direct';
+    });
+    const service = PermissionSettingsService();
+
+    expect(
+      await service.openNotificationChannelSettingsResult(
+        'assignment_deadlines_v2',
+      ),
+      SettingsOpenResult.direct,
+    );
+    expect(
+      calls.single.method,
+      'openNotificationChannelSettingsResult',
+    );
+    expect(
+      calls.single.arguments,
+      {'channelId': 'assignment_deadlines_v2'},
+    );
+  });
 }

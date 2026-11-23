@@ -19,6 +19,7 @@ import '../models/assignment_sync_progress.dart';
 import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
 import '../models/sync_report.dart';
+import '../models/sync_scope.dart';
 import '../models/course.dart';
 import 'assignment_query.dart';
 import 'assignment_grouping.dart';
@@ -36,10 +37,34 @@ import 'daily_summary.dart';
 import 'daytime_check_policy.dart';
 import '../models/assignment_change.dart';
 import '../models/backup_snapshot.dart';
+import '../models/course_term_preferences.dart';
+import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
+import '../models/pinned_assignments.dart';
 import '../models/reminder_history.dart';
 import '../models/study_notebook.dart';
+import 'course_term_catalog.dart';
+import 'coursework_deadline.dart';
+import 'deadline_quiet_hours_policy.dart';
 import 'reminder_explanation.dart';
+
+class ReturnCheckConfirmation {
+  const ReturnCheckConfirmation({
+    required this.id,
+    required this.accountEpoch,
+    required this.assignmentId,
+    required this.title,
+    required this.message,
+    required this.confirmedAt,
+  });
+
+  final int id;
+  final int accountEpoch;
+  final String assignmentId;
+  final String title;
+  final String message;
+  final DateTime confirmedAt;
+}
 
 class BackgroundCheckResult {
   const BackgroundCheckResult({
@@ -133,7 +158,7 @@ class AssignmentStore extends ChangeNotifier {
   String? _chapterSyncProgressText;
 
   CourseNoticeCollection get courseNotices => _courseNotices;
-  int get unreadCourseNoticeCount => _courseNotices.unreadCount;
+  int get unreadCourseNoticeCount => _courseNotices.primaryUnreadCount;
   CourseChapterCatalog get courseChapters => _courseChapters;
   int get pendingChapterSectionCount => _courseChapters.totalPendingSections;
   bool get isChapterSyncing => _isChapterSyncing;
@@ -366,9 +391,12 @@ class AssignmentStore extends ChangeNotifier {
               _courses
                   .where((c) => c.key == courseKey)
                   .map((c) => ChaoxingCourseRef(
-                      courseId: c.courseId,
-                      clazzId: c.clazzId,
-                      courseName: c.name))
+                        courseId: c.courseId,
+                        clazzId: c.clazzId,
+                        courseName: c.name,
+                        teacherNames: c.teacherNames,
+                        folderName: c.folderName,
+                      ))
                   .firstOrNull;
           if (match != null) targets.add(match);
         } else {
@@ -377,9 +405,12 @@ class AssignmentStore extends ChangeNotifier {
           for (final c in followed) {
             targets.add(clientByKey[c.key] ??
                 ChaoxingCourseRef(
-                    courseId: c.courseId,
-                    clazzId: c.clazzId,
-                    courseName: c.name));
+                  courseId: c.courseId,
+                  clazzId: c.clazzId,
+                  courseName: c.name,
+                  teacherNames: c.teacherNames,
+                  folderName: c.folderName,
+                ));
           }
         }
         if (targets.isEmpty) {
@@ -656,28 +687,47 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   List<AssignmentChange> changes = [];
+  Set<String> _acknowledgedDeadlineChangeIds = <String>{};
   String? returnCheckMessage;
   String? _visitedAssignment;
   int? _visitGeneration;
+  int _nextVisitTicket = 0;
+  int? _activeVisitTicket;
   bool _visitLeftApp = false;
+  int _nextConfirmationId = 0;
+  ReturnCheckConfirmation? _pendingReturnConfirmation;
+
+  ReturnCheckConfirmation? get pendingReturnConfirmation =>
+      _pendingReturnConfirmation;
+
+  ReturnCheckConfirmation? consumeReturnCheckConfirmation() {
+    final current = _pendingReturnConfirmation;
+    _pendingReturnConfirmation = null;
+    return current;
+  }
 
   void beginAssignmentVisit(String id) {
     if (!_authenticated || findAssignment(id) == null) return;
     _visitedAssignment = id;
     _visitGeneration = _generation;
+    _activeVisitTicket = ++_nextVisitTicket;
     _visitLeftApp = false;
+    _pendingReturnConfirmation = null;
     returnCheckMessage = null;
   }
 
   void cancelAssignmentVisit(String id) {
     if (_visitedAssignment == id) {
       _visitedAssignment = null;
+      _activeVisitTicket = null;
       _visitLeftApp = false;
     }
   }
 
   void markAssignmentVisitLeftApp() {
-    if (_visitedAssignment != null) _visitLeftApp = true;
+    if (_visitedAssignment != null && _activeVisitTicket != null) {
+      _visitLeftApp = true;
+    }
   }
 
   void dismissReturnCheck() {
@@ -686,10 +736,14 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> checkReturnedAssignment() async {
-    final id = _visitedAssignment, generation = _visitGeneration;
-    if (id == null || !_visitLeftApp) return;
+    final id = _visitedAssignment;
+    final generation = _visitGeneration;
+    final ticket = _activeVisitTicket;
+    if (id == null || ticket == null || !_visitLeftApp) return;
     _visitedAssignment = null;
+    _activeVisitTicket = null;
     _visitLeftApp = false;
+    _pendingReturnConfirmation = null;
     if (generation != _generation || !_authenticated || _disposed) return;
     final target = findAssignment(id);
     if (target == null ||
@@ -709,17 +763,28 @@ class AssignmentStore extends ChangeNotifier {
         for (final a in [..._assignments, ..._hiddenAssignments]) a.id: a
       };
       late List<Assignment> incoming;
-      try {
-        incoming = target.courseId == null
-            ? await chaoxingClient.fetchAssignments()
-            : await chaoxingClient.fetchAssignmentsForCourse(
-                courseId: target.courseId!, clazzId: target.clazzId!);
-      } on ChaoxingAuthenticationException {
-        await _refreshChaoxingSession();
-        incoming = target.courseId == null
-            ? await chaoxingClient.fetchAssignments()
-            : await chaoxingClient.fetchAssignmentsForCourse(
-                courseId: target.courseId!, clazzId: target.clazzId!);
+      if (target.isExam) {
+        try {
+          incoming = target.courseId == null
+              ? await chaoxingClient.fetchAssignments()
+              : await chaoxingClient.fetchAssignmentsForCourse(
+                  courseId: target.courseId!, clazzId: target.clazzId!);
+        } on ChaoxingAuthenticationException {
+          await _refreshChaoxingSession();
+          incoming = target.courseId == null
+              ? await chaoxingClient.fetchAssignments()
+              : await chaoxingClient.fetchAssignmentsForCourse(
+                  courseId: target.courseId!, clazzId: target.clazzId!);
+        }
+      } else {
+        Assignment? single;
+        try {
+          single = await chaoxingClient.fetchReturnedWork(target);
+        } on ChaoxingAuthenticationException {
+          await _refreshChaoxingSession();
+          single = await chaoxingClient.fetchReturnedWork(target);
+        }
+        incoming = single == null ? const <Assignment>[] : [single];
       }
       if (generation != _generation || !_authenticated || _disposed) return;
       final observed = incoming
@@ -759,16 +824,33 @@ class AssignmentStore extends ChangeNotifier {
           observed != null &&
           !observed.isCompleted &&
           observed.status != 'returned';
-      returnCheckMessage = observed == null ||
-              observed.status == 'unknown' ||
-              observed.statusLabel == '提交状态未知' ||
-              conflictsWithConfirmation
-          ? (observed?.isSupportedClassroomTask == true
-              ? '本次未能确认提交状态，已更新为待确认；确认前暂停提醒。'
-              : '本次未能确认提交状态，已保留原记录；请稍后刷新核对。')
-          : observed.isCompleted
-              ? '已确认提交：${observed.title}（${observed.statusLabel}）'
-              : '刚才的作业仍为${observed.statusLabel}，提醒继续保留。';
+      final unconfirmed = observed == null ||
+          observed.status == 'unknown' ||
+          observed.statusLabel == '提交状态未知' ||
+          conflictsWithConfirmation;
+      if (unconfirmed) {
+        returnCheckMessage = observed?.isSupportedClassroomTask == true
+            ? '本次未能确认提交状态，已更新为待确认；确认前暂停提醒。'
+            : '本次未能确认提交状态，已保留原记录；请稍后刷新核对。';
+      } else if (observed.isCompleted) {
+        if (!latestBefore.isCompleted) {
+          final event = ReturnCheckConfirmation(
+            id: ++_nextConfirmationId,
+            accountEpoch: accountEpoch,
+            assignmentId: observed.id,
+            title: observed.title,
+            message: '《${observed.title}》已确认提交',
+            confirmedAt: _clock(),
+          );
+          _pendingReturnConfirmation = event;
+          returnCheckMessage = event.message;
+        } else {
+          returnCheckMessage =
+              '已确认提交：${observed.title}（${observed.statusLabel}）';
+        }
+      } else {
+        returnCheckMessage = '刚才的作业仍为${observed.statusLabel}，提醒继续保留。';
+      }
       confirmed = true;
     });
     if (generation != _generation || !_authenticated || _disposed) return;
@@ -802,6 +884,7 @@ class AssignmentStore extends ChangeNotifier {
           observedIds,
           completeSync: completeSync,
           prefs: prefs,
+          at: _clock(),
         );
         return changeLog.load(prefs: prefs);
       });
@@ -817,6 +900,12 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   SyncReport syncReport = const SyncReport();
+  HistoricalSweepState _historicalSweepState =
+      const HistoricalSweepState.empty();
+  HistoricalSweepState get historicalSweepState => _historicalSweepState;
+  AssignmentSyncScope _lastRequestedSyncScope = AssignmentSyncScope.current;
+  Set<String> _lastTargetedCourseKeys = const {};
+  List<SyncSourceResult> _lastSyncSourceResults = const [];
   int _generation = 0;
   bool _disposed = false, _loginRunning = false;
   String get syncSummary =>
@@ -832,6 +921,8 @@ class AssignmentStore extends ChangeNotifier {
   String? _chaoxingAvatarUrl;
   DateTime? _lastSyncAt;
   List<int> _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
+  bool _allowUrgentDeadlineNightBreakthrough = false;
+  String _deadlineChannelId = LocalNotificationService.assignmentChannel;
   BackgroundCheckSettings _backgroundCheckSettings =
       const BackgroundCheckSettings(
     enabled: true,
@@ -919,6 +1010,11 @@ class AssignmentStore extends ChangeNotifier {
       _backgroundCheckSettings.notificationListenerEnabled;
   bool get newAssignmentReminderEnabled =>
       _backgroundCheckSettings.newAssignmentReminderEnabled;
+  bool get allowUrgentDeadlineNightBreakthrough =>
+      _allowUrgentDeadlineNightBreakthrough;
+  String get activeDeadlineChannelId => _deadlineChannelId;
+  bool get isUsingV2DeadlineChannel =>
+      _deadlineChannelId == LocalNotificationService.assignmentV2Channel;
   String? get backgroundWarning => _backgroundWarning;
   DateTime? get nextBackgroundCheckAt {
     if (!_authenticated || !_backgroundCheckSettings.enabled) return null;
@@ -942,13 +1038,253 @@ class AssignmentStore extends ChangeNotifier {
       List.unmodifiable(_reminderOffsetsMinutes);
   List<Assignment> get assignments => List.unmodifiable(_assignments);
   final Set<String> _unfollowed = {};
-  Set<String> _pinnedIds = {};
+  PinnedAssignments _pinned = const PinnedAssignments.empty();
+  LocalCourseworkState _courseworkState = const LocalCourseworkState.empty();
+  CourseTermPreferences _courseTermPreferences =
+      const CourseTermPreferences.empty();
+  CourseTermCatalog? _termCatalogCache;
   bool _pinsNeedSave = false;
+  bool _journalRestoreFailed = false;
 
   static String _pinKey(Assignment assignment) =>
       AssignmentGrouping.examKey(assignment) ??
       assignment.courseTaskKey ??
       assignment.id;
+
+  static String pinKeyOf(Assignment assignment) => _pinKey(assignment);
+
+  PinnedAssignments get pinnedAssignments => _pinned;
+  List<String> get pinnedKeys => _pinned.keys;
+  bool get hasManualPinOrder => _pinned.manuallyOrdered;
+  LocalCourseworkState get courseworkState => _courseworkState;
+  LocalCourseworkEntry? courseworkEntryFor(Assignment assignment) =>
+      CourseworkDeadline.entryFor(assignment, _courseworkState);
+  CourseworkDeadline? effectiveDeadlineFor(Assignment assignment) =>
+      CourseworkDeadline.resolveEntry(
+          assignment, courseworkEntryFor(assignment));
+  DateTime? manualDeadlineFor(Assignment assignment) =>
+      courseworkEntryFor(assignment)?.manualDeadlineAt;
+  bool isLocallyCompleted(Assignment assignment) =>
+      _authenticated &&
+      CourseworkDeadline.isLocallyCompleted(assignment, _courseworkState);
+  bool isEffectivelyCompleted(Assignment assignment) =>
+      assignment.isCompleted || isLocallyCompleted(assignment);
+
+  AssignmentChange? latestDeadlineChangeFor(Assignment assignment) {
+    for (final event in changes) {
+      if (event.assignmentId == assignment.id &&
+          event.kind == AssignmentChangeKind.deadline) {
+        return event;
+      }
+    }
+    return null;
+  }
+
+  AssignmentChange? activeDeadlineAlertFor(Assignment assignment) {
+    if (_journalRestoreFailed ||
+        changes.isEmpty ||
+        isEffectivelyCompleted(assignment)) {
+      return null;
+    }
+    final latest = latestDeadlineChangeFor(assignment);
+    if (latest == null || !latest.isAdvanceDeadlineAlert) return null;
+    if (_acknowledgedDeadlineChangeIds.contains(latest.effectiveChangeId)) {
+      return null;
+    }
+    return latest;
+  }
+
+  Future<bool> acknowledgeDeadlineAlert(String changeId) async {
+    final normalized = changeId.trim();
+    if (normalized.isEmpty) return false;
+    if (_acknowledgedDeadlineChangeIds.contains(normalized)) return true;
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    var nextSet = <String>{..._acknowledgedDeadlineChangeIds, normalized};
+    try {
+      await _runScopedWrite(snap, (prefs) async {
+        final durable =
+            await repository.readAcknowledgedDeadlineChangeIdsInPrefs(prefs);
+        final merged = <String>{
+          ..._acknowledgedDeadlineChangeIds,
+          ...durable,
+        };
+        final nextOrdered = <String>[
+          normalized,
+          for (final c in changes)
+            if (merged.contains(c.effectiveChangeId) &&
+                c.effectiveChangeId != normalized)
+              c.effectiveChangeId,
+          for (final id in merged)
+            if (id != normalized) id,
+        ];
+        nextSet = nextOrdered.take(300).toSet();
+        await repository.writeAcknowledgedDeadlineChangeIdsInPrefs(
+          prefs,
+          nextOrdered,
+        );
+      });
+    } on StaleSessionWriteException {
+      return false;
+    } on LocalStorageLeaseReleaseException {
+      const warning = '时间变更提醒确认状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
+      if (snap.generation == _generation &&
+          !_recoveryWarnings.contains(warning)) {
+        _recoveryWarnings.add(warning);
+      }
+    } catch (_) {
+      return false;
+    }
+    if (!_isSessionCurrent(snap)) return false;
+    _acknowledgedDeadlineChangeIds = nextSet;
+    notifyListeners();
+    return true;
+  }
+
+  Future<bool> _mutateCourseworkState(
+    _SessionSnapshot snap,
+    LocalCourseworkState Function(Assignment current) transform, {
+    required String leaseWarning,
+  }) async {
+    var saved = false;
+    await _run(() async {
+      if (!_isSessionCurrent(snap)) return;
+      final next = transform(Assignment(
+        id: '_',
+        courseName: '',
+        title: '',
+        deadlineAt: null,
+        requirementsText: '',
+        status: 'unknown',
+        lastSyncedAt: _clock(),
+      ));
+      if (next == _courseworkState) {
+        saved = true;
+        return;
+      }
+      await _markReminderMutationPending();
+      if (!_isSessionCurrent(snap)) return;
+      try {
+        await _runScopedWrite(
+          snap,
+          (prefs) => repository.writeCourseworkStateInPrefs(prefs, next),
+        );
+      } on StaleSessionWriteException {
+        return;
+      } on LocalStorageLeaseReleaseException {
+        if (snap.generation == _generation &&
+            !_recoveryWarnings.contains(leaseWarning)) {
+          _recoveryWarnings.add(leaseWarning);
+        }
+      } catch (_) {
+        return;
+      }
+      if (!_isSessionCurrent(snap)) return;
+      _courseworkState = next;
+      _invalidateHomeDisplayIndex();
+      saved = true;
+      await _afterAssignmentsChanged(
+        updateSummary: true,
+        updateManual: false,
+        updateWidget: true,
+      );
+      if (_isSessionCurrent(snap)) notifyListeners();
+    });
+    return saved;
+  }
+
+  Future<bool> setManualDeadline(Assignment assignment, DateTime? at) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null || assignment.isExam) {
+      return false;
+    }
+    if (at != null &&
+        !CourseworkDeadline.canSetManualDeadline(
+          assignment,
+          entry: courseworkEntryFor(assignment),
+        )) {
+      return false;
+    }
+    return _mutateCourseworkState(
+      snap,
+      (_) {
+        final current = findAnyAssignment(assignment.id) ?? assignment;
+        if (at != null &&
+            !CourseworkDeadline.canSetManualDeadline(
+              current,
+              entry: courseworkEntryFor(current),
+            )) {
+          return _courseworkState;
+        }
+        return _courseworkState.withManualDeadline(
+          CourseworkDeadline.keyFor(current),
+          CourseworkDeadline.aliasesFor(current),
+          at,
+        );
+      },
+      leaseWarning: '手动截止状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
+  Future<bool> setLocallyCompleted(
+    Assignment assignment,
+    bool completed,
+  ) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    return _mutateCourseworkState(
+      snap,
+      (_) {
+        final current = findAnyAssignment(assignment.id) ?? assignment;
+        return _courseworkState.withLocallyCompleted(
+          CourseworkDeadline.keyFor(current),
+          CourseworkDeadline.aliasesFor(current),
+          completed,
+        );
+      },
+      leaseWarning: '本机完成状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
+  Future<void> _reconcileCourseworkState() async {
+    final snap = _captureSession();
+    if (!snap.authenticated ||
+        snap.account == null ||
+        _journalRestoreFailed ||
+        repository.recoveryWarning != null ||
+        _courseworkState.isEmpty) {
+      return;
+    }
+    final reconciled = CourseworkDeadline.reconcileWithAssignments(
+      _courseworkState,
+      [..._assignments, ..._hiddenAssignments],
+    );
+    if (reconciled == _courseworkState) return;
+    try {
+      await _runScopedWrite(
+        snap,
+        (prefs) => repository.writeCourseworkStateInPrefs(prefs, reconciled),
+      );
+    } on StaleSessionWriteException {
+      return;
+    } on LocalStorageLeaseReleaseException {
+      const warning = '个人截止状态已同步清理，本机写入通道释放未确认，请稍后重试其他写入';
+      if (snap.generation == _generation &&
+          !_recoveryWarnings.contains(warning)) {
+        _recoveryWarnings.add(warning);
+      }
+    } catch (_) {
+      const warning = '部分个人截止状态同步整理未能保存，请稍后重试';
+      if (snap.generation == _generation &&
+          !_recoveryWarnings.contains(warning)) {
+        _recoveryWarnings.add(warning);
+      }
+      return;
+    }
+    if (!_isSessionCurrent(snap)) return;
+    _courseworkState = reconciled;
+    _invalidateHomeDisplayIndex();
+  }
 
   Set<String> _pinAliases(Assignment assignment) {
     final key = _pinKey(assignment);
@@ -997,7 +1333,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   bool isPinned(Assignment assignment) =>
-      _authenticated && _pinAliases(assignment).any(_pinnedIds.contains);
+      _authenticated && _pinned.containsAny(_pinAliases(assignment));
 
   Set<String>? _pinnableKeysCache;
   int? _pinnableKeysCacheMinute;
@@ -1033,15 +1369,7 @@ class AssignmentStore extends ChangeNotifier {
           !canTogglePin(assignment)) {
         return;
       }
-      final aliases = _pinAliases(assignment);
-      final next = {..._pinnedIds};
-      if (isPinned(assignment)) {
-        next.removeAll(aliases);
-      } else {
-        next
-          ..removeAll(aliases)
-          ..add(key);
-      }
+      final next = _pinned.toggle(key, _pinAliases(assignment));
       await _savePins(next, account, generation);
       if (generation != _generation ||
           account != _account ||
@@ -1049,7 +1377,49 @@ class AssignmentStore extends ChangeNotifier {
           _disposed) {
         return;
       }
-      _pinnedIds = next;
+      _pinned = next;
+      _pinsNeedSave = false;
+      saved = true;
+    });
+    return saved;
+  }
+
+  Future<bool> reorderPinned(List<String> visibleOrderedKeys) async {
+    final account = _account;
+    final generation = _generation;
+    if (account == null || !_authenticated || !_manageBackgroundSchedule) {
+      return false;
+    }
+    final cleanOrdered = [
+      for (final raw in visibleOrderedKeys)
+        if (raw.trim().isNotEmpty) raw.trim(),
+    ];
+    final initialVisibleSet =
+        visibleAssignments.where(isPinned).map(_pinKey).toSet();
+    if (_pinned.reorderVisible(cleanOrdered, initialVisibleSet) == null) {
+      return false;
+    }
+    var saved = false;
+    await _run(() async {
+      if (generation != _generation ||
+          account != _account ||
+          !_authenticated ||
+          !_manageBackgroundSchedule ||
+          _disposed) {
+        return;
+      }
+      final latestVisibleSet =
+          visibleAssignments.where(isPinned).map(_pinKey).toSet();
+      final next = _pinned.reorderVisible(cleanOrdered, latestVisibleSet);
+      if (next == null) return;
+      await _savePins(next, account, generation);
+      if (generation != _generation ||
+          account != _account ||
+          !_authenticated ||
+          _disposed) {
+        return;
+      }
+      _pinned = next;
       _pinsNeedSave = false;
       saved = true;
     });
@@ -1057,9 +1427,9 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> _savePins(
-      Set<String> ids, String account, int generation) async {
+      PinnedAssignments pins, String account, int generation) async {
     try {
-      await repository.savePinnedIds(ids, account);
+      await repository.savePinnedAssignments(pins, account);
     } on StaleSessionWriteException {
       return;
     } on LocalStorageLeaseReleaseException {
@@ -1072,22 +1442,50 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> _prunePins() async {
     final account = _account;
-    // Only the foreground store manages pins. A headless sync may have
-    // restored a snapshot from before a foreground pin operation.
+    // Only the foreground store manages pins, and never prune after a
+    // failed/damaged journal read. Keys absent merely due to unfollowed
+    // courses, partial sync frames, or filters must remain pinned on disk.
     if (!_manageBackgroundSchedule ||
         !_authenticated ||
         account == null ||
-        (_pinnedIds.isEmpty && !_pinsNeedSave) ||
+        (_pinned.isEmpty && !_pinsNeedSave) ||
+        _journalRestoreFailed ||
         repository.recoveryWarning != null) {
       return;
     }
-    final retained = visibleAssignments.where(isPinned).map(_pinKey).toSet();
-    if (setEquals(_pinnedIds, retained) && !_pinsNeedSave) return;
-    _pinnedIds = retained;
+    final aliasToCanonical = <String, String>{};
+    final explicitlyCompletedOrHiddenKeys = <String>{};
+    for (final group in localRecordGroups) {
+      final canonical = _pinKey(group.primary);
+      for (final alias in _pinAliases(group.primary)) {
+        aliasToCanonical[alias] = canonical;
+      }
+      for (final source in group.sources) {
+        for (final alias in _pinAliases(source)) {
+          aliasToCanonical[alias] = canonical;
+        }
+      }
+      if (group.hidden ||
+          group.primary.isCompleted ||
+          isLocallyCompleted(group.primary) ||
+          AssignmentQuery.isExamEnded(group.primary, _clock())) {
+        explicitlyCompletedOrHiddenKeys.add(canonical);
+        explicitlyCompletedOrHiddenKeys.addAll(_pinAliases(group.primary));
+        for (final source in group.sources) {
+          explicitlyCompletedOrHiddenKeys.addAll(_pinAliases(source));
+        }
+      }
+    }
+    final retained = _pinned.migrateAndPrune(
+      aliasToCanonical: aliasToCanonical,
+      explicitlyCompletedOrHiddenKeys: explicitlyCompletedOrHiddenKeys,
+    );
+    if (retained == _pinned && !_pinsNeedSave) return;
+    _pinned = retained;
     _pinsNeedSave = true;
     final generation = _generation;
     try {
-      await _savePins(_pinnedIds, account, generation);
+      await _savePins(_pinned, account, generation);
       if (generation == _generation) _pinsNeedSave = false;
     } catch (_) {
       // The next successful journal update can retry without restoring pins
@@ -1098,6 +1496,124 @@ class AssignmentStore extends ChangeNotifier {
   List<CourseRef> _courses = [];
   List<CourseRef> get courses => List.unmodifiable(_courses);
   bool follows(String key) => !_unfollowed.contains(key);
+  CourseTermPreferences get courseTermPreferences => _courseTermPreferences;
+
+  CourseTermCatalog get termCatalog {
+    final currentNow = _clock();
+    final currentTerm = AcademicTerm.fromInstant(currentNow);
+    final cached = _termCatalogCache;
+    if (cached != null && cached.currentTerm == currentTerm) {
+      return cached;
+    }
+    return _termCatalogCache = CourseTermCatalog.build(
+      courses: courses,
+      assignments: [..._assignments, ..._hiddenAssignments],
+      notices: _courseNotices.items,
+      preferences: _courseTermPreferences,
+      now: currentNow,
+      coursework: _courseworkState,
+      unfollowedCourseKeys: _unfollowed,
+      hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+    );
+  }
+
+  bool isCourseActive(String key) =>
+      follows(key) && termCatalog.isActiveOrRecalled(key);
+
+  Future<bool> _mutateCourseTermPreferences(
+    _SessionSnapshot snap,
+    CourseTermPreferences Function(CourseTermPreferences current) transform, {
+    required String leaseWarning,
+  }) async {
+    var saved = false;
+    await _run(() async {
+      if (!_isSessionCurrent(snap)) return;
+      final next = transform(_courseTermPreferences);
+      if (next == _courseTermPreferences) {
+        saved = true;
+        return;
+      }
+      await _markReminderMutationPending();
+      if (!_isSessionCurrent(snap)) return;
+      try {
+        await _runScopedWrite(
+          snap,
+          (prefs) => repository.writeCourseTermPreferencesInPrefs(prefs, next),
+        );
+      } on StaleSessionWriteException {
+        return;
+      } on LocalStorageLeaseReleaseException {
+        if (snap.generation == _generation &&
+            !_recoveryWarnings.contains(leaseWarning)) {
+          _recoveryWarnings.add(leaseWarning);
+        }
+      } catch (_) {
+        return;
+      }
+      if (!_isSessionCurrent(snap)) return;
+      _courseTermPreferences = next;
+      _invalidateHomeDisplayIndex();
+      saved = true;
+      await _afterAssignmentsChanged(
+        updateSummary: true,
+        updateManual: false,
+        updateWidget: true,
+      );
+      if (_isSessionCurrent(snap)) notifyListeners();
+    });
+    return saved;
+  }
+
+  Future<bool> setCourseManualTerm(String courseKey, AcademicTerm? term) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    return _mutateCourseTermPreferences(
+      snap,
+      (current) => current.withManualTerm(courseKey, term?.key),
+      leaseWarning: '学期归属已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
+  Future<bool> setCourseArchiveMode(
+    String courseKey,
+    CourseArchiveMode mode,
+  ) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    return _mutateCourseTermPreferences(
+      snap,
+      (current) => current.withArchiveMode(courseKey, mode),
+      leaseWarning: '课程归档状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
+  Future<bool> dismissCourseRecall(String courseKey) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    return _mutateCourseTermPreferences(
+      snap,
+      (current) {
+        final cursor = termCatalog.entryFor(courseKey)?.latestRecallEventUtc ??
+            _clock().toUtc();
+        return current
+            .withArchiveMode(courseKey, CourseArchiveMode.auto)
+            .withDismissedRecallCursor(courseKey, cursor);
+      },
+      leaseWarning: '召回忽略状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
+  Future<bool> archivePastCourses() async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    return _mutateCourseTermPreferences(
+      snap,
+      (current) =>
+          current.withBatchArchive(termCatalog.archivablePastCourseKeys),
+      leaseWarning: '往期课程已批量归档，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+  }
+
   List<Assignment> get formalAssignments =>
       courseAssignments.where((a) => a.isFormal).toList();
   List<CourseworkGroup>? _courseworkGroupsCache;
@@ -1116,7 +1632,8 @@ class AssignmentStore extends ChangeNotifier {
       _courseworkGroupsCache ??= List.unmodifiable(AssignmentGrouping.group(
         AssignmentQuery.scope([..._assignments, ..._hiddenAssignments], {})
             .where((assignment) =>
-                assignment.courseKey == null || follows(assignment.courseKey!))
+                assignment.courseKey == null ||
+                isCourseActive(assignment.courseKey!))
             .toList(),
         hiddenIds:
             _hiddenAssignments.map((assignment) => assignment.id).toSet(),
@@ -1128,13 +1645,65 @@ class AssignmentStore extends ChangeNotifier {
           if (!group.hidden) ...group.sources,
       ]);
 
-  /// Original primary records for statistics. Notice supplementation is a
-  /// display-only projection and must never resolve submission state.
+  /// Original primary records for statistics across followed courses.
+  ///
+  /// Uses all non-hidden followed records so past/archived terms remain
+  /// inspectable via [statsAssignmentsForScope].
   List<Assignment> get statsAssignments =>
       _statsAssignmentsCache ??= List.unmodifiable([
-        for (final group in courseworkGroups)
-          if (!group.hidden) group.primary,
+        for (final group in localRecordGroups)
+          if (!group.hidden &&
+              group.primary.isInAssignmentScope &&
+              (group.primary.courseKey == null ||
+                  follows(group.primary.courseKey!)))
+            group.primary,
       ]);
+
+  List<Assignment> statsAssignmentsForScope(
+    CourseTermScope scope, {
+    DateTime? now,
+  }) {
+    final catalog = now == null
+        ? termCatalog
+        : CourseTermCatalog.build(
+            courses: courses,
+            assignments: [..._assignments, ..._hiddenAssignments],
+            notices: _courseNotices.items,
+            preferences: _courseTermPreferences,
+            now: now,
+            coursework: _courseworkState,
+            unfollowedCourseKeys: _unfollowed,
+            hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+          );
+    return List.unmodifiable([
+      for (final a in statsAssignments)
+        if (catalog.matchesAssignmentInStatsScope(a, scope)) a,
+    ]);
+  }
+
+  List<Assignment> homeCatalogAssignmentsWithSelectedCourse(
+    String? selectedCourseKey,
+  ) {
+    final activeCatalog = homeCatalogAssignments;
+    if (selectedCourseKey == null ||
+        !follows(selectedCourseKey) ||
+        termCatalog.isActiveOrRecalled(selectedCourseKey)) {
+      return activeCatalog;
+    }
+    final activeIds = {for (final a in activeCatalog) a.id};
+    final extra = <Assignment>[];
+    for (final group in localRecordGroups) {
+      if (group.hidden) continue;
+      if (group.primary.courseKey != selectedCourseKey) continue;
+      for (final source in group.sources) {
+        if (!activeIds.contains(source.id)) {
+          extra.add(source);
+        }
+      }
+    }
+    if (extra.isEmpty) return activeCatalog;
+    return List<Assignment>.unmodifiable([...activeCatalog, ...extra]);
+  }
 
   Set<String> _effectiveHiddenAssignmentIds() => {
         for (final item in _hiddenAssignments) item.id,
@@ -1240,18 +1809,29 @@ class AssignmentStore extends ChangeNotifier {
         display.widgetRange != next.widgetRange) {
       return null;
     }
+    final effectiveCoursework = snap.authenticated
+        ? _courseworkState
+        : const LocalCourseworkState.empty();
+    final now = _clock();
+    final activeCatalog = snap.authenticated ? termCatalog : null;
     final items = next.forWidget(
       snap.authenticated ? courseAssignments : <Assignment>[],
-      _clock(),
+      now,
+      coursework: effectiveCoursework,
     );
     try {
       await _runScopedWrite(
         snap,
-        (_) => widgetSnapshotService.saveAssignmentsForContext(
-          items,
-          authenticated: snap.authenticated,
-          range: next.widgetRange,
-        ),
+        (_) {
+          widgetSnapshotService.clock = _clock;
+          widgetSnapshotService.courseworkState = effectiveCoursework;
+          widgetSnapshotService.termCatalog = activeCatalog;
+          return widgetSnapshotService.saveAssignmentsForContext(
+            items,
+            authenticated: snap.authenticated,
+            range: next.widgetRange,
+          );
+        },
       );
       return null;
     } on StaleSessionWriteException {
@@ -1261,8 +1841,13 @@ class AssignmentStore extends ChangeNotifier {
     }
   }
 
-  List<Assignment> get visibleAssignments =>
-      AssignmentQuery.currentDisplay(courseAssignments, DateTime.now());
+  List<Assignment> get visibleAssignments => AssignmentQuery.currentDisplay(
+        courseAssignments,
+        _clock(),
+        coursework: _authenticated
+            ? _courseworkState
+            : const LocalCourseworkState.empty(),
+      );
   AssignmentSyncProgress? _homeSyncProgress;
   List<Assignment> _homePreviewAssignments = [];
   Set<String> _homePendingDeadlineIds = {};
@@ -1276,8 +1861,13 @@ class AssignmentStore extends ChangeNotifier {
 
   List<Assignment> get homeDisplayAssignments {
     return AssignmentQuery.currentDisplay(
-        homeCatalogAssignments, DateTime.now(),
-        index: homeDisplayIndex);
+      homeCatalogAssignments,
+      DateTime.now(),
+      index: homeDisplayIndex,
+      coursework: _authenticated
+          ? _courseworkState
+          : const LocalCourseworkState.empty(),
+    );
   }
 
   /// Complete scoped source catalog for the home list, including submitted
@@ -1325,6 +1915,7 @@ class AssignmentStore extends ChangeNotifier {
       _homeDisplayIndex ??= AssignmentDisplayIndex.from(homeCatalogAssignments);
 
   void _invalidateHomeDisplayIndex() {
+    _termCatalogCache = null;
     _homeCatalogCache = null;
     _homeDisplayIndex = null;
     _courseworkGroupsCache = null;
@@ -1353,7 +1944,8 @@ class AssignmentStore extends ChangeNotifier {
   List<Assignment> _catalogAssignmentsFrom(Iterable<Assignment> records) =>
       AssignmentQuery.scope(records.toList(), {})
           .where((assignment) =>
-              assignment.courseKey == null || follows(assignment.courseKey!))
+              assignment.courseKey == null ||
+              isCourseActive(assignment.courseKey!))
           .toList();
 
   void _handleHomeProgress(int generation, AssignmentSyncProgress progress) {
@@ -1523,6 +2115,22 @@ class AssignmentStore extends ChangeNotifier {
       _assignments.clear();
       _hiddenAssignments = [];
       _recoveryWarnings.add('账号本机记录暂时无法恢复，请重新登录后重试');
+      widgetSnapshotService.clock = _clock;
+      widgetSnapshotService.courseworkState =
+          const LocalCourseworkState.empty();
+      widgetSnapshotService.termCatalog = null;
+      if (_manageBackgroundSchedule) {
+        try {
+          await widgetSnapshotService.saveAssignmentsForContext(
+            const [],
+            authenticated: false,
+            range: display.widgetRange,
+          );
+        } catch (widgetError) {
+          debugPrint(
+              '[WidgetSnapshot] restore_clear: ${widgetError.runtimeType}');
+        }
+      }
     }
     try {
       _chaoxingDisplayName = await sessionStore.readChaoxingDisplayName();
@@ -1548,13 +2156,30 @@ class AssignmentStore extends ChangeNotifier {
     _isChapterSyncing = false;
     _chapterSyncProgressText = null;
     changes = [];
+    _acknowledgedDeadlineChangeIds = <String>{};
     _assignments.clear();
     _hiddenAssignments = [];
     _courses = [];
     _unfollowed.clear();
-    _pinnedIds.clear();
+    _pinned = const PinnedAssignments.empty();
+    _courseworkState = const LocalCourseworkState.empty();
+    _courseTermPreferences = const CourseTermPreferences.empty();
+    _historicalSweepState = const HistoricalSweepState.empty();
+    _lastRequestedSyncScope = AssignmentSyncScope.current;
+    _lastTargetedCourseKeys = const {};
+    _lastSyncSourceResults = const [];
+    _termCatalogCache = null;
+    _visitedAssignment = null;
+    _activeVisitTicket = null;
+    _visitLeftApp = false;
+    _pendingReturnConfirmation = null;
     _pinsNeedSave = false;
+    _journalRestoreFailed = false;
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
+    _allowUrgentDeadlineNightBreakthrough = false;
+    _deadlineChannelId = LocalNotificationService.assignmentChannel;
+    notificationService.activeDeadlineChannelId =
+        LocalNotificationService.assignmentChannel;
     _lastSyncAt = null;
     _lastSyncAttemptAt = null;
     _serverBackoffUntil = null;
@@ -1603,11 +2228,47 @@ class AssignmentStore extends ChangeNotifier {
     await stage('置顶课业', () async {
       final account = _account;
       if (_manageBackgroundSchedule && _authenticated && account != null) {
-        _pinnedIds = await repository.loadPinnedIds(account);
+        _pinned = await repository.loadPinnedAssignments(account);
+      }
+    });
+    await stage('个人课业状态', () async {
+      final account = _account;
+      if (_authenticated && account != null) {
+        _courseworkState = await repository.loadCourseworkState(account);
+      }
+    });
+    await stage('课程学期设置', () async {
+      final account = _account;
+      if (_authenticated && account != null) {
+        _courseTermPreferences =
+            await repository.loadCourseTermPreferences(account);
+      }
+    });
+    await stage('往期巡检状态', () async {
+      final account = _account;
+      if (_authenticated && account != null) {
+        _historicalSweepState =
+            await repository.loadHistoricalSweepState(account);
       }
     });
     await stage('提醒设置', () async {
       _reminderOffsetsMinutes = await reminderRuleStore.loadOffsetsMinutes();
+      final account = _account;
+      _allowUrgentDeadlineNightBreakthrough =
+          (_authenticated && account != null)
+              ? await repository.loadAllowUrgentNightBreakthrough(account)
+              : false;
+      final savedDeadlineChannel = (_authenticated && account != null)
+          ? await repository.loadDeadlineChannelId(account)
+          : null;
+      _deadlineChannelId = (_authenticated && account != null)
+          ? await notificationService.resolveDefaultDeadlineChannel(
+              storedChannelId: savedDeadlineChannel,
+            )
+          : LocalNotificationService.assignmentChannel;
+      notificationService.activeDeadlineChannelId = _authenticated
+          ? _deadlineChannelId
+          : LocalNotificationService.assignmentChannel;
     });
     await stage('自动同步设置', () async {
       final snap = _captureSession();
@@ -1774,12 +2435,25 @@ class AssignmentStore extends ChangeNotifier {
       _courseChapters = await repository.loadCourseChapters();
     });
     await stage('作业记录', () async {
-      await _reloadJournal();
+      try {
+        await _reloadJournal();
+        _journalRestoreFailed = false;
+      } catch (_) {
+        _journalRestoreFailed = true;
+        rethrow;
+      }
       _hadCacheBeforeLastSync =
           _assignments.isNotEmpty || _hiddenAssignments.isNotEmpty;
     });
     await stage('作业变化', () async {
       changes = await changeLog.load();
+    });
+    await stage('时间变更确认状态', () async {
+      final account = _account;
+      if (_authenticated && account != null) {
+        _acknowledgedDeadlineChangeIds =
+            await repository.loadAcknowledgedDeadlineChangeIds(account);
+      }
     });
   }
 
@@ -1798,6 +2472,9 @@ class AssignmentStore extends ChangeNotifier {
     final generation = ++_generation;
     cancelSynchronization();
     _visitedAssignment = null;
+    _activeVisitTicket = null;
+    _visitLeftApp = false;
+    _pendingReturnConfirmation = null;
     returnCheckMessage = null;
     var loginSucceeded = false;
     chaoxingClient.deferProfile = true;
@@ -1874,6 +2551,10 @@ class AssignmentStore extends ChangeNotifier {
             if (generation != _generation || _disposed) {
               throw const _LoginInterruptedException();
             }
+            widgetSnapshotService.clock = _clock;
+            widgetSnapshotService.courseworkState =
+                const LocalCourseworkState.empty();
+            widgetSnapshotService.termCatalog = null;
             await widgetSnapshotService.saveAssignmentsForContext(
               const [],
               authenticated: false,
@@ -1953,7 +2634,12 @@ class AssignmentStore extends ChangeNotifier {
             _hiddenAssignments = [];
             _courses = [];
             _unfollowed.clear();
-            _pinnedIds.clear();
+            _pinned = const PinnedAssignments.empty();
+            _courseworkState = const LocalCourseworkState.empty();
+            _courseTermPreferences = const CourseTermPreferences.empty();
+            _historicalSweepState = const HistoricalSweepState.empty();
+            _termCatalogCache = null;
+            _acknowledgedDeadlineChangeIds = <String>{};
             _pinsNeedSave = false;
             _courseNotices = CourseNoticeCollection();
             _courseChapters = CourseChapterCatalog();
@@ -2091,16 +2777,43 @@ class AssignmentStore extends ChangeNotifier {
   Future<void> syncAssignments() =>
       syncAssignmentsForTrigger(BackgroundSyncTrigger.manual);
 
+  Future<void> syncAllTerms() => syncAssignmentsForTrigger(
+        BackgroundSyncTrigger.manual,
+        scope: AssignmentSyncScope.all,
+      );
+
+  Future<void> syncTargetedCourses(Set<String> courseKeys) =>
+      syncAssignmentsForTrigger(
+        BackgroundSyncTrigger.manual,
+        scope: AssignmentSyncScope.targeted,
+        targetedCourseKeys: courseKeys,
+      );
+
+  Future<void> retryLastSyncAfterVerification() => syncAssignmentsForTrigger(
+        BackgroundSyncTrigger.manual,
+        scope: _lastRequestedSyncScope,
+        targetedCourseKeys: _lastTargetedCourseKeys,
+      );
+
   Future<void> syncAssignmentsForTrigger(
     BackgroundSyncTrigger trigger, {
     bool skipTaskEngineProbe = false,
+    AssignmentSyncScope? scope,
+    Set<String>? targetedCourseKeys,
   }) async {
-    await _syncForTrigger(trigger, skipTaskEngineProbe: skipTaskEngineProbe);
+    await _syncForTrigger(
+      trigger,
+      skipTaskEngineProbe: skipTaskEngineProbe,
+      scope: scope,
+      targetedCourseKeys: targetedCourseKeys,
+    );
   }
 
   Future<String?> _syncForTrigger(
     BackgroundSyncTrigger trigger, {
     bool skipTaskEngineProbe = false,
+    AssignmentSyncScope? scope,
+    Set<String>? targetedCourseKeys,
   }) {
     if (!_authenticated) return Future.value();
     final existing = _syncInFlight;
@@ -2109,6 +2822,8 @@ class AssignmentStore extends ChangeNotifier {
     currentFuture = _performCoordinatedSync(
       trigger,
       skipTaskEngineProbe: skipTaskEngineProbe,
+      scope: scope,
+      targetedCourseKeys: targetedCourseKeys,
     ).whenComplete(() {
       if (identical(_syncInFlight, currentFuture)) {
         _syncInFlight = null;
@@ -2121,6 +2836,8 @@ class AssignmentStore extends ChangeNotifier {
   Future<String?> _performCoordinatedSync(
     BackgroundSyncTrigger trigger, {
     bool skipTaskEngineProbe = false,
+    AssignmentSyncScope? scope,
+    Set<String>? targetedCourseKeys,
   }) async {
     final operation = ++_syncOperation;
     final generation = _generation;
@@ -2203,7 +2920,14 @@ class AssignmentStore extends ChangeNotifier {
           trigger,
           operation: operation,
           skipTaskEngineProbe: skipTaskEngineProbe,
+          scope: scope,
+          targetedCourseKeys: targetedCourseKeys,
         );
+        if (trigger == BackgroundSyncTrigger.daytime) {
+          await _maybeRunHistoricalSweepAfterDaytimeSync(
+            session: _captureSession(syncOperation: operation),
+          );
+        }
       });
       if (_syncSkipReasonOperation == operation &&
           _syncSkipReasonGeneration == generation) {
@@ -2249,6 +2973,7 @@ class AssignmentStore extends ChangeNotifier {
     bool completeSync = false,
     bool detectNewAssignments = false,
     bool syncCompleted = false,
+    bool allowSourceBaselineUpdate = true,
     String? syncFailure,
     DateTime? completedAt,
   }) async {
@@ -2260,7 +2985,10 @@ class AssignmentStore extends ChangeNotifier {
       ..addAll(journal);
     _hiddenAssignments = await repository.loadHiddenAssignments();
     if (generation != _generation || _disposed) return;
+    _journalRestoreFailed = false;
     _invalidateHomeDisplayIndex();
+    await _reconcileCourseworkState();
+    if (generation != _generation || _disposed) return;
     final durableSyncAt = await repository.lastSyncAt();
     if (generation != _generation || _disposed) return;
     _lastSyncAt = durableSyncAt;
@@ -2319,6 +3047,7 @@ class AssignmentStore extends ChangeNotifier {
       completeSync: completeSync,
       detectNewAssignments: detectNewAssignments,
       syncCompleted: syncCompleted,
+      allowSourceBaselineUpdate: allowSourceBaselineUpdate,
       syncFailure: syncFailure,
       completedAt: completedAt,
     );
@@ -2507,6 +3236,126 @@ class AssignmentStore extends ChangeNotifier {
         (current) => current.copyWith(newAssignmentReminderEnabled: enabled),
       );
 
+  Future<bool> saveAllowUrgentDeadlineNightBreakthrough(bool enabled) async {
+    final snap = _captureSession();
+    var saved = false;
+    await _run(() async {
+      if (!_isSessionCurrent(snap)) return;
+      await _markReminderMutationPending();
+      if (!_isSessionCurrent(snap)) return;
+      try {
+        await _runScopedWrite(
+          snap,
+          (prefs) => repository.writeAllowUrgentNightBreakthroughInPrefs(
+            prefs,
+            enabled,
+          ),
+        );
+      } on StaleSessionWriteException {
+        return;
+      }
+      if (!_isSessionCurrent(snap)) return;
+      _allowUrgentDeadlineNightBreakthrough = enabled;
+      notificationService.allowUrgentNightBreakthrough =
+          snap.authenticated && enabled;
+      saved = true;
+      await _afterAssignmentsChanged(updateSummary: false);
+    });
+    return saved;
+  }
+
+  Future<bool> saveDeadlineChannelId(String channelId) async {
+    final normalized =
+        LocalAssignmentRepository.normalizeDeadlineChannelId(channelId);
+    if (normalized == null) {
+      _error = '未知的截止提醒通知渠道';
+      notifyListeners();
+      return false;
+    }
+    final snap = _captureSession();
+    var saved = false;
+    await _run(() async {
+      if (!_isSessionCurrent(snap)) return;
+      await _markReminderMutationPending();
+      if (!_isSessionCurrent(snap)) return;
+      try {
+        await _runScopedWrite(
+          snap,
+          (prefs) => repository.writeDeadlineChannelIdInPrefs(
+            prefs,
+            normalized,
+          ),
+        );
+      } on StaleSessionWriteException {
+        return;
+      }
+      if (!_isSessionCurrent(snap)) return;
+      _deadlineChannelId = normalized;
+      notificationService.activeDeadlineChannelId = snap.authenticated
+          ? normalized
+          : LocalNotificationService.assignmentChannel;
+      saved = true;
+      await _afterAssignmentsChanged(updateSummary: false);
+    });
+    return saved;
+  }
+
+  Future<TestDeadlineNotificationOutcome> sendTestDeadlineNotification({
+    int delayMillis = 3000,
+  }) async {
+    final now = _clock();
+    if (DeadlineQuietHoursPolicy.isQuiet(now)) {
+      final retryAt = DeadlineQuietHoursPolicy.nextQuietEnd(now);
+      final hm =
+          '${retryAt.hour.toString().padLeft(2, '0')}:${retryAt.minute.toString().padLeft(2, '0')}';
+      return TestDeadlineNotificationOutcome(
+        status: TestDeadlineNotificationStatus.quietHours,
+        channelId: activeDeadlineChannelId,
+        warning: '当前处于夜间静音时段（23:30–07:30），测试提醒不会穿透静音；请在 $hm 后重试。',
+        retryAfterAt: retryAt,
+      );
+    }
+    final targetChannel = _authenticated
+        ? _deadlineChannelId
+        : LocalNotificationService.assignmentChannel;
+    notificationService.activeDeadlineChannelId = targetChannel;
+    if (_nativeReminderAvailable) {
+      try {
+        return await backgroundReminderGateway.sendTestDeadlineNotification(
+          accountHash: _authenticated ? _accountHash : null,
+          channelId: targetChannel,
+          delayMillis: delayMillis,
+        );
+      } catch (error) {
+        return TestDeadlineNotificationOutcome(
+          status: TestDeadlineNotificationStatus.blocked,
+          channelId: targetChannel,
+          warning: '发送测试提醒失败：$error',
+        );
+      }
+    }
+    try {
+      final ok = await notificationService.showTestNotification();
+      return ok
+          ? TestDeadlineNotificationOutcome(
+              status: TestDeadlineNotificationStatus.posted,
+              channelId: targetChannel,
+            )
+          : TestDeadlineNotificationOutcome(
+              status: TestDeadlineNotificationStatus.blocked,
+              channelId: targetChannel,
+              warning:
+                  notificationService.lastWarning ?? '未能请求测试通知，请检查通知权限与渠道。',
+            );
+    } catch (error) {
+      return TestDeadlineNotificationOutcome(
+        status: TestDeadlineNotificationStatus.blocked,
+        channelId: targetChannel,
+        warning: '发送测试提醒失败：$error',
+      );
+    }
+  }
+
   /// Reloads durable sync timestamps and journal records if a headless
   /// background check persisted newer state while this foreground store was idle.
   Future<bool> reconcileExternalSyncState() async {
@@ -2590,6 +3439,7 @@ class AssignmentStore extends ChangeNotifier {
               '[AssignmentStore] reconcileSyncReport: ${error.runtimeType}');
         }
       }
+      _courseworkState = await repository.loadCourseworkState(account);
       await _reloadJournal();
       reconciled = true;
     });
@@ -2928,8 +3778,12 @@ class AssignmentStore extends ChangeNotifier {
     chaoxingClient.clearSession();
     _clearHomePreview(notify: true);
     _visitedAssignment = null;
+    _activeVisitTicket = null;
+    _visitLeftApp = false;
+    _pendingReturnConfirmation = null;
     returnCheckMessage = null;
     changes = [];
+    _acknowledgedDeadlineChangeIds = <String>{};
     await _run(() async {
       if (logoutGen != _generation || _disposed) return;
       final accountHash = _accountHash;
@@ -2963,6 +3817,10 @@ class AssignmentStore extends ChangeNotifier {
       }
       _accountHash = null;
       _nativeSessionEpoch = 0;
+      widgetSnapshotService.clock = _clock;
+      widgetSnapshotService.courseworkState =
+          const LocalCourseworkState.empty();
+      widgetSnapshotService.termCatalog = null;
       try {
         await repository.runScopedWrite(
           (_) => widgetSnapshotService.saveAssignmentsForContext(
@@ -3019,6 +3877,10 @@ class AssignmentStore extends ChangeNotifier {
       _agreementAccepted = false;
       _needsProfileRecovery = false;
       _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
+      _allowUrgentDeadlineNightBreakthrough = false;
+      _deadlineChannelId = LocalNotificationService.assignmentChannel;
+      notificationService.activeDeadlineChannelId =
+          LocalNotificationService.assignmentChannel;
       _chaoxingDisplayName = null;
       _chaoxingAvatarUrl = null;
       _error = null;
@@ -3030,13 +3892,24 @@ class AssignmentStore extends ChangeNotifier {
       _hiddenAssignments = [];
       _courses = [];
       _unfollowed.clear();
-      _pinnedIds.clear();
+      _pinned = const PinnedAssignments.empty();
+      _courseworkState = const LocalCourseworkState.empty();
+      _courseTermPreferences = const CourseTermPreferences.empty();
+      _historicalSweepState = const HistoricalSweepState.empty();
+      _lastRequestedSyncScope = AssignmentSyncScope.current;
+      _lastTargetedCourseKeys = const {};
+      _lastSyncSourceResults = const [];
+      _termCatalogCache = null;
       _pinsNeedSave = false;
       _invalidateHomeDisplayIndex();
       syncReport = const SyncReport();
       _visitedAssignment = null;
+      _activeVisitTicket = null;
+      _visitLeftApp = false;
+      _pendingReturnConfirmation = null;
       returnCheckMessage = null;
       changes = [];
+      _acknowledgedDeadlineChangeIds = <String>{};
       repository.recoveryWarning = null;
       await _reconcileBackgroundControls();
       if (logoutGen != _generation || _disposed) return;
@@ -3076,6 +3949,7 @@ class AssignmentStore extends ChangeNotifier {
     bool completeSync = false,
     bool detectNewAssignments = false,
     bool syncCompleted = false,
+    bool allowSourceBaselineUpdate = true,
     String? syncFailure,
     DateTime? completedAt,
     bool updateAssignmentReminders = true,
@@ -3102,6 +3976,15 @@ class AssignmentStore extends ChangeNotifier {
         _serviceWarnings.add(_privacyCleanupMessage(error));
       }
     }
+    final effectiveCoursework = snap.authenticated
+        ? _courseworkState
+        : const LocalCourseworkState.empty();
+    notificationService.courseworkState = effectiveCoursework;
+    notificationService.allowUrgentNightBreakthrough =
+        snap.authenticated && _allowUrgentDeadlineNightBreakthrough;
+    notificationService.activeDeadlineChannelId = snap.authenticated
+        ? _deadlineChannelId
+        : LocalNotificationService.assignmentChannel;
     if (!_privacyCleanupPending) {
       if (updateAssignmentReminders) {
         if (_nativeReminderAvailable && _authenticated) {
@@ -3117,6 +4000,7 @@ class AssignmentStore extends ChangeNotifier {
                   completeSync: completeSync,
                   detectNewAssignments: detectNewAssignments,
                   syncCompleted: syncCompleted,
+                  allowSourceBaselineUpdate: allowSourceBaselineUpdate,
                   failure: syncFailure,
                   completedAt: completedAt,
                 );
@@ -3176,16 +4060,27 @@ class AssignmentStore extends ChangeNotifier {
     if (!_isSessionCurrent(snap) || !updateWidget) {
       return manualRescheduleSucceeded;
     }
-    final widgetItems = display.forWidget(scoped, DateTime.now());
+    final now = _clock();
+    final activeCatalog = snap.authenticated ? termCatalog : null;
+    final widgetItems = display.forWidget(
+      scoped,
+      now,
+      coursework: effectiveCoursework,
+    );
     if (_manageBackgroundSchedule) {
       try {
         await _runScopedWrite(
           snap,
-          (_) => widgetSnapshotService.saveAssignmentsForContext(
-            widgetItems,
-            authenticated: snap.authenticated,
-            range: display.widgetRange,
-          ),
+          (_) {
+            widgetSnapshotService.clock = _clock;
+            widgetSnapshotService.courseworkState = effectiveCoursework;
+            widgetSnapshotService.termCatalog = activeCatalog;
+            return widgetSnapshotService.saveAssignmentsForContext(
+              widgetItems,
+              authenticated: snap.authenticated,
+              range: display.widgetRange,
+            );
+          },
         );
       } on StaleSessionWriteException {
         return manualRescheduleSucceeded;
@@ -3198,11 +4093,16 @@ class AssignmentStore extends ChangeNotifier {
       try {
         await _runScopedWrite(
           snap,
-          (_) => widgetSnapshotService.saveAssignmentsForContext(
-            widgetItems,
-            authenticated: true,
-            range: display.widgetRange,
-          ),
+          (_) {
+            widgetSnapshotService.clock = _clock;
+            widgetSnapshotService.courseworkState = effectiveCoursework;
+            widgetSnapshotService.termCatalog = activeCatalog;
+            return widgetSnapshotService.saveAssignmentsForContext(
+              widgetItems,
+              authenticated: true,
+              range: display.widgetRange,
+            );
+          },
         );
       } on StaleSessionWriteException {
         return manualRescheduleSucceeded;
@@ -3495,6 +4395,8 @@ class AssignmentStore extends ChangeNotifier {
         health: health,
         pluginEvidence: plugin,
         queryWarnings: warnings,
+        coursework: _courseworkState,
+        allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
         healthQueryFailed: healthQueryFailed,
         pluginQueryFailed: pluginQueryFailed,
         subjectQueryFailed: subjectQueryFailed,
@@ -3510,6 +4412,7 @@ class AssignmentStore extends ChangeNotifier {
         health: health,
         pluginEvidence: plugin,
         queryWarnings: warnings,
+        allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
         healthQueryFailed: healthQueryFailed,
         pluginQueryFailed: pluginQueryFailed,
         subjectQueryFailed: subjectQueryFailed,
@@ -3522,6 +4425,9 @@ class AssignmentStore extends ChangeNotifier {
         _authenticated ? personal : PersonalWorkspace(),
         now,
         _lastSyncAt,
+        coursework: _authenticated
+            ? _courseworkState
+            : const LocalCourseworkState.empty(),
       );
       return ReminderExplanationService.forSummary(
         personal: _authenticated ? personal : PersonalWorkspace(),
@@ -3592,6 +4498,7 @@ class AssignmentStore extends ChangeNotifier {
     required bool completeSync,
     required bool detectNewAssignments,
     required bool syncCompleted,
+    bool allowSourceBaselineUpdate = true,
     String? failure,
     DateTime? completedAt,
   }) async {
@@ -3602,7 +4509,7 @@ class AssignmentStore extends ChangeNotifier {
       accountHash: accountHash,
       sessionEpoch: sessionEpoch,
     );
-    final now = completedAt ?? DateTime.now();
+    final now = completedAt ?? _clock();
     final plan = AssignmentReminderPlanner.planAfterSync(
       accountHash: accountHash,
       sessionEpoch: sessionEpoch,
@@ -3613,9 +4520,11 @@ class AssignmentStore extends ChangeNotifier {
       sentNewAssignmentIds: state.sentNewAssignmentIds,
       baselineCompleted: state.baselineCompleted,
       baselinedSources: state.baselinedSources,
-      completedSourceKeys: syncCompleted
+      completedSourceKeys: (syncCompleted && allowSourceBaselineUpdate)
           ? {
-              for (final source in chaoxingClient.sourceResults)
+              for (final source in (_lastSyncSourceResults.isNotEmpty
+                  ? _lastSyncSourceResults
+                  : chaoxingClient.sourceResults))
                 if (source.phase == SyncSourcePhase.success) source.source,
             }
           : const {},
@@ -3625,6 +4534,9 @@ class AssignmentStore extends ChangeNotifier {
           _backgroundCheckSettings.newAssignmentReminderEnabled,
       reminderOffsetsMinutes: _reminderOffsetsMinutes,
       now: now,
+      courseworkState: _courseworkState,
+      archivedCourseKeys: _archivedReminderCourseKeys(),
+      allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
     );
     final result = await backgroundReminderGateway.applyPlan(
       accountHash: accountHash,
@@ -3643,8 +4555,188 @@ class AssignmentStore extends ChangeNotifier {
 
   bool _needsProfileRecovery = false;
 
-  Future<void> _syncAssignmentsBody(BackgroundSyncTrigger trigger,
-      {required int operation, bool skipTaskEngineProbe = false}) async {
+  SyncCourseSelector _buildSyncCourseSelector(
+    AssignmentSyncScope requestedScope,
+    Set<String> targetedCourseKeys,
+  ) {
+    return (catalog) {
+      final mappedCourses = [
+        for (final ref in catalog)
+          CourseRef(
+            courseId: ref.courseId,
+            clazzId: ref.clazzId,
+            name: ref.courseName,
+            teacherNames: ref.teacherNames,
+            folderName: ref.folderName,
+          ),
+      ];
+      final liveCatalog = CourseTermCatalog.build(
+        courses: mappedCourses,
+        assignments: [..._assignments, ..._hiddenAssignments],
+        notices: _courseNotices.items,
+        preferences: _courseTermPreferences,
+        now: _clock(),
+        coursework: _courseworkState,
+        unfollowedCourseKeys: _unfollowed,
+        hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+      );
+      return SyncScopeSelection.select(
+        catalog: catalog,
+        scope: requestedScope,
+        termCatalog: liveCatalog,
+        targetedCourseKeys: targetedCourseKeys,
+      );
+    };
+  }
+
+  Future<void> _maybeRunHistoricalSweepAfterDaytimeSync({
+    required _SessionSnapshot session,
+  }) async {
+    if (!_isSessionCurrent(session) || _disposed || _syncCancelled) return;
+    if (syncReport.phase != SyncPhase.success || _error != null) return;
+    final hasBlockingIssue = chaoxingClient.issues.any(
+      (issue) => const {
+        SyncIssueKind.verificationRequired,
+        SyncIssueKind.rateLimited,
+        SyncIssueKind.authExpired,
+      }.contains(issue.kind),
+    );
+    if (hasBlockingIssue) return;
+    final sweepNow = _clock();
+    if (!DaytimeCheckPolicy.isInWindow(sweepNow)) return;
+    if (_serverBackoffUntil?.isAfter(sweepNow) ?? false) return;
+
+    final catalog = termCatalog;
+    final eligibleKeys = [
+      for (final entry in catalog.entries)
+        if (entry.isFollowed && entry.state == CourseCatalogState.archived)
+          entry.courseKey,
+    ];
+    final batch = _historicalSweepState.selectNextBatch(
+      eligibleKeys,
+      now: sweepNow,
+    );
+    if (batch.isEmpty) return;
+
+    final account = session.account;
+    if (account == null) return;
+
+    final savedReport = syncReport;
+    final savedError = _error;
+    final batchSet = batch.toSet();
+    final priorRecords = [..._assignments, ..._hiddenAssignments];
+    var swept = const <Assignment>[];
+    var abortedMidBatch = false;
+    try {
+      chaoxingClient.nextSyncCourseSelector = _buildSyncCourseSelector(
+        AssignmentSyncScope.historicalSweep,
+        batchSet,
+      );
+      chaoxingClient.shouldStop =
+          () => !DaytimeCheckPolicy.isInWindow(_clock());
+      chaoxingClient.previousAssignments = {
+        for (final a in priorRecords) a.id: a,
+      };
+      swept = await chaoxingClient.fetchAssignmentsWithOptions(
+        collectCourseNotices: false,
+        enableTaskEngineProbe: false,
+      );
+    } on SyncReadException catch (error) {
+      if (error.issue.kind == SyncIssueKind.cancelled) {
+        throw const SyncCancelledException();
+      }
+      abortedMidBatch = true;
+    } on ChaoxingAuthenticationException {
+      abortedMidBatch = true;
+    } catch (_) {
+      abortedMidBatch = true;
+    } finally {
+      chaoxingClient.onProgress = null;
+      chaoxingClient.shouldStop = null;
+      chaoxingClient.nextSyncCourseSelector = null;
+    }
+
+    if (!_isSessionCurrent(session) || _disposed || _syncCancelled) return;
+    if (chaoxingClient.issues.isNotEmpty) {
+      try {
+        await _updateServerBackoff(chaoxingClient.issues, session: session);
+      } catch (_) {/* Keep sweep non-blocking for daytime sync state. */}
+    }
+
+    final failedKeys = {
+      ...chaoxingClient.lastFailedCourseKeys.where(batchSet.contains),
+      if (abortedMidBatch && chaoxingClient.lastFailedCourseKeys.isEmpty)
+        ...batchSet,
+    };
+    final nextState = _historicalSweepState.recordBatchResult(
+      plannedKeys: batch,
+      failedKeys: failedKeys,
+      eligiblePastCourseKeys: eligibleKeys,
+      at: sweepNow,
+    );
+    try {
+      await repository.saveHistoricalSweepState(nextState, account);
+      if (_isSessionCurrent(session)) {
+        _historicalSweepState = nextState;
+      }
+    } catch (_) {
+      // Cursor persistence failure leaves old cursor intact without failing
+      // the primary daytime sync.
+    }
+
+    if (swept.isNotEmpty && _isSessionCurrent(session) && !_disposed) {
+      try {
+        await _markReminderMutationPending();
+        await repository.mergeAndSave(
+          swept,
+          completeSync: false,
+          canCommit: _nativeReminderAvailable
+              ? () async {
+                  if (!_isSessionCurrent(session) || _disposed) return false;
+                  return backgroundReminderGateway.isSessionCurrent(
+                    session.accountHash!,
+                    session.sessionEpoch,
+                  );
+                }
+              : () async => _isSessionCurrent(session) && !_disposed,
+        );
+        if (_isSessionCurrent(session) && !_disposed) {
+          await _reloadJournal(
+            completeSync: false,
+            detectNewAssignments: false,
+            syncCompleted: true,
+            allowSourceBaselineUpdate: false,
+          );
+        }
+      } on StaleSessionWriteException {
+        return;
+      } catch (_) {
+        // Keep primary daytime sync state intact when best-effort historical merge fails.
+      }
+    }
+    if (_isSessionCurrent(session) && !_disposed) {
+      syncReport = savedReport;
+      _error = savedError;
+    }
+  }
+
+  Future<void> _syncAssignmentsBody(
+    BackgroundSyncTrigger trigger, {
+    required int operation,
+    bool skipTaskEngineProbe = false,
+    AssignmentSyncScope? scope,
+    Set<String>? targetedCourseKeys,
+  }) async {
+    final requestedScope = scope ?? AssignmentSyncScope.current;
+    final targetedKeys =
+        Set<String>.unmodifiable(targetedCourseKeys ?? const {});
+    if (trigger == BackgroundSyncTrigger.manual) {
+      _lastRequestedSyncScope = requestedScope;
+      _lastTargetedCourseKeys = targetedKeys;
+    }
+    final priorCurrentSuccessAt = syncReport.lastCurrentSuccessAt;
+    final priorFullSuccessAt = _lastSyncAt ?? syncReport.lastFullSuccessAt;
+    _lastSyncSourceResults = const [];
     final syncSession = _captureSession(syncOperation: operation);
     final generation = syncSession.generation;
     final syncAccount = syncSession.account;
@@ -3698,7 +4790,9 @@ class AssignmentStore extends ChangeNotifier {
         phase: SyncPhase.running,
         attemptedAt: attempted,
         lastDataSuccessAt: syncReport.lastDataSuccessAt,
-        lastFullSuccessAt: _lastSyncAt);
+        lastCurrentSuccessAt: priorCurrentSuccessAt,
+        lastFullSuccessAt: priorFullSuccessAt,
+        syncScope: requestedScope);
     try {
       await _persistSyncReport(session: syncSession);
     } on StaleSessionWriteException {
@@ -3749,6 +4843,10 @@ class AssignmentStore extends ChangeNotifier {
     }
 
     try {
+      chaoxingClient.nextSyncCourseSelector = _buildSyncCourseSelector(
+        requestedScope,
+        targetedKeys,
+      );
       incoming = await chaoxingClient.fetchAssignmentsWithOptions(
         collectCourseNotices: manualSync,
         enableTaskEngineProbe: manualSync && !skipTaskEngineProbe,
@@ -3759,6 +4857,10 @@ class AssignmentStore extends ChangeNotifier {
       _clearHomePreview(notify: true);
       await _refreshChaoxingSession();
       attachProgress();
+      chaoxingClient.nextSyncCourseSelector = _buildSyncCourseSelector(
+        requestedScope,
+        targetedKeys,
+      );
       incoming = await chaoxingClient.fetchAssignmentsWithOptions(
         collectCourseNotices: manualSync,
         enableTaskEngineProbe: manualSync && !skipTaskEngineProbe,
@@ -3771,6 +4873,7 @@ class AssignmentStore extends ChangeNotifier {
     } finally {
       chaoxingClient.onProgress = null;
       chaoxingClient.shouldStop = null;
+      chaoxingClient.nextSyncCourseSelector = null;
       if (generation == _generation &&
           !_disposed &&
           !_syncCancelled &&
@@ -3778,7 +4881,12 @@ class AssignmentStore extends ChangeNotifier {
           chaoxingClient.hasCourseResponse) {
         final nextCourses = chaoxingClient.courses
             .map((c) => CourseRef(
-                courseId: c.courseId, clazzId: c.clazzId, name: c.courseName))
+                  courseId: c.courseId,
+                  clazzId: c.clazzId,
+                  name: c.courseName,
+                  teacherNames: c.teacherNames,
+                  folderName: c.folderName,
+                ))
             .toList();
         final account = _account;
         if (account == null) {
@@ -3787,7 +4895,10 @@ class AssignmentStore extends ChangeNotifier {
         markSavingStage();
         try {
           await repository.saveCourses(nextCourses, account: account);
-          if (generation == _generation && !_disposed) _courses = nextCourses;
+          if (generation == _generation && !_disposed) {
+            _courses = nextCourses;
+            _invalidateHomeDisplayIndex();
+          }
         } on StaleSessionWriteException {
           // Account changed before the finally block could commit courses.
         }
@@ -3796,6 +4907,31 @@ class AssignmentStore extends ChangeNotifier {
     if (generation != _generation || _disposed) return;
     _ensureSyncActive(operation);
     var warning = chaoxingClient.lastSyncWarning;
+    // Snapshot scope, issues, sources, and counts before optional profile
+    // recovery, because _refreshChaoxingSession() calls login()->clearSession()
+    // and would otherwise wipe this round's sync telemetry.
+    final usedSelector = chaoxingClient.hasCourseResponse;
+    final effectiveScope = usedSelector
+        ? chaoxingClient.lastSyncScope
+        : (requestedScope == AssignmentSyncScope.targeted ||
+                requestedScope == AssignmentSyncScope.historicalSweep
+            ? requestedScope
+            : AssignmentSyncScope.all);
+    final plannedCount = usedSelector
+        ? chaoxingClient.plannedCourses
+        : (requestedScope == AssignmentSyncScope.targeted ||
+                requestedScope == AssignmentSyncScope.historicalSweep
+            ? targetedKeys.length
+            : 0);
+    final skippedCount = usedSelector ? chaoxingClient.skippedCourses : 0;
+    final clientSucceededCourses = chaoxingClient.succeededCourses;
+    final clientFailedCourses = chaoxingClient.failedCourses;
+    final capturedIssues = List<SyncIssue>.of(chaoxingClient.issues);
+    var capturedSourceResults =
+        List<SyncSourceResult>.of(chaoxingClient.sourceResults);
+    _lastSyncSourceResults = capturedSourceResults;
+    final capturedNotices =
+        List<CourseNotice>.of(chaoxingClient.lastFetchedNotices);
     if (_needsProfileRecovery && !chaoxingClient.deferProfile) {
       _needsProfileRecovery = false;
       try {
@@ -3806,12 +4942,18 @@ class AssignmentStore extends ChangeNotifier {
     }
     if (generation != _generation || _disposed) return;
     _ensureSyncActive(operation);
+    final isCurrentCoverage = effectiveScope == AssignmentSyncScope.current ||
+        effectiveScope == AssignmentSyncScope.all;
+    final isFullCoverage = effectiveScope == AssignmentSyncScope.all ||
+        (effectiveScope == AssignmentSyncScope.current && skippedCount == 0);
+    final cleanSuccess = warning == null;
+
     final before = [..._assignments, ..._hiddenAssignments];
     await _markReminderMutationPending();
     markSavingStage();
     await repository.mergeAndSave(
       incoming,
-      completeSync: warning == null,
+      completeSync: cleanSuccess && isFullCoverage,
       canCommit: _nativeReminderAvailable
           ? () async {
               _ensureSyncActive(operation);
@@ -3835,12 +4977,14 @@ class AssignmentStore extends ChangeNotifier {
     if (repository.identityConflictCount > 0) {
       warning ??= '部分旧记录存在重复关联，已暂停其提醒，请查看本地记录';
       final sources = repository.identityConflictSources;
-      chaoxingClient.sourceResults = [
-        for (final source in chaoxingClient.sourceResults)
+      capturedSourceResults = [
+        for (final source in capturedSourceResults)
           sources.contains(source.source)
               ? source.withIdentityConflict()
               : source,
       ];
+      _lastSyncSourceResults = capturedSourceResults;
+      chaoxingClient.sourceResults = capturedSourceResults;
     }
     final dataSuccessAt = DateTime.now();
     final bool dataMirrorSaved;
@@ -3854,10 +4998,10 @@ class AssignmentStore extends ChangeNotifier {
       return;
     }
     final timestampMirrorFailed = !attemptMirrorSaved || !dataMirrorSaved;
-    final reportIssues = List<SyncIssue>.of(chaoxingClient.issues);
+    final reportIssues = List<SyncIssue>.of(capturedIssues);
     var courseNoticeReadFailed = false;
     var courseNoticeSaveFailed = false;
-    final courseNoticeResults = chaoxingClient.sourceResults
+    final courseNoticeResults = capturedSourceResults
         .where((source) => source.source == 'courseNotice')
         .toList();
     if (courseNoticeResults.isNotEmpty &&
@@ -3870,7 +5014,7 @@ class AssignmentStore extends ChangeNotifier {
       ));
     }
     if (manualSync &&
-        chaoxingClient.sourceResults.any((s) =>
+        capturedSourceResults.any((s) =>
             s.source == 'courseNotice' && s.phase != SyncSourcePhase.failed)) {
       final account = syncAccount;
       if (account != null &&
@@ -3878,11 +5022,11 @@ class AssignmentStore extends ChangeNotifier {
           _account == account &&
           !_disposed) {
         try {
-          final mergedNotices =
-              _courseNotices.mergeIncoming(chaoxingClient.lastFetchedNotices);
+          final mergedNotices = _courseNotices.mergeIncoming(capturedNotices);
           await repository.saveCourseNotices(mergedNotices, account);
           if (generation == _generation && _account == account && !_disposed) {
             _courseNotices = mergedNotices;
+            _invalidateHomeDisplayIndex();
           }
         } on StaleSessionWriteException {
           return;
@@ -3904,6 +5048,11 @@ class AssignmentStore extends ChangeNotifier {
           '作业数据已保存，但兼容同步时间记录未能完整更新；当前同步报告保留了准确时间，请重试以修复记录',
           stage: 'persistence'));
     }
+    final nextCurrentSuccessAt = (cleanSuccess && isCurrentCoverage)
+        ? dataSuccessAt
+        : priorCurrentSuccessAt;
+    final nextFullSuccessAt =
+        (cleanSuccess && isFullCoverage) ? dataSuccessAt : priorFullSuccessAt;
     syncReport = SyncReport(
         phase: warning == null &&
                 !timestampMirrorFailed &&
@@ -3913,10 +5062,14 @@ class AssignmentStore extends ChangeNotifier {
             : SyncPhase.partial,
         attemptedAt: attempted,
         lastDataSuccessAt: dataSuccessAt,
-        lastFullSuccessAt: warning == null ? dataSuccessAt : _lastSyncAt,
-        succeededCourses: chaoxingClient.succeededCourses,
-        failedCourses: chaoxingClient.failedCourses,
-        sourceResults: chaoxingClient.sourceResults,
+        lastCurrentSuccessAt: nextCurrentSuccessAt,
+        lastFullSuccessAt: nextFullSuccessAt,
+        syncScope: effectiveScope,
+        plannedCourses: plannedCount,
+        skippedCourses: skippedCount,
+        succeededCourses: clientSucceededCourses,
+        failedCourses: clientFailedCourses,
+        sourceResults: capturedSourceResults,
         issues: reportIssues);
     try {
       await _updateServerBackoff(reportIssues, session: syncSession);
@@ -3944,10 +5097,14 @@ class AssignmentStore extends ChangeNotifier {
           phase: SyncPhase.partial,
           attemptedAt: attempted,
           lastDataSuccessAt: dataSuccessAt,
-          lastFullSuccessAt: warning == null ? dataSuccessAt : _lastSyncAt,
-          succeededCourses: chaoxingClient.succeededCourses,
-          failedCourses: chaoxingClient.failedCourses,
-          sourceResults: chaoxingClient.sourceResults,
+          lastCurrentSuccessAt: nextCurrentSuccessAt,
+          lastFullSuccessAt: nextFullSuccessAt,
+          syncScope: effectiveScope,
+          plannedCourses: plannedCount,
+          skippedCourses: skippedCount,
+          succeededCourses: clientSucceededCourses,
+          failedCourses: clientFailedCourses,
+          sourceResults: capturedSourceResults,
           issues: [
             ...reportIssues,
             const SyncIssue(
@@ -3958,9 +5115,11 @@ class AssignmentStore extends ChangeNotifier {
     }
     try {
       await _reloadJournal(
-        completeSync: warning == null,
-        detectNewAssignments: true,
+        completeSync: cleanSuccess && isCurrentCoverage,
+        detectNewAssignments:
+            effectiveScope != AssignmentSyncScope.historicalSweep,
         syncCompleted: true,
+        allowSourceBaselineUpdate: isCurrentCoverage,
         syncFailure: warning,
         completedAt: dataSuccessAt,
       );
@@ -3969,7 +5128,7 @@ class AssignmentStore extends ChangeNotifier {
       await _recordChanges(
         before,
         incoming,
-        completeSync: warning == null,
+        completeSync: cleanSuccess && isCurrentCoverage,
         session: syncSession,
       );
       _error ??= warning;
@@ -4084,6 +5243,13 @@ class AssignmentStore extends ChangeNotifier {
     return target;
   }
 
+  Set<String> _archivedReminderCourseKeys() {
+    return {
+      for (final entry in termCatalog.entries)
+        if (entry.state == CourseCatalogState.archived) entry.courseKey,
+    };
+  }
+
   /// Applies settings/schedule to the native side. Returns false only when a
   /// control write was not confirmed, so callers can refuse to activate a plan
   /// under stale settings. Health is diagnostic and never blocks that result.
@@ -4099,6 +5265,8 @@ class AssignmentStore extends ChangeNotifier {
           _backgroundCheckSettings,
           showDetails: notificationService.showDetails,
           reconcileSchedules: _manageBackgroundSchedule,
+          allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
+          deadlineChannelId: _deadlineChannelId,
         );
       }
       if (_manageBackgroundSchedule) {
@@ -4222,7 +5390,11 @@ class AssignmentStore extends ChangeNotifier {
           phase: SyncPhase.cancelled,
           attemptedAt: syncReport.attemptedAt,
           lastDataSuccessAt: syncReport.lastDataSuccessAt,
-          lastFullSuccessAt: _lastSyncAt,
+          lastCurrentSuccessAt: syncReport.lastCurrentSuccessAt,
+          lastFullSuccessAt: _lastSyncAt ?? syncReport.lastFullSuccessAt,
+          syncScope: syncReport.syncScope,
+          plannedCourses: syncReport.plannedCourses,
+          skippedCourses: syncReport.skippedCourses,
           succeededCourses: chaoxingClient.succeededCourses,
           failedCourses: chaoxingClient.failedCourses,
           issues: const [
@@ -4251,7 +5423,11 @@ class AssignmentStore extends ChangeNotifier {
             phase: SyncPhase.failed,
             attemptedAt: syncReport.attemptedAt ?? _lastSyncAttemptAt,
             lastDataSuccessAt: syncReport.lastDataSuccessAt,
-            lastFullSuccessAt: _lastSyncAt,
+            lastCurrentSuccessAt: syncReport.lastCurrentSuccessAt,
+            lastFullSuccessAt: _lastSyncAt ?? syncReport.lastFullSuccessAt,
+            syncScope: syncReport.syncScope,
+            plannedCourses: syncReport.plannedCourses,
+            skippedCourses: syncReport.skippedCourses,
             issues: [
               ...chaoxingClient.issues,
               if (storageFailure)

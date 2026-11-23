@@ -12,7 +12,11 @@ import 'package:study_assistant_mobile/src/features/reminder_settings_screen.dar
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
+import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/background_check_settings.dart';
+import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
+import 'package:study_assistant_mobile/src/services/daily_summary.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/permission_settings_service.dart';
 import 'package:study_assistant_mobile/src/services/reminder_rule_store.dart';
@@ -998,6 +1002,339 @@ void main() {
     expect(store.notificationDetails, !initialDetails);
     expect(store.reminderOffsetsMinutes, [30]);
   });
+
+  testWidgets('Phase 4A night breakthrough switch defaults off and toggles',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ReminderSettingsScreen(assignmentStore: store),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final toggle = find.byKey(const ValueKey('night-breakthrough-switch'));
+    await scrollTo(tester, toggle);
+    await Scrollable.ensureVisible(tester.element(toggle), alignment: 0.5);
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+    expect(store.allowUrgentDeadlineNightBreakthrough, isFalse);
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(store.allowUrgentDeadlineNightBreakthrough, isTrue);
+    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+    expect(find.textContaining('夜间静音时段提醒'), findsOneWidget);
+  });
+
+  testWidgets(
+      'Phase 4B presets: brand-new defaults to recommended, existing rules kept, preset atomic save & failure rollback',
+      (tester) async {
+    // 1. Brand-new user with empty prefs loads 推荐冲刺 [1440, 720, 360, 180, 60, 30].
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final notifications = _NoopNotificationService();
+    final brandNewStore = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: notifications,
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(brandNewStore.dispose);
+    await brandNewStore.restoreSession();
+    expect(brandNewStore.reminderOffsetsMinutes, [1440, 720, 360, 180, 60, 30]);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ReminderSettingsScreen(assignmentStore: brandNewStore),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('当前：推荐冲刺'), findsOneWidget);
+    expect(
+      tester
+          .widget<ChoiceChip>(
+            find.byKey(const ValueKey('reminder-preset-recommended')),
+          )
+          .selected,
+      isTrue,
+    );
+    expect(find.byKey(const ValueKey('reminder-preset-reset')), findsNothing);
+
+    // Tap 温和 -> saves once with [1440, 180].
+    notifications.assignmentsScheduled = 0;
+    final gentle = find.byKey(const ValueKey('reminder-preset-gentle'));
+    await Scrollable.ensureVisible(tester.element(gentle), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(gentle);
+    await tester.pumpAndSettle();
+    expect(brandNewStore.reminderOffsetsMinutes, [1440, 180]);
+    expect(notifications.assignmentsScheduled, 1);
+    expect(find.text('当前：温和'), findsOneWidget);
+
+    // Edit checkbox manually -> switches label to 自定义 and exposes 恢复默认.
+    final checkTen = find.widgetWithText(CheckboxListTile, '提前 10 分钟');
+    await scrollTo(tester, checkTen);
+    await Scrollable.ensureVisible(tester.element(checkTen), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(checkTen);
+    await tester.pumpAndSettle();
+    expect(brandNewStore.reminderOffsetsMinutes, [1440, 180, 10]);
+    expect(find.textContaining('当前：自定义'), findsOneWidget);
+    final resetBtn = find.byKey(const ValueKey('reminder-preset-reset'));
+    expect(resetBtn, findsOneWidget);
+    await Scrollable.ensureVisible(tester.element(resetBtn), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(resetBtn);
+    await tester.pumpAndSettle();
+    expect(brandNewStore.reminderOffsetsMinutes, [1440, 720, 360, 180, 60, 30]);
+    expect(find.text('当前：推荐冲刺'), findsOneWidget);
+
+    // 2. Existing user [1440, 180, 30] is preserved without auto-rewrite.
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'reminder_offsets_minutes': ['1440', '180', '30'],
+    });
+    final existingStore = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(existingStore.dispose);
+    await existingStore.restoreSession();
+    expect(existingStore.reminderOffsetsMinutes, [1440, 180, 30]);
+
+    // 3. Atomic preset save failure rolls back UI selection.
+    final gated = await _gatedStore();
+    addTearDown(gated.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ReminderSettingsScreen(assignmentStore: gated),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final intensive = find.byKey(const ValueKey('reminder-preset-intensive'));
+    await Scrollable.ensureVisible(tester.element(intensive), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(intensive);
+    await tester.pump();
+    expect(gated.calls, hasLength(1));
+    expect(
+      gated.calls.single.toSet(),
+      ReminderFrequencyPreset.intensive.offsetsMinutes.toSet(),
+    );
+    gated.gate.complete(false);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('保存失败'), findsOneWidget);
+    expect(
+      tester.widget<ChoiceChip>(intensive).selected,
+      isFalse,
+    );
+  });
+
+  testWidgets(
+      'health card flags muted sound and disabled vibration and shows exact alarm, battery, and lockscreen details',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final notif = _DetailedHealthNotificationService(
+      const ReminderHealth(
+        notifications: true,
+        exact: false,
+        assignmentChannel: ReminderChannelHealth(
+          ReminderChannelStatus.enabled,
+          importance: 4,
+          channelId: LocalNotificationService.assignmentChannel,
+          soundMuted: true,
+          vibrationEnabled: false,
+          lockscreenVisibility: 0,
+        ),
+        assignmentUpdatesChannel: ReminderChannelHealth(
+          ReminderChannelStatus.enabled,
+          importance: 3,
+        ),
+        summaryChannel: ReminderChannelHealth(
+          ReminderChannelStatus.enabled,
+          importance: 3,
+        ),
+        manualChannel: ReminderChannelHealth(
+          ReminderChannelStatus.enabled,
+          importance: 4,
+        ),
+        silentChannel: ReminderChannelHealth(
+          ReminderChannelStatus.enabled,
+          importance: 2,
+          soundMuted: true,
+          vibrationEnabled: false,
+        ),
+        activeDeadlineChannelId: LocalNotificationService.assignmentChannel,
+        ignoringBatteryOptimizations: false,
+        lockscreenShowNotifications: true,
+        lockscreenAllowPrivateNotifications: false,
+      ),
+    );
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: notif,
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            initialExpandHealth: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('有 2 项提醒状态需关注'), findsOneWidget);
+    expect(find.textContaining('截止提醒渠道在系统中已静音'), findsOneWidget);
+    expect(find.textContaining('截止提醒渠道振动已关闭'), findsOneWidget);
+    expect(find.textContaining('未开启精确闹钟，提醒可能延迟'), findsOneWidget);
+    expect(find.textContaining('受系统电池优化限制（可能延迟）'), findsOneWidget);
+    expect(find.textContaining('v1（assignment_deadlines）'), findsOneWidget);
+    expect(find.textContaining('系统锁屏仅显示脱敏摘要'), findsOneWidget);
+  });
+
+  testWidgets(
+      'enabling v2 deadline channel hides v2 button and routes channel settings tap to v2',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final notif = _DetailedHealthNotificationService(
+      const ReminderHealth(
+        notifications: true,
+        exact: true,
+        assignmentChannel: ReminderChannelHealth(
+          ReminderChannelStatus.enabled,
+          importance: 4,
+        ),
+      ),
+    );
+    final permissions = _ScriptedPermissionSettingsService();
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: notif,
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            permissionSettingsService: permissions,
+            initialExpandHealth: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final v2Button = find.byKey(const ValueKey('enable-v2-deadline-channel'));
+    expect(v2Button, findsOneWidget);
+    expect(find.text('启用新版有声截止渠道（v2）'), findsOneWidget);
+
+    await tester.tap(v2Button);
+    await tester.pumpAndSettle();
+
+    expect(store.isUsingV2DeadlineChannel, isTrue);
+    expect(v2Button, findsNothing);
+    expect(find.textContaining('v2（assignment_deadlines_v2）'), findsOneWidget);
+
+    final channelTile = find.widgetWithText(ListTile, '截止提醒通知渠道').first;
+    await scrollTo(tester, channelTile);
+    await tester.tap(channelTile);
+    await tester.pumpAndSettle();
+    expect(permissions.channelId, LocalNotificationService.assignmentV2Channel);
+  });
+
+  testWidgets(
+      'send test audible notification button reports daytime schedule and nighttime quiet block',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final gateway = _TestAudibleGateway();
+    final dayStore = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _DetailedHealthNotificationService(
+        const ReminderHealth(notifications: true, exact: true),
+      ),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(dayStore.dispose);
+    await dayStore.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: dayStore,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final testButton =
+        find.byKey(const ValueKey('send-test-notification-button'));
+    expect(testButton, findsOneWidget);
+    expect(find.text('发送测试有声提醒'), findsOneWidget);
+    await tester.tap(testButton);
+    await tester.pumpAndSettle();
+    expect(gateway.sendCalls, 1);
+    expect(find.textContaining('已安排测试有声提醒'), findsOneWidget);
+
+    final nightStore = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _DetailedHealthNotificationService(
+        const ReminderHealth(notifications: true, exact: true),
+      ),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 23, 45),
+    );
+    addTearDown(nightStore.dispose);
+    await nightStore.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            key: ValueKey(nightStore),
+            assignmentStore: nightStore,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester
+        .tap(find.byKey(const ValueKey('send-test-notification-button')));
+    await tester.pumpAndSettle();
+    expect(gateway.sendCalls, 1);
+    expect(find.textContaining('当前处于夜间静音时段'), findsOneWidget);
+  });
 }
 
 Future<AssignmentStore> _launchApp(WidgetTester tester, String location) async {
@@ -1061,6 +1398,9 @@ class _GatedRuleStore extends AssignmentStore {
 class _NoopNotificationService extends LocalNotificationService {
   bool failAssignments = false;
   int assignmentsScheduled = 0;
+
+  @override
+  Future<bool> isLegacyAssignmentMigrationComplete() async => true;
 
   @override
   Future<void> cancelPrivateSchedules() async {}
@@ -1208,5 +1548,130 @@ class _ReloadFailingWriteStore extends InMemorySharedPreferencesStore {
   @override
   Future<Map<String, Object>> getAll() async {
     throw StateError('synthetic reload failure');
+  }
+}
+
+class _DetailedHealthNotificationService extends _NoopNotificationService {
+  _DetailedHealthNotificationService(this.nextHealth);
+
+  final ReminderHealth nextHealth;
+
+  @override
+  Future<ReminderHealth> inspectHealth() async => nextHealth;
+}
+
+class _TestAudibleGateway extends BackgroundReminderGateway {
+  int sendCalls = 0;
+
+  @override
+  Future<bool> isAvailable() async => true;
+
+  @override
+  Future<int> ensureActiveAccount(String accountHash) async => 1;
+
+  @override
+  Future<int> clearActiveAccount(String accountHash) async => 1;
+
+  @override
+  Future<bool> isSessionCurrent(String accountHash, int sessionEpoch) async =>
+      true;
+
+  @override
+  Future<void> updateSettings(
+    String accountHash,
+    int sessionEpoch,
+    BackgroundCheckSettings settings, {
+    required bool showDetails,
+    bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
+  }) async {}
+
+  @override
+  Future<void> reconcileDaytimeSchedule({
+    required DateTime? targetAt,
+    required bool enabled,
+    required int intervalMinutes,
+  }) async {}
+
+  @override
+  Future<void> cancelAssignmentDeliveryKeepEvents(String accountHash) async {}
+
+  @override
+  Future<void> markPendingUpdate({
+    required String accountHash,
+    required int sessionEpoch,
+  }) async {}
+
+  @override
+  Future<bool> acquireWriteLease(String owner) async => true;
+
+  @override
+  Future<void> releaseWriteLease(String owner) async {}
+
+  @override
+  Future<ReminderPlanState> loadPlanState({
+    required String accountHash,
+    required int sessionEpoch,
+  }) async =>
+      ReminderPlanState(
+        accountHash: accountHash,
+        sessionEpoch: sessionEpoch,
+        baselineCompleted: true,
+        knownAssignmentIds: const {},
+        sentNewAssignmentIds: const {},
+        lastAttemptAt: null,
+        lastFullSuccessAt: null,
+        pendingUpdate: false,
+        mutationVersion: 0,
+      );
+
+  @override
+  Future<ReminderPlanApplyResult> applyPlan({
+    required String accountHash,
+    required int sessionEpoch,
+    required AssignmentReminderPlan plan,
+    required DateTime completedAt,
+    required String? failure,
+    required bool syncCompleted,
+    required int expectedMutationVersion,
+  }) async =>
+      const ReminderPlanApplyResult(
+        scheduledDeadlineCount: 0,
+        pendingNewCount: 0,
+        warning: null,
+      );
+
+  @override
+  Future<BackgroundReminderHealth> inspectHealth({
+    required String accountHash,
+    required int sessionEpoch,
+  }) async =>
+      const BackgroundReminderHealth(
+        backgroundEnabled: true,
+        intervalMinutes: 240,
+        newAssignmentReminderEnabled: false,
+        notificationListenerEnabled: false,
+        notificationListenerGranted: false,
+        nextCheckAt: null,
+        pendingNewCount: 0,
+        pendingDeadlineCount: 0,
+        baselineCompleted: true,
+        pendingSignalCount: 0,
+        migrationPending: false,
+        lastFailure: null,
+      );
+
+  @override
+  Future<TestDeadlineNotificationOutcome> sendTestDeadlineNotification({
+    String? accountHash,
+    String? channelId,
+    int delayMillis = 3000,
+  }) async {
+    sendCalls++;
+    return TestDeadlineNotificationOutcome(
+      status: TestDeadlineNotificationStatus.scheduled,
+      channelId: channelId,
+    );
   }
 }

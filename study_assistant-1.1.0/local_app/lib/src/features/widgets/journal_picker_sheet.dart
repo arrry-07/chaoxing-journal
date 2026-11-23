@@ -5,6 +5,17 @@ import '../../app/journal_motion.dart';
 import '../../models/display_preferences.dart';
 
 @immutable
+class JournalPickerFilterOption {
+  const JournalPickerFilterOption({
+    required this.id,
+    required this.label,
+  });
+
+  final String id;
+  final String label;
+}
+
+@immutable
 class JournalPickerOption<T> {
   const JournalPickerOption({
     this.key,
@@ -34,6 +45,10 @@ Future<T?> showJournalPickerSheet<T>(
   String searchHint = '搜索选项...',
   String emptyText = '没有找到匹配项',
   DisplayPreferences? displayPrefs,
+  List<JournalPickerFilterOption> filterOptions = const [],
+  String? initialFilterId,
+  bool Function(JournalPickerOption<T> option, String filterId)?
+      filterPredicate,
 }) {
   final enableSearch = searchable ?? options.length > 6;
   return showModalBottomSheet<T>(
@@ -50,6 +65,9 @@ Future<T?> showJournalPickerSheet<T>(
       searchHint: searchHint,
       emptyText: emptyText,
       displayPrefs: displayPrefs,
+      filterOptions: filterOptions,
+      initialFilterId: initialFilterId,
+      filterPredicate: filterPredicate,
     ),
   );
 }
@@ -63,6 +81,9 @@ class _JournalPickerSheetBody<T> extends StatefulWidget {
     required this.searchHint,
     required this.emptyText,
     this.displayPrefs,
+    this.filterOptions = const [],
+    this.initialFilterId,
+    this.filterPredicate,
   });
 
   final String title;
@@ -72,6 +93,10 @@ class _JournalPickerSheetBody<T> extends StatefulWidget {
   final String searchHint;
   final String emptyText;
   final DisplayPreferences? displayPrefs;
+  final List<JournalPickerFilterOption> filterOptions;
+  final String? initialFilterId;
+  final bool Function(JournalPickerOption<T> option, String filterId)?
+      filterPredicate;
 
   @override
   State<_JournalPickerSheetBody<T>> createState() =>
@@ -82,7 +107,16 @@ class _JournalPickerSheetBodyState<T>
     extends State<_JournalPickerSheetBody<T>> {
   final _controller = TextEditingController();
   String _query = '';
+  String? _activeFilterId;
   bool _popped = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.filterOptions.isNotEmpty) {
+      _activeFilterId = widget.initialFilterId ?? widget.filterOptions.first.id;
+    }
+  }
 
   void _close([T? result]) {
     if (_popped) return;
@@ -99,9 +133,20 @@ class _JournalPickerSheetBodyState<T>
   }
 
   List<JournalPickerOption<T>> get _filtered {
+    final activeFilter = _activeFilterId;
+    final scoped = (widget.filterOptions.isNotEmpty &&
+            activeFilter != null &&
+            widget.filterPredicate != null)
+        ? widget.options
+            .where((o) =>
+                (widget.selectedValue != null &&
+                    o.value == widget.selectedValue) ||
+                widget.filterPredicate!(o, activeFilter))
+            .toList(growable: false)
+        : widget.options;
     final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return widget.options;
-    return widget.options.where((o) {
+    if (q.isEmpty) return scoped;
+    return scoped.where((o) {
       if (o.label.toLowerCase().contains(q)) return true;
       if (o.subtitle != null && o.subtitle!.toLowerCase().contains(q)) {
         return true;
@@ -164,6 +209,34 @@ class _JournalPickerSheetBodyState<T>
                   ),
                 ],
               ),
+              if (widget.filterOptions.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (var i = 0; i < widget.filterOptions.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 8),
+                        ChoiceChip(
+                          key: ValueKey(
+                              'picker-filter-${widget.filterOptions[i].id}'),
+                          selected:
+                              _activeFilterId == widget.filterOptions[i].id,
+                          onSelected: (_) {
+                            if (widget.displayPrefs != null) {
+                              JournalMotion.tap(widget.displayPrefs!);
+                            }
+                            setState(() {
+                              _activeFilterId = widget.filterOptions[i].id;
+                            });
+                          },
+                          label: Text(widget.filterOptions[i].label),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
               if (widget.enableSearch) ...[
                 const SizedBox(height: 10),
                 TextField(
@@ -329,6 +402,9 @@ class _JournalPickerSheetBodyState<T>
                                                     const SizedBox(height: 2),
                                                     Text(
                                                       opt.subtitle!,
+                                                      maxLines: 2,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
                                                       style: journal.metadata
                                                           .copyWith(
                                                               fontSize: 12),

@@ -30,8 +30,13 @@ class ChaoxingSyncDiagnosticsExporter {
       'attemptedAtUtc': report.attemptedAt?.toUtc().toIso8601String(),
       'lastDataSuccessAtUtc':
           report.lastDataSuccessAt?.toUtc().toIso8601String(),
+      'lastCurrentSuccessAtUtc':
+          report.lastCurrentSuccessAt?.toUtc().toIso8601String(),
       'lastFullSuccessAtUtc':
           report.lastFullSuccessAt?.toUtc().toIso8601String(),
+      'syncScope': report.syncScope.name,
+      'plannedCourses': report.plannedCourses,
+      'skippedCourses': report.skippedCourses,
       'succeededCourses': report.succeededCourses,
       'failedCourses': report.failedCourses,
       'phaseElapsedMs': phaseElapsedMs,

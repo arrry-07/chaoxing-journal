@@ -8,6 +8,7 @@ import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/display_preferences.dart';
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -299,6 +300,120 @@ void main() {
       expect(label, isNot(contains('剩余')));
     } finally {
       semantics.dispose();
+    }
+  });
+
+  testWidgets(
+      'Phase 5A calendar shows warm vermilion cell tint only at >= 3 items, preserves today/selected/week/month & large text across themes',
+      (tester) async {
+    await (FontLoader(Journal.bodyFamily)
+          ..addFont(rootBundle.load('assets/type/LXGWWenKaiScreen.ttf')))
+        .load();
+    final now = DateTime.utc(2026, 12, 28, 2); // Beijing Dec 28 10:00
+    final day19TwoItems = DateTime.utc(2026, 12, 19, 1);
+    final day28TodayThreeItems = DateTime.utc(2026, 12, 28, 3);
+    final day29SelectedThreeItems = DateTime.utc(2026, 12, 29, 4);
+
+    final store = _Store()
+      ..replaceAssignmentsForTest([
+        _work('d19-1', title: '两项之一', deadlineAt: day19TwoItems),
+        _work('d19-2', title: '两项之二', deadlineAt: day19TwoItems),
+        _work('d28-1', title: '今天三项之一', deadlineAt: day28TodayThreeItems),
+        _work('d28-2', title: '今天三项之二', deadlineAt: day28TodayThreeItems),
+        _work('d29-1', title: '明天三项之一', deadlineAt: day29SelectedThreeItems),
+        _work('d29-2', title: '明天三项之二', deadlineAt: day29SelectedThreeItems),
+        _exam('d29-3', start: day29SelectedThreeItems),
+      ])
+      ..notebook = StudyNotebook(entries: [
+        ManualEntry(
+          id: 'm28',
+          title: '今天三项之三',
+          kind: 'todo',
+          at: day28TodayThreeItems,
+        ),
+      ]);
+    addTearDown(store.dispose);
+
+    for (final brightness in [Brightness.light, Brightness.dark]) {
+      final theme = brightness == Brightness.light
+          ? StudyAssistantTheme.light
+          : StudyAssistantTheme.dark;
+      final palette = brightness == Brightness.light
+          ? JournalPalette.light
+          : JournalPalette.dark;
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(MaterialApp(
+        theme: theme,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(2.0)),
+          child: child!,
+        ),
+        home: Scaffold(body: CalendarScreen(store: store, clock: () => now)),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull, reason: '$brightness');
+      expect(find.byKey(const ValueKey('calendar-busy-day-2026-12-19')),
+          findsNothing);
+      final busyToday =
+          find.byKey(const ValueKey('calendar-busy-day-2026-12-28'));
+      expect(busyToday, findsOneWidget);
+      final busyDecoration =
+          tester.widget<Container>(busyToday).decoration! as BoxDecoration;
+      expect(busyDecoration.color, palette.berryBg);
+
+      // Select day 29 (also busy): today still shows today border, day 29 stays busy + selected.
+      final day29 = find.descendant(
+        of: find.byKey(const ValueKey('calendar-grid-viewport')),
+        matching: find.text('29'),
+      );
+      await tester.ensureVisible(day29);
+      await tester.pumpAndSettle();
+      await tester.tap(day29);
+      await tester.pumpAndSettle();
+      expect(find.text('12月29日 · 议程'), findsOneWidget);
+      expect(find.byKey(const ValueKey('calendar-busy-day-2026-12-29')),
+          findsOneWidget);
+
+      // Week collapse toggle + cross-year navigation at 2.0x text scale.
+      final weekToggle = find.byKey(const ValueKey('calendar-week-toggle'));
+      await tester.ensureVisible(weekToggle);
+      await tester.pumpAndSettle();
+      await tester.tap(weekToggle);
+      await tester.pumpAndSettle();
+      final nextMonth = find.byTooltip('下个月');
+      await tester.scrollUntilVisible(
+        nextMonth,
+        -200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(nextMonth);
+      await tester.pumpAndSettle();
+      expect(find.text('2027年1月'), findsOneWidget);
+      final backToday = find.text('回今天');
+      await tester.scrollUntilVisible(
+        backToday,
+        -200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(backToday);
+      await tester.pumpAndSettle();
+      expect(find.text('2026年12月'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        weekToggle,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(weekToggle);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: '$brightness');
     }
   });
 }

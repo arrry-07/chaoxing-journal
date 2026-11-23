@@ -13,6 +13,7 @@ import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
+import 'package:study_assistant_mobile/src/models/sync_scope.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/home_sync_presentation.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -615,6 +616,49 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     }
   });
+
+  testWidgets(
+      'displays current-term vs full sync scope summary and triggers syncAllTerms from button',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final currentAt = DateTime(2026, 11, 22, 11, 30);
+    final fullAt = DateTime(2026, 11, 20, 9, 15);
+    var fullScanCalled = false;
+
+    final store = _SyncRefreshStore(() async {})
+      ..nextReport = SyncReport(
+        phase: SyncPhase.success,
+        attemptedAt: currentAt,
+        lastDataSuccessAt: currentAt,
+        lastCurrentSuccessAt: currentAt,
+        lastFullSuccessAt: fullAt,
+        syncScope: AssignmentSyncScope.current,
+        plannedCourses: 2,
+        skippedCourses: 3,
+      )
+      ..onSyncAllTerms = () async {
+        fullScanCalled = true;
+      };
+    addTearDown(store.dispose);
+
+    await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('最近本学期同步：'), findsOneWidget);
+    expect(find.textContaining('最近完整同步：'), findsOneWidget);
+    expect(
+      find.textContaining('本次范围：本学期优先 · 已扫描 2 门，跳过往期/归档 3 门'),
+      findsOneWidget,
+    );
+
+    final allBtn = find.byKey(const ValueKey('sync-all-terms-button'));
+    expect(allBtn, findsOneWidget);
+    expect(find.text('全量扫描全部学期'), findsOneWidget);
+    await tester.ensureVisible(allBtn);
+    await tester.tap(allBtn);
+    await tester.pumpAndSettle();
+    expect(fullScanCalled, isTrue);
+  });
 }
 
 class _SyncRefreshStore extends AssignmentStore {
@@ -627,6 +671,7 @@ class _SyncRefreshStore extends AssignmentStore {
         );
 
   final Future<void> Function() _onSync;
+  Future<void> Function()? onSyncAllTerms;
   SyncReport nextReport = const SyncReport(phase: SyncPhase.idle);
   String? nextError;
   int nextEpoch = 0;
@@ -641,6 +686,9 @@ class _SyncRefreshStore extends AssignmentStore {
   SyncReport get syncReport => nextReport;
 
   @override
+  DateTime? get lastSyncAt => nextReport.lastFullSuccessAt;
+
+  @override
   String? get operationError => nextError;
 
   @override
@@ -648,6 +696,9 @@ class _SyncRefreshStore extends AssignmentStore {
 
   @override
   Future<void> syncAssignments({bool complete = false}) => _onSync();
+
+  @override
+  Future<void> syncAllTerms() => (onSyncAllTerms ?? _onSync)();
 }
 
 Future<void> _pumpRestoredReport(

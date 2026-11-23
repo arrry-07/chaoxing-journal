@@ -14,6 +14,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Instant
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.TimeZone
 
 // Run this class alone in a disposable Android test install with fresh channels.
@@ -156,5 +157,90 @@ class Batch2BAlarmReconcileTest {
             syncCompleted = true,
             expectedMutationVersion = database.loadPlanState(accountHash, epoch).mutationVersion,
         )
+    }
+
+    @Test
+    fun timezoneReconcilePreservesQuietHoursShiftForDeadlineEvents() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = ReminderDatabase.get(context)
+        val accountHash = "instrumentation-tz-${System.nanoTime()}"
+        val shanghai = ZoneId.of("Asia/Shanghai")
+        val now = ZonedDateTime.now(shanghai).plusDays(1)
+            .withHour(20).withMinute(0).withSecond(0).withNano(0)
+        val deadline = now.plusHours(13).toInstant().toEpochMilli()
+        val assignmentId = "cx:work:tz:1"
+        val eventId = "$accountHash|$assignmentId|deadline:$deadline|180"
+        try {
+            val epoch = database.ensureActiveAccount(accountHash).sessionEpoch
+            database.updateSettings(
+                accountHash = accountHash,
+                sessionEpoch = epoch,
+                backgroundEnabled = true,
+                intervalMinutes = 240,
+                listenerEnabled = false,
+                newAssignmentEnabled = true,
+                showDetails = false,
+            )
+            val state = database.loadPlanState(accountHash, epoch)
+            val event = StoredReminderEvent(
+                eventId = eventId,
+                accountHash = accountHash,
+                sessionEpoch = epoch,
+                type = ReminderDatabase.EVENT_DEADLINE,
+                assignmentId = assignmentId,
+                courseName = "时区重算测试",
+                title = "早九点截止",
+                notifyAt = deadline - 3_600_000L * 3,
+                deadlineAt = deadline,
+                offsets = listOf(180),
+                batchId = null,
+                status = ReminderDatabase.STATUS_PENDING,
+                notificationId = ReminderDatabase.stableNotificationId(eventId),
+                deadlineSource = "official",
+            )
+            database.applyPlan(
+                accountHash = accountHash,
+                sessionEpoch = epoch,
+                baselineCompleted = true,
+                knownIds = setOf(assignmentId),
+                snapshots = listOf(
+                    StoredReminderSnapshot(
+                        accountHash = accountHash,
+                        assignmentId = assignmentId,
+                        sessionEpoch = epoch,
+                        courseName = "时区重算测试",
+                        title = "早九点截止",
+                        deadlineAt = deadline,
+                        deadlineTrusted = true,
+                        deadlineReadFailed = false,
+                        status = "pending",
+                        completed = false,
+                        hidden = false,
+                        followed = true,
+                        formal = true,
+                        deadlineSource = "official",
+                    ),
+                ),
+                events = listOf(event),
+                completedAt = now.toInstant().toEpochMilli(),
+                failure = null,
+                syncCompleted = true,
+                expectedMutationVersion = state.mutationVersion,
+            )
+            AssignmentAlarmScheduler.rescheduleForTimeZoneChange(
+                context,
+                database,
+                now.toInstant(),
+                shanghai,
+            )
+            val rescheduled = database.event(eventId)!!
+            assertEquals(
+                now.plusHours(11).plusMinutes(30).toInstant().toEpochMilli(),
+                rescheduled.notifyAt,
+            )
+        } finally {
+            database.event(eventId)?.let { AssignmentAlarmScheduler.cancelDeadline(context, it) }
+            if (database.readAccount(accountHash) != null) database.clearActiveAccount(accountHash)
+        }
     }
 }

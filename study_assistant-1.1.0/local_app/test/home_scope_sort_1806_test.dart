@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
@@ -237,6 +239,7 @@ Future<void> _pumpScreen(
   Size size = const Size(900, 2600),
   double scale = 1,
   ThemeData? theme,
+  DateTime Function()? clock,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -246,7 +249,7 @@ Future<void> _pumpScreen(
     theme: theme ?? StudyAssistantTheme.light,
     home: MediaQuery(
       data: MediaQueryData(textScaler: TextScaler.linear(scale)),
-      child: Scaffold(body: AssignmentListScreen(store: store)),
+      child: Scaffold(body: AssignmentListScreen(store: store, clock: clock)),
     ),
   ));
   await tester.pumpAndSettle();
@@ -1085,6 +1088,131 @@ void main() {
       } finally {
         semanticsHandle.dispose();
       }
+    });
+
+    testWidgets(
+        'phase 1C status row pairs day-level freshness and due summary with independent taps',
+        (tester) async {
+      await (FontLoader(Journal.bodyFamily)
+            ..addFont(rootBundle.load('assets/type/LXGWWenKaiScreen.ttf')))
+          .load();
+      await (FontLoader('MaterialIcons')
+            ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')))
+          .load();
+      final now = DateTime.utc(2026, 11, 16, 2); // Beijing 10:00
+      final store = _ScreenStore()
+        ..syncReport = SyncReport(
+          phase: SyncPhase.success,
+          lastDataSuccessAt: now.subtract(const Duration(hours: 26)),
+        )
+        ..replaceAssignmentsForTest([
+          _work('today-1',
+              course: '高等数学', title: '今日作业', due: _bj(2026, 11, 16, 22, 0)),
+          _work('day3-a',
+              course: '大学物理', title: '明日作业', due: _bj(2026, 11, 17, 18, 0)),
+          _work('day3-b',
+              course: '大学英语', title: '后日作业', due: _bj(2026, 11, 18, 20, 0)),
+          _work('day4',
+              course: '程序设计', title: '第四天作业', due: _bj(2026, 11, 19, 10, 0)),
+        ]);
+      addTearDown(store.dispose);
+
+      for (final scale in [1.0, 1.5]) {
+        await _pumpScreen(
+          tester,
+          store,
+          size: const Size(360, 800),
+          scale: scale,
+          clock: () => now,
+        );
+        expect(find.text('1天前更新'), findsOneWidget);
+        expect(find.text('今日 1 · 3日 3'), findsOneWidget);
+        final statusRect =
+            tester.getRect(find.byKey(const ValueKey('home-sync-status')));
+        final summaryRect =
+            tester.getRect(find.byKey(const ValueKey('home-due-summary')));
+        final sortPill = find
+            .ancestor(
+              of: find.byKey(const ValueKey('current-home-sort')),
+              matching: find.byType(InkWell),
+            )
+            .first;
+        final sortRect = tester.getRect(sortPill);
+        expect((statusRect.center.dy - summaryRect.center.dy).abs(),
+            lessThanOrEqualTo(4.0),
+            reason: 'status and due summary must sit on the same row @$scale');
+        expect(statusRect.right, lessThanOrEqualTo(summaryRect.left));
+        if (scale == 1.0) {
+          expect((summaryRect.right - sortRect.right).abs(),
+              lessThanOrEqualTo(4.0),
+              reason: 'due summary aligns flush right with sort pill edge');
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+
+      // Tap summary -> applies 7-day near-due filter; tap again -> clears it.
+      await _pumpScreen(
+        tester,
+        store,
+        size: const Size(360, 800),
+        scale: 1.0,
+        clock: () => now,
+      );
+      await tester.tap(find.byKey(const ValueKey('home-due-summary')));
+      await tester.pumpAndSettle();
+      expect(store.homeFilters.deadline, AssignmentDeadlineFilter.next7Days);
+      expect(find.text('期限：7天内'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('home-due-summary')));
+      await tester.pumpAndSettle();
+      expect(store.homeFilters.deadline, AssignmentDeadlineFilter.all);
+      expect(find.text('期限：7天内'), findsNothing);
+
+      // Pure cached network error -> gentle retry directly calls syncAssignments.
+      store.syncReport = const SyncReport(
+        phase: SyncPhase.failed,
+        issues: [SyncIssue(SyncIssueKind.network, 'timeout')],
+      );
+      store.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(find.text('网络暂不可用 · 重试'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('home-sync-status')));
+      await tester.pumpAndSettle();
+      expect(store.syncCalls, 1);
+
+      // Hard verification/auth issue still opens sync issues screen on tap.
+      final router = GoRouter(
+        initialLocation: '/assignments',
+        routes: [
+          GoRoute(
+            path: '/assignments',
+            builder: (_, __) => AssignmentListScreen(
+              store: store,
+              clock: () => now,
+            ),
+          ),
+          GoRoute(
+            path: '/sync',
+            builder: (_, s) => Text('同步页:${s.uri.queryParameters['expand']}'),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      store.syncReport = const SyncReport(
+        phase: SyncPhase.failed,
+        issues: [SyncIssue(SyncIssueKind.authExpired, 'expired')],
+      );
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home-sync-status')));
+      await tester.pumpAndSettle();
+      expect(find.text('同步页:issues'), findsOneWidget);
+
+      // Recovery scope hides home-due-summary.
+      router.go('/assignments?scope=noDeadline');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('home-due-summary')), findsNothing);
     });
   });
 }

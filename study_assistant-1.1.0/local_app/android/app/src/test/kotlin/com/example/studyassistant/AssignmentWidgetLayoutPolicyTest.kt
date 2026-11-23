@@ -106,8 +106,73 @@ class AssignmentWidgetLayoutPolicyTest {
         assertTrue(AssignmentWidgetLayoutPolicy.isUrgent("critical", "2小时"))
         assertTrue(AssignmentWidgetLayoutPolicy.isUrgent("normal", "已逾期"))
         assertTrue(AssignmentWidgetLayoutPolicy.isUrgent("unknown", "已截止"))
+        assertFalse(AssignmentWidgetLayoutPolicy.isUrgent("critical", "已开考"))
+        assertFalse(AssignmentWidgetLayoutPolicy.isUrgent("normal", "已开考"))
         assertFalse(AssignmentWidgetLayoutPolicy.isUrgent("soon", "5小时"))
         assertFalse(AssignmentWidgetLayoutPolicy.isUrgent("normal", "2天"))
+    }
+
+    @Test
+    fun formatItemMetaMarksManualDeadlinesAndKeepsLegacyCompatible() {
+        assertEquals(
+            "手动 11月20日 23:59 · 2天 · 高等数学",
+            AssignmentWidgetLayoutPolicy.formatItemMeta(
+                deadlineText = "11月20日 23:59",
+                resolvedRemaining = "2天",
+                courseName = "高等数学",
+                deadlineSource = "manual",
+            ),
+        )
+        assertEquals(
+            "手动 · 2天 · 高等数学",
+            AssignmentWidgetLayoutPolicy.formatItemMeta(
+                deadlineText = "",
+                resolvedRemaining = "2天",
+                courseName = "高等数学",
+                deadlineSource = "manual",
+            ),
+        )
+        for (source in listOf("official", "", "unknown_future")) {
+            assertEquals(
+                "11月20日 23:59 · 2天 · 高等数学",
+                AssignmentWidgetLayoutPolicy.formatItemMeta(
+                    deadlineText = "11月20日 23:59",
+                    resolvedRemaining = "2天",
+                    courseName = "高等数学",
+                    deadlineSource = source,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun normalizeDeepLinkStringPreservesAssignmentRouteAndFailSafesInvalidTargets() {
+        assertEquals(
+            "studyassistant:///assignments/cx%3Awork%3A1%3A2%3A3",
+            AssignmentWidgetLayoutPolicy.normalizeDeepLinkString(
+                "studyassistant://assignments/cx%3Awork%3A1%3A2%3A3",
+            ),
+        )
+        assertEquals(
+            "studyassistant:///assignments/cx%3Awork%3A1%3A2%3A3",
+            AssignmentWidgetLayoutPolicy.normalizeDeepLinkString(
+                "studyassistant:///assignments/cx%3Awork%3A1%3A2%3A3",
+            ),
+        )
+        for (homeTarget in listOf(
+            "studyassistant://assignments",
+            "studyassistant:///assignments",
+            "",
+            "   ",
+            "https://evil.invalid/steal",
+            "studyassistant://assignments/..",
+            "studyassistant:///assignments/a/b",
+        )) {
+            assertEquals(
+                "studyassistant:///assignments",
+                AssignmentWidgetLayoutPolicy.normalizeDeepLinkString(homeTarget),
+            )
+        }
     }
 
     @Test

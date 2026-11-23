@@ -7,8 +7,13 @@ import 'package:shared_preferences_platform_interface/shared_preferences_platfor
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/backup_snapshot.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/course_term_preferences.dart';
+import 'package:study_assistant_mobile/src/models/local_coursework_state.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
+import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/models/reminder_rule_limits.dart';
+import 'package:study_assistant_mobile/src/services/reminder_rule_store.dart';
 
 Assignment record(String id, String title) => Assignment(
       id: id,
@@ -273,6 +278,285 @@ void main() {
     await LocalAssignmentRepository().activateAccount('alice');
     expect((await repo.loadJournal()).single.title, '旧标题');
     expect(prefs.containsKey('journal_account_switch'), isFalse);
+  });
+
+  group('Phase 2A BackupSnapshot schema 8 pinned state', () {
+    test(
+        'schema 8 exports ordered pins, decodes v1-7 cleanly, and merges on restore',
+        () async {
+      final v5 = await repo.createBackupSnapshot('alice');
+      expect(jsonDecode(v5.encode())['schema'], 5);
+
+      await repo.mergeAndSave([
+        record('cx:work:1:2:4', '作业四')
+            .copyWith(publishedAt: DateTime.utc(2026, 11, 1)),
+        record('cx:work:1:2:5', '作业五'),
+      ]);
+      // v7 export when no pins exist stays schema 7.
+      final v7 = await repo.createBackupSnapshot('alice');
+      expect(jsonDecode(v7.encode())['schema'], 7);
+
+      // Pin & reorder -> schema 8.
+      await repo.savePinnedAssignments(
+        PinnedAssignments(
+          keys: ['cx:work:1:2:4', 'cx:work:1:2:3'],
+          manuallyOrdered: true,
+        ),
+        'alice',
+      );
+      final v8 = await repo.createBackupSnapshot('alice');
+      final rawV8 = jsonDecode(v8.encode()) as Map<String, dynamic>;
+      expect(rawV8['schema'], 8);
+      expect(rawV8['pinned'], {
+        'keys': ['cx:work:1:2:4', 'cx:work:1:2:3'],
+        'manuallyOrdered': true,
+      });
+
+      // Restoring schema 1-7 never overwrites existing local pins.
+      await repo.restoreBackupSnapshot(v5, 'alice');
+      await repo.restoreBackupSnapshot(v7, 'alice');
+      expect(
+        (await repo.loadPinnedAssignments('alice')).keys,
+        ['cx:work:1:2:4', 'cx:work:1:2:3'],
+      );
+
+      // Merging schema 8 preserves local manual order and appends imported unique keys.
+      await repo.savePinnedAssignments(
+        PinnedAssignments(
+          keys: ['cx:work:1:2:5'],
+          manuallyOrdered: true,
+        ),
+        'alice',
+      );
+      await repo.restoreBackupSnapshot(v8, 'alice');
+      final mergedLocalWins = await repo.loadPinnedAssignments('alice');
+      expect(mergedLocalWins.manuallyOrdered, isTrue);
+      expect(
+        mergedLocalWins.keys,
+        ['cx:work:1:2:5', 'cx:work:1:2:4', 'cx:work:1:2:3'],
+      );
+
+      // When local is not manually ordered, imported manual order leads.
+      await repo.savePinnedAssignments(
+        PinnedAssignments(
+          keys: ['cx:work:1:2:5'],
+          manuallyOrdered: false,
+        ),
+        'alice',
+      );
+      await repo.restoreBackupSnapshot(v8, 'alice');
+      final mergedImportLeads = await repo.loadPinnedAssignments('alice');
+      expect(mergedImportLeads.manuallyOrdered, isTrue);
+      expect(
+        mergedImportLeads.keys,
+        ['cx:work:1:2:4', 'cx:work:1:2:3', 'cx:work:1:2:5'],
+      );
+
+      // Malformed / URL-carrying pinned field is rejected strictly.
+      final badUrl = Map<String, dynamic>.from(rawV8)
+        ..['pinned'] = {
+          'keys': ['https://mooc1.chaoxing.com/work?enc=secret'],
+          'manuallyOrdered': true,
+        };
+      expect(() => BackupSnapshot.decode(jsonEncode(badUrl)),
+          throwsFormatException);
+      final badDup = Map<String, dynamic>.from(rawV8)
+        ..['pinned'] = {
+          'keys': ['cx:work:1:2:3', 'cx:work:1:2:3'],
+          'manuallyOrdered': true,
+        };
+      expect(() => BackupSnapshot.decode(jsonEncode(badDup)),
+          throwsFormatException);
+    });
+
+    test(
+        'Phase 2B schema 8 optional courseworkState backward compatible, merges cleanly, and rejects malformed entries',
+        () async {
+      // Old 2A schema 8 without courseworkState decodes cleanly as empty.
+      await repo.savePinnedAssignments(
+        PinnedAssignments(keys: ['cx:work:1:2:3'], manuallyOrdered: true),
+        'alice',
+      );
+      final schema8WithoutCoursework = await repo.createBackupSnapshot('alice');
+      final raw2A =
+          jsonDecode(schema8WithoutCoursework.encode()) as Map<String, dynamic>;
+      expect(raw2A['schema'], 8);
+      expect(raw2A.containsKey('courseworkState'), isFalse);
+      expect(BackupSnapshot.decode(jsonEncode(raw2A)).courseworkState.isEmpty,
+          isTrue);
+
+      // Export schema 8 with manualDeadlineAt, officialTakenOver & locallyCompleted.
+      final manualAt = DateTime.utc(2026, 12, 5, 15, 59);
+      final localState = LocalCourseworkState()
+          .withManualDeadline('cx:work:1:2:9', const [], manualAt)
+          .withLocallyCompleted('cx:work:1:2:11', const [], true)
+          .withEntry(
+            'cx:work:1:2:10',
+            const [],
+            LocalCourseworkEntry(
+              manualDeadlineAt: DateTime.utc(2026, 12, 6, 12),
+              officialTakenOver: true,
+              locallyCompleted: true,
+            ),
+          );
+      await repo.saveCourseworkState(localState, 'alice');
+      final withCoursework = await repo.createBackupSnapshot('alice');
+      final raw2B = jsonDecode(withCoursework.encode()) as Map<String, dynamic>;
+      expect(raw2B['schema'], 8);
+      expect(raw2B.containsKey('courseworkState'), isTrue);
+
+      // Restore keeps local existing entries and fills missing ones without promoting trust.
+      final overrideAt = DateTime.utc(2026, 12, 7, 10);
+      await repo.saveCourseworkState(
+        LocalCourseworkState()
+            .withManualDeadline('cx:work:1:2:9', const [], overrideAt),
+        'alice',
+      );
+      await repo.restoreBackupSnapshot(withCoursework, 'alice');
+      final restored = await repo.loadCourseworkState('alice');
+      expect(
+        restored
+            .entryForAliases(const ['cx:work:1:2:9'])!
+            .manualDeadlineAt!
+            .toUtc(),
+        overrideAt,
+      );
+      expect(
+        restored.entryForAliases(const ['cx:work:1:2:10'])!.officialTakenOver,
+        isTrue,
+      );
+      expect(
+        restored.entryForAliases(const ['cx:work:1:2:10'])!.locallyCompleted,
+        isTrue,
+      );
+      expect(
+        restored.entryForAliases(const ['cx:work:1:2:11'])!.locallyCompleted,
+        isTrue,
+      );
+
+      // Malformed / URL / bad-timezone entries rejected strictly.
+      final badUrl = Map<String, dynamic>.from(raw2B)
+        ..['courseworkState'] = {
+          'entries': {
+            'https://mooc1.chaoxing.com/work?enc=secret': {
+              'manualDeadlineAt': manualAt.toIso8601String(),
+              'officialTakenOver': false,
+            },
+          },
+        };
+      expect(() => BackupSnapshot.decode(jsonEncode(badUrl)),
+          throwsFormatException);
+
+      final badExtra = Map<String, dynamic>.from(raw2B)
+        ..['courseworkState'] = {
+          'entries': {
+            'cx:work:1:2:9': {
+              'manualDeadlineAt': manualAt.toIso8601String(),
+              'officialTakenOver': false,
+              'extra': 1,
+            },
+          },
+        };
+      expect(() => BackupSnapshot.decode(jsonEncode(badExtra)),
+          throwsFormatException);
+    });
+
+    test(
+        'schema 9 roundtrips course metadata, preserves existing local metadata on old backups, and rejects invalid course metadata',
+        () async {
+      await repo.activateAccount('alice');
+      const richCourse = CourseRef(
+        courseId: '101',
+        clazzId: '201',
+        name: '编译原理',
+        teacherNames: ['陈教授', '助教甲'],
+        folderName: '2026年秋季学期',
+      );
+      const plainCourse = CourseRef(
+        courseId: '102',
+        clazzId: '202',
+        name: '操作系统',
+      );
+      await repo.saveCourses([richCourse, plainCourse], account: 'alice');
+      final v9 = await repo.createBackupSnapshot('alice');
+      final rawV9 = jsonDecode(v9.encode()) as Map<String, dynamic>;
+      expect(rawV9['schema'], 9);
+      final decodedV9 = BackupSnapshot.decode(v9.encode());
+      expect(decodedV9.courses.first.teacherNames, ['陈教授', '助教甲']);
+      expect(decodedV9.courses.first.folderName, '2026年秋季学期');
+
+      // Restoring an older backup without metadata must not wipe verified local metadata.
+      final legacyV8 = BackupSnapshot.create(
+        owner: BackupSnapshot.ownerFor('alice'),
+        createdAt: DateTime.utc(2026, 11, 20),
+        records: const [],
+        hidden: const {},
+        courses: const [
+          CourseRef(courseId: '101', clazzId: '201', name: '编译原理'),
+        ],
+        unfollowed: const {},
+        reminderOffsets: const [120],
+        autoSyncIntervalMinutes: 60,
+        pinned: PinnedAssignments(keys: ['cx:work:1:2:9']),
+      );
+      expect((jsonDecode(legacyV8.encode()) as Map)['schema'], 8);
+      await repo.restoreBackupSnapshot(legacyV8, 'alice');
+      final preserved = await repo.loadCourses(account: 'alice');
+      expect(preserved.first.teacherNames, ['陈教授', '助教甲']);
+      expect(preserved.first.folderName, '2026年秋季学期');
+
+      // Missing course metadata in local storage is backfilled from schema 9 restore.
+      await repo.saveCourses(const [
+        CourseRef(courseId: '101', clazzId: '201', name: '编译原理'),
+      ], account: 'alice');
+      await repo.restoreBackupSnapshot(v9, 'alice');
+      final filled = await repo.loadCourses(account: 'alice');
+      expect(filled.first.teacherNames, ['陈教授', '助教甲']);
+      expect(filled.first.folderName, '2026年秋季学期');
+
+      // Strict validation rejects bad schema 9 course payloads and pre-v9 metadata.
+      final badTeachersEmpty = jsonDecode(v9.encode()) as Map<String, dynamic>;
+      (badTeachersEmpty['courses'] as List).first['teacherNames'] = <String>[];
+      expect(() => BackupSnapshot.decode(jsonEncode(badTeachersEmpty)),
+          throwsFormatException);
+
+      final badExtraKey = jsonDecode(v9.encode()) as Map<String, dynamic>;
+      (badExtraKey['courses'] as List).first['unknownField'] = 'x';
+      expect(() => BackupSnapshot.decode(jsonEncode(badExtraKey)),
+          throwsFormatException);
+
+      // Strict validation on schema 9 courseTermPreferences roundtrip & invalid overrides.
+      final termPrefs = CourseTermPreferences()
+          .withManualTerm('101:201', '2026-fall')
+          .withArchiveMode('102:202', CourseArchiveMode.archived);
+      await repo.saveCourseTermPreferences(termPrefs, 'alice');
+      final withTerms = await repo.createBackupSnapshot('alice');
+      final decodedTerms = BackupSnapshot.decode(withTerms.encode());
+      expect(decodedTerms.courseTermPreferences, termPrefs);
+
+      final badTerms = jsonDecode(withTerms.encode()) as Map<String, dynamic>;
+      badTerms['courseTermPreferences'] = {
+        'version': 1,
+        'entries': {
+          'badkey': {'archiveMode': 'archived'},
+        },
+      };
+      expect(() => BackupSnapshot.decode(jsonEncode(badTerms)),
+          throwsFormatException);
+    });
+
+    test(
+        'Phase 4B restored custom reminder rules are preserved instead of overwritten by new default preset',
+        () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('reminder_offsets_minutes', ['90', '15']);
+      final customSnapshot = await repo.createBackupSnapshot('alice');
+      expect(customSnapshot.reminderOffsets, [90, 15]);
+
+      await prefs.remove('reminder_offsets_minutes');
+      await repo.restoreBackupSnapshot(customSnapshot, 'alice');
+      expect(await ReminderRuleStore().loadOffsetsMinutes(), [90, 15]);
+    });
   });
 }
 

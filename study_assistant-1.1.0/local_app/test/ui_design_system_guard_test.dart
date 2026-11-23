@@ -343,6 +343,10 @@ JournalGroupedCard(
       expect(light!.paper, isNot(equals(dark!.paper)));
       expect(light.sheet, isNot(equals(dark.sheet)));
       expect(light.ink, isNot(equals(dark.ink)));
+      expect(light.berryBorder, const Color(0xFFECD0C8));
+      expect(dark.berryBorder, const Color(0xFF61403C));
+      expect(StudyAssistantTheme.light.colorScheme.error, light.berry);
+      expect(StudyAssistantTheme.dark.colorScheme.error, dark.berry);
       expect(Journal.titleFamily, 'LXGW WenKai Screen');
       expect(Journal.bodyFamily, 'LXGW WenKai Screen');
       expect(StudyAssistantTheme.light.textTheme.bodyMedium?.fontFamily,

@@ -125,6 +125,8 @@ class _HealthGateway extends BackgroundReminderGateway {
     BackgroundCheckSettings settings, {
     required bool showDetails,
     bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
   }) async {}
 
   @override
@@ -175,6 +177,12 @@ class _HealthGateway extends BackgroundReminderGateway {
 
   @override
   Future<void> releaseWriteLease(String owner) async {}
+
+  @override
+  Future<void> markPendingUpdate({
+    required String accountHash,
+    required int sessionEpoch,
+  }) async {}
 
   @override
   Future<BackgroundReminderHealth> inspectHealth({
@@ -355,12 +363,11 @@ void main() {
     final s = LocalNotificationService();
     await s.initialize();
     calls.clear();
-    final now = DateTime.now();
     final item = ManualEntry(
         id: 'private',
         title: 'PRIVATE TITLE',
         kind: 'exam',
-        at: now.add(const Duration(hours: 2)),
+        at: DateTime(2030, 11, 6, 18, 0),
         remind: true);
     await s.rescheduleManual([item]);
     final hidden =
@@ -400,7 +407,7 @@ void main() {
       id: 'permission-warning',
       title: '个人安排',
       kind: 'todo',
-      at: DateTime.now().add(const Duration(hours: 2)),
+      at: DateTime(2030, 11, 6, 18, 0),
       remind: true,
     );
 
@@ -439,7 +446,7 @@ void main() {
       id: 'channel-warning',
       title: '个人安排',
       kind: 'todo',
-      at: DateTime.now().add(const Duration(hours: 2)),
+      at: DateTime(2030, 11, 6, 18, 0),
       remind: true,
     );
 
@@ -695,7 +702,7 @@ void main() {
           id: 'manual-channel',
           title: '个人安排',
           kind: 'todo',
-          at: DateTime.now().add(const Duration(days: 2)),
+          at: DateTime(2030, 11, 6, 18, 0),
           remind: true)
     ]);
     createIndex = calls
@@ -873,7 +880,7 @@ void main() {
         id: 'manual-retry',
         title: '重试',
         kind: 'todo',
-        at: DateTime.now().add(const Duration(days: 2)),
+        at: DateTime(2030, 11, 6, 18, 0),
         remind: true);
     await expectLater(
         service.rescheduleManual([entry]), throwsA(isA<PlatformException>()));
@@ -947,7 +954,7 @@ void main() {
           id: 'manual-survives',
           title: '个人提醒',
           kind: 'todo',
-          at: DateTime.now().add(const Duration(days: 2)),
+          at: DateTime(2030, 11, 6, 18, 0),
           remind: true)
     ]);
     expect(
@@ -1514,7 +1521,7 @@ void main() {
     final s = LocalNotificationService();
     await s.initialize();
     calls.clear();
-    final at = DateTime.now().toUtc().add(const Duration(days: 2));
+    final at = DateTime(2030, 11, 6, 18, 0);
     final entry = ManualEntry(
         id: 'm1', title: 'exam', kind: 'exam', at: at, remind: true);
     await s.rescheduleManual([
@@ -1549,7 +1556,9 @@ void main() {
     final s = LocalNotificationService();
     await s.initialize();
     calls.clear();
-    await s.rescheduleAssignments([f.sample('106040')], offsetsMinutes: [30]);
+    final daytimeSample =
+        f.sample('106040').copyWith(deadlineAt: DateTime(2030, 11, 6, 18, 0));
+    await s.rescheduleAssignments([daytimeSample], offsetsMinutes: [30]);
     final workId = (calls
         .singleWhere((c) => c.method == 'zonedSchedule')
         .arguments as Map)['id'];
@@ -1559,7 +1568,7 @@ void main() {
           id: 'm1800000000086842',
           title: 'personal',
           kind: 'todo',
-          at: DateTime.utc(2030),
+          at: DateTime.utc(2030, 1, 1, 12),
           remind: true)
     ]);
     final manualId = (calls
@@ -1623,7 +1632,7 @@ void main() {
               id: id,
               title: id,
               kind: 'todo',
-              at: at ?? now.add(const Duration(days: 2)),
+              at: at ?? DateTime(2030, 11, 6, 18, 0),
               done: done,
               remind: remind);
       final stale = entry('stale');
@@ -1710,18 +1719,17 @@ void main() {
     });
     final service = LocalNotificationService();
     await service.initialize();
-    final now = DateTime.now();
     final stale = ManualEntry(
         id: 'stale',
         title: 'stale',
         kind: 'todo',
-        at: now.add(const Duration(days: 2)),
+        at: DateTime(2030, 11, 6, 18, 0),
         remind: true);
     final valid = ManualEntry(
         id: 'valid',
         title: 'valid',
         kind: 'todo',
-        at: now.add(const Duration(days: 2)),
+        at: DateTime(2030, 11, 6, 18, 0),
         remind: true);
     await service.rescheduleManual([stale, valid]);
     final staleId = active.entries
@@ -1810,20 +1818,19 @@ void main() {
       }
     });
     final service = LocalNotificationService();
-    final now = DateTime.now();
     await expectLater(
         service.rescheduleManual([
           ManualEntry(
               id: 'valid',
               title: 'valid',
               kind: 'todo',
-              at: now.add(const Duration(days: 2)),
+              at: DateTime(2030, 11, 6, 18, 0),
               remind: true),
           ManualEntry(
               id: 'other',
               title: 'other',
               kind: 'todo',
-              at: now.add(const Duration(days: 3)),
+              at: DateTime(2030, 11, 7, 18, 0),
               remind: true),
         ]),
         throwsA(isA<PlatformException>()));
@@ -1877,7 +1884,7 @@ void main() {
           id: 'delivered-private',
           title: '已送达的个人事项',
           kind: 'todo',
-          at: DateTime.now().add(const Duration(days: 2)),
+          at: DateTime(2030, 11, 6, 18, 0),
           remind: true)
     ]);
     final deliveredId = active.keys.single;
@@ -2606,9 +2613,16 @@ void main() {
       return true;
     });
     final service = LocalNotificationService();
+    final daytimeDeadline = DateTime(2030, 11, 6, 18, 0);
     await service.rescheduleAssignments([
-      f.sample('batch-a').copyWith(deadlineTrusted: true),
-      f.sample('batch-b').copyWith(deadlineTrusted: true),
+      f.sample('batch-a').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: daytimeDeadline,
+          ),
+      f.sample('batch-b').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: daytimeDeadline,
+          ),
     ], offsetsMinutes: [
       30
     ]);
@@ -2664,9 +2678,16 @@ void main() {
       return true;
     });
     final service = LocalNotificationService();
+    final daytimeDeadline = DateTime(2030, 11, 6, 18, 0);
     await service.rescheduleAssignments([
-      f.sample('compensate-a').copyWith(deadlineTrusted: true),
-      f.sample('compensate-b').copyWith(deadlineTrusted: true),
+      f.sample('compensate-a').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: daytimeDeadline,
+          ),
+      f.sample('compensate-b').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: daytimeDeadline,
+          ),
     ], offsetsMinutes: [
       30
     ]);
@@ -2713,9 +2734,14 @@ void main() {
       return true;
     });
     final service = LocalNotificationService();
-    await service.rescheduleAssignments(
-        [f.sample('committed').copyWith(deadlineTrusted: true)],
-        offsetsMinutes: [30]);
+    await service.rescheduleAssignments([
+      f.sample('committed').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: DateTime(2030, 11, 6, 18, 0),
+          )
+    ], offsetsMinutes: [
+      30
+    ]);
     expect(service.lastWarning, contains('旧通知清理失败'));
     expect(active.length, 2,
         reason: 'new batch is committed while old cancellation is pending');
@@ -2762,9 +2788,14 @@ void main() {
     });
 
     final service = LocalNotificationService();
-    await service.rescheduleAssignments(
-        [f.sample('commit-ack-lost').copyWith(deadlineTrusted: true)],
-        offsetsMinutes: [30]);
+    await service.rescheduleAssignments([
+      f.sample('commit-ack-lost').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: DateTime(2030, 11, 6, 18, 0),
+          )
+    ], offsetsMinutes: [
+      30
+    ]);
 
     expect(active.length, 1,
         reason: 'read-back must recognize the committed marker as durable');
@@ -2807,9 +2838,14 @@ void main() {
     });
 
     final service = LocalNotificationService();
-    await service.rescheduleAssignments(
-        [f.sample('commit-write-failed').copyWith(deadlineTrusted: true)],
-        offsetsMinutes: [30]);
+    await service.rescheduleAssignments([
+      f.sample('commit-write-failed').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: DateTime(2030, 11, 6, 18, 0),
+          )
+    ], offsetsMinutes: [
+      30
+    ]);
 
     expect(service.lastWarning, contains('未能完整更新'));
     expect(active.keys, [805]);
@@ -2855,9 +2891,14 @@ void main() {
     });
 
     final firstProcess = LocalNotificationService();
-    await firstProcess.rescheduleAssignments(
-        [f.sample('orphaned-commit').copyWith(deadlineTrusted: true)],
-        offsetsMinutes: [30]);
+    await firstProcess.rescheduleAssignments([
+      f.sample('orphaned-commit').copyWith(
+            deadlineTrusted: true,
+            deadlineAt: DateTime(2030, 11, 6, 18, 0),
+          )
+    ], offsetsMinutes: [
+      30
+    ]);
 
     expect(firstProcess.lastWarning, contains('无法重建恢复记录'));
     expect(active.length, 2,
@@ -3014,13 +3055,24 @@ void main() {
       return true;
     });
     final service = LocalNotificationService();
+    final daytimeDeadline = DateTime(2030, 11, 6, 18, 0);
     await Future.wait([
-      service.rescheduleAssignments(
-          [f.sample('concurrent-first').copyWith(deadlineTrusted: true)],
-          offsetsMinutes: [30]),
-      service.rescheduleAssignments(
-          [f.sample('concurrent-second').copyWith(deadlineTrusted: true)],
-          offsetsMinutes: [30]),
+      service.rescheduleAssignments([
+        f.sample('concurrent-first').copyWith(
+              deadlineTrusted: true,
+              deadlineAt: daytimeDeadline,
+            )
+      ], offsetsMinutes: [
+        30
+      ]),
+      service.rescheduleAssignments([
+        f.sample('concurrent-second').copyWith(
+              deadlineTrusted: true,
+              deadlineAt: daytimeDeadline,
+            )
+      ], offsetsMinutes: [
+        30
+      ]),
     ]);
     expect(active, hasLength(1));
     expect(active.values.single['payload'], contains('concurrent-second'));
@@ -3081,6 +3133,224 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     debugDefaultTargetPlatformOverride = null;
   });
+
+  test(
+      'ReminderChannelHealth label keeps normal text and appends sound or vibration flags',
+      () {
+    expect(
+      const ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 4)
+          .label,
+      '已开启（高重要性）',
+    );
+    expect(
+      const ReminderChannelHealth(
+        ReminderChannelStatus.enabled,
+        importance: 4,
+        soundMuted: true,
+      ).label,
+      '已开启（高重要性） · 系统已静音',
+    );
+    expect(
+      const ReminderChannelHealth(
+        ReminderChannelStatus.enabled,
+        importance: 4,
+        customSound: true,
+        vibrationEnabled: false,
+      ).label,
+      '已开启（高重要性） · 已自定义铃声 · 振动已关闭',
+    );
+  });
+
+  test(
+      'AssignmentStore saveDeadlineChannelId persists per account, updates settings, and resets on logout/switch',
+      () async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final session = f.Session();
+    final gateway = _Channel4CGateway();
+    final notifications = f.Notifications();
+    final store = AssignmentStore(
+      sessionStore: session,
+      notificationService: notifications,
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(store.dispose);
+
+    await store.restoreSession();
+    expect(
+      await store.saveDeadlineChannelId('unknown_channel'),
+      isFalse,
+    );
+    expect(
+      store.activeDeadlineChannelId,
+      LocalNotificationService.assignmentChannel,
+    );
+
+    expect(
+      await store.saveDeadlineChannelId(
+        LocalNotificationService.assignmentV2Channel,
+      ),
+      isTrue,
+    );
+    expect(store.isUsingV2DeadlineChannel, isTrue);
+    expect(
+      notifications.activeDeadlineChannelId,
+      LocalNotificationService.assignmentV2Channel,
+    );
+    expect(
+      gateway.updatedDeadlineChannels.last,
+      LocalNotificationService.assignmentV2Channel,
+    );
+
+    final restartedA = AssignmentStore(
+      sessionStore: session,
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(restartedA.dispose);
+    await restartedA.restoreSession();
+    expect(restartedA.isUsingV2DeadlineChannel, isTrue);
+
+    session.account = 'B';
+    final storeB = AssignmentStore(
+      sessionStore: session,
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(storeB.dispose);
+    await storeB.restoreSession();
+    expect(storeB.isUsingV2DeadlineChannel, isFalse);
+    expect(
+      storeB.activeDeadlineChannelId,
+      LocalNotificationService.assignmentChannel,
+    );
+
+    await restartedA.logout();
+    expect(restartedA.isUsingV2DeadlineChannel, isFalse);
+    expect(
+      restartedA.activeDeadlineChannelId,
+      LocalNotificationService.assignmentChannel,
+    );
+  });
+
+  test(
+      'AssignmentStore sendTestDeadlineNotification blocks quiet hours even with breakthrough and falls back cleanly',
+      () async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final gateway = _Channel4CGateway();
+    final nightStore = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 23, 45),
+    );
+    addTearDown(nightStore.dispose);
+    await nightStore.restoreSession();
+    expect(
+      await nightStore.saveAllowUrgentDeadlineNightBreakthrough(true),
+      isTrue,
+    );
+
+    final quietOutcome = await nightStore.sendTestDeadlineNotification();
+    expect(quietOutcome.status, TestDeadlineNotificationStatus.quietHours);
+    expect(quietOutcome.retryAfterAt, DateTime(2030, 11, 21, 7, 30));
+    expect(gateway.testSendCalls, 0);
+
+    final dayStore = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(dayStore.dispose);
+    await dayStore.restoreSession();
+    final nativeOutcome = await dayStore.sendTestDeadlineNotification();
+    expect(nativeOutcome.status, TestDeadlineNotificationStatus.scheduled);
+    expect(gateway.testSendCalls, 1);
+
+    final fallbackNotifications = _TestShowNotifications()..result = true;
+    final fallbackStore = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: fallbackNotifications,
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      nativeReminderDeliveryEnabled: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(fallbackStore.dispose);
+    await fallbackStore.restoreSession();
+    final posted = await fallbackStore.sendTestDeadlineNotification();
+    expect(posted.status, TestDeadlineNotificationStatus.posted);
+    expect(fallbackNotifications.showTestCalls, 1);
+
+    fallbackNotifications.result = false;
+    final blocked = await fallbackStore.sendTestDeadlineNotification();
+    expect(blocked.status, TestDeadlineNotificationStatus.blocked);
+  });
+}
+
+class _Channel4CGateway extends _HealthGateway {
+  final updatedDeadlineChannels = <String?>[];
+  int testSendCalls = 0;
+
+  @override
+  Future<void> updateSettings(
+    String accountHash,
+    int sessionEpoch,
+    BackgroundCheckSettings settings, {
+    required bool showDetails,
+    bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
+  }) async {
+    updatedDeadlineChannels.add(deadlineChannelId);
+  }
+
+  @override
+  Future<TestDeadlineNotificationOutcome> sendTestDeadlineNotification({
+    String? accountHash,
+    String? channelId,
+    int delayMillis = 3000,
+  }) async {
+    testSendCalls++;
+    return TestDeadlineNotificationOutcome(
+      status: TestDeadlineNotificationStatus.scheduled,
+      channelId: channelId,
+    );
+  }
+}
+
+class _TestShowNotifications extends f.Notifications {
+  bool result = true;
+  int showTestCalls = 0;
+
+  @override
+  Future<bool> showTestNotification() async {
+    showTestCalls++;
+    return result;
+  }
 }
 
 class _NotificationJournalStore extends InMemorySharedPreferencesStore {

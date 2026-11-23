@@ -70,7 +70,7 @@ void main() {
       reminderOffsetsMinutes: const [180],
       now: DateTime(2026, 11, 10, 20),
     );
-    expect(plan.deadlineEvents.single.notifyAt, DateTime(2026, 11, 11, 8));
+    expect(plan.deadlineEvents.single.notifyAt, DateTime(2026, 11, 11, 7, 30));
   });
 
   test('daytime check uses local date and hour for UTC clock inputs', () {

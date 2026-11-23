@@ -8,13 +8,18 @@ import '../models/assignment.dart';
 import '../models/course.dart';
 import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
+import '../models/course_term_preferences.dart';
 import '../models/backup_snapshot.dart';
+import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
+import '../models/pinned_assignments.dart';
 import '../models/study_notebook.dart';
+import '../models/sync_scope.dart';
 import '../models/home_filters.dart';
 import '../services/reminder_rule_store.dart';
 import '../services/background_reminder_gateway.dart';
 import '../services/background_check_settings.dart';
+import '../services/coursework_deadline.dart';
 
 /// A journal or course write could not be confirmed against durable storage.
 ///
@@ -69,6 +74,26 @@ class LocalAssignmentRepository {
   static const _noticesKey = 'course_notices_v1';
   static const _chaptersKey = 'course_chapters_v1';
   static const _pinnedKey = 'pinned_assignment_ids_v1';
+  static const _pinnedV2Key = 'pinned_assignments_v2';
+  static const _pinnedRecoveryWarning =
+      '部分置顶记录无法读取，原始数据已保留备份；本次以空列表临时显示，请勿覆盖原数据。';
+  static const _courseworkStateKey = 'local_coursework_state_v1';
+  static const _courseworkRecoveryWarning =
+      '部分个人课业状态无法读取，原始数据已保留备份；本次以空状态临时显示，请勿覆盖原数据。';
+  static const _courseTermPreferencesKey = 'course_term_preferences_v1';
+  static const _courseTermRecoveryWarning =
+      '部分课程学期与归档设置无法读取，原始数据已保留备份；本次以自动推断临时显示，请勿覆盖原数据。';
+  static const _historicalSweepStateKey = 'historical_sweep_state_v1';
+  static const _historicalSweepRecoveryWarning = '往期课程轮询游标无法读取，已从起始位置重新计算。';
+  static const _acknowledgedDeadlineChangesKey =
+      'acknowledged_deadline_changes_v1';
+  static const allowUrgentNightBreakthroughKey =
+      'allow_urgent_deadline_night_breakthrough_v1';
+  static const deadlineNotificationChannelKey =
+      'deadline_notification_channel_v1';
+  static const _maxAcknowledgedDeadlineChanges = 300;
+  static const _acknowledgedDeadlineRecoveryWarning =
+      '部分时间变更已读状态无法读取，原始数据已保留备份；本次以未确认状态临时显示，请勿覆盖原数据。';
   static const _maxAdditionalRecoveryBackups = 3;
   static const _maxRecoveryValueBytes = 4 * 1024 * 1024;
   static const _recoveryWriteFailedWarning =
@@ -103,6 +128,8 @@ class LocalAssignmentRepository {
     _notebookKey,
     _homeFiltersKey,
     _pinnedKey,
+    _pinnedV2Key,
+    _courseworkStateKey,
     _noticesKey,
     _chaptersKey,
     '${_key}_recovery_backup',
@@ -112,6 +139,21 @@ class LocalAssignmentRepository {
     '${_personalKey}_recovery_backups',
     '${_notebookKey}_recovery_backup',
     '${_notebookKey}_recovery_backups',
+    '${_pinnedV2Key}_recovery_backup',
+    '${_pinnedV2Key}_recovery_backups',
+    '${_courseworkStateKey}_recovery_backup',
+    '${_courseworkStateKey}_recovery_backups',
+    _courseTermPreferencesKey,
+    '${_courseTermPreferencesKey}_recovery_backup',
+    '${_courseTermPreferencesKey}_recovery_backups',
+    _historicalSweepStateKey,
+    '${_historicalSweepStateKey}_recovery_backup',
+    '${_historicalSweepStateKey}_recovery_backups',
+    _acknowledgedDeadlineChangesKey,
+    '${_acknowledgedDeadlineChangesKey}_recovery_backup',
+    '${_acknowledgedDeadlineChangesKey}_recovery_backups',
+    allowUrgentNightBreakthroughKey,
+    deadlineNotificationChannelKey,
     '${_noticesKey}_recovery_backup',
     '${_noticesKey}_recovery_backups',
     '${_chaptersKey}_recovery_backup',
@@ -141,32 +183,330 @@ class LocalAssignmentRepository {
         }
       });
 
-  Future<Set<String>> loadPinnedIds(String account) => _serialized(() async {
-        final prefs = await SharedPreferences.getInstance();
-        _checkOwner(prefs, account);
-        return (prefs.getStringList(_pinnedKey) ?? const <String>[])
-            .map((id) => id.trim())
-            .where((id) => id.isNotEmpty)
-            .toSet();
-      });
+  Future<PinnedAssignments> _readPinnedAssignments(
+      SharedPreferences prefs) async {
+    if (prefs.containsKey(_pinnedV2Key)) {
+      return _readProtected(
+        prefs,
+        _pinnedV2Key,
+        PinnedAssignments.decode,
+        PinnedAssignments.empty,
+        _pinnedRecoveryWarning,
+      );
+    }
+    final legacy = (prefs.getStringList(_pinnedKey) ?? const <String>[])
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty);
+    return PinnedAssignments.fromLegacyV1(legacy);
+  }
 
-  Future<void> savePinnedIds(Set<String> ids, String account) =>
+  Future<void> _writePinnedAssignments(
+    SharedPreferences prefs,
+    PinnedAssignments pins,
+  ) async {
+    await _protectExisting(
+      prefs,
+      _pinnedV2Key,
+      PinnedAssignments.decode,
+      _pinnedRecoveryWarning,
+    );
+    final raw = pins.encode();
+    PinnedAssignments.decode(raw);
+    await _writeVerified(prefs, _pinnedV2Key, raw, '置顶状态保存失败');
+    final sorted = pins.keys.toSet().toList()..sort();
+    try {
+      await _require(prefs.setStringList(_pinnedKey, sorted));
+    } catch (_) {
+      await prefs.reload();
+      rethrow;
+    }
+  }
+
+  Future<PinnedAssignments> loadPinnedAssignments(String account) =>
       _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
         _checkOwner(prefs, account);
-        final sorted = ids
-            .map((id) => id.trim())
-            .where((id) => id.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort();
-        try {
-          await _require(prefs.setStringList(_pinnedKey, sorted));
-        } catch (_) {
-          await prefs.reload();
-          rethrow;
-        }
+        return _readPinnedAssignments(prefs);
       });
+
+  Future<void> savePinnedAssignments(PinnedAssignments pins, String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        await _writePinnedAssignments(prefs, pins);
+      });
+
+  Future<Set<String>> loadPinnedIds(String account) => _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return (await _readPinnedAssignments(prefs)).keys.toSet();
+      });
+
+  Future<void> savePinnedIds(Set<String> ids, String account) =>
+      savePinnedAssignments(PinnedAssignments.fromLegacyV1(ids), account);
+
+  Future<LocalCourseworkState> _readCourseworkState(SharedPreferences prefs) =>
+      _readProtected(
+        prefs,
+        _courseworkStateKey,
+        LocalCourseworkState.decode,
+        LocalCourseworkState.empty,
+        _courseworkRecoveryWarning,
+      );
+
+  Future<void> writeCourseworkStateInPrefs(
+    SharedPreferences prefs,
+    LocalCourseworkState state,
+  ) async {
+    await _protectExisting(
+      prefs,
+      _courseworkStateKey,
+      LocalCourseworkState.decode,
+      _courseworkRecoveryWarning,
+    );
+    final raw = state.encode();
+    LocalCourseworkState.decode(raw);
+    await _writeVerified(prefs, _courseworkStateKey, raw, '个人课业状态保存失败');
+  }
+
+  Future<LocalCourseworkState> loadCourseworkState(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return _readCourseworkState(prefs);
+      });
+
+  Future<void> saveCourseworkState(
+    LocalCourseworkState state,
+    String account,
+  ) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        await writeCourseworkStateInPrefs(prefs, state);
+      });
+
+  Future<CourseTermPreferences> _readCourseTermPreferences(
+          SharedPreferences prefs) =>
+      _readProtected(
+        prefs,
+        _courseTermPreferencesKey,
+        CourseTermPreferences.decode,
+        CourseTermPreferences.empty,
+        _courseTermRecoveryWarning,
+      );
+
+  Future<void> writeCourseTermPreferencesInPrefs(
+    SharedPreferences prefs,
+    CourseTermPreferences value,
+  ) async {
+    await _protectExisting(
+      prefs,
+      _courseTermPreferencesKey,
+      CourseTermPreferences.decode,
+      _courseTermRecoveryWarning,
+    );
+    final raw = value.encode();
+    CourseTermPreferences.decode(raw);
+    await _writeVerified(
+      prefs,
+      _courseTermPreferencesKey,
+      raw,
+      '课程学期与归档设置保存失败',
+    );
+  }
+
+  Future<CourseTermPreferences> loadCourseTermPreferences(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return _readCourseTermPreferences(prefs);
+      });
+
+  Future<void> saveCourseTermPreferences(
+    CourseTermPreferences value,
+    String account,
+  ) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        await writeCourseTermPreferencesInPrefs(prefs, value);
+      });
+
+  Future<HistoricalSweepState> loadHistoricalSweepState(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return _readProtected(
+          prefs,
+          _historicalSweepStateKey,
+          HistoricalSweepState.decode,
+          HistoricalSweepState.empty,
+          _historicalSweepRecoveryWarning,
+        );
+      });
+
+  Future<void> saveHistoricalSweepState(
+    HistoricalSweepState state,
+    String account,
+  ) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        await _protectExisting(
+          prefs,
+          _historicalSweepStateKey,
+          HistoricalSweepState.decode,
+          _historicalSweepRecoveryWarning,
+        );
+        final raw = state.encode();
+        HistoricalSweepState.decode(raw);
+        await _writeVerified(
+          prefs,
+          _historicalSweepStateKey,
+          raw,
+          '往期课程轮询游标保存失败',
+        );
+      });
+
+  static Set<String> _decodeAcknowledgedDeadlineChanges(String raw) {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map || decoded['version'] != 1 || decoded['ids'] is! List) {
+      throw const FormatException('时间变更确认状态格式无效');
+    }
+    final ids = <String>{};
+    for (final item in decoded['ids'] as List) {
+      if (item is! String || item.trim().isEmpty) {
+        throw const FormatException('时间变更确认标识无效');
+      }
+      ids.add(item.trim());
+    }
+    return ids;
+  }
+
+  static String _encodeAcknowledgedDeadlineChanges(
+      Iterable<String> orderedIds) {
+    final unique = <String>[];
+    final seen = <String>{};
+    for (final raw in orderedIds) {
+      final id = raw.trim();
+      if (id.isEmpty || !seen.add(id)) continue;
+      unique.add(id);
+      if (unique.length >= _maxAcknowledgedDeadlineChanges) break;
+    }
+    return jsonEncode({'version': 1, 'ids': unique});
+  }
+
+  Future<Set<String>> readAcknowledgedDeadlineChangeIdsInPrefs(
+    SharedPreferences prefs,
+  ) =>
+      _readProtected(
+        prefs,
+        _acknowledgedDeadlineChangesKey,
+        _decodeAcknowledgedDeadlineChanges,
+        () => <String>{},
+        _acknowledgedDeadlineRecoveryWarning,
+      );
+
+  Future<Set<String>> loadAcknowledgedDeadlineChangeIds(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        return readAcknowledgedDeadlineChangeIdsInPrefs(prefs);
+      });
+
+  Future<void> writeAcknowledgedDeadlineChangeIdsInPrefs(
+    SharedPreferences prefs,
+    Iterable<String> orderedIds,
+  ) async {
+    await _protectExisting(
+      prefs,
+      _acknowledgedDeadlineChangesKey,
+      _decodeAcknowledgedDeadlineChanges,
+      _acknowledgedDeadlineRecoveryWarning,
+    );
+    final raw = _encodeAcknowledgedDeadlineChanges(orderedIds);
+    _decodeAcknowledgedDeadlineChanges(raw);
+    await _writeVerified(
+      prefs,
+      _acknowledgedDeadlineChangesKey,
+      raw,
+      '时间变更确认状态保存失败',
+    );
+  }
+
+  Future<bool> loadAllowUrgentNightBreakthrough(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        final raw = prefs.get(allowUrgentNightBreakthroughKey);
+        return raw is bool ? raw : false;
+      });
+
+  Future<void> writeAllowUrgentNightBreakthroughInPrefs(
+    SharedPreferences prefs,
+    bool enabled,
+  ) async {
+    Object? writeError;
+    try {
+      if (await prefs.setBool(allowUrgentNightBreakthroughKey, enabled)) return;
+      writeError = '原生写入未确认';
+    } catch (error) {
+      writeError = error;
+    }
+    try {
+      await prefs.reload();
+    } catch (reloadError) {
+      throw LocalStorageWriteException('夜间静音穿透设置保存结果未确认；重新读取也失败：$reloadError');
+    }
+    if (prefs.get(allowUrgentNightBreakthroughKey) == enabled) return;
+    throw LocalStorageWriteException('夜间静音穿透设置保存失败：$writeError');
+  }
+
+  static String? normalizeDeadlineChannelId(String? raw) {
+    switch (raw?.trim()) {
+      case 'assignment_deadlines':
+        return 'assignment_deadlines';
+      case 'assignment_deadlines_v2':
+        return 'assignment_deadlines_v2';
+      default:
+        return null;
+    }
+  }
+
+  Future<String?> loadDeadlineChannelId(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        final raw = prefs.get(deadlineNotificationChannelKey);
+        return raw is String ? normalizeDeadlineChannelId(raw) : null;
+      });
+
+  Future<void> writeDeadlineChannelIdInPrefs(
+    SharedPreferences prefs,
+    String channelId,
+  ) async {
+    final normalized = normalizeDeadlineChannelId(channelId);
+    if (normalized == null) {
+      throw ArgumentError.value(channelId, 'channelId', '未知的截止提醒通知渠道');
+    }
+    Object? writeError;
+    try {
+      if (await prefs.setString(deadlineNotificationChannelKey, normalized)) {
+        return;
+      }
+      writeError = '原生写入未确认';
+    } catch (error) {
+      writeError = error;
+    }
+    try {
+      await prefs.reload();
+    } catch (reloadError) {
+      throw LocalStorageWriteException('截止通知渠道保存结果未确认；重新读取也失败：$reloadError');
+    }
+    if (prefs.get(deadlineNotificationChannelKey) == normalized) return;
+    throw LocalStorageWriteException('截止通知渠道保存失败：$writeError');
+  }
 
   Future<StudyNotebook> loadNotebook() => _serialized(() async {
         final p = await SharedPreferences.getInstance();
@@ -402,7 +742,10 @@ class LocalAssignmentRepository {
               CourseChapterCatalog.decode,
               CourseChapterCatalog.new,
               '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
-            ));
+            ),
+            pinned: await _readPinnedAssignments(prefs),
+            courseworkState: await _readCourseworkState(prefs),
+            courseTermPreferences: await _readCourseTermPreferences(prefs));
         if (recoveryWarning != null) {
           throw StateError('检测到本机数据恢复警告，当前数据不完整，已阻止导出。原始损坏数据仍保留在本机。');
         }
@@ -448,7 +791,9 @@ class LocalAssignmentRepository {
           for (final c in await _loadCourses(account: account)) c.key: c
         };
         for (final c in validated.courses) {
-          courses.putIfAbsent(c.key, () => c);
+          final existing = courses[c.key];
+          courses[c.key] =
+              existing == null ? c : existing.mergeMissingMetadata(c);
         }
         final before = <String, dynamic>{
           'owner': prefs.getString(_ownerKey),
@@ -537,6 +882,27 @@ class LocalAssignmentRepository {
             final chaptersRaw = chapters.encode();
             CourseChapterCatalog.decode(chaptersRaw);
             await _require(prefs.setString(_chaptersKey, chaptersRaw));
+          }
+          if (validated.pinned.isNotEmpty || validated.pinned.manuallyOrdered) {
+            final localPins = await _readPinnedAssignments(prefs);
+            final mergedPins = localPins.mergeBackup(validated.pinned);
+            await _writePinnedAssignments(prefs, mergedPins);
+          }
+          if (validated.courseworkState.isNotEmpty) {
+            final localCoursework = await _readCourseworkState(prefs);
+            final mergedCoursework =
+                CourseworkDeadline.reconcileWithAssignments(
+              localCoursework.mergeBackup(validated.courseworkState),
+              state.byId.values,
+            );
+            await writeCourseworkStateInPrefs(prefs, mergedCoursework);
+          }
+          if (validated.courseTermPreferences.isNotEmpty) {
+            final localTerms = await _readCourseTermPreferences(prefs);
+            final mergedTerms = localTerms.mergeBackup(
+              validated.courseTermPreferences,
+            );
+            await writeCourseTermPreferencesInPrefs(prefs, mergedTerms);
           }
           await _require(prefs.remove(_switchKey));
           return true;

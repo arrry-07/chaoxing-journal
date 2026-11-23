@@ -52,4 +52,70 @@ class NotificationDeliveryPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun deadlineChannelPolicyNormalizesAndResolvesUpgradeVsFreshInstall() {
+        assertEquals(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES,
+            DeadlineChannelPolicy.normalizeChannelId(" assignment_deadlines "),
+        )
+        assertEquals(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+            DeadlineChannelPolicy.normalizeChannelId("assignment_deadlines_v2"),
+        )
+        assertNull(DeadlineChannelPolicy.normalizeChannelId("assignment_updates"))
+        assertNull(DeadlineChannelPolicy.normalizeChannelId(null))
+
+        assertEquals(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+            DeadlineChannelPolicy.resolveDefaultChannelId(
+                explicitSelection = null,
+                channelQuerySucceeded = true,
+                existingChannelIds = emptySet(),
+            ),
+        )
+        assertEquals(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES,
+            DeadlineChannelPolicy.resolveDefaultChannelId(
+                explicitSelection = null,
+                channelQuerySucceeded = true,
+                existingChannelIds = setOf(DeadlineChannelPolicy.CHANNEL_DEADLINES),
+            ),
+        )
+        assertEquals(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+            DeadlineChannelPolicy.resolveDefaultChannelId(
+                explicitSelection = null,
+                channelQuerySucceeded = true,
+                existingChannelIds = setOf(
+                    DeadlineChannelPolicy.CHANNEL_DEADLINES,
+                    DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+                ),
+            ),
+        )
+        assertEquals(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES,
+            DeadlineChannelPolicy.resolveDefaultChannelId(
+                explicitSelection = null,
+                channelQuerySucceeded = false,
+                existingChannelIds = emptySet(),
+            ),
+        )
+        assertEquals(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+            DeadlineChannelPolicy.resolveDefaultChannelId(
+                explicitSelection = DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+                channelQuerySucceeded = false,
+                existingChannelIds = setOf(DeadlineChannelPolicy.CHANNEL_DEADLINES),
+            ),
+        )
+        assertEquals(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES,
+            DeadlineChannelPolicy.resolveDefaultChannelId(
+                explicitSelection = DeadlineChannelPolicy.CHANNEL_DEADLINES,
+                channelQuerySucceeded = true,
+                existingChannelIds = setOf(DeadlineChannelPolicy.CHANNEL_DEADLINES_V2),
+            ),
+        )
+    }
 }

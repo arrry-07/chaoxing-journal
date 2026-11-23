@@ -34,6 +34,31 @@ enum NotificationRemoteAuthorization {
   stale,
 }
 
+enum TestDeadlineNotificationStatus {
+  posted,
+  scheduled,
+  quietHours,
+  blocked,
+}
+
+class TestDeadlineNotificationOutcome {
+  const TestDeadlineNotificationOutcome({
+    required this.status,
+    this.channelId,
+    this.warning,
+    this.retryAfterAt,
+  });
+
+  final TestDeadlineNotificationStatus status;
+  final String? channelId;
+  final String? warning;
+  final DateTime? retryAfterAt;
+
+  bool get accepted =>
+      status == TestDeadlineNotificationStatus.posted ||
+      status == TestDeadlineNotificationStatus.scheduled;
+}
+
 class NotificationRemoteStartContext {
   const NotificationRemoteStartContext({
     required this.accountHash,
@@ -215,6 +240,8 @@ class BackgroundReminderGateway {
     BackgroundCheckSettings settings, {
     required bool showDetails,
     bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
   }) async {
     await _invokeStrictVoid('updateSettings', {
       'accountHash': accountHash,
@@ -222,6 +249,8 @@ class BackgroundReminderGateway {
       ...settings.toJson(),
       'showDetails': showDetails,
       'reconcileSchedules': reconcileSchedules,
+      'allowUrgentNightBreakthrough': allowUrgentNightBreakthrough,
+      if (deadlineChannelId != null) 'deadlineChannelId': deadlineChannelId,
     });
   }
 
@@ -847,6 +876,36 @@ class BackgroundReminderGateway {
       'accountHash': accountHash,
       'version': version,
     });
+  }
+
+  Future<TestDeadlineNotificationOutcome> sendTestDeadlineNotification({
+    String? accountHash,
+    String? channelId,
+    int delayMillis = 3000,
+  }) async {
+    final value = await _invokeStrict<Map<Object?, Object?>>(
+      'sendTestDeadlineNotification',
+      {
+        if (accountHash != null) 'accountHash': accountHash,
+        if (channelId != null) 'channelId': channelId,
+        'delayMillis': delayMillis,
+      },
+    );
+    final rawStatus = value['status'];
+    final status = switch (rawStatus) {
+      'posted' => TestDeadlineNotificationStatus.posted,
+      'scheduled' => TestDeadlineNotificationStatus.scheduled,
+      'quietHours' => TestDeadlineNotificationStatus.quietHours,
+      'blocked' => TestDeadlineNotificationStatus.blocked,
+      _ => throw const BackgroundReminderGatewayException(
+          'sendTestDeadlineNotification', '原生测试提醒结果无效'),
+    };
+    return TestDeadlineNotificationOutcome(
+      status: status,
+      channelId: value['channelId'] as String?,
+      warning: value['warning'] as String?,
+      retryAfterAt: _optionalDate(value['retryAfterAt']),
+    );
   }
 
   Future<T?> _invoke<T>(String method, [Map<String, Object?>? arguments]) =>

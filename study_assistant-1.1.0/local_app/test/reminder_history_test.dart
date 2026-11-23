@@ -557,8 +557,7 @@ void main() {
       expect(added.reasonCodes, isNot(contains('alreadyKnown')));
     });
 
-    test(
-        'H5: _nextPlanned shifts pre-08:00 trigger to 08:00 and drops >= deadline',
+    test('H5: _nextPlanned shifts quiet trigger to 07:30 and drops >= deadline',
         () {
       final atTen = DateTime(2026, 11, 19, 10, 0);
       final earlyItem = assignment(deadline: atTen);
@@ -569,7 +568,7 @@ void main() {
         hiddenAssignmentIds: const {},
         unfollowedCourseKeys: const {},
         plan: plan(),
-        offsets: const [240], // 06:00 -> shifted to 08:00 < 10:00
+        offsets: const [240], // 06:00 -> shifted to 07:30 < 10:00
         newReminderEnabled: true,
         now: DateTime(2026, 11, 19, 2, 0),
         evidence: null,
@@ -584,7 +583,7 @@ void main() {
       );
       final validDeadline = earlyExplain.categories
           .firstWhere((item) => item.category == 'deadline');
-      expect(validDeadline.nextScheduledAt, DateTime(2026, 11, 19, 8, 0));
+      expect(validDeadline.nextScheduledAt, DateTime(2026, 11, 19, 7, 30));
 
       final utcItem = assignment(deadline: atTen.toUtc());
       final utcExplain = ReminderExplanationService.forAssignment(
@@ -611,7 +610,7 @@ void main() {
         utcExplain.categories
             .singleWhere((item) => item.category == 'deadline')
             .nextScheduledAt,
-        DateTime(2026, 11, 19, 8),
+        DateTime(2026, 11, 19, 7, 30),
       );
 
       final atSevenThirty = DateTime(2026, 11, 19, 7, 30);
@@ -623,7 +622,7 @@ void main() {
         hiddenAssignmentIds: const {},
         unfollowedCourseKeys: const {},
         plan: plan(),
-        offsets: const [60], // 06:30 -> shifted to 08:00 >= 07:30 -> dropped
+        offsets: const [60], // 06:30 -> shifted to 07:30 >= 07:30 -> dropped
         newReminderEnabled: true,
         now: DateTime(2026, 11, 19, 2, 0),
         evidence: null,

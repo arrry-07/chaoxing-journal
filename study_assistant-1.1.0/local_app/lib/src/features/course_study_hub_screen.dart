@@ -7,11 +7,13 @@ import 'package:intl/intl.dart';
 import '../app/journal.dart';
 import '../app/journal_motion.dart';
 import '../app/transient_feedback.dart';
+import '../models/assignment.dart';
 import '../models/course.dart';
 import '../models/course_chapter_progress.dart';
 import '../models/course_notice.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
+import '../services/coursework_deadline.dart';
 import '../services/interaction_feedback_service.dart';
 import 'widgets/data_recovery_warning.dart';
 import 'widgets/journal_buttons.dart';
@@ -61,6 +63,8 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   _NoticeScope _noticeScope = _NoticeScope.linked;
   String? _selectedCourseKey;
   bool _pendingChaptersOnly = false;
+  bool _systemRemindersExpanded = false;
+  bool _courseSliceExpanded = false;
   late final TextEditingController _searchController;
   String _searchQuery = '';
   Timer? _searchDebounce;
@@ -93,6 +97,8 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       _selectedCourseKey = null;
       _noticeScope = _NoticeScope.linked;
       _noticeFilter = _NoticeFilter.all;
+      _systemRemindersExpanded = false;
+      _courseSliceExpanded = false;
       _resetNoticeSearch();
     });
   }
@@ -112,6 +118,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     }
     if (oldWidget.initialCourseKey != widget.initialCourseKey) {
       final initialCourseKey = widget.initialCourseKey?.trim();
+      _courseSliceExpanded = false;
       if (initialCourseKey != null && initialCourseKey.isNotEmpty) {
         _noticeScope = _NoticeScope.course;
         _selectedCourseKey = initialCourseKey;
@@ -476,7 +483,9 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         final journal = Journal.of(context);
         final notices = widget.store.courseNotices.items;
         final scoped = _scopedNotices(notices);
-        final scopedUnread = scoped.where((n) => !n.localRead).length;
+        final primaryScoped = scoped.where((n) => !n.isSystemReminder).toList();
+        final primaryScopedUnread =
+            primaryScoped.where((n) => !n.localRead).length;
 
         return Scaffold(
           backgroundColor: journal.paper,
@@ -494,10 +503,10 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                 IconButton(
                   tooltip: '全部标为已读',
                   icon: const Icon(Icons.done_all_rounded, size: 21),
-                  onPressed: widget.store.isLoading || scopedUnread == 0
+                  onPressed: widget.store.isLoading || primaryScopedUnread == 0
                       ? null
                       : () => widget.store.markAllNoticesLocalRead(
-                            noticeIds: scoped
+                            noticeIds: primaryScoped
                                 .where((n) => !n.localRead)
                                 .map((n) => n.id),
                           ),
@@ -568,7 +577,12 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                     ),
                     if (_tab == 'notices')
                       ..._buildNoticesTab(
-                          context, notices, scoped, scopedUnread)
+                        context,
+                        notices,
+                        scoped,
+                        primaryScoped,
+                        primaryScopedUnread,
+                      )
                     else
                       ..._buildChaptersTab(context),
                   ],
@@ -609,13 +623,16 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
     BuildContext context,
     List<CourseNotice> notices,
     List<CourseNotice> scoped,
-    int scopedUnread,
+    List<CourseNotice> primaryScoped,
+    int primaryScopedUnread,
   ) {
     final journal = Journal.of(context);
     final query = _searchQuery;
     final courseOptions = <String, String>{};
+    final catalogByKey = <String, CourseRef>{};
     for (final c in widget.store.courses) {
       courseOptions[c.key] = c.name;
+      catalogByKey[c.key] = c;
     }
     for (final n in notices) {
       if (n.courseKey != null && !courseOptions.containsKey(n.courseKey)) {
@@ -626,6 +643,13 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         _selectedCourseKey != null &&
         !courseOptions.containsKey(_selectedCourseKey)) {
       courseOptions[_selectedCourseKey!] = '所选课程';
+    }
+    final optionNameCounts = <String, int>{};
+    for (final name in courseOptions.values) {
+      final trimmed = name.trim();
+      if (trimmed.isNotEmpty) {
+        optionNameCounts[trimmed] = (optionNameCounts[trimmed] ?? 0) + 1;
+      }
     }
 
     final currentScopeKey = switch (_noticeScope) {
@@ -654,6 +678,13 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       }
       return true;
     }).toList();
+    final primaryFiltered = filtered.where((n) => !n.isSystemReminder).toList();
+    final systemFiltered = filtered.where((n) => n.isSystemReminder).toList();
+    final systemUnreadCount = systemFiltered.where((n) => !n.localRead).length;
+
+    final showCourseSlice = widget.store.isAuthenticated &&
+        _noticeScope == _NoticeScope.course &&
+        _selectedCourseKey != null;
 
     final controls = <Widget>[
       Row(
@@ -673,8 +704,9 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                   context,
                   title: '通知范围',
                   selectedValue: currentScopeKey,
-                  searchable: courseOptions.length > 4,
-                  searchHint: '搜索课程名称...',
+                  searchable: courseOptions.length > 4 ||
+                      catalogByKey.values.any((c) => c.teacherNames.isNotEmpty),
+                  searchHint: '搜索课程或教师...',
                   displayPrefs: widget.store.display,
                   options: [
                     const JournalPickerOption(
@@ -690,16 +722,39 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                       icon: Icons.inbox_outlined,
                     ),
                     for (final entry in courseOptions.entries)
-                      JournalPickerOption(
-                        value: entry.key,
-                        label: entry.value,
-                        group: '按课程筛选',
-                        icon: courseIconFor(entry.value),
-                      ),
+                      () {
+                        final courseMeta = catalogByKey[entry.key];
+                        final parts = entry.key.split(':');
+                        final clazzId = courseMeta?.clazzId ??
+                            (parts.length > 1 ? parts[1] : '');
+                        final duplicateName =
+                            (optionNameCounts[entry.value.trim()] ?? 0) > 1;
+                        final subtitleParts = <String>[
+                          if (duplicateName && clazzId.isNotEmpty)
+                            '班级 $clazzId',
+                          if (courseMeta != null &&
+                              courseMeta.teacherNames.isNotEmpty)
+                            courseMeta.teacherLabel,
+                        ];
+                        return JournalPickerOption(
+                          value: entry.key,
+                          label: entry.value,
+                          subtitle: subtitleParts.isEmpty
+                              ? null
+                              : subtitleParts.join(' · '),
+                          keywords: courseMeta == null ||
+                                  courseMeta.teacherNames.isEmpty
+                              ? null
+                              : courseMeta.teacherNames.join(' '),
+                          group: '按课程筛选',
+                          icon: courseIconFor(entry.value),
+                        );
+                      }(),
                   ],
                 );
                 if (picked == null || !mounted) return;
                 setState(() {
+                  _courseSliceExpanded = false;
                   if (picked == '__linked__') {
                     _noticeScope = _NoticeScope.linked;
                     _selectedCourseKey = null;
@@ -722,13 +777,13 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         runSpacing: 6,
         children: [
           ChoiceChip(
-            label: Text('全部 (${scoped.length})'),
+            label: Text('全部 (${primaryScoped.length})'),
             selected: _noticeFilter == _NoticeFilter.all,
             onSelected: (_) =>
                 setState(() => _noticeFilter = _NoticeFilter.all),
           ),
           ChoiceChip(
-            label: Text('本机未读 ($scopedUnread)'),
+            label: Text('本机未读 ($primaryScopedUnread)'),
             selected: _noticeFilter == _NoticeFilter.localUnread,
             onSelected: (_) =>
                 setState(() => _noticeFilter = _NoticeFilter.localUnread),
@@ -742,11 +797,20 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         ],
       ),
       const SizedBox(height: 12),
+      if (showCourseSlice) ...[
+        _buildCourseSliceCard(
+          context,
+          journal,
+          _selectedCourseKey!,
+          catalogByKey[_selectedCourseKey],
+        ),
+        const SizedBox(height: 12),
+      ],
     ];
 
     return [
       SliverList.list(children: controls),
-      if (filtered.isEmpty)
+      if (primaryFiltered.isEmpty)
         SliverToBoxAdapter(
           child: JournalGroupedCard(
             padding: const EdgeInsets.all(18),
@@ -756,7 +820,9 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                     ? '暂无课程通知记录，点击右上角同步图标读取。'
                     : scoped.isEmpty
                         ? '当前通知范围内没有记录，可切换到「收件箱」查看平台消息。'
-                        : '当前筛选条件下没有匹配的通知。',
+                        : systemFiltered.isNotEmpty
+                            ? '当前范围内没有人工或考试通知，系统作业提醒已折叠在下方「系统提醒」。'
+                            : '当前筛选条件下没有匹配的通知。',
                 style: journal.metadata,
               ),
             ],
@@ -764,11 +830,264 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         )
       else
         JournalSliverGroupedCard(
-          itemCount: filtered.length,
+          itemCount: primaryFiltered.length,
           itemBuilder: (context, index) =>
-              _buildNoticeTile(context, filtered[index], journal),
+              _buildNoticeTile(context, primaryFiltered[index], journal),
+        ),
+      if (systemFiltered.isNotEmpty)
+        SliverPadding(
+          padding: const EdgeInsets.only(top: 12),
+          sliver: SliverToBoxAdapter(
+            child: _buildSystemRemindersCard(
+              context,
+              journal,
+              systemFiltered,
+              systemUnreadCount,
+            ),
+          ),
         ),
     ];
+  }
+
+  Widget _buildCourseSliceCard(
+    BuildContext context,
+    JournalPalette journal,
+    String targetKey,
+    CourseRef? courseMeta,
+  ) {
+    final coursework = widget.store.courseworkState;
+    final hiddenIds = {for (final a in widget.store.hiddenAssignments) a.id};
+    final seenIds = <String>{};
+    final sliceItems = [
+      for (final a in [
+        ...widget.store.assignments,
+        ...widget.store.hiddenAssignments,
+      ])
+        if (a.courseKey == targetKey && seenIds.add(a.id)) a,
+    ]..sort((a, b) {
+        final doneA = hiddenIds.contains(a.id) ||
+            CourseworkDeadline.isEffectivelyCompleted(a, coursework);
+        final doneB = hiddenIds.contains(b.id) ||
+            CourseworkDeadline.isEffectivelyCompleted(b, coursework);
+        if (doneA != doneB) return doneA ? 1 : -1;
+        return Assignment.compareByDeadline(a, b);
+      });
+
+    final termEntry = widget.store.termCatalog.entryFor(targetKey);
+    final title = courseMeta?.name ??
+        termEntry?.courseName ??
+        sliceItems.firstOrNull?.courseName ??
+        '当前课程';
+    final visibleItems =
+        _courseSliceExpanded ? sliceItems : sliceItems.take(4).toList();
+
+    String formatSliceTime(Assignment item) {
+      if (hiddenIds.contains(item.id)) return '已在本机隐藏';
+      if (CourseworkDeadline.isEffectivelyCompleted(item, coursework)) {
+        return item.isExam ? '已完成考试' : '已完成作业';
+      }
+      if (item.isExam) {
+        final at = item.timelineAt;
+        if (at != null && item.timelineTrusted) {
+          return '考试 · ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(at))}';
+        }
+        return '考试时间待确认';
+      }
+      final resolved = CourseworkDeadline.resolveEntry(
+        item,
+        CourseworkDeadline.entryFor(item, coursework),
+      );
+      if (resolved != null) {
+        final tag =
+            resolved.source == CourseworkDeadlineSource.manual ? '手动截止' : '截止';
+        return '$tag · ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(resolved.at))}';
+      }
+      return '截止时间待确认';
+    }
+
+    return JournalGroupedCard(
+      key: const ValueKey('course-hub-course-slice'),
+      dividerIndent: 16,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: journal.section),
+              if (courseMeta != null && courseMeta.teacherNames.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '教师：${courseMeta.teacherLabel}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: journal.metadata,
+                ),
+              ],
+              const SizedBox(height: 4),
+              Text(
+                [
+                  if (termEntry != null) termEntry.stateLabel,
+                  '全部课业 ${sliceItems.length} 项（含已完成/往期）',
+                ].join(' · '),
+                style: journal.metadata.copyWith(color: journal.ink),
+              ),
+            ],
+          ),
+        ),
+        if (sliceItems.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+            child: Text(
+              '本机暂无该班级的已缓存作业或考试记录',
+              style: journal.metadata,
+            ),
+          )
+        else ...[
+          for (final item in visibleItems)
+            InkWell(
+              onTap: () {
+                JournalMotion.tap(widget.store.display);
+                GoRouter.maybeOf(context)?.push(
+                  '/assignment/${Uri.encodeComponent(item.id)}',
+                );
+              },
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: journal.entryTitle,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            formatSliceTime(item),
+                            style: journal.metadata,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: journal.muted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (sliceItems.length > 4)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+                child: TextButton(
+                  key: const ValueKey('course-hub-slice-expand'),
+                  onPressed: () => setState(
+                    () => _courseSliceExpanded = !_courseSliceExpanded,
+                  ),
+                  child: Text(
+                    _courseSliceExpanded
+                        ? '收起课业列表'
+                        : '展开全部 ${sliceItems.length} 项',
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSystemRemindersCard(
+    BuildContext context,
+    JournalPalette journal,
+    List<CourseNotice> systemFiltered,
+    int systemUnreadCount,
+  ) {
+    return JournalGroupedCard(
+      key: const ValueKey('notice-system-reminders-card'),
+      dividerIndent: 16,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  key: const ValueKey('notice-system-reminders-toggle'),
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () {
+                    JournalMotion.tap(widget.store.display);
+                    setState(() {
+                      _systemRemindersExpanded = !_systemRemindersExpanded;
+                    });
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.notifications_none_rounded,
+                          size: 19,
+                          color: journal.muted,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '系统提醒（${systemFiltered.length}）',
+                                style: journal.entryTitle,
+                              ),
+                              Text(
+                                '${systemUnreadCount > 0 ? '$systemUnreadCount 条未读 · ' : ''}已自动折叠，不计入通知未读徽标',
+                                style: journal.metadata,
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          _systemRemindersExpanded
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded,
+                          color: journal.muted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              if (systemUnreadCount > 0)
+                TextButton(
+                  key: const ValueKey('notice-system-reminders-mark-read'),
+                  onPressed: widget.store.isLoading
+                      ? null
+                      : () => widget.store.markAllNoticesLocalRead(
+                            noticeIds: systemFiltered
+                                .where((n) => !n.localRead)
+                                .map((n) => n.id),
+                          ),
+                  child: const Text('全部已读'),
+                ),
+            ],
+          ),
+        ),
+        if (_systemRemindersExpanded)
+          for (final notice in systemFiltered)
+            _buildNoticeTile(context, notice, journal),
+      ],
+    );
   }
 
   Widget _buildNoticeTile(
@@ -975,11 +1294,16 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
         leading: CourseMark(course.name, size: 26),
         title: Text(course.name, style: journal.entryTitle),
         subtitle: Text(
-          snapshot == null
-              ? duplicateName
-                  ? '班级 ${course.clazzId} · $progressLabel'
-                  : progressLabel
-              : '$progressLabel · 更新于 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(snapshot.lastSyncedAt))}',
+          [
+            if (duplicateName && course.clazzId.isNotEmpty)
+              '班级 ${course.clazzId}',
+            if (course.teacherNames.isNotEmpty) course.teacherLabel,
+            snapshot == null
+                ? progressLabel
+                : '$progressLabel · 更新于 ${DateFormat('M月d日 HH:mm').format(AssignmentQuery.beijing(snapshot.lastSyncedAt))}',
+          ].join(' · '),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: journal.metadata,
         ),
         trailing: Row(

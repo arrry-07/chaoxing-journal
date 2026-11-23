@@ -54,6 +54,8 @@ class AssignmentWidgetProviderTest {
         title: String,
         urgency: String = "normal",
         remaining: String = "2天",
+        deadlineSource: String? = null,
+        eventKind: String = "deadline",
     ): JSONObject = JSONObject().apply {
         put("assignmentId", id)
         put("title", title)
@@ -62,7 +64,10 @@ class AssignmentWidgetProviderTest {
         put("remainingText", remaining)
         put("urgencyLevel", urgency)
         put("deepLinkUrl", "studyassistant:///assignments/$id")
-        put("eventKind", "deadline")
+        put("eventKind", eventKind)
+        if (deadlineSource != null) {
+            put("deadlineSource", deadlineSource)
+        }
     }
 
     @Test
@@ -163,8 +168,9 @@ class AssignmentWidgetProviderTest {
         assertEquals(View.VISIBLE, row3.visibility)
         assertEquals(View.GONE, row4.visibility)
         assertEquals(View.GONE, row6.visibility)
-        assertEquals(android.graphics.Color.parseColor("#813E53"), meta1.currentTextColor)
-        assertEquals(android.graphics.Color.parseColor("#53645A"), meta2.currentTextColor)
+        assertEquals(android.graphics.Color.parseColor("#B5493A"), meta1.currentTextColor)
+        assertEquals(android.graphics.Color.parseColor("#4E545C"), meta2.currentTextColor)
+        assertEquals(android.graphics.Color.parseColor("#1F2328"), header.currentTextColor)
         assertEquals(View.VISIBLE, footer.visibility)
         assertEquals("还有 4 项未展示 · 点击查看全部", footer.text.toString())
     }
@@ -284,10 +290,56 @@ class AssignmentWidgetProviderTest {
 
         assertEquals(android.graphics.Color.parseColor("#EAE6DF"),
             view.findViewById<TextView>(R.id.widget_header).currentTextColor)
-        assertEquals(android.graphics.Color.parseColor("#E8827D"),
+        assertEquals(android.graphics.Color.parseColor("#E27D70"),
             view.findViewById<TextView>(R.id.assignment_meta_1).currentTextColor)
-        assertEquals(android.graphics.Color.parseColor("#A09B93"),
+        assertEquals(android.graphics.Color.parseColor("#BAB5AC"),
             view.findViewById<TextView>(R.id.assignment_meta_2).currentTextColor)
+    }
+
+    @Test
+    fun manualSourceLegacyItemsAndStartedExamRenderExpectedCopyAndUrgency() {
+        val items = JSONArray().apply {
+            put(sampleItem("m1", "手动改期作业", deadlineSource = "manual"))
+            put(sampleItem("l1", "旧格式作业", deadlineSource = null))
+            put(
+                sampleItem(
+                    "e1",
+                    "跨天考试",
+                    urgency = "critical",
+                    remaining = "已开考",
+                    eventKind = "examStart",
+                ),
+            )
+        }
+        context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
+            .edit().putString("assignment_snapshot", items.toString()).commit()
+
+        val portrait = context.createConfigurationContext(
+            Configuration(context.resources.configuration).apply {
+                orientation = Configuration.ORIENTATION_PORTRAIT
+                uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                    Configuration.UI_MODE_NIGHT_NO
+                fontScale = 1.0f
+            },
+        )
+        val options = Bundle().apply {
+            putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 160)
+            putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 180)
+        }
+        val view = AssignmentWidgetProvider().buildViews(portrait, options)
+            .apply(portrait, FrameLayout(portrait))
+
+        assertEquals(
+            "手动 11月20日 23:59 · 2天 · 高等数学",
+            view.findViewById<TextView>(R.id.assignment_meta_1).text.toString(),
+        )
+        assertEquals(
+            "11月20日 23:59 · 2天 · 高等数学",
+            view.findViewById<TextView>(R.id.assignment_meta_2).text.toString(),
+        )
+        val examMeta = view.findViewById<TextView>(R.id.assignment_meta_3)
+        assertEquals("11月20日 23:59 · 已开考 · 高等数学", examMeta.text.toString())
+        assertEquals(android.graphics.Color.parseColor("#4E545C"), examMeta.currentTextColor)
     }
 
     @Test

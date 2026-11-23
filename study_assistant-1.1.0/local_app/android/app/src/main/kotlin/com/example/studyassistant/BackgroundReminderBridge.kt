@@ -168,8 +168,13 @@ object BackgroundReminderBridge {
                     "updateSettings" -> {
                         leaseExecutor.execute {
                             runCatching {
+                                val accountHash = call.requiredString("accountHash")
+                                val previousChannel = database.readAccount(accountHash)?.deadlineChannelId
+                                val requestedChannel = call.argument<String>("deadlineChannelId")
+                                val normalizedRequested =
+                                    DeadlineChannelPolicy.normalizeChannelId(requestedChannel)
                                 val state = database.updateSettings(
-                                    accountHash = call.requiredString("accountHash"),
+                                    accountHash = accountHash,
                                     sessionEpoch = call.requiredLong("sessionEpoch"),
                                     backgroundEnabled =
                                         call.argument<Boolean>("enabled") == true,
@@ -185,7 +190,24 @@ object BackgroundReminderBridge {
                                         ) == true,
                                     showDetails =
                                         call.argument<Boolean>("showDetails") == true,
+                                    allowUrgentNightBreakthrough =
+                                        call.argument<Boolean>("allowUrgentNightBreakthrough"),
+                                    deadlineChannelId = normalizedRequested,
                                 )
+                                AssignmentNotificationPublisher.ensureChannels(
+                                    appContext,
+                                    state.deadlineChannelId,
+                                )
+                                if (normalizedRequested != null &&
+                                    previousChannel != null &&
+                                    previousChannel != state.deadlineChannelId
+                                ) {
+                                    AssignmentNotificationPublisher.cancelDeadlineReminders(
+                                        appContext,
+                                        database,
+                                        accountHash,
+                                    )
+                                }
                                 val reconcileSchedules =
                                     call.argument<Boolean>("reconcileSchedules") != false
                                 if (reconcileSchedules) {
@@ -621,6 +643,20 @@ object BackgroundReminderBridge {
                             ),
                         )
                     }
+                    "sendTestDeadlineNotification" -> tasks.execute(result) { reply ->
+                        val delayMillis =
+                            (call.argument<Number>("delayMillis")?.toLong() ?: 3_000L)
+                                .coerceIn(0L, 10_000L)
+                        reply.success(
+                            AssignmentNotificationPublisher.publishTestDeadlineNotification(
+                                context = appContext,
+                                database = database,
+                                accountHash = call.argument<String>("accountHash"),
+                                requestedChannelId = call.argument<String>("channelId"),
+                                delayMillis = delayMillis,
+                            ).toMap(),
+                        )
+                    }
                     else -> result.notImplemented()
                 }
             } catch (error: ReminderHistoryException) {
@@ -691,7 +727,7 @@ object BackgroundReminderBridge {
         if (application.pendingNewCount == 0) {
             AssignmentAlarmScheduler.cancelNewAssignmentWindow(appContext, accountHash)
         }
-        if (NativeReminderPolicy.isInDaytimeWindow(now.toInstant(), now.zone)) {
+        if (DeadlineQuietHoursPolicy.isInAudibleNewWindow(now.toInstant(), now.zone)) {
             val published = AssignmentNotificationPublisher.publishPendingNewAssignments(
                 appContext,
                 database,
@@ -708,8 +744,8 @@ object BackgroundReminderBridge {
                 now.zone,
             )
             if (application.newEvents.isNotEmpty()) {
-                val windowStart = NativeReminderPolicy
-                    .nextWindowStart(now.toInstant(), now.zone)
+                val windowStart = DeadlineQuietHoursPolicy
+                    .nextAudibleNewWindowStart(now.toInstant(), now.zone)
                     .toEpochMilli()
                 AssignmentNotificationPublisher.recordEventObservations(
                     context = appContext,

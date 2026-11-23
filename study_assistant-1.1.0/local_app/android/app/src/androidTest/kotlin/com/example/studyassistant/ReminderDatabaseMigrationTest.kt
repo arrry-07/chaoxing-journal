@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -48,7 +49,7 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v3")!!
 
-        assertEquals(7, database.readableDatabase.version)
+        assertEquals(8, database.readableDatabase.version)
         assertEquals(3L, account.pendingSignalVersion)
         assertEquals(2L, account.consumedSignalVersion)
         assertEquals(0L, account.attemptedSignalVersion)
@@ -77,7 +78,7 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v4")!!
 
-        assertEquals(7, database.readableDatabase.version)
+        assertEquals(8, database.readableDatabase.version)
         assertEquals(8L, account.pendingSignalVersion)
         assertEquals(6L, account.consumedSignalVersion)
         assertEquals(7L, account.attemptedSignalVersion)
@@ -111,7 +112,7 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v5")!!
 
-        assertEquals(7, database.readableDatabase.version)
+        assertEquals(8, database.readableDatabase.version)
         assertEquals("legacy-v5-token", account.claimToken)
         assertMigratedBusinessDataIntact(database, "migration-v5")
 
@@ -130,11 +131,11 @@ class ReminderDatabaseMigrationTest {
 
     @Test
     fun freshDatabaseHasV7Indices() {
-        val name = "fresh-v7-${System.nanoTime()}.db"
+        val name = "fresh-v8-${System.nanoTime()}.db"
         names.add(name)
         ReminderDatabase.openForTest(context, name).use { database ->
             assertV7Indices(database.readableDatabase)
-            assertEquals(7, database.readableDatabase.version)
+            assertEquals(8, database.readableDatabase.version)
         }
     }
 
@@ -173,7 +174,46 @@ class ReminderDatabaseMigrationTest {
             assertEquals("v6-evidence", evidence.single().logicalKey)
             assertEquals("recoveryPending", evidence.single().state)
             assertV7Indices(db)
-            assertEquals(7, db.version)
+            assertEquals(8, db.version)
+        }
+    }
+
+    @Test
+    fun v7ToV8AddsQuietHoursColumnsAndMarksLegacySourceUnknown() {
+        val name = "migration-v7-${System.nanoTime()}.db"
+        val account = "migration-v7"
+        names.add(name)
+        createDatabase(name, version = 7, includeAttemptColumns = true, includeClaimToken = true) { db ->
+            seedV6Schema(db)
+            db.execSQL("CREATE INDEX IF NOT EXISTS events_notification_id ON events(notification_id)")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS events_account_assignment " +
+                    "ON events(account_hash, assignment_id, updated_at)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS notification_signals_received_at " +
+                    "ON notification_signals(account_hash, received_at)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS reminder_schedule_evidence_subject " +
+                    "ON reminder_schedule_evidence(" +
+                    "account_hash, history_generation, subject_kind, subject_id, confirmed_at)",
+            )
+            insertAccount(db, account, pendingVersion = 3, consumedVersion = 2)
+            seedLegacyRows(db, account)
+        }
+
+        ReminderDatabase.openForTest(context, name).use { database ->
+            assertEquals(8, database.readableDatabase.version)
+            val state = database.readAccount(account)!!
+            assertFalse(state.allowUrgentNightBreakthrough)
+            assertEquals(AssignmentNotificationPublisher.CHANNEL_DEADLINES, state.deadlineChannelId)
+            val legacySnapshot = database.snapshot(account, "cx:work:1:2:migrated")!!
+            val legacyEvent = database.eventsForAccount(account).single()
+            assertEquals("unknown", legacySnapshot.deadlineSource)
+            assertEquals("unknown", legacyEvent.deadlineSource)
+            // Legacy v7 deadline event lacking source must not be allowed to deliver/match.
+            assertFalse(legacySnapshot.matchesEvent(legacyEvent, System.currentTimeMillis()))
         }
     }
 

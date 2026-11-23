@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import '../../app/journal.dart';
 import '../../models/assignment.dart';
+import '../../models/local_coursework_state.dart';
 import '../../services/assignment_query.dart';
+import '../../services/coursework_deadline.dart';
 import '../../services/exam_schedule_presentation.dart';
 import 'coursework_status_pill.dart';
 
@@ -16,6 +18,7 @@ class AssignmentCard extends StatelessWidget {
       this.onOpenAssignment,
       this.examSources = const [],
       this.displayIndex,
+      this.courseworkEntry,
       this.opening = false,
       this.compact = false,
       this.countdown = false,
@@ -23,7 +26,9 @@ class AssignmentCard extends StatelessWidget {
       this.showDivider = true,
       this.enableTapFeedback = true,
       this.inPinnedSection = false,
+      this.dragHandle,
       this.deadlinePending = false,
+      this.hasDeadlineAlert = false,
       this.previewOnly = false,
       this.previewSaving = false,
       this.contentPadding = EdgeInsets.zero,
@@ -31,37 +36,68 @@ class AssignmentCard extends StatelessWidget {
   final Assignment assignment;
   final List<Assignment> examSources;
   final AssignmentDisplayIndex? displayIndex;
+  final LocalCourseworkEntry? courseworkEntry;
   final DateTime now;
   final VoidCallback onTap;
   final VoidCallback? onOpenAssignment;
   final VoidCallback? onLongPress;
+  final Widget? dragHandle;
   final EdgeInsetsGeometry contentPadding;
   final bool opening;
   final bool showFullDeadline, inPinnedSection, showDivider, enableTapFeedback;
-  final bool deadlinePending, previewOnly, previewSaving;
+  final bool deadlinePending, hasDeadlineAlert, previewOnly, previewSaving;
   final bool compact, countdown;
 
   static final DateFormat _clockFormat = DateFormat('HH:mm');
-  static (TextStyle, TextDirection, TextScaler)? _cachedRailKey;
+  static (
+    TextStyle,
+    TextStyle,
+    TextDirection,
+    TextScaler,
+    bool
+  )? _cachedRailKey;
   static double _cachedRailWidth = 0;
 
   static double _measureRailWidth(
     TextStyle style,
+    TextStyle metaStyle,
     TextDirection direction,
-    TextScaler scaler,
-  ) {
-    final key = (style, direction, scaler);
+    TextScaler scaler, {
+    required bool inPinnedSection,
+  }) {
+    final key = (style, metaStyle, direction, scaler, inPinnedSection);
     if (_cachedRailKey == key) return _cachedRailWidth;
-    final painter = TextPainter(
-      text: TextSpan(text: '00:00', style: style),
-      textDirection: direction,
-      textScaler: scaler,
-    )..layout();
-    final width = painter.width.ceilToDouble() + 4;
-    painter.dispose();
+    double widthFor(String text, TextStyle s) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: s),
+        textDirection: direction,
+        textScaler: scaler,
+      )..layout();
+      final w = painter.width.ceilToDouble() + 4;
+      painter.dispose();
+      return w;
+    }
+
+    var width = widthFor('00:00', style);
+    if (inPinnedSection) {
+      final dateWidth = widthFor('12/31',
+          metaStyle.copyWith(fontSize: 11.5, fontWeight: FontWeight.w600));
+      final remWidth = widthFor('剩23小时', metaStyle.copyWith(fontSize: 11));
+      if (dateWidth > width) width = dateWidth;
+      if (remWidth > width) width = remWidth;
+    }
     _cachedRailKey = key;
     _cachedRailWidth = width;
     return width;
+  }
+
+  static String _compactRemaining(DateTime deadline, DateTime now) {
+    final diff = deadline.difference(now);
+    if (diff.isNegative || diff.inSeconds <= 0) return '已逾期';
+    final minutes = (diff.inMilliseconds / 60000).ceil();
+    if (minutes < 60) return '剩$minutes分';
+    if (minutes < 1440) return '剩${(minutes / 60).ceil()}小时';
+    return '剩${(minutes / 1440).ceil()}天';
   }
 
   static String examStateLabel(Assignment assignment, DateTime now) {
@@ -112,13 +148,16 @@ class AssignmentCard extends StatelessWidget {
     ];
   }
 
-  CourseworkPillTone _stateTone(Assignment a, AssignmentDeadlineBucket bucket) {
+  CourseworkPillTone _stateTone(
+    Assignment a,
+    AssignmentDeadlineBucket bucket, {
+    bool hasManualDeadline = false,
+  }) {
     if (a.isExam) return CourseworkPillTone.exam;
     if (a.isCompleted) return CourseworkPillTone.completed;
     if (bucket == AssignmentDeadlineBucket.unconfirmed ||
         a.status == 'unknown' ||
-        !a.deadlineTrusted ||
-        a.deadlineReadFailed) {
+        (!hasManualDeadline && (!a.deadlineTrusted || a.deadlineReadFailed))) {
       return CourseworkPillTone.unconfirmed;
     }
     return CourseworkPillTone.neutral;
@@ -127,19 +166,24 @@ class AssignmentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
-    final a = assignment, d = a.timelineAt;
-    final bucket = AssignmentQuery.timelineBucketAt(a, now);
+    final a = assignment;
+    final resolvedDeadline =
+        a.isExam ? null : CourseworkDeadline.resolveEntry(a, courseworkEntry);
+    final isManualDeadline = resolvedDeadline?.isManual == true;
+    final d = a.isExam ? a.timelineAt : resolvedDeadline?.at;
+    final bucket = a.isExam
+        ? AssignmentQuery.timelineBucketAt(a, now)
+        : CourseworkDeadline.bucketAt(a, now, entry: courseworkEntry);
     final overdue = bucket == AssignmentDeadlineBucket.overdue;
     final today = d != null &&
         bucket != AssignmentDeadlineBucket.unconfirmed &&
         AssignmentQuery.dayKey(d) == AssignmentQuery.dayKey(now);
     final urgent = overdue
-        ? '已逾期${now.difference(d!).inDays > 0 ? '${now.difference(d).inDays}天' : ''}'
+        ? '${isManualDeadline ? '手动截止已过' : '已逾期'}${now.difference(d!).inDays > 0 ? '${now.difference(d).inDays}天' : ''}'
         : showFullDeadline &&
                 !a.isExam &&
                 a.isPendingConfirmed &&
-                a.deadlineTrusted &&
-                !a.deadlineReadFailed &&
+                resolvedDeadline != null &&
                 today
             ? '今天截止'
             : null;
@@ -189,24 +233,28 @@ class AssignmentCard extends StatelessWidget {
             .format(beijingDeadline);
     final deadline = deadlinePending
         ? '正在确认截止时间'
-        : a.deadlineReadFailed
-            ? d == null
-                ? withStart('截止时间待确认')
-                : '截止 $deadlineDate · ${a.deadlineLabel}'
-            : bucket == AssignmentDeadlineBucket.unconfirmed &&
-                    d == null &&
-                    a.deadlineTrusted &&
-                    !a.deadlineReadFailed
-                ? withStart('截止信息待确认')
-                : !a.deadlineTrusted
-                    ? withStart(a.deadlineLabel)
-                    : d == null
-                        ? withStart('无截止日期')
-                        : countdown && !inPinnedSection
-                            ? DisplayPreferences.remaining(d, now)
-                            : '截止 $deadlineDate';
+        : isManualDeadline
+            ? countdown && !inPinnedSection
+                ? '手动 ${DisplayPreferences.remaining(d!, now)} · 官方待确认'
+                : '手动截止 $deadlineDate · 官方待确认'
+            : a.deadlineReadFailed
+                ? (a.deadlineAt == null
+                    ? withStart('截止时间待确认')
+                    : '截止 ${DateFormat(inPinnedSection && AssignmentQuery.beijing(a.deadlineAt!).year != AssignmentQuery.beijing(now).year ? 'yyyy年M月d日 HH:mm' : 'M月d日 HH:mm').format(AssignmentQuery.beijing(a.deadlineAt!))} · ${a.deadlineLabel}')
+                : bucket == AssignmentDeadlineBucket.unconfirmed &&
+                        d == null &&
+                        a.deadlineTrusted &&
+                        !a.deadlineReadFailed
+                    ? withStart('截止信息待确认')
+                    : !a.deadlineTrusted
+                        ? withStart(a.deadlineLabel)
+                        : d == null
+                            ? withStart('无截止日期')
+                            : countdown && !inPinnedSection
+                                ? DisplayPreferences.remaining(d, now)
+                                : '截止 $deadlineDate';
     final hasTime =
-        d != null && a.timelineTrusted && (a.isExam || !a.deadlineReadFailed);
+        d != null && (a.isExam ? a.timelineTrusted : resolvedDeadline != null);
     final clock = hasTime
         ? _clockFormat.format(AssignmentQuery.beijing(d))
         : examSchedule?.timeline?.clock ?? '';
@@ -217,17 +265,28 @@ class AssignmentCard extends StatelessWidget {
             : '待定';
     final railWidth = _measureRailWidth(
       journal.time,
+      journal.metadata,
       Directionality.of(context),
       MediaQuery.textScalerOf(context),
+      inPinnedSection: inPinnedSection,
     );
     final largeText = JournalLayout.isLargeText(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
-    final stateTone = _stateTone(a, bucket);
+    final stateTone =
+        _stateTone(a, bucket, hasManualDeadline: isManualDeadline);
     final hasSpecialStatePill = stateTone != CourseworkPillTone.neutral;
-    final highlightToday =
-        today && !overdue && !a.isCompleted && a.deadlineTrusted;
-    final railTextColor = highlightToday
+    final highlightToday = today &&
+        !overdue &&
+        !a.isCompleted &&
+        (a.isExam ? a.timelineTrusted : resolvedDeadline != null);
+    final pinUrgent = inPinnedSection &&
+        !overdue &&
+        !a.isCompleted &&
+        d != null &&
+        (a.isExam ? a.timelineTrusted : resolvedDeadline != null) &&
+        (today || d.difference(now) <= const Duration(hours: 48));
+    final railTextColor = (highlightToday || pinUrgent)
         ? journal.berry
         : clock.isEmpty
             ? (railLabel == '待定' ? journal.ochre : journal.muted)
@@ -238,6 +297,18 @@ class AssignmentCard extends StatelessWidget {
         CourseworkStatusPill(
           label: state,
           tone: stateTone,
+        ),
+      if (isManualDeadline)
+        const CourseworkStatusPill(
+          label: '手动',
+          tone: CourseworkPillTone.neutral,
+          icon: Icons.edit_calendar_outlined,
+        ),
+      if (hasDeadlineAlert && !a.isCompleted)
+        const CourseworkStatusPill(
+          label: '时间变更',
+          tone: CourseworkPillTone.urgentToday,
+          icon: Icons.update_rounded,
         ),
       if (previewOnly)
         CourseworkStatusPill(
@@ -262,7 +333,11 @@ class AssignmentCard extends StatelessWidget {
         if (examSchedule?.yearUnconfirmed == true)
           Text('年份待确认', style: journal.metadata),
         for (final line in examLines) Text(line, style: journal.metadata),
-      ] else if (showFullDeadline || inPinnedSection || countdown || !hasTime)
+      ] else if (showFullDeadline ||
+          inPinnedSection ||
+          countdown ||
+          !hasTime ||
+          isManualDeadline)
         Text(
           inPinnedSection && countdown && hasTime
               ? '$deadline · ${DisplayPreferences.remaining(d, now)}'
@@ -313,7 +388,7 @@ class AssignmentCard extends StatelessWidget {
               opening ? Icons.hourglass_top_rounded : Icons.open_in_new_rounded,
               size: 18,
               color: enabled
-                  ? journal.muted.withValues(alpha: 0.9)
+                  ? journal.muted
                   : journal.muted.withValues(alpha: 0.45),
             );
 
@@ -379,11 +454,78 @@ class AssignmentCard extends StatelessWidget {
     final contentRight =
         contentPadding.resolve(Directionality.of(context)).right;
     final hasInlineLaunch = onOpenAssignment != null && !largeText;
+    final hasInlineDrag = dragHandle != null && !largeText;
+    final topRightReserve = (hasInlineLaunch ? 48.0 : 0.0) +
+        (hasInlineDrag ? 34.0 : 0.0) +
+        ((hasInlineLaunch || hasInlineDrag) ? 6.0 : 0.0);
     final titlePadding = EdgeInsets.only(
-      right: hasInlineLaunch
-          ? (54.0 - contentRight).clamp(0.0, 54.0).toDouble()
+      right: (hasInlineLaunch || hasInlineDrag)
+          ? (topRightReserve - contentRight)
+              .clamp(0.0, topRightReserve)
+              .toDouble()
           : 0.0,
     );
+
+    Widget buildPinnedRail() {
+      if (d == null || !hasTime) {
+        return Text(
+          railLabel,
+          style: journal.time.copyWith(
+            color: railTextColor,
+            fontWeight: clock.isEmpty ? FontWeight.w500 : FontWeight.w600,
+            fontSize: clock.isEmpty ? 14 : journal.time.fontSize,
+          ),
+        );
+      }
+      final beijingD = AssignmentQuery.beijing(d);
+      final todayDay = AssignmentQuery.dayKey(now);
+      final tomorrowDay =
+          DateTime(todayDay.year, todayDay.month, todayDay.day + 1);
+      final dueDay = AssignmentQuery.dayKey(d);
+      final dateLabel = dueDay == todayDay
+          ? '今天'
+          : dueDay == tomorrowDay
+              ? '明天'
+              : '${beijingD.month}/${beijingD.day}';
+      final remLabel = overdue
+          ? (isManualDeadline ? '手动已过' : '已逾期')
+          : _compactRemaining(d, now);
+      final dateColor = pinUrgent ? journal.berry : journal.muted;
+      final clockColor =
+          pinUrgent ? journal.berry : (overdue ? journal.muted : journal.ink);
+      final remColor = pinUrgent ? journal.berry : journal.muted;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            dateLabel,
+            style: journal.metadata.copyWith(
+              color: dateColor,
+              fontSize: 11.5,
+              height: 1.22,
+              fontWeight: pinUrgent ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+          Text(
+            clock,
+            style: journal.time.copyWith(
+              color: clockColor,
+              fontWeight: FontWeight.w600,
+              height: 1.22,
+            ),
+          ),
+          Text(
+            remLabel,
+            style: journal.metadata.copyWith(
+              color: remColor,
+              fontSize: 11,
+              height: 1.22,
+            ),
+          ),
+        ],
+      );
+    }
 
     final bodyColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -436,9 +578,7 @@ class AssignmentCard extends StatelessWidget {
                 if (hasTitle && hasCourse && showPlainInlineState)
                   Text(
                     '·',
-                    style: journal.metadata.copyWith(
-                      color: journal.muted.withValues(alpha: 0.65),
-                    ),
+                    style: journal.metadata,
                   ),
                 if (showPlainInlineState) Text(state, style: journal.metadata),
                 if (highlightPills.isNotEmpty && !hasSpecialStatePill)
@@ -513,18 +653,20 @@ class AssignmentCard extends StatelessWidget {
                                               ),
                                             ),
                                     )
-                                  : Text(
-                                      railLabel,
-                                      style: journal.time.copyWith(
-                                        color: railTextColor,
-                                        fontWeight: clock.isEmpty
-                                            ? FontWeight.w500
-                                            : FontWeight.w600,
-                                        fontSize: clock.isEmpty
-                                            ? 14
-                                            : journal.time.fontSize,
-                                      ),
-                                    ),
+                                  : inPinnedSection
+                                      ? buildPinnedRail()
+                                      : Text(
+                                          railLabel,
+                                          style: journal.time.copyWith(
+                                            color: railTextColor,
+                                            fontWeight: clock.isEmpty
+                                                ? FontWeight.w500
+                                                : FontWeight.w600,
+                                            fontSize: clock.isEmpty
+                                                ? 14
+                                                : journal.time.fontSize,
+                                          ),
+                                        ),
                             ),
                             const SizedBox(width: railGap),
                             Expanded(child: bodyColumn),
@@ -534,12 +676,18 @@ class AssignmentCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (onOpenAssignment != null && largeText)
+                if ((onOpenAssignment != null || dragHandle != null) &&
+                    largeText)
                   Padding(
                     padding: EdgeInsets.only(left: contentLeftInset, bottom: 8),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: buildLaunchControl(),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (onOpenAssignment != null) buildLaunchControl(),
+                        if (dragHandle != null) dragHandle!,
+                      ],
                     ),
                   ),
                 if (showDivider) ...[
@@ -560,11 +708,17 @@ class AssignmentCard extends StatelessWidget {
             ),
           ),
         ),
-        if (hasInlineLaunch)
+        if (hasInlineLaunch || hasInlineDrag)
           Positioned(
             top: compact ? 0 : 2,
             right: 2,
-            child: buildLaunchControl(),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (hasInlineLaunch) buildLaunchControl(),
+                if (hasInlineDrag) dragHandle!,
+              ],
+            ),
           ),
       ],
     );
@@ -646,12 +800,7 @@ class _CourseStateLine extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 5),
-            Text(
-              '·',
-              style: style.copyWith(
-                color: journal.muted.withValues(alpha: 0.65),
-              ),
-            ),
+            Text('·', style: style),
             const SizedBox(width: 5),
             Text(state, style: style),
           ],
