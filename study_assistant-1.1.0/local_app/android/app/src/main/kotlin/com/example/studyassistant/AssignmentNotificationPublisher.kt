@@ -6,8 +6,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
 import android.net.Uri
 import android.os.SystemClock
+import android.provider.Settings
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -15,12 +17,19 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 object AssignmentNotificationPublisher {
-    const val CHANNEL_DEADLINES = "assignment_deadlines"
-    const val CHANNEL_UPDATES = "assignment_updates"
-    const val CHANNEL_SILENT = "assignment_silent"
+    const val CHANNEL_DEADLINES = DeadlineChannelPolicy.CHANNEL_DEADLINES
+    const val CHANNEL_DEADLINES_V2 = DeadlineChannelPolicy.CHANNEL_DEADLINES_V2
+    const val CHANNEL_UPDATES = DeadlineChannelPolicy.CHANNEL_UPDATES
+    const val CHANNEL_SILENT = DeadlineChannelPolicy.CHANNEL_SILENT
+    const val TEST_NOTIFICATION_ID = DeadlineChannelPolicy.TEST_NOTIFICATION_ID
     private const val EXTRA_DELIVERY_TOKEN = "com.example.studyassistant.DELIVERY_TOKEN"
+    private val testDelayExecutor = Executors.newSingleThreadScheduledExecutor { action ->
+        Thread(action, "test-notification-delay").apply { isDaemon = true }
+    }
 
     // Guarded by deliveryLock, including cleanup and the visibility check.
     private val inFlightDeliveries = mutableMapOf<Int, InFlightDelivery>()
@@ -38,37 +47,89 @@ object AssignmentNotificationPublisher {
         val historyWarning: String? = null,
     )
 
-    fun ensureChannels(context: Context) {
+    data class TestPublishResult(
+        val status: String,
+        val channelId: String?,
+        val warning: String?,
+        val retryAfterAt: Long? = null,
+    ) {
+        fun toMap(): Map<String, Any?> = mapOf(
+            "status" to status,
+            "channelId" to channelId,
+            "warning" to warning,
+            "retryAfterAt" to retryAfterAt,
+        )
+    }
+
+    fun ensureDeadlineChannel(context: Context, channelId: String) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_DEADLINES,
-                "作业截止提醒",
-                NotificationManager.IMPORTANCE_HIGH,
-            ).apply {
-                description = "学习通作业截止前提醒"
-            },
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_UPDATES,
-                "作业变化提醒",
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply {
-                description = "学习通作业新增提醒"
-            },
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_SILENT,
-                "静默作业通知",
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = "未知截止时间的新增作业静默提示"
-                setSound(null, null)
-                enableVibration(false)
-            },
-        )
+        val normalized = DeadlineChannelPolicy.normalizeChannelId(channelId) ?: CHANNEL_DEADLINES
+        if (manager.getNotificationChannel(normalized) != null) return
+        if (normalized == CHANNEL_DEADLINES_V2) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_DEADLINES_V2,
+                    "作业截止提醒（增强有声）",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = "学习通作业截止与考试开考有声提醒"
+                    val soundUri = Settings.System.DEFAULT_NOTIFICATION_URI
+                    if (soundUri != null) {
+                        setSound(
+                            soundUri,
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .build(),
+                        )
+                    }
+                    enableVibration(true)
+                    vibrationPattern = DeadlineChannelPolicy.DEFAULT_VIBRATION_PATTERN
+                    lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+                },
+            )
+        } else {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_DEADLINES,
+                    "作业截止提醒",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = "学习通作业截止前提醒"
+                },
+            )
+        }
+    }
+
+    fun ensureChannels(context: Context, activeDeadlineChannelId: String? = null) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val deadlineChannel = DeadlineChannelPolicy.normalizeChannelId(activeDeadlineChannelId)
+            ?: DeadlineChannelPolicy.resolveFromSystem(context)
+        ensureDeadlineChannel(context, deadlineChannel)
+        if (manager.getNotificationChannel(CHANNEL_UPDATES) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_UPDATES,
+                    "作业变化提醒",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = "学习通作业新增提醒"
+                },
+            )
+        }
+        if (manager.getNotificationChannel(CHANNEL_SILENT) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_SILENT,
+                    "静默作业通知",
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "未知截止时间的新增作业静默提示"
+                    setSound(null, null)
+                    enableVibration(false)
+                },
+            )
+        }
     }
 
     fun publishDeadline(
@@ -78,7 +139,6 @@ object AssignmentNotificationPublisher {
         now: Instant = Instant.now(),
         zone: ZoneId = ZoneId.systemDefault(),
     ): PublishResult {
-        ensureChannels(context)
         if (!LegacyAssignmentMigrationState.isComplete(context)) {
             return blocked(
                 context,
@@ -91,6 +151,7 @@ object AssignmentNotificationPublisher {
         }
         val account = database.readAccount(event.accountHash)
             ?: return PublishResult(false, null, "账号提醒状态不存在")
+        ensureChannels(context, account.deadlineChannelId)
         if (account.pendingUpdate) {
             return blocked(
                 context,
@@ -209,9 +270,18 @@ object AssignmentNotificationPublisher {
                 )
             }
         }
-        val activeChannel = CHANNEL_DEADLINES
+        val activeChannel = DeadlineChannelPolicy.normalizeChannelId(account.deadlineChannelId)
+            ?: CHANNEL_DEADLINES
+        ensureDeadlineChannel(context, activeChannel)
         notificationWarning(context, activeChannel)?.let {
-            return blocked(context, database, listOf(event), event.eventKind, it)
+            return blocked(
+                context,
+                database,
+                listOf(event),
+                event.eventKind,
+                it,
+                channelIdOverride = activeChannel,
+            )
         }
 
         val remaining = formatRemaining(
@@ -237,7 +307,7 @@ object AssignmentNotificationPublisher {
         )
         val notification = baseBuilder(
             context,
-            CHANNEL_DEADLINES,
+            activeChannel,
             title,
             body,
             anonymousBody.takeIf { account.showDetails },
@@ -534,6 +604,116 @@ object AssignmentNotificationPublisher {
             null,
             System.currentTimeMillis(),
         )
+    }
+
+    fun cancelDeadlineReminders(
+        context: Context,
+        database: ReminderDatabase,
+        accountHash: String,
+    ) {
+        val events = synchronized(LegacyAssignmentNotificationMigrator.deliveryLock) {
+            val manager = NotificationManagerCompat.from(context)
+            val cancelled = database.cancelDeadlineReminders(accountHash)
+            cancelInFlightForAccountLocked(manager, accountHash)
+            cancelled.forEach {
+                AssignmentAlarmScheduler.cancelDeadline(context, it)
+                manager.cancel(it.notificationId)
+            }
+            cancelled
+        }
+        if (events.isNotEmpty()) {
+            recordObservations(
+                context,
+                database,
+                events,
+                "cancelled",
+                "scheduleReplaced",
+                null,
+                System.currentTimeMillis(),
+                useEventNotificationId = true,
+            )
+        }
+    }
+
+    fun publishTestDeadlineNotification(
+        context: Context,
+        database: ReminderDatabase,
+        accountHash: String? = null,
+        requestedChannelId: String? = null,
+        now: Instant = Instant.now(),
+        zone: ZoneId = ZoneId.systemDefault(),
+        delayMillis: Long = 3_000L,
+    ): TestPublishResult {
+        if (DeadlineQuietHoursPolicy.isQuiet(now, zone)) {
+            val retryAt = DeadlineQuietHoursPolicy.nextQuietEnd(now, zone).toEpochMilli()
+            return TestPublishResult(
+                status = "quietHours",
+                channelId = null,
+                warning = "当前处于夜间静音时段（23:30–07:30），测试提醒不会穿透静音；请在 07:30 后重试。",
+                retryAfterAt = retryAt,
+            )
+        }
+        val targetChannel = DeadlineChannelPolicy.normalizeChannelId(requestedChannelId)
+            ?: accountHash?.let { database.readAccount(it)?.deadlineChannelId }
+                ?.let(DeadlineChannelPolicy::normalizeChannelId)
+            ?: DeadlineChannelPolicy.resolveFromSystem(context)
+        ensureChannels(context, targetChannel)
+        notificationWarning(context, targetChannel)?.let { warning ->
+            return TestPublishResult(
+                status = "blocked",
+                channelId = targetChannel,
+                warning = warning,
+            )
+        }
+        val appContext = context.applicationContext ?: context
+        val launchIntent = appContext.packageManager
+            .getLaunchIntentForPackage(appContext.packageName)
+            ?.apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+        val click = launchIntent?.let {
+            PendingIntent.getActivity(
+                appContext,
+                TEST_NOTIFICATION_ID,
+                it,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
+        val body = "这是一条无隐私内容的测试提醒，用于核对声音、短振与锁屏横幅（实际效果取决于系统与渠道设置）。"
+        val notification = baseBuilder(
+            appContext,
+            targetChannel,
+            "课业手记测试有声提醒",
+            body,
+            "课业手记有声提醒测试",
+        )
+            .setOnlyAlertOnce(false)
+            .apply { if (click != null) setContentIntent(click) }
+            .build()
+        val postAction = {
+            try {
+                NotificationManagerCompat.from(appContext)
+                    .notify(TEST_NOTIFICATION_ID, notification)
+            } catch (_: SecurityException) {
+            } catch (_: RuntimeException) {
+            }
+        }
+        val boundedDelay = delayMillis.coerceIn(0L, 10_000L)
+        if (boundedDelay == 0L) {
+            return try {
+                NotificationManagerCompat.from(appContext)
+                    .notify(TEST_NOTIFICATION_ID, notification)
+                TestPublishResult(status = "posted", channelId = targetChannel, warning = null)
+            } catch (error: SecurityException) {
+                TestPublishResult(
+                    status = "blocked",
+                    channelId = targetChannel,
+                    warning = "系统通知权限未开启：${error.message.orEmpty()}",
+                )
+            }
+        }
+        testDelayExecutor.schedule(postAction, boundedDelay, TimeUnit.MILLISECONDS)
+        return TestPublishResult(status = "scheduled", channelId = targetChannel, warning = null)
     }
 
     fun cancelDeliveryForPrivacy(
@@ -915,6 +1095,7 @@ object AssignmentNotificationPublisher {
         category: String,
         warning: String,
         reasonCode: String? = null,
+        channelIdOverride: String? = null,
     ): PublishResult = PublishResult(
         false,
         null,
@@ -924,7 +1105,7 @@ object AssignmentNotificationPublisher {
             database,
             events,
             "blocked",
-            reasonCode ?: blockReasonCode(context, category),
+            reasonCode ?: blockReasonCode(context, category, channelIdOverride),
             null,
             System.currentTimeMillis(),
             categoryOverride = category,
@@ -938,10 +1119,14 @@ object AssignmentNotificationPublisher {
             events.firstOrNull()?.eventKind ?: "deadline"
         }
 
-    private fun blockReasonCode(context: Context, category: String): String {
+    private fun blockReasonCode(
+        context: Context,
+        category: String,
+        channelIdOverride: String? = null,
+    ): String {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return "notificationPermissionOff"
-        val channelId = if (category == "newAssignment") {
+        val channelId = channelIdOverride ?: if (category == "newAssignment") {
             CHANNEL_UPDATES
         } else {
             CHANNEL_DEADLINES

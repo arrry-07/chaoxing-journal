@@ -45,6 +45,7 @@ import '../models/reminder_history.dart';
 import '../models/study_notebook.dart';
 import 'course_term_catalog.dart';
 import 'coursework_deadline.dart';
+import 'deadline_quiet_hours_policy.dart';
 import 'reminder_explanation.dart';
 
 class ReturnCheckConfirmation {
@@ -921,6 +922,7 @@ class AssignmentStore extends ChangeNotifier {
   DateTime? _lastSyncAt;
   List<int> _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
   bool _allowUrgentDeadlineNightBreakthrough = false;
+  String _deadlineChannelId = LocalNotificationService.assignmentChannel;
   BackgroundCheckSettings _backgroundCheckSettings =
       const BackgroundCheckSettings(
     enabled: true,
@@ -1010,6 +1012,9 @@ class AssignmentStore extends ChangeNotifier {
       _backgroundCheckSettings.newAssignmentReminderEnabled;
   bool get allowUrgentDeadlineNightBreakthrough =>
       _allowUrgentDeadlineNightBreakthrough;
+  String get activeDeadlineChannelId => _deadlineChannelId;
+  bool get isUsingV2DeadlineChannel =>
+      _deadlineChannelId == LocalNotificationService.assignmentV2Channel;
   String? get backgroundWarning => _backgroundWarning;
   DateTime? get nextBackgroundCheckAt {
     if (!_authenticated || !_backgroundCheckSettings.enabled) return null;
@@ -2151,6 +2156,9 @@ class AssignmentStore extends ChangeNotifier {
     _journalRestoreFailed = false;
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
     _allowUrgentDeadlineNightBreakthrough = false;
+    _deadlineChannelId = LocalNotificationService.assignmentChannel;
+    notificationService.activeDeadlineChannelId =
+        LocalNotificationService.assignmentChannel;
     _lastSyncAt = null;
     _lastSyncAttemptAt = null;
     _serverBackoffUntil = null;
@@ -2229,6 +2237,17 @@ class AssignmentStore extends ChangeNotifier {
           (_authenticated && account != null)
               ? await repository.loadAllowUrgentNightBreakthrough(account)
               : false;
+      final savedDeadlineChannel = (_authenticated && account != null)
+          ? await repository.loadDeadlineChannelId(account)
+          : null;
+      _deadlineChannelId = (_authenticated && account != null)
+          ? await notificationService.resolveDefaultDeadlineChannel(
+              storedChannelId: savedDeadlineChannel,
+            )
+          : LocalNotificationService.assignmentChannel;
+      notificationService.activeDeadlineChannelId = _authenticated
+          ? _deadlineChannelId
+          : LocalNotificationService.assignmentChannel;
     });
     await stage('自动同步设置', () async {
       final snap = _captureSession();
@@ -3220,6 +3239,98 @@ class AssignmentStore extends ChangeNotifier {
     return saved;
   }
 
+  Future<bool> saveDeadlineChannelId(String channelId) async {
+    final normalized =
+        LocalAssignmentRepository.normalizeDeadlineChannelId(channelId);
+    if (normalized == null) {
+      _error = '未知的截止提醒通知渠道';
+      notifyListeners();
+      return false;
+    }
+    final snap = _captureSession();
+    var saved = false;
+    await _run(() async {
+      if (!_isSessionCurrent(snap)) return;
+      await _markReminderMutationPending();
+      if (!_isSessionCurrent(snap)) return;
+      try {
+        await _runScopedWrite(
+          snap,
+          (prefs) => repository.writeDeadlineChannelIdInPrefs(
+            prefs,
+            normalized,
+          ),
+        );
+      } on StaleSessionWriteException {
+        return;
+      }
+      if (!_isSessionCurrent(snap)) return;
+      _deadlineChannelId = normalized;
+      notificationService.activeDeadlineChannelId = snap.authenticated
+          ? normalized
+          : LocalNotificationService.assignmentChannel;
+      saved = true;
+      await _afterAssignmentsChanged(updateSummary: false);
+    });
+    return saved;
+  }
+
+  Future<TestDeadlineNotificationOutcome> sendTestDeadlineNotification({
+    int delayMillis = 3000,
+  }) async {
+    final now = _clock();
+    if (DeadlineQuietHoursPolicy.isQuiet(now)) {
+      final retryAt = DeadlineQuietHoursPolicy.nextQuietEnd(now);
+      final hm =
+          '${retryAt.hour.toString().padLeft(2, '0')}:${retryAt.minute.toString().padLeft(2, '0')}';
+      return TestDeadlineNotificationOutcome(
+        status: TestDeadlineNotificationStatus.quietHours,
+        channelId: activeDeadlineChannelId,
+        warning: '当前处于夜间静音时段（23:30–07:30），测试提醒不会穿透静音；请在 $hm 后重试。',
+        retryAfterAt: retryAt,
+      );
+    }
+    final targetChannel = _authenticated
+        ? _deadlineChannelId
+        : LocalNotificationService.assignmentChannel;
+    notificationService.activeDeadlineChannelId = targetChannel;
+    if (_nativeReminderAvailable) {
+      try {
+        return await backgroundReminderGateway.sendTestDeadlineNotification(
+          accountHash: _authenticated ? _accountHash : null,
+          channelId: targetChannel,
+          delayMillis: delayMillis,
+        );
+      } catch (error) {
+        return TestDeadlineNotificationOutcome(
+          status: TestDeadlineNotificationStatus.blocked,
+          channelId: targetChannel,
+          warning: '发送测试提醒失败：$error',
+        );
+      }
+    }
+    try {
+      final ok = await notificationService.showTestNotification();
+      return ok
+          ? TestDeadlineNotificationOutcome(
+              status: TestDeadlineNotificationStatus.posted,
+              channelId: targetChannel,
+            )
+          : TestDeadlineNotificationOutcome(
+              status: TestDeadlineNotificationStatus.blocked,
+              channelId: targetChannel,
+              warning:
+                  notificationService.lastWarning ?? '未能请求测试通知，请检查通知权限与渠道。',
+            );
+    } catch (error) {
+      return TestDeadlineNotificationOutcome(
+        status: TestDeadlineNotificationStatus.blocked,
+        channelId: targetChannel,
+        warning: '发送测试提醒失败：$error',
+      );
+    }
+  }
+
   /// Reloads durable sync timestamps and journal records if a headless
   /// background check persisted newer state while this foreground store was idle.
   Future<bool> reconcileExternalSyncState() async {
@@ -3738,6 +3849,9 @@ class AssignmentStore extends ChangeNotifier {
       _needsProfileRecovery = false;
       _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
       _allowUrgentDeadlineNightBreakthrough = false;
+      _deadlineChannelId = LocalNotificationService.assignmentChannel;
+      notificationService.activeDeadlineChannelId =
+          LocalNotificationService.assignmentChannel;
       _chaoxingDisplayName = null;
       _chaoxingAvatarUrl = null;
       _error = null;
@@ -3839,6 +3953,9 @@ class AssignmentStore extends ChangeNotifier {
     notificationService.courseworkState = effectiveCoursework;
     notificationService.allowUrgentNightBreakthrough =
         snap.authenticated && _allowUrgentDeadlineNightBreakthrough;
+    notificationService.activeDeadlineChannelId = snap.authenticated
+        ? _deadlineChannelId
+        : LocalNotificationService.assignmentChannel;
     if (!_privacyCleanupPending) {
       if (updateAssignmentReminders) {
         if (_nativeReminderAvailable && _authenticated) {
@@ -5114,6 +5231,7 @@ class AssignmentStore extends ChangeNotifier {
           showDetails: notificationService.showDetails,
           reconcileSchedules: _manageBackgroundSchedule,
           allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
+          deadlineChannelId: _deadlineChannelId,
         );
       }
       if (_manageBackgroundSchedule) {

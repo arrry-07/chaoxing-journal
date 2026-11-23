@@ -5,6 +5,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.media.AudioAttributes
 import android.os.Build
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -1018,5 +1019,134 @@ class AssignmentNotificationPublisherTest {
             subjectRefs = listOf("assignment" to event.assignmentId),
         )["items"] as List<Map<String, Any?>>
         assertTrue(items.isEmpty())
+    }
+
+    @Test
+    fun zCreatesV2DeadlineChannelWithoutOverwritingExistingChannel() {
+        notificationManager.deleteNotificationChannel(
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+        )
+        notificationManager.deleteNotificationChannel(
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES,
+        )
+        notificationManager.createNotificationChannel(
+            NotificationChannel(
+                AssignmentNotificationPublisher.CHANNEL_DEADLINES,
+                "既有旧截止渠道",
+                NotificationManager.IMPORTANCE_LOW,
+            ),
+        )
+
+        AssignmentNotificationPublisher.ensureChannels(
+            context,
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+        )
+
+        val v2 = notificationManager.getNotificationChannel(
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+        )
+        assertEquals(NotificationManager.IMPORTANCE_HIGH, v2.importance)
+        assertTrue(v2.sound != null)
+        assertEquals(AudioAttributes.USAGE_NOTIFICATION, v2.audioAttributes?.usage)
+        assertTrue(v2.shouldVibrate())
+        assertEquals(Notification.VISIBILITY_PRIVATE, v2.lockscreenVisibility)
+
+        val v1 = notificationManager.getNotificationChannel(
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES,
+        )
+        assertEquals(NotificationManager.IMPORTANCE_LOW, v1.importance)
+        notificationManager.deleteNotificationChannel(
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+        )
+        notificationManager.deleteNotificationChannel(
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES,
+        )
+    }
+
+    @Test
+    fun zTestDeadlineNotificationRespectsQuietHoursAndWritesNoHistory() {
+        assertTrue(LegacyAssignmentMigrationState.confirm(context))
+        val shanghai = ZoneId.of("Asia/Shanghai")
+        val quietNow = ZonedDateTime.now(shanghai).plusDays(1)
+            .withHour(23).withMinute(45).withSecond(0).withNano(0)
+        val quietResult = AssignmentNotificationPublisher.publishTestDeadlineNotification(
+            context = context,
+            database = database,
+            accountHash = accountHash,
+            requestedChannelId = AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+            now = quietNow.toInstant(),
+            zone = shanghai,
+            delayMillis = 0L,
+        )
+        assertEquals("quietHours", quietResult.status)
+        assertTrue(quietResult.retryAfterAt != null)
+        assertFalse(
+            notificationManager.activeNotifications.any {
+                it.id == AssignmentNotificationPublisher.TEST_NOTIFICATION_ID
+            },
+        )
+
+        val eventsBefore = database.eventsForAccount(accountHash).size
+        val epoch = database.ensureActiveAccount(accountHash).sessionEpoch
+        val generation = (ReminderHistoryStore.enableSession(
+            context,
+            database,
+            accountHash,
+            epoch,
+            1L,
+        )["historyGeneration"] as Number).toLong()
+        val obsContext = ReminderObservationContext(
+            accountHash = accountHash,
+            sessionEpoch = epoch,
+            historyGeneration = generation,
+            operationSequence = 1L,
+        )
+        val dayNow = ZonedDateTime.now(shanghai).plusDays(1)
+            .withHour(10).withMinute(0).withSecond(0).withNano(0)
+        try {
+            val dayResult = AssignmentNotificationPublisher.publishTestDeadlineNotification(
+                context = context,
+                database = database,
+                accountHash = accountHash,
+                requestedChannelId = AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+                now = dayNow.toInstant(),
+                zone = shanghai,
+                delayMillis = 0L,
+            )
+            assertEquals("posted", dayResult.status)
+            assertEquals(
+                AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+                dayResult.channelId,
+            )
+            val active = notificationManager.activeNotifications.single {
+                it.id == AssignmentNotificationPublisher.TEST_NOTIFICATION_ID
+            }
+            assertEquals(
+                AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+                active.notification.channelId,
+            )
+            assertEquals(
+                Notification.VISIBILITY_PRIVATE,
+                active.notification.visibility,
+            )
+            assertEquals(eventsBefore, database.eventsForAccount(accountHash).size)
+            @Suppress("UNCHECKED_CAST")
+            val historyItems = ReminderHistoryStore.listHistory(
+                context,
+                database,
+                obsContext,
+                snapshotMaxId = null,
+                beforeId = null,
+                category = null,
+                subjectRefs = emptyList(),
+            )["items"] as List<Map<String, Any?>>
+            assertTrue(historyItems.isEmpty())
+        } finally {
+            runCatching {
+                notificationManager.cancel(
+                    AssignmentNotificationPublisher.TEST_NOTIFICATION_ID,
+                )
+            }
+        }
     }
 }

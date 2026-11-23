@@ -89,6 +89,8 @@ class LocalAssignmentRepository {
       'acknowledged_deadline_changes_v1';
   static const allowUrgentNightBreakthroughKey =
       'allow_urgent_deadline_night_breakthrough_v1';
+  static const deadlineNotificationChannelKey =
+      'deadline_notification_channel_v1';
   static const _maxAcknowledgedDeadlineChanges = 300;
   static const _acknowledgedDeadlineRecoveryWarning =
       '部分时间变更已读状态无法读取，原始数据已保留备份；本次以未确认状态临时显示，请勿覆盖原数据。';
@@ -151,6 +153,7 @@ class LocalAssignmentRepository {
     '${_acknowledgedDeadlineChangesKey}_recovery_backup',
     '${_acknowledgedDeadlineChangesKey}_recovery_backups',
     allowUrgentNightBreakthroughKey,
+    deadlineNotificationChannelKey,
     '${_noticesKey}_recovery_backup',
     '${_noticesKey}_recovery_backups',
     '${_chaptersKey}_recovery_backup',
@@ -458,6 +461,51 @@ class LocalAssignmentRepository {
     }
     if (prefs.get(allowUrgentNightBreakthroughKey) == enabled) return;
     throw LocalStorageWriteException('夜间静音穿透设置保存失败：$writeError');
+  }
+
+  static String? normalizeDeadlineChannelId(String? raw) {
+    switch (raw?.trim()) {
+      case 'assignment_deadlines':
+        return 'assignment_deadlines';
+      case 'assignment_deadlines_v2':
+        return 'assignment_deadlines_v2';
+      default:
+        return null;
+    }
+  }
+
+  Future<String?> loadDeadlineChannelId(String account) =>
+      _serialized(() async {
+        final prefs = await SharedPreferences.getInstance();
+        _checkOwner(prefs, account);
+        final raw = prefs.get(deadlineNotificationChannelKey);
+        return raw is String ? normalizeDeadlineChannelId(raw) : null;
+      });
+
+  Future<void> writeDeadlineChannelIdInPrefs(
+    SharedPreferences prefs,
+    String channelId,
+  ) async {
+    final normalized = normalizeDeadlineChannelId(channelId);
+    if (normalized == null) {
+      throw ArgumentError.value(channelId, 'channelId', '未知的截止提醒通知渠道');
+    }
+    Object? writeError;
+    try {
+      if (await prefs.setString(deadlineNotificationChannelKey, normalized)) {
+        return;
+      }
+      writeError = '原生写入未确认';
+    } catch (error) {
+      writeError = error;
+    }
+    try {
+      await prefs.reload();
+    } catch (reloadError) {
+      throw LocalStorageWriteException('截止通知渠道保存结果未确认；重新读取也失败：$reloadError');
+    }
+    if (prefs.get(deadlineNotificationChannelKey) == normalized) return;
+    throw LocalStorageWriteException('截止通知渠道保存失败：$writeError');
   }
 
   Future<StudyNotebook> loadNotebook() => _serialized(() async {

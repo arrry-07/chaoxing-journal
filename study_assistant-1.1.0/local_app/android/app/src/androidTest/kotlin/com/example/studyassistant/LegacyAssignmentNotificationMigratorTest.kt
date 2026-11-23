@@ -137,10 +137,43 @@ class LegacyAssignmentNotificationMigratorTest {
         assertTrue(activeIds().contains(unknownId))
     }
 
+    @Test
+    fun retiresPluginDeliveredNotificationOnV2Channel() {
+        manager.createNotificationChannel(
+            NotificationChannel(
+                AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+                "迁移测试v2",
+                NotificationManager.IMPORTANCE_HIGH,
+            ),
+        )
+        val legacyV2Id = ReminderDatabase.stableNotificationId("legacy-v2:$accountHash")
+        postPlugin(
+            legacyV2Id,
+            channelId = AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+        )
+
+        val outcome = LegacyAssignmentNotificationMigrator.retireNow(
+            context,
+            database,
+            database.notificationIds() + legacyV2Id,
+        )
+
+        assertTrue(outcome.completed)
+        assertEquals(listOf(legacyV2Id), outcome.retiredIds)
+        val deadline = SystemClock.elapsedRealtime() + 3_000
+        while (legacyV2Id in activeIds() && SystemClock.elapsedRealtime() < deadline) {
+            SystemClock.sleep(50)
+        }
+        assertFalse(activeIds().contains(legacyV2Id))
+    }
+
     private fun activeIds(): Set<Int> =
         NotificationManagerCompat.from(context).activeNotifications.map { it.id }.toSet()
 
-    private fun postPlugin(id: Int) {
+    private fun postPlugin(
+        id: Int,
+        channelId: String = AssignmentNotificationPublisher.CHANNEL_DEADLINES,
+    ) {
         val launcher = requireNotNull(
             context.packageManager.getLaunchIntentForPackage(context.packageName),
         )
@@ -148,7 +181,7 @@ class LegacyAssignmentNotificationMigratorTest {
         launcher.putExtra("notificationId", id)
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val click = PendingIntent.getActivity(context, id, launcher, flags)
-        post(id, click)
+        post(id, click, channelId = channelId)
     }
 
     private fun postNative(id: Int, eventId: String) {
@@ -167,10 +200,14 @@ class LegacyAssignmentNotificationMigratorTest {
         post(id, click)
     }
 
-    private fun post(id: Int, click: PendingIntent) {
+    private fun post(
+        id: Int,
+        click: PendingIntent,
+        channelId: String = AssignmentNotificationPublisher.CHANNEL_DEADLINES,
+    ) {
         val notification = NotificationCompat.Builder(
             context,
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES,
+            channelId,
         )
             .setSmallIcon(R.drawable.app_icon)
             .setContentTitle("合成通知")

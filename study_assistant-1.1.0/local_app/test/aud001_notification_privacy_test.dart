@@ -10,6 +10,7 @@ import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -468,4 +469,134 @@ void main() {
     expect(retry.privateCleanupCalls, 1);
     expect(prefs.getBool('notification_privacy_cleanup_pending_v1'), isNull);
   });
+
+  test(
+      'test deadline notification leaks no coursework details and channel resets on logout',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'notification_details_v1': true,
+      'auto_sync_interval_minutes': 0,
+    });
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    FlutterLocalNotificationsPlatform.instance =
+        AndroidFlutterLocalNotificationsPlugin();
+    const notificationsChannel =
+        MethodChannel('dexterous.com/flutter/local_notifications');
+    const permissionsChannel = MethodChannel('study_assistant/permissions');
+    final shownNotifications = <Map<Object?, Object?>>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(permissionsChannel, (call) async => 35);
+    messenger.setMockMethodCallHandler(notificationsChannel, (call) async {
+      if (call.method == 'show') {
+        shownNotifications.add(call.arguments as Map<Object?, Object?>);
+      }
+      return switch (call.method) {
+        'getNotificationAppLaunchDetails' => {'notificationLaunchedApp': false},
+        'getNotificationChannels' => [
+            {
+              'id': 'assignment_deadlines',
+              'name': '作业截止提醒',
+              'description': '',
+              'groupId': null,
+              'showBadge': true,
+              'importance': 4,
+              'sound': null,
+              'playSound': true,
+              'enableLights': false,
+              'enableVibration': true,
+              'vibrationPattern': null,
+              'ledColor': 0,
+              'audioAttributesUsage': 5,
+            },
+            {
+              'id': 'assignment_deadlines_v2',
+              'name': '作业截止提醒（增强有声）',
+              'description': '',
+              'groupId': null,
+              'showBadge': true,
+              'importance': 4,
+              'sound': null,
+              'playSound': true,
+              'enableLights': false,
+              'enableVibration': true,
+              'vibrationPattern': null,
+              'ledColor': 0,
+              'audioAttributesUsage': 5,
+            },
+          ],
+        'areNotificationsEnabled' || 'canScheduleExactNotifications' => true,
+        'pendingNotificationRequests' || 'getActiveNotifications' => [],
+        _ => true,
+      };
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(notificationsChannel, null);
+      messenger.setMockMethodCallHandler(permissionsChannel, null);
+      FlutterLocalNotificationsPlatform.instance =
+          AndroidFlutterLocalNotificationsPlugin();
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    final client = _PrivacyAssignmentClient();
+    final store = AssignmentStore(
+      sessionStore: _Session(),
+      notificationService: LocalNotificationService(
+        clock: () => DateTime(2030, 11, 20, 10, 0),
+      )..showDetails = true,
+      widgetSnapshotService: _Widget(),
+      chaoxingClient: client,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(store.dispose);
+
+    await store.restoreSession();
+    await store.syncAssignments();
+    expect(
+      await store
+          .saveDeadlineChannelId(LocalNotificationService.assignmentV2Channel),
+      isTrue,
+    );
+    expect(store.isUsingV2DeadlineChannel, isTrue);
+
+    final outcome = await store.sendTestDeadlineNotification();
+    expect(outcome.status, TestDeadlineNotificationStatus.posted);
+    expect(outcome.channelId, LocalNotificationService.assignmentV2Channel);
+    expect(shownNotifications, hasLength(1));
+    final args = shownNotifications.single;
+    expect(args['title'], isNot(contains('高等数学')));
+    expect(args['body'], isNot(contains('高等数学')));
+    expect(args['title'], isNot(contains('机密作业')));
+    expect(args['body'], isNot(contains('机密作业')));
+
+    await store.logout();
+    expect(store.isUsingV2DeadlineChannel, isFalse);
+    expect(
+      store.activeDeadlineChannelId,
+      LocalNotificationService.assignmentChannel,
+    );
+  });
+}
+
+class _PrivacyAssignmentClient extends ChaoxingLocalClient {
+  @override
+  Future<ChaoxingLoginResult> login({
+    required String account,
+    required String password,
+  }) async =>
+      const ChaoxingLoginResult(success: true);
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async => [
+        Assignment(
+          id: 'cx:work:1:2:secret',
+          courseName: '高等数学',
+          title: '机密作业',
+          deadlineAt: DateTime(2030, 11, 21, 12, 0),
+          requirementsText: '',
+          status: 'pending',
+          lastSyncedAt: DateTime(2030, 11, 20, 10, 0),
+          deadlineTrusted: true,
+        ),
+      ];
 }

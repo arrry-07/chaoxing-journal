@@ -65,10 +65,23 @@ enum ReminderChannelStatus {
 }
 
 class ReminderChannelHealth {
-  const ReminderChannelHealth(this.status, {this.importance});
+  const ReminderChannelHealth(
+    this.status, {
+    this.importance,
+    this.channelId,
+    this.soundMuted,
+    this.customSound,
+    this.vibrationEnabled,
+    this.lockscreenVisibility,
+  });
 
   final ReminderChannelStatus status;
   final int? importance;
+  final String? channelId;
+  final bool? soundMuted;
+  final bool? customSound;
+  final bool? vibrationEnabled;
+  final int? lockscreenVisibility;
 
   bool? get enabled => switch (status) {
         ReminderChannelStatus.enabled => true,
@@ -76,20 +89,29 @@ class ReminderChannelHealth {
         _ => null,
       };
 
-  String get label => switch (status) {
-        ReminderChannelStatus.enabled => switch (importance) {
-            1 => '已开启（最低重要性）',
-            2 => '已开启（低重要性）',
-            3 => '已开启（默认重要性）',
-            4 => '已开启（高重要性）',
-            5 => '已开启（最高重要性）',
-            _ => '已开启',
-          },
-        ReminderChannelStatus.disabled => '已关闭（系统设置）',
-        ReminderChannelStatus.missing => '渠道未创建（请重新初始化提醒）',
-        ReminderChannelStatus.unsupported => '系统不支持通知渠道',
-        ReminderChannelStatus.queryFailed => '读取失败，请重新体检',
-      };
+  String get label {
+    final base = switch (status) {
+      ReminderChannelStatus.enabled => switch (importance) {
+          1 => '已开启（最低重要性）',
+          2 => '已开启（低重要性）',
+          3 => '已开启（默认重要性）',
+          4 => '已开启（高重要性）',
+          5 => '已开启（最高重要性）',
+          _ => '已开启',
+        },
+      ReminderChannelStatus.disabled => '已关闭（系统设置）',
+      ReminderChannelStatus.missing => '渠道未创建（请重新初始化提醒）',
+      ReminderChannelStatus.unsupported => '系统不支持通知渠道',
+      ReminderChannelStatus.queryFailed => '读取失败，请重新体检',
+    };
+    if (status != ReminderChannelStatus.enabled) return base;
+    final traits = <String>[
+      if (soundMuted == true) '系统已静音' else if (customSound == true) '已自定义铃声',
+      if (vibrationEnabled == false) '振动已关闭',
+    ];
+    if (traits.isEmpty) return base;
+    return '$base · ${traits.join(' · ')}';
+  }
 }
 
 class ReminderHealth {
@@ -100,6 +122,13 @@ class ReminderHealth {
       this.assignmentUpdatesChannel,
       this.summaryChannel,
       this.manualChannel,
+      this.activeDeadlineChannelId,
+      this.legacyDeadlineChannel,
+      this.v2DeadlineChannel,
+      this.silentChannel,
+      this.ignoringBatteryOptimizations,
+      this.lockscreenShowNotifications,
+      this.lockscreenAllowPrivateNotifications,
       this.pending,
       this.summaryPending,
       this.manualPending,
@@ -110,7 +139,14 @@ class ReminderHealth {
   final ReminderChannelHealth? assignmentChannel,
       assignmentUpdatesChannel,
       summaryChannel,
-      manualChannel;
+      manualChannel,
+      legacyDeadlineChannel,
+      v2DeadlineChannel,
+      silentChannel;
+  final String? activeDeadlineChannelId;
+  final bool? ignoringBatteryOptimizations,
+      lockscreenShowNotifications,
+      lockscreenAllowPrivateNotifications;
   final int? pending, summaryPending, manualPending;
   final bool scheduleRecoveryPending;
   final List<String> queryErrors;

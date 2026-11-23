@@ -179,6 +179,12 @@ class _HealthGateway extends BackgroundReminderGateway {
   Future<void> releaseWriteLease(String owner) async {}
 
   @override
+  Future<void> markPendingUpdate({
+    required String accountHash,
+    required int sessionEpoch,
+  }) async {}
+
+  @override
   Future<BackgroundReminderHealth> inspectHealth({
     required String accountHash,
     required int sessionEpoch,
@@ -3127,6 +3133,224 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     debugDefaultTargetPlatformOverride = null;
   });
+
+  test(
+      'ReminderChannelHealth label keeps normal text and appends sound or vibration flags',
+      () {
+    expect(
+      const ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 4)
+          .label,
+      '已开启（高重要性）',
+    );
+    expect(
+      const ReminderChannelHealth(
+        ReminderChannelStatus.enabled,
+        importance: 4,
+        soundMuted: true,
+      ).label,
+      '已开启（高重要性） · 系统已静音',
+    );
+    expect(
+      const ReminderChannelHealth(
+        ReminderChannelStatus.enabled,
+        importance: 4,
+        customSound: true,
+        vibrationEnabled: false,
+      ).label,
+      '已开启（高重要性） · 已自定义铃声 · 振动已关闭',
+    );
+  });
+
+  test(
+      'AssignmentStore saveDeadlineChannelId persists per account, updates settings, and resets on logout/switch',
+      () async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final session = f.Session();
+    final gateway = _Channel4CGateway();
+    final notifications = f.Notifications();
+    final store = AssignmentStore(
+      sessionStore: session,
+      notificationService: notifications,
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(store.dispose);
+
+    await store.restoreSession();
+    expect(
+      await store.saveDeadlineChannelId('unknown_channel'),
+      isFalse,
+    );
+    expect(
+      store.activeDeadlineChannelId,
+      LocalNotificationService.assignmentChannel,
+    );
+
+    expect(
+      await store.saveDeadlineChannelId(
+        LocalNotificationService.assignmentV2Channel,
+      ),
+      isTrue,
+    );
+    expect(store.isUsingV2DeadlineChannel, isTrue);
+    expect(
+      notifications.activeDeadlineChannelId,
+      LocalNotificationService.assignmentV2Channel,
+    );
+    expect(
+      gateway.updatedDeadlineChannels.last,
+      LocalNotificationService.assignmentV2Channel,
+    );
+
+    final restartedA = AssignmentStore(
+      sessionStore: session,
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(restartedA.dispose);
+    await restartedA.restoreSession();
+    expect(restartedA.isUsingV2DeadlineChannel, isTrue);
+
+    session.account = 'B';
+    final storeB = AssignmentStore(
+      sessionStore: session,
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(storeB.dispose);
+    await storeB.restoreSession();
+    expect(storeB.isUsingV2DeadlineChannel, isFalse);
+    expect(
+      storeB.activeDeadlineChannelId,
+      LocalNotificationService.assignmentChannel,
+    );
+
+    await restartedA.logout();
+    expect(restartedA.isUsingV2DeadlineChannel, isFalse);
+    expect(
+      restartedA.activeDeadlineChannelId,
+      LocalNotificationService.assignmentChannel,
+    );
+  });
+
+  test(
+      'AssignmentStore sendTestDeadlineNotification blocks quiet hours even with breakthrough and falls back cleanly',
+      () async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final gateway = _Channel4CGateway();
+    final nightStore = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 23, 45),
+    );
+    addTearDown(nightStore.dispose);
+    await nightStore.restoreSession();
+    expect(
+      await nightStore.saveAllowUrgentDeadlineNightBreakthrough(true),
+      isTrue,
+    );
+
+    final quietOutcome = await nightStore.sendTestDeadlineNotification();
+    expect(quietOutcome.status, TestDeadlineNotificationStatus.quietHours);
+    expect(quietOutcome.retryAfterAt, DateTime(2030, 11, 21, 7, 30));
+    expect(gateway.testSendCalls, 0);
+
+    final dayStore = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(dayStore.dispose);
+    await dayStore.restoreSession();
+    final nativeOutcome = await dayStore.sendTestDeadlineNotification();
+    expect(nativeOutcome.status, TestDeadlineNotificationStatus.scheduled);
+    expect(gateway.testSendCalls, 1);
+
+    final fallbackNotifications = _TestShowNotifications()..result = true;
+    final fallbackStore = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: fallbackNotifications,
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      nativeReminderDeliveryEnabled: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(fallbackStore.dispose);
+    await fallbackStore.restoreSession();
+    final posted = await fallbackStore.sendTestDeadlineNotification();
+    expect(posted.status, TestDeadlineNotificationStatus.posted);
+    expect(fallbackNotifications.showTestCalls, 1);
+
+    fallbackNotifications.result = false;
+    final blocked = await fallbackStore.sendTestDeadlineNotification();
+    expect(blocked.status, TestDeadlineNotificationStatus.blocked);
+  });
+}
+
+class _Channel4CGateway extends _HealthGateway {
+  final updatedDeadlineChannels = <String?>[];
+  int testSendCalls = 0;
+
+  @override
+  Future<void> updateSettings(
+    String accountHash,
+    int sessionEpoch,
+    BackgroundCheckSettings settings, {
+    required bool showDetails,
+    bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
+  }) async {
+    updatedDeadlineChannels.add(deadlineChannelId);
+  }
+
+  @override
+  Future<TestDeadlineNotificationOutcome> sendTestDeadlineNotification({
+    String? accountHash,
+    String? channelId,
+    int delayMillis = 3000,
+  }) async {
+    testSendCalls++;
+    return TestDeadlineNotificationOutcome(
+      status: TestDeadlineNotificationStatus.scheduled,
+      channelId: channelId,
+    );
+  }
+}
+
+class _TestShowNotifications extends f.Notifications {
+  bool result = true;
+  int showTestCalls = 0;
+
+  @override
+  Future<bool> showTestNotification() async {
+    showTestCalls++;
+    return result;
+  }
 }
 
 class _NotificationJournalStore extends InMemorySharedPreferencesStore {

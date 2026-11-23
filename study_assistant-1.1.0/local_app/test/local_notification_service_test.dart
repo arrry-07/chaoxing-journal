@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/daily_summary.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -226,6 +227,240 @@ void main() {
         tz.TZDateTime(shanghai, 2030, 11, 20, 22, 30).millisecondsSinceEpoch,
         tz.TZDateTime(shanghai, 2030, 11, 21, 0, 0).millisecondsSinceEpoch,
       ]);
+    });
+
+    test(
+        'resolveDefaultDeadlineChannel picks v2 on fresh install and preserves v1 on upgrade or failure',
+        () async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      var channels = <Map<String, Object?>>[];
+      var failChannelQuery = false;
+      messenger.setMockMethodCallHandler(notifications, (call) async {
+        calls.add(call);
+        if (call.method == 'getNotificationChannels') {
+          if (failChannelQuery) {
+            throw PlatformException(code: 'channels_unavailable');
+          }
+          return channels;
+        }
+        return switch (call.method) {
+          'getNotificationAppLaunchDetails' => {
+              'notificationLaunchedApp': false
+            },
+          'pendingNotificationRequests' || 'getActiveNotifications' => [],
+          _ => true,
+        };
+      });
+
+      SharedPreferences.setMockInitialValues({});
+      final freshService = LocalNotificationService();
+      await freshService.initializeSafely();
+      channels = [
+        fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
+      ];
+      expect(
+        await freshService.resolveDefaultDeadlineChannel(),
+        LocalNotificationService.assignmentV2Channel,
+      );
+
+      SharedPreferences.setMockInitialValues({});
+      channels = [
+        fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
+      ];
+      final upgradeByChannel = LocalNotificationService();
+      await upgradeByChannel.initializeSafely();
+      expect(
+        await upgradeByChannel.resolveDefaultDeadlineChannel(),
+        LocalNotificationService.assignmentChannel,
+      );
+      expect(
+        await upgradeByChannel.resolveDefaultDeadlineChannel(
+          storedChannelId: LocalNotificationService.assignmentV2Channel,
+        ),
+        LocalNotificationService.assignmentV2Channel,
+      );
+
+      SharedPreferences.setMockInitialValues(
+          {'notification_details_v1': false});
+      channels = <Map<String, Object?>>[];
+      final upgradeByLegacyKey = LocalNotificationService();
+      await upgradeByLegacyKey.initializeSafely();
+      expect(
+        await upgradeByLegacyKey.resolveDefaultDeadlineChannel(),
+        LocalNotificationService.assignmentChannel,
+      );
+
+      SharedPreferences.setMockInitialValues({});
+      failChannelQuery = true;
+      expect(
+        await LocalNotificationService().resolveDefaultDeadlineChannel(),
+        LocalNotificationService.assignmentChannel,
+      );
+
+      final failedInit = LocalNotificationService();
+      await failedInit.initializeSafely();
+      expect(
+        await failedInit.resolveDefaultDeadlineChannel(),
+        LocalNotificationService.assignmentChannel,
+      );
+
+      failChannelQuery = false;
+      SharedPreferences.setMockInitialValues({
+        'deadline_channel_install_default_v1':
+            LocalNotificationService.assignmentV2Channel,
+      });
+      messenger.setMockMethodCallHandler(permissions, (call) async {
+        throw MissingPluginException('missing permissions in worker');
+      });
+      expect(
+        await LocalNotificationService().resolveDefaultDeadlineChannel(),
+        LocalNotificationService.assignmentV2Channel,
+      );
+      messenger.setMockMethodCallHandler(permissions, (call) async => 35);
+    });
+
+    test(
+        'inspectHealth merges native channel details silently without polluting queryErrors',
+        () async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(permissions, (call) async {
+        if (call.method == 'getAndroidSdkInt') return 35;
+        if (call.method == 'inspectNotificationHealthDetails') {
+          return {
+            'channels': {
+              'assignment_deadlines': {
+                'exists': true,
+                'importance': 4,
+                'soundMuted': true,
+                'customSound': false,
+                'vibrationEnabled': false,
+                'lockscreenVisibility': 0,
+              },
+              'assignment_deadlines_v2': {
+                'exists': true,
+                'importance': 4,
+                'soundMuted': false,
+                'customSound': true,
+                'vibrationEnabled': true,
+                'lockscreenVisibility': 1,
+              },
+              'assignment_silent': {
+                'exists': true,
+                'importance': 2,
+                'soundMuted': true,
+                'customSound': false,
+                'vibrationEnabled': false,
+                'lockscreenVisibility': 0,
+              },
+            },
+            'ignoringBatteryOptimizations': false,
+            'lockscreenShowNotifications': true,
+            'lockscreenAllowPrivateNotifications': false,
+          };
+        }
+        return null;
+      });
+      messenger.setMockMethodCallHandler(notifications, (call) async {
+        calls.add(call);
+        return switch (call.method) {
+          'getNotificationChannels' => [
+              fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
+              fixture.channelRow('assignment_deadlines_v2', '作业截止提醒（增强有声）', 4),
+              fixture.channelRow('assignment_silent', '静默作业通知', 2),
+              fixture.channelRow('assignment_updates', '作业变化提醒', 3),
+              fixture.channelRow('daily_summary', '每日课业摘要', 3),
+              fixture.channelRow('personal_schedule', '个人待办与考试提醒', 4),
+            ],
+          'areNotificationsEnabled' || 'canScheduleExactNotifications' => true,
+          'pendingNotificationRequests' || 'getActiveNotifications' => [],
+          _ => true,
+        };
+      });
+
+      final service = LocalNotificationService()
+        ..activeDeadlineChannelId =
+            LocalNotificationService.assignmentV2Channel;
+      final health = await service.inspectHealth();
+      expect(health.queryErrors, isEmpty);
+      expect(health.activeDeadlineChannelId,
+          LocalNotificationService.assignmentV2Channel);
+      expect(health.assignmentChannel?.channelId,
+          LocalNotificationService.assignmentV2Channel);
+      expect(health.assignmentChannel?.customSound, isTrue);
+      expect(health.legacyDeadlineChannel?.soundMuted, isTrue);
+      expect(health.legacyDeadlineChannel?.vibrationEnabled, isFalse);
+      expect(health.silentChannel?.importance, 2);
+      expect(health.ignoringBatteryOptimizations, isFalse);
+      expect(health.lockscreenShowNotifications, isTrue);
+      expect(health.lockscreenAllowPrivateNotifications, isFalse);
+
+      messenger.setMockMethodCallHandler(permissions, (call) async {
+        if (call.method == 'getAndroidSdkInt') return 35;
+        if (call.method == 'inspectNotificationHealthDetails') {
+          throw MissingPluginException('missing details handler');
+        }
+        return null;
+      });
+      final fallbackHealth = await service.inspectHealth();
+      expect(fallbackHealth.queryErrors, isEmpty);
+      expect(fallbackHealth.assignmentChannel?.status,
+          ReminderChannelStatus.enabled);
+    });
+
+    test(
+        'showTestNotification uses activeDeadlineChannelId and keeps private visibility',
+        () async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final channelList = <Map<String, Object?>>[
+        fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
+        fixture.channelRow('personal_schedule', '个人待办与考试提醒', 4),
+      ];
+      messenger.setMockMethodCallHandler(notifications, (call) async {
+        calls.add(call);
+        if (call.method == 'createNotificationChannel') {
+          final args = call.arguments as Map;
+          final id = args['id'] as String;
+          if (!channelList.any((item) => item['id'] == id)) {
+            channelList.add(
+              fixture.channelRow(
+                id,
+                args['name'] as String? ?? '',
+                args['importance'] as int? ?? 4,
+              ),
+            );
+          }
+          return null;
+        }
+        return switch (call.method) {
+          'getNotificationAppLaunchDetails' => {
+              'notificationLaunchedApp': false
+            },
+          'getNotificationChannels' => channelList,
+          'pendingNotificationRequests' || 'getActiveNotifications' => [],
+          _ => true,
+        };
+      });
+
+      final service = LocalNotificationService()
+        ..activeDeadlineChannelId =
+            LocalNotificationService.assignmentV2Channel;
+      expect(await service.showTestNotification(), isTrue);
+
+      final createdChannels = calls
+          .where((call) => call.method == 'createNotificationChannel')
+          .map((call) => (call.arguments as Map)['id'])
+          .toList();
+      expect(createdChannels,
+          contains(LocalNotificationService.assignmentV2Channel));
+      final showArgs =
+          calls.singleWhere((call) => call.method == 'show').arguments as Map;
+      final specifics = showArgs['platformSpecifics'] as Map;
+      expect(
+          specifics['channelId'], LocalNotificationService.assignmentV2Channel);
+      expect(specifics['visibility'], NotificationVisibility.private.index);
     });
   });
 

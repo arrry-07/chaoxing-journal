@@ -11,6 +11,7 @@ import '../models/reminder_rule_limits.dart';
 import '../services/assignment_store.dart';
 import '../services/background_reminder_gateway.dart';
 import '../services/daily_summary.dart';
+import '../services/local_notification_service.dart';
 import '../services/permission_settings_service.dart';
 import '../services/reminder_rule_store.dart';
 import 'widgets/journal_buttons.dart';
@@ -296,6 +297,78 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     return _healthError != null ? '$text（上次结果）' : text;
   }
 
+  String get _exactAlarmText {
+    final base = _stateText(_health?.exact);
+    if (_health?.exact == false) {
+      return '$base · 未开启精确闹钟，提醒可能延迟';
+    }
+    return base;
+  }
+
+  String get _batterySettingsText {
+    final ignoring = _health?.ignoringBatteryOptimizations;
+    if (ignoring == true) {
+      return '系统已忽略电池优化；打开应用详情后，请进入电池或后台运行设置自行核对';
+    }
+    if (ignoring == false) {
+      return '受系统电池优化限制（可能延迟）；打开应用详情后，请进入电池或后台运行设置自行核对';
+    }
+    return '打开应用详情后，请进入电池或后台运行设置自行核对';
+  }
+
+  String get _deadlineChannelSummaryText =>
+      widget.assignmentStore.isUsingV2DeadlineChannel
+          ? 'v2（${LocalNotificationService.assignmentV2Channel}）'
+          : 'v1（${LocalNotificationService.assignmentChannel}）';
+
+  String get _lockscreenPrivacyText {
+    final show = _health?.lockscreenShowNotifications;
+    final allowPrivate = _health?.lockscreenAllowPrivateNotifications;
+    final channelVis = _health?.assignmentChannel?.lockscreenVisibility;
+    if (show == null && allowPrivate == null && channelVis == null) {
+      return '未读到系统锁屏策略（以系统设置为准）';
+    }
+    if (show == false) {
+      return '系统锁屏已关闭通知显示';
+    }
+    if (channelVis == -1) {
+      return '当前截止渠道在锁屏已设为不显示';
+    }
+    if (allowPrivate == false || channelVis == 0) {
+      return '系统锁屏仅显示脱敏摘要';
+    }
+    return '系统锁屏允许显示通知（按应用隐私设置输出）';
+  }
+
+  Future<void> _enableV2DeadlineChannel() async {
+    if (_saving || _healthBusy) return;
+    setState(() => _saving = true);
+    try {
+      final saved = await widget.assignmentStore.saveDeadlineChannelId(
+        LocalNotificationService.assignmentV2Channel,
+      );
+      if (!mounted) return;
+      if (saved) {
+        final warnings = widget.assignmentStore.serviceWarnings;
+        setState(() {
+          _healthMessage = warnings.isNotEmpty
+              ? '已启用新版有声截止渠道（v2），但提醒仍需处理：${warnings.first}'
+              : '已启用新版有声截止渠道（v2），未完成课业提醒已重新安排。';
+        });
+        await _loadHealth(force: true);
+      } else {
+        setState(() {
+          _healthMessage =
+              widget.assignmentStore.operationError ?? '启用新版有声渠道失败，请重试';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
   Future<void> _updateSummary(bool enabled, int hour, int minute) async {
     if (_saving || _healthBusy) return;
     setState(() => _healthBusy = true);
@@ -338,6 +411,15 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
         case ReminderChannelStatus.unsupported:
         case null:
           break;
+      }
+    }
+    final deadlineChannel = current?.assignmentChannel;
+    if (deadlineChannel?.status == ReminderChannelStatus.enabled) {
+      if (deadlineChannel?.soundMuted == true) {
+        issues.add('截止提醒渠道在系统中已静音');
+      }
+      if (deadlineChannel?.vibrationEnabled == false) {
+        issues.add('截止提醒渠道振动已关闭');
       }
     }
     if (current?.scheduleRecoveryPending == true) {
@@ -460,23 +542,31 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                 runSpacing: 8,
                 children: [
                   JournalPrimaryButton(
+                    key: const ValueKey('send-test-notification-button'),
                     expanded: false,
                     height: 42,
-                    label: '发送测试通知',
+                    label: '发送测试有声提醒',
                     loading: _testingNotification,
                     onPressed: _healthBusy || _testingNotification
                         ? null
                         : () async {
                             setState(() => _testingNotification = true);
                             try {
-                              final ok = await widget
-                                  .assignmentStore.notificationService
-                                  .showTestNotification();
+                              final outcome = await widget.assignmentStore
+                                  .sendTestDeadlineNotification();
                               if (!mounted) return;
                               setState(() {
-                                _healthMessage = ok
-                                    ? '已请求系统显示测试通知。请下拉通知栏核对。'
-                                    : '未能请求测试通知，请检查通知权限与渠道。';
+                                _healthMessage = switch (outcome.status) {
+                                  TestDeadlineNotificationStatus.scheduled =>
+                                    '已安排测试有声提醒（约 3 秒后送达，可先锁屏观察）；请核对声音、短振与锁屏横幅，实际效果取决于系统与渠道设置。',
+                                  TestDeadlineNotificationStatus.posted =>
+                                    '已请求系统显示测试有声提醒；请下拉通知栏核对，实际声音、短振与锁屏显示取决于系统与渠道设置。',
+                                  TestDeadlineNotificationStatus.quietHours =>
+                                    outcome.warning ??
+                                        '当前处于夜间静音时段（23:30–07:30），测试提醒不会穿透静音；请在 07:30 后重试。',
+                                  TestDeadlineNotificationStatus.blocked =>
+                                    outcome.warning ?? '未能请求测试通知，请检查通知权限与渠道。',
+                                };
                               });
                             } finally {
                               if (mounted) {
@@ -485,6 +575,16 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                             }
                           },
                   ),
+                  if (!widget.assignmentStore.isUsingV2DeadlineChannel)
+                    JournalSecondaryButton(
+                      key: const ValueKey('enable-v2-deadline-channel'),
+                      expanded: false,
+                      height: 42,
+                      label: '启用新版有声截止渠道（v2）',
+                      onPressed: _saving || _healthBusy
+                          ? null
+                          : _enableV2DeadlineChannel,
+                    ),
                   JournalSecondaryButton(
                     expanded: false,
                     height: 42,
@@ -558,7 +658,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                 subtitle: Text(_channelStateText(_health?.assignmentChannel)),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => _openNotificationChannel(
-                  'assignment_deadlines',
+                  widget.assignmentStore.activeDeadlineChannelId,
                   '截止提醒通知渠道',
                 ),
               ),
@@ -600,7 +700,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                 dense: true,
                 leading: const Icon(Icons.alarm_on_outlined),
                 title: const Text('精确闹钟'),
-                subtitle: Text(_stateText(_health?.exact)),
+                subtitle: Text(_exactAlarmText),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => _openPermissionSettings(
                   widget.permissionSettingsService.openExactAlarmSettingsResult,
@@ -626,7 +726,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                 dense: true,
                 leading: const Icon(Icons.battery_saver_outlined),
                 title: const Text('本应用电池与后台设置'),
-                subtitle: const Text('打开应用详情后，请进入电池或后台运行设置自行核对'),
+                subtitle: Text(_batterySettingsText),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => _openPermissionSettings(
                   widget.permissionSettingsService.openBatterySettingsResult,
@@ -641,6 +741,8 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                   children: [
                     Text(
                       '技术状态 · 调度事务：$_recoveryText\n'
+                      '截止渠道：$_deadlineChannelSummaryText · 静默新作业渠道：${_channelStateText(_health?.silentChannel)}\n'
+                      '锁屏隐私策略：$_lockscreenPrivacyText\n'
                       '原生作业截止事件：${_nativeText((v) => '${v.pendingDeadlineCount} 条')} · 待处理新增作业事件：${_nativeText((v) => '${v.pendingNewCount} 条')}\n'
                       '已安排摘要：${_localCount(_health?.summaryPending)} · 个人提醒：${_localCount(_health?.manualPending)} · 新增基线：$_baselineText\n'
                       '下次后台检查：${_backgroundHealth?.nextCheckAt == null ? widget.assignmentStore.nextBackgroundCheckAt?.toLocal().toString().substring(0, 16) ?? '未安排' : _backgroundHealth!.nextCheckAt!.toLocal().toString().substring(0, 16)}'

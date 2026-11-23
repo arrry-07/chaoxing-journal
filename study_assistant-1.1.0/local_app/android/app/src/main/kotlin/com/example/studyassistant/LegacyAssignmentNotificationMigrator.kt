@@ -201,7 +201,12 @@ object LegacyAssignmentNotificationMigrator {
         )
     }
 
-    private val assignmentChannels = setOf("assignment_deadlines", "assignment_updates")
+    private val assignmentChannels = setOf(
+        DeadlineChannelPolicy.CHANNEL_DEADLINES,
+        DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+        DeadlineChannelPolicy.CHANNEL_UPDATES,
+        DeadlineChannelPolicy.CHANNEL_SILENT,
+    )
 
     private fun Outcome.toMap(): Map<String, Any?> = mapOf(
         "completed" to completed,

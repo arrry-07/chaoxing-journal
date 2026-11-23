@@ -168,8 +168,13 @@ object BackgroundReminderBridge {
                     "updateSettings" -> {
                         leaseExecutor.execute {
                             runCatching {
+                                val accountHash = call.requiredString("accountHash")
+                                val previousChannel = database.readAccount(accountHash)?.deadlineChannelId
+                                val requestedChannel = call.argument<String>("deadlineChannelId")
+                                val normalizedRequested =
+                                    DeadlineChannelPolicy.normalizeChannelId(requestedChannel)
                                 val state = database.updateSettings(
-                                    accountHash = call.requiredString("accountHash"),
+                                    accountHash = accountHash,
                                     sessionEpoch = call.requiredLong("sessionEpoch"),
                                     backgroundEnabled =
                                         call.argument<Boolean>("enabled") == true,
@@ -187,9 +192,22 @@ object BackgroundReminderBridge {
                                         call.argument<Boolean>("showDetails") == true,
                                     allowUrgentNightBreakthrough =
                                         call.argument<Boolean>("allowUrgentNightBreakthrough"),
-                                    deadlineChannelId =
-                                        call.argument<String>("deadlineChannelId"),
+                                    deadlineChannelId = normalizedRequested,
                                 )
+                                AssignmentNotificationPublisher.ensureChannels(
+                                    appContext,
+                                    state.deadlineChannelId,
+                                )
+                                if (normalizedRequested != null &&
+                                    previousChannel != null &&
+                                    previousChannel != state.deadlineChannelId
+                                ) {
+                                    AssignmentNotificationPublisher.cancelDeadlineReminders(
+                                        appContext,
+                                        database,
+                                        accountHash,
+                                    )
+                                }
                                 val reconcileSchedules =
                                     call.argument<Boolean>("reconcileSchedules") != false
                                 if (reconcileSchedules) {
@@ -623,6 +641,20 @@ object BackgroundReminderBridge {
                                 call.requiredLong("sessionEpoch"),
                                 call.requiredLong("expectedHistoryGeneration"),
                             ),
+                        )
+                    }
+                    "sendTestDeadlineNotification" -> tasks.execute(result) { reply ->
+                        val delayMillis =
+                            (call.argument<Number>("delayMillis")?.toLong() ?: 3_000L)
+                                .coerceIn(0L, 10_000L)
+                        reply.success(
+                            AssignmentNotificationPublisher.publishTestDeadlineNotification(
+                                context = appContext,
+                                database = database,
+                                accountHash = call.argument<String>("accountHash"),
+                                requestedChannelId = call.argument<String>("channelId"),
+                                delayMillis = delayMillis,
+                            ).toMap(),
                         )
                     }
                     else -> result.notImplemented()

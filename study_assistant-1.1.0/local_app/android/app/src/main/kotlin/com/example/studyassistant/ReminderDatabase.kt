@@ -572,6 +572,7 @@ class ReminderDatabase private constructor(
                 putNull("last_failure")
                 put("pending_update", 0)
                 put("allow_urgent_night_breakthrough", 0)
+                put("deadline_channel_id", AssignmentNotificationPublisher.CHANNEL_DEADLINES)
             },
             keepAccountHash?.let { "account_hash != ?" },
             keepAccountHash?.let { arrayOf(it) },
@@ -1104,6 +1105,27 @@ class ReminderDatabase private constructor(
                 },
                 "account_hash = ? AND status IN (?, ?)",
                 arrayOf(accountHash, STATUS_PENDING, STATUS_SUBMITTED),
+            )
+            cancelled
+        }
+
+    @Synchronized
+    fun cancelDeadlineReminders(accountHash: String): List<StoredReminderEvent> =
+        transaction {
+            val cancelled = eventsForAccount(accountHash)
+                .filter {
+                    it.type == EVENT_DEADLINE &&
+                        (it.status == STATUS_PENDING || it.status == STATUS_SUBMITTED)
+                }
+            val now = System.currentTimeMillis()
+            writableDatabase.update(
+                "events",
+                ContentValues().apply {
+                    put("status", STATUS_CANCELLED)
+                    put("updated_at", now)
+                },
+                "account_hash = ? AND type = ? AND status IN (?, ?)",
+                arrayOf(accountHash, EVENT_DEADLINE, STATUS_PENDING, STATUS_SUBMITTED),
             )
             cancelled
         }

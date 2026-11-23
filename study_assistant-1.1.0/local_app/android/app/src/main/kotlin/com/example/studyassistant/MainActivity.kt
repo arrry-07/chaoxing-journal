@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.ComponentName
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
@@ -120,6 +121,10 @@ class MainActivity : FlutterActivity() {
                 )
                 return@setMethodCallHandler
             }
+            if (call.method == "inspectNotificationHealthDetails") {
+                result.success(inspectNotificationHealthDetails())
+                return@setMethodCallHandler
+            }
             val outcome = when (call.method) {
                 "openNotificationSettings",
                 "openNotificationSettingsResult" -> openNotificationSettings()
@@ -127,7 +132,10 @@ class MainActivity : FlutterActivity() {
                 "openExactAlarmSettingsResult" -> openExactAlarmSettings()
                 "openLockScreenNotificationSettings",
                 "openLockScreenNotificationSettingsResult" ->
-                    openNotificationChannelSettings(ASSIGNMENT_DEADLINE_CHANNEL_ID)
+                    openNotificationChannelSettings(
+                        call.argument<String>("channelId")
+                            ?: ASSIGNMENT_DEADLINE_CHANNEL_ID
+                    )
                 "openNotificationChannelSettingsResult" ->
                     openNotificationChannelSettings(call.argument<String>("channelId"))
                 "openBatterySettings",
@@ -382,6 +390,61 @@ class MainActivity : FlutterActivity() {
         return runCatching {
             startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }.isSuccess
+    }
+
+    private fun inspectNotificationHealthDetails(): Map<String, Any?> {
+        val manager = runCatching {
+            getSystemService(NotificationManager::class.java)
+        }.getOrNull()
+        val byId = runCatching {
+            manager?.notificationChannels?.associateBy { it.id }.orEmpty()
+        }.getOrDefault(emptyMap())
+        val defaultSound = runCatching { Settings.System.DEFAULT_NOTIFICATION_URI }.getOrNull()
+        val channelIds = listOf(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES,
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+            DeadlineChannelPolicy.CHANNEL_UPDATES,
+            DeadlineChannelPolicy.CHANNEL_SILENT,
+            "daily_summary",
+            "personal_schedule",
+        )
+        val channelMap = buildMap<String, Any?> {
+            for (id in channelIds) {
+                val channel = byId[id]
+                if (channel == null) {
+                    put(id, mapOf("exists" to false))
+                } else {
+                    val sound = runCatching { channel.sound }.getOrNull()
+                    put(
+                        id,
+                        mapOf(
+                            "exists" to true,
+                            "importance" to channel.importance,
+                            "soundMuted" to (sound == null),
+                            "customSound" to (sound != null && defaultSound != null && sound != defaultSound),
+                            "vibrationEnabled" to runCatching { channel.shouldVibrate() }.getOrNull(),
+                            "lockscreenVisibility" to runCatching { channel.lockscreenVisibility }.getOrNull(),
+                        ),
+                    )
+                }
+            }
+        }
+        val ignoringBattery = runCatching {
+            getSystemService(PowerManager::class.java)
+                ?.isIgnoringBatteryOptimizations(packageName)
+        }.getOrNull()
+        val lockscreenShow = runCatching {
+            Settings.Secure.getInt(contentResolver, "lock_screen_show_notifications") == 1
+        }.getOrNull()
+        val lockscreenAllowPrivate = runCatching {
+            Settings.Secure.getInt(contentResolver, "lock_screen_allow_private_notifications") == 1
+        }.getOrNull()
+        return mapOf(
+            "channels" to channelMap,
+            "ignoringBatteryOptimizations" to ignoringBattery,
+            "lockscreenShowNotifications" to lockscreenShow,
+            "lockscreenAllowPrivateNotifications" to lockscreenAllowPrivate,
+        )
     }
 
     private companion object {
