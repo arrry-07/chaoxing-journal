@@ -2,12 +2,12 @@
 
 <a id="dev-当前迭代进度"></a>
 
-## 当前迭代进度（1.8.26+120 已正式发布收口；dev 已落地 1.8.27 首个修复底座，其余待规划）
+## 当前迭代进度（1.8.26+120 已正式发布收口；dev 已落地 1.9.0 首个修复底座，其余待规划）
 
 - **1.8.26+120 已正式发布收口**（PR `#63` 合入 `7021e47`，`v1.8.26` → `7021e47`，Release `455145659`），五阶段 `1A–5C` 全部交付；详见[验收与发布记录](../reviews/2026-11-23-v1.8.26-五阶段体验升级学期归档与提醒重构验收与发布记录.md)。
 - 终版验证：UTC 全量 `1894 passed / 1 skipped`、上海/洛杉矶核心各 `231 passed`、JVM `76`、Lint 0 错误、隔离 MuMu API 32 仪器测试 `112` 项 0 失败；正式双 ABI 包在 MuMu「学习通」保数据覆盖，版本 `1.8.26 (120)`，统计往期下钻 33/33。
-- **`dev` 已合入 1.8.27 首项预备修复**（`0806fee`）：补齐统计下钻 `LocalRecordFilterSpec.copyWith` / `isStatsScoped` / `resetToAllLocal`、`LocalRecordQuery.query` 的 `statsScoped` 退出及 `LocalRecordsScreen` 横幅学期标签/`didUpdateWidget`（附单元+组件回归），并将 `AssignmentNotificationPublisherTest#unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel` 改为设备本地固定白天 `10:00`；本地门禁（6 文件 75 项、`dart analyze` 0 问题）与隔离 ASCII 目录 `:app:compileDebugAndroidTestKotlin` 通过，全量 CI 与实机 `androidTest` 留待后续 PR/发版补齐。
-- 下一轮确认范围后从当前 `dev` 起 `1.8.27-dev.1` 预览，详见[收口与下一轮起点交接](handoffs/2026-11-23-v1.8.26-发版收口与下一轮起点交接.md)；波次 B-2 / C-1 / C-2 仍需维护者确认后执行。
+- **`dev` 已合入 1.9.0 首项预备修复**（`0806fee`）：补齐统计下钻 `LocalRecordFilterSpec.copyWith` / `isStatsScoped` / `resetToAllLocal`、`LocalRecordQuery.query` 的 `statsScoped` 退出及 `LocalRecordsScreen` 横幅学期标签/`didUpdateWidget`（附单元+组件回归），并将 `AssignmentNotificationPublisherTest#unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel` 改为设备本地固定白天 `10:00`；本地门禁（6 文件 75 项、`dart analyze` 0 问题）与隔离 ASCII 目录 `:app:compileDebugAndroidTestKotlin` 通过，全量 CI 与实机 `androidTest` 留待后续 PR/发版补齐。
+- 已启用[标准三段版本分级规则](VALIDATION.md#版本号与迭代分级规则)（小更新升 `Z`、较大更新升 `Y` 并归零 `Z`、禁用前导零）；下一轮确认范围后从当前 `dev` 起 `1.9.0-dev.1` 预览，详见[收口与下一轮起点交接](handoffs/2026-11-23-v1.8.26-发版收口与下一轮起点交接.md)；波次 B-2 / C-1 / C-2 仍需维护者确认后执行。
 
 ## 最近 2 个正式发布版本
 
