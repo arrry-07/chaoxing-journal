@@ -1568,7 +1568,7 @@ void main() {
           id: 'm1800000000086842',
           title: 'personal',
           kind: 'todo',
-          at: DateTime.utc(2030),
+          at: DateTime.utc(2030, 1, 1, 12),
           remind: true)
     ]);
     final manualId = (calls

@@ -310,13 +310,14 @@ void main() {
     expect(journal['oldIds'], [deliveredId]);
   });
   test('active query failure does not cancel an invalid p payload', () async {
-    final service = LocalNotificationService();
+    final now = DateTime(2030, 11, 20, 10, 0);
+    final service = LocalNotificationService(clock: () => now);
     await service.rescheduleManual([
       ManualEntry(
           id: 'qa-invalid',
           title: 'QA',
           kind: 'todo',
-          at: DateTime.now().add(const Duration(hours: 1)),
+          at: now.add(const Duration(hours: 1)),
           remind: true)
     ]);
     final id = pending.single['id'] as int;
@@ -388,13 +389,14 @@ void main() {
   ]) {
     test('v2 manual recovery rejects conflicting native evidence $evidence',
         () async {
-      final service = LocalNotificationService();
+      final now = DateTime(2030, 11, 20, 10, 0);
+      final service = LocalNotificationService(clock: () => now);
       await service.rescheduleManual([
         ManualEntry(
             id: 'qa-manual',
             title: 'QA',
             kind: 'exam',
-            at: DateTime.now().add(const Duration(hours: 1)),
+            at: now.add(const Duration(hours: 1)),
             remind: true)
       ]);
       final id = pending.single['id'];

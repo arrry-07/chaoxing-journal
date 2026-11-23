@@ -177,10 +177,9 @@ void main() {
               (call.arguments as Map)['scheduledDateTime'] as String))
           .toList();
       expect(scheduledTimes, hasLength(1));
-      expect(
-        scheduledTimes.single.millisecondsSinceEpoch,
-        tz.TZDateTime(shanghai, 2030, 11, 21, 7, 30).millisecondsSinceEpoch,
-      );
+      // The plugin receives wall-clock time; compare it without assuming the
+      // host process timezone matches Asia/Shanghai.
+      expect(scheduledTimes.single, DateTime(2030, 11, 21, 7, 30));
 
       calls.clear();
       service.allowUrgentNightBreakthrough = true;
@@ -198,10 +197,7 @@ void main() {
           .map((call) => DateTime.parse(
               (call.arguments as Map)['scheduledDateTime'] as String))
           .toList();
-      expect(
-        scheduledTimes.single.millisecondsSinceEpoch,
-        tz.TZDateTime(shanghai, 2030, 11, 21, 0, 15).millisecondsSinceEpoch,
-      );
+      expect(scheduledTimes.single, DateTime(2030, 11, 21, 0, 15));
 
       calls.clear();
       await service.rescheduleAssignments([
@@ -223,9 +219,9 @@ void main() {
           .map((call) => DateTime.parse(
               (call.arguments as Map)['scheduledDateTime'] as String))
           .toList();
-      expect(scheduledTimes.map((t) => t.millisecondsSinceEpoch).toList(), [
-        tz.TZDateTime(shanghai, 2030, 11, 20, 22, 30).millisecondsSinceEpoch,
-        tz.TZDateTime(shanghai, 2030, 11, 21, 0, 0).millisecondsSinceEpoch,
+      expect(scheduledTimes, [
+        DateTime(2030, 11, 20, 22, 30),
+        DateTime(2030, 11, 21, 0, 0),
       ]);
     });
 
