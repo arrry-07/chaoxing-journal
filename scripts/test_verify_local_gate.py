@@ -58,12 +58,11 @@ class VerifyLocalGateTests(unittest.TestCase):
             subprocess.run(["git", "add", "."], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
 
-            pubspec = "version: 1.8.27+121\n"
-            self.assertTrue(mod._should_allow_dev_metadata(repo, pubspec, release_flag=False))
-            self.assertFalse(mod._should_allow_dev_metadata(repo, pubspec, release_flag=True))
+            self.assertTrue(mod._should_allow_dev_metadata(repo, release_flag=False))
+            self.assertFalse(mod._should_allow_dev_metadata(repo, release_flag=True))
 
             subprocess.run(["git", "checkout", "-b", "main"], cwd=repo, check=True, capture_output=True)
-            self.assertFalse(mod._should_allow_dev_metadata(repo, pubspec, release_flag=False))
+            self.assertFalse(mod._should_allow_dev_metadata(repo, release_flag=False))
 
 
 if __name__ == "__main__":

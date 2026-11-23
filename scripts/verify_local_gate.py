@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
@@ -49,11 +48,9 @@ def _changed_dart_files(repo: Path, app_dir: Path) -> list[str]:
     return sorted(paths)
 
 
-def _should_allow_dev_metadata(repo: Path, pubspec_text: str, release_flag: bool) -> bool:
+def _should_allow_dev_metadata(repo: Path, release_flag: bool) -> bool:
     if release_flag:
         return False
-    if re.search(r"^version:\s*\d+\.\d+\.\d+-dev\.", pubspec_text, re.M):
-        return True
     branch_proc = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=repo,
@@ -147,9 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         # 3. Release metadata check
-        pubspec = (app_dir / "pubspec.yaml").read_text(encoding="utf-8")
         meta_cmd = [py, str(app_dir / "tool" / "check_release_metadata.py")]
-        if _should_allow_dev_metadata(repo, pubspec, args.release):
+        if _should_allow_dev_metadata(repo, args.release):
             meta_cmd.append("--allow-dev")
         _run_step("Release metadata check", meta_cmd, app_dir)
 
