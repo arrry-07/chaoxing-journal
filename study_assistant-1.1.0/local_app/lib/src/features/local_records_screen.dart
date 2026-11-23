@@ -10,6 +10,7 @@ import '../services/assignment_grouping.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_statistics.dart';
 import '../services/assignment_store.dart';
+import '../services/course_term_catalog.dart';
 import '../services/exam_schedule_presentation.dart';
 import '../services/local_record_query.dart';
 import 'widgets/assignment_card.dart';
@@ -88,6 +89,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
         oldInit.scope != nextInit.scope ||
         oldInit.courseKey != nextInit.courseKey ||
         oldInit.timeRange != nextInit.timeRange ||
+        oldInit.termScope != nextInit.termScope ||
         oldInit.query != nextInit.query ||
         oldInit.sort != nextInit.sort;
     if (filterChanged) _spec = nextInit;
@@ -251,6 +253,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
 
   String _scopeBannerSummary(Map<String, String> courseLabels) {
     final parts = <String>[
+      if (_spec.termScope != CourseTermScope.allTerms) _spec.termScope.label,
       if (_spec.scope != LocalRecordScopeFilter.allLocal) _spec.scope.label,
       if (_spec.timeRange != StatsTimeRange.all) _spec.timeRange.label,
       if (_spec.status != LocalRecordStatusFilter.all) _spec.status.label,

@@ -12,7 +12,9 @@ import 'package:study_assistant_mobile/src/features/widgets/journal_sliver_group
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/local_records_screen.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/local_record_query.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -690,5 +692,153 @@ void main() {
     await tester.tap(find.byTooltip('课题甲 操作'));
     expect(iconTaps, 1);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'local records preserves termScope across filter edits, updates on initialFilter.termScope change, and resets to all local including unfollowed courses',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final now = DateTime.utc(2026, 11, 20, 4); // 2026-2027 fall
+    final store = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: _Notifications(),
+      widgetSnapshotService: _Widgets(),
+      clock: () => now,
+    );
+    addTearDown(store.dispose);
+    await store.repository.activateAccount('A');
+    await store.repository.saveCourses(const [
+      CourseRef(
+        courseId: '1',
+        clazzId: '10',
+        name: '本学期算法',
+        folderName: '2026年秋',
+      ),
+      CourseRef(
+        courseId: '2',
+        clazzId: '20',
+        name: '往期微积分',
+        folderName: '2025年秋',
+      ),
+      CourseRef(
+        courseId: '99',
+        clazzId: '1',
+        name: '未关注选修课',
+        folderName: '2026年秋',
+      ),
+    ], account: 'A');
+    await store.repository.mergeAndSave([
+      Assignment(
+        id: 'cx:work:1:10:cur1',
+        courseName: '本学期算法',
+        title: '本学期算法作业',
+        deadlineAt: now.add(const Duration(days: 2)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:work:2:20:past1',
+        courseName: '往期微积分',
+        title: '往期微积分已提交',
+        deadlineAt: DateTime.utc(2025, 11, 10),
+        requirementsText: '',
+        status: 'submitted',
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:work:2:20:past2',
+        courseName: '往期微积分',
+        title: '往期微积分待核对',
+        deadlineAt: DateTime.utc(2025, 11, 12),
+        requirementsText: '',
+        status: 'unknown',
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:work:99:1:unfol1',
+        courseName: '未关注选修课',
+        title: '未关注选修作业',
+        deadlineAt: now.add(const Duration(days: 1)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+    ]);
+    await store.restoreSession();
+    await store.followCourse('99:1', false);
+
+    final initialPastSpec = LocalRecordFilterSpec.fromQueryParameters(const {
+      'from': 'stats',
+      'scope': 'followedStats',
+      'status': 'completed',
+      'term': 'pastTerms',
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: LocalRecordsScreen(
+        store: store,
+        clock: () => now,
+        initialFilter: initialPastSpec,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('当前统计筛选：往期 · 已关注课程 · 已完成'), findsOneWidget);
+    expect(find.text('1 条记录'), findsOneWidget);
+    expect(find.text('往期微积分已提交'), findsOneWidget);
+    expect(find.text('本学期算法作业'), findsNothing);
+
+    await tester.tap(find.text('全部状态'));
+    await tester.pumpAndSettle();
+    expect(find.text('当前统计筛选：往期 · 已关注课程'), findsOneWidget);
+    expect(find.text('2 条记录'), findsOneWidget);
+    expect(find.text('往期微积分已提交'), findsOneWidget);
+    expect(find.text('往期微积分待核对'), findsOneWidget);
+    expect(find.text('本学期算法作业'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), '算法');
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('0 条记录'), findsOneWidget);
+    expect(find.text('当前筛选条件下没有课业记录'), findsOneWidget);
+    expect(find.text('本学期算法作业'), findsNothing);
+
+    await tester.tap(find.text('查看全部本机记录'));
+    await tester.pumpAndSettle();
+    expect(find.text('当前从课业统计进入明细视图'), findsOneWidget);
+    expect(find.text('4 条记录'), findsOneWidget);
+    final scrollable = find.byWidgetPredicate(
+      (widget) => widget is Scrollable && widget.axis == Axis.vertical,
+    );
+    await tester.scrollUntilVisible(
+      find.text('未关注选修作业'),
+      150,
+      scrollable: scrollable,
+    );
+    expect(find.text('未关注选修作业'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('本学期算法作业'),
+      150,
+      scrollable: scrollable,
+    );
+    expect(find.text('本学期算法作业'), findsOneWidget);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: LocalRecordsScreen(
+        store: store,
+        clock: () => now,
+        initialFilter: initialPastSpec.copyWith(
+          status: LocalRecordStatusFilter.all,
+          termScope: CourseTermScope.currentTerm,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('当前统计筛选：本学期 · 已关注课程'), findsOneWidget);
+    expect(find.text('1 条记录'), findsOneWidget);
+    expect(find.text('本学期算法作业'), findsOneWidget);
+    expect(find.text('往期微积分已提交'), findsNothing);
   });
 }

@@ -854,11 +854,16 @@ class AssignmentNotificationPublisherTest {
     fun unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel() {
         assertTrue(LegacyAssignmentMigrationState.confirm(context))
         val id = seedPendingNewAssignment()
+        val daytimeNow = ZonedDateTime.now(ZoneId.systemDefault())
+            .withHour(10)
+            .withMinute(0)
+            .withSecond(0)
+            .withNano(0)
         val result = AssignmentNotificationPublisher.publishPendingNewAssignments(
             context,
             database,
             accountHash,
-            Instant.now(),
+            daytimeNow.toInstant(),
         )
         assertTrue("publish result: $result", result.submitted)
         val active = notificationManager.activeNotifications.single { it.id == id && it.tag == null }
