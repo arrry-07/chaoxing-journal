@@ -15,8 +15,14 @@ import tempfile
 
 PACKAGE = "com.example.studyassistant.journal"
 TEST_PACKAGE = f"{PACKAGE}.test"
+TEST_CLASS_PACKAGE = "com.example.studyassistant"
 TEST_RUNNER = "androidx.test.runner.AndroidJUnitRunner"
 PROTECTED_SERIALS = {"127.0.0.1:16448"}
+CRASH_MARKERS = ("FAILURES!!!", "Process crashed")
+CRASH_PREFIXES = (
+    "INSTRUMENTATION_STATUS: Error=",
+    "INSTRUMENTATION_STATUS: shortMsg=",
+)
 
 ANDROID_TEST_BATCHES: dict[str, tuple[str, ...]] = {
     "batch1_channel_and_fresh_install": (
@@ -143,6 +149,19 @@ def parse_instrumentation_output(text: str) -> dict[tuple[str, str], int]:
     return results
 
 
+def detect_execution_error(output: str) -> str | None:
+    """Return the first instrumentation crash marker, if the run did not finish."""
+
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(CRASH_PREFIXES):
+            return stripped
+    for marker in CRASH_MARKERS:
+        if marker in output:
+            return marker
+    return None
+
+
 def summarize_results(name: str, output: str, returncode: int) -> BatchResult:
     parsed = parse_instrumentation_output(output)
     result = BatchResult(name=name)
@@ -162,7 +181,16 @@ def summarize_results(name: str, output: str, returncode: int) -> BatchResult:
             result.passed = int(ok_match.group(1))
         elif returncode != 0:
             result.failed = 1
-    if returncode != 0 and result.failed == 0:
+        else:
+            result.execution_error = "instrumentation reported no test results"
+    crash = detect_execution_error(output)
+    if crash is not None and result.execution_error is None:
+        result.execution_error = crash
+    if (
+        returncode != 0
+        and result.failed == 0
+        and result.execution_error is None
+    ):
         result.execution_error = f"instrumentation exited with {returncode}"
     return result
 
@@ -178,29 +206,49 @@ def _run(cmd: list[str], cwd: Path | None = None, *, check: bool = False) -> sub
     )
 
 
+def qualified_classes(classes: Sequence[str]) -> list[str]:
+    return [f"{TEST_CLASS_PACKAGE}.{name}" for name in classes]
+
+
+def instrument_command(
+    serial: str, adb: str, classes: Sequence[str]
+) -> list[str]:
+    return [
+        adb,
+        "-s",
+        serial,
+        "shell",
+        "am",
+        "instrument",
+        "-w",
+        "-r",
+        "-e",
+        "class",
+        ",".join(qualified_classes(classes)),
+        f"{TEST_PACKAGE}/{TEST_RUNNER}",
+    ]
+
+
+def batch_commands(
+    serial: str,
+    adb: str,
+    app_apk: Path,
+    test_apk: Path,
+    classes: Sequence[str],
+) -> list[list[str]]:
+    return [
+        [adb, "-s", serial, "uninstall", PACKAGE],
+        [adb, "-s", serial, "uninstall", TEST_PACKAGE],
+        [adb, "-s", serial, "install", "-r", str(app_apk)],
+        [adb, "-s", serial, "install", "-r", str(test_apk)],
+        instrument_command(serial, adb, classes),
+    ]
+
+
 def _print_commands(serial: str, adb: str, app_apk: Path, test_apk: Path, batches: Mapping[str, Sequence[str]]) -> None:
     for name, classes in batches.items():
         print(f"[DRY-RUN] {name}")
-        for cmd in (
-            [adb, "-s", serial, "uninstall", PACKAGE],
-            [adb, "-s", serial, "uninstall", TEST_PACKAGE],
-            [adb, "-s", serial, "install", "-r", str(app_apk)],
-            [adb, "-s", serial, "install", "-r", str(test_apk)],
-            [
-                adb,
-                "-s",
-                serial,
-                "shell",
-                "am",
-                "instrument",
-                "-w",
-                "-r",
-                "-e",
-                "class",
-                ",".join(classes),
-                f"{TEST_PACKAGE}/{TEST_RUNNER}",
-            ],
-        ):
+        for cmd in batch_commands(serial, adb, app_apk, test_apk, classes):
             print("+ " + " ".join(cmd))
 
 
@@ -302,57 +350,51 @@ def main(argv: list[str] | None = None) -> int:
 
         if not args.skip_build:
             build_root = _build_root(args.work_dir or _default_work_dir())
-            build = _run(_gradle_command(build_root))
+            build = _run(
+                _gradle_command(build_root),
+                cwd=build_root / "android",
+            )
             if build.returncode != 0:
                 print(build.stdout)
                 print(build.stderr, file=sys.stderr)
                 print("[FAIL] Gradle build failed.", file=sys.stderr)
                 return 1
         else:
-            build_root = app_root
+            build_root = (
+                args.work_dir / "local_app" if args.work_dir else app_root
+            )
 
         app_apk = _find_apk(build_root, "app-debug.apk")
         test_apk = _find_apk(build_root, "app-debug-androidTest.apk")
         results: list[BatchResult] = []
+        install_failed = False
         for name, classes in batches.items():
             print(f"\n=== {name} ({len(classes)} classes) ===", flush=True)
-            for cmd in (
-                [args.adb, "-s", serial, "uninstall", PACKAGE],
-                [args.adb, "-s", serial, "uninstall", TEST_PACKAGE],
+            for cmd in batch_commands(
+                serial, args.adb, app_apk, test_apk, classes
             ):
-                _run(cmd)
-            for apk in (app_apk, test_apk):
-                install = _run([args.adb, "-s", serial, "install", "-r", str(apk)])
-                if install.returncode != 0:
-                    print(install.stdout)
-                    print(install.stderr, file=sys.stderr)
-                    results.append(BatchResult(name=name, execution_error="APK install failed"))
+                completed = _run(cmd)
+                if "install" in cmd and completed.returncode != 0:
+                    print(completed.stdout)
+                    print(completed.stderr, file=sys.stderr)
+                    results.append(
+                        BatchResult(
+                            name=name, execution_error="APK install failed"
+                        )
+                    )
+                    install_failed = True
                     break
-            else:
-                instrument = _run(
-                    [
-                        args.adb,
-                        "-s",
-                        serial,
-                        "shell",
-                        "am",
-                        "instrument",
-                        "-w",
-                        "-r",
-                        "-e",
-                        "class",
-                        ",".join(classes),
-                        f"{TEST_PACKAGE}/{TEST_RUNNER}",
-                    ]
-                )
-                print(instrument.stdout)
-                if instrument.stderr.strip():
-                    print(instrument.stderr, file=sys.stderr)
-                results.append(
-                    summarize_results(name, instrument.stdout, instrument.returncode)
-                )
-                continue
-            break
+                if "instrument" in cmd:
+                    print(completed.stdout)
+                    if completed.stderr.strip():
+                        print(completed.stderr, file=sys.stderr)
+                    results.append(
+                        summarize_results(
+                            name, completed.stdout, completed.returncode
+                        )
+                    )
+            if install_failed:
+                break
 
         print("\n### Android instrumentation summary\n")
         print("| Batch | Passed | Failed | Skipped | Assumption skip | Error |")

@@ -7,9 +7,11 @@ import contextlib
 import importlib.util
 from io import StringIO
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().with_name("run_android_tests.py")
@@ -90,6 +92,113 @@ class AndroidTestRunnerTests(unittest.TestCase):
         self.assertIn("uninstall com.example.studyassistant.journal.test", text)
         self.assertIn("install -r", text)
         self.assertIn("am instrument -w -r", text)
+
+    def test_dry_run_uses_fully_qualified_class_names(self) -> None:
+        stdout = StringIO()
+        with contextlib.redirect_stdout(stdout):
+            code = runner.main(
+                [
+                    "--serial",
+                    "127.0.0.1:16384",
+                    "--dry-run",
+                    "--skip-build",
+                ]
+            )
+        text = stdout.getvalue()
+        self.assertEqual(0, code)
+        self.assertIn(
+            "-e class com.example.studyassistant.AssignmentNotificationPublisherTest",
+            text,
+        )
+        self.assertIn(
+            "com.example.studyassistant.RealAccountHeadlessEntryTest",
+            text,
+        )
+        self.assertNotIn("-e class AssignmentNotificationPublisherTest", text)
+
+    def test_gradle_build_runs_inside_the_android_project(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            build_root = Path(raw) / "local_app"
+            build_root.mkdir()
+            calls: list[dict[str, object]] = []
+
+            def fake_run(cmd, cwd=None, check=False):  # noqa: ANN001
+                calls.append({"cmd": cmd, "cwd": cwd})
+                return subprocess.CompletedProcess(cmd, 0, "OK (1 test)", "")
+
+            def fake_find(app_root: Path, name: str) -> Path:
+                return app_root / name
+
+            with (
+                mock.patch.object(runner, "_build_root", return_value=build_root),
+                mock.patch.object(runner, "_run", side_effect=fake_run),
+                mock.patch.object(runner, "_find_apk", side_effect=fake_find),
+                contextlib.redirect_stdout(StringIO()),
+            ):
+                code = runner.main(["--serial", "emulator-1"])
+            self.assertEqual(0, code)
+            gradle_calls = [
+                call for call in calls if "gradlew" in " ".join(map(str, call["cmd"]))
+            ]
+            self.assertEqual(1, len(gradle_calls))
+            self.assertEqual(build_root / "android", gradle_calls[0]["cwd"])
+
+    def test_skip_build_with_work_dir_reuses_the_ascii_mirror(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            work_dir = Path(raw)
+            seen: list[Path] = []
+
+            def fake_find(app_root: Path, name: str) -> Path:
+                seen.append(app_root)
+                return app_root / name
+
+            with (
+                mock.patch.object(runner, "_find_apk", side_effect=fake_find),
+                mock.patch.object(
+                    runner,
+                    "_run",
+                    return_value=subprocess.CompletedProcess(
+                        [], 0, "OK (1 test)", ""
+                    ),
+                ),
+                contextlib.redirect_stdout(StringIO()),
+            ):
+                code = runner.main(
+                    [
+                        "--serial",
+                        "emulator-1",
+                        "--skip-build",
+                        "--work-dir",
+                        str(work_dir),
+                    ]
+                )
+            self.assertEqual(0, code)
+            self.assertTrue(seen)
+            self.assertEqual(work_dir / "local_app", seen[0])
+
+    def test_crashed_or_empty_runs_are_execution_errors(self) -> None:
+        crashed = runner.summarize_results(
+            "batch",
+            "INSTRUMENTATION_STATUS: Error=Process crashed",
+            0,
+        )
+        self.assertIsNotNone(crashed.execution_error)
+
+        class_not_found = runner.summarize_results(
+            "batch",
+            "INSTRUMENTATION_STATUS: shortMsg=ClassNotFoundException",
+            0,
+        )
+        self.assertIsNotNone(class_not_found.execution_error)
+
+        empty = runner.summarize_results("batch", "", 0)
+        self.assertEqual(
+            "instrumentation reported no test results", empty.execution_error
+        )
+
+        ok = runner.summarize_results("batch", "OK (7 tests)", 0)
+        self.assertEqual(7, ok.passed)
+        self.assertIsNone(ok.execution_error)
 
     def test_parser_counts_pass_fail_and_assumption_skip(self) -> None:
         output = "\n".join(
