@@ -25,6 +25,7 @@ import '../services/home_course_filter.dart';
 import '../services/home_sync_presentation.dart';
 import '../services/home_upcoming_exam.dart';
 import '../services/interaction_feedback_service.dart';
+import '../services/todo_copy_formatter.dart';
 import 'widgets/appearance_controls.dart';
 import 'widgets/assignment_card.dart';
 import 'widgets/journal_buttons.dart';
@@ -329,6 +330,60 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           unawaited(store.setAssignmentsHidden(sourceIds, false));
         }
       },
+    );
+  }
+
+  Future<void> _copyNext7DaysTodos({required DateTime now}) async {
+    final result = TodoCopyFormatter.formatNext7Days(
+      store.homeCatalogAssignments,
+      manualEntries: store.isAuthenticated ? store.notebook.entries : const [],
+      now: now,
+      index: store.homeDisplayIndex,
+      coursework: store.courseworkState,
+    );
+    if (result.isEmpty) {
+      feedback('近 7 天暂无可复制的待办');
+      return;
+    }
+    try {
+      await Clipboard.setData(ClipboardData(text: result.text!));
+      if (mounted) {
+        feedback('已复制近 7 天待办（共 ${result.count} 项）');
+      }
+    } catch (_) {
+      if (mounted) {
+        feedback('复制失败，请稍后重试');
+      }
+    }
+  }
+
+  Future<void> _openMoreMenu(BuildContext anchorContext) async {
+    final box = anchorContext.findRenderObject() as RenderBox?;
+    Rect? anchorRect;
+    if (box != null && box.hasSize) {
+      final topLeft = box.localToGlobal(Offset.zero);
+      anchorRect = topLeft & box.size;
+    }
+    await showJournalContextMenu(
+      context: context,
+      anchorRect: anchorRect,
+      displayPrefs: store.display,
+      actions: [
+        JournalContextMenuAction(
+          label: '复制近 7 天待办',
+          icon: Icons.copy_all_outlined,
+          onSelected: () => unawaited(
+            _copyNext7DaysTodos(now: widget.clock?.call() ?? DateTime.now()),
+          ),
+        ),
+        JournalContextMenuAction(
+          label: '同步详情',
+          icon: Icons.sync_alt_rounded,
+          onSelected: () {
+            if (mounted) context.push('/sync');
+          },
+        ),
+      ],
     );
   }
 
@@ -1041,14 +1096,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   ),
                 action(
                   '更多',
-                  IconButton(
-                      tooltip: '同步详情',
+                  Builder(
+                    builder: (moreContext) => IconButton(
+                      key: const ValueKey('home-more-menu'),
+                      tooltip: '更多',
                       padding: const EdgeInsets.only(bottom: 12),
                       iconSize: 21,
                       constraints:
                           const BoxConstraints(minWidth: 48, minHeight: 48),
-                      onPressed: () => context.push('/sync'),
-                      icon: const Icon(Icons.more_horiz_rounded)),
+                      onPressed: () => unawaited(_openMoreMenu(moreContext)),
+                      icon: const Icon(Icons.more_horiz_rounded),
+                    ),
+                  ),
                 ),
               ]);
 

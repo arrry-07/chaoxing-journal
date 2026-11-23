@@ -37,7 +37,11 @@ void main() {
     expect(find.text('CAMPUS JOURNAL   /   01'), findsNothing);
     expect(t.widget<Text>(find.text('课业手记')).style, Journal.display);
     expect(find.byTooltip('刷新作业'), findsOneWidget);
-    expect(find.byTooltip('同步详情'), findsOneWidget);
+    expect(find.byTooltip('更多'), findsOneWidget);
+    await t.tap(find.byTooltip('更多'));
+    await t.pumpAndSettle();
+    expect(find.text('复制近 7 天待办'), findsOneWidget);
+    expect(find.text('同步详情'), findsOneWidget);
   });
 
   testWidgets('unknown submission keeps exact label and never claims overdue',

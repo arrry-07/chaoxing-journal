@@ -26,7 +26,7 @@ class JournalContextMenuAction {
 Future<void> showJournalContextMenu({
   required BuildContext context,
   required Rect? anchorRect,
-  required Widget previewCard,
+  Widget? previewCard,
   required List<JournalContextMenuAction> actions,
   DisplayPreferences displayPrefs = const DisplayPreferences(),
 }) async {
@@ -66,7 +66,7 @@ class _JournalContextMenuOverlay extends StatefulWidget {
 
   final Animation<double> animation;
   final Rect? anchorRect;
-  final Widget previewCard;
+  final Widget? previewCard;
   final List<JournalContextMenuAction> actions;
   final DisplayPreferences displayPrefs;
 
@@ -132,33 +132,60 @@ class _JournalContextMenuOverlayState
           (size.width - horizontalPad * 2).clamp(240.0, 520.0).toDouble(),
       maxCardWidth,
     );
-    final naturalCardHeight = anchorRect?.height ?? 92.0;
+    final naturalCardHeight =
+        widget.previewCard == null ? 0.0 : (anchorRect?.height ?? 92.0);
+    final hasPreview = widget.previewCard != null;
 
-    // One shared vertical budget: the menu keeps up to two rows when space
-    // permits and never exceeds usableHeight; the preview clips cleanly.
-    final minCardShown = math.min(naturalCardHeight, 96.0);
+    // One shared vertical budget: with preview keeps up to two rows when space
+    // permits; without preview places the menu directly near the anchor.
+    final minCardShown = hasPreview ? math.min(naturalCardHeight, 96.0) : 0.0;
     final desiredFloor = math.min(itemHeight * 2, usableHeight);
-    final menuBudget =
-        math.max(desiredFloor, usableHeight - gap - minCardShown);
-    final menuHeight = math.min(
-      naturalMenuHeight,
-      math.min(usableHeight, menuBudget),
-    );
-    final cardHeight = math.max(
-      0.0,
-      math.min(naturalCardHeight, usableHeight - gap - menuHeight),
-    );
-    final stackHeight = cardHeight + gap + menuHeight;
+    final menuBudget = hasPreview
+        ? math.max(desiredFloor, usableHeight - gap - minCardShown)
+        : usableHeight;
+    final cardHeight = hasPreview
+        ? math.max(
+            0.0,
+            math.min(
+              naturalCardHeight,
+              usableHeight -
+                  gap -
+                  math.min(
+                    naturalMenuHeight,
+                    math.min(usableHeight, menuBudget),
+                  ),
+            ),
+          )
+        : 0.0;
 
     final anchorTop = anchorRect?.top ?? (size.height * 0.28);
-    final availableAbove = anchorTop - topSafe;
+    final anchorBottom = anchorRect?.bottom ?? size.height * 0.45;
+    final availableAbove = anchorTop - topSafe - (hasPreview ? 0.0 : 6.0);
     final availableBelow =
-        size.height - bottomSafe - (anchorRect?.bottom ?? size.height * 0.45);
-    final fitsBelow = anchorTop + stackHeight <= size.height - bottomSafe;
-    final placeBelow = fitsBelow || availableBelow >= availableAbove;
+        size.height - bottomSafe - anchorBottom - (hasPreview ? 0.0 : 6.0);
+    final double menuHeight;
+    final bool placeBelow;
+    if (hasPreview) {
+      menuHeight = math.min(
+        naturalMenuHeight,
+        math.min(usableHeight, menuBudget),
+      );
+      final stackHeight = cardHeight + gap + menuHeight;
+      final fitsBelow = anchorTop + stackHeight <= size.height - bottomSafe;
+      placeBelow = fitsBelow || availableBelow >= availableAbove;
+    } else {
+      placeBelow = naturalMenuHeight <= availableBelow ||
+          availableBelow >= availableAbove;
+      final verticalRoom =
+          math.max(0.0, placeBelow ? availableBelow : availableAbove);
+      menuHeight = math.min(naturalMenuHeight, verticalRoom);
+    }
+    final stackHeight = hasPreview ? cardHeight + gap + menuHeight : menuHeight;
 
     final double cardTop;
-    if (placeBelow) {
+    if (!hasPreview) {
+      cardTop = anchorTop;
+    } else if (placeBelow) {
       final maxTop = size.height - bottomSafe - stackHeight;
       cardTop = anchorTop.clamp(topSafe, math.max(topSafe, maxTop)).toDouble();
     } else {
@@ -173,11 +200,44 @@ class _JournalContextMenuOverlayState
         .clamp(
             edgeInset, math.max(edgeInset, size.width - edgeInset - cardWidth))
         .toDouble();
-    final menuWidth = math.min(largeText ? 300.0 : 238.0, cardWidth);
-    final menuLeft = cardLeft
+    final menuWidth = math.min(
+      largeText ? 300.0 : 238.0,
+      hasPreview ? cardWidth : maxCardWidth,
+    );
+    final alignRight = !hasPreview &&
+        anchorRect != null &&
+        anchorRect.center.dx > size.width / 2;
+    final rawMenuLeft = hasPreview
+        ? cardLeft
+        : anchorRect == null
+            ? (size.width - menuWidth) / 2
+            : (alignRight ? anchorRect.right - menuWidth : anchorRect.left);
+    final menuLeft = rawMenuLeft
         .clamp(
             edgeInset, math.max(edgeInset, size.width - edgeInset - menuWidth))
         .toDouble();
+    final double? menuTop = hasPreview
+        ? (placeBelow ? cardTop + cardHeight + gap : null)
+        : (placeBelow
+            ? (anchorBottom + 6)
+                .clamp(topSafe,
+                    math.max(topSafe, size.height - bottomSafe - menuHeight))
+                .toDouble()
+            : null);
+    final double? menuBottom = hasPreview
+        ? (placeBelow ? null : size.height - (cardTop - gap))
+        : (placeBelow
+            ? null
+            : (size.height - (anchorTop - 6))
+                .clamp(bottomSafe,
+                    math.max(bottomSafe, size.height - topSafe - menuHeight))
+                .toDouble());
+    final Alignment scaleAlignment = switch ((placeBelow, alignRight)) {
+      (true, true) => Alignment.topRight,
+      (true, false) => Alignment.topLeft,
+      (false, true) => Alignment.bottomRight,
+      (false, false) => Alignment.bottomLeft,
+    };
 
     return Material(
       type: MaterialType.transparency,
@@ -207,7 +267,7 @@ class _JournalContextMenuOverlayState
                   ),
                 ),
               ),
-              if (cardHeight > 0)
+              if (widget.previewCard != null && cardHeight > 0)
                 Positioned(
                   left: cardLeft,
                   top: cardTop,
@@ -252,13 +312,12 @@ class _JournalContextMenuOverlayState
                 ),
               Positioned(
                 left: menuLeft,
-                top: placeBelow ? cardTop + cardHeight + gap : null,
-                bottom: placeBelow ? null : size.height - (cardTop - gap),
+                top: menuTop,
+                bottom: menuBottom,
                 width: menuWidth,
                 child: Transform.scale(
                   scale: menuScale,
-                  alignment:
-                      placeBelow ? Alignment.topLeft : Alignment.bottomLeft,
+                  alignment: scaleAlignment,
                   child: Opacity(
                     opacity: t.clamp(0.0, 1.0),
                     child: DecoratedBox(
