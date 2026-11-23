@@ -19,8 +19,8 @@
 - 第三方 API、版本兼容或升级先查锁文件（Flutter 用 `pubspec.lock`），再用 Context7 核对对应版本文档。项目内部逻辑直接检查本地源码和测试。
 - 视觉与布局改动须有当前任务的明确要求；功能修复只改必需的可观察界面状态，并在交付中说明。无关视觉问题只记录。
 - 保留已有修改和未跟踪的 `docs/feedback/`、`scripts/demo-video/` 及个人材料。凭据、Cookie、账号响应或敏感日志不得进入提交。保持 Flutter、脚本、参考实现与 CI 约定的目录路径。
-- MuMu 预览按[自测包步骤](docs/guides/开发与贡献.md#mumu-自测包)执行。只有准备安装预览包时才写入下一目标正式版的 `X.Y.Z-dev.N+build`（无前导零，如 `1.9.0-dev.1+121`）。使用原签名覆盖并保留登录态和数据。
-- 维护者明确要求正式发版后，从 `dev` 向 `main` 提汇总 PR；紧急 Hotfix 从最新 `main` 起步，发布后同步回 `dev`。正式版采用标准无前导零三段 `X.Y.Z` 与 `vX.Y.Z`（小更新升第二小数点后 `Z`，较大更新升第一小数点后 `Y` 并归零 `Z`，重大跃迁升 `X`；自 `1.8.26+120` 后下一正式版从 `1.9.0` 起步，构建号高于已用预览包；细则与渠道联动见[版本号与迭代分级规则](docs/ai-workflow/VALIDATION.md#版本号与迭代分级规则)）。
+- MuMu 预览按[自测包步骤](docs/guides/开发与贡献.md#mumu-自测包)执行。仅在 `dev` 完成改动准备打自测包时，将 `pubspec.yaml` 与 `AppVersion` 第三位补丁号 `Z+1`、构建号 `+1`（纯三段无前导零 `X.Y.Z+build`，如 `1.8.27+121`，不用 `-dev.N`），原签名覆盖保留登录态和数据。
+- 维护者明确要求正式发版后，从 `dev` 向 `main` 提汇总 PR；紧急 Hotfix 从最新 `main` 起步，发布后同步回 `dev`。正式版采用标准无前导零三段 `X.Y.Z` 与 `vX.Y.Z`：在 `dev` 冻结时一律升第二位 `Y+1` 并归零 `Z`（如 `1.9.0`；`Y` 最大 `99`，满 `99` 进第一位 `X+1` 归零 `Y/Z` 为 `2.0.0`），构建号高于全部测试包，每次正式版均同步推进 `update-stable.json` 与 `update-manual.json`（细则见[版本号与迭代规则](docs/ai-workflow/VALIDATION.md#版本号与迭代分级规则)）。
 - 正式发布逐关核对 [CI、原签名 APK、设备及回下载](docs/ai-workflow/VALIDATION.md#集成验收与正式发布)。GitHub 每包必发，Gitee 自动更新小索引、按需手动镜像 APK，细则见[分发指南](docs/guides/更新渠道与国内分发.md)。
 - 并行任务先划定文件与资源归属；正式发布的独立审读、Git 与验收责任见[协作与发布审读](docs/ai-workflow/VALIDATION.md#协作与发布审读)。
 

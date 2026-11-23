@@ -48,6 +48,23 @@ class VerifyLocalGateTests(unittest.TestCase):
         self.assertIn("--tests", stderr.getvalue())
         self.assertIn("--skip-flutter-tests", stderr.getvalue())
 
+    def test_allow_dev_metadata_on_dev_branch_without_dev_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-b", "dev"], cwd=repo, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            (repo / "README.md").write_text("hi\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+            pubspec = "version: 1.8.27+121\n"
+            self.assertTrue(mod._should_allow_dev_metadata(repo, pubspec, release_flag=False))
+            self.assertFalse(mod._should_allow_dev_metadata(repo, pubspec, release_flag=True))
+
+            subprocess.run(["git", "checkout", "-b", "main"], cwd=repo, check=True, capture_output=True)
+            self.assertFalse(mod._should_allow_dev_metadata(repo, pubspec, release_flag=False))
+
 
 if __name__ == "__main__":
     unittest.main()

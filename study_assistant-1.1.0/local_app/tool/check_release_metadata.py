@@ -24,7 +24,7 @@ if dev_suffix and not args.allow_dev:
 name = base_name + (dev_suffix or "")
 app = (root / 'lib/src/app/app_version.dart').read_text(encoding='utf-8')
 assert f"name = '{name}'" in app and f'code = {code};' in app, 'AppVersion mismatch'
-if not dev_suffix:
+if not args.allow_dev and not dev_suffix:
     assert f'## {name}（{code}）' in (repo / 'CHANGELOG.md').read_text(encoding='utf-8'), 'Changelog missing'
     assert f'{name}（{code}）' in (repo / 'README.md').read_text(encoding='utf-8'), 'README mismatch'
     assert f'{name}+{code}' in (repo / 'docs/guides/安装与使用.md').read_text(encoding='utf-8'), 'Install guide mismatch'
