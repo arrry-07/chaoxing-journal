@@ -9,7 +9,7 @@
 - **课程学期归档、精选同步与单课聚合**：完成 `FB-008` 完整能力——课程教师/目录元数据透传与 `schema 9` 加密备份、统一学期归属/批量归档/往期召回；同步默认当前学期优先并保留 24 小时有界往期巡检与全量扫描入口；系统提醒默认折叠且红点隔离；详情页课名可直达单课切片。
 - **Android 冲刺提醒与提醒体检**：截止提醒默认在 `[23:30, 07:30)` 夜间静音顺延，可选 `≤1h` 紧急穿透；原生 `SQLite v8` 在投递前二次校验；提供温和 / 推荐冲刺 / 极致死线三档频率预设并迁移保留既有自定义；新增版本化有声渠道 `assignment_deadlines_v2` 与静默新作业渠道 `assignment_silent`，补齐体检详情与无隐私 3 秒测试触发。
 - **日历、考前条、复制与桌面小组件**：首页增加 14 天近期考试细条；日历对 `>=3` 项扎堆日使用暖朱砂淡底并提供「+ 记一条」；首页「更多」浮层支持脱敏复制近 7 天待办；桌面小组件对齐宣纸浅色 / 深夜暖灰 / 朱砂语义色，采用 `tnum` 排版、手动截止前缀，并随系统深浅色与字号变化即时重排。
-- PR、Commit 与验收发布记录待正式收口提交回填。
+- PR [#63](https://github.com/arrry-07/chaoxing-journal/pull/63) 合入 `7021e47`，已发布 [v1.8.26](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.26)。[验收与发布记录](docs/reviews/2026-11-23-v1.8.26-五阶段体验升级学期归档与提醒重构验收与发布记录.md)
 
 ## 1.8.25（114） — 统计与快捷隐藏修复、并发安全纵深与原生提醒性能升级（正式发布，2026-11-23）
 
@@ -27,7 +27,7 @@
 - **考试通知详情页梳理**：隐藏冗余通用「考试通知」课程眉标，考试安排由结构化图标分条展示并去重同义时间/时长/地点行，提示条改为轻描边样式，完整通知原文收进默认折叠面板。
 - **解析、会话与音频可靠性加固**：升级 Gradle 8.14.2 / AGP 8.11.1 / Kotlin 2.2.20 工具链并消除跨盘符增量编译异常；在 `ChaoxingExamParser.enrichNotices` 与序列化中保留缺年改期锚点、在 `verifyInBrowser` 为单条异常 Cookie 增加 `FormatException` 容错、兼容课程入口与账号考试内链驼峰 `clazzId`；统一首页、日历与同步详情的 `syncDone` 刷新完成反馈口径并补齐原生音频策略 `InteractionSoundPolicyTest` JVM 单测。
 - **工程化安全门禁与原因核清**：查明设备端剩余 2 条「提交未知」均为预期真实未知（无正式记录的纯广播通知与无补充来源的已结束竞赛考试）；落地版本化 `.githooks/` 防误提交安全钩子与 `scripts/verify_local_gate.py` 一键本地验证门禁。
-- PR [#61](https://github.com/arrry-07/chaoxing-journal/pull/61) 合入 `a20a072`，已发布 [v1.8.24](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.24)。[验收与发布记录](docs/reviews/2026-11-22-v1.8.24-全应用UI升级详情页精修与可靠性加固验收与发布记录.md)
+- PR [#61](https://github.com/arrry-07/chaoxing-journal/pull/61) 合入 `a20a072`，已发布 [v1.8.24](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.24)。[验收与发布记录](docs/archive/reviews/2026-11-22-v1.8.24-全应用UI升级详情页精修与可靠性加固验收与发布记录.md)
 
 ## 1.8.23（102） — 主题外观、交互反馈、随堂练习状态修复与置顶继承收口（正式发布，2026-11-22）
 
