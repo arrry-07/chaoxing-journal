@@ -145,11 +145,13 @@ class ReminderDatabaseRetentionTest {
         database.writableDatabase.execSQL(
             "INSERT INTO events (event_id, account_hash, session_epoch, type, assignment_id, " +
                 "course_name, title, notify_at, deadline_at, status, notification_id, " +
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "deadline_source, created_at, updated_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             arrayOf(
                 id, owner, account.sessionEpoch, ReminderDatabase.EVENT_DEADLINE,
                 assignmentId, "fixture course", "fixture work", (deadline ?: updatedAt) - 60_000L,
-                deadline, status, ReminderDatabase.stableNotificationId(id), updatedAt, updatedAt,
+                deadline, status, ReminderDatabase.stableNotificationId(id), "official",
+                updatedAt, updatedAt,
             ),
         )
     }

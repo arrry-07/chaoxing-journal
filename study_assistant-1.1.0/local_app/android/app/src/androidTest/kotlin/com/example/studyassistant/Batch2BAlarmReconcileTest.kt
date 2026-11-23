@@ -165,8 +165,9 @@ class Batch2BAlarmReconcileTest {
         val database = ReminderDatabase.get(context)
         val accountHash = "instrumentation-tz-${System.nanoTime()}"
         val shanghai = ZoneId.of("Asia/Shanghai")
-        val now = ZonedDateTime.of(2026, 11, 20, 20, 0, 0, 0, shanghai)
-        val deadline = ZonedDateTime.of(2026, 11, 21, 9, 0, 0, 0, shanghai).toInstant().toEpochMilli()
+        val now = ZonedDateTime.now(shanghai).plusDays(1)
+            .withHour(20).withMinute(0).withSecond(0).withNano(0)
+        val deadline = now.plusHours(13).toInstant().toEpochMilli()
         val assignmentId = "cx:work:tz:1"
         val eventId = "$accountHash|$assignmentId|deadline:$deadline|180"
         try {
@@ -234,7 +235,7 @@ class Batch2BAlarmReconcileTest {
             )
             val rescheduled = database.event(eventId)!!
             assertEquals(
-                ZonedDateTime.of(2026, 11, 21, 7, 30, 0, 0, shanghai).toInstant().toEpochMilli(),
+                now.plusHours(11).plusMinutes(30).toInstant().toEpochMilli(),
                 rescheduled.notifyAt,
             )
         } finally {
