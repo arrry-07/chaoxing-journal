@@ -6,10 +6,9 @@
 
 ## 2026-11-24 · v1.8.29 Stage 1 完成（会话守卫收敛 + 离线边界 + 双 API 矩阵）
 
-- 已完成改动：M1 `7f27920` 收敛 `AssignmentStore` 5 处会话归属校验并补 3 项回归（净减 13 行，13/13 通过）；M2 `caff7b6` 新增 9 项离线边界回归，UTC / `Asia/Shanghai` / `America/Los_Angeles` 全部通过；M3–M4 `4b1a6b8` 补 API 33+ 通知授权、`ReminderApiMatrixTest` 与多设备/Doze/只读 OEM 脚本（Python 17 项）。M5 期间修 `da3b27d`，Doze 状态改为按真实 `dumpsys` 结果记录（Python 18 项）。
-- 当前 commit 与状态：M5 在隔离 MuMu API 32 `127.0.0.1:16384` 与 API 35 `emulator-5556` 实跑 4 批 22 类 0 失败：API 32 各批 `20/80/10/1`、API 35 `20/80/11/4`；API 35 batch4 `4/4`、聚合通知 `8/8` 全为 `STATUS_CODE 0`，Doze 真实 `IDLE → reset`；API 32 OEM 禁用 Doze，如实记为 `unsupported`（d 项仍通过）。原始日志 `D:\campus-tools\build-work\androidtest-matrix-20261124-192708\androidtest-matrix.log`，Gradle 日志在 `...\androidtest-matrix-build-20261124-191452\gradle-build.log`。
-- 当前状态补充：按维护者要求 `docs/plans/2026-11-23-v1.8.27-首页手动课业混排与发版自动化方案.md` 留到 `1.90.0` 正式发布收口，`docs/plans/` 暂为 3 份；`pubspec.yaml` 与 `AppVersion` 仍为 `1.8.28+122`，未升版、未打自测包。
-- 下一步待办：停机进入本方案独立 Gate 审查（Diff `27c4102..HEAD`）；Gate 通过后再决定升 `1.8.29+123` 自测包。
+- 已完成改动：Stage 1 主体为 `7f27920`（5 处会话守卫、净减 13 行、13 项回归）、`caff7b6`（9 项离线边界回归，UTC/上海/洛杉矶全绿）、`4b1a6b8`（API 33+ 授权、API 矩阵与多设备脚本）、`da3b27d`（Doze 真实状态）与 `306c031`（文档收口）；本轮按 Gate 返工清单提交 `404fa82`，补齐 1a/1c/2a/2b/3 守卫回归、9010 Cookie 解锁与下游断言、矩阵 c/d 清理和广播对账，以及镜像 SDK 优先级、Doze ManifestError 透传、OEM 通道解析（Python 22 项）。
+- 当前 commit 与状态：`HEAD=404fa82`；隔离 MuMu API 32 为 4 批 22 类 116 项、111 通过/5 假设跳过/0 失败，API 35 为 116 项、115 通过/1 假设跳过/0 失败；API 35 batch4 4/4、聚合通知 8/8 均 `STATUS_CODE 0`，Doze `IDLE → reset`；API 32 OEM 禁用 Doze 记 `unsupported`，d 项仍通过。最终门禁 14 份 Flutter 208 项、9 组 Python 112 项、`dart analyze` 0 问题、L0 `32 + 25 = 57` 行；日志 `D:\campus-tools\build-work\androidtest-matrix-20261124-200655\androidtest-matrix.log`，Gradle 日志 `D:\campus-tools\build-work\androidtest-matrix-build-20261124-200033\gradle-build.log`。
+- 下一步待办：按维护者指令 `docs/plans/` 保留 3 份（`v1.8.27` 留至 `1.90.0` 收口），`pubspec.yaml`/`AppVersion` 仍为 `1.8.28+122`；立即停机等待 `306c031..HEAD` 增量 Gate 复审，不升版、不打 APK。
 
 ## 2026-11-24 · 固化 dev 分支开发命名规范、下一正式版 1.90.0 与方案更名
 
