@@ -416,6 +416,28 @@ class AndroidTestRunnerTests(unittest.TestCase):
         self.assertTrue(any("deviceidle unforce" in line for line in flat))
         self.assertTrue(any("battery reset" in line for line in flat))
 
+    def test_doze_probe_reports_real_state_instead_of_assuming_idle(self) -> None:
+        readings = iter(["ACTIVE", "ACTIVE"])
+
+        def fake_run(cmd, cwd=None, check=False):  # noqa: ANN001
+            if "get" in cmd and "deep" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    next(readings),
+                    "",
+                )
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with mock.patch.object(runner, "_run", side_effect=fake_run):
+            _, state = runner.run_with_doze(
+                "emulator-1",
+                "adb",
+                lambda: [],
+            )
+        self.assertIn("unsupported", state)
+        self.assertIn("ACTIVE", state)
+
     def test_oem_readonly_audit_executes_zero_destructive_commands(self) -> None:
         calls: list[list[str]] = []
 

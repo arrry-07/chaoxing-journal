@@ -523,10 +523,29 @@ def _find_apk(app_root: Path, name: str) -> Path:
 
 
 def enter_doze(serial: str, adb: str) -> str:
-    baseline = _shell(serial, adb, "dumpsys", "deviceidle", "get", "deep").strip()
+    baseline = _deep_state(
+        _shell(serial, adb, "dumpsys", "deviceidle", "get", "deep")
+    )
     _shell(serial, adb, "dumpsys", "battery", "unplug")
     _shell(serial, adb, "dumpsys", "deviceidle", "force-idle")
-    return baseline or "unknown"
+    entered = _deep_state(
+        _shell(serial, adb, "dumpsys", "deviceidle", "get", "deep")
+    )
+    if entered == "IDLE":
+        return f"IDLE (from {baseline})"
+    return f"unsupported ({entered})"
+
+
+def _deep_state(text: str) -> str:
+    match = re.search(r"deep state:\s*([A-Z-]+)", text, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+    stripped = text.strip().upper()
+    if stripped == "IDLE" or stripped.endswith(" IDLE"):
+        return "IDLE"
+    if stripped == "ACTIVE" or stripped.endswith(" ACTIVE"):
+        return "ACTIVE"
+    return stripped.splitlines()[0] if stripped else "unknown"
 
 
 def exit_doze(serial: str, adb: str) -> None:
@@ -553,10 +572,13 @@ def run_with_doze(
     adb: str,
     action,
 ) -> tuple[list[BatchResult], str]:
-    baseline = "unknown"
+    doze_state = "unsupported (unknown)"
     try:
-        baseline = enter_doze(serial, adb)
-        return action(), f"idle (from {baseline}) → reset"
+        try:
+            doze_state = enter_doze(serial, adb)
+        except ManifestError as error:
+            doze_state = f"unsupported ({error})"
+        return action(), f"{doze_state} → reset"
     finally:
         exit_doze(serial, adb)
 
