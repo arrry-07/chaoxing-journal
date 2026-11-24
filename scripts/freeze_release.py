@@ -109,10 +109,16 @@ def _validate_formal_step(
     current: ReleaseVersion,
 ) -> None:
     expected = _expected_formal_base(previous)
-    if current.base_tuple != expected:
+    same_series_patch = (
+        current.major == previous.major
+        and current.minor == previous.minor
+        and current.patch > previous.patch
+    )
+    if current.base_tuple != expected and not same_series_patch:
         wanted = ".".join(str(part) for part in expected)
         raise FreezeError(
-            f"Formal release after {previous.name} must be {wanted}; "
+            f"Formal release after {previous.name} must be {wanted} "
+            f"(or a patch in {previous.major}.{previous.minor}.x); "
             f"got {current.name}."
         )
 
@@ -127,12 +133,6 @@ def _validate_mode(version: ReleaseVersion, mode: str) -> None:
             raise FreezeError(
                 f"Dev test packages increment Z: {version.name} has Z == 0. "
                 "Use --mode formal for a release freeze."
-            )
-    elif mode == "formal":
-        if version.patch != 0:
-            raise FreezeError(
-                f"Formal releases end with .0: {version.name}. "
-                "Use --mode dev for a MuMu test package."
             )
 
 
@@ -415,10 +415,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.check:
             current, level = check_release(args.root, args.mode, args.previous)
-            kind = "dev test package" if current.is_dev else "formal release"
+            effective_mode = args.mode or ("formal" if current.patch == 0 else "dev")
+            kind = "formal release" if effective_mode == "formal" else "dev test package"
             print(f"[PASS] Current {kind}: {current.raw}")
             if level:
-                print(_level_line(level, current))
+                print(_level_line(level, current, effective_mode))
             return 0
         if not args.mode:
             print(
@@ -434,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"[PASS] Applied release metadata: {current.raw}")
         if level:
-            print(_level_line(level, current))
+            print(_level_line(level, current, args.mode))
         print("No git commit, tag, push or remote write was performed.")
         return 0
     except FreezeError as error:
@@ -442,12 +443,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
-def _level_line(level: str, current: ReleaseVersion) -> str:
-    if current.is_dev:
+def _level_line(level: str, current: ReleaseVersion, mode: str | None = None) -> str:
+    effective_mode = mode or ("dev" if current.is_dev else "formal")
+    if effective_mode == "dev":
         return (
             "Update level: patch (dev test package; publish only "
             "pubspec.yaml + AppVersion, no Gitee manifests)"
         )
+    if level == "patch":
+        return "Update level: patch (formal release; sync update-manual.json)"
     return (
         f"Update level: {level} (formal release; sync update-stable.json "
         "and update-manual.json)"

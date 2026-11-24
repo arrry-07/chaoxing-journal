@@ -170,8 +170,8 @@ void main() {
   testWidgets(
       'M6: ManualEntryDetailScreen displays D13 quiet-hours warning only for skipped future reminder, copies note, toggles done, deletes, and handles missing entry across themes at 320dp@2x',
       (tester) async {
-    // 23:10 Beijing (15:10 UTC)
-    final now = DateTime.utc(2026, 11, 25, 15, 10);
+    // 23:10 local wall time across any runner TZ (UTC / CST / PST)
+    final now = DateTime(2026, 11, 25, 23, 10);
     final quietEntry = ManualEntry(
       id: 'm-quiet',
       kind: ManualEntry.kindTodo,
@@ -180,14 +180,14 @@ void main() {
       location: '教二 301',
       minutes: 45,
       note: '附上测试截图和版本号',
-      at: DateTime.utc(2026, 11, 25, 16, 10), // 00:10+1 Beijing, cand=23:40
+      at: DateTime(2026, 11, 26, 0, 10), // cand=23:40 local
       remind: true,
     );
     final daytimeEntry = ManualEntry(
       id: 'm-day',
       kind: ManualEntry.kindExam,
       title: '下午上机考试',
-      at: DateTime.utc(2026, 11, 26, 6, 0), // 14:00 Beijing
+      at: DateTime(2026, 11, 26, 14, 0),
       remind: true,
     );
     final store = await _buildStore(now, entries: [quietEntry, daytimeEntry]);
@@ -471,12 +471,12 @@ void main() {
       isNull,
     );
 
-    final now = DateTime.utc(2026, 11, 25, 15, 10); // 23:10 Beijing
+    final now = DateTime(2026, 11, 25, 23, 10);
     final quietEntry = ManualEntry(
       id: 'm-q',
       kind: ManualEntry.kindTodo,
       title: '凌晨待办',
-      at: DateTime.utc(2026, 11, 25, 16, 10), // 00:10+1 Beijing -> quiet skip
+      at: DateTime(2026, 11, 26, 0, 10), // cand=23:40 local -> quiet skip
       remind: true,
     );
     final soonEntry = ManualEntry(

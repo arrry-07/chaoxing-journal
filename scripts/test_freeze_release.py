@@ -149,15 +149,51 @@ class FreezeReleaseTests(unittest.TestCase):
         return repo
 
     def test_check_infers_dev_mode_for_patch_package(self) -> None:
-        repo = self._repo()
+        repo = self._repo("1.8.27+121", formal="1.8.26+120")
         result = _run(FREEZE, "--check", "--root", str(repo))
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("dev test package", result.stdout)
-        self.assertIn("1.8.26+120", result.stdout)
+        self.assertIn("1.8.27+121", result.stdout)
 
         formal = _run(FREEZE, "--check", "--mode", "formal", "--root", str(repo))
         self.assertEqual(1, formal.returncode)
-        self.assertIn("end with .0", formal.stderr)
+        self.assertIn("CHANGELOG.md", formal.stderr)
+
+    def test_apply_formal_patch_release_preserves_formal_mode(self) -> None:
+        repo = self._repo(
+            "1.8.30+123",
+            formal="1.8.26+120",
+            changelog_new="## 1.8.31（124）\n",
+        )
+        result = _run(
+            FREEZE,
+            "--apply",
+            "--mode",
+            "formal",
+            "--version",
+            "1.8.31+124",
+            "--root",
+            str(repo),
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("Update level: patch (formal release", result.stdout)
+        check = _run(
+            FREEZE,
+            "--check",
+            "--mode",
+            "formal",
+            "--root",
+            str(repo),
+            "--previous",
+            "1.8.26+120",
+        )
+        self.assertEqual(0, check.returncode, check.stderr)
+        self.assertIn("Current formal release: 1.8.31+124", check.stdout)
+        self.assertIn("Update level: patch (formal release", check.stdout)
+        metadata = _run(
+            repo / "study_assistant-1.1.0/local_app/tool/check_release_metadata.py"
+        )
+        self.assertEqual(0, metadata.returncode, metadata.stderr)
 
     def test_apply_dev_version_updates_only_app_identity(self) -> None:
         repo = self._repo()

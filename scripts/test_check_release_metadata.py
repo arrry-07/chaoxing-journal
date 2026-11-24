@@ -81,10 +81,18 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("1.8.27+121", result.stdout)
 
-    def test_dev_version_without_allow_dev_is_rejected(self) -> None:
-        result = _run(self._repo("1.8.27+121"))
-        self.assertEqual(1, result.returncode)
-        self.assertIn("Formal release metadata requires X.Y.0", result.stderr)
+    def test_unfrozen_dev_version_without_allow_dev_is_rejected(self) -> None:
+        repo, script = _make_repo("1.8.27+121")
+        self.temp_dirs.append(repo)
+        (repo / "CHANGELOG.md").write_text("## 1.8.26（120）\n", encoding="utf-8")
+        (repo / "README.md").write_text("当前正式包为 1.8.26（120）\n", encoding="utf-8")
+        result = _run(script)
+        self.assertNotEqual(0, result.returncode)
+
+    def test_formal_patch_version_passes_when_formal_docs_match(self) -> None:
+        result = _run(self._repo("1.8.31+124"))
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("1.8.31+124", result.stdout)
 
     def test_dev_suffix_is_rejected(self) -> None:
         result = _run(self._repo("1.90.0-dev.1+123"), "--allow-dev")

@@ -32,12 +32,6 @@ if int(minor) > 99:
         "Minor version Y must be <= 99; bump the major version instead "
         f"(got {base_name})\n",
     )
-if not args.allow_dev and patch != "0":
-    parser.exit(
-        1,
-        "Formal release metadata requires X.Y.0 after freezing "
-        f"(got {base_name}); dev test packages use --allow-dev\n",
-    )
 
 name = base_name
 app = (root / 'lib/src/app/app_version.dart').read_text(encoding='utf-8')

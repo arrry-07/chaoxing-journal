@@ -4,11 +4,11 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
-## 2026-11-25 · v1.8.31 Stage 1 + Gate 2 二次返工完成（Semantics/防连点/代理对全通过，待复审收口）
+## 2026-11-25 · v1.8.31 Stage 2 正式冻结完成（Gate 2 终审 0 阻断通过，1.8.31+124 待提 PR 与双端验收）
 
-- 已完成改动：在 `9c810ef` 基础上修复 `Gate 2` 增量复审指出的 Major（`manual_attachment_picker_section.dart` 为图片删除与预览 `Semantics(excludeSemantics: true)` 补全 `onTap`/`enabled` 并新增 `SemanticsAction.tap` 断言）及高价值 Minor（`_AttachmentFullscreenViewer.dispose` 同步复位 `_galleryOpening`、`PersonalFileBridge.kt` 用截断前原始扩展名线索猜测 MIME、`ManualAttachmentPathPolicyTest.kt` 补充 UTF-16 代理对截断单测）。
-- 当前 commit 与状态：二次返工待提交（前序 `9c810ef` 已推 `origin/dev`），L0 `60 <= 80`；`verify_local_gate.py` 定向门禁（5 组 Flutter 37 项 + 9 组 Python + `dart analyze` 0 问题）与隔离 ASCII Gradle `:app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug --rerun-tasks`（`cx1831-gradle`）全部通过。
-- 下一步待办：提交推送本轮返工并完成 `Gate 2` 最终复审 0 阻断通过；随后冻结并直发正式版 `1.8.31+124`（PR/CI + MuMu/真机双端验收 + Release 与归档）。
+- 已完成改动：基于 `Gate 2` 增量终审 `930175d1` 对 `7e730f5` 返回 **PASS（0 阻断 / 0 中级 / 0 次要）** 后，授权扩展 `check_release_metadata.py` 与 `freeze_release.py`（及对应 Python 单测）支持维护者显式冻结 `1.8.31+124` 正式补丁版（保持未冻结 `dev` 拒过、前导零与 `minor <= 99` 门禁不变）；更新 `CHANGELOG.md`（汇总 `v1.8.27`–`v1.8.31` 交付并明确披露 `personal_schedule_v2` 渠道迁移及加密备份不含本地附件），运行 `freeze_release.py --apply --mode formal --version 1.8.31+124` 同步版本标识，并顺带修复全量 `TZ=UTC` 回归暴露的 `assignment_list_screen.dart` 360dp 紧凑按钮宽度及 `v1830_manual_detail_m6_test.dart` 时区无关本地时间断言。
+- 当前 commit 与状态：冻结变更待提交（前序 `7e730f5` 已推 `origin/dev`），L0 `60 <= 80`；`freeze_release.py --check --mode formal --previous 1.8.26+120`、`check_release_metadata.py` 与 `TZ=UTC` 全套 `--release --mode full` 门禁（Flutter 1977 passed / 0 failed / 1 opt-in benchmark skipped、9 组 114 项 Python 单测与 `dart analyze` 0 问题）全部通过。
+- 下一步待办：完成全套门禁并提交推送 `dev` 后，提 PR `dev -> main`、跑通 PR CI 与审计并合入 `main`，构建干净签名的 `chaoxing-journal-1.8.31.apk` 在 MuMu `127.0.0.1:16448` 与物理真机 `MKB4C20605047402` 双端保数据验收通过后发布 `v1.8.31` 正式 Release 并收口归档。
 
 ## 2026-11-25 · v1.8.30 Stage 1 + Gate 1 返工完成（24 文件 282 项与全套校验全绿，待 Gate 1 复审）
 

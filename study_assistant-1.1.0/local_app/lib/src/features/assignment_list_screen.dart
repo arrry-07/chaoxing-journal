@@ -2142,9 +2142,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       return width;
     }
 
-    final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 26;
-    final sortWidth = 17 + 7 + labelWidth(sortLabel, sortStyle) + 26;
-    final addWidth = 16 + 7 + labelWidth(addLabel, addStyle) + 26;
+    final filterWidth = 16 + 5 + labelWidth(filterLabel, filterStyle) + 22;
+    final sortWidth = 16 + 5 + labelWidth(sortLabel, sortStyle) + 22;
+    final addWidth = 16 + 5 + labelWidth(addLabel, addStyle) + 22;
 
     Widget buildFilterPill({bool fullWidth = false}) {
       final journal = Journal.of(context);
@@ -2173,7 +2173,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     widthFactor: fullWidth ? null : 1,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 13, vertical: 6.5),
+                          horizontal: 11, vertical: 6.5),
                       decoration: BoxDecoration(
                         color: filtersActive ? journal.sage : journal.parchment,
                         borderRadius: BorderRadius.circular(20),
@@ -2195,7 +2195,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             size: 16,
                             color: filterColor,
                           ),
-                          const SizedBox(width: 7),
+                          const SizedBox(width: 5),
                           Flexible(
                             child: Text(filterLabel, style: filterStyle),
                           ),
@@ -2234,7 +2234,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     widthFactor: 1,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 13, vertical: 6.5),
+                          horizontal: 11, vertical: 6.5),
                       decoration: BoxDecoration(
                         color: journal.parchment,
                         borderRadius: BorderRadius.circular(20),
@@ -2246,7 +2246,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Icon(Icons.swap_vert_rounded,
                             size: 16, color: journal.muted),
-                        const SizedBox(width: 7),
+                        const SizedBox(width: 5),
                         Flexible(
                           child: Text(
                             sortLabel,
@@ -2293,7 +2293,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     widthFactor: 1,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 13,
+                        horizontal: 11,
                         vertical: 6.5,
                       ),
                       decoration: BoxDecoration(
@@ -2312,7 +2312,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             size: 16,
                             color: journal.ink,
                           ),
-                          const SizedBox(width: 7),
+                          const SizedBox(width: 5),
                           Text(addLabel, style: addStyle),
                         ],
                       ),
@@ -2327,8 +2327,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     }
 
     return LayoutBuilder(builder: (context, constraints) {
-      // Three pill borders plus the 10 + 8 gaps need more than 20px of slack.
-      if (filterWidth + sortWidth + addWidth + 28 <= constraints.maxWidth) {
+      // Three pill borders (4.8px) plus the 10 + 8 gaps need ~23px of slack.
+      if (filterWidth + sortWidth + addWidth + 24 <= constraints.maxWidth) {
         return Row(children: [
           Expanded(child: buildFilterPill(fullWidth: true)),
           const SizedBox(width: 10),
