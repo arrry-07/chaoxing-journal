@@ -4,6 +4,12 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
+## 2026-11-25 · v1.8.31 Stage 1 完成（存储兼容 + 原生桥 + Flutter UI/清理通过全套单测与 Gradle，待 Gate 2）
+
+- 已完成改动：按 [v1.8.31 方案](../plans/2026-11-25-v1.8.31-待办附件与存储格式升级方案.md) 完成 M1–M5：`PersonalWorkspace.map` 新增 `optionalKeys`，新增 `ManualAttachment` 模型，`ManualEntry` 新增 `updatedAt` 与 `attachments`（`StudyNotebook` 本地读写兼容 v1/v2，`BackupSnapshot` 强制 `portable: true` 严格输出 v1 + 10 键并补缺还原）；Android 侧新增 `ManualAttachmentPathPolicy` 与独立 `MethodChannel("study_assistant/manual_attachments")` 桥接免权限拍照（`cacheDir/camera_captures` 用毕清理）、Photo Picker / `ACTION_OPEN_DOCUMENT` 与 20 MB 流式复制至 `filesDir/manual_attachments/`（保留旧 `6183` 通道）；Flutter 侧接入 `ManualAttachmentService`、`ManualEntryEditor` 草稿隔离清理、详情页画廊/全屏缩放/系统打开、首页 `附件 N` 角标、`BackupScreen` 不含本地附件披露，以及 `AssignmentStore` 保存差集/登出/切号清理。
+- 当前 commit 与状态：Stage 1 代码与 `DEV_STATE.md` 待提交（基线 `8473892`），19 个相关 Flutter 测试（169 项，无后续 Dart 修改）、9 组 Python 单测、`dart analyze lib test` 0 问题及隔离 ASCII Gradle `:app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug --rerun-tasks`（`cx1831-gradle`）全部通过。
+- 下一步待办：提交推送 Stage 1 至 `origin/dev`，运行 Gate 2 并发双轴审查（Standards + Spec）至 0 阻断；随后按维护者授权冻结并直发正式版 `1.8.31+124`（PR/CI + MuMu/真机双端验收 + Release 与归档）。
+
 ## 2026-11-25 · v1.8.30 Stage 1 + Gate 1 返工完成（24 文件 282 项与全套校验全绿，待 Gate 1 复审）
 
 - 已完成改动：在 `946a179` 基础上完成 Gate 1 双轴（Axis 1 Standards + Axis 2 Spec）全部阻断、中级及关键次要项返工：`LocalNotificationService` 改为仅在 `migrateLegacyManualChannelIfNeeded` 确认创建 `personal_schedule_v2` 且重排 `p:` 闹钟后再安全退役旧 `personal_schedule`（并兼容无宿主插件测试的 `MissingPluginException`/`UnimplementedError`/`LateInitializationError`），清理 `reminderWindowMissed` 对全局 `lastWarning` 污染、`showTest`/`showTestManual` 捕获 `StateError` 并统一 `_clock()`；`AssignmentStore` 拆分 5 路子系统告警桶、`hasWidgetWarningOnly`/`hasNonQuietServiceWarning`、`manualSaveWarnings` 与 `saveFeedback(warnings:)`，防止保存待办弹出无关全局 SnackBar；`AssignmentDetailScreen` 截止预警横幅与 `AssignmentChangesScreen` 截止变更徽章收敛为 `ochre`，`ManualHomeCard` 按需诚实显示夜间静音/不足 30 分文案、`ReminderSettingsScreen` 补全 `manualChannel` 音振诊断与 `personal_schedule_v2` 用户偏好重置说明；`AssignmentListScreen` 修复 `_courseCountsFor` 覆盖完整目录、空课兜底与考试快捷新建；`AppDeepLinks` 支持 `/assignments/manual/:id` 登录后回跳，补全 `JournalPalette.==`/`hashCode`；`v1.8.30` 方案补充 §11 M1 诊断、M3 对比度及 D14 披露。
@@ -27,10 +33,4 @@
 - 已完成改动：为 `v1.8.30` 设备矩阵新建 API 26/30/31/33/34 隔离 AVD，复用 `1.8.29` 同源 debug/androidTest APK 跑 4 批 22 类 116 项；修复 androidTest 的 minSdk 26 兼容（`ReminderSourceScopeTest`/`ReminderDatabaseMigrationTest` 去掉 `SQLiteOpenHelper.use` 改 `try/finally`，`AssignmentNotificationPublisherTest` 的 v1 渠道断言改为「ensureChannels 不改变既有重要性」并加删除等待）。
 - 当前 commit 与状态：API 26/30/31/33/34 分别 111/111/112/114/115 通过、0 失败（其余为 API/环境假设跳过），均 Doze `IDLE → reset`；API 32/35 沿用 `1.8.29` 证据（111 通过/5 跳过 与 115 通过/1 跳过）。日志在 `D:\campus-tools\build-work\androidtest-api{26,30,31,33,34}-20261124.log`；仅测试代码变更，未改 App 源码/版本/签名，未新建预览包。
 - 下一步待办：物理 OEM 真机只读体检需设备授权；回归发现的两个 UI/文案问题仍待下一轮产品收口，正式发版仍等维护者指令。
-
-## 2026-11-24 · 1.8.29+123 完整功能回归通过（主实例保数据 + 隔离破坏性）
-
-- 已完成改动：对 `1.8.29+123` 原包（SHA-256 `0749a144…`）在 MuMu「学习通」`127.0.0.1:16448` 完成完整回归：首页混排与双向排序/逾期置底、筛选/搜索、置顶拖拽及冷启持久化、完成撤销、手动待办增删、详情/提醒状态、日历月周与议程、统计 24/39 与往期 33/41 下钻及关注恢复、提醒权限与测试通知、更新检查、40 门课程/42 条通知/桌面小组件与双击返回；仅集中线上刷新 1 次（扫描 38 门，跳过往期/归档 2 门）。隔离 `127.0.0.1:16384`（API 32）完成 1.7.3→`1.8.29` 原地升级、清数据首启、登录校验/协议页、精确闹钟拒绝降级与通知渠道重建。
-- 当前 commit 与状态：回归基线 `711d835`；主实例 `firstInstallTime`、登录态、40 门课程与 80 条记录保持，临时条目/置顶/主题/提醒 3 条/统计关注均已恢复；主/隔离 0 条 App `FATAL/FlutterError/RenderFlex`（仅 `uiautomator` 工具自身退出 SIGSEGV）。证据在 `D:\campus-tools\build-work\cx1829-full-regression-20261124-212529`；非阻断问题：关于对话框按钮英文、夜间静音个人日程导致首页持续显示「提醒或小组件需要处理」，另有一条考试通知详情疑似重复待样本核对。
-- 下一步待办：按 [ROADMAP](../ROADMAP.md#dev-下一阶段) 规划 `v1.8.30`；`docs/plans/` 保持 3 份现状，正式发版仍待维护者指令（目标 `1.90.0`）。
 

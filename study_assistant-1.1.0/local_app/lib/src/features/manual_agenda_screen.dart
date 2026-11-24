@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -6,6 +8,7 @@ import '../app/journal.dart';
 import '../app/journal_motion.dart';
 import '../app/transient_feedback.dart';
 import '../app/unsaved_edit_guard.dart';
+import '../models/manual_attachment.dart';
 import '../models/study_notebook.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
@@ -15,6 +18,7 @@ import 'widgets/data_recovery_warning.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_picker_sheet.dart';
+import 'widgets/manual_attachment_picker_section.dart';
 
 String manualTime(DateTime? at) => at == null
     ? '未安排时间'
@@ -283,6 +287,10 @@ class _EditorState extends State<ManualEntryEditor> {
   bool _saving = false;
   UnsavedEditGuard? _leaveGuard;
   String? error;
+  List<ManualAttachment> _attachments = const [];
+  final Set<String> _draftAddedPaths = {};
+  String? _attachmentHint;
+  String? _attachmentRoot;
 
   @override
   void initState() {
@@ -297,6 +305,13 @@ class _EditorState extends State<ManualEntryEditor> {
                 .firstOrNull);
     _missingEntry =
         widget.entry == null && widget.entryId != null && _entry == null;
+    _attachments = List<ManualAttachment>.from(
+      _entry?.attachments ?? const <ManualAttachment>[],
+    );
+    _attachmentRoot = widget.store.manualAttachmentService.cachedRootPath;
+    if (_attachments.isNotEmpty) {
+      unawaited(_ensureAttachmentRoot());
+    }
     title = TextEditingController(text: _entry?.title);
     course = TextEditingController(
         text: _entry?.course ?? widget.initialCourse?.trim());
@@ -317,6 +332,12 @@ class _EditorState extends State<ManualEntryEditor> {
     }
   }
 
+  Future<void> _ensureAttachmentRoot() async {
+    final root = await widget.store.manualAttachmentService.getAttachmentRoot();
+    if (!mounted || root == null || root == _attachmentRoot) return;
+    setState(() => _attachmentRoot = root);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -330,7 +351,8 @@ class _EditorState extends State<ManualEntryEditor> {
       hasUnsavedChanges: () => _dirty || _saving,
       draftRevision: () =>
           '${title.text}|${course.text}|${location.text}|${note.text}|'
-          '${minutes.text}|$kind|$remind|$at',
+          '${minutes.text}|$kind|$remind|$at|'
+          '${_attachments.map((a) => a.relativePath).join(',')}',
       blocksNavigation: () => _saving,
       confirmDiscard: _confirmDiscard,
       isStale: () =>
@@ -376,12 +398,172 @@ class _EditorState extends State<ManualEntryEditor> {
 
   @override
   void dispose() {
+    if (_draftAddedPaths.isNotEmpty) {
+      final cleanup = _draftAddedPaths.toList();
+      _draftAddedPaths.clear();
+      unawaited(widget.store.manualAttachmentService.deleteFiles(cleanup));
+    }
     _leaveGuard?.unregister(this);
     for (final c in [title, course, location, note, minutes]) {
       c.removeListener(_markDirty);
       c.dispose();
     }
     super.dispose();
+  }
+
+  int get _remainingImageSlots => (ManualAttachment.maxImagesPerEntry -
+          _attachments.where((a) => a.isImage).length)
+      .clamp(0, ManualAttachment.maxImagesPerEntry);
+
+  int get _remainingTotalSlots =>
+      (ManualAttachment.maxAttachmentsPerEntry - _attachments.length)
+          .clamp(0, ManualAttachment.maxAttachmentsPerEntry);
+
+  void _acceptAttachments(
+    List<ManualAttachment> incoming, {
+    String? hint,
+  }) {
+    final kept = <ManualAttachment>[..._attachments];
+    final rejectedPaths = <String>[];
+    var imageCount = kept.where((a) => a.isImage).length;
+    var capHit = false;
+    var addedAny = false;
+    for (final item in incoming) {
+      if (kept.length >= ManualAttachment.maxAttachmentsPerEntry ||
+          (item.isImage && imageCount >= ManualAttachment.maxImagesPerEntry)) {
+        capHit = true;
+        rejectedPaths.add(item.relativePath);
+        continue;
+      }
+      if (kept.any((existing) => existing.relativePath == item.relativePath)) {
+        continue;
+      }
+      kept.add(item);
+      _draftAddedPaths.add(item.relativePath);
+      addedAny = true;
+      if (item.isImage) imageCount++;
+    }
+    if (rejectedPaths.isNotEmpty) {
+      unawaited(
+          widget.store.manualAttachmentService.deleteFiles(rejectedPaths));
+    }
+    setState(() {
+      _attachments = kept;
+      if (addedAny) _dirty = true;
+      _attachmentHint = capHit ? '已达到附件数量上限，超出部分未添加' : hint;
+    });
+    if (kept.isNotEmpty) {
+      unawaited(_ensureAttachmentRoot());
+    }
+  }
+
+  Future<void> _capturePhoto() async {
+    if (busy || _remainingImageSlots <= 0 || _remainingTotalSlots <= 0) {
+      return;
+    }
+    setState(() {
+      busy = true;
+      _attachmentHint = null;
+    });
+    try {
+      final result = await widget.store.manualAttachmentService.capturePhoto();
+      if (!mounted) {
+        final att = result.attachment;
+        if (att != null) {
+          unawaited(widget.store.manualAttachmentService
+              .deleteFiles([att.relativePath]));
+        }
+        return;
+      }
+      if (result.attachment != null) {
+        _acceptAttachments([result.attachment!]);
+      } else if (!result.cancelled) {
+        setState(() => _attachmentHint = result.message);
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _pickImages() async {
+    if (busy) return;
+    final allowed = _remainingImageSlots < _remainingTotalSlots
+        ? _remainingImageSlots
+        : _remainingTotalSlots;
+    if (allowed <= 0) {
+      setState(() => _attachmentHint = '图片已达 9 张上限');
+      return;
+    }
+    setState(() {
+      busy = true;
+      _attachmentHint = null;
+    });
+    try {
+      final result = await widget.store.manualAttachmentService
+          .pickImages(maxCount: allowed);
+      if (!mounted) {
+        if (result.attachments.isNotEmpty) {
+          unawaited(widget.store.manualAttachmentService.deleteFiles(
+            result.attachments.map((a) => a.relativePath),
+          ));
+        }
+        return;
+      }
+      if (result.attachments.isNotEmpty) {
+        _acceptAttachments(result.attachments, hint: result.message);
+      } else if (result.message != null) {
+        setState(() => _attachmentHint = result.message);
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _pickAttachmentFile() async {
+    if (busy) return;
+    if (_remainingTotalSlots <= 0) {
+      setState(() => _attachmentHint = '已达单条 20 个附件上限');
+      return;
+    }
+    setState(() {
+      busy = true;
+      _attachmentHint = null;
+    });
+    try {
+      final result =
+          await widget.store.manualAttachmentService.pickAttachmentFile();
+      if (!mounted) {
+        final att = result.attachment;
+        if (att != null) {
+          unawaited(widget.store.manualAttachmentService
+              .deleteFiles([att.relativePath]));
+        }
+        return;
+      }
+      if (result.attachment != null) {
+        _acceptAttachments([result.attachment!]);
+      } else if (!result.cancelled) {
+        setState(() => _attachmentHint = result.message);
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  void _removeAttachment(ManualAttachment target) {
+    if (busy) return;
+    setState(() {
+      _attachments = [
+        for (final item in _attachments)
+          if (item.relativePath != target.relativePath) item,
+      ];
+      _dirty = true;
+      _attachmentHint = null;
+    });
+    if (_draftAddedPaths.remove(target.relativePath)) {
+      unawaited(widget.store.manualAttachmentService
+          .deleteFiles([target.relativePath]));
+    }
   }
 
   Future<void> chooseDate() async {
@@ -495,6 +677,13 @@ class _EditorState extends State<ManualEntryEditor> {
       epoch,
     );
     if (ok) {
+      final discardedDrafts = _draftAddedPaths.toList();
+      _draftAddedPaths.clear();
+      if (discardedDrafts.isNotEmpty) {
+        unawaited(
+          widget.store.manualAttachmentService.deleteFiles(discardedDrafts),
+        );
+      }
       _saving = false;
       _dirty = false;
       await WidgetsBinding.instance.endOfFrame;
@@ -504,6 +693,14 @@ class _EditorState extends State<ManualEntryEditor> {
         setState(() {
           busy = false;
           _saving = false;
+          if (!ok) {
+            error = widget.store.saveFeedback(
+              false,
+              successMessage: '',
+              failureMessage: '删除失败，请核对账号后重试',
+              warnings: widget.store.manualSaveWarnings,
+            );
+          }
         });
       }
       return;
@@ -538,11 +735,22 @@ class _EditorState extends State<ManualEntryEditor> {
         minutes: int.parse(minutes.text.trim()),
         at: at,
         remind: at != null && remind,
-        done: _entry?.done ?? false);
+        done: _entry?.done ?? false,
+        updatedAt: DateTime.now(),
+        attachments: _attachments);
     final ok = await widget.store.saveNotebook(
         (n) => n.withEntries([...n.entries.where((v) => v.id != e.id), e]),
         epoch);
     if (ok) {
+      final savedPaths = {for (final item in e.attachments) item.relativePath};
+      final discardedDrafts =
+          _draftAddedPaths.where((path) => !savedPaths.contains(path)).toList();
+      _draftAddedPaths.clear();
+      if (discardedDrafts.isNotEmpty) {
+        unawaited(
+          widget.store.manualAttachmentService.deleteFiles(discardedDrafts),
+        );
+      }
       _saving = false;
       _dirty = false;
       await WidgetsBinding.instance.endOfFrame;
@@ -640,217 +848,234 @@ class _EditorState extends State<ManualEntryEditor> {
             ),
             body: Form(
                 key: form,
-                child: ListView(
+                child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
-                    children: [
-                      JournalGroupedCard(
-                        padding: const EdgeInsets.all(14),
-                        children: [
-                          Column(
-                            children: [
-                              TextFormField(
-                                  controller: title,
-                                  enabled: !busy,
-                                  maxLength: 200,
-                                  decoration:
-                                      const InputDecoration(labelText: '标题'),
-                                  validator: (s) =>
-                                      s == null || s.trim().isEmpty
-                                          ? '请填写标题'
-                                          : null),
-                              const SizedBox(height: 10),
-                              _AgendaKindSegment(
-                                selected: kind,
-                                enabled: !busy,
-                                onChanged: (next) {
-                                  JournalMotion.tap(widget.store.display);
-                                  setState(() {
-                                    kind = next;
-                                    _dirty = true;
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                  controller: course,
-                                  enabled: !busy,
-                                  maxLength: 200,
-                                  decoration: InputDecoration(
-                                    labelText: '课程（可选）',
-                                    suffixIcon: widget.store.courses.isEmpty
-                                        ? null
-                                        : IconButton(
-                                            tooltip: '从我的课程选择',
-                                            onPressed:
-                                                busy ? null : chooseCourse,
-                                            icon: const Icon(
-                                              Icons.menu_book_outlined,
-                                            ),
-                                          ),
-                                  )),
-                              TextFormField(
-                                  controller: location,
-                                  enabled: !busy,
-                                  maxLength: 200,
-                                  decoration: const InputDecoration(
-                                      labelText: '地点（可选）')),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      JournalGroupedCard(
-                        dividerIndent: 16,
-                        children: [
-                          ListTile(
-                              title: Text(manualTime(at),
-                                  style: journal.entryTitle),
-                              subtitle: Text(
-                                kind == 'exam' ? '考试必须填写时间' : '待办可以暂不安排时间',
-                                style: journal.metadata,
-                              ),
-                              trailing: const Icon(Icons.calendar_today_rounded,
-                                  size: 19),
-                              onTap: busy ? null : chooseDate),
-                          if (at != null && kind == 'todo')
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
-                                child: TextButton(
-                                    onPressed: busy
-                                        ? null
-                                        : () => setState(() {
-                                              at = null;
-                                              remind = false;
-                                              _dirty = true;
-                                            }),
-                                    child: const Text('清除时间')),
-                              ),
-                            ),
-                          SwitchListTile(
-                              title:
-                                  Text('提前30分钟提醒', style: journal.entryTitle),
-                              subtitle:
-                                  Text('受通知权限和系统调度限制', style: journal.metadata),
-                              value: remind,
-                              onChanged: busy || at == null
-                                  ? null
-                                  : (v) => setState(() {
-                                        remind = v;
-                                        _dirty = true;
-                                      })),
-                          if (_entry != null)
-                            JournalGroupTile(
-                              icon: Icons.notifications_active_outlined,
-                              title: '提醒状态',
-                              onTap: busy
-                                  ? null
-                                  : () {
-                                      final router = GoRouter.maybeOf(context);
-                                      if (router != null) {
-                                        router.push(
-                                          '/reminder-status/manual/${Uri.encodeComponent(_entry!.id)}?unsaved=${_dirty ? 1 : 0}',
-                                        );
-                                      } else {
-                                        Navigator.of(context,
-                                                rootNavigator: true)
-                                            .push(
-                                          MaterialPageRoute<void>(
-                                            builder: (_) =>
-                                                ReminderStatusScreen(
-                                              store: widget.store,
-                                              kind: 'manual',
-                                              id: _entry!.id,
-                                              hasUnsavedEdits: _dirty,
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                    },
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      JournalGroupedCard(
-                        padding: const EdgeInsets.all(14),
-                        children: [
-                          Column(
-                            children: [
-                              TextFormField(
-                                  controller: minutes,
-                                  enabled: !busy,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(
-                                      labelText: '预计分钟（0表示未填写）'),
-                                  validator: (s) {
-                                    final v = int.tryParse(s?.trim() ?? '');
-                                    return v == null || v < 0 || v > 1440
-                                        ? '请输入0–1440的整数'
-                                        : null;
-                                  }),
-                              const SizedBox(height: 12),
-                              TextFormField(
-                                  controller: note,
-                                  enabled: !busy,
-                                  maxLength: 10000,
-                                  minLines: 3,
-                                  maxLines: 8,
-                                  decoration:
-                                      const InputDecoration(labelText: '备注')),
-                            ],
-                          ),
-                        ],
-                      ),
-                      if (error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: Semantics(
-                            key: const ValueKey('manual-editor-feedback'),
-                            liveRegion: true,
-                            child: Text(
-                              error!,
-                              style: journal.metadata
-                                  .copyWith(color: journal.berry),
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 16),
-                      JournalPrimaryButton(
-                        loading: busy,
-                        label: busy ? '正在保存…' : '保存个人安排',
-                        onPressed: busy ? null : save,
-                      ),
-                      if (_entry != null) ...[
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        JournalGroupedCard(
+                          padding: const EdgeInsets.all(14),
                           children: [
-                            OutlinedButton.icon(
-                              onPressed: busy ? null : toggleDone,
-                              icon: Icon(
-                                _entry!.done
-                                    ? Icons.undo_rounded
-                                    : Icons.check_rounded,
-                              ),
-                              label: Text(
-                                _entry!.done ? '恢复未完成' : '标记完成',
-                              ),
-                            ),
-                            TextButton.icon(
-                              style: TextButton.styleFrom(
-                                foregroundColor: journal.berry,
-                              ),
-                              onPressed: busy ? null : deleteEntry,
-                              icon: const Icon(Icons.delete_outline_rounded),
-                              label: const Text('删除个人安排'),
+                            Column(
+                              children: [
+                                TextFormField(
+                                    controller: title,
+                                    enabled: !busy,
+                                    maxLength: 200,
+                                    decoration:
+                                        const InputDecoration(labelText: '标题'),
+                                    validator: (s) =>
+                                        s == null || s.trim().isEmpty
+                                            ? '请填写标题'
+                                            : null),
+                                const SizedBox(height: 10),
+                                _AgendaKindSegment(
+                                  selected: kind,
+                                  enabled: !busy,
+                                  onChanged: (next) {
+                                    JournalMotion.tap(widget.store.display);
+                                    setState(() {
+                                      kind = next;
+                                      _dirty = true;
+                                    });
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                                TextFormField(
+                                    controller: course,
+                                    enabled: !busy,
+                                    maxLength: 200,
+                                    decoration: InputDecoration(
+                                      labelText: '课程（可选）',
+                                      suffixIcon: widget.store.courses.isEmpty
+                                          ? null
+                                          : IconButton(
+                                              tooltip: '从我的课程选择',
+                                              onPressed:
+                                                  busy ? null : chooseCourse,
+                                              icon: const Icon(
+                                                Icons.menu_book_outlined,
+                                              ),
+                                            ),
+                                    )),
+                                TextFormField(
+                                    controller: location,
+                                    enabled: !busy,
+                                    maxLength: 200,
+                                    decoration: const InputDecoration(
+                                        labelText: '地点（可选）')),
+                              ],
                             ),
                           ],
                         ),
+                        const SizedBox(height: 12),
+                        JournalGroupedCard(
+                          dividerIndent: 16,
+                          children: [
+                            ListTile(
+                                title: Text(manualTime(at),
+                                    style: journal.entryTitle),
+                                subtitle: Text(
+                                  kind == 'exam' ? '考试必须填写时间' : '待办可以暂不安排时间',
+                                  style: journal.metadata,
+                                ),
+                                trailing: const Icon(
+                                    Icons.calendar_today_rounded,
+                                    size: 19),
+                                onTap: busy ? null : chooseDate),
+                            if (at != null && kind == 'todo')
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 2),
+                                  child: TextButton(
+                                      onPressed: busy
+                                          ? null
+                                          : () => setState(() {
+                                                at = null;
+                                                remind = false;
+                                                _dirty = true;
+                                              }),
+                                      child: const Text('清除时间')),
+                                ),
+                              ),
+                            SwitchListTile(
+                                title:
+                                    Text('提前30分钟提醒', style: journal.entryTitle),
+                                subtitle: Text('受通知权限和系统调度限制',
+                                    style: journal.metadata),
+                                value: remind,
+                                onChanged: busy || at == null
+                                    ? null
+                                    : (v) => setState(() {
+                                          remind = v;
+                                          _dirty = true;
+                                        })),
+                            if (_entry != null)
+                              JournalGroupTile(
+                                icon: Icons.notifications_active_outlined,
+                                title: '提醒状态',
+                                onTap: busy
+                                    ? null
+                                    : () {
+                                        final router =
+                                            GoRouter.maybeOf(context);
+                                        if (router != null) {
+                                          router.push(
+                                            '/reminder-status/manual/${Uri.encodeComponent(_entry!.id)}?unsaved=${_dirty ? 1 : 0}',
+                                          );
+                                        } else {
+                                          Navigator.of(context,
+                                                  rootNavigator: true)
+                                              .push(
+                                            MaterialPageRoute<void>(
+                                              builder: (_) =>
+                                                  ReminderStatusScreen(
+                                                store: widget.store,
+                                                kind: 'manual',
+                                                id: _entry!.id,
+                                                hasUnsavedEdits: _dirty,
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        JournalGroupedCard(
+                          padding: const EdgeInsets.all(14),
+                          children: [
+                            Column(
+                              children: [
+                                TextFormField(
+                                    controller: minutes,
+                                    enabled: !busy,
+                                    keyboardType: TextInputType.number,
+                                    decoration: const InputDecoration(
+                                        labelText: '预计分钟（0表示未填写）'),
+                                    validator: (s) {
+                                      final v = int.tryParse(s?.trim() ?? '');
+                                      return v == null || v < 0 || v > 1440
+                                          ? '请输入0–1440的整数'
+                                          : null;
+                                    }),
+                                const SizedBox(height: 12),
+                                TextFormField(
+                                    controller: note,
+                                    enabled: !busy,
+                                    maxLength: 10000,
+                                    minLines: 3,
+                                    maxLines: 8,
+                                    decoration:
+                                        const InputDecoration(labelText: '备注')),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        ManualAttachmentPickerSection(
+                          attachments: _attachments,
+                          service: widget.store.manualAttachmentService,
+                          busy: busy,
+                          rootPath: _attachmentRoot,
+                          statusHint: _attachmentHint,
+                          onCapturePhoto: _capturePhoto,
+                          onPickImages: _pickImages,
+                          onPickFile: _pickAttachmentFile,
+                          onRemove: _removeAttachment,
+                        ),
+                        if (error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: Semantics(
+                              key: const ValueKey('manual-editor-feedback'),
+                              liveRegion: true,
+                              child: Text(
+                                error!,
+                                style: journal.metadata
+                                    .copyWith(color: journal.berry),
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 16),
+                        JournalPrimaryButton(
+                          loading: busy,
+                          label: busy ? '正在保存…' : '保存个人安排',
+                          onPressed: busy ? null : save,
+                        ),
+                        if (_entry != null) ...[
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: busy ? null : toggleDone,
+                                icon: Icon(
+                                  _entry!.done
+                                      ? Icons.undo_rounded
+                                      : Icons.check_rounded,
+                                ),
+                                label: Text(
+                                  _entry!.done ? '恢复未完成' : '标记完成',
+                                ),
+                              ),
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  foregroundColor: journal.berry,
+                                ),
+                                onPressed: busy ? null : deleteEntry,
+                                icon: const Icon(Icons.delete_outline_rounded),
+                                label: const Text('删除个人安排'),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
-                    ]))));
+                    )))));
   }
 }
 

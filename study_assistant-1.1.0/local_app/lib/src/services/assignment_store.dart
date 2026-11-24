@@ -24,6 +24,7 @@ import '../models/course.dart';
 import 'assignment_query.dart';
 import 'assignment_grouping.dart';
 import 'local_notification_service.dart';
+import 'manual_attachment_service.dart';
 import 'personal_file_service.dart';
 import 'reminder_rule_store.dart';
 import 'secure_session_store.dart';
@@ -107,6 +108,7 @@ class AssignmentStore extends ChangeNotifier {
     required this.notificationService,
     required this.widgetSnapshotService,
     this.personalFileService = const PersonalFileService(),
+    ManualAttachmentService? manualAttachmentService,
     LocalAssignmentRepository? repository,
     ChaoxingLocalClient? chaoxingClient,
     ReminderRuleStore? reminderRuleStore,
@@ -120,7 +122,9 @@ class AssignmentStore extends ChangeNotifier {
     this.reminderHistoryEnabled = false,
     this.nativeReminderDeliveryEnabled = false,
     DateTime Function()? clock,
-  })  : repository = repository ??
+  })  : manualAttachmentService =
+            manualAttachmentService ?? ManualAttachmentService(),
+        repository = repository ??
             LocalAssignmentRepository(
               backgroundReminderGateway: backgroundReminderGateway,
               writeLeaseOwner: nativeLeaseOwner,
@@ -137,6 +141,7 @@ class AssignmentStore extends ChangeNotifier {
   final LocalNotificationService notificationService;
   final WidgetSnapshotService widgetSnapshotService;
   final PersonalFileService personalFileService;
+  final ManualAttachmentService manualAttachmentService;
   final LocalAssignmentRepository repository;
   final ChaoxingLocalClient chaoxingClient;
   final ReminderRuleStore reminderRuleStore;
@@ -237,6 +242,7 @@ class AssignmentStore extends ChangeNotifier {
       notebook = StudyNotebook.decode(next.encode());
       _invalidatePinnableKeys();
       saved = true;
+      await _cleanupRemovedManualAttachments(previous, notebook);
       if (_pinsNeedSave || _pinned.keys.any(ManualEntry.isManualKey)) {
         await _prunePins();
       }
@@ -2729,6 +2735,12 @@ class AssignmentStore extends ChangeNotifier {
         // The account and credentials are committed at this point.
         if (oldAccount != null && oldAccount.trim() != normalizedAccount) {
           await personalFileService.releaseAll();
+          try {
+            await manualAttachmentService.deleteAllAttachments();
+          } catch (error) {
+            debugPrint(
+                '[ManualAttachment] switch_cleanup: ${error.runtimeType}');
+          }
         }
         if (generation != _generation || _disposed) {
           chaoxingClient.clearSession();
@@ -3924,6 +3936,12 @@ class AssignmentStore extends ChangeNotifier {
       if (logoutGen != _generation || _disposed) return;
       await personalFileService.releaseAll();
       if (logoutGen != _generation || _disposed) return;
+      try {
+        await manualAttachmentService.deleteAllAttachments();
+      } catch (error) {
+        debugPrint('[ManualAttachment] logout_cleanup: ${error.runtimeType}');
+      }
+      if (logoutGen != _generation || _disposed) return;
       chaoxingClient.clearSession();
       chaoxingClient.previousAssignments = {};
       chaoxingClient.trackedActivityIds = {};
@@ -4024,6 +4042,27 @@ class AssignmentStore extends ChangeNotifier {
       ..clear()
       ..addAll(assignments);
     _invalidateHomeDisplayIndex();
+  }
+
+  Future<void> _cleanupRemovedManualAttachments(
+    StudyNotebook previous,
+    StudyNotebook current,
+  ) async {
+    final retained = <String>{
+      for (final entry in current.entries)
+        for (final item in entry.attachments) item.relativePath,
+    };
+    final removed = <String>[
+      for (final entry in previous.entries)
+        for (final item in entry.attachments)
+          if (!retained.contains(item.relativePath)) item.relativePath,
+    ];
+    if (removed.isEmpty) return;
+    try {
+      await manualAttachmentService.deleteFiles(removed);
+    } catch (error) {
+      debugPrint('[ManualAttachment] cleanup: ${error.runtimeType}');
+    }
   }
 
   Future<bool> _afterAssignmentsChanged({

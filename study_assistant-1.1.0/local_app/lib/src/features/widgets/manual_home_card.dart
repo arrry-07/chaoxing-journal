@@ -173,6 +173,7 @@ class ManualHomeCard extends StatelessWidget {
     final auxiliary = <String>[
       if (entry.location.trim().isNotEmpty) '地点 ${entry.location.trim()}',
       if (reminderLabel != null) reminderLabel,
+      if (entry.attachments.isNotEmpty) '附件 ${entry.attachments.length}',
       if (countdown && !inPinnedSection && at != null && !overdue)
         DisplayPreferences.remaining(at, now),
       if (at == null) '无截止日期',
@@ -277,6 +278,8 @@ class ManualHomeCard extends StatelessWidget {
                   entry.title,
                   if (entry.course.trim().isNotEmpty) entry.course.trim(),
                   typeLabel,
+                  if (entry.attachments.isNotEmpty)
+                    '有${entry.attachments.length}个附件',
                   if (overdue) overdueLabel,
                   if (at == null) '无截止日期',
                 ].join('，'),

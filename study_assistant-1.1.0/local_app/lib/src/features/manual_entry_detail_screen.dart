@@ -17,6 +17,7 @@ import 'reminder_status_screen.dart';
 import 'widgets/coursework_status_pill.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
+import 'widgets/manual_attachment_gallery.dart';
 
 class ManualEntryDetailScreen extends StatefulWidget {
   const ManualEntryDetailScreen({
@@ -493,7 +494,10 @@ class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
             ],
           ),
         ],
-        const SizedBox.shrink(key: ValueKey('manual-detail-attachments-slot')),
+        ManualAttachmentGallery(
+          attachments: entry.attachments,
+          service: widget.store.manualAttachmentService,
+        ),
         const SizedBox(height: 16),
         JournalPrimaryButton(
           buttonKey: const ValueKey('manual-detail-toggle-done'),

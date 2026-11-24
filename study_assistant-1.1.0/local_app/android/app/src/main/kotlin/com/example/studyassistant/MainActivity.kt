@@ -82,8 +82,11 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         interactionSoundBridge = InteractionSoundBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         BackgroundReminderBridge.attach(flutterEngine, this)
-        personalFileBridge = PersonalFileBridge(this,
-            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/personal_files"))
+        personalFileBridge = PersonalFileBridge(
+            this,
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/personal_files"),
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/manual_attachments"),
+        )
         backupBridge = BackupBridge(this,
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/backup"))
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/external_links").setMethodCallHandler { call, result ->

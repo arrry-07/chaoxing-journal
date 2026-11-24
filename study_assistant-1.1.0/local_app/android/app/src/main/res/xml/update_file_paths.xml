@@ -3,4 +3,10 @@
     <cache-path
         name="update_apks"
         path="updates/" />
+    <cache-path
+        name="camera_captures"
+        path="camera_captures/" />
+    <files-path
+        name="manual_attachments"
+        path="manual_attachments/" />
 </paths>

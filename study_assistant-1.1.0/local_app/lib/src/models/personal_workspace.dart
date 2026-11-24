@@ -83,10 +83,14 @@ class PersonalWorkspace {
   final bool summaryEnabled;
   final int summaryHour, summaryMinute;
   static Never bad() => throw const FormatException('个人记录格式无效或超出上限');
-  static Map<String, dynamic> map(dynamic v, Set<String> keys) {
+  static Map<String, dynamic> map(
+    dynamic v,
+    Set<String> keys, {
+    Set<String> optionalKeys = const {},
+  }) {
     if (v is! Map ||
-        v.length != keys.length ||
-        v.keys.any((k) => !keys.contains(k))) {
+        !keys.every(v.containsKey) ||
+        v.keys.any((k) => !keys.contains(k) && !optionalKeys.contains(k))) {
       bad();
     }
     return Map<String, dynamic>.from(v);

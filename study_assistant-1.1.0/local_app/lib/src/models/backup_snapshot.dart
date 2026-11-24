@@ -176,7 +176,7 @@ class BackupSnapshot {
     );
     return BackupSnapshot.decode(jsonEncode({
       'schema': version,
-      'notebook': (notebook ?? StudyNotebook()).toJson(),
+      'notebook': (notebook ?? StudyNotebook()).toJson(portable: true),
       'personal': (personal ?? PersonalWorkspace()).toJson(portable: true),
       if (version >= 6) 'notices': effectiveNotices.toJson(portable: true),
       if (version >= 6) 'chapters': effectiveChapters.toJson(portable: true),
@@ -211,7 +211,7 @@ class BackupSnapshot {
     );
     return jsonEncode({
       'schema': version,
-      'notebook': notebook.toJson(),
+      'notebook': notebook.toJson(portable: true),
       'personal': personal.toJson(portable: true),
       if (version >= 6) 'notices': notices.toJson(portable: true),
       if (version >= 6) 'chapters': chapters.toJson(portable: true),
@@ -460,7 +460,7 @@ class BackupSnapshot {
     if (interval is! int || interval < 0 || interval > 1440) _bad();
     final decodedNotebook = version < 3
         ? StudyNotebook()
-        : StudyNotebook.decode(jsonEncode(j['notebook']));
+        : StudyNotebook.decodePortable(jsonEncode(j['notebook']));
     final validEntryIds = {for (final e in decodedNotebook.entries) e.id};
     final decodedNotices = version < 6
         ? CourseNoticeCollection()

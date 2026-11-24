@@ -205,8 +205,8 @@ class _BackupScreenState extends State<BackupScreen> {
               title: '备份口令与操作',
               infoTitle: '加密备份包含范围',
               infoItems: const [
-                '导出当前账号的作业、课程、计划、个人清单备注、手动安排、学期快照、资料链接与提醒设置。',
-                '不包含登录凭据、个人资料、作业访问签名、说明正文及本地文件授权关联。',
+                '导出当前账号的作业、课程、计划、个人清单备注、待办/考试文字与日程（保持旧版本可读兼容）、学期快照、资料链接与提醒设置。',
+                '不包含本地待办图片与文件附件、登录凭据、个人资料、作业访问签名、说明正文及本地文件授权关联。',
                 '口令仅用于本次加解密，不会保存到设备；忘记口令无法找回。',
               ],
               padding: const EdgeInsets.all(16),
@@ -214,6 +214,11 @@ class _BackupScreenState extends State<BackupScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    Text(
+                      '导出会保留待办文字与日程（兼容旧版本读取），不包含本地图片与文件附件。',
+                      style: journal.metadata,
+                    ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: _password,
                       obscureText: true,
