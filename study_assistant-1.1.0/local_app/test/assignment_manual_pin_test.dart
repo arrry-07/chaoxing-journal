@@ -8,6 +8,7 @@ import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/account_identity.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 
 import 'review_core_remediation_test.dart' as core;
 
@@ -29,9 +30,10 @@ class _FixedStore extends AssignmentStore {
     DateTime Function()? clock,
     core.Client? client,
     super.manageBackgroundSchedule,
+    LocalNotificationService? notifications,
   }) : super(
           sessionStore: session ?? core.Session(),
-          notificationService: core.Notifications(),
+          notificationService: notifications ?? core.Notifications(),
           widgetSnapshotService: core.WidgetService(),
           chaoxingClient: client ?? core.Client(),
           clock: clock ?? (() => _now),
@@ -39,6 +41,15 @@ class _FixedStore extends AssignmentStore {
 
   @override
   Future<bool> runDueAutoSync({DateTime? now}) async => false;
+}
+
+class _TrackingNotifications extends core.Notifications {
+  final manualCalls = <List<ManualEntry>>[];
+
+  @override
+  Future<void> rescheduleManual(List<ManualEntry> items) async {
+    manualCalls.add(items);
+  }
 }
 
 class _PinSaveRepository extends LocalAssignmentRepository {
@@ -702,6 +713,7 @@ void main() {
     toggleGate.complete();
     expect(await pendingToggle, isFalse);
     expect(toggleStore.error, isNull);
+    expect(toggleStore.serviceWarnings, isEmpty);
 
     // 1b: dispose while a reorderPinned save is held.
     final reorderRepo = _ControllablePinRepository();
@@ -721,23 +733,41 @@ void main() {
     reorderGate.complete();
     expect(await pendingReorder, isFalse);
 
-    // 1c: dispose while a saveNotebook write is held.
+    // 1c: dispose after saveNotebook commits and enters _prunePins.
     final notebookRepo = _ControllablePinRepository();
-    final notebookStore = _FixedStore(repository: notebookRepo);
+    final notifications = _TrackingNotifications();
+    final notebookStore = _FixedStore(
+      repository: notebookRepo,
+      notifications: notifications,
+    );
     await notebookStore.restoreSession();
-    final notebookStarted = Completer<void>();
-    final notebookGate = Completer<void>();
-    notebookRepo.notebookStarted = notebookStarted;
-    notebookRepo.notebookGate = notebookGate;
+    final manual = _manual('m-dispose');
+    expect(
+      await notebookStore.saveNotebook(
+        (_) => StudyNotebook(entries: [manual]),
+        notebookStore.accountEpoch,
+      ),
+      isTrue,
+    );
+    expect(await notebookStore.toggleManualPin(manual), isTrue);
+    notifications.manualCalls.clear();
+    final pruneStarted = Completer<void>();
+    final pruneGate = Completer<void>();
+    notebookRepo.saveStarted = pruneStarted;
+    notebookRepo.saveGate = pruneGate;
     final pendingNotebook = notebookStore.saveNotebook(
-      (_) => StudyNotebook(entries: [_manual('m-dispose')]),
+      (n) => n.withEntries([
+        for (final entry in n.entries)
+          entry.id == manual.id ? entry.completed(true) : entry,
+      ]),
       notebookStore.accountEpoch,
     );
-    await notebookStarted.future;
+    await pruneStarted.future;
     notebookStore.dispose();
-    notebookGate.complete();
-    expect(await pendingNotebook, isFalse);
-    expect(notebookRepo.notebookSaveCalls, 1);
+    pruneGate.complete();
+    expect(await pendingNotebook, isTrue);
+    expect(notebookRepo.notebookSaveCalls, 2);
+    expect(notifications.manualCalls, isEmpty);
   });
 
   test(
@@ -745,8 +775,13 @@ void main() {
       'does not leak warning into new session', () async {
     final work = core.sample('pin-lease-a');
     final session = core.Session();
+    final client = core.Client();
     final repo = _ControllablePinRepository();
-    final store = _FixedStore(session: session, repository: repo);
+    final store = _FixedStore(
+      session: session,
+      repository: repo,
+      client: client,
+    );
     addTearDown(store.dispose);
     await store.restoreSession();
 
@@ -766,11 +801,21 @@ void main() {
     repo.saveStarted = logoutStarted;
     repo.saveGate = logoutGate;
     repo.gateError = LocalStorageLeaseReleaseException('unconfirmed lease');
+    final clearStarted = Completer<void>();
+    final clearGate = Completer<void>();
+    session.clearStarted = clearStarted;
+    session.clearGate = clearGate;
     final pendingLogoutToggle = store.togglePin(work);
     await logoutStarted.future;
     final logoutFuture = store.logout();
     logoutGate.complete();
     expect(await pendingLogoutToggle, isFalse);
+    await clearStarted.future;
+    expect(
+      store.serviceWarnings.where((warning) => warning.contains('置顶状态已保存')),
+      isEmpty,
+    );
+    clearGate.complete();
     await logoutFuture;
     expect(store.isAuthenticated, isFalse);
     expect(store.error, isNull);
@@ -787,6 +832,10 @@ void main() {
     repo.saveStarted = switchStarted;
     repo.saveGate = switchGate;
     repo.gateError = LocalStorageLeaseReleaseException('unconfirmed lease');
+    final loginStarted = Completer<void>();
+    final loginGate = Completer<void>();
+    client.loginStarted = loginStarted;
+    client.loginGate = loginGate;
     final pendingSwitchToggle = store.togglePin(work);
     await switchStarted.future;
     final switchFuture = store.loginChaoxing(
@@ -796,6 +845,12 @@ void main() {
     );
     switchGate.complete();
     expect(await pendingSwitchToggle, isFalse);
+    await loginStarted.future;
+    expect(
+      store.serviceWarnings.where((warning) => warning.contains('置顶状态已保存')),
+      isEmpty,
+    );
+    loginGate.complete();
     await switchFuture;
     expect(store.account, 'B');
     expect(store.pinnedKeys, isEmpty);
@@ -821,11 +876,13 @@ void main() {
       manageBackgroundSchedule: false,
     );
     addTearDown(store.dispose);
-    await store.restoreSession();
+    await repo.mergeAndSave([work, work2]);
+    await repo.activateAccount('A');
     await repo.savePinnedAssignments(
       PinnedAssignments(keys: [firstKey, secondKey], manuallyOrdered: true),
       'A',
     );
+    await store.restoreSession();
     repo.saveCalls = 0;
 
     expect(await store.reorderPinned([secondKey, firstKey]), isFalse);

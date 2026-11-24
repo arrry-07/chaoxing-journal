@@ -24,7 +24,6 @@ import org.junit.FixMethodOrder
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.MethodSorters
-import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.concurrent.TimeUnit
@@ -250,29 +249,29 @@ class ReminderApiMatrixTest {
             deadlineAt = System.currentTimeMillis() + 2 * 60 * 60 * 1000L,
             notifyAt = System.currentTimeMillis() + 60 * 60 * 1000L,
         )
-        AssignmentAlarmScheduler.scheduleDeadline(context, event)
-        assertTrue(AssignmentAlarmScheduler.hasDeadlineAlarm(context, event))
+        try {
+            AssignmentAlarmScheduler.scheduleDeadline(context, event)
+            assertTrue(AssignmentAlarmScheduler.hasDeadlineAlarm(context, event))
+        } finally {
+            AssignmentAlarmScheduler.cancelDeadline(context, event)
+        }
     }
 
     @Test
     fun dExactAlarmPermissionGrantedBroadcastReconcilesAlarmsAndWorkConstraints() {
-        assumeTrue(
-            "Requires API 31+",
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
-        )
-        if (!context.getSystemService(AlarmManager::class.java)
-                .canScheduleExactAlarms()
-        ) {
-            val descriptor = InstrumentationRegistry.getInstrumentation()
-                .uiAutomation.executeShellCommand(
-                    "appops set ${context.packageName} SCHEDULE_EXACT_ALARM allow",
-                )
-            ParcelFileDescriptor.AutoCloseInputStream(descriptor)
-                .bufferedReader()
-                .use { it.readText() }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val alarms = context.getSystemService(AlarmManager::class.java)
+            if (!alarms.canScheduleExactAlarms()) {
+                val descriptor = InstrumentationRegistry.getInstrumentation()
+                    .uiAutomation.executeShellCommand(
+                        "appops set ${context.packageName} SCHEDULE_EXACT_ALARM allow",
+                    )
+                ParcelFileDescriptor.AutoCloseInputStream(descriptor)
+                    .bufferedReader()
+                    .use { it.readText() }
+            }
+            assertTrue(alarms.canScheduleExactAlarms())
         }
-        val alarms = context.getSystemService(AlarmManager::class.java)
-        assertTrue(alarms.canScheduleExactAlarms())
 
         val event = seedDeadline(
             assignmentId = "cx:work:matrix:exact",
@@ -297,16 +296,13 @@ class ReminderApiMatrixTest {
             expectedMutationVersion = database.loadPlanState(accountHash, epoch)
                 .mutationVersion,
         )
-        AssignmentAlarmScheduler.reconcile(context, database)
-        BackgroundWorkScheduler.reconcileAfterSystemChange(context, database)
         ReminderSystemReceiver().onReceive(
             context,
             Intent("android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"),
         )
 
-        assertTrue(AssignmentAlarmScheduler.hasDeadlineAlarm(context, event))
         val name = BackgroundWorkScheduler.daytimeWorkName(accountHash, epoch)
-        val work = waitForEnqueuedWork(name)
+        val work = waitForReconciledAlarmAndWork(event, name)
         assertTrue(
             work.constraints.requiredNetworkType == NetworkType.CONNECTED,
         )
@@ -382,16 +378,29 @@ class ReminderApiMatrixTest {
         return false
     }
 
-    private fun waitForEnqueuedWork(name: String): WorkInfo {
-        repeat(100) {
+    private fun waitForReconciledAlarmAndWork(
+        event: StoredReminderEvent,
+        name: String,
+    ): WorkInfo {
+        val deadline = SystemClock.uptimeMillis() + 5_000L
+        while (SystemClock.uptimeMillis() < deadline) {
+            val hasAlarm = AssignmentAlarmScheduler.hasDeadlineAlarm(context, event)
             val infos = WorkManager.getInstance(context)
                 .getWorkInfosForUniqueWork(name)
                 .get(5, TimeUnit.SECONDS)
-            infos.firstOrNull { it.state == WorkInfo.State.ENQUEUED }?.let {
-                return it
+            val work = infos.firstOrNull {
+                it.state == WorkInfo.State.ENQUEUED &&
+                    it.constraints.requiredNetworkType == NetworkType.CONNECTED
+            }
+            if (hasAlarm && work != null) {
+                return work
             }
             SystemClock.sleep(20)
         }
-        error("Expected unique work $name to be ENQUEUED")
+        assertTrue(
+            "Expected deadline alarm for ${event.eventId}",
+            AssignmentAlarmScheduler.hasDeadlineAlarm(context, event),
+        )
+        error("Expected unique work $name to be ENQUEUED with CONNECTED network")
     }
 }

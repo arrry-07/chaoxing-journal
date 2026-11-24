@@ -438,6 +438,58 @@ class AndroidTestRunnerTests(unittest.TestCase):
         self.assertIn("unsupported", state)
         self.assertIn("ACTIVE", state)
 
+    def test_doze_probe_recognizes_deep_state_regex_and_idle(self) -> None:
+        readings = iter([
+            "Light state: ACTIVE, deep state: ACTIVE",
+            "Light state: ACTIVE, deep state: IDLE",
+        ])
+
+        def fake_run(cmd, cwd=None, check=False):  # noqa: ANN001
+            if "get" in cmd and "deep" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, next(readings), "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with mock.patch.object(runner, "_run", side_effect=fake_run):
+            _, state = runner.run_with_doze(
+                "emulator-1",
+                "adb",
+                lambda: [],
+            )
+        self.assertTrue(state.startswith("IDLE (from ACTIVE)"))
+
+    def test_doze_probe_propagates_manifest_error(self) -> None:
+        def fake_run(cmd, cwd=None, check=False):  # noqa: ANN001
+            if "force-idle" in " ".join(cmd):
+                return subprocess.CompletedProcess(cmd, 1, "", "device offline")
+            return subprocess.CompletedProcess(cmd, 0, "ACTIVE", "")
+
+        with mock.patch.object(runner, "_run", side_effect=fake_run):
+            with self.assertRaises(runner.ManifestError) as raised:
+                runner.run_with_doze("emulator-1", "adb", lambda: [])
+        self.assertIn("force-idle", str(raised.exception))
+
+    def test_mirror_explicit_sdk_wins_over_existing_valid_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            mirror = root / "mirror"
+            current = root / "current"
+            explicit = root / "explicit"
+            for sdk in (current, explicit):
+                (sdk / "platforms" / "android-36").mkdir(parents=True)
+            (mirror / "android").mkdir(parents=True)
+            properties = mirror / "android" / "local.properties"
+            properties.write_text(
+                f"sdk.dir={runner._properties_escape(str(current))}\n",
+                encoding="utf-8",
+            )
+            runner.ensure_mirror_local_properties(
+                mirror,
+                sdk_dir=explicit,
+                flutter_sdk=None,
+            )
+            values = runner._read_properties(properties)
+            self.assertEqual(str(explicit), values["sdk.dir"])
+
     def test_oem_readonly_audit_executes_zero_destructive_commands(self) -> None:
         calls: list[list[str]] = []
 
@@ -465,7 +517,10 @@ class AndroidTestRunnerTests(unittest.TestCase):
             elif "alarm" in joined:
                 text = "RTC_WAKEUP com.example.studyassistant.journal ASSIGNMENT_DEADLINE"
             elif "notification" in joined:
-                text = "com.example.studyassistant.journal importance=3"
+                text = (
+                    "com.example.studyassistant.journal\n"
+                    "mChannelId=deadline importance=4\n"
+                )
             return subprocess.CompletedProcess(cmd, 0, text, "")
 
         with mock.patch.object(runner, "_run", side_effect=fake_run):
@@ -475,6 +530,8 @@ class AndroidTestRunnerTests(unittest.TestCase):
             )
         self.assertEqual(0, code)
         self.assertIn("Exact alarm app-op", report)
+        self.assertIn("id=deadline", report)
+        self.assertIn("importance=4", report)
         forbidden = (
             "uninstall",
             "install -r",
@@ -489,6 +546,26 @@ class AndroidTestRunnerTests(unittest.TestCase):
             joined = " ".join(cmd)
             for token in forbidden:
                 self.assertNotIn(token, joined)
+
+    def test_oem_audit_does_not_treat_disallow_as_allow(self) -> None:
+        def fake_run(cmd, cwd=None, check=False):  # noqa: ANN001
+            joined = " ".join(str(part) for part in cmd)
+            text = ""
+            if "getprop" in cmd:
+                text = "[ro.build.version.sdk]: [35]\n"
+            elif "appops" in cmd:
+                text = "SCHEDULE_EXACT_ALARM: disallow"
+            elif "notification" in joined:
+                text = "com.example.studyassistant.journal mChannelId=deadline importance=4"
+            return subprocess.CompletedProcess(cmd, 0, text, "")
+
+        with mock.patch.object(runner, "_run", side_effect=fake_run):
+            code, report = runner.run_oem_readonly_audit(
+                "127.0.0.1:16448",
+                "adb",
+            )
+        self.assertEqual(0, code)
+        self.assertIn("deny/unknown", report)
 
     def test_instrument_command_never_enables_real_account_flag(self) -> None:
         for classes in runner.ANDROID_TEST_BATCHES.values():

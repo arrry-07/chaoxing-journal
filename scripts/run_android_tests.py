@@ -433,27 +433,23 @@ def ensure_mirror_local_properties(
     current = _read_properties(properties_path)
     current_sdk = current.get("sdk.dir", "")
     sdk_candidates: list[Path] = []
-    if current_sdk:
-        sdk_candidates.append(Path(current_sdk))
     if sdk_dir is not None:
         sdk_candidates.append(sdk_dir)
     for key in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
         value = os.environ.get(key)
         if value:
             sdk_candidates.append(Path(value))
-    sdk_candidates.extend(
-        [
-            Path("D:/campus-tools/android"),
-            Path.home() / "AppData" / "Local" / "Android" / "Sdk",
-        ]
-    )
+    if current_sdk:
+        sdk_candidates.append(Path(current_sdk))
+    sdk_candidates.append(Path.home() / "AppData" / "Local" / "Android" / "Sdk")
     chosen_sdk = next(
         (candidate for candidate in sdk_candidates if _has_android_36(candidate)),
         None,
     )
     changed = False
     if chosen_sdk is not None and (
-        not current_sdk or not _has_android_36(Path(current_sdk))
+        not current_sdk
+        or Path(current_sdk).resolve() != chosen_sdk.resolve()
     ):
         current["sdk.dir"] = str(chosen_sdk)
         changed = True
@@ -533,10 +529,11 @@ def enter_doze(serial: str, adb: str) -> str:
     )
     if entered == "IDLE":
         return f"IDLE (from {baseline})"
-    return f"unsupported ({entered})"
+    return f"unsupported ({' '.join(entered.split())})"
 
 
 def _deep_state(text: str) -> str:
+    text = text.replace("|", "/")
     match = re.search(r"deep state:\s*([A-Z-]+)", text, re.IGNORECASE)
     if match:
         return match.group(1).upper()
@@ -545,7 +542,7 @@ def _deep_state(text: str) -> str:
         return "IDLE"
     if stripped == "ACTIVE" or stripped.endswith(" ACTIVE"):
         return "ACTIVE"
-    return stripped.splitlines()[0] if stripped else "unknown"
+    return " ".join(stripped.splitlines()[0].split()) if stripped else "unknown"
 
 
 def exit_doze(serial: str, adb: str) -> None:
@@ -572,15 +569,43 @@ def run_with_doze(
     adb: str,
     action,
 ) -> tuple[list[BatchResult], str]:
-    doze_state = "unsupported (unknown)"
     try:
-        try:
-            doze_state = enter_doze(serial, adb)
-        except ManifestError as error:
-            doze_state = f"unsupported ({error})"
+        doze_state = enter_doze(serial, adb)
         return action(), f"{doze_state} → reset"
     finally:
         exit_doze(serial, adb)
+
+
+def _notification_channel_summary(text: str) -> str:
+    if PACKAGE not in text:
+        return "unknown"
+    lines = text.splitlines()
+    start = next(
+        (index for index, line in enumerate(lines) if PACKAGE in line),
+        0,
+    )
+    channel_id = ""
+    importance = ""
+    for line in lines[start : start + 80]:
+        if not channel_id:
+            match = re.search(
+                r"(?:mChannelId|channelId|mId)=([^\s,}]+)",
+                line,
+            )
+            if match:
+                channel_id = match.group(1).strip().strip("'\"")
+        if not importance:
+            match = re.search(r"(?:mImportance|importance)=(\d+)", line)
+            if match:
+                importance = match.group(1)
+        if channel_id and importance:
+            break
+    details = []
+    if channel_id:
+        details.append(f"id={channel_id}")
+    if importance:
+        details.append(f"importance={importance}")
+    return "present " + " ".join(details) if details else "present"
 
 
 def run_oem_readonly_audit(serial: str, adb: str) -> tuple[int, str]:
@@ -620,7 +645,7 @@ def run_oem_readonly_audit(serial: str, adb: str) -> tuple[int, str]:
         ("First install", info.first_install_time or "unknown"),
         (
             "Exact alarm app-op",
-            "allow" if "allow" in appops_text else "deny/unknown",
+            "allow" if re.search(r"\ballow\b", appops_text) else "deny/unknown",
         ),
         (
             "Battery whitelist",
@@ -631,10 +656,7 @@ def run_oem_readonly_audit(serial: str, adb: str) -> tuple[int, str]:
             f"{len(alarm_lines)} "
             f"(deadline={any('ASSIGNMENT_DEADLINE' in line or 'ScheduledNotificationReceiver' in line for line in alarm_lines)})",
         ),
-        (
-            "Reminder channel",
-            "present" if PACKAGE in notification_text else "unknown",
-        ),
+        ("Reminder channel", _notification_channel_summary(notification_text)),
     ]
     lines = ["| Field | Value |", "| --- | --- |"]
     lines.extend(f"| {key} | {value} |" for key, value in rows)

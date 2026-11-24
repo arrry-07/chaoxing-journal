@@ -24,6 +24,8 @@ Assignment sample(String id, {String status = 'pending'}) => Assignment(
 class Session extends SecureSessionStore {
   String? account = 'A';
   bool failNextSave = false;
+  Completer<void>? clearStarted;
+  Completer<void>? clearGate;
   @override
   Future<String?> readChaoxingAccount() async => account;
   @override
@@ -47,6 +49,13 @@ class Session extends SecureSessionStore {
 
   @override
   Future<void> clear() async {
+    final started = clearStarted;
+    if (started != null && !started.isCompleted) started.complete();
+    final gate = clearGate;
+    if (gate != null) {
+      clearGate = null;
+      await gate.future;
+    }
     account = null;
   }
 }
@@ -54,6 +63,8 @@ class Session extends SecureSessionStore {
 class Client extends ChaoxingLocalClient {
   bool failLogin = false, partial = false;
   String? cookieOwner = 'A';
+  Completer<void>? loginStarted;
+  Completer<void>? loginGate;
   @override
   bool get needsSessionInitialization => cookieOwner == null;
   @override
@@ -65,6 +76,13 @@ class Client extends ChaoxingLocalClient {
   @override
   Future<ChaoxingLoginResult> login(
       {required String account, required String password}) async {
+    final started = loginStarted;
+    if (started != null && !started.isCompleted) started.complete();
+    final gate = loginGate;
+    if (gate != null) {
+      loginGate = null;
+      await gate.future;
+    }
     cookieOwner = account;
     return ChaoxingLoginResult(
         success: !failLogin, message: failLogin ? '登录失败' : null);

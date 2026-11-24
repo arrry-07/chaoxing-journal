@@ -216,6 +216,8 @@ class _FixtureServer {
         requests.add(options.uri.path);
         requestCookies[options.uri.path] =
             options.headers['Cookie']?.toString() ?? '';
+        final cookie = requestCookies[options.uri.path]!;
+        final unlockedByCookie = cookie.contains('challenge=solved');
         dynamic body;
         var status = 200;
         switch (options.uri.path) {
@@ -245,7 +247,7 @@ class _FixtureServer {
               ));
               return;
             }
-            if (detail9010 && !verified) {
+            if (detail9010 && !unlockedByCookie) {
               status = 202;
               body = {'status': false, 'code': 9010, 'msg': '【9010】操作异常'};
             } else {
@@ -275,7 +277,6 @@ class _FixtureServer {
   bool failCourseList = false;
   bool detail9010 = false;
   bool detailTimeout = false;
-  bool verified = false;
   String detailDeadline = '2030-05-01 12:00';
 }
 
@@ -541,7 +542,6 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_channel, (call) async {
       expect(call.method, 'verifySession');
-      server.verified = true;
       return [
         {'url': 'https://mooc1.chaoxing.com/', 'cookies': 'challenge=solved'},
       ];
@@ -561,9 +561,16 @@ void main() {
     expect(store.pinnedKeys, contains(oldKey));
     expect(store.lastSyncAt, isNull);
     expect(server.requests, isNot(contains('/pc/notice/getNoticeList')));
+    for (final path in [
+      '/phone/moocAnalysis/examList',
+      '/exam/test',
+      '/exam-ans/exam/test/examcode/examlist',
+      '/pc/notice/getNoticeList',
+    ]) {
+      expect(server.requests, isNot(contains(path)));
+    }
 
     expect(await store.chaoxingClient.verifyInBrowser(), isTrue);
-    server.verified = true;
     await store.syncAssignments();
     expect(store.syncReport.phase, SyncPhase.success);
     expect(store.syncReport.issues, isEmpty);
@@ -669,7 +676,6 @@ void main() {
       expect(call.method, 'verifySession');
       round++;
       if (round == 1) return null;
-      server.verified = true;
       return [
         {'url': 'https://mooc1.chaoxing.com/', 'cookies': 'challenge=solved'},
       ];
@@ -709,7 +715,7 @@ void main() {
     expect(beforeSyncAt, isNotNull);
 
     server.failCourseList = true;
-    await Future<void>.delayed(const Duration(milliseconds: 5));
+    await Future<void>.delayed(const Duration(milliseconds: 25));
     await store.syncAssignments();
     expect(store.syncReport.phase, SyncPhase.failed);
     expect(
@@ -722,7 +728,7 @@ void main() {
     expect(store.lastSyncAt, beforeSyncAt);
 
     server.failCourseList = false;
-    await Future<void>.delayed(const Duration(milliseconds: 5));
+    await Future<void>.delayed(const Duration(milliseconds: 25));
     await store.syncAssignments();
     expect(store.syncReport.phase, SyncPhase.success);
     expect(store.syncReport.issues, isEmpty);
