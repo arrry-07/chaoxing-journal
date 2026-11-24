@@ -237,7 +237,15 @@ class AssignmentStore extends ChangeNotifier {
       notebook = StudyNotebook.decode(next.encode());
       _invalidatePinnableKeys();
       saved = true;
-      if (_pinned.keys.any(ManualEntry.isManualKey)) await _prunePins();
+      if (_pinsNeedSave || _pinned.keys.any(ManualEntry.isManualKey)) {
+        await _prunePins();
+      }
+      if (_generation != expectedEpoch ||
+          !_authenticated ||
+          account != _account ||
+          _disposed) {
+        return;
+      }
       final manualSucceeded = await _afterAssignmentsChanged(
         updateAssignmentReminders: false,
         updateSummary: false,
@@ -1406,8 +1414,8 @@ class AssignmentStore extends ChangeNotifier {
       bool valid() => stillOwned() && canToggle();
       if (!valid()) return;
       final next = _pinned.toggle(key, aliases);
-      await _savePins(next, account, generation);
-      if (!stillOwned()) return;
+      final persisted = await _savePins(next, account, generation);
+      if (!persisted || !stillOwned()) return;
       _pinned = next;
       _pinsNeedSave = false;
       saved = true;
@@ -1445,8 +1453,8 @@ class AssignmentStore extends ChangeNotifier {
       }
       final next = _pinned.reorderVisible(cleanOrdered, visibleKeySet);
       if (next == null) return;
-      await _savePins(next, account, generation);
-      if (generation != _generation ||
+      if (!await _savePins(next, account, generation) ||
+          generation != _generation ||
           account != _account ||
           !_authenticated ||
           _disposed) {
@@ -1459,17 +1467,23 @@ class AssignmentStore extends ChangeNotifier {
     return saved;
   }
 
-  Future<void> _savePins(
+  Future<bool> _savePins(
       PinnedAssignments pins, String account, int generation) async {
     try {
       await repository.savePinnedAssignments(pins, account);
+      return true;
     } on StaleSessionWriteException {
-      return;
+      return false;
     } on LocalStorageLeaseReleaseException {
       const warning = '置顶状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
-      if (generation == _generation && !_recoveryWarnings.contains(warning)) {
+      if (generation == _generation &&
+          account == _account &&
+          _authenticated &&
+          !_disposed &&
+          !_recoveryWarnings.contains(warning)) {
         _recoveryWarnings.add(warning);
       }
+      return true;
     }
   }
 
@@ -1524,8 +1538,14 @@ class AssignmentStore extends ChangeNotifier {
     _pinsNeedSave = true;
     final generation = _generation;
     try {
-      await _savePins(_pinned, account, generation);
-      if (generation == _generation) _pinsNeedSave = false;
+      final persisted = await _savePins(_pinned, account, generation);
+      if (persisted &&
+          generation == _generation &&
+          account == _account &&
+          _authenticated &&
+          !_disposed) {
+        _pinsNeedSave = false;
+      }
     } catch (_) {
       // The next successful journal update can retry without restoring pins
       // for entries already removed during this session.
