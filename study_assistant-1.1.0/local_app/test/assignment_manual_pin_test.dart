@@ -28,6 +28,7 @@ class _FixedStore extends AssignmentStore {
     super.repository,
     DateTime Function()? clock,
     core.Client? client,
+    super.manageBackgroundSchedule,
   }) : super(
           sessionStore: session ?? core.Session(),
           notificationService: core.Notifications(),
@@ -60,6 +61,22 @@ class _ControllablePinRepository extends LocalAssignmentRepository {
   Object? gateError;
   void Function()? onSaved;
   int saveCalls = 0;
+  Completer<void>? notebookStarted;
+  Completer<void>? notebookGate;
+  int notebookSaveCalls = 0;
+
+  @override
+  Future<void> saveNotebook(StudyNotebook value, String account) async {
+    notebookSaveCalls++;
+    final started = notebookStarted;
+    if (started != null && !started.isCompleted) started.complete();
+    final gate = notebookGate;
+    if (gate != null) {
+      notebookGate = null;
+      await gate.future;
+    }
+    await super.saveNotebook(value, account);
+  }
 
   @override
   Future<void> savePinnedAssignments(
@@ -657,5 +674,162 @@ void main() {
     final stored = await repo.loadPinnedAssignments('A');
     expect(stored.keys, isNot(contains(firstKey)));
     expect(stored.keys, containsAll(<String>[secondKey, manualKey]));
+  });
+
+  test(
+      'dispose during in-flight pin and notebook writes drops commits silently',
+      () async {
+    final work = core.sample('pin-dispose-a');
+    final work2 = core.sample('pin-dispose-b');
+    final workKey = AssignmentStore.pinKeyOf(work);
+    final secondKey = AssignmentStore.pinKeyOf(work2);
+
+    // 1a: dispose while a togglePin save is held.
+    final toggleRepo = _ControllablePinRepository();
+    final toggleStore = _FixedStore(repository: toggleRepo);
+    await toggleStore.restoreSession();
+    await toggleRepo.mergeAndSave([work]);
+    await toggleStore.restoreSession();
+    final toggleStarted = Completer<void>();
+    final toggleGate = Completer<void>();
+    toggleRepo.saveStarted = toggleStarted;
+    toggleRepo.saveGate = toggleGate;
+    toggleRepo.gateError =
+        LocalStorageLeaseReleaseException('unconfirmed lease');
+    final pendingToggle = toggleStore.togglePin(work);
+    await toggleStarted.future;
+    toggleStore.dispose();
+    toggleGate.complete();
+    expect(await pendingToggle, isFalse);
+    expect(toggleStore.error, isNull);
+
+    // 1b: dispose while a reorderPinned save is held.
+    final reorderRepo = _ControllablePinRepository();
+    final reorderStore = _FixedStore(repository: reorderRepo);
+    await reorderStore.restoreSession();
+    await reorderRepo.mergeAndSave([work, work2]);
+    await reorderStore.restoreSession();
+    expect(await reorderStore.togglePin(work), isTrue);
+    expect(await reorderStore.togglePin(work2), isTrue);
+    final reorderStarted = Completer<void>();
+    final reorderGate = Completer<void>();
+    reorderRepo.saveStarted = reorderStarted;
+    reorderRepo.saveGate = reorderGate;
+    final pendingReorder = reorderStore.reorderPinned([secondKey, workKey]);
+    await reorderStarted.future;
+    reorderStore.dispose();
+    reorderGate.complete();
+    expect(await pendingReorder, isFalse);
+
+    // 1c: dispose while a saveNotebook write is held.
+    final notebookRepo = _ControllablePinRepository();
+    final notebookStore = _FixedStore(repository: notebookRepo);
+    await notebookStore.restoreSession();
+    final notebookStarted = Completer<void>();
+    final notebookGate = Completer<void>();
+    notebookRepo.notebookStarted = notebookStarted;
+    notebookRepo.notebookGate = notebookGate;
+    final pendingNotebook = notebookStore.saveNotebook(
+      (_) => StudyNotebook(entries: [_manual('m-dispose')]),
+      notebookStore.accountEpoch,
+    );
+    await notebookStarted.future;
+    notebookStore.dispose();
+    notebookGate.complete();
+    expect(await pendingNotebook, isFalse);
+    expect(notebookRepo.notebookSaveCalls, 1);
+  });
+
+  test(
+      'LocalStorageLeaseReleaseException after logout or account switch '
+      'does not leak warning into new session', () async {
+    final work = core.sample('pin-lease-a');
+    final session = core.Session();
+    final repo = _ControllablePinRepository();
+    final store = _FixedStore(session: session, repository: repo);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    Future<void> seed() async {
+      session.account = 'A';
+      await store.restoreSession();
+      await repo.mergeAndSave([work]);
+      await store.restoreSession();
+      expect(store.account, 'A');
+      expect(store.isPinned(work), isFalse);
+    }
+
+    // 2a: logout during a lease-release failure must not warn the new session.
+    await seed();
+    final logoutStarted = Completer<void>();
+    final logoutGate = Completer<void>();
+    repo.saveStarted = logoutStarted;
+    repo.saveGate = logoutGate;
+    repo.gateError = LocalStorageLeaseReleaseException('unconfirmed lease');
+    final pendingLogoutToggle = store.togglePin(work);
+    await logoutStarted.future;
+    final logoutFuture = store.logout();
+    logoutGate.complete();
+    expect(await pendingLogoutToggle, isFalse);
+    await logoutFuture;
+    expect(store.isAuthenticated, isFalse);
+    expect(store.error, isNull);
+    expect((store.error ?? '').contains('置顶状态已保存'), isFalse);
+    expect(
+      store.serviceWarnings.where((warning) => warning.contains('置顶状态已保存')),
+      isEmpty,
+    );
+
+    // 2b: switching accounts must isolate the warning from the new session.
+    await seed();
+    final switchStarted = Completer<void>();
+    final switchGate = Completer<void>();
+    repo.saveStarted = switchStarted;
+    repo.saveGate = switchGate;
+    repo.gateError = LocalStorageLeaseReleaseException('unconfirmed lease');
+    final pendingSwitchToggle = store.togglePin(work);
+    await switchStarted.future;
+    final switchFuture = store.loginChaoxing(
+      account: 'B',
+      password: 'pw',
+      agreementAccepted: true,
+    );
+    switchGate.complete();
+    expect(await pendingSwitchToggle, isFalse);
+    await switchFuture;
+    expect(store.account, 'B');
+    expect(store.pinnedKeys, isEmpty);
+    expect(await repo.loadPinnedIds('B'), isEmpty);
+    expect(store.error, isNull);
+    expect((store.error ?? '').contains('置顶状态已保存'), isFalse);
+    expect(
+      store.serviceWarnings.where((warning) => warning.contains('置顶状态已保存')),
+      isEmpty,
+    );
+  });
+
+  test(
+      'reorderPinned rejects calls on background store when '
+      'manageBackgroundSchedule is false', () async {
+    final work = core.sample('pin-background-a');
+    final work2 = core.sample('pin-background-b');
+    final firstKey = AssignmentStore.pinKeyOf(work);
+    final secondKey = AssignmentStore.pinKeyOf(work2);
+    final repo = _ControllablePinRepository();
+    final store = _FixedStore(
+      repository: repo,
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await repo.savePinnedAssignments(
+      PinnedAssignments(keys: [firstKey, secondKey], manuallyOrdered: true),
+      'A',
+    );
+    repo.saveCalls = 0;
+
+    expect(await store.reorderPinned([secondKey, firstKey]), isFalse);
+    expect(repo.saveCalls, 0);
+    expect(store.pinnedKeys, isEmpty);
   });
 }

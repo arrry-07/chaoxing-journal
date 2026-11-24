@@ -240,10 +240,7 @@ class AssignmentStore extends ChangeNotifier {
       if (_pinsNeedSave || _pinned.keys.any(ManualEntry.isManualKey)) {
         await _prunePins();
       }
-      if (_generation != expectedEpoch ||
-          !_authenticated ||
-          account != _account ||
-          _disposed) {
+      if (!_ownsAuthenticatedSession(expectedEpoch, account)) {
         return;
       }
       final manualSucceeded = await _afterAssignmentsChanged(
@@ -1406,11 +1403,7 @@ class AssignmentStore extends ChangeNotifier {
     if (account == null || !canToggle()) return false;
     var saved = false;
     await _run(() async {
-      bool stillOwned() =>
-          generation == _generation &&
-          account == _account &&
-          _authenticated &&
-          !_disposed;
+      bool stillOwned() => _ownsAuthenticatedSession(generation, account);
       bool valid() => stillOwned() && canToggle();
       if (!valid()) return;
       final next = _pinned.toggle(key, aliases);
@@ -1444,20 +1437,14 @@ class AssignmentStore extends ChangeNotifier {
     final visibleKeySet = cleanOrdered.toSet();
     var saved = false;
     await _run(() async {
-      if (generation != _generation ||
-          account != _account ||
-          !_authenticated ||
-          !_manageBackgroundSchedule ||
-          _disposed) {
+      if (!_manageBackgroundSchedule ||
+          !_ownsAuthenticatedSession(generation, account)) {
         return;
       }
       final next = _pinned.reorderVisible(cleanOrdered, visibleKeySet);
       if (next == null) return;
       if (!await _savePins(next, account, generation) ||
-          generation != _generation ||
-          account != _account ||
-          !_authenticated ||
-          _disposed) {
+          !_ownsAuthenticatedSession(generation, account)) {
         return;
       }
       _pinned = next;
@@ -1466,6 +1453,13 @@ class AssignmentStore extends ChangeNotifier {
     });
     return saved;
   }
+
+  bool _ownsAuthenticatedSession(int generation, String? account) =>
+      !_disposed &&
+      _authenticated &&
+      account != null &&
+      generation == _generation &&
+      account == _account;
 
   Future<bool> _savePins(
       PinnedAssignments pins, String account, int generation) async {
@@ -1476,10 +1470,7 @@ class AssignmentStore extends ChangeNotifier {
       return false;
     } on LocalStorageLeaseReleaseException {
       const warning = '置顶状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
-      if (generation == _generation &&
-          account == _account &&
-          _authenticated &&
-          !_disposed &&
+      if (_ownsAuthenticatedSession(generation, account) &&
           !_recoveryWarnings.contains(warning)) {
         _recoveryWarnings.add(warning);
       }
@@ -1539,11 +1530,7 @@ class AssignmentStore extends ChangeNotifier {
     final generation = _generation;
     try {
       final persisted = await _savePins(_pinned, account, generation);
-      if (persisted &&
-          generation == _generation &&
-          account == _account &&
-          _authenticated &&
-          !_disposed) {
+      if (persisted && _ownsAuthenticatedSession(generation, account)) {
         _pinsNeedSave = false;
       }
     } catch (_) {
