@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -165,7 +166,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('图片 2/9 · 总计 2/20'), findsOneWidget);
 
-    // Removing the draft camera photo cleans it immediately.
+    // Verify accessibility semantics for both preview and delete actions, then remove draft cam_1.
+    final previewSemantics = tester.getSemantics(
+      find.bySemanticsLabel('查看图片 cam_1.jpg'),
+    );
+    expect(previewSemantics.getSemanticsData().hasAction(SemanticsAction.tap),
+        isTrue);
+    final removeSemantics = tester.getSemantics(
+      find.bySemanticsLabel('删除图片 cam_1.jpg'),
+    );
+    expect(removeSemantics.getSemanticsData().hasAction(SemanticsAction.tap),
+        isTrue);
     await tester.tap(find.byKey(const ValueKey('attachment-remove-cam_1')));
     await tester.pumpAndSettle();
     expect(service.deletedPaths, ['manual_attachments/cam_1.jpg']);

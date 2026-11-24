@@ -673,16 +673,17 @@ class PersonalFileBridge(
         }
         val rawMime = resolver.getType(uri)
         val defaultMime = if (isImage) "image/jpeg" else "application/octet-stream"
+        val rawExtHint = rawName?.substringAfterLast('/')?.substringAfterLast('\\')
         val displayName = ManualAttachmentPathPolicy.sanitizeDisplayName(
             rawName,
             fallback = if (isImage) "图片" else "本地文件",
         )
         val ext = ManualAttachmentPathPolicy.sanitizeExtension(
-            displayName,
+            rawExtHint,
             rawMime,
             fallback = if (isImage) "jpg" else "bin",
         )
-        val guessedMime = guessMimeForExtension(ext, displayName)
+        val guessedMime = guessMimeForExtension(ext, rawExtHint ?: displayName)
         val preferredMime = if (isGenericMime(rawMime)) {
             guessedMime ?: rawMime
         } else {

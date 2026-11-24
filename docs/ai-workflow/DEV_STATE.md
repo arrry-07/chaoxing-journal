@@ -4,11 +4,11 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
-## 2026-11-25 · v1.8.31 Stage 1 + Gate 2 返工完成（全套单测与 Gradle 通过，待 Gate 2 增量复审）
+## 2026-11-25 · v1.8.31 Stage 1 + Gate 2 二次返工完成（Semantics/防连点/代理对全通过，待复审收口）
 
-- 已完成改动：基于 `547dfc0` 完成 Gate 2 双轴评审（Axis 1 / Axis 2 均 0 阻断）所提唯一 Major 及全部高价值 Minor 返工：`PersonalFileBridge.kt` 将 `pending` 生命周期延续至主线程交付且 `close()` 改用 `ioExecutor.shutdown()` 并配合 `storageGeneration` 校验，将 `deleteAttachmentFiles` / `deleteAllAttachments` 串行排入单线程 `ioExecutor`，消除拷贝/清理竞态与销毁期文件残留，并修复通用 `application/octet-stream` MIME 遮蔽扩展名猜测问题；`ManualAttachmentPathPolicy.kt` 对齐 Unicode 全角/不间断空格修剪与 UTF-16 代理对截断；`manual_attachment_picker_section.dart` 补齐 `48x48` 触控热区与 `excludeSemantics`；`manual_attachment_gallery.dart` 增加 `_galleryOpening` 防连点及 `_PlaceholderImageTile` 极端缩放自适应；`manual_attachment_ui_test.dart` 与 `ManualAttachmentPathPolicyTest.kt` 补充既有待办保存删附与 Unicode 空白回归。
-- 当前 commit 与状态：Gate 2 返工待提交（前序 Stage 1 `547dfc0` 已推 `origin/dev`），L0 `60 <= 80`；`verify_local_gate.py` 定向门禁（6 组 Flutter 67 项 + 9 组 Python + `dart analyze` 0 问题）及隔离 ASCII Gradle `:app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug --rerun-tasks`（`cx1831-gradle`）全部通过。
-- 下一步待办：提交推送返工后完成 Gate 2 增量复审至 0 阻断；随后按维护者授权冻结 `1.8.31+124` 正式版（PR/CI + MuMu/真机双端验收 + Release 与归档）。
+- 已完成改动：在 `9c810ef` 基础上修复 `Gate 2` 增量复审指出的 Major（`manual_attachment_picker_section.dart` 为图片删除与预览 `Semantics(excludeSemantics: true)` 补全 `onTap`/`enabled` 并新增 `SemanticsAction.tap` 断言）及高价值 Minor（`_AttachmentFullscreenViewer.dispose` 同步复位 `_galleryOpening`、`PersonalFileBridge.kt` 用截断前原始扩展名线索猜测 MIME、`ManualAttachmentPathPolicyTest.kt` 补充 UTF-16 代理对截断单测）。
+- 当前 commit 与状态：二次返工待提交（前序 `9c810ef` 已推 `origin/dev`），L0 `60 <= 80`；`verify_local_gate.py` 定向门禁（5 组 Flutter 37 项 + 9 组 Python + `dart analyze` 0 问题）与隔离 ASCII Gradle `:app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug --rerun-tasks`（`cx1831-gradle`）全部通过。
+- 下一步待办：提交推送本轮返工并完成 `Gate 2` 最终复审 0 阻断通过；随后冻结并直发正式版 `1.8.31+124`（PR/CI + MuMu/真机双端验收 + Release 与归档）。
 
 ## 2026-11-25 · v1.8.30 Stage 1 + Gate 1 返工完成（24 文件 282 项与全套校验全绿，待 Gate 1 复审）
 

@@ -147,9 +147,10 @@ class ManualAttachmentPickerSection extends StatelessWidget {
                   return Stack(
                     fit: StackFit.expand,
                     children: [
-                      InkWell(
-                        key: ValueKey('editor-attachment-image-${item.id}'),
-                        borderRadius: BorderRadius.circular(10),
+                      Semantics(
+                        button: true,
+                        excludeSemantics: true,
+                        label: '查看图片 ${item.name}',
                         onTap: () => showAttachmentImageGallery(
                           context,
                           images: images,
@@ -157,10 +158,21 @@ class ManualAttachmentPickerSection extends StatelessWidget {
                           service: service,
                           rootPath: rootPath,
                         ),
-                        child: AttachmentImageThumbnail(
-                          attachment: item,
-                          service: service,
-                          rootPath: rootPath,
+                        child: InkWell(
+                          key: ValueKey('editor-attachment-image-${item.id}'),
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () => showAttachmentImageGallery(
+                            context,
+                            images: images,
+                            initialIndex: index,
+                            service: service,
+                            rootPath: rootPath,
+                          ),
+                          child: AttachmentImageThumbnail(
+                            attachment: item,
+                            service: service,
+                            rootPath: rootPath,
+                          ),
                         ),
                       ),
                       Positioned(
@@ -169,7 +181,9 @@ class ManualAttachmentPickerSection extends StatelessWidget {
                         child: Semantics(
                           button: true,
                           excludeSemantics: true,
+                          enabled: !busy,
                           label: '删除图片 ${item.name}',
+                          onTap: busy ? null : () => onRemove(item),
                           child: Tooltip(
                             message: '删除图片',
                             child: SizedBox(

@@ -141,6 +141,7 @@ class _AttachmentFullscreenViewerState
 
   @override
   void dispose() {
+    _galleryOpening = false;
     _controller.dispose();
     super.dispose();
   }

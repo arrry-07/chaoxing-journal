@@ -77,6 +77,10 @@ class ManualAttachmentPathPolicyTest {
         assertEquals("实验 报告.pdf", ManualAttachmentPathPolicy.sanitizeDisplayName("实验/报告\n.pdf"))
         assertEquals("本地文件", ManualAttachmentPathPolicy.sanitizeDisplayName("  /\\  "))
         assertEquals("本地文件", ManualAttachmentPathPolicy.sanitizeDisplayName("\u3000\u00A0"))
+        assertEquals(
+            199,
+            ManualAttachmentPathPolicy.sanitizeDisplayName("a".repeat(199) + "\uD83D\uDE00").length,
+        )
         assertEquals("pdf", ManualAttachmentPathPolicy.sanitizeExtension("notes.PDF", "application/octet-stream"))
         assertEquals("jpg", ManualAttachmentPathPolicy.sanitizeExtension("photo", "image/jpeg"))
         assertEquals("image/jpeg", ManualAttachmentPathPolicy.sanitizeMimeType("image/jpeg; charset=utf-8", "application/octet-stream"))
