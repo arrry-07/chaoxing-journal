@@ -143,6 +143,24 @@ class AndroidTestRunnerTests(unittest.TestCase):
             self.assertEqual(1, len(gradle_calls))
             self.assertEqual(build_root / "android", gradle_calls[0]["cwd"])
 
+    def test_run_decodes_output_as_utf8_with_replacement(self) -> None:
+        seen: dict[str, object] = {}
+
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            seen["cmd"] = cmd
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(cmd, 0, "OK (1 test)", "")
+
+        with (
+            mock.patch.object(runner.subprocess, "run", side_effect=fake_run),
+            contextlib.redirect_stdout(StringIO()),
+        ):
+            runner._run(["adb", "shell", "am", "instrument"])
+
+        self.assertTrue(seen["text"])
+        self.assertEqual("utf-8", seen["encoding"])
+        self.assertEqual("replace", seen["errors"])
+
     def test_skip_build_with_work_dir_reuses_the_ascii_mirror(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             work_dir = Path(raw)

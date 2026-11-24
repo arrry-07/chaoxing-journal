@@ -212,6 +212,8 @@ def _run(cmd: list[str], cwd: Path | None = None, *, check: bool = False) -> sub
         cmd,
         cwd=cwd,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=check,
     )
