@@ -6,6 +6,7 @@ enum CourseworkPillTone {
   urgentToday,
   unconfirmed,
   exam,
+  todo,
   completed,
   neutral,
 }
@@ -33,9 +34,9 @@ class CourseworkStatusPill extends StatelessWidget {
           defaultIcon: Icons.warning_amber_rounded,
         ),
       CourseworkPillTone.urgentToday => (
-          fg: journal.berry,
-          bg: journal.berryBg,
-          border: journal.berryBorder,
+          fg: journal.accent,
+          bg: journal.slateBg,
+          border: journal.sageBorder,
           defaultIcon: Icons.schedule_rounded,
         ),
       CourseworkPillTone.unconfirmed => (
@@ -45,10 +46,16 @@ class CourseworkStatusPill extends StatelessWidget {
           defaultIcon: Icons.help_outline_rounded,
         ),
       CourseworkPillTone.exam => (
-          fg: journal.slate,
-          bg: journal.slateBg,
-          border: null,
+          fg: journal.examOrange,
+          bg: journal.examOrangeBg,
+          border: journal.examOrangeBorder,
           defaultIcon: Icons.school_outlined,
+        ),
+      CourseworkPillTone.todo => (
+          fg: journal.todoGreen,
+          bg: journal.todoGreenBg,
+          border: journal.todoGreenBorder,
+          defaultIcon: Icons.task_alt_rounded,
         ),
       CourseworkPillTone.completed => (
           fg: journal.ink,
@@ -84,7 +91,7 @@ class CourseworkStatusPill extends StatelessWidget {
             child: Text(
               label,
               style: journal.metadata.copyWith(
-                fontSize: 11.5,
+                fontSize: 12,
                 height: 1.25,
                 fontWeight: FontWeight.w600,
                 color: palette.fg,

@@ -183,7 +183,8 @@ void main() {
 
     await tester.tap(find.text('搜索与筛选'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const ValueKey('home-course-filter')));
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('home-course-filter')));
     await tester.tap(find.byKey(const ValueKey('home-course-filter')));
     await tester.pumpAndSettle();
 

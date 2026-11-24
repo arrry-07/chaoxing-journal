@@ -409,7 +409,7 @@ void main() {
       await store.repository.mergeAndSave([far, unknown, today]);
       await store.restoreSession();
 
-      // Single pin: no drag handle shown, left rail shows 3 lines with berry color.
+      // Single pin: no drag handle shown, left rail shows 3 lines with accent color (red reserved for overdue).
       await store.togglePin(today);
       await _mountRoutedHomeWithClock(tester, store, () => now);
       expect(find.byIcon(Icons.drag_indicator_rounded), findsNothing);
@@ -417,7 +417,7 @@ void main() {
       expect(find.text('15:00'), findsOneWidget);
       expect(find.text('剩3小时'), findsOneWidget);
       final todayText = tester.widget<Text>(find.text('今天'));
-      expect(todayText.style?.color, Journal.berry);
+      expect(todayText.style?.color, JournalPalette.light.accent);
 
       // Pin two more -> auto order: today, far, unknown; drag handle appears.
       await store.togglePin(unknown);

@@ -62,14 +62,14 @@ class ManualHomeCard extends StatelessWidget {
     final clock =
         at == null ? '' : _clockFormat.format(AssignmentQuery.beijing(at));
     final railTextColor = pinUrgent
-        ? journal.berry
+        ? journal.accent
         : at == null
             ? journal.muted
             : overdue
                 ? journal.muted
                 : today
-                    ? journal.berry
-                    : journal.ink.withValues(alpha: 0.88);
+                    ? journal.accent
+                    : journal.ink;
     final overdueDays = overdue ? now.difference(at!).inDays : 0;
     final overdueLabel = overdueDays > 0 ? '已逾期$overdueDays天' : '已逾期';
 
@@ -112,7 +112,7 @@ class ManualHomeCard extends StatelessWidget {
           Text(
             dateLabel,
             style: journal.metadata.copyWith(
-              color: pinUrgent ? journal.berry : journal.muted,
+              color: pinUrgent ? journal.accent : journal.muted,
               fontSize: 11.5,
               height: 1.22,
               fontWeight: pinUrgent ? FontWeight.w600 : FontWeight.w500,
@@ -122,7 +122,7 @@ class ManualHomeCard extends StatelessWidget {
             clock,
             style: journal.time.copyWith(
               color: pinUrgent
-                  ? journal.berry
+                  ? journal.accent
                   : overdue
                       ? journal.muted
                       : journal.ink,
@@ -133,7 +133,7 @@ class ManualHomeCard extends StatelessWidget {
           Text(
             remaining,
             style: journal.metadata.copyWith(
-              color: pinUrgent ? journal.berry : journal.muted,
+              color: pinUrgent ? journal.accent : journal.muted,
               fontSize: 11,
               height: 1.22,
             ),
@@ -143,17 +143,15 @@ class ManualHomeCard extends StatelessWidget {
     }
 
     final isExam = entry.kind == ManualEntry.kindExam;
-    final typeLabel = isExam ? '手动考试' : '手动待办';
-    final typePill = isExam
-        ? const CourseworkStatusPill(
-            label: '手动考试',
-            tone: CourseworkPillTone.exam,
-          )
-        : const CourseworkStatusPill(
-            label: '手动待办',
-            tone: CourseworkPillTone.neutral,
-            icon: Icons.edit_note_rounded,
-          );
+    final typeLabel = isExam ? '考试' : '待办';
+    final typePill = CourseworkStatusPill(
+      label: typeLabel,
+      tone: isExam ? CourseworkPillTone.exam : CourseworkPillTone.todo,
+    );
+    const sourcePill = CourseworkStatusPill(
+      label: '自己添加',
+      tone: CourseworkPillTone.neutral,
+    );
     final auxiliary = <String>[
       if (entry.location.trim().isNotEmpty) '地点 ${entry.location.trim()}',
       if (entry.remind && at != null && at.isAfter(now)) '提前30分提醒',
@@ -223,6 +221,7 @@ class ManualHomeCard extends StatelessWidget {
             if (entry.course.trim().isNotEmpty)
               Text(entry.course.trim(), style: journal.metadata),
             typePill,
+            sourcePill,
             if (overdue)
               CourseworkStatusPill(
                 label: overdueLabel,
@@ -233,6 +232,15 @@ class ManualHomeCard extends StatelessWidget {
         if (auxiliary.isNotEmpty) ...[
           const SizedBox(height: 4),
           for (final line in auxiliary) Text(line, style: journal.metadata),
+        ],
+        if (entry.note.trim().isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            entry.note.trim(),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: journal.metadata,
+          ),
         ],
       ],
     );

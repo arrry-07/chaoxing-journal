@@ -165,8 +165,10 @@ void main() {
     final openWeb = find.byKey(const ValueKey('assignment-detail-open-web'));
     await reveal(openWeb);
     expect(openWeb.hitTestable(), findsOneWidget);
-    expect(tester.widget<TextButton>(openWeb), isA<TextButton>());
+    expect(tester.widget<OutlinedButton>(openWeb), isA<OutlinedButton>());
     expect(tester.getSize(openWeb).height, greaterThanOrEqualTo(48));
+    expect(tester.getRect(openWeb).width, closeTo(openRect.width, 1.0));
+    expect(tester.getRect(openWeb).top, greaterThan(openRect.bottom));
 
     final last = find.byKey(const ValueKey('assignment-detail-hide'));
     await reveal(last);
@@ -924,7 +926,7 @@ void main() {
         final web = find.byKey(const ValueKey('assignment-detail-open-web'));
         await tester.scrollUntilVisible(web, 120, scrollable: scroll);
         await tester.pumpAndSettle();
-        final webButton = tester.widget<TextButton>(web);
+        final webButton = tester.widget<OutlinedButton>(web);
         expect(webButton.onPressed, isNotNull);
         expect(
           find.descendant(
@@ -933,8 +935,17 @@ void main() {
           ),
           findsOneWidget,
         );
+        final openRect = tester.getRect(open);
         final webRect = tester.getRect(web);
-        expect((webRect.center.dx - 180).abs(), lessThanOrEqualTo(2.0));
+        expect(webRect.width, closeTo(openRect.width, 1.0));
+        if (scale <= 1.0) {
+          expect(webRect.height, closeTo(openRect.height, 0.5));
+          expect(webRect.top, closeTo(openRect.top, 0.5));
+        } else {
+          expect(openRect.height, greaterThanOrEqualTo(48));
+          expect(webRect.height, greaterThanOrEqualTo(48));
+          expect(webRect.top, greaterThan(openRect.bottom));
+        }
       }
     }
 
@@ -964,7 +975,7 @@ void main() {
     expect(tester.widget<FilledButton>(openDisabled).onPressed, isNull);
     final webDisabled =
         find.byKey(const ValueKey('assignment-detail-open-web'));
-    expect(tester.widget<TextButton>(webDisabled).onPressed, isNull);
+    expect(tester.widget<OutlinedButton>(webDisabled).onPressed, isNull);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

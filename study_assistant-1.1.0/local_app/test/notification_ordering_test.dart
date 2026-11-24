@@ -99,7 +99,7 @@ void main() {
             for (final id in [
               'assignment_deadlines',
               'daily_summary',
-              'personal_schedule'
+              'personal_schedule_v2'
             ])
               h.channelRow(id, id, 4)
           ];
@@ -238,7 +238,7 @@ void main() {
     ]);
     final id = pending.single['id'];
     pending.clear();
-    active.add({'id': id, 'channelId': 'personal_schedule', 'tag': null});
+    active.add({'id': id, 'channelId': 'personal_schedule_v2', 'tag': null});
     await service.rescheduleManual([]);
     expect(active, isEmpty);
     expect(pending, isEmpty);
@@ -285,7 +285,7 @@ void main() {
         .firstWhere((item) => item['payload'] == 'p:qa-delivered')['id'] as int;
     pending.removeWhere((item) => item['id'] == deliveredId);
     active.add(
-        {'id': deliveredId, 'channelId': 'personal_schedule', 'tag': null});
+        {'id': deliveredId, 'channelId': 'personal_schedule_v2', 'tag': null});
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         'notification_schedule_v2_journal_manual',
@@ -380,7 +380,7 @@ void main() {
   for (final evidence in [
     {'channelId': 'assignment_deadlines', 'tag': null},
     {'channelId': 'unknown-channel', 'tag': null},
-    {'channelId': 'personal_schedule', 'tag': 'foreign-tag'},
+    {'channelId': 'personal_schedule_v2', 'tag': 'foreign-tag'},
     {
       'channelId': 'assignment_deadlines',
       'tag': null,
@@ -418,7 +418,7 @@ void main() {
           'channelId': [
             'assignment_deadlines',
             'daily_summary',
-            'personal_schedule'
+            'personal_schedule_v2'
           ][i],
           'tag': null
         },

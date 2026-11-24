@@ -129,6 +129,8 @@ class ReminderHealth {
       this.ignoringBatteryOptimizations,
       this.lockscreenShowNotifications,
       this.lockscreenAllowPrivateNotifications,
+      this.ringerMode,
+      this.interruptionFilter,
       this.pending,
       this.summaryPending,
       this.manualPending,
@@ -147,9 +149,17 @@ class ReminderHealth {
   final bool? ignoringBatteryOptimizations,
       lockscreenShowNotifications,
       lockscreenAllowPrivateNotifications;
+  final String? ringerMode, interruptionFilter;
   final int? pending, summaryPending, manualPending;
   final bool scheduleRecoveryPending;
   final List<String> queryErrors;
+
+  bool get isPhoneMutedOrVibrate =>
+      ringerMode == 'silent' || ringerMode == 'vibrate';
+  bool get isDndActive =>
+      interruptionFilter == 'priority' ||
+      interruptionFilter == 'none' ||
+      interruptionFilter == 'alarms';
 
   // Missing, unsupported and failed channel checks must not collapse to false.
   bool? get channelEnabled => assignmentChannel?.enabled;

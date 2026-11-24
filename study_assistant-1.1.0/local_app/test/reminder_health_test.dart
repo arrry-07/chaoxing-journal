@@ -392,7 +392,7 @@ void main() {
         return [
           channelRow('assignment_deadlines', '作业截止提醒', 4),
           channelRow('daily_summary', '每日课业摘要', 3),
-          channelRow('personal_schedule', '个人待办与考试提醒', 4),
+          channelRow('personal_schedule_v2', '待办与考试提醒', 4),
         ];
       }
       if (call.method == 'pendingNotificationRequests') return [];
@@ -431,7 +431,7 @@ void main() {
         return [
           channelRow('assignment_deadlines', '作业截止提醒', 4),
           channelRow('daily_summary', '每日课业摘要', 3),
-          channelRow('personal_schedule', '个人待办与考试提醒', 0),
+          channelRow('personal_schedule_v2', '待办与考试提醒', 0),
         ];
       }
       if (call.method == 'pendingNotificationRequests') return [];
@@ -495,13 +495,15 @@ void main() {
       }
       return true;
     });
-    final service = LocalNotificationService();
+    final service = LocalNotificationService(
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
     await service.rescheduleManual([
       ManualEntry(
         id: 'fallback',
         title: '期末考试',
         kind: 'exam',
-        at: DateTime.now().add(const Duration(hours: 2)),
+        at: DateTime(2030, 11, 20, 12, 0),
         remind: true,
       )
     ]);
@@ -596,7 +598,7 @@ void main() {
         return [
           channelRow('assignment_deadlines', '作业截止提醒', 4),
           channelRow('daily_summary', '每日课业摘要', 0),
-          channelRow('personal_schedule', '个人待办与考试提醒', 2)
+          channelRow('personal_schedule_v2', '待办与考试提醒', 2)
         ];
       }
       if (c.method == 'areNotificationsEnabled') return true;
@@ -636,7 +638,7 @@ void main() {
           'assignment_deadlines',
           'assignment_updates',
           'daily_summary',
-          'personal_schedule'
+          'personal_schedule_v2'
         ]);
     final channels = calls
         .where((call) => call.method == 'createNotificationChannel')
@@ -644,7 +646,7 @@ void main() {
         .toList();
     expect(channels.map((channel) => channel['importance']), [4, 3, 3, 4]);
     expect(channels.map((channel) => channel['name']),
-        ['作业截止提醒', '作业变化提醒', '每日课业摘要', '个人待办与考试提醒']);
+        ['作业截止提醒', '作业变化提醒', '每日课业摘要', '待办与考试提醒']);
     final initializeIndex =
         calls.indexWhere((call) => call.method == 'initialize');
     final launchIndex = calls
@@ -713,7 +715,7 @@ void main() {
         calls
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
-        ['personal_schedule']);
+        ['personal_schedule_v2']);
   });
   test('empty replacement still cancels old reminders without channel creation',
       () async {
@@ -806,7 +808,7 @@ void main() {
           channelRow('assignment_deadlines', '用户自定义作业名', 0),
           channelRow('assignment_updates', '用户自定义作业变化名', 1),
           channelRow('daily_summary', '用户自定义摘要名', 2),
-          channelRow('personal_schedule', '用户自定义日程名', 1),
+          channelRow('personal_schedule_v2', '用户自定义日程名', 1),
         ];
       }
       if (call.method == 'getNotificationAppLaunchDetails') {
@@ -862,7 +864,7 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       if (call.method == 'createNotificationChannel' &&
-          (call.arguments as Map)['id'] == 'personal_schedule' &&
+          (call.arguments as Map)['id'] == 'personal_schedule_v2' &&
           fail) {
         throw PlatformException(code: 'channel_create_failed');
       }
@@ -892,7 +894,7 @@ void main() {
         calls
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
-        ['personal_schedule', 'personal_schedule']);
+        ['personal_schedule_v2', 'personal_schedule_v2']);
   });
   test('initialization attempts every channel even when one creation fails',
       () async {
@@ -921,7 +923,7 @@ void main() {
           'assignment_deadlines',
           'assignment_updates',
           'daily_summary',
-          'personal_schedule'
+          'personal_schedule_v2'
         ]);
   });
   test('a channel failure does not block other reminder categories', () async {
@@ -961,7 +963,7 @@ void main() {
         calls
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
-        ['assignment_deadlines', 'daily_summary', 'personal_schedule']);
+        ['assignment_deadlines', 'daily_summary', 'personal_schedule_v2']);
     expect(calls.where((call) => call.method == 'zonedSchedule'), hasLength(8));
   });
   test('channel query failure blocks replacement but preserves old reminders',
@@ -1103,7 +1105,7 @@ void main() {
         return [
           channelRow('assignment_deadlines', '作业截止提醒', 4),
           channelRow('daily_summary', '每日课业摘要', 0),
-          channelRow('personal_schedule', '个人待办与考试提醒', 2)
+          channelRow('personal_schedule_v2', '待办与考试提醒', 2)
         ];
       }
       if (c.method == 'areNotificationsEnabled') return true;
@@ -1174,7 +1176,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     final tile = find.widgetWithText(ListTile, '作业变化通知渠道');
-    await tester.ensureVisible(tile);
+    await Scrollable.ensureVisible(tester.element(tile), alignment: 0.5);
+    await tester.pumpAndSettle();
     await tester.tap(tile);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -1597,7 +1600,7 @@ void main() {
             return {'notificationLaunchedApp': false};
           case 'getNotificationChannels':
             return [
-              channelRow('personal_schedule', '个人待办与考试提醒', 4),
+              channelRow('personal_schedule_v2', '待办与考试提醒', 4),
             ];
           case 'areNotificationsEnabled':
             return true;
@@ -1690,7 +1693,7 @@ void main() {
           return {'notificationLaunchedApp': false};
         case 'getNotificationChannels':
           return [
-            channelRow('personal_schedule', '个人待办与考试提醒', 4),
+            channelRow('personal_schedule_v2', '待办与考试提醒', 4),
           ];
         case 'areNotificationsEnabled':
           return true;
@@ -1796,7 +1799,7 @@ void main() {
           return {'notificationLaunchedApp': false};
         case 'getNotificationChannels':
           return [
-            channelRow('personal_schedule', '个人待办与考试提醒', 4),
+            channelRow('personal_schedule_v2', '待办与考试提醒', 4),
           ];
         case 'areNotificationsEnabled':
           return true;

@@ -47,8 +47,8 @@ class HomeTimelineItem {
     final raw = assignment?.courseName ?? manual!.course;
     final trimmed = raw.trim();
     if (trimmed.isNotEmpty || !isManual) return trimmed;
-    if (!isExam) return '个人待办';
-    return '手动考试';
+    if (!isExam) return '待办';
+    return '考试';
   }
 
   /// Manual entries use their stored instant; Chaoxing records only use the

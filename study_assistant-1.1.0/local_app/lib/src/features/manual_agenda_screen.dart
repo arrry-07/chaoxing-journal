@@ -9,6 +9,7 @@ import '../app/unsaved_edit_guard.dart';
 import '../models/study_notebook.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
+import 'manual_entry_detail_screen.dart';
 import 'reminder_status_screen.dart';
 import 'widgets/data_recovery_warning.dart';
 import 'widgets/journal_buttons.dart';
@@ -158,7 +159,28 @@ class _AgendaState extends State<ManualAgendaScreen> {
                                 '${manualTime(e.at)}${e.course.isEmpty ? '' : '\n${e.course}'}${e.location.isEmpty ? '' : ' · ${e.location}'}${e.minutes == 0 ? '' : '\n预计 ${e.minutes} 分钟'}${e.done ? ' · 个人已完成' : ''}',
                                 style: journal.metadata,
                               ),
-                              onTap: busy ? null : () => edit(e),
+                              onTap: busy
+                                  ? null
+                                  : () {
+                                      final router = GoRouter.maybeOf(context);
+                                      if (router != null) {
+                                        router.push(
+                                          '/assignments/manual/${Uri.encodeComponent(e.id)}',
+                                        );
+                                      } else {
+                                        Navigator.of(context,
+                                                rootNavigator: true)
+                                            .push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                ManualEntryDetailScreen(
+                                              store: widget.store,
+                                              entryId: e.id,
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    },
                               trailing: IconButton(
                                   tooltip: '删除个人日程',
                                   onPressed: busy ? null : () => remove(e),
@@ -199,6 +221,7 @@ class ManualEntryEditor extends StatefulWidget {
     this.entryId,
     this.initialDay,
     this.initialCourse,
+    this.initialKind,
     this.routeScope = '/agenda',
   });
   final AssignmentStore store;
@@ -208,6 +231,7 @@ class ManualEntryEditor extends StatefulWidget {
 
   /// Prefills the course for a new entry, e.g. from an empty course filter.
   final String? initialCourse;
+  final String? initialKind;
   final String routeScope;
   @override
   State<ManualEntryEditor> createState() => _EditorState();
@@ -258,7 +282,10 @@ class _EditorState extends State<ManualEntryEditor> {
     location = TextEditingController(text: _entry?.location);
     note = TextEditingController(text: _entry?.note);
     minutes = TextEditingController(text: '${_entry?.minutes ?? 0}');
-    kind = _entry?.kind ?? 'todo';
+    kind = _entry?.kind ??
+        (widget.initialKind == ManualEntry.kindExam
+            ? ManualEntry.kindExam
+            : ManualEntry.kindTodo);
     remind = _entry?.remind ?? false;
     at = _entry?.at ??
         (widget.initialDay == null
@@ -593,18 +620,6 @@ class _EditorState extends State<ManualEntryEditor> {
                 child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
                     children: [
-                      _AgendaKindSegment(
-                        selected: kind,
-                        enabled: !busy,
-                        onChanged: (next) {
-                          JournalMotion.tap(widget.store.display);
-                          setState(() {
-                            kind = next;
-                            _dirty = true;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 12),
                       JournalGroupedCard(
                         padding: const EdgeInsets.all(14),
                         children: [
@@ -620,6 +635,19 @@ class _EditorState extends State<ManualEntryEditor> {
                                       s == null || s.trim().isEmpty
                                           ? '请填写标题'
                                           : null),
+                              const SizedBox(height: 10),
+                              _AgendaKindSegment(
+                                selected: kind,
+                                enabled: !busy,
+                                onChanged: (next) {
+                                  JournalMotion.tap(widget.store.display);
+                                  setState(() {
+                                    kind = next;
+                                    _dirty = true;
+                                  });
+                                },
+                              ),
+                              const SizedBox(height: 8),
                               TextFormField(
                                   controller: course,
                                   enabled: !busy,
@@ -868,8 +896,8 @@ class _AgendaKindSegment extends StatelessWidget {
       ),
       child: Row(
         children: [
-          item('todo', '个人待办'),
-          item('exam', '手动考试'),
+          item('todo', '待办'),
+          item('exam', '考试'),
         ],
       ),
     );

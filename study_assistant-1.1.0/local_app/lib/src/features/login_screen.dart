@@ -229,8 +229,7 @@ class _AgreementPanel extends StatelessWidget {
                     fontSize: 14.5,
                     height: 1.45,
                     decoration: TextDecoration.underline,
-                    decorationColor:
-                        Journal.of(context).ink.withValues(alpha: 0.72),
+                    decorationColor: Journal.of(context).muted,
                     decorationThickness: 1,
                   ),
             ),

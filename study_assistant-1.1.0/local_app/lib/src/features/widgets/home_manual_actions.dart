@@ -8,6 +8,7 @@ import '../../app/journal_motion.dart';
 import '../../models/study_notebook.dart';
 import '../../services/assignment_store.dart';
 import '../manual_agenda_screen.dart';
+import '../manual_entry_detail_screen.dart';
 import 'journal_context_menu.dart';
 import 'journal_swipe_tile.dart';
 import 'manual_home_card.dart';
@@ -33,10 +34,32 @@ class HomeManualActions {
   final HomeManualFeedback feedback;
   final bool Function() isMounted;
 
+  Future<void> openDetail(
+    BuildContext context,
+    ManualEntry entry,
+  ) async {
+    if (!isMounted()) return;
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      await router.push('/assignments/manual/${Uri.encodeComponent(entry.id)}');
+      return;
+    }
+    if (!isMounted()) return;
+    await Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ManualEntryDetailScreen(
+          store: store,
+          entryId: entry.id,
+        ),
+      ),
+    );
+  }
+
   Future<void> openEditor(
     BuildContext context, {
     ManualEntry? entry,
     String? initialCourse,
+    String? initialKind,
   }) async {
     if (!isMounted()) return;
     if (entry == null && store.notebook.entries.length >= 500) {
@@ -46,14 +69,19 @@ class HomeManualActions {
     final router = GoRouter.maybeOf(context);
     if (router != null) {
       final course = initialCourse?.trim() ?? '';
+      final kindParam = initialKind?.trim() ?? '';
+      final queryParams = <String, String>{
+        if (course.isNotEmpty) 'course': course,
+        if (kindParam.isNotEmpty) 'kind': kindParam,
+      };
       await router.push(
         entry != null
-            ? '/assignments/manual/${Uri.encodeComponent(entry.id)}'
-            : course.isEmpty
+            ? '/assignments/manual/${Uri.encodeComponent(entry.id)}/edit'
+            : queryParams.isEmpty
                 ? '/assignments/new'
                 : Uri(
                     path: '/assignments/new',
-                    queryParameters: {'course': course},
+                    queryParameters: queryParams,
                   ).toString(),
       );
       return;
@@ -65,6 +93,7 @@ class HomeManualActions {
           store: store,
           entry: entry,
           initialCourse: initialCourse,
+          initialKind: initialKind,
           routeScope: '/assignments',
         ),
       ),
@@ -280,7 +309,7 @@ Widget buildHomeManualTile({
           compact: store.display.compact,
           countdown: store.display.countdown,
           dragHandle: dragHandle,
-          onTap: () => actions.openEditor(itemContext, entry: entry),
+          onTap: () => actions.openDetail(itemContext, entry),
           onToggleDone: () => unawaited(actions.completeWithUndo(entry)),
           onLongPress: () => actions.openContextMenu(
             itemContext,

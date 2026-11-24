@@ -50,6 +50,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   bool _savingRules = false;
   bool _healthBusy = false;
   bool _testingNotification = false;
+  bool _testingManualNotification = false;
   bool? _listenerGranted;
 
   ReminderHealth? _health;
@@ -536,6 +537,78 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                   ),
                 ),
               ],
+              if (current?.isPhoneMutedOrVibrate == true) ...[
+                const SizedBox(height: 8),
+                Container(
+                  key: const ValueKey('reminder-health-ringer-warning'),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: journal.ochreBg.withValues(
+                      alpha: journal.isDark ? 0.65 : 0.72,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: journal.ochreBorder, width: 0.7),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Icon(
+                          Icons.volume_off_outlined,
+                          size: 16,
+                          color: journal.ochre,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '当前手机处于静音或振动模式，系统不会播放提醒铃声。',
+                          style:
+                              journal.metadata.copyWith(color: journal.ochre),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (current?.isDndActive == true) ...[
+                const SizedBox(height: 8),
+                Container(
+                  key: const ValueKey('reminder-health-dnd-warning'),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: journal.ochreBg.withValues(
+                      alpha: journal.isDark ? 0.65 : 0.72,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: journal.ochreBorder, width: 0.7),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Icon(
+                          Icons.do_not_disturb_on_outlined,
+                          size: 16,
+                          color: journal.ochre,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '当前已开启系统勿扰模式，可能拦截提醒声音或弹窗。',
+                          style:
+                              journal.metadata.copyWith(color: journal.ochre),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 14),
               Wrap(
                 spacing: 8,
@@ -591,6 +664,47 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                     label: '重新体检',
                     onPressed:
                         _healthBusy ? null : () => _loadHealth(force: false),
+                  ),
+                  JournalSecondaryButton(
+                    buttonKey:
+                        const ValueKey('send-test-manual-notification-button'),
+                    expanded: false,
+                    height: 42,
+                    label: _testingManualNotification ? '正在发送…' : '测试待办提醒',
+                    onPressed: _healthBusy || _testingManualNotification
+                        ? null
+                        : () async {
+                            setState(() => _testingManualNotification = true);
+                            try {
+                              final ok = await widget
+                                  .assignmentStore.notificationService
+                                  .showTestManualNotification();
+                              if (!mounted) return;
+                              setState(() {
+                                _healthMessage = ok
+                                    ? '已发送待办测试提醒；若未听到声音，请检查手机是否静音或系统渠道铃声设置。'
+                                    : '未能发送待办测试提醒，请检查通知权限与待办提醒渠道。';
+                              });
+                              await _loadHealth(force: true);
+                            } finally {
+                              if (mounted) {
+                                setState(
+                                    () => _testingManualNotification = false);
+                              }
+                            }
+                          },
+                  ),
+                  JournalSecondaryButton(
+                    buttonKey:
+                        const ValueKey('open-system-notification-settings'),
+                    expanded: false,
+                    height: 42,
+                    label: '打开系统通知设置',
+                    onPressed: () => _openPermissionSettings(
+                      widget.permissionSettingsService
+                          .openNotificationSettingsResult,
+                      destination: '系统通知设置',
+                    ),
                   ),
                   if (current?.scheduleRecoveryPending == true)
                     JournalSecondaryButton(
@@ -692,7 +806,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                 subtitle: Text(_channelStateText(_health?.manualChannel)),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => _openNotificationChannel(
-                  'personal_schedule',
+                  LocalNotificationService.manualV2Channel,
                   '个人日程通知渠道',
                 ),
               ),

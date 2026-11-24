@@ -353,7 +353,7 @@ void main() {
     );
     expect(
       [for (final item in items) item.displayCourse],
-      ['', '个人待办', '手动考试'],
+      ['', '待办', '考试'],
     );
   });
 

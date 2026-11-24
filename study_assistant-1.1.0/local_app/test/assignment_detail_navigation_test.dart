@@ -177,7 +177,7 @@ void main() {
     expect(tester.widget<FilledButton>(openPrimary).onPressed, isNull);
     final openWeb = find.byKey(const ValueKey('assignment-detail-open-web'));
     await reveal(tester, openWeb);
-    final webButton = tester.widget<TextButton>(openWeb);
+    final webButton = tester.widget<OutlinedButton>(openWeb);
     expect(webButton.onPressed, isNull);
     await tester.tap(openWeb, warnIfMissed: false);
     await tester.pump();

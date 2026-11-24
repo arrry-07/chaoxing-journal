@@ -936,6 +936,8 @@ void main() {
     expect(find.byType(CalendarScreen), findsOneWidget);
     expect(find.byType(JournalFloatingNavBar), findsOneWidget);
 
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('calendar-quick-add-entry')));
     await tester.pumpAndSettle();
     expect(find.byType(ManualEntryEditor), findsOneWidget);

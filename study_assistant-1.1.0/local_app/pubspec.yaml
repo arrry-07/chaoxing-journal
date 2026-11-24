@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   crypto: ^3.0.7
   dio: ^5.7.0
   flutter_secure_storage: ^9.2.2

@@ -704,6 +704,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             : const <ManualEntry>[];
         final selectedCourseIdle = recoveryScope == null &&
             _courseKey != null &&
+            _query.trim().isEmpty &&
+            _deadlineFilter == AssignmentDeadlineFilter.all &&
+            _typeFilter == AssignmentTypeFilter.all &&
             manualItems.isEmpty &&
             !displayAssignments.any((a) => a.courseKey == _courseKey);
         _courseCountsFor = (type, deadline) => countHomeCourseItems(
@@ -1108,11 +1111,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
 
               final summaryStyle = journal.metadata.copyWith(
-                color: nearDueActive
+                color: nearDueActive || dueSummary.dueToday > 0
                     ? journal.accent
-                    : dueSummary.dueToday > 0
-                        ? journal.berry
-                        : journal.muted,
+                    : journal.muted,
                 fontWeight: nearDueActive || dueSummary.dueToday > 0
                     ? FontWeight.w600
                     : FontWeight.w400,
@@ -1838,7 +1839,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   }) {
     final journal = Journal.of(context);
     final textColor = switch (tone) {
-      HomeDayHeadingTone.overdue => journal.berry,
+      HomeDayHeadingTone.overdue => journal.muted,
       HomeDayHeadingTone.undated => journal.ochre,
       HomeDayHeadingTone.today => journal.ink,
       HomeDayHeadingTone.normal => journal.muted,
@@ -1879,7 +1880,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
                 color: tone == HomeDayHeadingTone.overdue
-                    ? journal.berryBg
+                    ? journal.parchment
                     : journal.sage,
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -1890,7 +1891,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   height: 1.2,
                   fontWeight: FontWeight.w600,
                   color: tone == HomeDayHeadingTone.overdue
-                      ? journal.berry
+                      ? journal.muted
                       : journal.ink,
                 ),
               ),

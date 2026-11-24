@@ -14,6 +14,8 @@ class JournalPrimaryButton extends StatelessWidget {
     this.destructive = false,
     this.expanded = true,
     this.height = 48.0,
+    this.padding,
+    this.singleLineLabel = false,
     this.backgroundColor,
     this.foregroundColor,
   });
@@ -26,6 +28,8 @@ class JournalPrimaryButton extends StatelessWidget {
   final bool destructive;
   final bool expanded;
   final double height;
+  final EdgeInsetsGeometry? padding;
+  final bool singleLineLabel;
   final Color? backgroundColor;
   final Color? foregroundColor;
 
@@ -37,6 +41,16 @@ class JournalPrimaryButton extends StatelessWidget {
         backgroundColor ?? (destructive ? journal.berry : journal.primaryFill);
     final fg = foregroundColor ?? journal.onPrimaryFill;
 
+    final labelText = Text(
+      label,
+      maxLines: singleLineLabel ? 1 : null,
+      softWrap: !singleLineLabel,
+      style: journal.entryTitle.copyWith(
+        color: enabled ? fg : journal.muted,
+        fontWeight: FontWeight.w600,
+        fontSize: 15,
+      ),
+    );
     final child = loading
         ? SizedBox.square(
             dimension: 18,
@@ -45,18 +59,14 @@ class JournalPrimaryButton extends StatelessWidget {
               color: enabled ? fg : journal.muted,
             ),
           )
-        : Text(
-            label,
-            style: journal.entryTitle.copyWith(
-              color: enabled ? fg : journal.muted,
-              fontWeight: FontWeight.w600,
-              fontSize: 15,
-            ),
-          );
+        : (singleLineLabel
+            ? FittedBox(fit: BoxFit.scaleDown, child: labelText)
+            : labelText);
 
     final style = FilledButton.styleFrom(
       minimumSize: Size(expanded ? double.infinity : 0, height),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      padding:
+          padding ?? const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
       backgroundColor: bg,
       foregroundColor: fg,
       disabledBackgroundColor: journal.parchment,
@@ -93,6 +103,9 @@ class JournalSecondaryButton extends StatelessWidget {
     this.icon,
     this.expanded = true,
     this.height = 46.0,
+    this.outlined = false,
+    this.padding,
+    this.singleLineLabel = false,
   });
 
   final Key? buttonKey;
@@ -101,17 +114,23 @@ class JournalSecondaryButton extends StatelessWidget {
   final IconData? icon;
   final bool expanded;
   final double height;
+  final bool outlined;
+  final EdgeInsetsGeometry? padding;
+  final bool singleLineLabel;
 
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
     final style = OutlinedButton.styleFrom(
       minimumSize: Size(expanded ? double.infinity : 0, height),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      backgroundColor: journal.parchment,
+      padding:
+          padding ?? const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      backgroundColor: outlined ? Colors.transparent : journal.parchment,
       foregroundColor: journal.ink,
       disabledForegroundColor: journal.muted,
-      side: BorderSide.none,
+      side: outlined
+          ? BorderSide(color: journal.ruleStrong, width: 1.0)
+          : BorderSide.none,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       textStyle: journal.entryTitle.copyWith(
         fontSize: 14.5,
@@ -119,19 +138,28 @@ class JournalSecondaryButton extends StatelessWidget {
       ),
     );
 
+    final rawText = Text(
+      label,
+      maxLines: singleLineLabel ? 1 : null,
+      softWrap: !singleLineLabel,
+    );
+    final labelWidget = singleLineLabel
+        ? FittedBox(fit: BoxFit.scaleDown, child: rawText)
+        : rawText;
+
     final Widget button = icon != null
         ? OutlinedButton.icon(
             key: buttonKey,
             onPressed: onPressed,
             style: style,
-            icon: Icon(icon, size: 18),
-            label: Text(label),
+            icon: Icon(icon, size: 17),
+            label: labelWidget,
           )
         : OutlinedButton(
             key: buttonKey,
             onPressed: onPressed,
             style: style,
-            child: Text(label),
+            child: labelWidget,
           );
 
     return _PressableScale(

@@ -11,9 +11,22 @@ class AppDeepLinks {
 
   /// Notification payloads are not arbitrary app routes. In particular a
   /// digest has no assignment ID and must never open a detail page.
-  static String notificationLocation(String payload,
-      {required bool Function(String id) containsAssignment}) {
-    if (payload.startsWith('p:')) return '/agenda';
+  static String notificationLocation(
+    String payload, {
+    required bool Function(String id) containsAssignment,
+    bool Function(String id)? containsManualEntry,
+  }) {
+    if (payload == 't:manual-notification-test') {
+      return '/assignments';
+    }
+    if (payload.startsWith('p:')) {
+      final rawId = payload.substring(2);
+      if (_safeId(rawId) &&
+          (containsManualEntry == null || containsManualEntry(rawId))) {
+        return '/assignments/manual/${Uri.encodeComponent(rawId)}';
+      }
+      return '/agenda';
+    }
     if (payload == 'd:summary' || payload == 't:notification-test') {
       return '/assignments';
     }
