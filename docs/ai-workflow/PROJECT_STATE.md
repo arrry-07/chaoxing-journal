@@ -9,7 +9,7 @@
 - **`dev` 已合入 1.9.0 首项预备修复**（`0806fee`）：补齐统计下钻 `LocalRecordFilterSpec.copyWith` / `isStatsScoped` / `resetToAllLocal`、`LocalRecordQuery.query` 的 `statsScoped` 退出及 `LocalRecordsScreen` 横幅学期标签/`didUpdateWidget`（附单元+组件回归），并将 `AssignmentNotificationPublisherTest#unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel` 改为设备本地固定白天 `10:00`；本地门禁（6 文件 75 项、`dart analyze` 0 问题）与隔离 ASCII 目录 `:app:compileDebugAndroidTestKotlin` 通过，全量 CI 与实机 `androidTest` 留待后续 PR/发版补齐。
 - 已启用[新版三段版本规则](VALIDATION.md#版本号与迭代分级规则)（`dev` 打 MuMu 自测包升 `Z`，正式版一律升 `Y` 归零 `Z`、`Y` 上限 `99`），并定稿 [v1.9.0 详细执行方案](../plans/2026-11-23-v1.9.0-首页手动课业混排与发版自动化方案.md)（首页手动课业混排 + `androidTest` 隔离脚本 + 波次 C-1，波次 B-2/C-2 暂缓）；详见[交接文档](handoffs/2026-11-23-v1.8.26-发版收口与下一轮起点交接.md)。
 - **首页混排阶段通过代码 Gate（`700f95f`）与 MuMu 自测（`0604293`）**：`1.8.27+121` 已在 MuMu「学习通」保数据验证同日混排、逾期置底与手动置顶/拖拽、无截止待办、完成撤销、统计隔离、日历及精确闹钟。详见 [dev 本地状态](DEV_STATE.md)。
-- **Stage 1 部分完成、隔离设备测试停工待裁决**：[v1.9.0 置顶持久化与隔离设备仪器测试方案](../plans/2026-11-24-v1.9.0-置顶持久化与隔离设备仪器测试方案.md) 的 M1–M2 已交付（`ef0e39a`：`_savePins` 返回写盘结果，拒写不再误报成功/污染内存，`_prunePins` 保留重试标志；8 文件定向门禁 105 项全绿）；M3 在隔离 MuMu API 32 实跑 112 项时 batch1 有 1 项因 `assignment_updates` 通道状态串扰失败（单跑通过），详见 [dev 本地状态](DEV_STATE.md)。
+- **Stage 1 已完成，待 Gate**：[v1.9.0 置顶持久化与隔离设备仪器测试方案](../plans/2026-11-24-v1.9.0-置顶持久化与隔离设备仪器测试方案.md) 的 M1–M4 已交付：`ef0e39a` 修复 `_savePins` 拒写误报并补 6 项回归，`3de0f59` 扩项隔离 androidTest 通道夹具与脚本 UTF-8 解码；隔离 MuMu API 32 实跑 3 批 112 项得 110 通过/2 假设跳过/0 失败，固定白天静默用例 `STATUS_CODE=0`，详见 [dev 本地状态](DEV_STATE.md)。
 
 ## 最近 2 个正式发布版本
 
@@ -18,7 +18,7 @@
 
 ## 待补证与按需入口
 
-- 正式版 `1.8.26+120` 的 `androidTest` 记录为隔离 MuMu API 32 完成 112 项、0 失败；本轮 dev 复跑同一套件得 109 通过/1 失败/2 假设跳过，失败为通道夹具串扰（单跑通过），历史结论需 Gate 时对原始日志复核。CI 目前仅编译 `androidTest`。
+- `dev` 的 `androidTest` 已在隔离 MuMu API 32 完成 112 项、110 通过/2 假设跳过/0 失败（含固定白天静默用例与通道夹具隔离）；CI 目前仅编译 `androidTest`，API 33+/OEM 矩阵待补证。
 - `3A` 已核实缓存通知模板（`senderName == '学习通知'`）与监听器无班级键；`backclazzdata` 在网 `teacherfactor`/`state`/`isEnd` 字段存在率及真实在线 `2C` 新旧作业详情返回路径待明确样本时顺带核实。
 - `FB-002`、自然 `9010`、改期/`completeTime` 与 30 天发布时间/活动性质核实见[反馈台账](../待处理体验反馈.md)；已完成方案归档于[归档方案](../archive/plans/2026-11-22-v1.8.25-产品与体验分期升级方案.md)。
 - [仓库规则](../../AGENTS.md) · [文档路由](../README.md) · [验证范围](VALIDATION.md) · [历史工程状态](../archive/PROJECT_STATE_HISTORY.md)（仅按用户点名的版本追溯）
