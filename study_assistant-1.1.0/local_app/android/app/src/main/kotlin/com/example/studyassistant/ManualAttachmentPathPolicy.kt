@@ -64,13 +64,16 @@ internal object ManualAttachmentPathPolicy {
             .replace(Regex("[\\r\\n\\u0000-\\u0008\\u000B-\\u001F]+"), "")
             .replace(Regex("[\\t/\\\\]+"), " ")
             .replace(Regex(" {2,}"), " ")
-            .trim()
+            .trim { it.isWhitespace() }
         if (cleaned.isEmpty()) return fallback
-        return if (cleaned.length <= MAX_DISPLAY_NAME_LENGTH) {
-            cleaned
-        } else {
-            cleaned.take(MAX_DISPLAY_NAME_LENGTH).trim().ifEmpty { fallback }
+        if (cleaned.length <= MAX_DISPLAY_NAME_LENGTH) {
+            return cleaned
         }
+        var cut = cleaned.substring(0, MAX_DISPLAY_NAME_LENGTH)
+        if (cut.isNotEmpty() && Character.isHighSurrogate(cut.last())) {
+            cut = cut.dropLast(1)
+        }
+        return cut.trim { it.isWhitespace() }.ifEmpty { fallback }
     }
 
     fun sanitizeExtension(

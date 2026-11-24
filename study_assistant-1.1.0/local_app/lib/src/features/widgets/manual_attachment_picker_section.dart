@@ -68,7 +68,7 @@ class ManualAttachmentPickerSection extends StatelessWidget {
                 OutlinedButton.icon(
                   key: const ValueKey('attachment-add-camera'),
                   style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(48, 46),
+                    minimumSize: const Size(48, 48),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 8,
@@ -81,7 +81,7 @@ class ManualAttachmentPickerSection extends StatelessWidget {
                 OutlinedButton.icon(
                   key: const ValueKey('attachment-add-gallery'),
                   style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(48, 46),
+                    minimumSize: const Size(48, 48),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 8,
@@ -94,7 +94,7 @@ class ManualAttachmentPickerSection extends StatelessWidget {
                 OutlinedButton.icon(
                   key: const ValueKey('attachment-add-file'),
                   style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(48, 46),
+                    minimumSize: const Size(48, 48),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 8,
@@ -164,25 +164,45 @@ class ManualAttachmentPickerSection extends StatelessWidget {
                         ),
                       ),
                       Positioned(
-                        top: 2,
-                        right: 2,
+                        top: 0,
+                        right: 0,
                         child: Semantics(
                           button: true,
+                          excludeSemantics: true,
                           label: '删除图片 ${item.name}',
-                          child: IconButton(
-                            key: ValueKey('attachment-remove-${item.id}'),
-                            tooltip: '删除图片',
-                            constraints: const BoxConstraints.tightFor(
-                              width: 36,
-                              height: 36,
+                          child: Tooltip(
+                            message: '删除图片',
+                            child: SizedBox(
+                              width: 48,
+                              height: 48,
+                              child: Material(
+                                type: MaterialType.transparency,
+                                child: InkWell(
+                                  key: ValueKey('attachment-remove-${item.id}'),
+                                  customBorder: const CircleBorder(),
+                                  onTap: busy ? null : () => onRemove(item),
+                                  child: Align(
+                                    alignment: Alignment.topRight,
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(4),
+                                      child: Container(
+                                        width: 28,
+                                        height: 28,
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xB3191816),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(
+                                          Icons.close_rounded,
+                                          size: 16,
+                                          color: Color(0xFFFFFFFF),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
-                            padding: EdgeInsets.zero,
-                            style: IconButton.styleFrom(
-                              backgroundColor: const Color(0xB3191816),
-                              foregroundColor: const Color(0xFFFFFFFF),
-                            ),
-                            onPressed: busy ? null : () => onRemove(item),
-                            icon: const Icon(Icons.close_rounded, size: 16),
                           ),
                         ),
                       ),

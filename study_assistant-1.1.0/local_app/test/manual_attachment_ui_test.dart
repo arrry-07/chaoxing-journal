@@ -231,16 +231,39 @@ void main() {
     final store = await _makeStore(service);
     addTearDown(store.dispose);
 
+    final keepExisting = _att('saved_keep');
+    final dropExisting = _att('saved_drop');
+    final existingEntry = ManualEntry(
+      id: 'm-save-diff',
+      title: '既有待办',
+      kind: ManualEntry.kindTodo,
+      attachments: [keepExisting, dropExisting],
+    );
+    await store.saveNotebook(
+      (_) => StudyNotebook(entries: [existingEntry]),
+      store.accountEpoch,
+    );
+
     service.nextCamera = AttachmentSingleResult(attachment: _att('cam_keep'));
     await tester.pumpWidget(
       MaterialApp(
         theme: StudyAssistantTheme.light,
-        home: ManualEntryEditor(store: store),
+        home: ManualEntryEditor(store: store, entry: existingEntry),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextFormField).first, '带附件保存');
+    final dropBtn = find.byKey(const ValueKey('attachment-remove-saved_drop'));
+    await tester.scrollUntilVisible(
+      dropBtn,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(dropBtn);
+    await tester.pumpAndSettle();
+    // Removing a previously saved file must wait until save commits.
+    expect(service.deletedPaths, isEmpty);
+
     final camBtn = find.byKey(const ValueKey('attachment-add-camera'));
     await tester.scrollUntilVisible(
       camBtn,
@@ -262,10 +285,10 @@ void main() {
     expect(store.notebook.entries, hasLength(1));
     expect(store.notebook.entries.single.updatedAt, isNotNull);
     expect(
-      store.notebook.entries.single.attachments.single.relativePath,
-      'manual_attachments/cam_keep.jpg',
+      store.notebook.entries.single.attachments.map((e) => e.relativePath),
+      ['manual_attachments/saved_keep.jpg', 'manual_attachments/cam_keep.jpg'],
     );
-    expect(service.deletedPaths, isEmpty);
+    expect(service.deletedPaths, ['manual_attachments/saved_drop.jpg']);
   });
 
   testWidgets(

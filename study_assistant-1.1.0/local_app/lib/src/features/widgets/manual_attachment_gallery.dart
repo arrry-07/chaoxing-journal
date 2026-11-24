@@ -6,6 +6,8 @@ import '../../models/manual_attachment.dart';
 import '../../services/manual_attachment_service.dart';
 import 'journal_grouped_card.dart';
 
+bool _galleryOpening = false;
+
 Future<void> showAttachmentImageGallery(
   BuildContext context, {
   required List<ManualAttachment> images,
@@ -13,20 +15,25 @@ Future<void> showAttachmentImageGallery(
   required ManualAttachmentService service,
   String? rootPath,
 }) async {
-  if (images.isEmpty) return;
-  final resolvedRoot = rootPath ?? await service.getAttachmentRoot();
-  if (!context.mounted) return;
-  await Navigator.of(context, rootNavigator: true).push(
-    MaterialPageRoute<void>(
-      fullscreenDialog: true,
-      builder: (_) => _AttachmentFullscreenViewer(
-        images: images,
-        initialIndex: initialIndex.clamp(0, images.length - 1),
-        service: service,
-        rootPath: resolvedRoot,
+  if (_galleryOpening || images.isEmpty) return;
+  _galleryOpening = true;
+  try {
+    final resolvedRoot = rootPath ?? await service.getAttachmentRoot();
+    if (!context.mounted) return;
+    await Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => _AttachmentFullscreenViewer(
+          images: images,
+          initialIndex: initialIndex.clamp(0, images.length - 1),
+          service: service,
+          rootPath: resolvedRoot,
+        ),
       ),
-    ),
-  );
+    );
+  } finally {
+    _galleryOpening = false;
+  }
 }
 
 class AttachmentImageThumbnail extends StatelessWidget {
@@ -79,19 +86,24 @@ class _PlaceholderImageTile extends StatelessWidget {
     final journal = Journal.of(context);
     return Padding(
       padding: const EdgeInsets.all(6),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.image_outlined, size: 22, color: journal.muted),
-          const SizedBox(height: 4),
-          Text(
-            name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: journal.metadata.copyWith(fontSize: 11),
-          ),
-        ],
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.image_outlined, size: 22, color: journal.muted),
+            const SizedBox(height: 4),
+            Flexible(
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: journal.metadata.copyWith(fontSize: 11),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
