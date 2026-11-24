@@ -63,7 +63,19 @@ List<HomeTimelineSection> buildHomeTimelineSections({
       }
     }
     if (pinned.isNotEmpty) {
-      DateTime? autoPinnedTime(HomeTimelineItem item) => item.displayAt;
+      DateTime? autoPinnedTime(HomeTimelineItem item) {
+        if (item.isManual) return item.displayAt;
+        final assignment = item.assignment!;
+        if (assignment.isExam) {
+          return assignment.exam?.startTrusted == true
+              ? assignment.exam!.startAt
+              : null;
+        }
+        return AssignmentQuery.effectiveDeadline(
+          assignment,
+          coursework: coursework,
+        )?.at;
+      }
 
       int compareAutoPinned(
         HomeTimelineItem left,

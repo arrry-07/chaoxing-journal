@@ -46,7 +46,7 @@ class HomeTimelineItem {
   String get displayCourse {
     final raw = assignment?.courseName ?? manual!.course;
     final trimmed = raw.trim();
-    if (trimmed.isNotEmpty) return trimmed;
+    if (trimmed.isNotEmpty || !isManual) return trimmed;
     if (!isExam) return '个人待办';
     return '手动考试';
   }

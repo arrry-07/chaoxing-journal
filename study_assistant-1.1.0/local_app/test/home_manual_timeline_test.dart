@@ -338,6 +338,25 @@ void main() {
     expect(items[2].title, '英语作业一');
   });
 
+  test('empty coursework course stays blank while manual entries fall back',
+      () {
+    final items = HomeManualTimeline.mergeAndSort(
+      assignments: [
+        _assignment('blank', course: '', title: '无课程作业'),
+      ],
+      manualEntries: [
+        _entry('todo', title: '无课程待办'),
+        _entry('exam', title: '无课程考试', kind: 'exam'),
+      ],
+      order: HomeSortOrder.grouped,
+      now: now,
+    );
+    expect(
+      [for (final item in items) item.displayCourse],
+      ['', '个人待办', '手动考试'],
+    );
+  });
+
   test('home due summary counts manual todos without touching completion', () {
     final summary = HomeDueSummary.from(
       const [],

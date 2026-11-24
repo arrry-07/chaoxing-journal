@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
+import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 
@@ -17,17 +20,34 @@ ManualEntry _manual(String id, {bool done = false}) => ManualEntry(
     );
 
 class _FixedStore extends AssignmentStore {
-  _FixedStore()
-      : super(
-          sessionStore: core.Session(),
+  _FixedStore({
+    core.Session? session,
+    LocalAssignmentRepository? repository,
+    DateTime Function()? clock,
+  }) : super(
+          sessionStore: session ?? core.Session(),
           notificationService: core.Notifications(),
           widgetSnapshotService: core.WidgetService(),
           chaoxingClient: core.Client(),
-          clock: () => _now,
+          repository: repository,
+          clock: clock ?? (() => _now),
         );
 
   @override
   Future<bool> runDueAutoSync({DateTime? now}) async => false;
+}
+
+class _PinSaveRepository extends LocalAssignmentRepository {
+  _PinSaveRepository(this.onSaved);
+
+  final void Function() onSaved;
+
+  @override
+  Future<void> savePinnedAssignments(
+      PinnedAssignments pins, String account) async {
+    await super.savePinnedAssignments(pins, account);
+    onSaved();
+  }
 }
 
 Future<_FixedStore> _store() async {
@@ -99,7 +119,7 @@ void main() {
   test('deleting a manual entry clears its pin and logout isolates account',
       () async {
     final session = core.Session();
-    final store = _FixedStore();
+    final store = _FixedStore(session: session);
     addTearDown(store.dispose);
     await store.restoreSession();
     final entry = _manual('m2');
@@ -134,8 +154,47 @@ void main() {
     expect(store.pinnedKeys, isEmpty);
     session.account = 'B';
     await store.restoreSession();
+    expect(store.isAuthenticated, isTrue);
+    expect(store.account, 'B');
     expect(store.notebook.entries, isEmpty);
     expect(store.isManualPinned(entry), isFalse);
+  });
+
+  test('an exam ending during pin save keeps stored and active pins in sync',
+      () async {
+    final end = _now.add(const Duration(minutes: 1));
+    final exam = Assignment(
+      id: 'cx:exam:1:2:pin-boundary',
+      courseName: '测试课程',
+      title: '即将结束的考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: _now,
+      source: AssignmentSource.exam,
+      exam: ExamInfo(
+        examId: 'pin-boundary',
+        courseId: '1',
+        clazzId: '2',
+        endAt: end,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    var clock = _now;
+    final repository = _PinSaveRepository(() => clock = end);
+    final store = _FixedStore(repository: repository, clock: () => clock);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+    await repository.mergeAndSave([exam]);
+    await store.restoreSession();
+
+    expect(store.canTogglePin(exam), isTrue);
+    expect(await store.togglePin(exam), isTrue);
+    expect(store.canTogglePin(exam), isFalse);
+    expect(await repository.loadPinnedIds('A'),
+        contains(AssignmentStore.pinKeyOf(exam)));
+    expect(store.isPinned(exam), isTrue);
   });
 
   test('reorderPinned accepts a filtered subset and rejects bad keys',

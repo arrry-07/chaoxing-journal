@@ -16,6 +16,7 @@ import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/home_manual_timeline.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
@@ -259,6 +260,47 @@ void main() {
     expect(store.pinnedKeys, isEmpty);
   });
 
+  testWidgets('automatic pin order uses only trusted exam start times',
+      (tester) async {
+    final notice = Assignment(
+      id: 'cx:examNotice:inbox:notice',
+      courseName: '高等数学',
+      title: '缺年考试通知',
+      deadlineAt: null,
+      requirementsText: '考试时间：11-24 09:00 至 11-24 10:00',
+      status: 'pending',
+      lastSyncedAt: now,
+      source: AssignmentSource.exam,
+      exam: const ExamInfo(
+        examId: 'notice',
+        courseId: '1',
+        clazzId: '2',
+        noticeOnly: true,
+      ),
+    );
+    final manual = _manual('later', at: now.add(const Duration(days: 2)));
+    final items = HomeManualTimeline.mergeAndSort(
+      assignments: [notice],
+      manualEntries: [manual],
+      order: HomeSortOrder.deadlineAsc,
+      now: now,
+    );
+    expect(items.first.assignment, notice);
+    expect(items.first.displayAt!.isBefore(manual.at!), isTrue);
+
+    final store = await _store([notice], entries: [manual], clock: () => now);
+    addTearDown(store.dispose);
+    expect(await store.togglePin(notice), isTrue);
+    expect(await store.toggleManualPin(manual), isTrue);
+    await _pumpHome(tester, store, now);
+
+    expect(find.text('置顶'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text(manual.title)).dy,
+      lessThan(tester.getTopLeft(find.text(notice.title)).dy),
+    );
+  });
+
   testWidgets(
       'type and deadline filters apply to manual and coursework together',
       (tester) async {
@@ -366,6 +408,66 @@ void main() {
         expect(tester.takeException(), isNull, reason: '$scale/$pinned');
         expect(find.text(entry.title), findsOneWidget);
         expect(find.text('标记完成'), findsOneWidget);
+      }
+    }
+  });
+
+  testWidgets('manual card title clears inline actions at 1.0x text',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final entry = _manual(
+      'm-inline',
+      title: '这是一条很长的手动待办标题，用来核对常规字号下标题与操作按钮的避让',
+      at: now.add(const Duration(hours: 2)),
+    );
+
+    for (final pinned in [false, true]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: Scaffold(
+            body: SizedBox(
+              width: 360,
+              child: ManualHomeCard(
+                entry: entry,
+                now: now,
+                inPinnedSection: pinned,
+                dragHandle: pinned
+                    ? const SizedBox(
+                        key: ValueKey('manual-drag-handle'),
+                        width: 34,
+                        height: 48,
+                      )
+                    : null,
+                onTap: () {},
+                onToggleDone: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final cardRect = tester.getRect(find.byType(ManualHomeCard));
+      final titleRect = tester.getRect(find.text(entry.title));
+      final completeRect = tester.getRect(
+        find.byKey(const ValueKey('complete-manual-m-inline')),
+      );
+      expect(
+        titleRect.right,
+        lessThanOrEqualTo(completeRect.left),
+        reason: 'pinned=$pinned',
+      );
+      if (pinned) {
+        final handleRect = tester.getRect(
+          find.byKey(const ValueKey('manual-drag-handle')),
+        );
+        expect(handleRect.right, closeTo(cardRect.right - 2, 0.01));
+        expect(completeRect.right, closeTo(handleRect.left, 0.01));
+      } else {
+        expect(completeRect.right, closeTo(cardRect.right - 2, 0.01));
       }
     }
   });

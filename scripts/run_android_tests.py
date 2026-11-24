@@ -22,6 +22,8 @@ CRASH_MARKERS = ("FAILURES!!!", "Process crashed")
 CRASH_PREFIXES = (
     "INSTRUMENTATION_STATUS: Error=",
     "INSTRUMENTATION_STATUS: shortMsg=",
+    "INSTRUMENTATION_RESULT: shortMsg=",
+    "INSTRUMENTATION_FAILED:",
 )
 
 ANDROID_TEST_BATCHES: dict[str, tuple[str, ...]] = {
@@ -164,7 +166,7 @@ def detect_execution_error(output: str) -> str | None:
 
 def summarize_results(name: str, output: str, returncode: int) -> BatchResult:
     parsed = parse_instrumentation_output(output)
-    result = BatchResult(name=name)
+    result = BatchResult(name=name, execution_error=detect_execution_error(output))
     for code in parsed.values():
         if code == 0:
             result.passed += 1
@@ -179,13 +181,22 @@ def summarize_results(name: str, output: str, returncode: int) -> BatchResult:
         ok_match = re.search(r"OK \((\d+) tests?\)", output)
         if ok_match:
             result.passed = int(ok_match.group(1))
-        elif returncode != 0:
+        elif returncode != 0 and result.execution_error is None:
             result.failed = 1
         else:
-            result.execution_error = "instrumentation reported no test results"
-    crash = detect_execution_error(output)
-    if crash is not None and result.execution_error is None:
-        result.execution_error = crash
+            result.execution_error = (
+                result.execution_error or "instrumentation reported no test results"
+            )
+    unfinished = next(
+        (
+            f"{test_class}.{test_name}"
+            for (test_class, test_name), code in parsed.items()
+            if code == 1
+        ),
+        None,
+    )
+    if unfinished is not None and result.execution_error is None:
+        result.execution_error = f"instrumentation did not finish {unfinished}"
     if (
         returncode != 0
         and result.failed == 0

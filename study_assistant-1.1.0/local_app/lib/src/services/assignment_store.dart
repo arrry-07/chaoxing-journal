@@ -1398,16 +1398,16 @@ class AssignmentStore extends ChangeNotifier {
     if (account == null || !canToggle()) return false;
     var saved = false;
     await _run(() async {
-      bool valid() =>
+      bool stillOwned() =>
           generation == _generation &&
           account == _account &&
           _authenticated &&
-          !_disposed &&
-          canToggle();
+          !_disposed;
+      bool valid() => stillOwned() && canToggle();
       if (!valid()) return;
       final next = _pinned.toggle(key, aliases);
       await _savePins(next, account, generation);
-      if (!valid()) return;
+      if (!stillOwned()) return;
       _pinned = next;
       _pinsNeedSave = false;
       saved = true;

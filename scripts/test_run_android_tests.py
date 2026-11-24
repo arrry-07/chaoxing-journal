@@ -191,6 +191,36 @@ class AndroidTestRunnerTests(unittest.TestCase):
         )
         self.assertIsNotNone(class_not_found.execution_error)
 
+        for marker in (
+            "INSTRUMENTATION_RESULT: shortMsg=Runner stopped unexpectedly.",
+            "INSTRUMENTATION_FAILED: com.example.OneTest#passes",
+        ):
+            with self.subTest(marker=marker):
+                summary = runner.summarize_results(
+                    "batch", f"OK (1 test)\n{marker}", 0
+                )
+                self.assertEqual(1, summary.passed)
+                self.assertEqual(marker, summary.execution_error)
+
+        unfinished = runner.summarize_results(
+            "batch",
+            "\n".join(
+                [
+                    "INSTRUMENTATION_STATUS: class=com.example.OneTest",
+                    "INSTRUMENTATION_STATUS: test=passes",
+                    "INSTRUMENTATION_STATUS_CODE: 1",
+                ]
+            ),
+            0,
+        )
+        self.assertIn("did not finish", unfinished.execution_error or "")
+
+        failed_to_start = "INSTRUMENTATION_FAILED: Unable to find instrumentation"
+        self.assertEqual(
+            failed_to_start,
+            runner.summarize_results("batch", failed_to_start, 0).execution_error,
+        )
+
         empty = runner.summarize_results("batch", "", 0)
         self.assertEqual(
             "instrumentation reported no test results", empty.execution_error

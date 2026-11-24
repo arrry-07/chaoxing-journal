@@ -167,7 +167,7 @@ class ManualHomeCard extends StatelessWidget {
         contentPadding.resolve(Directionality.of(context)).right;
     final topRightReserve = (inlineActions ? 48.0 : 0.0) +
         (inlineActions && dragHandle != null ? 34.0 : 0.0) +
-        ((inlineActions && dragHandle != null) ? 6.0 : 0.0);
+        (inlineActions ? 6.0 : 0.0);
     final titlePadding = EdgeInsets.only(
       right: inlineActions
           ? (topRightReserve - contentRight)
@@ -237,13 +237,13 @@ class ManualHomeCard extends StatelessWidget {
       ],
     );
 
-    return Padding(
-      padding: contentPadding,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Stack(
+    return Stack(
+      children: [
+        Padding(
+          padding: contentPadding,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Semantics(
                 button: true,
@@ -278,65 +278,65 @@ class ManualHomeCard extends StatelessWidget {
                   ),
                 ),
               ),
-              if (inlineActions)
-                Positioned(
-                  top: 0,
-                  right: 0,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+              if (largeText)
+                Padding(
+                  padding: EdgeInsets.only(
+                    left: railWidth + 10,
+                    bottom: 8,
+                  ),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      completeButton(),
+                      OutlinedButton.icon(
+                        key: ValueKey('complete-manual-${entry.id}'),
+                        onPressed: onToggleDone,
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(48, 48),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          backgroundColor: journal.parchment,
+                          side: BorderSide.none,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        icon: Icon(
+                          Icons.radio_button_unchecked_rounded,
+                          size: 17,
+                          color: journal.muted,
+                        ),
+                        label: Text(
+                          '标记完成',
+                          style: journal.metadata.copyWith(
+                            color: journal.ink,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                       if (dragHandle != null) dragHandle!,
                     ],
                   ),
                 ),
             ],
           ),
-          if (largeText)
-            Padding(
-              padding: EdgeInsets.only(
-                left: railWidth + 10,
-                bottom: 8,
-              ),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  OutlinedButton.icon(
-                    key: ValueKey('complete-manual-${entry.id}'),
-                    onPressed: onToggleDone,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(48, 48),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      backgroundColor: journal.parchment,
-                      side: BorderSide.none,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                    ),
-                    icon: Icon(
-                      Icons.radio_button_unchecked_rounded,
-                      size: 17,
-                      color: journal.muted,
-                    ),
-                    label: Text(
-                      '标记完成',
-                      style: journal.metadata.copyWith(
-                        color: journal.ink,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  if (dragHandle != null) dragHandle!,
-                ],
-              ),
+        ),
+        if (inlineActions)
+          Positioned(
+            top: compact ? 0 : 2,
+            right: 2,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                completeButton(),
+                if (dragHandle != null) dragHandle!,
+              ],
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
