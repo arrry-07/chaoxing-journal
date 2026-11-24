@@ -34,7 +34,8 @@ class HomeSyncPresentation {
       required DateTime now,
       DateTime? successAt,
       bool? hasPreviousData,
-      bool serviceWarning = false}) {
+      bool serviceWarning = false,
+      bool widgetWarning = false}) {
     if (loading || report.phase == SyncPhase.running) {
       return HomeSyncPresentation(
           hasCache ? '正在更新…' : '正在读取作业…', HomeSyncAction.none);
@@ -143,6 +144,14 @@ class HomeSyncPresentation {
             showCached:
                 report.phase == SyncPhase.failed ? hasCache : showCached);
       }
+    }
+    if (serviceWarning && widgetWarning) {
+      return const HomeSyncPresentation(
+          '作业已更新，提醒或小组件需要处理', HomeSyncAction.settings);
+    }
+    if (widgetWarning) {
+      return const HomeSyncPresentation(
+          '作业已更新，小组件需要处理', HomeSyncAction.settings);
     }
     if (serviceWarning) {
       return const HomeSyncPresentation(

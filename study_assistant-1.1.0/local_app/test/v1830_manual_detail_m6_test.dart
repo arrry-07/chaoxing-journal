@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/app/app_deep_links.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/features/manual_agenda_screen.dart';
 import 'package:study_assistant_mobile/src/features/manual_entry_detail_screen.dart';
@@ -456,5 +457,61 @@ void main() {
     expect(service.lastQuietHoursSkippedManualIds, {'m-quiet-skip'});
     expect(service.lastWarning, isNull);
     expect(scheduledCalls.map((c) => c['title']).toList(), ['考试提醒', '待办提醒']);
+  });
+
+  testWidgets(
+      'M6 Gate 1: ManualHomeCard shows quiet-hours/missed-window status honestly and AppDeepLinks retains manual detail redirect',
+      (tester) async {
+    expect(
+      AppDeepLinks.validatedAssignmentLocation('/assignments/manual/m-123'),
+      '/assignments/manual/m-123',
+    );
+    expect(
+      AppDeepLinks.validatedAssignmentLocation('/assignments/manual/..'),
+      isNull,
+    );
+
+    final now = DateTime.utc(2026, 11, 25, 15, 10); // 23:10 Beijing
+    final quietEntry = ManualEntry(
+      id: 'm-q',
+      kind: ManualEntry.kindTodo,
+      title: '凌晨待办',
+      at: DateTime.utc(2026, 11, 25, 16, 10), // 00:10+1 Beijing -> quiet skip
+      remind: true,
+    );
+    final soonEntry = ManualEntry(
+      id: 'm-s',
+      kind: ManualEntry.kindExam,
+      title: '快到点考试',
+      at: now.add(const Duration(minutes: 15)),
+      remind: true,
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(
+        body: ListView(
+          children: [
+            ManualHomeCard(
+              entry: quietEntry,
+              now: now,
+              onTap: () {},
+              onToggleDone: () {},
+            ),
+            ManualHomeCard(
+              entry: soonEntry,
+              now: now,
+              onTap: () {},
+              onToggleDone: () {},
+            ),
+          ],
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('夜间静音时段未排期'), findsOneWidget);
+    expect(find.textContaining('不足30分未排提醒'), findsOneWidget);
+    expect(find.textContaining('提前30分提醒'), findsNothing);
   });
 }

@@ -69,6 +69,11 @@ class _FakeNotifications extends LocalNotificationService {
     PersonalWorkspace personal,
     DateTime? lastSync,
   ) async {}
+
+  @override
+  Future<void> migrateLegacyManualChannelIfNeeded(
+    List<ManualEntry> entries,
+  ) async {}
 }
 
 class _NoopSnapshot extends WidgetSnapshotService {
@@ -166,23 +171,42 @@ void main() {
     });
 
     test(
-        'initialize retires legacy personal_schedule channel, creates personal_schedule_v2 with sound/vibration, and survives deleteNotificationChannel errors',
+        'initialize creates personal_schedule_v2 first without dropping legacy alarms, then migrateLegacyManualChannelIfNeeded reschedules onto v2 before retiring personal_schedule and survives errors',
         () async {
+      SharedPreferences.setMockInitialValues({
+        'notification_schedule_v2_active_manual': ['2000000101'],
+      });
       final calls = <MethodCall>[];
+      final events = <String>[];
+      var throwOnDelete = true;
       final channels = <Map<String, Object?>>[
         lns_fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
         lns_fixture.channelRow('assignment_updates', '作业变化提醒', 3),
         lns_fixture.channelRow('daily_summary', '每日课业摘要', 3),
         lns_fixture.channelRow('personal_schedule', '个人待办与考试提醒', 4),
       ];
+      final pendingRequests = <Map<String, Object?>>[
+        {
+          'id': 2000000101,
+          'title': '旧待办',
+          'body': '旧内容',
+          'payload': 'p:m1',
+        },
+      ];
       messenger.setMockMethodCallHandler(permissions, (call) async => 35);
       messenger.setMockMethodCallHandler(notifications, (call) async {
         calls.add(call);
         if (call.method == 'deleteNotificationChannel') {
-          throw PlatformException(code: 'legacy_delete_error');
+          events.add('delete:${call.arguments}');
+          if (throwOnDelete) {
+            throw PlatformException(code: 'legacy_delete_error');
+          }
+          channels.removeWhere((c) => c['id'] == call.arguments);
+          return null;
         }
         if (call.method == 'createNotificationChannel') {
           final args = Map<String, Object?>.from(call.arguments as Map);
+          events.add('create:${args['id']}');
           channels.add(lns_fixture.channelRow(
             args['id'] as String,
             args['name'] as String,
@@ -190,24 +214,33 @@ void main() {
           ));
           return null;
         }
+        if (call.method == 'zonedSchedule') {
+          final args = Map<Object?, Object?>.from(call.arguments as Map);
+          final details =
+              Map<Object?, Object?>.from(args['platformSpecifics'] as Map);
+          events.add('schedule:${args['payload']}@${details['channelId']}');
+          return null;
+        }
         return switch (call.method) {
           'getNotificationAppLaunchDetails' => {
               'notificationLaunchedApp': false
             },
           'getNotificationChannels' => channels,
-          'pendingNotificationRequests' || 'getActiveNotifications' => [],
+          'pendingNotificationRequests' => pendingRequests,
+          'getActiveNotifications' => [],
           _ => true,
         };
       });
 
-      final service = LocalNotificationService();
+      final service = LocalNotificationService(
+        clock: () => DateTime(2030, 11, 20, 10, 0),
+      );
       await service.initialize();
 
+      // initialize MUST NOT delete legacy channel before notebook entries are rescheduled.
       expect(
-        calls
-            .where((c) => c.method == 'deleteNotificationChannel')
-            .map((c) => c.arguments),
-        contains(LocalNotificationService.manualChannel),
+        calls.where((c) => c.method == 'deleteNotificationChannel'),
+        isEmpty,
       );
       final v2Create = calls
           .where((c) => c.method == 'createNotificationChannel')
@@ -218,6 +251,46 @@ void main() {
       expect(v2Create['importance'], 4);
       expect(v2Create['playSound'], isTrue);
       expect(v2Create['enableVibration'], isTrue);
+
+      final entry = ManualEntry(
+        id: 'm1',
+        title: '高数交作业',
+        kind: ManualEntry.kindTodo,
+        at: DateTime(2030, 11, 20, 14, 0),
+        remind: true,
+      );
+      await service.migrateLegacyManualChannelIfNeeded([entry]);
+      expect(
+        events,
+        containsAllInOrder([
+          'create:personal_schedule_v2',
+          'schedule:p:m1@personal_schedule_v2',
+          'delete:personal_schedule',
+        ]),
+      );
+
+      throwOnDelete = false;
+      await service.migrateLegacyManualChannelIfNeeded([entry]);
+      expect(
+        channels.any((c) => c['id'] == LocalNotificationService.manualChannel),
+        isFalse,
+      );
+    });
+
+    test('showTestManualNotification handles StateError cleanly', () async {
+      messenger.setMockMethodCallHandler(permissions, (call) async => 35);
+      messenger.setMockMethodCallHandler(notifications, (call) async {
+        return switch (call.method) {
+          'getNotificationAppLaunchDetails' => {
+              'notificationLaunchedApp': false
+            },
+          'getNotificationChannels' => null,
+          'pendingNotificationRequests' || 'getActiveNotifications' => [],
+          _ => true,
+        };
+      });
+      final service = LocalNotificationService();
+      expect(await service.showTestManualNotification(), isFalse);
     });
 
     test(
@@ -374,4 +447,63 @@ void main() {
       expect(events, contains('channel:personal_schedule_v2'));
     }
   });
+
+  testWidgets(
+      'M7 Gate 1: ReminderSettingsScreen flags muted manualChannel audio/vibration and catches test manual notification errors',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    FlutterSecureStorage.setMockInitialValues({});
+    final fakeNotif = _ThrowingTestManualNotifications(
+      const ReminderHealth(
+        notifications: true,
+        exact: true,
+        assignmentChannel: ReminderChannelHealth(ReminderChannelStatus.enabled),
+        assignmentUpdatesChannel:
+            ReminderChannelHealth(ReminderChannelStatus.enabled),
+        summaryChannel: ReminderChannelHealth(ReminderChannelStatus.enabled),
+        manualChannel: ReminderChannelHealth(
+          ReminderChannelStatus.enabled,
+          soundMuted: true,
+          vibrationEnabled: false,
+        ),
+      ),
+    );
+    final store = AssignmentStore(
+      sessionStore: _TestSession(),
+      notificationService: fakeNotif,
+      widgetSnapshotService: _NoopSnapshot(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: ReminderSettingsScreen(
+        assignmentStore: store,
+        initialExpandHealth: true,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('个人日程渠道在系统中已静音'), findsOneWidget);
+    expect(find.textContaining('个人日程渠道振动已关闭'), findsOneWidget);
+
+    final btn =
+        find.byKey(const ValueKey('send-test-manual-notification-button'));
+    await Scrollable.ensureVisible(tester.element(btn), alignment: 0.5);
+    await tester.pumpAndSettle();
+    await tester.tap(btn);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('未能发送待办测试提醒'), findsOneWidget);
+  });
+}
+
+class _ThrowingTestManualNotifications extends _FakeNotifications {
+  _ThrowingTestManualNotifications(super.health);
+
+  @override
+  Future<bool> showTestManualNotification() async {
+    throw StateError('channel unreadable');
+  }
 }

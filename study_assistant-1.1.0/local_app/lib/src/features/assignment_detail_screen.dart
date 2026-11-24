@@ -1931,12 +1931,10 @@ class _DetailDeadlineAlertBanner extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
       decoration: BoxDecoration(
-        color: journal.berryBg.withValues(
-          alpha: journal.isDark ? 0.65 : 0.85,
-        ),
+        color: journal.ochreBg,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: journal.berryBorder,
+          color: journal.ochreBorder,
           width: 0.8,
         ),
       ),
@@ -1948,7 +1946,7 @@ class _DetailDeadlineAlertBanner extends StatelessWidget {
             child: Icon(
               Icons.update_rounded,
               size: 16,
-              color: journal.berry,
+              color: journal.ochre,
             ),
           ),
           const SizedBox(width: 8),
@@ -1959,7 +1957,7 @@ class _DetailDeadlineAlertBanner extends StatelessWidget {
                 Text(
                   headline,
                   style: journal.metadata.copyWith(
-                    color: journal.berry,
+                    color: journal.ochre,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
                     height: 1.35,

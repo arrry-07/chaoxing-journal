@@ -23,7 +23,7 @@ class AppDeepLinks {
       final rawId = payload.substring(2);
       if (_safeId(rawId) &&
           (containsManualEntry == null || containsManualEntry(rawId))) {
-        return '/assignments/manual/${Uri.encodeComponent(rawId)}';
+        return manualDetailLocation(rawId);
       }
       return '/agenda';
     }
@@ -44,6 +44,10 @@ class AppDeepLinks {
 
   static String assignmentLocation(String assignmentId) {
     return '/assignments/${Uri.encodeComponent(assignmentId)}';
+  }
+
+  static String manualDetailLocation(String entryId) {
+    return '/assignments/manual/${Uri.encodeComponent(entryId)}';
   }
 
   static String? normalizeIncomingLocation(Uri uri) {
@@ -109,12 +113,19 @@ class AppDeepLinks {
         uri.hasQuery ||
         uri.hasFragment ||
         !uri.path.startsWith('/') ||
-        segments.length != 2 ||
-        segments.first != 'assignments' ||
-        !_safeId(segments[1])) {
+        segments.isEmpty ||
+        segments.first != 'assignments') {
       return null;
     }
-    return assignmentLocation(segments[1]);
+    if (segments.length == 2 && _safeId(segments[1])) {
+      return assignmentLocation(segments[1]);
+    }
+    if (segments.length == 3 &&
+        segments[1] == 'manual' &&
+        _safeId(segments[2])) {
+      return manualDetailLocation(segments[2]);
+    }
+    return null;
   }
 
   static bool _safeId(String id) =>

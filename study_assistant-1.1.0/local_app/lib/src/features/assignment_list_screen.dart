@@ -645,12 +645,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     store.follows(group.primary.courseKey!)))
               ...group.sources,
         ];
+        final pickerIndex = allFollowedSources.isEmpty
+            ? displayIndex
+            : AssignmentDisplayIndex.from(allFollowedSources);
         final pickerAssignments = AssignmentQuery.currentDisplay(
           AssignmentQuery.scope(allFollowedSources, {}),
           now,
-          index: allFollowedSources.isEmpty
-              ? displayIndex
-              : AssignmentDisplayIndex.from(allFollowedSources),
+          index: pickerIndex,
           coursework: coursework,
         );
         final options = buildHomeCourseFilterOptions(
@@ -712,12 +713,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         _courseCountsFor = (type, deadline) => countHomeCourseItems(
               options: options,
               filteredAssignments: AssignmentQuery.filterHome(
-                catalogAssignments,
+                allFollowedSources,
                 query: _query,
                 deadline: deadline,
                 type: type,
                 includeHistorical: false,
-                index: displayIndex,
+                index: pickerIndex,
                 now: now,
                 coursework: coursework,
               ),
@@ -752,8 +753,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             hasPreviousData: store.hadCacheBeforeLastSync,
             now: now,
             successAt: store.lastSyncAt,
-            serviceWarning: store.error != null &&
-                store.syncReport.phase == SyncPhase.success);
+            serviceWarning: (store.hasNonQuietServiceWarning ||
+                    store.recoveryWarning != null ||
+                    store.operationError != null) &&
+                store.syncReport.phase == SyncPhase.success,
+            widgetWarning:
+                store.serviceWarnings.any((w) => w.contains('小组件')) &&
+                    store.syncReport.phase == SyncPhase.success);
         final dueSummary = HomeDueSummary.from(
           catalogAssignments,
           now: now,
@@ -1350,9 +1356,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           }
           if (selectedCourseIdle) {
             final courseName = store.courses
-                .where((course) => course.key == _courseKey)
-                .firstOrNull
-                ?.name;
+                    .where((course) => course.key == _courseKey)
+                    .firstOrNull
+                    ?.name ??
+                options
+                    .where((option) => option.courseKey == _courseKey)
+                    .firstOrNull
+                    ?.name;
             return _emptyStateCard(
               icon: Icons.event_note_outlined,
               message: '这门课暂无作业和考试',
@@ -1422,7 +1432,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 JournalSecondaryButton(
                   expanded: false,
                   label: '添加课业或待办',
-                  onPressed: () => _manualActions.openEditor(context),
+                  onPressed: () => _manualActions.openEditor(
+                    context,
+                    initialKind: _typeFilter == AssignmentTypeFilter.exam
+                        ? ManualEntry.kindExam
+                        : ManualEntry.kindTodo,
+                  ),
                 ),
               ],
             );
@@ -1445,7 +1460,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               JournalSecondaryButton(
                 expanded: false,
                 label: '添加课业或待办',
-                onPressed: () => _manualActions.openEditor(context),
+                onPressed: () => _manualActions.openEditor(
+                  context,
+                  initialKind: _typeFilter == AssignmentTypeFilter.exam
+                      ? ManualEntry.kindExam
+                      : ManualEntry.kindTodo,
+                ),
               ),
             ],
           );
@@ -2247,7 +2267,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
     Widget buildAddButton() {
       const message = '添加课业或待办';
-      void onTap() => _manualActions.openEditor(context);
+      void onTap() => _manualActions.openEditor(
+            context,
+            initialKind: _typeFilter == AssignmentTypeFilter.exam
+                ? ManualEntry.kindExam
+                : ManualEntry.kindTodo,
+          );
       return Semantics(
         button: true,
         label: message,

@@ -37,8 +37,10 @@ class LocalNotificationService {
   final DateTime Function() _clock;
   final tz.Location? _location;
   String? lastWarning;
+  String? lastManualNotice;
   List<ReminderScheduleOutcome> lastScheduleOutcomes = const [];
   Set<String> lastQuietHoursSkippedManualIds = const {};
+  Set<String> lastMissedWindowManualIds = const {};
   bool showDetails = false;
   bool allowUrgentNightBreakthrough = false;
   LocalCourseworkState courseworkState = const LocalCourseworkState.empty();
@@ -359,23 +361,34 @@ class LocalNotificationService {
         null;
   }
 
+  static bool isManualReminderWindowMissed(
+    ManualEntry entry, {
+    required DateTime now,
+  }) {
+    if (entry.done || !entry.remind || entry.at == null) return false;
+    final rawAt = entry.at!.subtract(const Duration(minutes: 30));
+    return !rawAt.isAfter(now);
+  }
+
   NotificationPayloadHandler? _onPayload;
   String? _pendingPayload;
   Future<void> rescheduleManual(List<ManualEntry> entries) async {
     lastWarning = null;
+    lastManualNotice = null;
     lastScheduleOutcomes = const [];
     lastQuietHoursSkippedManualIds = const {};
+    lastMissedWindowManualIds = const {};
     await _ensurePluginInitialized();
     final now = _clock();
     final schedules = <(ManualEntry, DateTime)>[];
     final validIds = <String>{};
     final quietHoursSkippedIds = <String>{};
+    final missedWindowIds = <String>{};
     final seen = <String>{};
-    var reminderWindowMissed = false;
     for (final e in entries.where((e) => !e.done && e.remind && e.at != null)) {
       final rawAt = e.at!.subtract(const Duration(minutes: 30));
       if (!rawAt.isAfter(now)) {
-        reminderWindowMissed = true;
+        missedWindowIds.add(e.id);
         continue;
       }
       if (!seen.add(e.id)) {
@@ -397,9 +410,9 @@ class LocalNotificationService {
     }
     lastQuietHoursSkippedManualIds =
         Set<String>.unmodifiable(quietHoursSkippedIds);
-    if (reminderWindowMissed) {
-      lastWarning =
-          _appendWarning(lastWarning, '部分个人安排的提前30分钟提醒时间已过，本次未安排提醒；请调整时间或关闭提醒');
+    lastMissedWindowManualIds = Set<String>.unmodifiable(missedWindowIds);
+    if (missedWindowIds.isNotEmpty) {
+      lastManualNotice = '部分个人安排的提前30分钟提醒时间已过，本次未安排提醒；请调整时间或关闭提醒';
     }
     if (schedules.isNotEmpty) {
       await _ensureAndroidChannel(manualV2Channel);
@@ -478,7 +491,7 @@ class LocalNotificationService {
             category: 'personal',
             stage: 'scheduleFailed',
             reasonCode: 'scheduleBatchFailed',
-            observedAt: DateTime.now(),
+            observedAt: _clock(),
             scheduledAt: at,
             expectedPayload: 'p:${entry.id}',
             evidenceState: 'recoveryPending',
@@ -690,6 +703,9 @@ class LocalNotificationService {
         } on MissingPluginException catch (error) {
           debugPrint('[Notification] showTestManual: ${error.runtimeType}');
           return false;
+        } on StateError catch (error) {
+          debugPrint('[Notification] showTestManual: ${error.runtimeType}');
+          return false;
         }
       });
 
@@ -729,8 +745,41 @@ class LocalNotificationService {
         } on MissingPluginException catch (error) {
           debugPrint('[Notification] showTest: ${error.runtimeType}');
           return false;
+        } on StateError catch (error) {
+          debugPrint('[Notification] showTest: ${error.runtimeType}');
+          return false;
         }
       });
+
+  Future<void> migrateLegacyManualChannelIfNeeded(
+    List<ManualEntry> entries,
+  ) async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    final List<AndroidNotificationChannel>? existing;
+    final AndroidFlutterLocalNotificationsPlugin? android;
+    try {
+      await _ensurePluginInitialized();
+      android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      if (android == null) return;
+      existing = await android.getNotificationChannels();
+    } on MissingPluginException {
+      return;
+    } on UnimplementedError {
+      return;
+    } on Error catch (error) {
+      // Unmocked headless host unit tests never run Android's registerWith(),
+      // leaving flutter_local_notifications' late _instance uninitialized.
+      if (error.toString().startsWith('LateInitializationError:')) return;
+      rethrow;
+    }
+    if (existing == null || !existing.any((item) => item.id == manualChannel)) {
+      return;
+    }
+    await _ensureAndroidChannel(manualV2Channel);
+    await rescheduleManual(entries);
+    await _retireLegacyManualChannel(android);
+  }
 
   Future<bool> requestNotificationsPermission() async {
     await _ensurePluginInitialized();
@@ -745,7 +794,7 @@ class LocalNotificationService {
     lastWarning = null;
     lastScheduleOutcomes = const [];
     await _ensurePluginInitialized();
-    final now = DateTime.now();
+    final now = _clock();
     final desired = DailySummary.build(
       assignments,
       personal,
@@ -782,7 +831,7 @@ class LocalNotificationService {
         for (final notice in desired)
           'summary:${notice.at.millisecondsSinceEpoch}',
       };
-      final observedAt = DateTime.now();
+      final observedAt = _clock();
       final cancellations = <ReminderScheduleOutcome>[
         for (final prev in prior)
           if (prev.scheduledAtMs > now.millisecondsSinceEpoch &&
@@ -841,7 +890,7 @@ class LocalNotificationService {
             category: 'summary',
             stage: 'scheduleFailed',
             reasonCode: 'scheduleBatchFailed',
-            observedAt: DateTime.now(),
+            observedAt: _clock(),
             scheduledAt: notice.at,
             expectedPayload: 'd:summary',
             evidenceState: 'recoveryPending',
@@ -1036,9 +1085,6 @@ class LocalNotificationService {
           final existing = await android.getNotificationChannels();
           if (existing != null) {
             await _recordInstallDeadlineChannelDefault(existing);
-            if (existing.any((item) => item.id == manualChannel)) {
-              await _retireLegacyManualChannel(android);
-            }
           }
         } catch (_) {
           // Let explicit per-channel creation surface channel failures below.
@@ -1875,15 +1921,7 @@ class LocalNotificationService {
       throw StateError('无法确认通知渠道 ${channel.id} 是否存在');
     }
     if (existing.any((item) => item.id == channel.id)) {
-      if (channel.id == manualV2Channel &&
-          existing.any((item) => item.id == manualChannel)) {
-        await _retireLegacyManualChannel(android);
-      }
       return;
-    }
-    if (channel.id == manualV2Channel &&
-        existing.any((item) => item.id == manualChannel)) {
-      await _retireLegacyManualChannel(android);
     }
     await android.createNotificationChannel(channel);
   }

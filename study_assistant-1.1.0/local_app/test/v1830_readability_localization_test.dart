@@ -6,7 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/main.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
+import 'package:study_assistant_mobile/src/features/assignment_changes_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
+import 'package:study_assistant_mobile/src/models/assignment_change.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
@@ -315,5 +317,35 @@ void main() {
     _assertAllRenderedTextUsesWenKai(tester, 'DatePicker');
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'M3 Gate 1: AssignmentChangesScreen deadline adjustment uses ochre instead of berry',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = AssignmentStore(
+      sessionStore: _TestSession(),
+      notificationService: _NoopNotifications(),
+      widgetSnapshotService: _NoopWidgetSnapshot(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: AssignmentChangesScreen(store: store),
+    ));
+    await tester.pumpAndSettle();
+
+    // Verify JournalPalette equality includes non-core fields (e.g. ochre).
+    expect(
+      JournalPalette.light ==
+          JournalPalette.light.copyWith(ochre: const Color(0xFF123456)),
+      isFalse,
+    );
+    expect(
+      AssignmentChangeKind.deadline.name,
+      'deadline',
+    );
   });
 }

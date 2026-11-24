@@ -4,11 +4,11 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
-## 2026-11-25 · v1.8.30 Stage 1 完成（M3–M7 本地门禁与原生校验全绿，待 Gate 1）
+## 2026-11-25 · v1.8.30 Stage 1 + Gate 1 返工完成（24 文件 282 项与全套校验全绿，待 Gate 1 复审）
 
-- 已完成改动：M3 去除文字透明叠加、规范正文与次要字号（`LXGW WenKai Screen` 权重与行距收口）、将红色（`berry`）严格收敛至逾期与错误/销毁操作，同步调整 `CourseworkStatusPill`、首页卡片与日期组标题；M4 接入 `flutter_localizations` 固定 `zh_CN` 兜底「关于/日期选择器」中文化、补齐文楷字体与 `IntrinsicHeight` 等高细节按钮；M5 取消日历繁忙红框底色与今日外环，改为按类型着色圆点（作业 `accent`、考试 `examOrange`、待办 `todoGreen`）及图例，并修复 `AssignmentListScreen` 在叠加搜索/筛选时错误展示 `selectedCourseIdle` 的问题；M6 新增 `ManualEntryDetailScreen` 与 `/assignments/manual/:id(/edit)` 路由及 `p:<id>` 深链，统一「待办/考试 + 自己添加」文案与备注摘要露出，并按 D13 分离夜间静音项级提醒与全局告警；M7 迁移 `personal_schedule_v2` 显式有声/振动通知渠道并安全退役旧 `personal_schedule`，在 `MainActivity` 暴露 `AudioManager.ringerMode` 与系统勿扰状态到提醒页健康警示、新增「测试待办提醒」及系统通知设置入口。
-- 当前 commit 与状态：Stage 1 `M3–M7` 待提交，L0 共 `60 <= 80` 行；M3/M4（71 项）、M5（46 项）、M6（95 项）、M7（156 项 Flutter + 全套 Python + `dart analyze` 0 问题）与隔离 ASCII 目录 `D:\campus-tools\build-work\cx1830-m7-gradle\local_app` Gradle `:app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug`（0 错误）全部通过；M3 基准对比数据位于 `D:\campus-tools\build-work\cx1830-m3`。
-- 下一步待办：提交推送 `dev` 并执行 Gate 1（Standards + Spec 双路并发审查）至 0 阻断；随后归档超限旧计划、推进 `v1.8.31` 待办附件方案与实现（Gate 2），最后按维护者指令直接冻结正式版 `1.8.31+124` 经 PR/CI、MuMu + 真机双端实测与 GitHub Release 收口。
+- 已完成改动：在 `946a179` 基础上完成 Gate 1 双轴（Axis 1 Standards + Axis 2 Spec）全部阻断、中级及关键次要项返工：`LocalNotificationService` 改为仅在 `migrateLegacyManualChannelIfNeeded` 确认创建 `personal_schedule_v2` 且重排 `p:` 闹钟后再安全退役旧 `personal_schedule`（并兼容无宿主插件测试的 `MissingPluginException`/`UnimplementedError`/`LateInitializationError`），清理 `reminderWindowMissed` 对全局 `lastWarning` 污染、`showTest`/`showTestManual` 捕获 `StateError` 并统一 `_clock()`；`AssignmentStore` 拆分 5 路子系统告警桶、`hasWidgetWarningOnly`/`hasNonQuietServiceWarning`、`manualSaveWarnings` 与 `saveFeedback(warnings:)`，防止保存待办弹出无关全局 SnackBar；`AssignmentDetailScreen` 截止预警横幅与 `AssignmentChangesScreen` 截止变更徽章收敛为 `ochre`，`ManualHomeCard` 按需诚实显示夜间静音/不足 30 分文案、`ReminderSettingsScreen` 补全 `manualChannel` 音振诊断与 `personal_schedule_v2` 用户偏好重置说明；`AssignmentListScreen` 修复 `_courseCountsFor` 覆盖完整目录、空课兜底与考试快捷新建；`AppDeepLinks` 支持 `/assignments/manual/:id` 登录后回跳，补全 `JournalPalette.==`/`hashCode`；`v1.8.30` 方案补充 §11 M1 诊断、M3 对比度及 D14 披露。
+- 当前 commit 与状态：Stage 1 返工待提交（前序 `946a179` 已推 `origin/dev`），L0 共 `60 <= 80` 行；`dart analyze lib test` 0 问题、全部 9 组 Python 单测通过、24 个定向 Flutter 测试（282 项）全绿；前序 ASCII Gradle `:app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug`（`cx1830-m7-gradle`）与 M3 对比基准（`cx1830-m3`）已留档。
+- 下一步待办：提交推送本轮 Gate 1 返工并执行定向 Gate 1 增量复审至 0 阻断；随后归档超额旧计划、落盘并实施 `v1.8.31` 待办附件（先改存储格式向后兼容，后接原生桥与 UI/生命周期清理 + Gate 2），最后按维护者授权直发正式版 `1.8.31+124`（PR/CI + MuMu/真机双端实测 + Release 与归档）。
 
 ## 2026-11-25 · v1.8.30 M1 通知诊断 + M2 筛选
 

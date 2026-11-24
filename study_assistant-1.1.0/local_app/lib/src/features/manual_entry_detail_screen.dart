@@ -460,14 +460,21 @@ class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
             trailing: TextButton.icon(
               key: const ValueKey('manual-detail-copy-note'),
               style: TextButton.styleFrom(
-                minimumSize: const Size(48, 36),
+                minimumSize: const Size(48, 48),
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 foregroundColor: journal.accent,
               ),
               onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: entry.note.trim()));
-                if (context.mounted) {
-                  showJournalMessage(context, '已复制备注');
+                try {
+                  await Clipboard.setData(
+                      ClipboardData(text: entry.note.trim()));
+                  if (context.mounted) {
+                    showJournalMessage(context, '已复制备注');
+                  }
+                } catch (_) {
+                  if (context.mounted) {
+                    showJournalMessage(context, '无法写入剪贴板，请手动长按复制');
+                  }
                 }
               },
               icon: const Icon(Icons.copy_outlined, size: 16),

@@ -50,6 +50,7 @@ class _AgendaState extends State<ManualAgendaScreen> {
           ok,
           successMessage: '个人安排已保存',
           failureMessage: '个人安排保存失败，请核对账号后重试',
+          warnings: widget.store.manualSaveWarnings,
         );
       });
     }
@@ -79,9 +80,29 @@ class _AgendaState extends State<ManualAgendaScreen> {
     }
   }
 
-  void edit([ManualEntry? e]) =>
-      Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => ManualEntryEditor(store: widget.store, entry: e)));
+  Future<void> edit([ManualEntry? e]) async {
+    final kind = filter == ManualEntry.kindExam
+        ? ManualEntry.kindExam
+        : ManualEntry.kindTodo;
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      await router.push(
+        e != null
+            ? '/assignments/manual/${Uri.encodeComponent(e.id)}/edit'
+            : Uri(
+                path: '/assignments/new',
+                queryParameters: {'kind': kind},
+              ).toString(),
+      );
+      return;
+    }
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => ManualEntryEditor(
+              store: widget.store,
+              entry: e,
+              initialKind: e == null ? kind : null,
+            )));
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -527,13 +548,15 @@ class _EditorState extends State<ManualEntryEditor> {
       await WidgetsBinding.instance.endOfFrame;
     }
     if (!mounted) return;
+    final manualWarnings = widget.store.manualSaveWarnings;
     final feedback = widget.store.saveFeedback(
       ok,
       successMessage: '个人安排已保存',
       failureMessage: '保存失败，输入仍保留，请核对账号后重试',
+      warnings: manualWarnings,
     );
     if (ok && editorRoute?.isCurrent != false) {
-      if (widget.store.serviceWarnings.isNotEmpty) {
+      if (manualWarnings.isNotEmpty) {
         showJournalMessage(context, feedback);
       }
       final router = GoRouter.maybeOf(context);

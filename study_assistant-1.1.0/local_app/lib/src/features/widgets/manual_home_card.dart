@@ -7,6 +7,7 @@ import '../../models/display_preferences.dart';
 import '../../models/study_notebook.dart';
 import '../../services/assignment_query.dart';
 import '../../services/home_manual_timeline.dart';
+import '../../services/local_notification_service.dart';
 import 'assignment_card.dart';
 import 'coursework_status_pill.dart';
 
@@ -26,6 +27,7 @@ class ManualHomeCard extends StatelessWidget {
     this.inPinnedSection = false,
     this.compact = false,
     this.countdown = false,
+    this.allowUrgentNightBreakthrough = false,
     this.contentPadding = const EdgeInsets.symmetric(horizontal: 14),
   });
 
@@ -38,6 +40,7 @@ class ManualHomeCard extends StatelessWidget {
   final bool inPinnedSection;
   final bool compact;
   final bool countdown;
+  final bool allowUrgentNightBreakthrough;
   final EdgeInsetsGeometry contentPadding;
 
   static final DateFormat _clockFormat = DateFormat('HH:mm');
@@ -152,9 +155,24 @@ class ManualHomeCard extends StatelessWidget {
       label: '自己添加',
       tone: CourseworkPillTone.neutral,
     );
+    final missedWindow =
+        LocalNotificationService.isManualReminderWindowMissed(entry, now: now);
+    final quietHoursSkipped =
+        LocalNotificationService.isManualReminderQuietHoursSkipped(
+      entry,
+      now: now,
+      allowUrgentNightBreakthrough: allowUrgentNightBreakthrough,
+    );
+    final reminderLabel = !entry.remind || at == null || !at.isAfter(now)
+        ? null
+        : missedWindow
+            ? '不足30分未排提醒'
+            : quietHoursSkipped
+                ? '夜间静音时段未排期'
+                : '提前30分提醒';
     final auxiliary = <String>[
       if (entry.location.trim().isNotEmpty) '地点 ${entry.location.trim()}',
-      if (entry.remind && at != null && at.isAfter(now)) '提前30分提醒',
+      if (reminderLabel != null) reminderLabel,
       if (countdown && !inPinnedSection && at != null && !overdue)
         DisplayPreferences.remaining(at, now),
       if (at == null) '无截止日期',

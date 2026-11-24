@@ -235,7 +235,7 @@ class TodoCopyFormatter {
       final timeStr =
           DateFormat('HH:mm').format(AssignmentQuery.beijing(item.at));
       final kindTag =
-          '${item.isExam ? '开考' : '截止'}${item.isManual ? '（手动）' : ''}';
+          '${item.isExam ? '开考' : '截止'}${item.isManual ? '（自己添加）' : ''}';
       final sanitizedTitle = sanitizeField(item.rawTitle);
       final title = sanitizedTitle.isEmpty
           ? (item.isExam ? '未命名考试' : '未命名待办')

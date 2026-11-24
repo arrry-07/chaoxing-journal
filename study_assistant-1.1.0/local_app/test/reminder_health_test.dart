@@ -456,18 +456,21 @@ void main() {
   });
   test('manual reminder whose 30-minute lead time has passed is reported',
       () async {
-    final service = LocalNotificationService();
+    final fixedNow = DateTime(2030, 11, 6, 12, 0);
+    final service = LocalNotificationService(clock: () => fixedNow);
     await service.rescheduleManual([
       ManualEntry(
         id: 'too-soon',
         title: '即将开始的考试',
         kind: 'exam',
-        at: DateTime.now().add(const Duration(minutes: 15)),
+        at: fixedNow.add(const Duration(minutes: 15)),
         remind: true,
       )
     ]);
 
-    expect(service.lastWarning, contains('提前30分钟提醒时间已过'));
+    expect(service.lastManualNotice, contains('提前30分钟提醒时间已过'));
+    expect(service.lastMissedWindowManualIds, contains('too-soon'));
+    expect(service.lastWarning, isNull);
     expect(calls.where((call) => call.method == 'zonedSchedule'), isEmpty);
   });
   test('manual inexact fallback preserves permission and channel warnings',

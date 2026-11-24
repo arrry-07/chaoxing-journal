@@ -414,15 +414,21 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
           break;
       }
     }
-    final deadlineChannel = current?.assignmentChannel;
-    if (deadlineChannel?.status == ReminderChannelStatus.enabled) {
-      if (deadlineChannel?.soundMuted == true) {
-        issues.add('截止提醒渠道在系统中已静音');
+    void checkChannelAudioAndVibration(
+      ReminderChannelHealth? channel,
+      String name,
+    ) {
+      if (channel?.status != ReminderChannelStatus.enabled) return;
+      if (channel?.soundMuted == true) {
+        issues.add('$name在系统中已静音');
       }
-      if (deadlineChannel?.vibrationEnabled == false) {
-        issues.add('截止提醒渠道振动已关闭');
+      if (channel?.vibrationEnabled == false) {
+        issues.add('$name振动已关闭');
       }
     }
+
+    checkChannelAudioAndVibration(current?.assignmentChannel, '截止提醒渠道');
+    checkChannelAudioAndVibration(current?.manualChannel, '个人日程渠道');
     if (current?.scheduleRecoveryPending == true) {
       issues.add('存在待恢复的调度事务');
     }
@@ -477,6 +483,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       infoItems: const [
         '权限开启与已安排不等于绝对准时送达：厂商省电策略、锁屏限制或应用被强制停止都可能拦截后台提醒。',
         '每日摘要按当前快照预安排未来 7 天，超过 7 天未打开应用将停止摘要，且不会在后台自动拉取新作业。',
+        '待办与考试提醒已升级至新版有声渠道（v2），旧渠道自定义设置已重置；如曾调整系统铃声或静音规则请在此重新核对。',
         '若某条课业提醒异常，可在下方查看「提醒记录与原因」。',
       ],
       dividerIndent: 16,
@@ -686,6 +693,11 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                                     : '未能发送待办测试提醒，请检查通知权限与待办提醒渠道。';
                               });
                               await _loadHealth(force: true);
+                            } catch (_) {
+                              if (!mounted) return;
+                              setState(() {
+                                _healthMessage = '未能发送待办测试提醒，请检查通知权限与待办提醒渠道。';
+                              });
                             } finally {
                               if (mounted) {
                                 setState(

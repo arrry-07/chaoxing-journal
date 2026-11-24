@@ -63,7 +63,7 @@ class HomeManualActions {
   }) async {
     if (!isMounted()) return;
     if (entry == null && store.notebook.entries.length >= 500) {
-      feedback('个人待办已达 500 条上限，请清理后再添加');
+      feedback('待办已达 500 条上限，请清理后再添加');
       return;
     }
     final router = GoRouter.maybeOf(context);
@@ -112,7 +112,7 @@ class HomeManualActions {
     if (!isMounted() || !ok) return;
     JournalMotion.complete(store.display);
     feedback(
-      '已完成「${entry.title}」，可在个人待办查看',
+      '已完成「${entry.title}」，可在待办列表查看',
       actionLabel: '撤销',
       action: () {
         if (store.accountEpoch != epoch) return;
@@ -279,6 +279,8 @@ Widget buildHomeManualTile({
           inPinnedSection: pinned,
           compact: store.display.compact,
           countdown: store.display.countdown,
+          allowUrgentNightBreakthrough:
+              store.allowUrgentDeadlineNightBreakthrough,
         ),
       );
       return JournalSwipeTile(
@@ -308,6 +310,8 @@ Widget buildHomeManualTile({
           inPinnedSection: pinned,
           compact: store.display.compact,
           countdown: store.display.countdown,
+          allowUrgentNightBreakthrough:
+              store.allowUrgentDeadlineNightBreakthrough,
           dragHandle: dragHandle,
           onTap: () => actions.openDetail(itemContext, entry),
           onToggleDone: () => unawaited(actions.completeWithUndo(entry)),

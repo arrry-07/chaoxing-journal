@@ -270,7 +270,7 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
         AssignmentSource.courseWork => '正式作业',
         AssignmentSource.classroomActivity => '课堂活动',
         AssignmentSource.exam => '考试与通知',
-        AssignmentSource.manual => '手动安排',
+        AssignmentSource.manual => '自己添加',
         AssignmentSource.legacyUnknown => '历史来源',
       };
 

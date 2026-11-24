@@ -410,11 +410,18 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
           isDark == other.isDark &&
           paper == other.paper &&
           sheet == other.sheet &&
+          sheetElevated == other.sheetElevated &&
+          parchment == other.parchment &&
           ink == other.ink &&
           primaryFill == other.primaryFill &&
           onPrimaryFill == other.onPrimaryFill &&
           muted == other.muted &&
-          slate == other.slate &&
+          sage == other.sage &&
+          sageBorder == other.sageBorder &&
+          rule == other.rule &&
+          ruleStrong == other.ruleStrong &&
+          cardBorder == other.cardBorder &&
+          divider == other.divider &&
           berry == other.berry &&
           berryBg == other.berryBg &&
           berryBorder == other.berryBorder &&
@@ -423,18 +430,33 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
           examOrangeBorder == other.examOrangeBorder &&
           todoGreen == other.todoGreen &&
           todoGreenBg == other.todoGreenBg &&
-          todoGreenBorder == other.todoGreenBorder;
+          todoGreenBorder == other.todoGreenBorder &&
+          ochre == other.ochre &&
+          ochreBg == other.ochreBg &&
+          ochreBorder == other.ochreBorder &&
+          slate == other.slate &&
+          slateBg == other.slateBg &&
+          navGlassFill == other.navGlassFill &&
+          navGlassBorder == other.navGlassBorder &&
+          navGlassHighlight == other.navGlassHighlight;
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
         isDark,
         paper,
         sheet,
+        sheetElevated,
+        parchment,
         ink,
         primaryFill,
         onPrimaryFill,
         muted,
-        slate,
+        sage,
+        sageBorder,
+        rule,
+        ruleStrong,
+        cardBorder,
+        divider,
         berry,
         berryBg,
         berryBorder,
@@ -444,7 +466,15 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         todoGreen,
         todoGreenBg,
         todoGreenBorder,
-      );
+        ochre,
+        ochreBg,
+        ochreBorder,
+        slate,
+        slateBg,
+        navGlassFill,
+        navGlassBorder,
+        navGlassHighlight,
+      ]);
 }
 
 class JournalLayout {
