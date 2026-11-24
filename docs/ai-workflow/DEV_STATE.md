@@ -4,6 +4,12 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
+## 2026-11-24 · 1.8.29+123 完整功能回归通过（主实例保数据 + 隔离破坏性）
+
+- 已完成改动：对 `1.8.29+123` 原包（SHA-256 `0749a144…`）在 MuMu「学习通」`127.0.0.1:16448` 完成完整回归：首页混排与双向排序/逾期置底、筛选/搜索、置顶拖拽及冷启持久化、完成撤销、手动待办增删、详情/提醒状态、日历月周与议程、统计 24/39 与往期 33/41 下钻及关注恢复、提醒权限与测试通知、更新检查、40 门课程/42 条通知/桌面小组件与双击返回；仅集中线上刷新 1 次（扫描 38 门，跳过往期/归档 2 门）。隔离 `127.0.0.1:16384`（API 32）完成 1.7.3→`1.8.29` 原地升级、清数据首启、登录校验/协议页、精确闹钟拒绝降级与通知渠道重建。
+- 当前 commit 与状态：回归基线 `711d835`；主实例 `firstInstallTime`、登录态、40 门课程与 80 条记录保持，临时条目/置顶/主题/提醒 3 条/统计关注均已恢复；主/隔离 0 条 App `FATAL/FlutterError/RenderFlex`（仅 `uiautomator` 工具自身退出 SIGSEGV）。证据在 `D:\campus-tools\build-work\cx1829-full-regression-20261124-212529`；非阻断问题：关于对话框按钮英文、夜间静音个人日程导致首页持续显示「提醒或小组件需要处理」，另有一条考试通知详情疑似重复待样本核对。
+- 下一步待办：按 [ROADMAP](../ROADMAP.md#dev-下一阶段) 规划 `v1.8.30`；`docs/plans/` 保持 3 份现状，正式发版仍待维护者指令（目标 `1.90.0`）。
+
 ## 2026-11-24 · v1.8.29 增量 Gate 通过与 1.8.29+123 自测包收口
 
 - 已完成改动：增量 Gate 在 `e915990` 通过（0 阻断）；版本提交 `87a4207` 仅改 `pubspec.yaml` 与 `AppVersion` 至 `1.8.29+123`；从该提交 `git archive` 的干净 ASCII 镜像、本机缓存 `--no-pub` 构建原签名双 ABI Release APK，并完成 MuMu「学习通」保数据覆盖与纯离线基础冒烟。
@@ -27,10 +33,4 @@
 - 已完成改动：Gate 通过后固化「Stage 1 → 独立 Gate → 升 `Z+1` 原签名自测 → MuMu 基础冒烟与核心路径 → dev 文档 → 下一轮提示词」闭环（`AGENTS.md`、`VALIDATION.md`、开发指南），明确 Gate 后直接打自测包、不逐轮询问 A/B；版本升至 `1.8.28+122`（仅 `pubspec.yaml` 与 `AppVersion`）；从 `772fe67` 的 `git archive` 干净 ASCII 输入、本机缓存 `--no-pub` 构建原签名双 ABI Release APK，并完成 MuMu「学习通」保数据覆盖与实屏验收。
 - 当前 commit 与状态：工作流 `0343a06`、版本 `772fe67`；APK `62109666` 字节、SHA-256 `039dd33ea1d091d8bbdae42924b67b4fc5fe1d9fdd457cf8976623c138464087`，包名 `com.example.studyassistant.journal`、`1.8.28 (122)`、min26/target36、ARM64/x86_64、非 debuggable、v2 证书 `d36a5715...`、16 KiB 对齐与 ZIP 472 条目 CRC 全通过。MuMu `127.0.0.1:16448` 覆盖安装成功，`firstInstallTime=2026-11-04 19:05:10` 保留、设备 `base.apk` 哈希一致；冷启动 2335ms，全程 logcat 0 条 `FATAL/FlutterError/RenderFlex overflowed`。实屏核对：登录态、40 门课程与 80 项课业保留，「关于我们」显示 `1.8.28 (122)`；手动待办与学习通作业按时间混排；置顶/取消置顶、拖拽调序在杀进程重启后保持；逾期项默认置底且可手动置顶；完成与撤销、统计 24/39 与往期 33/41 下钻、日历议程、提醒设置页均正常。截图与日志在 `D:\campus-tools\build-work\cx1828-preview-772fe67-20261124-170537`；临时条目 `QA1828-*` 已删除、置顶已清空、首页恢复「时间近到远 / 全部 / 全部」。未刷新学习通线上接口；仅误触外链打开一次作业页并取消签到弹窗，未提交任何内容。
 - 下一步待办：按 [ROADMAP](../ROADMAP.md#dev-下一阶段) 的下一轮候选方向规划；正式发版仍等维护者主动下达指令后进入 Stage 2（目标 `1.90.0`，构建号顺延高于 `+122`）。
-
-## 2026-11-24 · 1.8.28 Stage 1 完成：置顶持久化修复与隔离 androidTest 112 项通过
-
-- 已完成改动：`assignment_manual_pin_test.dart` 新增可控仓库夹具与 6 项回归（修前 #1/#2/#5/#6 实测红灯，修后 10/10 全绿）；`assignment_store.dart` 将 `_savePins` 改为 `Future<bool>`（`StaleSessionWriteException` 返回 `false` 且不设 `_error`/`_recoveryWarnings`，`LocalStorageLeaseReleaseException` 仍返回 `true` 并记恢复告警），`_togglePinKey`/`reorderPinned` 写后守卫改为 `!persisted || !stillOwned()`，`_prunePins` 仅在 `persisted` 且会话未变时清 `_pinsNeedSave`，`saveNotebook` 补 `_pinsNeedSave ||` 重试入口与 `_prunePins` 后会话守卫（源码净增 20 行）。维护者批准的扩项：`AssignmentNotificationPublisherTest` 改用复用型合成关闭通道 `synthetic-disabled-updates-tests` 并走 internal 重载，移除对生产 `CHANNEL_UPDATES` 的 setUp/tearDown 删除；`run_android_tests.py` 的 `_run` 显式 `encoding="utf-8", errors="replace"`，`test_run_android_tests.py` 增 1 项回归。
-- 当前 commit 与状态：`ef0e39a`（修复 + 6 回归）、`3de0f59`（夹具与脚本，3 文件）已推送 `origin/dev`。M2 定向门禁退出码 0（8 文件 105 项、`dart analyze` 0 问题）；扩项后 M4 最终门禁 9 组 Python 100 项全过、L0 55 行。M3 用新 ASCII 镜像 `D:\campus-tools\build-work\androidtest-1828-20261124-155743`（JDK 17 + `D:\campus-tools\android`，`:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest` 全部成功）在隔离 MuMu `127.0.0.1:16384`（API 32、`x86_64`、`Asia/Shanghai`）实跑：batch1 `20/0/0/0`、batch2 `80/0/0/0`、batch3 `10/0/2/2`，合计 112 项 110 通过、2 假设跳过、0 失败；`AssignmentNotificationPublisherTest#unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel` 为 `STATUS_CODE=0`；跳过项为 `FeedbackEmailLaunchTest#systemCanOpenTheFixedMailtoDraftWhenAHandlerExists`（无邮件客户端）与 `RealAccountHeadlessEntryTest#realSessionRunsDaytimeBackgroundCheck`（未传 `-e realAccount true`）。未设 `PYTHONUTF8` 直接运行脚本退出码 0，日志 `androidtest-3batches.log`、`gradle-build.log` 均在该构建目录。保护实例 `127.0.0.1:16448` 仍 `1.8.27+121`、`firstInstallTime=2026-11-04 19:05:10`。
-- 下一步待办：Stage 1 已完成并停机，进入本方案独立 Gate 审查（建议 Diff 区间 `bff9e7c..HEAD`）；Gate 通过后再决定升 `1.8.28+122` 打 MuMu 自测包或进入 `v1.9.0` Stage 2。
 
