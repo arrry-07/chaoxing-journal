@@ -3,6 +3,12 @@
 > 每项独立改动提交前更新本文件；只保留最近 5 条，更早记录随发布收口归档。
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办。
 
+## 2026-11-24 · v1.9.0 下一阶段只读调查与方案定稿（置顶持久化与隔离设备 androidTest）
+
+- 已完成改动：在基线 `0604293` 完成只读源码核实，并用仓外临时测试确认修前行为：`_savePins` 吞掉 `StaleSessionWriteException` 后，`_togglePinKey`（`togglePin`/`toggleManualPin`）与 `reorderPinned` 误返回 `true` 且污染内存 `_pinned`、`_prunePins` 误清 `_pinsNeedSave` 阻断后续 `refreshAssignments()`/`saveNotebook()` 补写重试；同时核对 `saveNotebook` 缺 `_pinsNeedSave ||` 与 `_prunePins` 后会话守卫，而 `_afterAssignmentsChanged` 及其 13 处提醒更新调用方已有 `_isSessionCurrent(snap)` 保护。已输出 Stage 1 → Gate → Stage 2 规格书 [v1.9.0 置顶持久化与隔离设备仪器测试方案](../plans/2026-11-24-v1.9.0-置顶持久化与隔离设备仪器测试方案.md)。
+- 当前 commit 与状态：未改应用/测试/脚本代码（`pubspec.yaml` 仍 `1.8.27+121`）；仓外复现测试 `1 passed / 0 failed`（实测确认 4 项修前异常）；核验隔离 MuMu `127.0.0.1:16384`（API 32、`x86_64`、`Asia/Shanghai`）在线可重装，保护实例 `127.0.0.1:16448`（API 35、`1.8.27+121`、`firstInstallTime=2026-11-04 19:05:10`）完好，并确认工作树 `android/local.properties` 指向 `C:\rea-tools\android` 故隔离构建须用纯 ASCII 镜像写入 `D:\campus-tools\android` + `JDK 17` 预编译后传 `--skip-build`。
+- 下一步待办：按 [v1.9.0 置顶持久化与隔离设备仪器测试方案](../plans/2026-11-24-v1.9.0-置顶持久化与隔离设备仪器测试方案.md) 执行 Stage 1（M1 红灯回归 → M2 最小修复 → M3 隔离 MuMu 112 项实跑取证 → M4 状态回写），完成后停机进入独立 Gate 审查。
+
 ## 2026-11-24 11:55 · 1.8.27+121 首页混排阶段 MuMu 自测
 
 - 已完成改动：`700f95f` 的 `super.repository` 修复已过代码 Gate。阶段自测升至 `1.8.27+121`，使用原签名构建双 ABI 预览包。新流程见 [验证规则](VALIDATION.md#先确定本次终点)。
@@ -28,9 +34,3 @@
 - 已完成改动：新增本状态文件；`AGENTS.md` 与 `VALIDATION.md` 写入「每项改动提交前更新状态与相关文档」及「Gate 返工复审按增量执行」规则。
 - 当前 commit 与状态：功能返工 `dd29cbc` → `38ca50b` → `0773ba3` → `e46538f` 已推送 `origin/dev`；本提交为工作流规则，`pubspec` 仍 `1.8.26+120`，未触碰 `main`/Tag/Release。
 - 下一步待办：按增量复审 `ba707c5..e46538f` 复核 4 个返工 commit；通过后等维护者发版指令进入 Stage 2。
-
-## 2026-11-24 · v1.9.0 Stage 1 Gate 返工
-
-- 已完成改动：修复时间信任 `displayAt` 与 Tier 1、`reorderPinned` 筛选子集；首页抽离 `home_manual_actions.dart` / `home_manual_sections.dart`（`assignment_list_screen.dart` 净减 22 行）；`assignment_store.dart` 净增 40 行；手动卡片、编辑器删除守卫、空态与工具栏修复；`androidTest` 全限定类名、`cwd`、崩溃判错；`freeze_release.py` dev/formal 双模式与 CRLF、`check_release_metadata.py` 拒绝 `-dev.N`/前导零/`Y>99`。
-- 当前 commit 与状态：`e46538f` 已推送 `origin/dev`；本地门禁 88 项 Flutter 测试 + 9 组 Python 单测全绿；`pubspec` 仍 `1.8.26+120`，未触碰 `main`/Tag/Release。
-- 下一步待办：Gate 增量复审通过后，等维护者明确发版指令再进入 Stage 2。
