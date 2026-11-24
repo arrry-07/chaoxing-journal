@@ -22,14 +22,13 @@ ManualEntry _manual(String id, {bool done = false}) => ManualEntry(
 class _FixedStore extends AssignmentStore {
   _FixedStore({
     core.Session? session,
-    LocalAssignmentRepository? repository,
+    super.repository,
     DateTime Function()? clock,
   }) : super(
           sessionStore: session ?? core.Session(),
           notificationService: core.Notifications(),
           widgetSnapshotService: core.WidgetService(),
           chaoxingClient: core.Client(),
-          repository: repository,
           clock: clock ?? (() => _now),
         );
 
