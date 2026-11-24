@@ -25,11 +25,15 @@ SPEC.loader.exec_module(runner)
 class AndroidTestRunnerTests(unittest.TestCase):
     def test_repository_manifest_covers_all_instrumentation_classes(self) -> None:
         batches = runner.verify_batch_manifest(runner.default_android_test_dir())
-        self.assertEqual(3, len(batches))
-        self.assertEqual(21, sum(len(classes) for classes in batches.values()))
+        self.assertEqual(4, len(batches))
+        self.assertEqual(22, sum(len(classes) for classes in batches.values()))
         self.assertIn("AssignmentNotificationPublisherTest", batches[
             "batch1_channel_and_fresh_install"
         ])
+        self.assertEqual(
+            ("ReminderApiMatrixTest",),
+            batches["batch4_api_matrix_and_doze"],
+        )
 
     def test_manifest_rejects_unregistered_and_duplicate_classes(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -85,9 +89,11 @@ class AndroidTestRunnerTests(unittest.TestCase):
         first = text.index("[DRY-RUN] batch1_channel_and_fresh_install")
         second = text.index("[DRY-RUN] batch2_reminder_and_background")
         third = text.index("[DRY-RUN] batch3_widget_and_boundaries")
+        fourth = text.index("[DRY-RUN] batch4_api_matrix_and_doze")
         self.assertLess(first, second)
         self.assertLess(second, third)
-        self.assertEqual(5 * 3, text.count("adb -s 127.0.0.1:16384"))
+        self.assertLess(third, fourth)
+        self.assertEqual(5 * 4, text.count("adb -s 127.0.0.1:16384"))
         self.assertIn("uninstall com.example.studyassistant.journal", text)
         self.assertIn("uninstall com.example.studyassistant.journal.test", text)
         self.assertIn("install -r", text)
@@ -276,6 +282,200 @@ class AndroidTestRunnerTests(unittest.TestCase):
             0,
         )
         self.assertEqual(7, fallback.passed)
+
+    def test_protected_first_install_time_is_rejected_even_with_allow_wipe_physical(
+        self,
+    ) -> None:
+        info = runner.DeviceInfo(
+            serial="127.0.0.1:9999",
+            sdk_int=35,
+            abi="x86_64",
+            manufacturer="Google",
+            model="sdk_gphone",
+            timezone="Asia/Shanghai",
+            is_emulator=True,
+            installed_version="1.8.28",
+            installed_code="122",
+            first_install_time="2026-11-04 19:05:10",
+        )
+        refusal = runner.validate_destructive_target(
+            info,
+            allow_wipe_physical=True,
+        )
+        self.assertIsNotNone(refusal)
+        self.assertIn("firstInstallTime", refusal)
+
+    def test_physical_device_rejected_without_allow_wipe_physical(self) -> None:
+        info = runner.DeviceInfo(
+            serial="ABC123",
+            sdk_int=35,
+            abi="arm64-v8a",
+            manufacturer="Huawei",
+            model="Phone",
+            timezone="Asia/Shanghai",
+            is_emulator=False,
+            installed_version="1.8.28",
+            installed_code="122",
+            first_install_time="2026-11-01 10:00:00",
+        )
+        self.assertIsNotNone(
+            runner.validate_destructive_target(
+                info,
+                allow_wipe_physical=False,
+            )
+        )
+        self.assertIsNone(
+            runner.validate_destructive_target(
+                info,
+                allow_wipe_physical=True,
+            )
+        )
+
+    def test_multi_serial_matrix_builds_once_and_runs_each_target(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            build_root = Path(raw) / "local_app"
+            build_root.mkdir()
+            calls: list[list[str]] = []
+
+            def fake_run(cmd, cwd=None, check=False):  # noqa: ANN001
+                calls.append([str(part) for part in cmd])
+                return subprocess.CompletedProcess(cmd, 0, "OK (1 test)", "")
+
+            def fake_find(app_root: Path, name: str) -> Path:
+                return app_root / name
+
+            with (
+                mock.patch.object(runner, "_build_root", return_value=build_root),
+                mock.patch.object(runner, "_run", side_effect=fake_run),
+                mock.patch.object(runner, "_find_apk", side_effect=fake_find),
+                contextlib.redirect_stdout(StringIO()),
+            ):
+                code = runner.main(
+                    [
+                        "--serial",
+                        "emulator-1",
+                        "--serial",
+                        "emulator-2",
+                    ]
+                )
+            self.assertEqual(0, code)
+            gradle = [
+                cmd for cmd in calls if "gradlew" in " ".join(cmd)
+            ]
+            self.assertEqual(1, len(gradle))
+            instruments = [
+                cmd for cmd in calls if "am" in cmd and "instrument" in cmd
+            ]
+            self.assertEqual(8, len(instruments))
+            self.assertTrue(any("-s" in cmd and "emulator-1" in cmd for cmd in instruments))
+            self.assertTrue(any("-s" in cmd and "emulator-2" in cmd for cmd in instruments))
+
+    def test_mirror_local_properties_repairs_missing_android36_without_touching_repo(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            mirror = root / "mirror"
+            sdk = root / "sdk"
+            (sdk / "platforms" / "android-36").mkdir(parents=True)
+            (mirror / "android").mkdir(parents=True)
+            properties = mirror / "android" / "local.properties"
+            properties.write_text(
+                "sdk.dir=C\\:\\\\missing\\\\sdk\n",
+                encoding="utf-8",
+            )
+            repo_properties = runner.local_app_root() / "android" / "local.properties"
+            before = repo_properties.read_text(encoding="utf-8") if repo_properties.is_file() else None
+            runner.ensure_mirror_local_properties(
+                mirror,
+                sdk_dir=sdk,
+                flutter_sdk=None,
+            )
+            repaired = properties.read_text(encoding="utf-8")
+            self.assertIn("sdk.dir=", repaired)
+            values = runner._read_properties(properties)
+            self.assertEqual(str(sdk), values["sdk.dir"])
+            after = repo_properties.read_text(encoding="utf-8") if repo_properties.is_file() else None
+            self.assertEqual(before, after)
+
+    def test_doze_probe_always_restores_deviceidle_and_battery_on_failure(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, cwd=None, check=False):  # noqa: ANN001
+            calls.append([str(part) for part in cmd])
+            return subprocess.CompletedProcess(cmd, 0, "deep-idle", "")
+
+        def action() -> None:
+            raise RuntimeError("instrumentation failed")
+
+        with mock.patch.object(runner, "_run", side_effect=fake_run):
+            with self.assertRaises(RuntimeError):
+                runner.run_with_doze("emulator-1", "adb", action)
+        flat = [" ".join(cmd) for cmd in calls]
+        self.assertTrue(any("deviceidle force-idle" in line for line in flat))
+        self.assertTrue(any("deviceidle unforce" in line for line in flat))
+        self.assertTrue(any("battery reset" in line for line in flat))
+
+    def test_oem_readonly_audit_executes_zero_destructive_commands(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, cwd=None, check=False):  # noqa: ANN001
+            calls.append([str(part) for part in cmd])
+            joined = " ".join(str(part) for part in cmd)
+            text = ""
+            if "getprop" in cmd:
+                text = (
+                    "[ro.build.version.sdk]: [35]\n"
+                    "[ro.product.cpu.abi]: [x86_64]\n"
+                    "[ro.kernel.qemu]: [1]\n"
+                    "[persist.sys.timezone]: [Asia/Shanghai]\n"
+                )
+            elif "dumpsys" in cmd and "package" in cmd:
+                text = (
+                    "versionName=1.8.28\n"
+                    "versionCode=122\n"
+                    "firstInstallTime=2026-11-04 19:05:10\n"
+                )
+            elif "appops" in cmd:
+                text = "SCHEDULE_EXACT_ALARM: allow"
+            elif "deviceidle" in cmd:
+                text = "com.example.studyassistant.journal"
+            elif "alarm" in joined:
+                text = "RTC_WAKEUP com.example.studyassistant.journal ASSIGNMENT_DEADLINE"
+            elif "notification" in joined:
+                text = "com.example.studyassistant.journal importance=3"
+            return subprocess.CompletedProcess(cmd, 0, text, "")
+
+        with mock.patch.object(runner, "_run", side_effect=fake_run):
+            code, report = runner.run_oem_readonly_audit(
+                "127.0.0.1:16448",
+                "adb",
+            )
+        self.assertEqual(0, code)
+        self.assertIn("Exact alarm app-op", report)
+        forbidden = (
+            "uninstall",
+            "install -r",
+            "pm clear",
+            "pm grant",
+            "pm revoke",
+            "appops set",
+            "am instrument",
+            "force-idle",
+        )
+        for cmd in calls:
+            joined = " ".join(cmd)
+            for token in forbidden:
+                self.assertNotIn(token, joined)
+
+    def test_instrument_command_never_enables_real_account_flag(self) -> None:
+        for classes in runner.ANDROID_TEST_BATCHES.values():
+            command = runner.instrument_command(
+                "emulator-1",
+                "adb",
+                classes,
+            )
+            self.assertNotIn("realAccount", " ".join(command))
 
 
 if __name__ == "__main__":

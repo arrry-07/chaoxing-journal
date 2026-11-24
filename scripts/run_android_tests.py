@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import re
 import shutil
@@ -18,6 +19,7 @@ TEST_PACKAGE = f"{PACKAGE}.test"
 TEST_CLASS_PACKAGE = "com.example.studyassistant"
 TEST_RUNNER = "androidx.test.runner.AndroidJUnitRunner"
 PROTECTED_SERIALS = {"127.0.0.1:16448"}
+PROTECTED_FIRST_INSTALL_TIMES = {"2026-11-04 19:05:10"}
 CRASH_MARKERS = ("FAILURES!!!", "Process crashed")
 CRASH_PREFIXES = (
     "INSTRUMENTATION_STATUS: Error=",
@@ -54,6 +56,9 @@ ANDROID_TEST_BATCHES: dict[str, tuple[str, ...]] = {
         "HeadlessFlutterEngineTest",
         "RealAccountHeadlessEntryTest",
     ),
+    "batch4_api_matrix_and_doze": (
+        "ReminderApiMatrixTest",
+    ),
 }
 
 
@@ -64,11 +69,27 @@ class ManifestError(RuntimeError):
 @dataclass
 class BatchResult:
     name: str
+    serial: str = ""
+    doze: str = "—"
     passed: int = 0
     failed: int = 0
     skipped: int = 0
     assumption_skipped: int = 0
     execution_error: str | None = None
+
+
+@dataclass(frozen=True)
+class DeviceInfo:
+    serial: str
+    sdk_int: int | None
+    abi: str
+    manufacturer: str
+    model: str
+    timezone: str
+    is_emulator: bool
+    installed_version: str
+    installed_code: str
+    first_install_time: str
 
 
 def repo_root() -> Path:
@@ -219,6 +240,106 @@ def _run(cmd: list[str], cwd: Path | None = None, *, check: bool = False) -> sub
     )
 
 
+def normalize_serials(values: Sequence[str] | None) -> list[str]:
+    serials: list[str] = []
+    for value in values or ():
+        for part in value.split(","):
+            serial = part.strip()
+            if serial and serial not in serials:
+                serials.append(serial)
+    return serials
+
+
+def _shell(serial: str, adb: str, *args: str) -> str:
+    completed = _run([adb, "-s", serial, "shell", *args])
+    if completed.returncode != 0:
+        raise ManifestError(
+            f"adb shell {' '.join(args)} failed for {serial}: "
+            f"{completed.stderr.strip() or completed.stdout.strip()}"
+        )
+    return completed.stdout
+
+
+def _parse_getprop(text: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        match = re.match(r"^\[([^\]]+)\]: \[(.*)\]$", line.strip())
+        if match:
+            values[match.group(1)] = match.group(2)
+    return values
+
+
+def probe_device(serial: str, adb: str) -> DeviceInfo:
+    """Read-only device identity used before any destructive command."""
+
+    properties = _parse_getprop(_shell(serial, adb, "getprop"))
+    package_dump = _shell(
+        serial,
+        adb,
+        "dumpsys",
+        "package",
+        PACKAGE,
+    )
+    version_name = ""
+    version_code = ""
+    first_install = ""
+    for line in package_dump.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("versionName=") and not version_name:
+            version_name = stripped.split("=", 1)[1]
+        elif stripped.startswith("versionCode=") and not version_code:
+            version_code = stripped.split("=", 1)[1].split()[0]
+        elif stripped.startswith("firstInstallTime=") and not first_install:
+            first_install = stripped.split("=", 1)[1].strip()
+    characteristics = properties.get("ro.build.characteristics", "")
+    is_emulator = (
+        serial.startswith(("emulator-", "127.0.0.1:"))
+        or properties.get("ro.kernel.qemu") == "1"
+        or "emulator" in characteristics
+    )
+    sdk_raw = properties.get("ro.build.version.sdk", "")
+    try:
+        sdk_int = int(sdk_raw)
+    except ValueError:
+        sdk_int = None
+    return DeviceInfo(
+        serial=serial,
+        sdk_int=sdk_int,
+        abi=properties.get("ro.product.cpu.abi", ""),
+        manufacturer=properties.get("ro.product.manufacturer", ""),
+        model=properties.get("ro.product.model", ""),
+        timezone=properties.get("persist.sys.timezone", ""),
+        is_emulator=is_emulator,
+        installed_version=version_name,
+        installed_code=version_code,
+        first_install_time=first_install,
+    )
+
+
+def validate_destructive_target(
+    info: DeviceInfo,
+    *,
+    allow_wipe_physical: bool,
+) -> str | None:
+    if info.serial in PROTECTED_SERIALS:
+        return (
+            f"Refusing protected data-preserving device {info.serial}. "
+            "Use a disposable emulator for instrumentation tests."
+        )
+    if info.first_install_time in PROTECTED_FIRST_INSTALL_TIMES:
+        return (
+            f"Refusing device {info.serial} with protected "
+            f"firstInstallTime={info.first_install_time}."
+        )
+    if not info.is_emulator and not allow_wipe_physical:
+        return (
+            f"Refusing unknown or physical device {info.serial}; "
+            "use --oem-readonly-audit for a read-only audit or pass "
+            "--allow-wipe-physical after confirming the target."
+        )
+    return None
+
+
 def qualified_classes(classes: Sequence[str]) -> list[str]:
     return [f"{TEST_CLASS_PACKAGE}.{name}" for name in classes]
 
@@ -265,7 +386,92 @@ def _print_commands(serial: str, adb: str, app_apk: Path, test_apk: Path, batche
             print("+ " + " ".join(cmd))
 
 
-def _build_root(work_dir: Path) -> Path:
+def _properties_unescape(value: str) -> str:
+    return value.replace("\\:", ":").replace("\\\\", "\\")
+
+
+def _properties_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace(":", "\\:")
+
+
+def _read_properties(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = _properties_unescape(value.strip())
+    return values
+
+
+def _write_properties(path: Path, values: Mapping[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"{key}={_properties_escape(value)}" for key, value in values.items()]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _has_android_36(path: Path) -> bool:
+    return (path / "platforms" / "android-36").is_dir()
+
+
+def ensure_mirror_local_properties(
+    mirror_root: Path,
+    *,
+    sdk_dir: Path | None,
+    flutter_sdk: Path | None,
+) -> None:
+    """Repair only the mirror copy; the shared worktree is never written."""
+
+    if mirror_root.resolve() == local_app_root().resolve():
+        return
+    properties_path = mirror_root / "android" / "local.properties"
+    if not properties_path.parent.is_dir():
+        return
+    current = _read_properties(properties_path)
+    current_sdk = current.get("sdk.dir", "")
+    sdk_candidates: list[Path] = []
+    if current_sdk:
+        sdk_candidates.append(Path(current_sdk))
+    if sdk_dir is not None:
+        sdk_candidates.append(sdk_dir)
+    for key in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+        value = os.environ.get(key)
+        if value:
+            sdk_candidates.append(Path(value))
+    sdk_candidates.extend(
+        [
+            Path("D:/campus-tools/android"),
+            Path.home() / "AppData" / "Local" / "Android" / "Sdk",
+        ]
+    )
+    chosen_sdk = next(
+        (candidate for candidate in sdk_candidates if _has_android_36(candidate)),
+        None,
+    )
+    changed = False
+    if chosen_sdk is not None and (
+        not current_sdk or not _has_android_36(Path(current_sdk))
+    ):
+        current["sdk.dir"] = str(chosen_sdk)
+        changed = True
+    current_flutter = current.get("flutter.sdk", "")
+    if flutter_sdk is not None and Path(flutter_sdk).is_dir():
+        if not current_flutter or not (Path(current_flutter) / "bin" / "flutter").exists():
+            current["flutter.sdk"] = str(flutter_sdk)
+            changed = True
+    if changed:
+        _write_properties(properties_path, current)
+
+
+def _build_root(
+    work_dir: Path,
+    *,
+    sdk_dir: Path | None = None,
+    flutter_sdk: Path | None = None,
+) -> Path:
     source = local_app_root()
     if str(source).isascii():
         return source
@@ -279,6 +485,11 @@ def _build_root(work_dir: Path) -> Path:
         source,
         destination,
         ignore=shutil.ignore_patterns("build", ".gradle"),
+    )
+    ensure_mirror_local_properties(
+        destination,
+        sdk_dir=sdk_dir,
+        flutter_sdk=flutter_sdk,
     )
     package_config = destination / "pubspec.yaml"
     if not package_config.is_file():
@@ -311,6 +522,141 @@ def _find_apk(app_root: Path, name: str) -> Path:
     return matches[0]
 
 
+def enter_doze(serial: str, adb: str) -> str:
+    baseline = _shell(serial, adb, "dumpsys", "deviceidle", "get", "deep").strip()
+    _shell(serial, adb, "dumpsys", "battery", "unplug")
+    _shell(serial, adb, "dumpsys", "deviceidle", "force-idle")
+    return baseline or "unknown"
+
+
+def exit_doze(serial: str, adb: str) -> None:
+    errors: list[str] = []
+    for args in (
+        ("dumpsys", "deviceidle", "unforce"),
+        ("dumpsys", "battery", "reset"),
+    ):
+        completed = _run([adb, "-s", serial, "shell", *args])
+        if completed.returncode != 0:
+            errors.append(
+                completed.stderr.strip()
+                or completed.stdout.strip()
+                or " ".join(args)
+            )
+    if errors:
+        raise ManifestError(
+            f"Doze reset failed for {serial}: {'; '.join(errors)}"
+        )
+
+
+def run_with_doze(
+    serial: str,
+    adb: str,
+    action,
+) -> tuple[list[BatchResult], str]:
+    baseline = "unknown"
+    try:
+        baseline = enter_doze(serial, adb)
+        return action(), f"idle (from {baseline}) → reset"
+    finally:
+        exit_doze(serial, adb)
+
+
+def run_oem_readonly_audit(serial: str, adb: str) -> tuple[int, str]:
+    """Read-only OEM diagnostics; never uninstalls, installs or instruments."""
+
+    try:
+        info = probe_device(serial, adb)
+    except ManifestError as error:
+        return 1, f"[FAIL] {error}"
+    appops = _run(
+        [adb, "-s", serial, "shell", "appops", "get", PACKAGE,
+         "SCHEDULE_EXACT_ALARM"]
+    )
+    whitelist = _run(
+        [adb, "-s", serial, "shell", "dumpsys", "deviceidle", "whitelist"]
+    )
+    alarms = _run([adb, "-s", serial, "shell", "dumpsys", "alarm"])
+    notifications = _run(
+        [adb, "-s", serial, "shell", "dumpsys", "notification"]
+    )
+    appops_text = appops.stdout if appops.returncode == 0 else "unknown"
+    whitelist_text = whitelist.stdout if whitelist.returncode == 0 else ""
+    alarm_text = alarms.stdout if alarms.returncode == 0 else ""
+    notification_text = (
+        notifications.stdout if notifications.returncode == 0 else ""
+    )
+    alarm_lines = [
+        line for line in alarm_text.splitlines() if PACKAGE in line
+    ]
+    rows = [
+        ("Serial", info.serial),
+        ("API", str(info.sdk_int or "unknown")),
+        ("ABI", info.abi or "unknown"),
+        ("Device", f"{info.manufacturer} {info.model}".strip() or "unknown"),
+        ("Timezone", info.timezone or "unknown"),
+        ("Installed", f"{info.installed_version} ({info.installed_code})"),
+        ("First install", info.first_install_time or "unknown"),
+        (
+            "Exact alarm app-op",
+            "allow" if "allow" in appops_text else "deny/unknown",
+        ),
+        (
+            "Battery whitelist",
+            "yes" if PACKAGE in whitelist_text else "no",
+        ),
+        (
+            "Alarm entries",
+            f"{len(alarm_lines)} "
+            f"(deadline={any('ASSIGNMENT_DEADLINE' in line or 'ScheduledNotificationReceiver' in line for line in alarm_lines)})",
+        ),
+        (
+            "Reminder channel",
+            "present" if PACKAGE in notification_text else "unknown",
+        ),
+    ]
+    lines = ["| Field | Value |", "| --- | --- |"]
+    lines.extend(f"| {key} | {value} |" for key, value in rows)
+    return 0, "\n".join(lines)
+
+
+def _run_batch(
+    serial: str,
+    adb: str,
+    app_apk: Path,
+    test_apk: Path,
+    name: str,
+    classes: Sequence[str],
+) -> list[BatchResult]:
+    for cmd in batch_commands(serial, adb, app_apk, test_apk, classes):
+        completed = _run(cmd)
+        if "install" in cmd and completed.returncode != 0:
+            print(completed.stdout)
+            print(completed.stderr, file=sys.stderr)
+            return [
+                BatchResult(
+                    name=name,
+                    serial=serial,
+                    execution_error="APK install failed",
+                )
+            ]
+        if "instrument" in cmd:
+            print(completed.stdout)
+            if completed.stderr.strip():
+                print(completed.stderr, file=sys.stderr)
+            result = summarize_results(
+                name, completed.stdout, completed.returncode
+            )
+            result.serial = serial
+            return [result]
+    return [
+        BatchResult(
+            name=name,
+            serial=serial,
+            execution_error="instrumentation command was not executed",
+        )
+    ]
+
+
 def _default_work_dir() -> Path:
     drive_d = Path("D:/")
     if drive_d.exists():
@@ -321,11 +667,16 @@ def _default_work_dir() -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-manifest-only", action="store_true")
-    parser.add_argument("--serial")
+    parser.add_argument("--serial", action="append")
     parser.add_argument("--adb", default="adb")
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--sdk-dir", type=Path)
+    parser.add_argument("--flutter-sdk", type=Path)
+    parser.add_argument("--allow-wipe-physical", action="store_true")
+    parser.add_argument("--doze-probe", action="store_true")
+    parser.add_argument("--oem-readonly-audit", action="store_true")
     args = parser.parse_args(argv)
 
     try:
@@ -335,34 +686,57 @@ def main(argv: list[str] | None = None) -> int:
         if args.verify_manifest_only:
             return 0
 
-        serial = (args.serial or "").strip()
-        if not serial:
+        serials = normalize_serials(args.serial)
+        if not serials:
             print("[FAIL] --serial is required unless --verify-manifest-only is used.", file=sys.stderr)
             return 2
-        if serial in PROTECTED_SERIALS:
-            print(
-                f"[FAIL] Refusing protected data-preserving device {serial}. "
-                "Use a disposable emulator for instrumentation tests.",
-                file=sys.stderr,
-            )
-            return 2
+        if args.oem_readonly_audit:
+            if args.doze_probe or args.allow_wipe_physical or args.dry_run:
+                print(
+                    "[FAIL] --oem-readonly-audit cannot be combined with "
+                    "--doze-probe, --allow-wipe-physical or --dry-run.",
+                    file=sys.stderr,
+                )
+                return 2
+            results = 0
+            for serial in serials:
+                code, report = run_oem_readonly_audit(serial, args.adb)
+                print(f"\n### OEM read-only audit · {serial}\n")
+                print(report)
+                results = max(results, code)
+            return results
+        for serial in serials:
+            if serial in PROTECTED_SERIALS:
+                print(
+                    f"[FAIL] Refusing protected data-preserving device {serial}. "
+                    "Use a disposable emulator for instrumentation tests.",
+                    file=sys.stderr,
+                )
+                return 2
 
         app_root = local_app_root()
         if args.dry_run:
             print(f"[DRY-RUN] project root: {app_root}")
             if not args.skip_build:
                 print("+ " + " ".join(_gradle_command(app_root)))
-            _print_commands(
-                serial,
-                args.adb,
-                app_root / "build/app/outputs/flutter-apk/app-debug.apk",
-                app_root / "build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk",
-                batches,
-            )
+            for serial in serials:
+                _print_commands(
+                    serial,
+                    args.adb,
+                    app_root / "build/app/outputs/flutter-apk/app-debug.apk",
+                    app_root / "build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk",
+                    batches,
+                )
+            if args.doze_probe:
+                print("[DRY-RUN] batch4 will enter and reset Doze")
             return 0
 
         if not args.skip_build:
-            build_root = _build_root(args.work_dir or _default_work_dir())
+            build_root = _build_root(
+                args.work_dir or _default_work_dir(),
+                sdk_dir=args.sdk_dir,
+                flutter_sdk=args.flutter_sdk,
+            )
             build = _run(
                 _gradle_command(build_root),
                 cwd=build_root / "android",
@@ -379,50 +753,98 @@ def main(argv: list[str] | None = None) -> int:
 
         app_apk = _find_apk(build_root, "app-debug.apk")
         test_apk = _find_apk(build_root, "app-debug-androidTest.apk")
+        devices: list[DeviceInfo] = []
+        for serial in serials:
+            info = probe_device(serial, args.adb)
+            refusal = validate_destructive_target(
+                info,
+                allow_wipe_physical=args.allow_wipe_physical,
+            )
+            if refusal is not None:
+                print(f"[FAIL] {refusal}", file=sys.stderr)
+                return 2
+            devices.append(info)
+
         results: list[BatchResult] = []
-        install_failed = False
-        for name, classes in batches.items():
-            print(f"\n=== {name} ({len(classes)} classes) ===", flush=True)
-            for cmd in batch_commands(
-                serial, args.adb, app_apk, test_apk, classes
-            ):
-                completed = _run(cmd)
-                if "install" in cmd and completed.returncode != 0:
-                    print(completed.stdout)
-                    print(completed.stderr, file=sys.stderr)
+        for info in devices:
+            serial = info.serial
+            install_failed = False
+            for name, classes in batches.items():
+                print(
+                    f"\n=== {serial} · {name} ({len(classes)} classes) ===",
+                    flush=True,
+                )
+                try:
+                    if args.doze_probe and name == "batch4_api_matrix_and_doze":
+                        batch_results, doze_state = run_with_doze(
+                            serial,
+                            args.adb,
+                            lambda: _run_batch(
+                                serial,
+                                args.adb,
+                                app_apk,
+                                test_apk,
+                                name,
+                                classes,
+                            ),
+                        )
+                        for result in batch_results:
+                            result.doze = doze_state
+                        results.extend(batch_results)
+                    else:
+                        batch_results = _run_batch(
+                            serial,
+                            args.adb,
+                            app_apk,
+                            test_apk,
+                            name,
+                            classes,
+                        )
+                        results.extend(batch_results)
+                except ManifestError as error:
                     results.append(
                         BatchResult(
-                            name=name, execution_error="APK install failed"
+                            name=name,
+                            serial=serial,
+                            execution_error=str(error),
                         )
                     )
+                if any(
+                    result.execution_error == "APK install failed"
+                    for result in results
+                    if result.serial == serial and result.name == name
+                ):
                     install_failed = True
                     break
-                if "instrument" in cmd:
-                    print(completed.stdout)
-                    if completed.stderr.strip():
-                        print(completed.stderr, file=sys.stderr)
-                    results.append(
-                        summarize_results(
-                            name, completed.stdout, completed.returncode
-                        )
-                    )
             if install_failed:
-                break
+                continue
 
         print("\n### Android instrumentation summary\n")
-        print("| Batch | Passed | Failed | Skipped | Assumption skip | Error |")
-        print("| --- | ---: | ---: | ---: | ---: | --- |")
+        print(
+            "| Serial | API | ABI | Device | Batch | Passed | Failed | "
+            "Skipped | Assumption skip | Doze | Error |"
+        )
+        print(
+            "| --- | ---: | --- | --- | --- | ---: | ---: | ---: | "
+            "---: | --- | --- |"
+        )
+        by_serial = {info.serial: info for info in devices}
         for result in results:
+            info = by_serial.get(result.serial)
             print(
-                f"| {result.name} | {result.passed} | {result.failed} | "
+                f"| {result.serial} | {(info.sdk_int if info else None) or '?'} | "
+                f"{info.abi if info else '?'} | "
+                f"{(info.manufacturer + ' ' + info.model).strip() if info else '?'} | "
+                f"{result.name} | {result.passed} | {result.failed} | "
                 f"{result.skipped} | {result.assumption_skipped} | "
+                f"{result.doze} | "
                 f"{result.execution_error or ''} |"
             )
         failed = any(
             result.failed > 0 or result.execution_error is not None
             for result in results
         )
-        if len(results) != len(batches):
+        if len(results) != len(devices) * len(batches):
             failed = True
         if failed:
             print("\n[FAIL] One or more Android instrumentation batches failed.", file=sys.stderr)
