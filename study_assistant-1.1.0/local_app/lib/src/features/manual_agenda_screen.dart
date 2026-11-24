@@ -198,12 +198,16 @@ class ManualEntryEditor extends StatefulWidget {
     this.entry,
     this.entryId,
     this.initialDay,
+    this.initialCourse,
     this.routeScope = '/agenda',
   });
   final AssignmentStore store;
   final ManualEntry? entry;
   final String? entryId;
   final DateTime? initialDay;
+
+  /// Prefills the course for a new entry, e.g. from an empty course filter.
+  final String? initialCourse;
   final String routeScope;
   @override
   State<ManualEntryEditor> createState() => _EditorState();
@@ -249,7 +253,8 @@ class _EditorState extends State<ManualEntryEditor> {
     _missingEntry =
         widget.entry == null && widget.entryId != null && _entry == null;
     title = TextEditingController(text: _entry?.title);
-    course = TextEditingController(text: _entry?.course);
+    course = TextEditingController(
+        text: _entry?.course ?? widget.initialCourse?.trim());
     location = TextEditingController(text: _entry?.location);
     note = TextEditingController(text: _entry?.note);
     minutes = TextEditingController(text: '${_entry?.minutes ?? 0}');

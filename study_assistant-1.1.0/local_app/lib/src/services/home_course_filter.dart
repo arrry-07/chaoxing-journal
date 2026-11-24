@@ -1,5 +1,6 @@
 import '../models/assignment.dart';
 import '../models/course.dart';
+import '../models/study_notebook.dart';
 import 'course_term_catalog.dart';
 
 /// A course filter entry resolved from the account's full course catalog.
@@ -67,6 +68,7 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
   required Iterable<Assignment> records,
   String? selectedCourseKey,
   CourseTermCatalog? termCatalog,
+  bool includeIdleCourses = false,
 }) {
   final known = <String, _KnownCourse>{};
 
@@ -140,6 +142,9 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
   }
 
   final candidateKeys = <String>{
+    if (includeIdleCourses)
+      for (final course in catalog)
+        if (course.key.isNotEmpty) course.key,
     for (final assignment in assignments)
       if (assignment.courseKey case final key?) key,
   };
@@ -183,6 +188,57 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
   });
   return List.unmodifiable(options);
 }
+
+/// Counts the items each course would show on Home under the given filters.
+///
+/// Coursework is matched by course key; manual entries only carry a course
+/// name, so they count toward every option with the same normalized name.
+Map<String, int> countHomeCourseItems({
+  required Iterable<HomeCourseFilterOption> options,
+  required Iterable<Assignment> filteredAssignments,
+  required Iterable<ManualEntry> filteredManualEntries,
+}) {
+  final counts = <String, int>{};
+  final keys = {for (final option in options) option.courseKey};
+  for (final assignment in filteredAssignments) {
+    final key = assignment.courseKey;
+    if (key == null || !keys.contains(key)) continue;
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  final manualByName = <String, int>{};
+  for (final entry in filteredManualEntries) {
+    final name = _normalized(entry.course);
+    if (name.isEmpty) continue;
+    manualByName[name] = (manualByName[name] ?? 0) + 1;
+  }
+  for (final option in options) {
+    final manual = manualByName[_normalized(option.name)];
+    if (manual == null) continue;
+    counts[option.courseKey] = (counts[option.courseKey] ?? 0) + manual;
+  }
+  return counts;
+}
+
+/// Courses with items come first (most items first); idle courses follow in
+/// the stable name order produced by [buildHomeCourseFilterOptions].
+List<HomeCourseFilterOption> sortHomeCourseOptionsByCount(
+  List<HomeCourseFilterOption> options,
+  Map<String, int> counts,
+) {
+  final indexed = [
+    for (var index = 0; index < options.length; index++)
+      (index: index, option: options[index]),
+  ];
+  indexed.sort((left, right) {
+    final byCount = (counts[right.option.courseKey] ?? 0)
+        .compareTo(counts[left.option.courseKey] ?? 0);
+    if (byCount != 0) return byCount;
+    return left.index.compareTo(right.index);
+  });
+  return List.unmodifiable([for (final item in indexed) item.option]);
+}
+
+String homeCourseCountLabel(int count) => count > 0 ? '$count 项' : '暂无';
 
 String _normalized(String value) => value.trim().toLowerCase();
 

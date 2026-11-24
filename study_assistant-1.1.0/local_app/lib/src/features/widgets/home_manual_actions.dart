@@ -33,7 +33,11 @@ class HomeManualActions {
   final HomeManualFeedback feedback;
   final bool Function() isMounted;
 
-  Future<void> openEditor(BuildContext context, {ManualEntry? entry}) async {
+  Future<void> openEditor(
+    BuildContext context, {
+    ManualEntry? entry,
+    String? initialCourse,
+  }) async {
     if (!isMounted()) return;
     if (entry == null && store.notebook.entries.length >= 500) {
       feedback('个人待办已达 500 条上限，请清理后再添加');
@@ -41,10 +45,16 @@ class HomeManualActions {
     }
     final router = GoRouter.maybeOf(context);
     if (router != null) {
+      final course = initialCourse?.trim() ?? '';
       await router.push(
-        entry == null
-            ? '/assignments/new'
-            : '/assignments/manual/${Uri.encodeComponent(entry.id)}',
+        entry != null
+            ? '/assignments/manual/${Uri.encodeComponent(entry.id)}'
+            : course.isEmpty
+                ? '/assignments/new'
+                : Uri(
+                    path: '/assignments/new',
+                    queryParameters: {'course': course},
+                  ).toString(),
       );
       return;
     }
@@ -54,6 +64,7 @@ class HomeManualActions {
         builder: (_) => ManualEntryEditor(
           store: store,
           entry: entry,
+          initialCourse: initialCourse,
           routeScope: '/assignments',
         ),
       ),

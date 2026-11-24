@@ -704,6 +704,7 @@ class AssignmentQuery {
         AssignmentTypeFilter.exam => assignment.isExam,
         AssignmentTypeFilter.examNotice =>
           assignment.isExam && assignment.exam?.noticeOnly == true,
+        AssignmentTypeFilter.todo => false,
       };
 
   static bool isCalendarDated(

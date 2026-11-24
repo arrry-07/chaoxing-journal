@@ -463,8 +463,9 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
               path: '/assignments/new',
               onExit: (_, __) =>
                   _leaveGuard.confirmLeave(routeScope: '/assignments'),
-              builder: (_, __) => ManualEntryEditor(
+              builder: (_, state) => ManualEntryEditor(
                 store: assignmentStore,
+                initialCourse: state.uri.queryParameters['course'],
                 routeScope: '/assignments',
               ),
             ),

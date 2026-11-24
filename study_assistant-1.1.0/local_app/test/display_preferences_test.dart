@@ -422,7 +422,7 @@ void main() {
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
     await t.tap(find.text('搜索与筛选'));
     await t.pumpAndSettle();
-    await t.tap(find.text('所选课程'));
+    await t.tap(find.byKey(const ValueKey('home-course-filter')));
     await t.pumpAndSettle();
     await t.tap(find.byKey(const ValueKey('course-option-1:2')));
     await t.pumpAndSettle();

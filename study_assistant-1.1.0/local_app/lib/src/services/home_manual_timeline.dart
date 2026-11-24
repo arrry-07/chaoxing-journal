@@ -164,12 +164,11 @@ class HomeManualTimeline {
   static bool _matchesType(ManualEntry entry, AssignmentTypeFilter type) =>
       switch (type) {
         AssignmentTypeFilter.all => true,
-        AssignmentTypeFilter.homework ||
-        AssignmentTypeFilter.task =>
-          entry.kind == ManualEntry.kindTodo,
+        AssignmentTypeFilter.homework || AssignmentTypeFilter.task => false,
         AssignmentTypeFilter.exam ||
         AssignmentTypeFilter.examNotice =>
           entry.kind == ManualEntry.kindExam,
+        AssignmentTypeFilter.todo => entry.kind == ManualEntry.kindTodo,
       };
 
   static bool _matchesDeadline(

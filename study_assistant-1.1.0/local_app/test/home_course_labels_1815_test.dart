@@ -111,7 +111,7 @@ Future<void> _openFilters(WidgetTester tester) async {
 }
 
 Future<void> _openCourseMenu(WidgetTester tester) async {
-  final courseRow = find.text('所选课程');
+  final courseRow = find.byKey(const ValueKey('home-course-filter'));
   await Scrollable.ensureVisible(tester.element(courseRow), alignment: 0.5);
   await tester.pumpAndSettle();
   await tester.tap(courseRow);
@@ -191,7 +191,27 @@ void main() {
     await _openCourseMenu(tester);
     expect(find.byKey(const ValueKey('course-option-1:k1')), findsOneWidget);
     expect(find.byKey(const ValueKey('course-option-2:k2')), findsOneWidget);
-    expect(find.byKey(const ValueKey('course-option-3:k3')), findsNothing);
+    expect(find.byKey(const ValueKey('course-option-3:k3')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('course-option-1:k1')),
+        matching: find.text('1 项'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('course-option-3:k3')),
+        matching: find.text('暂无'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('course-option-1:k1'))).dy,
+      lessThan(tester
+          .getTopLeft(find.byKey(const ValueKey('course-option-3:k3')))
+          .dy),
+    );
     expect(find.text('班级 k1'), findsOneWidget);
     expect(find.text('班级 k2'), findsWidgets);
 
@@ -202,6 +222,60 @@ void main() {
     expect(store.homeFilters.courseKey, '1:k1');
     expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     expect(find.text('课程：同名课程 · 班级 k1'), findsOneWidget);
+  });
+
+  testWidgets('idle course shows empty state with add and clear actions',
+      (tester) async {
+    final store = _Store(catalog: _sameNameCatalog())
+      ..homeFilters = const HomeFilters(
+        courseKey: '3:k3',
+        sortOrder: HomeSortOrder.deadlineDesc,
+      )
+      ..replaceAssignmentsForTest([
+        _work(workId: 'w', courseId: '1', classId: 'k1'),
+      ]);
+    addTearDown(store.dispose);
+    await _pump(tester, store);
+
+    expect(find.text('这门课暂无作业和考试'), findsOneWidget);
+    expect(find.byKey(const ValueKey('home-course-empty-add')), findsOneWidget);
+    expect(find.text('为这门课添加待办'), findsOneWidget);
+    expect(find.text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。'), findsNothing);
+
+    await tester.tap(find.text('查看全部课程'));
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.courseKey, isNull);
+    expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
+    expect(find.text('这门课暂无作业和考试'), findsNothing);
+  });
+
+  testWidgets('course filter row clears the selection inline', (tester) async {
+    final store = _Store(catalog: _sameNameCatalog())
+      ..homeFilters = const HomeFilters(courseKey: '1:k1')
+      ..replaceAssignmentsForTest([
+        _work(workId: 'w', courseId: '1', classId: 'k1'),
+      ]);
+    addTearDown(store.dispose);
+    await _pump(tester, store);
+    await _openFilters(tester);
+
+    final row = find.byKey(const ValueKey('home-course-filter'));
+    await Scrollable.ensureVisible(tester.element(row), alignment: 0.5);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: row, matching: find.byType(Icon)).evaluate().where(
+          (element) =>
+              (element.widget as Icon).icon == Icons.menu_book_outlined),
+      isEmpty,
+    );
+    final clear = find.byKey(const ValueKey('home-course-filter-clear'));
+    expect(clear, findsOneWidget);
+    await tester.tap(clear);
+    await tester.pumpAndSettle();
+    expect(clear, findsNothing);
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.courseKey, isNull);
   });
 
   testWidgets('long course names truncate on one line at 320dp and 2x',

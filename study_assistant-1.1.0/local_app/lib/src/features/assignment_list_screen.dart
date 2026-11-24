@@ -30,6 +30,7 @@ import '../services/todo_copy_formatter.dart';
 import 'widgets/appearance_controls.dart';
 import 'widgets/assignment_card.dart';
 import 'widgets/home_manual_actions.dart';
+import 'widgets/home_course_filter_row.dart';
 import 'widgets/home_manual_sections.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_context_menu.dart';
@@ -257,6 +258,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         feedback(message, action: action, actionLabel: actionLabel),
     isMounted: () => mounted,
   );
+
+  /// Per-course item counts for the picker, refreshed on every build so the
+  /// sheet can recount when the user changes type or deadline before applying.
+  Map<String, int> Function(AssignmentTypeFilter, AssignmentDeadlineFilter)
+      _courseCountsFor = (_, __) => const {};
 
   Future<void> _toggleTodayPlan(Assignment assignment) async {
     final epoch = store.accountEpoch;
@@ -656,6 +662,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           records: allFollowedSources,
           selectedCourseKey: _courseKey,
           termCatalog: termCatalog,
+          includeIdleCourses: true,
         );
         final items = recoveryScope == null
             ? AssignmentQuery.filterHome(
@@ -695,6 +702,32 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 now: now,
               )
             : const <ManualEntry>[];
+        final selectedCourseIdle = recoveryScope == null &&
+            _courseKey != null &&
+            manualItems.isEmpty &&
+            !displayAssignments.any((a) => a.courseKey == _courseKey);
+        _courseCountsFor = (type, deadline) => countHomeCourseItems(
+              options: options,
+              filteredAssignments: AssignmentQuery.filterHome(
+                catalogAssignments,
+                query: _query,
+                deadline: deadline,
+                type: type,
+                includeHistorical: false,
+                index: displayIndex,
+                now: now,
+                coursework: coursework,
+              ),
+              filteredManualEntries: HomeManualTimeline.filterManualEntries(
+                store.isAuthenticated
+                    ? store.notebook.entries
+                    : const <ManualEntry>[],
+                query: _query,
+                deadline: deadline,
+                type: type,
+                now: now,
+              ),
+            );
         final sortedTimelineItems = HomeManualTimeline.mergeAndSort(
           assignments: items,
           manualEntries: manualItems,
@@ -1302,14 +1335,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   ],
                 ),
               ),
-            if (recoveryScope == null &&
-                _courseKey != null &&
-                manualItems.isEmpty &&
-                !displayAssignments.any((a) => a.courseKey == _courseKey))
-              Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
-                      style: journal.metadata)),
             if (sortedTimelineItems.isNotEmpty && recoveryScope == null)
               const SizedBox(height: 12),
           ],
@@ -1320,6 +1345,41 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             return _emptyStateCard(
               icon: Icons.event_available_outlined,
               message: '当前范围没有课业',
+            );
+          }
+          if (selectedCourseIdle) {
+            final courseName = store.courses
+                .where((course) => course.key == _courseKey)
+                .firstOrNull
+                ?.name;
+            return _emptyStateCard(
+              icon: Icons.event_note_outlined,
+              message: '这门课暂无作业和考试',
+              actions: [
+                JournalPrimaryButton(
+                  key: const ValueKey('home-course-empty-add'),
+                  expanded: false,
+                  label: '为这门课添加待办',
+                  onPressed: () => _manualActions.openEditor(
+                    context,
+                    initialCourse: courseName,
+                  ),
+                ),
+                JournalSecondaryButton(
+                  expanded: false,
+                  label: '查看全部课程',
+                  onPressed: () => _saveFilters(
+                    HomeFilters(
+                      query: _query,
+                      deadline: _deadlineFilter,
+                      type: _typeFilter,
+                      sortOrder: _sortOrder,
+                    ),
+                    store.accountEpoch,
+                    store.account,
+                  ),
+                ),
+              ],
             );
           }
           if (filtersActive &&
@@ -2390,75 +2450,74 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ],
                   ),
                   const SizedBox(height: 16),
-                  Text('课程筛选', style: journal.dayHeading),
-                  const SizedBox(height: 8),
-                  JournalGroupedCard(
-                    children: [
-                      JournalGroupTile(
-                        key: ValueKey(
-                            'course-${store.accountEpoch}-${courseKey ?? "all"}'),
-                        title: '所选课程',
-                        trailingText: selectedCourseLabel,
-                        icon: Icons.menu_book_outlined,
-                        onTap: () async {
-                          final picked = await showJournalPickerSheet<String>(
-                            context,
-                            title: '课程筛选',
-                            selectedValue: courseKey ?? '',
-                            searchable: courseOptions.length > 5 ||
-                                courseOptions
-                                    .any((o) => o.teacherNames.isNotEmpty),
-                            searchHint: '搜索课程或教师...',
-                            displayPrefs: store.display,
-                            filterOptions: const [
-                              JournalPickerFilterOption(
-                                id: 'currentTerm',
-                                label: '本学期',
-                              ),
-                              JournalPickerFilterOption(
-                                id: 'pastTerms',
-                                label: '往期',
-                              ),
-                              JournalPickerFilterOption(
-                                id: 'allTerms',
-                                label: '全部学期',
-                              ),
-                            ],
-                            initialFilterId: 'currentTerm',
-                            filterPredicate: (option, filterId) {
-                              if (option.value.isEmpty) return true;
-                              final scope = switch (filterId) {
-                                'pastTerms' => CourseTermScope.pastTerms,
-                                'allTerms' => CourseTermScope.allTerms,
-                                _ => CourseTermScope.currentTerm,
-                              };
-                              return store.termCatalog.matchesCoursePickerScope(
-                                  option.value, scope);
-                            },
-                            options: [
-                              const JournalPickerOption<String>(
-                                value: '',
-                                label: '全部课程',
-                              ),
-                              for (final option in courseOptions)
-                                JournalPickerOption<String>(
-                                  key: ValueKey(
-                                      'course-option-${option.courseKey}'),
-                                  value: option.courseKey,
-                                  label: option.name,
-                                  subtitle: option.subtitle,
-                                  keywords: option.searchKeywords,
-                                  icon: courseIconFor(option.name),
-                                ),
-                            ],
-                          );
-                          if (picked != null) {
-                            setSheetState(
-                                () => courseKey = picked == '' ? null : picked);
-                          }
+                  HomeCourseFilterRow(
+                    key: const ValueKey('home-course-filter'),
+                    tapKey: ValueKey(
+                        'course-${store.accountEpoch}-${courseKey ?? "all"}'),
+                    value: selectedCourseLabel,
+                    selected: courseKey != null,
+                    onClear: () => setSheetState(() => courseKey = null),
+                    onTap: () async {
+                      final counts = _courseCountsFor(type, deadline);
+                      final ordered =
+                          sortHomeCourseOptionsByCount(courseOptions, counts);
+                      final picked = await showJournalPickerSheet<String>(
+                        context,
+                        title: '课程筛选',
+                        selectedValue: courseKey ?? '',
+                        searchable: courseOptions.length > 5 ||
+                            courseOptions.any((o) => o.teacherNames.isNotEmpty),
+                        searchHint: '搜索课程或教师...',
+                        displayPrefs: store.display,
+                        filterOptions: const [
+                          JournalPickerFilterOption(
+                            id: 'currentTerm',
+                            label: '本学期',
+                          ),
+                          JournalPickerFilterOption(
+                            id: 'pastTerms',
+                            label: '往期',
+                          ),
+                          JournalPickerFilterOption(
+                            id: 'allTerms',
+                            label: '全部学期',
+                          ),
+                        ],
+                        initialFilterId: 'currentTerm',
+                        filterPredicate: (option, filterId) {
+                          if (option.value.isEmpty) return true;
+                          final scope = switch (filterId) {
+                            'pastTerms' => CourseTermScope.pastTerms,
+                            'allTerms' => CourseTermScope.allTerms,
+                            _ => CourseTermScope.currentTerm,
+                          };
+                          return store.termCatalog
+                              .matchesCoursePickerScope(option.value, scope);
                         },
-                      ),
-                    ],
+                        options: [
+                          const JournalPickerOption<String>(
+                            value: '',
+                            label: '全部课程',
+                          ),
+                          for (final option in ordered)
+                            JournalPickerOption<String>(
+                              key:
+                                  ValueKey('course-option-${option.courseKey}'),
+                              value: option.courseKey,
+                              label: option.name,
+                              subtitle: option.subtitle,
+                              keywords: option.searchKeywords,
+                              icon: courseIconFor(option.name),
+                              trailingText: homeCourseCountLabel(
+                                  counts[option.courseKey] ?? 0),
+                            ),
+                        ],
+                      );
+                      if (picked != null) {
+                        setSheetState(
+                            () => courseKey = picked == '' ? null : picked);
+                      }
+                    },
                   ),
                   const SizedBox(height: 16),
                   Text('排序', style: journal.dayHeading),

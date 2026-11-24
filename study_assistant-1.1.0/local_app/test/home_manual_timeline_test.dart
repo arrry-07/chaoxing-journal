@@ -137,9 +137,9 @@ void main() {
         ];
 
     expect(ids(), ['todo', 'exam', 'overdue', 'none']);
-    expect(
-        ids(type: AssignmentTypeFilter.homework), ['todo', 'overdue', 'none']);
-    expect(ids(type: AssignmentTypeFilter.task), ['todo', 'overdue', 'none']);
+    expect(ids(type: AssignmentTypeFilter.homework), isEmpty);
+    expect(ids(type: AssignmentTypeFilter.task), isEmpty);
+    expect(ids(type: AssignmentTypeFilter.todo), ['todo', 'overdue', 'none']);
     expect(ids(type: AssignmentTypeFilter.exam), ['exam']);
     expect(ids(type: AssignmentTypeFilter.examNotice), ['exam']);
     expect(ids(course: ' 高等数学 '), ['todo', 'none']);

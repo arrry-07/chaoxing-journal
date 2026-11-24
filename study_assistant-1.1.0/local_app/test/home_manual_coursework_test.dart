@@ -352,13 +352,22 @@ void main() {
       type: AssignmentTypeFilter.homework,
       sortOrder: HomeSortOrder.deadlineDesc,
     ));
-    expect(find.text('手动普通待办'), findsOneWidget);
     expect(find.text('学习通普通作业'), findsOneWidget);
+    expect(find.text('手动普通待办'), findsNothing);
+    expect(find.text('手动逾期待办'), findsNothing);
+    expect(find.text('手动考试安排'), findsNothing);
+
+    await setFilters(const HomeFilters(
+      type: AssignmentTypeFilter.todo,
+      sortOrder: HomeSortOrder.deadlineDesc,
+    ));
+    expect(find.text('手动普通待办'), findsOneWidget);
     expect(find.text('手动逾期待办'), findsOneWidget);
-    expect(find.text('手动考试'), findsNothing);
+    expect(find.text('学习通普通作业'), findsNothing);
+    expect(find.text('手动考试安排'), findsNothing);
     expect(
       tester.getTopLeft(find.text('手动逾期待办')).dy,
-      greaterThan(tester.getTopLeft(find.text('学习通普通作业')).dy),
+      greaterThan(tester.getTopLeft(find.text('手动普通待办')).dy),
     );
   });
 
