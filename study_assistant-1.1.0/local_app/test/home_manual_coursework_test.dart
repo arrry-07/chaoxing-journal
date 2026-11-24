@@ -362,6 +362,72 @@ void main() {
     );
   });
 
+  testWidgets(
+      'FB-005 overdue manual and coursework pin to top and return to bottom on unpin',
+      (tester) async {
+    final upcoming = _work(
+      'w-upcoming',
+      title: '学习通普通作业',
+      due: now.add(const Duration(hours: 3)),
+      syncedAt: now,
+    );
+    final overdueWork = _work(
+      'w-overdue',
+      title: '学习通逾期作业',
+      due: now.subtract(const Duration(hours: 3)),
+      syncedAt: now,
+    );
+    final overdueManual = _manual(
+      'm-overdue-pin',
+      title: '手动逾期待办',
+      at: now.subtract(const Duration(hours: 2)),
+    );
+    final store = await _store([upcoming, overdueWork],
+        entries: [overdueManual], clock: () => now);
+    addTearDown(store.dispose);
+    await _pumpHome(tester, store, now);
+
+    double topOf(String title) => tester.getTopLeft(find.text(title)).dy;
+
+    void expectOverdueAtBottom() {
+      expect(topOf(overdueWork.title), greaterThan(topOf(upcoming.title)));
+      expect(topOf(overdueManual.title), greaterThan(topOf(upcoming.title)));
+    }
+
+    void expectOverdueOnTop() {
+      expect(topOf(overdueWork.title), lessThan(topOf(upcoming.title)));
+      expect(topOf(overdueManual.title), lessThan(topOf(upcoming.title)));
+    }
+
+    for (final order in [
+      HomeSortOrder.deadlineAsc,
+      HomeSortOrder.deadlineDesc,
+    ]) {
+      await store.saveHomeFilters(
+        HomeFilters(sortOrder: order),
+        store.accountEpoch,
+      );
+      await tester.pumpAndSettle();
+      expectOverdueAtBottom();
+
+      expect(store.canTogglePin(overdueWork), isTrue);
+      expect(store.canToggleManualPin(overdueManual), isTrue);
+      expect(await store.togglePin(overdueWork), isTrue);
+      expect(await store.toggleManualPin(overdueManual), isTrue);
+      await tester.pumpAndSettle();
+      expect(store.isPinned(overdueWork), isTrue);
+      expect(store.isManualPinned(overdueManual), isTrue);
+      expectOverdueOnTop();
+
+      expect(await store.togglePin(overdueWork), isTrue);
+      expect(await store.toggleManualPin(overdueManual), isTrue);
+      await tester.pumpAndSettle();
+      expect(store.isPinned(overdueWork), isFalse);
+      expect(store.isManualPinned(overdueManual), isFalse);
+      expectOverdueAtBottom();
+    }
+  });
+
   testWidgets('manual card stays overflow-free at 360dp for 1.5x and 2.0x text',
       (tester) async {
     tester.view.physicalSize = const Size(360, 800);
