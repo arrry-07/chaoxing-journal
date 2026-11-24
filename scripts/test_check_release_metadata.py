@@ -71,9 +71,9 @@ class ReleaseMetadataTests(unittest.TestCase):
         return script
 
     def test_formal_version_requires_docs(self) -> None:
-        result = _run(self._repo("1.9.0+121"))
+        result = _run(self._repo("1.90.0+123"))
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("1.9.0+121", result.stdout)
+        self.assertIn("1.90.0+123", result.stdout)
 
     def test_dev_version_passes_with_allow_dev_and_keeps_formal_docs(self) -> None:
         script = self._repo("1.8.27+121")
@@ -87,12 +87,12 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("Formal release metadata requires X.Y.0", result.stderr)
 
     def test_dev_suffix_is_rejected(self) -> None:
-        result = _run(self._repo("1.9.0-dev.1+121"), "--allow-dev")
+        result = _run(self._repo("1.90.0-dev.1+123"), "--allow-dev")
         self.assertEqual(1, result.returncode)
         self.assertIn("-dev.N", result.stderr)
 
     def test_leading_zero_is_rejected_with_actionable_message(self) -> None:
-        for version in ("1.9.00+121", "1.9.01+121", "1.09.0+121"):
+        for version in ("1.9.00+121", "1.90.00+123", "1.9.01+121", "1.09.0+121"):
             result = _run(self._repo(version))
             self.assertEqual(1, result.returncode, version)
             self.assertIn("leading zeros", result.stderr)
@@ -103,7 +103,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("must be <= 99", result.stderr)
 
     def test_crlf_pubspec_is_accepted(self) -> None:
-        result = _run(self._repo("1.9.0+122", newline="\r\n"))
+        result = _run(self._repo("1.90.0+123", newline="\r\n"))
         self.assertEqual(0, result.returncode, result.stderr)
 
 

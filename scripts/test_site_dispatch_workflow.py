@@ -140,7 +140,7 @@ class SiteDispatchWorkflowTests(unittest.TestCase):
             urlopen.assert_not_called()
 
     def test_inline_script_rejects_invalid_tag(self) -> None:
-        for tag in ("v1.9.00", "1.9.0", "v1.9.0-rc.1", ""):
+        for tag in ("v1.9.00", "v1.90.00", "1.9.0", "1.90.0", "v1.9.0-rc.1", ""):
             urlopen = mock.Mock()
             code, output = self._run_inline(
                 {
@@ -159,15 +159,15 @@ class SiteDispatchWorkflowTests(unittest.TestCase):
         code, output = self._run_inline(
             {
                 "SITE_DISPATCH_TOKEN": "secret-token",
-                "RELEASE_TAG": "v1.9.0",
+                "RELEASE_TAG": "v1.90.0",
                 "RELEASE_DRAFT": "false",
                 "RELEASE_PRERELEASE": "false",
-                "RELEASE_URL": "https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.9.0",
+                "RELEASE_URL": "https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.90.0",
             },
             urlopen,
         )
         self.assertEqual(0, code)
-        self.assertIn("[PASS] Dispatched v1.9.0", output)
+        self.assertIn("[PASS] Dispatched v1.90.0", output)
         self.assertNotIn("secret-token", output)
         request = urlopen.call_args.args[0]
         self.assertEqual(
@@ -180,7 +180,7 @@ class SiteDispatchWorkflowTests(unittest.TestCase):
         )
         payload = json.loads(request.data.decode("utf-8"))
         self.assertEqual("chaoxing-release-published", payload["event_type"])
-        self.assertEqual("v1.9.0", payload["client_payload"]["tag"])
+        self.assertEqual("v1.90.0", payload["client_payload"]["tag"])
         self.assertEqual(
             "arrry-07/chaoxing-journal",
             payload["client_payload"]["source_repo"],

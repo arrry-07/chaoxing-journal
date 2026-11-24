@@ -191,7 +191,7 @@ class FreezeReleaseTests(unittest.TestCase):
             "--mode",
             "dev",
             "--version",
-            "1.9.0+121",
+            "1.90.0+121",
             "--root",
             str(repo),
         )
@@ -201,7 +201,7 @@ class FreezeReleaseTests(unittest.TestCase):
     def test_apply_formal_version_updates_links_and_classifies_minor(self) -> None:
         repo = self._repo(
             "1.8.27+121",
-            changelog_new="## 1.9.0（122）\n",
+            changelog_new="## 1.90.0（122）\n",
         )
         result = _run(
             FREEZE,
@@ -209,7 +209,7 @@ class FreezeReleaseTests(unittest.TestCase):
             "--mode",
             "formal",
             "--version",
-            "1.9.0+122",
+            "1.90.0+122",
             "--previous",
             "1.8.26+120",
             "--root",
@@ -219,12 +219,12 @@ class FreezeReleaseTests(unittest.TestCase):
         self.assertIn("minor", result.stdout)
         readme = _read(repo / "README.md")
         install = _read(repo / "docs/guides/安装与使用.md")
-        self.assertIn("下载 Android 安装包：1.9.0+122", readme)
-        self.assertIn("[1.9.0 发布页]", readme)
-        self.assertIn("1.9.0 继续沿用", readme)
-        self.assertIn("releases/tag/v1.9.0", readme)
-        self.assertIn("chaoxing-journal-1.9.0.apk", readme)
-        self.assertIn("当前正式版本为 `1.9.0+122`", install)
+        self.assertIn("下载 Android 安装包：1.90.0+122", readme)
+        self.assertIn("[1.90.0 发布页]", readme)
+        self.assertIn("1.90.0 继续沿用", readme)
+        self.assertIn("releases/tag/v1.90.0", readme)
+        self.assertIn("chaoxing-journal-1.90.0.apk", readme)
+        self.assertIn("当前正式版本为 `1.90.0+122`", install)
         self.assertNotIn("chaoxing-journal-1.8.26.apk", readme)
         self.assertNotIn("1.8.26", readme)
         metadata = _run(
@@ -247,7 +247,7 @@ class FreezeReleaseTests(unittest.TestCase):
     def test_formal_apply_detects_previous_release_from_docs(self) -> None:
         repo = self._repo(
             "1.8.27+121",
-            changelog_new="## 1.9.0（122）\n",
+            changelog_new="## 1.90.0（122）\n",
         )
         result = _run(
             FREEZE,
@@ -255,29 +255,70 @@ class FreezeReleaseTests(unittest.TestCase):
             "--mode",
             "formal",
             "--version",
-            "1.9.0+122",
+            "1.90.0+122",
             "--root",
             str(repo),
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("1.9.0+122", _read(repo / "README.md"))
+        self.assertIn("1.90.0+122", _read(repo / "README.md"))
 
     def test_formal_apply_requires_expected_minor_step(self) -> None:
-        repo = self._repo(changelog_new="## 1.10.0（121）\n")
-        result = _run(
+        for bad_version in ("1.9.0+121", "1.10.0+121"):
+            repo = self._repo(changelog_new=f"## {bad_version.split('+')[0]}（121）\n")
+            result = _run(
+                FREEZE,
+                "--apply",
+                "--mode",
+                "formal",
+                "--version",
+                bad_version,
+                "--previous",
+                "1.8.26+120",
+                "--root",
+                str(repo),
+            )
+            self.assertEqual(1, result.returncode, bad_version)
+            self.assertIn("must be 1.90.0", result.stderr)
+
+        repo_next = self._repo(
+            "1.90.0+122",
+            formal="1.90.0+122",
+            changelog_new="## 1.91.0（123）\n",
+        )
+        ok = _run(
             FREEZE,
             "--apply",
             "--mode",
             "formal",
             "--version",
-            "1.10.0+121",
+            "1.91.0+123",
             "--previous",
-            "1.8.26+120",
+            "1.90.0+122",
             "--root",
-            str(repo),
+            str(repo_next),
         )
-        self.assertEqual(1, result.returncode)
-        self.assertIn("must be 1.9.0", result.stderr)
+        self.assertEqual(0, ok.returncode, ok.stderr)
+        self.assertIn("minor", ok.stdout)
+
+        repo_skip = self._repo(
+            "1.90.0+122",
+            formal="1.90.0+122",
+            changelog_new="## 1.92.0（123）\n",
+        )
+        skip = _run(
+            FREEZE,
+            "--apply",
+            "--mode",
+            "formal",
+            "--version",
+            "1.92.0+123",
+            "--previous",
+            "1.90.0+122",
+            "--root",
+            str(repo_skip),
+        )
+        self.assertEqual(1, skip.returncode)
+        self.assertIn("must be 1.91.0", skip.stderr)
 
     def test_minor_99_rolls_into_new_major(self) -> None:
         repo = self._repo(
@@ -324,7 +365,7 @@ class FreezeReleaseTests(unittest.TestCase):
             "--mode",
             "dev",
             "--version",
-            "1.9.00+121",
+            "1.90.00+121",
             "--root",
             str(repo),
         )
@@ -337,7 +378,7 @@ class FreezeReleaseTests(unittest.TestCase):
             "--mode",
             "formal",
             "--version",
-            "1.9.0+120",
+            "1.90.0+120",
             "--previous",
             "1.8.26+120",
             "--root",
@@ -354,7 +395,7 @@ class FreezeReleaseTests(unittest.TestCase):
             "--mode",
             "formal",
             "--version",
-            "1.9.0+122",
+            "1.90.0+122",
             "--root",
             str(repo),
         )
@@ -385,7 +426,7 @@ class FreezeReleaseTests(unittest.TestCase):
             "--mode",
             "formal",
             "--version",
-            "1.9.0+122",
+            "1.90.0+122",
             "--previous",
             "1.8.26+120",
             "--root",
@@ -394,7 +435,7 @@ class FreezeReleaseTests(unittest.TestCase):
         self.assertEqual(1, formal.returncode)
         self.assertIn("CHANGELOG.md", formal.stderr)
         (repo / "CHANGELOG.md").write_text(
-            "## 1.8.26（120）\r\n## 1.9.0（122）\r\n",
+            "## 1.8.26（120）\r\n## 1.90.0（122）\r\n",
             encoding="utf-8",
             newline="",
         )
@@ -404,7 +445,7 @@ class FreezeReleaseTests(unittest.TestCase):
             "--mode",
             "formal",
             "--version",
-            "1.9.0+122",
+            "1.90.0+122",
             "--previous",
             "1.8.26+120",
             "--root",
@@ -421,14 +462,14 @@ class FreezeReleaseTests(unittest.TestCase):
             self.assertEqual(text.count("\n"), text.count("\r\n"), path)
 
     def test_update_levels(self) -> None:
-        base = freeze.parse_version("1.9.0+121")
+        base = freeze.parse_version("1.90.0+122")
         self.assertEqual(
             "patch",
-            freeze.classify_update(base, freeze.parse_version("1.9.1+122")),
+            freeze.classify_update(base, freeze.parse_version("1.90.1+123")),
         )
         self.assertEqual(
             "minor",
-            freeze.classify_update(base, freeze.parse_version("1.10.0+130")),
+            freeze.classify_update(base, freeze.parse_version("1.91.0+130")),
         )
         self.assertEqual(
             "major",

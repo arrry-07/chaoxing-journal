@@ -22,7 +22,7 @@ if version is None:
     parser.exit(
         1,
         "Expected X.Y.Z+build without leading zeros or a -dev.N suffix "
-        "(for example 1.9.0+121, not 1.9.00+121) in pubspec.yaml\n",
+        "(for example 1.90.0+123, not 1.90.00+123) in pubspec.yaml\n",
     )
 
 base_name, minor, patch, code = version.groups()

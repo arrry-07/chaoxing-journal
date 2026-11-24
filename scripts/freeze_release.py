@@ -61,7 +61,7 @@ def parse_version(raw: str) -> ReleaseVersion:
     if match is None:
         raise FreezeError(
             "Version must look like X.Y.Z+build without leading zeros or a "
-            "-dev.N suffix (for example 1.9.0+121, not 1.9.00+121)."
+            "-dev.N suffix (for example 1.90.0+123, not 1.90.00+123)."
         )
     return ReleaseVersion(
         major=int(match.group("major")),
@@ -97,6 +97,8 @@ def _validate_monotonic(
 
 
 def _expected_formal_base(previous: ReleaseVersion) -> tuple[int, int, int]:
+    if previous.major == 1 and previous.minor == 8:
+        return (1, 90, 0)
     if previous.minor >= 99:
         return (previous.major + 1, 0, 0)
     return (previous.major, previous.minor + 1, 0)
