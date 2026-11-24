@@ -3,6 +3,12 @@
 > 每项独立改动提交前更新本文件；只保留最近 5 条，更早记录随发布收口归档。
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办。
 
+## 2026-11-24 · v1.9.0 Stage 1：置顶修复完成、隔离 androidTest 阻塞
+
+- 已完成改动：`assignment_manual_pin_test.dart` 新增可控仓库夹具与 6 项回归（修前 #1/#2/#5/#6 实测红灯，修后 10/10 全绿）；`assignment_store.dart` 将 `_savePins` 改为 `Future<bool>`（`StaleSessionWriteException` 返回 `false` 且不设 `_error`/`_recoveryWarnings`，`LocalStorageLeaseReleaseException` 仍返回 `true` 并记恢复告警），`_togglePinKey`/`reorderPinned` 写后守卫改为 `!persisted || !stillOwned()`，`_prunePins` 仅在 `persisted` 且会话未变时清 `_pinsNeedSave`，`saveNotebook` 补 `_pinsNeedSave ||` 重试入口与 `_prunePins` 后会话守卫（源码净增 20 行）。
+- 当前 commit 与状态：代码与回归 `ef0e39a` 已推送 `origin/dev`；`verify_local_gate.py --tests <8 文件>` 退出码 0（Flutter 105 项、`dart analyze` 0 问题、9 组 Python 99 项、L0 55 行）。M3 在隔离 MuMu `127.0.0.1:16384`（API 32、`x86_64`、`Asia/Shanghai`）用 ASCII 镜像构建（`D:\campus-tools\build-work\androidtest-1828-20261124-153020`）实跑 3 批 21 类 112 项：batch1 19 通过/1 失败、batch2 80 通过、batch3 10 通过/2 假设跳过。失败项为 `AssignmentNotificationPublisherTest#unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel`：同批 `aDisabledChannelKeepsNewAssignmentPending` 先把 `assignment_updates` 建为 `IMPORTANCE_NONE` 并删除，Android 按同 id 重建时恢复旧 `importance`（应用侧 `createNotificationChannel` 无法改回），而发布前对 `CHANNEL_UPDATES` 的预检先于静默通道切换，故返回「对应通知通道已关闭」。该用例单跑 `STATUS_CODE=0`；最小复现对日志 `repro-channel-order-pair.log`、完整批次日志 `androidtest-3batches.log` 均在上述构建目录。保护实例 `127.0.0.1:16448` 仍 `1.8.27+121`、`firstInstallTime=2026-11-04 19:05:10`。
+- 下一步待办：M3 未达方案「0 失败」判据，Stage 1 停工待裁决：修复 Kotlin `androidTest` 通道夹具（需扩项，超出本方案非目标）或接受该环境性失败并记录豁免；处理后再补跑 M3、完成 M4 状态回写并进入独立 Gate。
+
 ## 2026-11-24 · v1.9.0 下一阶段只读调查与方案定稿（置顶持久化与隔离设备 androidTest）
 
 - 已完成改动：在基线 `0604293` 完成只读源码核实，并用仓外临时测试确认修前行为：`_savePins` 吞掉 `StaleSessionWriteException` 后，`_togglePinKey`（`togglePin`/`toggleManualPin`）与 `reorderPinned` 误返回 `true` 且污染内存 `_pinned`、`_prunePins` 误清 `_pinsNeedSave` 阻断后续 `refreshAssignments()`/`saveNotebook()` 补写重试；同时核对 `saveNotebook` 缺 `_pinsNeedSave ||` 与 `_prunePins` 后会话守卫，而 `_afterAssignmentsChanged` 及其 13 处提醒更新调用方已有 `_isSessionCurrent(snap)` 保护。已输出 Stage 1 → Gate → Stage 2 规格书 [v1.9.0 置顶持久化与隔离设备仪器测试方案](../plans/2026-11-24-v1.9.0-置顶持久化与隔离设备仪器测试方案.md)。
@@ -29,8 +35,3 @@
 - 当前 commit 与状态：本提交为工作流文档；功能 HEAD 仍 `e46538f`，`pubspec` 仍 `1.8.26+120`，未触碰 `main`/Tag/Release。
 - 下一步待办：用轻量复审提示词复核 `ba707c5..HEAD`，通过后等维护者发版指令。
 
-## 2026-11-24 · 工作流规则：改动落盘与 Gate 增量复审
-
-- 已完成改动：新增本状态文件；`AGENTS.md` 与 `VALIDATION.md` 写入「每项改动提交前更新状态与相关文档」及「Gate 返工复审按增量执行」规则。
-- 当前 commit 与状态：功能返工 `dd29cbc` → `38ca50b` → `0773ba3` → `e46538f` 已推送 `origin/dev`；本提交为工作流规则，`pubspec` 仍 `1.8.26+120`，未触碰 `main`/Tag/Release。
-- 下一步待办：按增量复审 `ba707c5..e46538f` 复核 4 个返工 commit；通过后等维护者发版指令进入 Stage 2。
