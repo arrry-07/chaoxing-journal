@@ -3,10 +3,16 @@
 > 每项独立改动提交前更新本文件；只保留最近 5 条，更早记录随发布收口归档。
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办。
 
+## 2026-11-24 · 1.8.28+122 自测包收口（置顶持久化 + 隔离 androidTest + 工作流固化）
+
+- 已完成改动：Gate 通过后固化「Stage 1 → 独立 Gate → 升 `Z+1` 原签名自测 → MuMu 基础冒烟与核心路径 → dev 文档 → 下一轮提示词」闭环（`AGENTS.md`、`VALIDATION.md`、开发指南），明确 Gate 后直接打自测包、不逐轮询问 A/B；版本升至 `1.8.28+122`（仅 `pubspec.yaml` 与 `AppVersion`）；从 `772fe67` 的 `git archive` 干净 ASCII 输入、本机缓存 `--no-pub` 构建原签名双 ABI Release APK，并完成 MuMu「学习通」保数据覆盖与实屏验收。
+- 当前 commit 与状态：工作流 `0343a06`、版本 `772fe67`；APK `62109666` 字节、SHA-256 `039dd33ea1d091d8bbdae42924b67b4fc5fe1d9fdd457cf8976623c138464087`，包名 `com.example.studyassistant.journal`、`1.8.28 (122)`、min26/target36、ARM64/x86_64、非 debuggable、v2 证书 `d36a5715...`、16 KiB 对齐与 ZIP 472 条目 CRC 全通过。MuMu `127.0.0.1:16448` 覆盖安装成功，`firstInstallTime=2026-11-04 19:05:10` 保留、设备 `base.apk` 哈希一致；冷启动 2335ms，全程 logcat 0 条 `FATAL/FlutterError/RenderFlex overflowed`。实屏核对：登录态、40 门课程与 80 项课业保留，「关于我们」显示 `1.8.28 (122)`；手动待办与学习通作业按时间混排；置顶/取消置顶、拖拽调序在杀进程重启后保持；逾期项默认置底且可手动置顶；完成与撤销、统计 24/39 与往期 33/41 下钻、日历议程、提醒设置页均正常。截图与日志在 `D:\campus-tools\build-work\cx1828-preview-772fe67-20261124-170537`；临时条目 `QA1828-*` 已删除、置顶已清空、首页恢复「时间近到远 / 全部 / 全部」。未刷新学习通线上接口；仅误触外链打开一次作业页并取消签到弹窗，未提交任何内容。
+- 下一步待办：按 [ROADMAP](../ROADMAP.md#dev-下一阶段) 的下一轮候选方向规划；正式发版仍等维护者主动下达指令后进入 Stage 2（目标 `1.9.0`，构建号顺延高于 `+122`）。
+
 ## 2026-11-24 · v1.9.0 Stage 1 完成：置顶持久化修复与隔离 androidTest 112 项通过
 
 - 已完成改动：`assignment_manual_pin_test.dart` 新增可控仓库夹具与 6 项回归（修前 #1/#2/#5/#6 实测红灯，修后 10/10 全绿）；`assignment_store.dart` 将 `_savePins` 改为 `Future<bool>`（`StaleSessionWriteException` 返回 `false` 且不设 `_error`/`_recoveryWarnings`，`LocalStorageLeaseReleaseException` 仍返回 `true` 并记恢复告警），`_togglePinKey`/`reorderPinned` 写后守卫改为 `!persisted || !stillOwned()`，`_prunePins` 仅在 `persisted` 且会话未变时清 `_pinsNeedSave`，`saveNotebook` 补 `_pinsNeedSave ||` 重试入口与 `_prunePins` 后会话守卫（源码净增 20 行）。维护者批准的扩项：`AssignmentNotificationPublisherTest` 改用复用型合成关闭通道 `synthetic-disabled-updates-tests` 并走 internal 重载，移除对生产 `CHANNEL_UPDATES` 的 setUp/tearDown 删除；`run_android_tests.py` 的 `_run` 显式 `encoding="utf-8", errors="replace"`，`test_run_android_tests.py` 增 1 项回归。
-- 当前 commit 与状态：`ef0e39a`（修复 + 6 回归）、`3de0f59`（夹具与脚本，3 文件）已推送 `origin/dev`。M2 定向门禁退出码 0（8 文件 105 项、`dart analyze` 0 问题、9 组 Python 99 项、L0 55 行）。M3 用新 ASCII 镜像 `D:\campus-tools\build-work\androidtest-1828-20261124-155743`（JDK 17 + `D:\campus-tools\android`，`:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest` 全部成功）在隔离 MuMu `127.0.0.1:16384`（API 32、`x86_64`、`Asia/Shanghai`）实跑：batch1 `20/0/0/0`、batch2 `80/0/0/0`、batch3 `10/0/2/2`，合计 112 项 110 通过、2 假设跳过、0 失败；`AssignmentNotificationPublisherTest#unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel` 为 `STATUS_CODE=0`；跳过项为 `FeedbackEmailLaunchTest#systemCanOpenTheFixedMailtoDraftWhenAHandlerExists`（无邮件客户端）与 `RealAccountHeadlessEntryTest#realSessionRunsDaytimeBackgroundCheck`（未传 `-e realAccount true`）。未设 `PYTHONUTF8` 直接运行脚本退出码 0，日志 `androidtest-3batches.log`、`gradle-build.log` 均在该构建目录。保护实例 `127.0.0.1:16448` 仍 `1.8.27+121`、`firstInstallTime=2026-11-04 19:05:10`。
+- 当前 commit 与状态：`ef0e39a`（修复 + 6 回归）、`3de0f59`（夹具与脚本，3 文件）已推送 `origin/dev`。M2 定向门禁退出码 0（8 文件 105 项、`dart analyze` 0 问题）；扩项后 M4 最终门禁 9 组 Python 100 项全过、L0 55 行。M3 用新 ASCII 镜像 `D:\campus-tools\build-work\androidtest-1828-20261124-155743`（JDK 17 + `D:\campus-tools\android`，`:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest` 全部成功）在隔离 MuMu `127.0.0.1:16384`（API 32、`x86_64`、`Asia/Shanghai`）实跑：batch1 `20/0/0/0`、batch2 `80/0/0/0`、batch3 `10/0/2/2`，合计 112 项 110 通过、2 假设跳过、0 失败；`AssignmentNotificationPublisherTest#unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel` 为 `STATUS_CODE=0`；跳过项为 `FeedbackEmailLaunchTest#systemCanOpenTheFixedMailtoDraftWhenAHandlerExists`（无邮件客户端）与 `RealAccountHeadlessEntryTest#realSessionRunsDaytimeBackgroundCheck`（未传 `-e realAccount true`）。未设 `PYTHONUTF8` 直接运行脚本退出码 0，日志 `androidtest-3batches.log`、`gradle-build.log` 均在该构建目录。保护实例 `127.0.0.1:16448` 仍 `1.8.27+121`、`firstInstallTime=2026-11-04 19:05:10`。
 - 下一步待办：Stage 1 已完成并停机，进入本方案独立 Gate 审查（建议 Diff 区间 `bff9e7c..HEAD`）；Gate 通过后再决定升 `1.8.28+122` 打 MuMu 自测包或进入 `v1.9.0` Stage 2。
 
 ## 2026-11-24 · v1.9.0 下一阶段只读调查与方案定稿（置顶持久化与隔离设备 androidTest）
@@ -29,9 +35,4 @@
 - 当前 commit 与状态：`640916d` 基于 `d97ba40`，版本为 `1.8.26+120`。本地门禁脚本退出码为 0，7 个 Flutter 文件 91 项（含 `FB-005`）、9 组 Python 共 99 项通过。原日志中 Dart 分析有 1 条 `use_super_parameters`，经 Gate 复审确认为阻断。隔离旧实现触发 5 个 Flutter 回归失败，仪器测试清单覆盖 21 个类，受保护设备 dry-run 拒绝执行。门禁日志 `chaoxing-v1.9.0-gate-20261124-112723.log`。
 - 下一步待办：静态分析阻断的处理见上条。MuMu 实机界面、隔离仪器测试和云端全量 CI 待相应验收。
 
-## 2026-11-24 · 工作流规则：审查提示词轻量化
-
-- 已完成改动：`VALIDATION.md` 增补「审查/复审提示词只给基线、范围、必读文件、硬边界与输出格式，不替审查模型罗列检查清单」；跨会话记忆同步更新。
-- 当前 commit 与状态：本提交为工作流文档；功能 HEAD 仍 `e46538f`，`pubspec` 仍 `1.8.26+120`，未触碰 `main`/Tag/Release。
-- 下一步待办：用轻量复审提示词复核 `ba707c5..HEAD`，通过后等维护者发版指令。
 
