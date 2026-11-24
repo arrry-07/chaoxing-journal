@@ -170,13 +170,31 @@ void main() {
     },
   );
 
-  test('Android FileProvider exposes update apk cache directory', () {
+  test('Android FileProvider exposes update apk cache and attachment paths',
+      () {
     final paths = File(
       'android/app/src/main/res/xml/update_file_paths.xml',
     ).readAsStringSync();
 
     expect(paths, contains('cache-path'));
-    expect(paths, contains('updates'));
+    expect(paths, contains('updates/'));
+    expect(paths, contains('camera_captures/'));
+    expect(paths, contains('manual_attachments/'));
+  });
+
+  test(
+      'Android manifest does not request camera or broad media storage permissions',
+      () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+
+    expect(manifest, isNot(contains('android.permission.CAMERA')));
+    expect(manifest, isNot(contains('android.permission.READ_MEDIA_IMAGES')));
+    expect(
+      manifest,
+      isNot(contains('android.permission.READ_EXTERNAL_STORAGE')),
+    );
   });
 
   test('unsupported 32-bit JNI libraries cannot be packaged', () {

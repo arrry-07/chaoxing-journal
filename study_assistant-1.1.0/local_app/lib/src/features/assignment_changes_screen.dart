@@ -34,8 +34,8 @@ class AssignmentChangesScreen extends StatelessWidget {
       AssignmentChangeKind.deadline => (
           label: '截止调整',
           icon: Icons.event_outlined,
-          color: journal.berry,
-          pillBg: journal.berryBg,
+          color: journal.ochre,
+          pillBg: journal.ochreBg,
         ),
       AssignmentChangeKind.status => (
           label: '状态变更',

@@ -13,7 +13,7 @@ class Journal {
   static const sheet = Color(0xFFFFFFFF);
   static const parchment = Color(0xFFEFEFEA);
   static const ink = Color(0xFF1F2328);
-  static const muted = Color(0xFF4E545C);
+  static const muted = Color(0xFF434951);
   static const sage = Color(0xFFEAF0FD);
   static const sageBorder = Color(0xFFC9D6F7);
   static const rule = Color(0xFFE6E5E0);
@@ -22,6 +22,12 @@ class Journal {
   static const berry = Color(0xFFB5493A);
   static const berryBg = Color(0xFFFBF2EF);
   static const berryBorder = Color(0xFFECD0C8);
+  static const examOrange = Color(0xFFAD4E0E);
+  static const examOrangeBg = Color(0xFFFDF2E6);
+  static const examOrangeBorder = Color(0xFFEED3B6);
+  static const todoGreen = Color(0xFF2A7A4B);
+  static const todoGreenBg = Color(0xFFEAF6EE);
+  static const todoGreenBorder = Color(0xFFC1E0CC);
   static const ochre = Color(0xFF4F5D73);
   static const ochreBg = Color(0xFFEFF2F6);
   static const ochreBorder = Color(0xFFD8DEE8);
@@ -84,7 +90,7 @@ class Journal {
   static const metadata = TextStyle(
     fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
-    fontSize: 13,
+    fontSize: 13.5,
     height: 1.45,
     fontFeatures: [FontFeature.tabularFigures()],
     color: muted,
@@ -110,7 +116,7 @@ class Journal {
   static const pillLabel = TextStyle(
     fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
-    fontSize: 12.5,
+    fontSize: 13,
     fontWeight: FontWeight.w400,
     height: 1.2,
     fontFeatures: [FontFeature.tabularFigures()],
@@ -139,6 +145,12 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     required this.berry,
     required this.berryBg,
     required this.berryBorder,
+    required this.examOrange,
+    required this.examOrangeBg,
+    required this.examOrangeBorder,
+    required this.todoGreen,
+    required this.todoGreenBg,
+    required this.todoGreenBorder,
     required this.ochre,
     required this.ochreBg,
     required this.ochreBorder,
@@ -168,6 +180,12 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     berry: Journal.berry,
     berryBg: Journal.berryBg,
     berryBorder: Journal.berryBorder,
+    examOrange: Journal.examOrange,
+    examOrangeBg: Journal.examOrangeBg,
+    examOrangeBorder: Journal.examOrangeBorder,
+    todoGreen: Journal.todoGreen,
+    todoGreenBg: Journal.todoGreenBg,
+    todoGreenBorder: Journal.todoGreenBorder,
     ochre: Journal.ochre,
     ochreBg: Journal.ochreBg,
     ochreBorder: Journal.ochreBorder,
@@ -188,7 +206,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     ink: Color(0xFFEAE6DF),
     primaryFill: Color(0xFFEAE6DF),
     onPrimaryFill: Color(0xFF1A1917),
-    muted: Color(0xFFBAB5AC),
+    muted: Color(0xFFC4BFB6),
     sage: Color(0xFF252B3B),
     sageBorder: Color(0xFF3D4C6E),
     rule: Color(0xFF32302B),
@@ -198,6 +216,12 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     berry: Color(0xFFE27D70),
     berryBg: Color(0xFF342222),
     berryBorder: Color(0xFF61403C),
+    examOrange: Color(0xFFF0A05A),
+    examOrangeBg: Color(0xFF33271D),
+    examOrangeBorder: Color(0xFF5D432E),
+    todoGreen: Color(0xFF63C58A),
+    todoGreenBg: Color(0xFF1F3026),
+    todoGreenBorder: Color(0xFF345742),
     ochre: Color(0xFFAEBACB),
     ochreBg: Color(0xFF272B32),
     ochreBorder: Color(0xFF3D434F),
@@ -226,6 +250,12 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
   final Color berry;
   final Color berryBg;
   final Color berryBorder;
+  final Color examOrange;
+  final Color examOrangeBg;
+  final Color examOrangeBorder;
+  final Color todoGreen;
+  final Color todoGreenBg;
+  final Color todoGreenBorder;
   final Color ochre;
   final Color ochreBg;
   final Color ochreBorder;
@@ -280,6 +310,12 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     Color? berry,
     Color? berryBg,
     Color? berryBorder,
+    Color? examOrange,
+    Color? examOrangeBg,
+    Color? examOrangeBorder,
+    Color? todoGreen,
+    Color? todoGreenBg,
+    Color? todoGreenBorder,
     Color? ochre,
     Color? ochreBg,
     Color? ochreBorder,
@@ -308,6 +344,12 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         berry: berry ?? this.berry,
         berryBg: berryBg ?? this.berryBg,
         berryBorder: berryBorder ?? this.berryBorder,
+        examOrange: examOrange ?? this.examOrange,
+        examOrangeBg: examOrangeBg ?? this.examOrangeBg,
+        examOrangeBorder: examOrangeBorder ?? this.examOrangeBorder,
+        todoGreen: todoGreen ?? this.todoGreen,
+        todoGreenBg: todoGreenBg ?? this.todoGreenBg,
+        todoGreenBorder: todoGreenBorder ?? this.todoGreenBorder,
         ochre: ochre ?? this.ochre,
         ochreBg: ochreBg ?? this.ochreBg,
         ochreBorder: ochreBorder ?? this.ochreBorder,
@@ -342,6 +384,13 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
       berry: Color.lerp(berry, other.berry, t)!,
       berryBg: Color.lerp(berryBg, other.berryBg, t)!,
       berryBorder: Color.lerp(berryBorder, other.berryBorder, t)!,
+      examOrange: Color.lerp(examOrange, other.examOrange, t)!,
+      examOrangeBg: Color.lerp(examOrangeBg, other.examOrangeBg, t)!,
+      examOrangeBorder:
+          Color.lerp(examOrangeBorder, other.examOrangeBorder, t)!,
+      todoGreen: Color.lerp(todoGreen, other.todoGreen, t)!,
+      todoGreenBg: Color.lerp(todoGreenBg, other.todoGreenBg, t)!,
+      todoGreenBorder: Color.lerp(todoGreenBorder, other.todoGreenBorder, t)!,
       ochre: Color.lerp(ochre, other.ochre, t)!,
       ochreBg: Color.lerp(ochreBg, other.ochreBg, t)!,
       ochreBorder: Color.lerp(ochreBorder, other.ochreBorder, t)!,
@@ -361,29 +410,71 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
           isDark == other.isDark &&
           paper == other.paper &&
           sheet == other.sheet &&
+          sheetElevated == other.sheetElevated &&
+          parchment == other.parchment &&
           ink == other.ink &&
           primaryFill == other.primaryFill &&
           onPrimaryFill == other.onPrimaryFill &&
           muted == other.muted &&
-          slate == other.slate &&
+          sage == other.sage &&
+          sageBorder == other.sageBorder &&
+          rule == other.rule &&
+          ruleStrong == other.ruleStrong &&
+          cardBorder == other.cardBorder &&
+          divider == other.divider &&
           berry == other.berry &&
           berryBg == other.berryBg &&
-          berryBorder == other.berryBorder;
+          berryBorder == other.berryBorder &&
+          examOrange == other.examOrange &&
+          examOrangeBg == other.examOrangeBg &&
+          examOrangeBorder == other.examOrangeBorder &&
+          todoGreen == other.todoGreen &&
+          todoGreenBg == other.todoGreenBg &&
+          todoGreenBorder == other.todoGreenBorder &&
+          ochre == other.ochre &&
+          ochreBg == other.ochreBg &&
+          ochreBorder == other.ochreBorder &&
+          slate == other.slate &&
+          slateBg == other.slateBg &&
+          navGlassFill == other.navGlassFill &&
+          navGlassBorder == other.navGlassBorder &&
+          navGlassHighlight == other.navGlassHighlight;
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
         isDark,
         paper,
         sheet,
+        sheetElevated,
+        parchment,
         ink,
         primaryFill,
         onPrimaryFill,
         muted,
-        slate,
+        sage,
+        sageBorder,
+        rule,
+        ruleStrong,
+        cardBorder,
+        divider,
         berry,
         berryBg,
         berryBorder,
-      );
+        examOrange,
+        examOrangeBg,
+        examOrangeBorder,
+        todoGreen,
+        todoGreenBg,
+        todoGreenBorder,
+        ochre,
+        ochreBg,
+        ochreBorder,
+        slate,
+        slateBg,
+        navGlassFill,
+        navGlassBorder,
+        navGlassHighlight,
+      ]);
 }
 
 class JournalLayout {

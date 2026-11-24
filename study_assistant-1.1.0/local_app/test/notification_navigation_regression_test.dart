@@ -105,6 +105,33 @@ void main() {
         AppDeepLinks.notificationLocation('https://evil.example',
             containsAssignment: (_) => true),
         '/assignments');
+    expect(
+        AppDeepLinks.notificationLocation(
+          'p:entry-1',
+          containsAssignment: (_) => false,
+          containsManualEntry: (id) => id == 'entry-1',
+        ),
+        '/assignments/manual/entry-1');
+    expect(
+        AppDeepLinks.notificationLocation(
+          'p:missing',
+          containsAssignment: (_) => false,
+          containsManualEntry: (_) => false,
+        ),
+        '/agenda');
+    expect(
+        AppDeepLinks.notificationLocation(
+          'p:../bad',
+          containsAssignment: (_) => false,
+          containsManualEntry: (_) => true,
+        ),
+        '/agenda');
+    expect(
+        AppDeepLinks.notificationLocation(
+          't:manual-notification-test',
+          containsAssignment: (_) => false,
+        ),
+        '/assignments');
   });
 
   for (final cold in [true, false]) {

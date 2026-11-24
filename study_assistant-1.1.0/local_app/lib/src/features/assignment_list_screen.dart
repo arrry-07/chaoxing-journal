@@ -14,20 +14,24 @@ import '../models/display_preferences.dart';
 import '../models/home_filters.dart';
 import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
+import '../models/study_notebook.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_web_link.dart';
 import '../services/course_term_catalog.dart';
-import '../services/exam_schedule_presentation.dart';
 import '../services/external_link_service.dart';
 import '../services/home_course_filter.dart';
+import '../services/home_manual_timeline.dart';
 import '../services/home_sync_presentation.dart';
 import '../services/home_upcoming_exam.dart';
 import '../services/interaction_feedback_service.dart';
 import '../services/todo_copy_formatter.dart';
 import 'widgets/appearance_controls.dart';
 import 'widgets/assignment_card.dart';
+import 'widgets/home_manual_actions.dart';
+import 'widgets/home_course_filter_row.dart';
+import 'widgets/home_manual_sections.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_context_menu.dart';
 import 'widgets/journal_grouped_card.dart';
@@ -248,6 +252,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     feedback(pinned ? '已置顶' : '已取消置顶');
   }
 
+  late final HomeManualActions _manualActions = HomeManualActions(
+    store: store,
+    feedback: (message, {action, actionLabel}) =>
+        feedback(message, action: action, actionLabel: actionLabel),
+    isMounted: () => mounted,
+  );
+
+  /// Per-course item counts for the picker, refreshed on every build so the
+  /// sheet can recount when the user changes type or deadline before applying.
+  Map<String, int> Function(AssignmentTypeFilter, AssignmentDeadlineFilter)
+      _courseCountsFor = (_, __) => const {};
+
   Future<void> _toggleTodayPlan(Assignment assignment) async {
     final epoch = store.accountEpoch;
     final day =
@@ -370,11 +386,23 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       displayPrefs: store.display,
       actions: [
         JournalContextMenuAction(
+          label: '添加课业或待办',
+          icon: Icons.add_rounded,
+          onSelected: () => _manualActions.openEditor(context),
+        ),
+        JournalContextMenuAction(
           label: '复制近 7 天待办',
           icon: Icons.copy_all_outlined,
           onSelected: () => unawaited(
             _copyNext7DaysTodos(now: widget.clock?.call() ?? DateTime.now()),
           ),
+        ),
+        JournalContextMenuAction(
+          label: '管理个人待办与考试',
+          icon: Icons.event_note_outlined,
+          onSelected: () {
+            if (mounted) context.push('/agenda');
+          },
         ),
         JournalContextMenuAction(
           label: '同步详情',
@@ -617,12 +645,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     store.follows(group.primary.courseKey!)))
               ...group.sources,
         ];
+        final pickerIndex = allFollowedSources.isEmpty
+            ? displayIndex
+            : AssignmentDisplayIndex.from(allFollowedSources);
         final pickerAssignments = AssignmentQuery.currentDisplay(
           AssignmentQuery.scope(allFollowedSources, {}),
           now,
-          index: allFollowedSources.isEmpty
-              ? displayIndex
-              : AssignmentDisplayIndex.from(allFollowedSources),
+          index: pickerIndex,
           coursework: coursework,
         );
         final options = buildHomeCourseFilterOptions(
@@ -634,6 +663,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           records: allFollowedSources,
           selectedCourseKey: _courseKey,
           termCatalog: termCatalog,
+          includeIdleCourses: true,
         );
         final items = recoveryScope == null
             ? AssignmentQuery.filterHome(
@@ -655,9 +685,57 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ))
                 .toList();
         final sortOrder = _sortOrder;
-        final sortedItems = AssignmentQuery.sortHome(
-          items,
-          sortOrder,
+        final selectedCourseName = _courseKey == null
+            ? null
+            : options
+                .where((option) => option.courseKey == _courseKey)
+                .firstOrNull
+                ?.name;
+        final manualItems = recoveryScope == null
+            ? HomeManualTimeline.filterManualEntries(
+                store.isAuthenticated
+                    ? store.notebook.entries
+                    : const <ManualEntry>[],
+                query: _query,
+                selectedCourseName: selectedCourseName,
+                deadline: _deadlineFilter,
+                type: _typeFilter,
+                now: now,
+              )
+            : const <ManualEntry>[];
+        final selectedCourseIdle = recoveryScope == null &&
+            _courseKey != null &&
+            _query.trim().isEmpty &&
+            _deadlineFilter == AssignmentDeadlineFilter.all &&
+            _typeFilter == AssignmentTypeFilter.all &&
+            manualItems.isEmpty &&
+            !displayAssignments.any((a) => a.courseKey == _courseKey);
+        _courseCountsFor = (type, deadline) => countHomeCourseItems(
+              options: options,
+              filteredAssignments: AssignmentQuery.filterHome(
+                allFollowedSources,
+                query: _query,
+                deadline: deadline,
+                type: type,
+                includeHistorical: false,
+                index: pickerIndex,
+                now: now,
+                coursework: coursework,
+              ),
+              filteredManualEntries: HomeManualTimeline.filterManualEntries(
+                store.isAuthenticated
+                    ? store.notebook.entries
+                    : const <ManualEntry>[],
+                query: _query,
+                deadline: deadline,
+                type: type,
+                now: now,
+              ),
+            );
+        final sortedTimelineItems = HomeManualTimeline.mergeAndSort(
+          assignments: items,
+          manualEntries: manualItems,
+          order: sortOrder,
           now: now,
           sourceRecords: catalogAssignments,
           displayIndex: displayIndex,
@@ -675,17 +753,25 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             hasPreviousData: store.hadCacheBeforeLastSync,
             now: now,
             successAt: store.lastSyncAt,
-            serviceWarning: store.error != null &&
-                store.syncReport.phase == SyncPhase.success);
+            serviceWarning: (store.hasNonQuietServiceWarning ||
+                    store.recoveryWarning != null ||
+                    store.operationError != null) &&
+                store.syncReport.phase == SyncPhase.success,
+            widgetWarning:
+                store.serviceWarnings.any((w) => w.contains('小组件')) &&
+                    store.syncReport.phase == SyncPhase.success);
         final dueSummary = HomeDueSummary.from(
           catalogAssignments,
           now: now,
           index: displayIndex,
           coursework: coursework,
+          manualEntries:
+              store.isAuthenticated ? store.notebook.entries : const [],
         );
         final showDueSummary = recoveryScope == null &&
             (catalogAssignments.isNotEmpty ||
                 displayAssignments.isNotEmpty ||
+                manualItems.isNotEmpty ||
                 store.syncReport.phase == SyncPhase.success ||
                 store.syncReport.lastDataSuccessAt != null ||
                 store.lastSyncAt != null);
@@ -818,202 +904,47 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           );
         }
 
-        List<
-            ({
-              String? heading,
-              _DayHeadingTone tone,
-              String? badge,
-              List<Assignment> items,
-              bool pinned,
-            })> buildTimelineSections(List<Assignment> list) {
-          final sections = <({
-            String? heading,
-            _DayHeadingTone tone,
-            String? badge,
-            List<Assignment> items,
-            bool pinned,
-          })>[];
-          var regular = list;
-
-          void flushGroup({
-            String? heading,
-            _DayHeadingTone tone = _DayHeadingTone.normal,
-            String? badge,
-            required List<Assignment> rows,
-            bool pinned = false,
-          }) {
-            if (rows.isEmpty) return;
-            sections.add((
-              heading: heading,
-              tone: tone,
-              badge: badge,
-              items: rows,
+        Widget timelineCard(
+          HomeTimelineItem item, {
+          bool pinned = false,
+          Widget? dragHandle,
+          List<String> pinnedVisibleKeys = const [],
+        }) {
+          if (item.isManual) {
+            return buildHomeManualTile(
+              store: store,
+              now: now,
+              entry: item.manual!,
+              actions: _manualActions,
               pinned: pinned,
-            ));
-          }
-
-          if (recoveryScope == null && store.isAuthenticated) {
-            final pinned = <Assignment>[];
-            regular = <Assignment>[];
-            for (final a in list) {
-              if (store.isPinned(a) &&
-                  !store.isHomeAssignmentPreviewOnly(a.id)) {
-                pinned.add(a);
-              } else {
-                regular.add(a);
-              }
-            }
-            if (pinned.isNotEmpty) {
-              DateTime? autoPinnedTime(Assignment a) {
-                if (a.isExam) {
-                  return a.exam?.startTrusted == true ? a.exam!.startAt : null;
-                }
-                return AssignmentQuery.effectiveDeadline(
-                  a,
-                  coursework: coursework,
-                )?.at;
-              }
-
-              int compareAutoPinned(Assignment left, Assignment right) {
-                final lt = autoPinnedTime(left);
-                final rt = autoPinnedTime(right);
-                if (lt != null && rt != null) {
-                  final cmp = lt.compareTo(rt);
-                  if (cmp != 0) return cmp;
-                } else if (lt != null) {
-                  return -1;
-                } else if (rt != null) {
-                  return 1;
-                }
-                return AssignmentStore.pinKeyOf(left)
-                    .compareTo(AssignmentStore.pinKeyOf(right));
-              }
-
-              final orderedPinned = store.pinnedAssignments.orderItems(
-                pinned,
-                keyOf: AssignmentStore.pinKeyOf,
-                defaultComparator: compareAutoPinned,
-              );
-              flushGroup(
-                heading: '置顶',
-                tone: _DayHeadingTone.today,
-                rows: orderedPinned,
-                pinned: true,
-              );
-            }
-          }
-
-          String? previousKey;
-          String? activeHeading;
-          String? activeBadge;
-          var activeTone = _DayHeadingTone.normal;
-          var activeRows = <Assignment>[];
-          var overdueTierAnnounced = false;
-          final todayDay = AssignmentQuery.dayKey(now);
-          final tomorrowDay =
-              DateTime(todayDay.year, todayDay.month, todayDay.day + 1);
-
-          for (final a in regular) {
-            final bucket = AssignmentQuery.timelineBucketAt(
-              a,
-              now,
-              coursework: coursework,
+              dragHandle: dragHandle,
+              pinnedVisibleKeys: pinnedVisibleKeys,
             );
-            final isOverdue = bucket == AssignmentDeadlineBucket.overdue;
-            DateTime? badgeDay;
-            String? key;
-            String? heading;
-            if (a.isExam) {
-              final stamp = ExamSchedulePresentation.build(a,
-                      records: examSources, index: displayIndex)
-                  .timeline;
-              key = stamp?.key;
-              heading = stamp?.heading;
-              final start = a.timelineAt;
-              if (start != null &&
-                  (a.timelineTrusted || recoveryScope != null)) {
-                badgeDay = AssignmentQuery.dayKey(start);
-              }
-            } else {
-              final resolvedWorkAt = AssignmentQuery.displayTimelineAt(
-                a,
-                records: examSources,
-                index: displayIndex,
-                now: now,
-                coursework: coursework,
-              );
-              if (resolvedWorkAt != null) {
-                final day = AssignmentQuery.dayKey(resolvedWorkAt);
-                badgeDay = day;
-                final showYear =
-                    recoveryScope != null || day.year != todayDay.year;
-                key =
-                    '${showYear ? '' : 'work:'}${day.year}:${day.month}:${day.day}';
-                heading =
-                    '${showYear ? '${day.year}年' : ''}${day.month}月${day.day}日 '
-                    '周${'一二三四五六日'[day.weekday - 1]}';
-              }
-            }
-            if (heading == null && recoveryScope == null) {
-              if (!a.isExam &&
-                  bucket == AssignmentDeadlineBucket.confirmedNoDeadline) {
-                key = 'noDeadline';
-                heading = '无截止日期';
-              } else {
-                key = 'undated';
-                heading = '无日期与待确认';
-              }
-            }
-            final effectiveKey = isOverdue ? 'overdue:$key' : key;
-            if (heading != null && effectiveKey != previousKey) {
-              flushGroup(
-                heading: activeHeading,
-                tone: activeTone,
-                badge: activeBadge,
-                rows: activeRows,
-              );
-              activeRows = <Assignment>[];
-              activeHeading = heading;
-              activeBadge = null;
-              activeTone = _DayHeadingTone.normal;
-              if (isOverdue) {
-                activeTone = _DayHeadingTone.overdue;
-                if (!overdueTierAnnounced && recoveryScope == null) {
-                  activeBadge = '已逾期置底';
-                  overdueTierAnnounced = true;
-                }
-              } else if (key == 'undated' || key == 'noDeadline') {
-                activeTone = _DayHeadingTone.undated;
-              } else if (badgeDay == todayDay) {
-                activeTone = _DayHeadingTone.today;
-                activeBadge = '今天';
-              } else if (recoveryScope == null && badgeDay == tomorrowDay) {
-                activeTone = _DayHeadingTone.today;
-                activeBadge = '明天';
-              }
-            }
-            previousKey = effectiveKey;
-            activeRows.add(a);
           }
-
-          flushGroup(
-            heading: activeHeading,
-            tone: activeTone,
-            badge: activeBadge,
-            rows: activeRows,
+          return card(
+            item.assignment!,
+            pinned: pinned,
+            dragHandle: dragHandle,
+            pinnedVisibleKeys: pinnedVisibleKeys,
           );
-          return sections;
         }
 
-        final timelineSections = sortedItems.isEmpty
-            ? const <({
-                String? heading,
-                _DayHeadingTone tone,
-                String? badge,
-                List<Assignment> items,
-                bool pinned,
-              })>[]
-            : buildTimelineSections(sortedItems);
+        List<HomeTimelineSection> buildTimelineSections(
+          List<HomeTimelineItem> list,
+        ) =>
+            buildHomeTimelineSections(
+              list: list,
+              now: now,
+              store: store,
+              recovery: recoveryScope != null,
+              coursework: coursework,
+              examSources: examSources,
+              displayIndex: displayIndex,
+            );
+
+        final timelineSections = sortedTimelineItems.isEmpty
+            ? const <HomeTimelineSection>[]
+            : buildTimelineSections(sortedTimelineItems);
 
         final headerBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1186,11 +1117,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               }
 
               final summaryStyle = journal.metadata.copyWith(
-                color: nearDueActive
+                color: nearDueActive || dueSummary.dueToday > 0
                     ? journal.accent
-                    : dueSummary.dueToday > 0
-                        ? journal.berry
-                        : journal.muted,
+                    : journal.muted,
                 fontWeight: nearDueActive || dueSummary.dueToday > 0
                     ? FontWeight.w600
                     : FontWeight.w400,
@@ -1413,14 +1342,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   ],
                 ),
               ),
-            if (recoveryScope == null &&
-                _courseKey != null &&
-                !displayAssignments.any((a) => a.courseKey == _courseKey))
-              Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text('已保留课程筛选，当前没有可显示的作业。可在搜索与筛选中更改条件。',
-                      style: journal.metadata)),
-            if (sortedItems.isNotEmpty && recoveryScope == null)
+            if (sortedTimelineItems.isNotEmpty && recoveryScope == null)
               const SizedBox(height: 12),
           ],
         );
@@ -1432,8 +1354,50 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               message: '当前范围没有课业',
             );
           }
+          if (selectedCourseIdle) {
+            final courseName = store.courses
+                    .where((course) => course.key == _courseKey)
+                    .firstOrNull
+                    ?.name ??
+                options
+                    .where((option) => option.courseKey == _courseKey)
+                    .firstOrNull
+                    ?.name;
+            return _emptyStateCard(
+              icon: Icons.event_note_outlined,
+              message: '这门课暂无作业和考试',
+              actions: [
+                JournalPrimaryButton(
+                  key: const ValueKey('home-course-empty-add'),
+                  expanded: false,
+                  label: '为这门课添加待办',
+                  onPressed: () => _manualActions.openEditor(
+                    context,
+                    initialCourse: courseName,
+                  ),
+                ),
+                JournalSecondaryButton(
+                  expanded: false,
+                  label: '查看全部课程',
+                  onPressed: () => _saveFilters(
+                    HomeFilters(
+                      query: _query,
+                      deadline: _deadlineFilter,
+                      type: _typeFilter,
+                      sortOrder: _sortOrder,
+                    ),
+                    store.accountEpoch,
+                    store.account,
+                  ),
+                ),
+              ],
+            );
+          }
           if (filtersActive &&
-              (displayAssignments.isNotEmpty || store.assignments.isNotEmpty)) {
+              (displayAssignments.isNotEmpty ||
+                  store.assignments.isNotEmpty ||
+                  (store.isAuthenticated &&
+                      store.notebook.entries.any((entry) => !entry.done)))) {
             return _emptyStateCard(
               icon: Icons.filter_alt_off_outlined,
               message: '没有符合搜索、类型或期限条件的记录',
@@ -1465,6 +1429,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   label: '管理课程',
                   onPressed: () => context.push('/courses'),
                 ),
+                JournalSecondaryButton(
+                  expanded: false,
+                  label: '添加课业或待办',
+                  onPressed: () => _manualActions.openEditor(
+                    context,
+                    initialKind: _typeFilter == AssignmentTypeFilter.exam
+                        ? ManualEntry.kindExam
+                        : ManualEntry.kindTodo,
+                  ),
+                ),
               ],
             );
           }
@@ -1482,6 +1456,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                         : store.syncReport.phase == SyncPhase.failed
                             ? '本次尚未取得作业，请点击右上角刷新继续。'
                             : '点击右上角刷新，开始整理这本课业手记。',
+            actions: [
+              JournalSecondaryButton(
+                expanded: false,
+                label: '添加课业或待办',
+                onPressed: () => _manualActions.openEditor(
+                  context,
+                  initialKind: _typeFilter == AssignmentTypeFilter.exam
+                      ? ManualEntry.kindExam
+                      : ManualEntry.kindTodo,
+                ),
+              ),
+            ],
           );
         }
 
@@ -1512,8 +1498,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       Builder(
                         builder: (context) {
                           final visibleKeys = [
-                            for (final item in section.items)
-                              AssignmentStore.pinKeyOf(item),
+                            for (final item in section.items) item.pinKey,
                           ];
                           return ReorderableListView.builder(
                             shrinkWrap: true,
@@ -1559,10 +1544,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                 ),
                               );
                               return Column(
-                                key: ValueKey('pinned-reorder-${item.id}'),
+                                key: ValueKey('pinned-reorder-${item.pinKey}'),
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  card(
+                                  timelineCard(
                                     item,
                                     pinned: true,
                                     dragHandle: dragHandle,
@@ -1589,7 +1574,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     dividerIndent: 70.0,
                     children: [
                       for (final item in section.items)
-                        card(item, pinned: section.pinned),
+                        timelineCard(item, pinned: section.pinned),
                     ],
                   );
             if (section.heading == null) return groupCard;
@@ -1609,6 +1594,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         );
 
         final headerActions = [
+          if (recoveryScope == null)
+            IconButton(
+              key: const ValueKey('home-sliver-add-manual'),
+              tooltip: '添加课业或待办',
+              iconSize: 20,
+              onPressed: () => _manualActions.openEditor(context),
+              icon: const Icon(Icons.add_rounded),
+            ),
           IconButton(
             tooltip: '今日计划',
             iconSize: 20,
@@ -1861,15 +1854,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   Widget dayHeading(
     String label, {
     double top = 12,
-    _DayHeadingTone tone = _DayHeadingTone.normal,
+    HomeDayHeadingTone tone = HomeDayHeadingTone.normal,
     String? badge,
   }) {
     final journal = Journal.of(context);
     final textColor = switch (tone) {
-      _DayHeadingTone.overdue => journal.berry,
-      _DayHeadingTone.undated => journal.ochre,
-      _DayHeadingTone.today => journal.ink,
-      _DayHeadingTone.normal => journal.muted,
+      HomeDayHeadingTone.overdue => journal.muted,
+      HomeDayHeadingTone.undated => journal.ochre,
+      HomeDayHeadingTone.today => journal.ink,
+      HomeDayHeadingTone.normal => journal.muted,
     };
     final baseStyle = journal.dayHeading.copyWith(
       color: textColor,
@@ -1906,8 +1899,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
-                color: tone == _DayHeadingTone.overdue
-                    ? journal.berryBg
+                color: tone == HomeDayHeadingTone.overdue
+                    ? journal.parchment
                     : journal.sage,
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -1917,8 +1910,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   fontSize: 11,
                   height: 1.2,
                   fontWeight: FontWeight.w600,
-                  color: tone == _DayHeadingTone.overdue
-                      ? journal.berry
+                  color: tone == HomeDayHeadingTone.overdue
+                      ? journal.muted
                       : journal.ink,
                 ),
               ),
@@ -2130,9 +2123,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       color: journal.muted,
       fontWeight: FontWeight.w500,
     );
+    final addStyle = journal.metadata.copyWith(
+      color: journal.ink,
+      fontWeight: FontWeight.w600,
+    );
     final scaler = MediaQuery.textScalerOf(context);
     final filterLabel = filtersActive ? '已筛选' : '搜索与筛选';
     final sortLabel = _shortSortLabel(sortOrder);
+    const addLabel = '添加';
     double labelWidth(String text, TextStyle style) {
       final painter = TextPainter(
         text: TextSpan(text: text, style: style),
@@ -2144,8 +2142,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       return width;
     }
 
-    final filterWidth = 18 + 8 + labelWidth(filterLabel, filterStyle) + 26;
-    final sortWidth = 17 + 7 + labelWidth(sortLabel, sortStyle) + 26;
+    final filterWidth = 16 + 5 + labelWidth(filterLabel, filterStyle) + 22;
+    final sortWidth = 16 + 5 + labelWidth(sortLabel, sortStyle) + 22;
+    final addWidth = 16 + 5 + labelWidth(addLabel, addStyle) + 22;
 
     Widget buildFilterPill({bool fullWidth = false}) {
       final journal = Journal.of(context);
@@ -2174,7 +2173,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     widthFactor: fullWidth ? null : 1,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 13, vertical: 6.5),
+                          horizontal: 11, vertical: 6.5),
                       decoration: BoxDecoration(
                         color: filtersActive ? journal.sage : journal.parchment,
                         borderRadius: BorderRadius.circular(20),
@@ -2196,7 +2195,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             size: 16,
                             color: filterColor,
                           ),
-                          const SizedBox(width: 7),
+                          const SizedBox(width: 5),
                           Flexible(
                             child: Text(filterLabel, style: filterStyle),
                           ),
@@ -2235,7 +2234,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     widthFactor: 1,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 13, vertical: 6.5),
+                          horizontal: 11, vertical: 6.5),
                       decoration: BoxDecoration(
                         color: journal.parchment,
                         borderRadius: BorderRadius.circular(20),
@@ -2247,7 +2246,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Icon(Icons.swap_vert_rounded,
                             size: 16, color: journal.muted),
-                        const SizedBox(width: 7),
+                        const SizedBox(width: 5),
                         Flexible(
                           child: Text(
                             sortLabel,
@@ -2266,19 +2265,86 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       );
     }
 
+    Widget buildAddButton() {
+      const message = '添加课业或待办';
+      void onTap() => _manualActions.openEditor(
+            context,
+            initialKind: _typeFilter == AssignmentTypeFilter.exam
+                ? ManualEntry.kindExam
+                : ManualEntry.kindTodo,
+          );
+      return Semantics(
+        button: true,
+        label: message,
+        onTap: onTap,
+        child: ExcludeSemantics(
+          child: Tooltip(
+            message: message,
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                key: const ValueKey('home-add-manual'),
+                borderRadius: BorderRadius.circular(20),
+                onTap: onTap,
+                enableFeedback: false,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Center(
+                    widthFactor: 1,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 6.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: journal.sage,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: journal.sageBorder,
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.add_rounded,
+                            size: 16,
+                            color: journal.ink,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(addLabel, style: addStyle),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return LayoutBuilder(builder: (context, constraints) {
-      if (filterWidth + sortWidth + 10 <= constraints.maxWidth) {
+      // Three pill borders (4.8px) plus the 10 + 8 gaps need ~23px of slack.
+      if (filterWidth + sortWidth + addWidth + 24 <= constraints.maxWidth) {
         return Row(children: [
           Expanded(child: buildFilterPill(fullWidth: true)),
           const SizedBox(width: 10),
           buildSortButton(),
+          const SizedBox(width: 8),
+          buildAddButton(),
         ]);
       }
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      return Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           buildFilterPill(),
           buildSortButton(),
+          buildAddButton(),
         ],
       );
     });
@@ -2410,75 +2476,74 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ],
                   ),
                   const SizedBox(height: 16),
-                  Text('课程筛选', style: journal.dayHeading),
-                  const SizedBox(height: 8),
-                  JournalGroupedCard(
-                    children: [
-                      JournalGroupTile(
-                        key: ValueKey(
-                            'course-${store.accountEpoch}-${courseKey ?? "all"}'),
-                        title: '所选课程',
-                        trailingText: selectedCourseLabel,
-                        icon: Icons.menu_book_outlined,
-                        onTap: () async {
-                          final picked = await showJournalPickerSheet<String>(
-                            context,
-                            title: '课程筛选',
-                            selectedValue: courseKey ?? '',
-                            searchable: courseOptions.length > 5 ||
-                                courseOptions
-                                    .any((o) => o.teacherNames.isNotEmpty),
-                            searchHint: '搜索课程或教师...',
-                            displayPrefs: store.display,
-                            filterOptions: const [
-                              JournalPickerFilterOption(
-                                id: 'currentTerm',
-                                label: '本学期',
-                              ),
-                              JournalPickerFilterOption(
-                                id: 'pastTerms',
-                                label: '往期',
-                              ),
-                              JournalPickerFilterOption(
-                                id: 'allTerms',
-                                label: '全部学期',
-                              ),
-                            ],
-                            initialFilterId: 'currentTerm',
-                            filterPredicate: (option, filterId) {
-                              if (option.value.isEmpty) return true;
-                              final scope = switch (filterId) {
-                                'pastTerms' => CourseTermScope.pastTerms,
-                                'allTerms' => CourseTermScope.allTerms,
-                                _ => CourseTermScope.currentTerm,
-                              };
-                              return store.termCatalog.matchesCoursePickerScope(
-                                  option.value, scope);
-                            },
-                            options: [
-                              const JournalPickerOption<String>(
-                                value: '',
-                                label: '全部课程',
-                              ),
-                              for (final option in courseOptions)
-                                JournalPickerOption<String>(
-                                  key: ValueKey(
-                                      'course-option-${option.courseKey}'),
-                                  value: option.courseKey,
-                                  label: option.name,
-                                  subtitle: option.subtitle,
-                                  keywords: option.searchKeywords,
-                                  icon: courseIconFor(option.name),
-                                ),
-                            ],
-                          );
-                          if (picked != null) {
-                            setSheetState(
-                                () => courseKey = picked == '' ? null : picked);
-                          }
+                  HomeCourseFilterRow(
+                    key: const ValueKey('home-course-filter'),
+                    tapKey: ValueKey(
+                        'course-${store.accountEpoch}-${courseKey ?? "all"}'),
+                    value: selectedCourseLabel,
+                    selected: courseKey != null,
+                    onClear: () => setSheetState(() => courseKey = null),
+                    onTap: () async {
+                      final counts = _courseCountsFor(type, deadline);
+                      final ordered =
+                          sortHomeCourseOptionsByCount(courseOptions, counts);
+                      final picked = await showJournalPickerSheet<String>(
+                        context,
+                        title: '课程筛选',
+                        selectedValue: courseKey ?? '',
+                        searchable: courseOptions.length > 5 ||
+                            courseOptions.any((o) => o.teacherNames.isNotEmpty),
+                        searchHint: '搜索课程或教师...',
+                        displayPrefs: store.display,
+                        filterOptions: const [
+                          JournalPickerFilterOption(
+                            id: 'currentTerm',
+                            label: '本学期',
+                          ),
+                          JournalPickerFilterOption(
+                            id: 'pastTerms',
+                            label: '往期',
+                          ),
+                          JournalPickerFilterOption(
+                            id: 'allTerms',
+                            label: '全部学期',
+                          ),
+                        ],
+                        initialFilterId: 'currentTerm',
+                        filterPredicate: (option, filterId) {
+                          if (option.value.isEmpty) return true;
+                          final scope = switch (filterId) {
+                            'pastTerms' => CourseTermScope.pastTerms,
+                            'allTerms' => CourseTermScope.allTerms,
+                            _ => CourseTermScope.currentTerm,
+                          };
+                          return store.termCatalog
+                              .matchesCoursePickerScope(option.value, scope);
                         },
-                      ),
-                    ],
+                        options: [
+                          const JournalPickerOption<String>(
+                            value: '',
+                            label: '全部课程',
+                          ),
+                          for (final option in ordered)
+                            JournalPickerOption<String>(
+                              key:
+                                  ValueKey('course-option-${option.courseKey}'),
+                              value: option.courseKey,
+                              label: option.name,
+                              subtitle: option.subtitle,
+                              keywords: option.searchKeywords,
+                              icon: courseIconFor(option.name),
+                              trailingText: homeCourseCountLabel(
+                                  counts[option.courseKey] ?? 0),
+                            ),
+                        ],
+                      );
+                      if (picked != null) {
+                        setSheetState(
+                            () => courseKey = picked == '' ? null : picked);
+                      }
+                    },
                   ),
                   const SizedBox(height: 16),
                   Text('排序', style: journal.dayHeading),
@@ -2573,8 +2638,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         openingAccount);
   }
 }
-
-enum _DayHeadingTone { normal, today, undated, overdue }
 
 class _HomeFilterSelection {
   const _HomeFilterSelection({

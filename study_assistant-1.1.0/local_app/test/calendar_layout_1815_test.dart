@@ -127,7 +127,7 @@ void main() {
       final cell = tester.getSize(_daySemantics(11, 18, today: true));
       expect(cell.height, greaterThanOrEqualTo(48), reason: 'scale $scale');
       if (scale == 1.0) {
-        expect(cell.height, closeTo(48, 0.01));
+        expect(cell.height, closeTo(50, 0.01));
         expect(
           tester.getTopLeft(find.text('18')).dy,
           closeTo(tester.getTopLeft(find.text('19')).dy, 0.01),
@@ -138,7 +138,7 @@ void main() {
         );
       }
       if (scale == 1.38) {
-        expect(cell.height, greaterThan(48));
+        expect(cell.height, greaterThan(50));
       }
       if (scale == 2.0) {
         expect(
@@ -359,14 +359,13 @@ void main() {
       expect(tester.takeException(), isNull, reason: '$brightness');
       expect(find.byKey(const ValueKey('calendar-busy-day-2026-12-19')),
           findsNothing);
-      final busyToday =
-          find.byKey(const ValueKey('calendar-busy-day-2026-12-28'));
-      expect(busyToday, findsOneWidget);
-      final busyDecoration =
-          tester.widget<Container>(busyToday).decoration! as BoxDecoration;
-      expect(busyDecoration.color, palette.berryBg);
+      expect(find.byKey(const ValueKey('calendar-busy-day-2026-12-28')),
+          findsNothing);
+      final todayCell = find.byKey(const ValueKey('calendar-day-2026-12-28'));
+      expect(todayCell, findsOneWidget);
+      expect(tester.widget<Container>(todayCell).decoration, isNull);
 
-      // Select day 29 (also busy): today still shows today border, day 29 stays busy + selected.
+      // Select day 29 (also 3+ items): day 28 stays today accent bold without red box, day 29 uses sage fill.
       final day29 = find.descendant(
         of: find.byKey(const ValueKey('calendar-grid-viewport')),
         matching: find.text('29'),
@@ -377,7 +376,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('12月29日 · 议程'), findsOneWidget);
       expect(find.byKey(const ValueKey('calendar-busy-day-2026-12-29')),
-          findsOneWidget);
+          findsNothing);
+      final day29Cell = find.byKey(const ValueKey('calendar-day-2026-12-29'));
+      final day29Circle = tester.widget<AnimatedContainer>(find.descendant(
+        of: day29Cell,
+        matching: find.byType(AnimatedContainer),
+      ));
+      final day29Decoration = day29Circle.decoration! as BoxDecoration;
+      expect(day29Decoration.color, palette.sage);
 
       // Week collapse toggle + cross-year navigation at 2.0x text scale.
       final weekToggle = find.byKey(const ValueKey('calendar-week-toggle'));

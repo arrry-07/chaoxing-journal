@@ -24,6 +24,7 @@ import '../models/course.dart';
 import 'assignment_query.dart';
 import 'assignment_grouping.dart';
 import 'local_notification_service.dart';
+import 'manual_attachment_service.dart';
 import 'personal_file_service.dart';
 import 'reminder_rule_store.dart';
 import 'secure_session_store.dart';
@@ -107,6 +108,7 @@ class AssignmentStore extends ChangeNotifier {
     required this.notificationService,
     required this.widgetSnapshotService,
     this.personalFileService = const PersonalFileService(),
+    ManualAttachmentService? manualAttachmentService,
     LocalAssignmentRepository? repository,
     ChaoxingLocalClient? chaoxingClient,
     ReminderRuleStore? reminderRuleStore,
@@ -120,7 +122,9 @@ class AssignmentStore extends ChangeNotifier {
     this.reminderHistoryEnabled = false,
     this.nativeReminderDeliveryEnabled = false,
     DateTime Function()? clock,
-  })  : repository = repository ??
+  })  : manualAttachmentService =
+            manualAttachmentService ?? ManualAttachmentService(),
+        repository = repository ??
             LocalAssignmentRepository(
               backgroundReminderGateway: backgroundReminderGateway,
               writeLeaseOwner: nativeLeaseOwner,
@@ -137,6 +141,7 @@ class AssignmentStore extends ChangeNotifier {
   final LocalNotificationService notificationService;
   final WidgetSnapshotService widgetSnapshotService;
   final PersonalFileService personalFileService;
+  final ManualAttachmentService manualAttachmentService;
   final LocalAssignmentRepository repository;
   final ChaoxingLocalClient chaoxingClient;
   final ReminderRuleStore reminderRuleStore;
@@ -235,7 +240,15 @@ class AssignmentStore extends ChangeNotifier {
       if (_generation != expectedEpoch || !_authenticated) return;
       final previous = notebook;
       notebook = StudyNotebook.decode(next.encode());
+      _invalidatePinnableKeys();
       saved = true;
+      await _cleanupRemovedManualAttachments(previous, notebook);
+      if (_pinsNeedSave || _pinned.keys.any(ManualEntry.isManualKey)) {
+        await _prunePins();
+      }
+      if (!_ownsAuthenticatedSession(expectedEpoch, account)) {
+        return;
+      }
       final manualSucceeded = await _afterAssignmentsChanged(
         updateAssignmentReminders: false,
         updateSummary: false,
@@ -524,7 +537,7 @@ class AssignmentStore extends ChangeNotifier {
         return;
       }
       if (notebook.entries.length >= 500) {
-        _error = '个人待办已达 500 条上限，请清理后再添加到日程';
+        _error = '待办已达 500 条上限，请清理后再添加';
         return;
       }
       final baseId = 'notice-${notice.id.substring(10, 24)}';
@@ -561,6 +574,7 @@ class AssignmentStore extends ChangeNotifier {
       }
       final previous = notebook;
       notebook = StudyNotebook.decode(nextNotebook.encode());
+      _invalidatePinnableKeys();
       final manualSucceeded = await _afterAssignmentsChanged();
       await _recordManualCancellationOutcomes(
         previous,
@@ -616,7 +630,7 @@ class AssignmentStore extends ChangeNotifier {
         return;
       }
       if (notebook.entries.length >= 500) {
-        _error = '个人待办已达 500 条上限，请清理后再添加';
+        _error = '待办已达 500 条上限，请清理后再添加';
         return;
       }
       final digest = sha256
@@ -656,6 +670,7 @@ class AssignmentStore extends ChangeNotifier {
       }
       final previous = notebook;
       notebook = StudyNotebook.decode(nextNotebook.encode());
+      _invalidatePinnableKeys();
       final manualSucceeded = await _afterAssignmentsChanged();
       await _recordManualCancellationOutcomes(
         previous,
@@ -908,10 +923,22 @@ class AssignmentStore extends ChangeNotifier {
   List<SyncSourceResult> _lastSyncSourceResults = const [];
   int _generation = 0;
   bool _disposed = false, _loginRunning = false;
-  String get syncSummary =>
-      _serviceWarnings.isNotEmpty && syncReport.phase == SyncPhase.success
-          ? '作业已更新，提醒或小组件需要处理'
-          : syncReport.summary;
+  String get syncSummary {
+    if (_serviceWarnings.isNotEmpty && syncReport.phase == SyncPhase.success) {
+      return hasWidgetWarningOnly ? '作业已更新，小组件需要处理' : '作业已更新，提醒或小组件需要处理';
+    }
+    return syncReport.summary;
+  }
+
+  bool get hasWidgetWarningOnly =>
+      _widgetWarnings.isNotEmpty &&
+      _serviceWarnings.length == _widgetWarnings.length &&
+      _recoveryWarnings.isEmpty &&
+      _error == null &&
+      repository.recoveryWarning == null;
+
+  bool get hasNonQuietServiceWarning =>
+      _serviceWarnings.isNotEmpty && !hasWidgetWarningOnly;
   bool _authenticated = false;
   bool _loading = false;
   bool _agreementAccepted = false;
@@ -945,8 +972,15 @@ class AssignmentStore extends ChangeNotifier {
   bool get isLoading => _loading;
   bool get agreementAccepted => _agreementAccepted;
   final List<String> _serviceWarnings = [];
+  final List<String> _privacyWarnings = [];
+  final List<String> _deadlineWarnings = [];
+  final List<String> _summaryWarnings = [];
+  final List<String> _manualWarnings = [];
+  final List<String> _widgetWarnings = [];
   final List<String> _recoveryWarnings = [];
   List<String> get serviceWarnings => List.unmodifiable(_serviceWarnings);
+  List<String> get manualSaveWarnings =>
+      List.unmodifiable([..._privacyWarnings, ..._manualWarnings]);
   String? get recoveryWarning => repository.recoveryWarning;
   String? get operationError => _error;
   String? get error {
@@ -963,14 +997,15 @@ class AssignmentStore extends ChangeNotifier {
     bool saved, {
     required String successMessage,
     required String failureMessage,
+    Iterable<String>? warnings,
   }) {
-    final warnings = {
+    final mergedWarnings = {
       if (repository.recoveryWarning != null) repository.recoveryWarning!,
-      ..._serviceWarnings,
+      ...(warnings ?? _serviceWarnings),
     };
     return [
       saved ? successMessage : failureMessage,
-      ...warnings,
+      ...mergedWarnings,
     ].join('；');
   }
 
@@ -1052,6 +1087,8 @@ class AssignmentStore extends ChangeNotifier {
       assignment.id;
 
   static String pinKeyOf(Assignment assignment) => _pinKey(assignment);
+
+  static String manualPinKeyOf(ManualEntry entry) => entry.pinKey;
 
   PinnedAssignments get pinnedAssignments => _pinned;
   List<String> get pinnedKeys => _pinned.keys;
@@ -1338,6 +1375,9 @@ class AssignmentStore extends ChangeNotifier {
   Set<String>? _pinnableKeysCache;
   int? _pinnableKeysCacheMinute;
 
+  void _invalidatePinnableKeys() =>
+      _pinnableKeysCache = _pinnableKeysCacheMinute = null;
+
   Set<String> _pinnableKeys() {
     final now = _clock();
     final minute = now.millisecondsSinceEpoch ~/ 60000;
@@ -1347,6 +1387,8 @@ class AssignmentStore extends ChangeNotifier {
     _pinnableKeysCacheMinute = minute;
     return _pinnableKeysCache = {
       for (final item in visibleAssignments) _pinKey(item),
+      for (final entry in notebook.entries)
+        if (!entry.done) manualPinKeyOf(entry),
     };
   }
 
@@ -1356,27 +1398,43 @@ class AssignmentStore extends ChangeNotifier {
       _account != null &&
       _pinnableKeys().contains(_pinKey(assignment));
 
-  Future<bool> togglePin(Assignment assignment) async {
+  Future<bool> togglePin(Assignment assignment) => _togglePinKey(
+        _pinKey(assignment),
+        _pinAliases(assignment),
+        () => canTogglePin(assignment),
+      );
+
+  bool isManualPinned(ManualEntry entry) =>
+      _authenticated && _pinned.containsAny([manualPinKeyOf(entry)]);
+
+  bool canToggleManualPin(ManualEntry entry) =>
+      _manageBackgroundSchedule &&
+      _authenticated &&
+      _account != null &&
+      !entry.done &&
+      _pinnableKeys().contains(manualPinKeyOf(entry));
+
+  Future<bool> toggleManualPin(ManualEntry entry) {
+    final key = manualPinKeyOf(entry);
+    return _togglePinKey(key, [key], () => canToggleManualPin(entry));
+  }
+
+  Future<bool> _togglePinKey(
+    String key,
+    Iterable<String> aliases,
+    bool Function() canToggle,
+  ) async {
     final account = _account;
     final generation = _generation;
-    if (account == null || !canTogglePin(assignment)) return false;
-    final key = _pinKey(assignment);
+    if (account == null || !canToggle()) return false;
     var saved = false;
     await _run(() async {
-      if (generation != _generation ||
-          account != _account ||
-          !_authenticated ||
-          !canTogglePin(assignment)) {
-        return;
-      }
-      final next = _pinned.toggle(key, _pinAliases(assignment));
-      await _savePins(next, account, generation);
-      if (generation != _generation ||
-          account != _account ||
-          !_authenticated ||
-          _disposed) {
-        return;
-      }
+      bool stillOwned() => _ownsAuthenticatedSession(generation, account);
+      bool valid() => stillOwned() && canToggle();
+      if (!valid()) return;
+      final next = _pinned.toggle(key, aliases);
+      final persisted = await _savePins(next, account, generation);
+      if (!persisted || !stillOwned()) return;
       _pinned = next;
       _pinsNeedSave = false;
       saved = true;
@@ -1394,29 +1452,25 @@ class AssignmentStore extends ChangeNotifier {
       for (final raw in visibleOrderedKeys)
         if (raw.trim().isNotEmpty) raw.trim(),
     ];
-    final initialVisibleSet =
-        visibleAssignments.where(isPinned).map(_pinKey).toSet();
-    if (_pinned.reorderVisible(cleanOrdered, initialVisibleSet) == null) {
+    // Filters may hide pinned slots; only the visible subset is reordered.
+    final pinnable = _pinnableKeys();
+    if (cleanOrdered.isEmpty ||
+        cleanOrdered.toSet().length != cleanOrdered.length ||
+        cleanOrdered.any(
+            (key) => !pinnable.contains(key) || !_pinned.keys.contains(key))) {
       return false;
     }
+    final visibleKeySet = cleanOrdered.toSet();
     var saved = false;
     await _run(() async {
-      if (generation != _generation ||
-          account != _account ||
-          !_authenticated ||
-          !_manageBackgroundSchedule ||
-          _disposed) {
+      if (!_manageBackgroundSchedule ||
+          !_ownsAuthenticatedSession(generation, account)) {
         return;
       }
-      final latestVisibleSet =
-          visibleAssignments.where(isPinned).map(_pinKey).toSet();
-      final next = _pinned.reorderVisible(cleanOrdered, latestVisibleSet);
+      final next = _pinned.reorderVisible(cleanOrdered, visibleKeySet);
       if (next == null) return;
-      await _savePins(next, account, generation);
-      if (generation != _generation ||
-          account != _account ||
-          !_authenticated ||
-          _disposed) {
+      if (!await _savePins(next, account, generation) ||
+          !_ownsAuthenticatedSession(generation, account)) {
         return;
       }
       _pinned = next;
@@ -1426,17 +1480,27 @@ class AssignmentStore extends ChangeNotifier {
     return saved;
   }
 
-  Future<void> _savePins(
+  bool _ownsAuthenticatedSession(int generation, String? account) =>
+      !_disposed &&
+      _authenticated &&
+      account != null &&
+      generation == _generation &&
+      account == _account;
+
+  Future<bool> _savePins(
       PinnedAssignments pins, String account, int generation) async {
     try {
       await repository.savePinnedAssignments(pins, account);
+      return true;
     } on StaleSessionWriteException {
-      return;
+      return false;
     } on LocalStorageLeaseReleaseException {
       const warning = '置顶状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
-      if (generation == _generation && !_recoveryWarnings.contains(warning)) {
+      if (_ownsAuthenticatedSession(generation, account) &&
+          !_recoveryWarnings.contains(warning)) {
         _recoveryWarnings.add(warning);
       }
+      return true;
     }
   }
 
@@ -1476,6 +1540,12 @@ class AssignmentStore extends ChangeNotifier {
         }
       }
     }
+    for (final key in _pinned.keys.where(ManualEntry.isManualKey)) {
+      final id = key.substring(ManualEntry.pinPrefix.length);
+      if (!notebook.hasActiveEntry(id)) {
+        explicitlyCompletedOrHiddenKeys.add(key);
+      }
+    }
     final retained = _pinned.migrateAndPrune(
       aliasToCanonical: aliasToCanonical,
       explicitlyCompletedOrHiddenKeys: explicitlyCompletedOrHiddenKeys,
@@ -1485,8 +1555,10 @@ class AssignmentStore extends ChangeNotifier {
     _pinsNeedSave = true;
     final generation = _generation;
     try {
-      await _savePins(_pinned, account, generation);
-      if (generation == _generation) _pinsNeedSave = false;
+      final persisted = await _savePins(_pinned, account, generation);
+      if (persisted && _ownsAuthenticatedSession(generation, account)) {
+        _pinsNeedSave = false;
+      }
     } catch (_) {
       // The next successful journal update can retry without restoring pins
       // for entries already removed during this session.
@@ -2077,6 +2149,12 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> restoreSession() async {
+    _serviceWarnings.clear();
+    _privacyWarnings.clear();
+    _deadlineWarnings.clear();
+    _summaryWarnings.clear();
+    _manualWarnings.clear();
+    _widgetWarnings.clear();
     _recoveryWarnings.clear();
     _nativeReminderAvailable = nativeReminderDeliveryEnabled &&
         await backgroundReminderGateway.isAvailable();
@@ -2143,6 +2221,7 @@ class AssignmentStore extends ChangeNotifier {
     }
     await _reconcileBackgroundControls();
     await _maybeMigrateLegacyAssignmentSchedules();
+    await _maybeMigrateLegacyManualSchedules();
     notifyListeners();
   }
 
@@ -2427,6 +2506,7 @@ class AssignmentStore extends ChangeNotifier {
     });
     await stage('个人待办与学期归档', () async {
       notebook = await repository.loadNotebook();
+      _invalidatePinnableKeys();
     });
     await stage('课程通知', () async {
       _courseNotices = await repository.loadCourseNotices();
@@ -2655,6 +2735,12 @@ class AssignmentStore extends ChangeNotifier {
         // The account and credentials are committed at this point.
         if (oldAccount != null && oldAccount.trim() != normalizedAccount) {
           await personalFileService.releaseAll();
+          try {
+            await manualAttachmentService.deleteAllAttachments();
+          } catch (error) {
+            debugPrint(
+                '[ManualAttachment] switch_cleanup: ${error.runtimeType}');
+          }
         }
         if (generation != _generation || _disposed) {
           chaoxingClient.clearSession();
@@ -2705,6 +2791,7 @@ class AssignmentStore extends ChangeNotifier {
         _authenticated = true;
         loginSucceeded = true;
         await _reconcileBackgroundControls();
+        await _maybeMigrateLegacyManualSchedules();
       });
     } finally {
       _loginRunning = false;
@@ -3849,6 +3936,12 @@ class AssignmentStore extends ChangeNotifier {
       if (logoutGen != _generation || _disposed) return;
       await personalFileService.releaseAll();
       if (logoutGen != _generation || _disposed) return;
+      try {
+        await manualAttachmentService.deleteAllAttachments();
+      } catch (error) {
+        debugPrint('[ManualAttachment] logout_cleanup: ${error.runtimeType}');
+      }
+      if (logoutGen != _generation || _disposed) return;
       chaoxingClient.clearSession();
       chaoxingClient.previousAssignments = {};
       chaoxingClient.trackedActivityIds = {};
@@ -3884,6 +3977,12 @@ class AssignmentStore extends ChangeNotifier {
       _chaoxingDisplayName = null;
       _chaoxingAvatarUrl = null;
       _error = null;
+      _serviceWarnings.clear();
+      _privacyWarnings.clear();
+      _deadlineWarnings.clear();
+      _summaryWarnings.clear();
+      _manualWarnings.clear();
+      _widgetWarnings.clear();
       _recoveryWarnings.clear();
       _assignments.clear();
       _lastSyncAt = null;
@@ -3945,6 +4044,27 @@ class AssignmentStore extends ChangeNotifier {
     _invalidateHomeDisplayIndex();
   }
 
+  Future<void> _cleanupRemovedManualAttachments(
+    StudyNotebook previous,
+    StudyNotebook current,
+  ) async {
+    final retained = <String>{
+      for (final entry in current.entries)
+        for (final item in entry.attachments) item.relativePath,
+    };
+    final removed = <String>[
+      for (final entry in previous.entries)
+        for (final item in entry.attachments)
+          if (!retained.contains(item.relativePath)) item.relativePath,
+    ];
+    if (removed.isEmpty) return;
+    try {
+      await manualAttachmentService.deleteFiles(removed);
+    } catch (error) {
+      debugPrint('[ManualAttachment] cleanup: ${error.runtimeType}');
+    }
+  }
+
   Future<bool> _afterAssignmentsChanged({
     bool completeSync = false,
     bool detectNewAssignments = false,
@@ -3965,7 +4085,36 @@ class AssignmentStore extends ChangeNotifier {
       }
     }
     var manualRescheduleSucceeded = false;
-    _serviceWarnings.clear();
+    final fullRefresh = updateAssignmentReminders &&
+        updateSummary &&
+        updateManual &&
+        updateWidget;
+    void clearWarningBucket(List<String> bucket) {
+      for (final msg in bucket) {
+        _serviceWarnings.remove(msg);
+      }
+      bucket.clear();
+    }
+
+    void addSubsystemWarning(List<String> bucket, String message) {
+      bucket.add(message);
+      _serviceWarnings.add(message);
+    }
+
+    if (fullRefresh) {
+      _serviceWarnings.clear();
+      _privacyWarnings.clear();
+      _deadlineWarnings.clear();
+      _summaryWarnings.clear();
+      _manualWarnings.clear();
+      _widgetWarnings.clear();
+    } else {
+      clearWarningBucket(_privacyWarnings);
+      if (updateAssignmentReminders) clearWarningBucket(_deadlineWarnings);
+      if (updateSummary) clearWarningBucket(_summaryWarnings);
+      if (updateManual) clearWarningBucket(_manualWarnings);
+      if (updateWidget) clearWarningBucket(_widgetWarnings);
+    }
     // Restored app preferences can outlive excluded/nonportable credentials.
     // Do not publish their private content to lockscreen or widget before login.
     final scoped = snap.authenticated ? courseAssignments : <Assignment>[];
@@ -3973,7 +4122,7 @@ class AssignmentStore extends ChangeNotifier {
       try {
         await _cancelPrivateNotifications();
       } catch (error) {
-        _serviceWarnings.add(_privacyCleanupMessage(error));
+        addSubsystemWarning(_privacyWarnings, _privacyCleanupMessage(error));
       }
     }
     final effectiveCoursework = snap.authenticated
@@ -3992,7 +4141,10 @@ class AssignmentStore extends ChangeNotifier {
           if (!controlsApplied) {
             // Fail closed: publishing a plan while showDetails/schedule settings
             // were not applied would activate the previous native settings.
-            _serviceWarnings.add(_backgroundWarning ?? '后台提醒设置未能应用，本次未更新提醒计划');
+            addSubsystemWarning(
+              _deadlineWarnings,
+              _backgroundWarning ?? '后台提醒设置未能应用，本次未更新提醒计划',
+            );
           } else {
             try {
               if (await _ensureLegacyAssignmentVerified()) {
@@ -4006,7 +4158,7 @@ class AssignmentStore extends ChangeNotifier {
                 );
               }
             } catch (error) {
-              _serviceWarnings.add('后台作业提醒状态未能更新：$error');
+              addSubsystemWarning(_deadlineWarnings, '后台作业提醒状态未能更新：$error');
             }
           }
         } else {
@@ -4014,10 +4166,11 @@ class AssignmentStore extends ChangeNotifier {
             await notificationService.rescheduleAssignments(scoped,
                 offsetsMinutes: _reminderOffsetsMinutes);
           } catch (_) {
-            _serviceWarnings.add('提醒安排失败，请检查通知权限后重试');
+            addSubsystemWarning(_deadlineWarnings, '提醒安排失败，请检查通知权限后重试');
           }
           if (notificationService.lastWarning != null) {
-            _serviceWarnings.add(notificationService.lastWarning!);
+            addSubsystemWarning(
+                _deadlineWarnings, notificationService.lastWarning!);
           }
         }
       }
@@ -4026,13 +4179,17 @@ class AssignmentStore extends ChangeNotifier {
           await notificationService.rescheduleSummary(scoped,
               _authenticated ? personal : PersonalWorkspace(), _lastSyncAt);
           if (notificationService.lastWarning != null) {
-            _serviceWarnings.add(notificationService.lastWarning!);
+            addSubsystemWarning(
+                _summaryWarnings, notificationService.lastWarning!);
           }
         } catch (error) {
           final detail = notificationService.lastWarning ?? error.toString();
-          _serviceWarnings.add(_authenticated && personal.summaryEnabled
-              ? '每日摘要未能更新：$detail'
-              : '旧摘要未能清理：$detail');
+          addSubsystemWarning(
+            _summaryWarnings,
+            _authenticated && personal.summaryEnabled
+                ? '每日摘要未能更新：$detail'
+                : '旧摘要未能清理：$detail',
+          );
         }
         await _recordPluginScheduleOutcomes(
           notificationService.lastScheduleOutcomes,
@@ -4045,12 +4202,13 @@ class AssignmentStore extends ChangeNotifier {
           manualRescheduleSucceeded = !notificationService.lastScheduleOutcomes
               .any((item) => item.stage == 'scheduleFailed');
           if (notificationService.lastWarning != null) {
-            _serviceWarnings.add('个人日程：${notificationService.lastWarning!}');
+            addSubsystemWarning(
+                _manualWarnings, '个人日程：${notificationService.lastWarning!}');
           }
         } catch (error) {
           manualRescheduleSucceeded = false;
           final detail = notificationService.lastWarning ?? error.toString();
-          _serviceWarnings.add('个人日程提醒未能更新或清理：$detail');
+          addSubsystemWarning(_manualWarnings, '个人日程提醒未能更新或清理：$detail');
         }
         await _recordPluginScheduleOutcomes(
           notificationService.lastScheduleOutcomes,
@@ -4086,7 +4244,7 @@ class AssignmentStore extends ChangeNotifier {
         return manualRescheduleSucceeded;
       } catch (_) {
         if (snap.generation == _generation && !_disposed) {
-          _serviceWarnings.add('作业已保存在本机，小组件更新失败，请稍后刷新');
+          addSubsystemWarning(_widgetWarnings, '作业已保存在本机，小组件更新失败，请稍后刷新');
         }
       }
     } else if (snap.authenticated && !_privacyCleanupPending) {
@@ -4461,6 +4619,24 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void> _maybeMigrateLegacyAssignmentSchedules() async {
     await _ensureLegacyAssignmentVerified();
+  }
+
+  Future<void> _maybeMigrateLegacyManualSchedules() async {
+    if (!_authenticated ||
+        !_manageBackgroundSchedule ||
+        _privacyCleanupPending) {
+      return;
+    }
+    notificationService.allowUrgentNightBreakthrough =
+        _allowUrgentDeadlineNightBreakthrough;
+    notificationService.courseworkState = _courseworkState;
+    try {
+      await notificationService
+          .migrateLegacyManualChannelIfNeeded(notebook.entries);
+    } catch (error) {
+      _manualWarnings.add('个人日程提醒渠道迁移未完成：$error');
+      _serviceWarnings.add('个人日程提醒渠道迁移未完成：$error');
+    }
   }
 
   /// The native migration revision is the only activation fact. The Flutter

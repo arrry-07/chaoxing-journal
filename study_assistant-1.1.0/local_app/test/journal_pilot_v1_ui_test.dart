@@ -274,7 +274,7 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('期限'), findsOneWidget);
 
-    final courseRow = find.text('所选课程');
+    final courseRow = find.byKey(const ValueKey('home-course-filter'));
     await tester.ensureVisible(courseRow);
     await tester.tap(courseRow);
     await tester.pumpAndSettle();

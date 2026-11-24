@@ -131,6 +131,18 @@ void main() {
     expect(legacy.deadline, AssignmentDeadlineFilter.notExpired);
     expect(newer.deadline, AssignmentDeadlineFilter.notExpired);
   });
+  test('todo type round-trips and unknown types fall back to all', () {
+    final todo = HomeFilters.decode(
+        const HomeFilters(type: AssignmentTypeFilter.todo, courseKey: 'c:k')
+            .encode());
+    expect(todo.type, AssignmentTypeFilter.todo);
+    expect(todo.courseKey, 'c:k');
+
+    final unknown = HomeFilters.decode(
+        '{"query":"","courseKey":"c:k","deadline":"all","type":"futureKind"}');
+    expect(unknown.type, AssignmentTypeFilter.all);
+    expect(unknown.courseKey, 'c:k');
+  });
   test('malformed preferences safely use defaults', () async {
     for (final raw in [
       null,

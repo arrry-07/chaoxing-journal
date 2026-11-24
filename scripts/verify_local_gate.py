@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
@@ -47,6 +46,22 @@ def _changed_dart_files(repo: Path, app_dir: Path) -> list[str]:
                 if full.is_file() and full.is_relative_to(app_dir.resolve()):
                     paths.add(str(full.relative_to(app_dir.resolve())).replace("\\", "/"))
     return sorted(paths)
+
+
+def _should_allow_dev_metadata(repo: Path, release_flag: bool) -> bool:
+    if release_flag:
+        return False
+    branch_proc = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if branch_proc.returncode == 0:
+        branch = branch_proc.stdout.strip()
+        if branch and branch not in ("main", "HEAD"):
+            return True
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -129,10 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         # 3. Release metadata check
-        pubspec = (app_dir / "pubspec.yaml").read_text(encoding="utf-8")
-        is_dev = bool(re.search(r"^version:\s*\d+\.\d+\.\d+-dev\.", pubspec, re.M))
         meta_cmd = [py, str(app_dir / "tool" / "check_release_metadata.py")]
-        if is_dev and not args.release:
+        if _should_allow_dev_metadata(repo, args.release):
             meta_cmd.append("--allow-dev")
         _run_step("Release metadata check", meta_cmd, app_dir)
 
@@ -165,6 +178,10 @@ def main(argv: list[str] | None = None) -> int:
             "test_verify_apk_and_report.py",
             "test_check_repo_safety.py",
             "test_verify_local_gate.py",
+            "test_run_android_tests.py",
+            "test_check_release_metadata.py",
+            "test_freeze_release.py",
+            "test_site_dispatch_workflow.py",
         ):
             _run_step(f"Python tests ({test_name})", [py, str(repo / "scripts" / test_name)], repo)
 

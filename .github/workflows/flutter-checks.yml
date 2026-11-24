@@ -114,6 +114,11 @@ jobs:
           python3 scripts/test_verify_apk_and_report.py
           python3 scripts/test_gitee_release_sync.py
           python3 scripts/test_gitee_workflow.py
+          python3 scripts/test_run_android_tests.py
+          python3 scripts/run_android_tests.py --verify-manifest-only
+          python3 scripts/test_check_release_metadata.py
+          python3 scripts/test_freeze_release.py
+          python3 scripts/test_site_dispatch_workflow.py
           python3 -c 'from pathlib import Path; a = len(Path("AGENTS.md").read_text(encoding="utf-8").splitlines()); s = len(Path("docs/ai-workflow/PROJECT_STATE.md").read_text(encoding="utf-8").splitlines()); assert a + s <= 80, f"L0 doc line budget exceeded: {a} + {s} = {a + s} > 80"; print(f"[PASS] L0 doc line budget: {a} + {s} = {a + s} <= 80")'
       - name: Run synthetic JVM checks
         run: |
@@ -137,7 +142,7 @@ jobs:
         run: |
           for timezone in Asia/Shanghai America/Los_Angeles; do
             echo "Testing deadlines in $timezone"
-            TZ="$timezone" flutter test --no-pub test/journal_flow_test.dart test/chaoxing_api_parser_test.dart test/review_core_remediation_test.dart test/assignment_detail_navigation_test.dart test/signed_deadline_anchor_test.dart test/assignment_query_test.dart test/home_scope_sort_1806_test.dart test/academic_term_scope_test.dart test/calendar_clock_test.dart test/calendar_scope_test.dart test/exam_notice_metadata_test.dart test/home_swipe_and_context_menu_test.dart
+            TZ="$timezone" flutter test --no-pub test/journal_flow_test.dart test/chaoxing_api_parser_test.dart test/review_core_remediation_test.dart test/assignment_detail_navigation_test.dart test/signed_deadline_anchor_test.dart test/assignment_query_test.dart test/home_scope_sort_1806_test.dart test/academic_term_scope_test.dart test/calendar_clock_test.dart test/calendar_scope_test.dart test/exam_notice_metadata_test.dart test/home_swipe_and_context_menu_test.dart test/home_manual_timeline_test.dart test/home_manual_coursework_test.dart
           done
       - name: Build Android debug APK
         run: flutter build apk --debug --no-pub --target-platform android-arm64,android-x64

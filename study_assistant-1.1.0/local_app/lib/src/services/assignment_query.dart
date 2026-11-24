@@ -266,6 +266,14 @@ class AssignmentQuery {
     return DateTime(d.year, d.month, d.day);
   }
 
+  /// Public natural-order comparison for mixed home timeline consumers.
+  static int compareNaturalPinyin(String left, String right) =>
+      _compareKey(_NaturalKey(left), _NaturalKey(right));
+
+  /// Deadline-bucket rank used by name-only home orderings.
+  static int nameGroupRank(AssignmentDeadlineBucket bucket) =>
+      _nameGroupRank(bucket);
+
   static DateTime _beijingInstant(int year, int month, int day) =>
       DateTime.utc(year, month, day).subtract(const Duration(hours: 8));
 
@@ -696,6 +704,7 @@ class AssignmentQuery {
         AssignmentTypeFilter.exam => assignment.isExam,
         AssignmentTypeFilter.examNotice =>
           assignment.isExam && assignment.exam?.noticeOnly == true,
+        AssignmentTypeFilter.todo => false,
       };
 
   static bool isCalendarDated(

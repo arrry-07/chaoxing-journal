@@ -333,7 +333,7 @@ void main() {
     expect(find.text('11月30日 · 议程'), findsOneWidget);
     expect(find.byKey(const ValueKey('calendar-dots-30')), findsOneWidget);
     expect(find.text('十一月作业'), findsOneWidget);
-    expect(find.text('个人待办 · 十一月安排'), findsOneWidget);
+    expect(find.text('十一月安排'), findsOneWidget);
     expect(find.text('十二月作业'), findsNothing);
 
     await tester.tap(find.byTooltip('下个月'));
@@ -343,9 +343,9 @@ void main() {
     expect(find.byKey(const ValueKey('calendar-dots-1')), findsOneWidget);
     expect(find.text('十二月作业'), findsOneWidget);
     expect(find.text('十一月作业'), findsNothing);
-    expect(find.text('个人待办 · 十一月安排'), findsNothing);
-    final firstManual = find.text('个人待办 · 十二月跨月安排');
-    final laterManual = find.text('个人待办 · 十二月稍后安排');
+    expect(find.text('十一月安排'), findsNothing);
+    final firstManual = find.text('十二月跨月安排');
+    final laterManual = find.text('十二月稍后安排');
     for (final row in [firstManual, laterManual]) {
       await tester.scrollUntilVisible(row, 180,
           scrollable: find.byType(Scrollable).first);
@@ -385,8 +385,8 @@ void main() {
     expect(tester.getTopLeft(firstManual).dy,
         lessThan(tester.getTopLeft(laterManual).dy));
     expect(find.text('十一月作业'), findsNothing);
-    expect(find.text('个人待办 · 十一月安排'), findsNothing);
-    expect(find.text('个人待办 · 十二月已完成安排'), findsNothing);
+    expect(find.text('十一月安排'), findsNothing);
+    expect(find.text('十二月已完成安排'), findsNothing);
   });
 
   testWidgets('calendar cells reuse the display projection for their month',
@@ -640,39 +640,55 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
-      find.text('手动考试 · 高数考试'),
+      find.text('高数考试'),
       220,
       scrollable: find.byType(Scrollable).first,
     );
-    final examTitle = tester.widget<Text>(find.text('手动考试 · 高数考试'));
-    final todoTitle = tester.widget<Text>(find.text('个人待办 · 交材料'));
-    expect(examTitle.style?.color, Journal.slate);
+    final examTitle = tester.widget<Text>(find.text('高数考试'));
+    final todoTitle = tester.widget<Text>(find.text('交材料'));
+    expect(examTitle.style?.color, Journal.ink);
     expect(todoTitle.style?.color, Journal.ink);
     final examTile = find.ancestor(
-      of: find.text('手动考试 · 高数考试'),
+      of: find.text('高数考试'),
       matching: find.byType(ListTile),
     );
     final todoTile = find.ancestor(
-      of: find.text('个人待办 · 交材料'),
+      of: find.text('交材料'),
       matching: find.byType(ListTile),
     );
     expect(
-      tester
-          .widget<Icon>(find.descendant(
-            of: examTile,
-            matching: find.byIcon(Icons.school_outlined),
-          ))
-          .color,
-      Journal.slate,
+      find.descendant(of: examTile, matching: find.text('考试')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: todoTile, matching: find.text('待办')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: examTile, matching: find.text('自己添加')),
+      findsOneWidget,
     );
     expect(
       tester
-          .widget<Icon>(find.descendant(
-            of: todoTile,
-            matching: find.byIcon(Icons.event_note_outlined),
-          ))
+          .widget<Icon>(find
+              .descendant(
+                of: examTile,
+                matching: find.byIcon(Icons.school_outlined),
+              )
+              .first)
           .color,
-      Journal.ink,
+      JournalPalette.light.examOrange,
+    );
+    expect(
+      tester
+          .widget<Icon>(find
+              .descendant(
+                of: todoTile,
+                matching: find.byIcon(Icons.event_note_outlined),
+              )
+              .first)
+          .color,
+      JournalPalette.light.todoGreen,
     );
 
     final pendingRow =
@@ -1175,7 +1191,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(CalendarScreen), findsOneWidget);
-    expect(find.text('个人待办 · 跨年二日复习'), findsOneWidget);
+    expect(find.text('跨年二日复习'), findsOneWidget);
     expect(store.notebook.entries, hasLength(1));
     expect(
       AssignmentQuery.dayKey(store.notebook.entries.single.at!),
@@ -1185,7 +1201,7 @@ void main() {
     // Open + 记一条 and add a manual exam on the same blank day.
     await tester.tap(quickAdd);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('手动考试'));
+    await tester.tap(find.text('考试'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).first, '跨年口试');
     await tester.pump();
@@ -1193,7 +1209,7 @@ void main() {
     await tester.tap(saveBtn);
     await tester.pumpAndSettle();
 
-    expect(find.text('手动考试 · 跨年口试'), findsOneWidget);
+    expect(find.text('跨年口试'), findsOneWidget);
     expect(store.notebook.entries, hasLength(2));
     expect(tester.takeException(), isNull);
   });

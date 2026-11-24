@@ -1,9 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/services/assignment_statistics.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/local_record_query.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -415,6 +417,130 @@ void main() {
     expect(reset.status, LocalRecordStatusFilter.all);
     expect(reset.courseKey, isNull);
     expect(reset.timeRange, StatsTimeRange.all);
+  });
+
+  test(
+      'LocalRecordFilterSpec preserves termScope across copyWith and exits stats base scope on resetToAllLocal',
+      () async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final now = DateTime.utc(2026, 11, 20, 4); // 2026-2027 fall
+    final store = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: _NoopNotifications(),
+      widgetSnapshotService: _NoopWidgets(),
+      clock: () => now,
+    );
+    addTearDown(store.dispose);
+    await store.repository.activateAccount('A');
+    await store.repository.saveCourses(const [
+      CourseRef(
+        courseId: '1',
+        clazzId: '10',
+        name: '本学期算法',
+        folderName: '2026年秋',
+      ),
+      CourseRef(
+        courseId: '2',
+        clazzId: '20',
+        name: '往期微积分',
+        folderName: '2025年秋',
+      ),
+      CourseRef(
+        courseId: '99',
+        clazzId: '1',
+        name: '未关注选修课',
+        folderName: '2026年秋',
+      ),
+    ], account: 'A');
+    await store.repository.mergeAndSave([
+      _work(
+        id: 'cur1',
+        courseId: '1',
+        clazzId: '10',
+        courseName: '本学期算法',
+        title: '在学作业',
+        status: 'pending',
+        deadlineAt: now.add(const Duration(days: 2)),
+        lastSyncedAt: now,
+      ),
+      _work(
+        id: 'past1',
+        courseId: '2',
+        clazzId: '20',
+        courseName: '往期微积分',
+        title: '去年已完成',
+        status: 'submitted',
+        deadlineAt: DateTime.utc(2025, 11, 10),
+        lastSyncedAt: now,
+      ),
+      _work(
+        id: 'unfol1',
+        courseId: '99',
+        clazzId: '1',
+        courseName: '未关注选修课',
+        title: '未关注记录',
+        status: 'pending',
+        deadlineAt: now.add(const Duration(days: 1)),
+        lastSyncedAt: now,
+      ),
+    ]);
+    await store.restoreSession();
+    await store.followCourse('99:1', false);
+
+    final drilled = LocalRecordFilterSpec.fromQueryParameters(const {
+      'from': 'stats',
+      'scope': 'followedStats',
+      'status': 'completed',
+      'term': 'pastTerms',
+    });
+    expect(drilled.termScope, CourseTermScope.pastTerms);
+    expect(drilled.isStatsScoped, isTrue);
+
+    final refined = drilled.copyWith(
+      status: LocalRecordStatusFilter.all,
+      query: '去年',
+    );
+    expect(refined.termScope, CourseTermScope.pastTerms);
+    expect(
+      LocalRecordQuery.query(store, refined, now)
+          .groups
+          .map((g) => g.primary.title),
+      ['去年已完成'],
+    );
+
+    const termOnly =
+        LocalRecordFilterSpec(termScope: CourseTermScope.pastTerms);
+    expect(termOnly.isStatsScoped, isTrue);
+    expect(
+      LocalRecordQuery.query(store, termOnly, now)
+          .groups
+          .map((g) => g.primary.title),
+      ['去年已完成'],
+    );
+
+    final switched = refined.copyWith(
+      termScope: CourseTermScope.currentTerm,
+      query: '',
+    );
+    expect(switched.termScope, CourseTermScope.currentTerm);
+    expect(
+      LocalRecordQuery.query(store, switched, now)
+          .groups
+          .map((g) => g.primary.title),
+      ['在学作业'],
+    );
+
+    final reset = drilled.resetToAllLocal();
+    expect(reset.from, 'stats');
+    expect(reset.scope, LocalRecordScopeFilter.allLocal);
+    expect(reset.termScope, CourseTermScope.allTerms);
+    expect(
+      LocalRecordQuery.query(store, reset, now)
+          .groups
+          .map((g) => g.primary.title)
+          .toSet(),
+      {'在学作业', '去年已完成', '未关注记录'},
+    );
   });
 
   test(

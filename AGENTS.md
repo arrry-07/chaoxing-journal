@@ -11,7 +11,7 @@
 
 ## 日常开发与正式发布
 
-- 日常在 `dev` 工作。每项独立改动通过定向检查后单独提交（功能迭代同步更新 [dev 进度](docs/ai-workflow/PROJECT_STATE.md#dev-当前迭代进度)），随后自动轻量推送 `origin/dev`（无需重复确认），细则见[日常推送门禁](docs/ai-workflow/VALIDATION.md#dev-日常推送门禁)。
+- 日常在 `dev` 工作。每项独立改动通过定向检查后单独提交（功能迭代同步更新 [dev 进度](docs/ai-workflow/PROJECT_STATE.md#dev-当前迭代进度)，并在提交前更新 [dev 本地状态](docs/ai-workflow/DEV_STATE.md)：已完成改动、当前 commit 与状态、下一步待办），随后自动轻量推送 `origin/dev`（无需重复确认），细则见[日常推送门禁](docs/ai-workflow/VALIDATION.md#dev-日常推送门禁)。
 - 推送 `origin/dev` 前必查 `git status` 与本次提交 Diff，严禁纳入凭据、Cookie、账号响应、敏感日志、`docs/feedback/`、`scripts/demo-video/`、个人材料或 `.apk` 等大体积二进制；仅推 `dev` 到 `origin/dev`，严禁顺手合入 `main`、建正式 PR 或打正式 Tag（正式发版须等明确指令）。
 - 推送完成后，在最终回复末尾固定附两行供代码走查：最新 `origin/dev` 提交号（完整 SHA 与简短信息），以及对比链接 `https://github.com/arrry-07/chaoxing-journal/compare/main...dev` 与核心修改文件的 `dev` 直达链接。
 - 本地快检使用缓存依赖，按需运行 `python scripts/verify_local_gate.py --tests <相关测试>`（或改动文件的 `dart format`、`dart analyze lib test`——含中文路径时勿直接运行 `flutter analyze`——与 `flutter --no-version-check test --no-pub <相关测试>`）。
@@ -19,8 +19,9 @@
 - 第三方 API、版本兼容或升级先查锁文件（Flutter 用 `pubspec.lock`），再用 Context7 核对对应版本文档。项目内部逻辑直接检查本地源码和测试。
 - 视觉与布局改动须有当前任务的明确要求；功能修复只改必需的可观察界面状态，并在交付中说明。无关视觉问题只记录。
 - 保留已有修改和未跟踪的 `docs/feedback/`、`scripts/demo-video/` 及个人材料。凭据、Cookie、账号响应或敏感日志不得进入提交。保持 Flutter、脚本、参考实现与 CI 约定的目录路径。
-- MuMu 预览按[自测包步骤](docs/guides/开发与贡献.md#mumu-自测包)执行。只有准备安装预览包时才写入 `X.Y.Z-dev.N+build`。使用原签名覆盖并保留登录态和数据。
-- 维护者明确要求正式发版后，从 `dev` 向 `main` 提汇总 PR；紧急 Hotfix 从最新 `main` 起步，发布后同步回 `dev`。正式版使用 `X.Y.Z` 与 `vX.Y.Z`，构建号高于已用预览包。
+- **固定阶段闭环**：Stage 1 完成 → 独立 Gate 审查（有阻断则返工复审至完全修复）→ 按[自测包步骤](docs/guides/开发与贡献.md#mumu-自测包)升第三位 `Z+1` 和构建号 `+1`、原签名打包并在 MuMu「学习通」保数据实测 → 更新全部 dev 文档 → 输出下一阶段 Antigravity 规划提示词与本机真实可用模型推荐。默认持续在 `dev` 小版本递增，Gate 通过后直接打自测包，不逐轮询问「直接发正式版 / 先打自测包」；仅在积累较多完整改动适合攒批发正式版时，在收口汇报中顺带建议，正式发布仍等维护者明确指令。
+- **MuMu 验收口径**：采用「基础保数据冒烟 + 本轮及尚未发版的核心改动路径」；涉及学习通线上接口最多集中刷新 1 次，避免高频请求触发 `9010`；未改同步解析时不重复刷线上接口，始终保留登录态、课程与课业数据。
+- 维护者明确要求正式发版后，从 `dev` 向 `main` 提汇总 PR；紧急 Hotfix 从最新 `main` 起步，发布后同步回 `dev`。正式版采用标准无前导零三段 `X.Y.Z` 与 `vX.Y.Z`：下一正式版在 `dev` 冻结时从 `1.90.0` 起步，此后正式版升第二位 `Y+1` 并归零 `Z`（`1.91.0…1.99.0`，`Y` 最大 `99`，满 `99` 进第一位 `X+1` 归零 `Y/Z` 为 `2.0.0`），构建号高于全部测试包，每次正式版均同步推进 `update-stable.json` 与 `update-manual.json`（细则见[版本号与迭代规则](docs/ai-workflow/VALIDATION.md#版本号与迭代分级规则)）。
 - 正式发布逐关核对 [CI、原签名 APK、设备及回下载](docs/ai-workflow/VALIDATION.md#集成验收与正式发布)。GitHub 每包必发，Gitee 自动更新小索引、按需手动镜像 APK，细则见[分发指南](docs/guides/更新渠道与国内分发.md)。
 - 并行任务先划定文件与资源归属；正式发布的独立审读、Git 与验收责任见[协作与发布审读](docs/ai-workflow/VALIDATION.md#协作与发布审读)。
 
@@ -28,4 +29,4 @@
 
 - [PROJECT_STATE.md](docs/ai-workflow/PROJECT_STATE.md) 维护当前迭代和最近两版入口；[CHANGELOG.md](CHANGELOG.md) 维护已交付行为，版本身份核对源码、Git 和 GitHub Release；测试和产物的详细证据归对应发布记录。
 - `docs/plans/` 保留最多两份正在执行或待执行的方案；复杂任务换手时才写交接，`docs/ai-workflow/handoffs/` 只留当前有效的一份。完成或失效即用 `git mv` 移入对应归档。
-- 新增计划、交接、验收统一命名 `YYYY-MM-DD-vX.Y.Z-<主题>.md`。正式发布收口的同一提交归档本轮已完成方案、过期交接、第三旧及更早验收与其证据，并滚动归档工程状态。步骤与目标路径见[文档索引](docs/README.md#发布收口与归档)。
+- 新增计划、交接、验收统一命名 `YYYY-MM-DD-vX.Y.Z-<主题>.md`：`dev` 分支日常开发与方案一律使用当前/下个 `dev` 修订号（如 `v1.8.27`、`v1.8.28`、`v1.8.29`），严禁提前冠名未获授权的下一正式版号（如 `v1.90.0`）；仅在维护者明确下达正式发版指令后才切换正式版号。正式发布收口的同一提交归档本轮已完成方案、过期交接、第三旧及更早验收与其证据，并滚动归档工程状态。步骤与目标路径见[文档索引](docs/README.md#发布收口与归档)。

@@ -1527,46 +1527,70 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     ),
                   ],
                   const SizedBox(height: 16),
-                  JournalPrimaryButton(
-                    buttonKey: const ValueKey('assignment-detail-open'),
-                    height: 46,
-                    backgroundColor: journal.isDark
-                        ? journal.primaryFill
-                        : const Color(0xFF34322F),
-                    foregroundColor: journal.isDark
-                        ? journal.onPrimaryFill
-                        : const Color(0xFFFFF7EC),
-                    onPressed: _opening || _hiding || _currentUrl == null
-                        ? null
-                        : _openAssignment,
-                    icon: Icons.open_in_new_rounded,
-                    label: _opening
-                        ? '正在打开…'
-                        : assignment.isExam
-                            ? '在学习通内查看$_itemLabel'
-                            : '在学习通内打开作业',
-                  ),
-                  const SizedBox(height: 6),
-                  Center(
-                    child: TextButton.icon(
-                      key: const ValueKey('assignment-detail-open-web'),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
-                        foregroundColor: journal.ink,
-                        disabledForegroundColor: journal.muted,
-                        textStyle: journal.metadata.copyWith(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w500,
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final stackButtons = constraints.maxWidth < 320 ||
+                          MediaQuery.textScalerOf(context).scale(14) >= 18.0;
+                      final primaryBtn = JournalPrimaryButton(
+                        buttonKey: const ValueKey('assignment-detail-open'),
+                        height: 48,
+                        padding: stackButtons
+                            ? null
+                            : const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 12),
+                        singleLineLabel: !stackButtons,
+                        backgroundColor: journal.isDark
+                            ? journal.primaryFill
+                            : const Color(0xFF34322F),
+                        foregroundColor: journal.isDark
+                            ? journal.onPrimaryFill
+                            : const Color(0xFFFFF7EC),
+                        onPressed: _opening || _hiding || _currentUrl == null
+                            ? null
+                            : _openAssignment,
+                        icon: Icons.open_in_new_rounded,
+                        label: _opening
+                            ? '正在打开…'
+                            : assignment.isExam
+                                ? '在学习通内查看$_itemLabel'
+                                : '在学习通内打开作业',
+                      );
+                      final secondaryBtn = JournalSecondaryButton(
+                        buttonKey: const ValueKey('assignment-detail-open-web'),
+                        height: 48,
+                        outlined: true,
+                        padding: stackButtons
+                            ? null
+                            : const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 12),
+                        singleLineLabel: !stackButtons,
+                        onPressed: _opening || _hiding || _currentUrl == null
+                            ? null
+                            : _openWeb,
+                        icon: Icons.open_in_browser_rounded,
+                        label: _opening ? '正在请求浏览器…' : '打开$_itemLabel网页',
+                      );
+                      if (stackButtons) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            primaryBtn,
+                            const SizedBox(height: 10),
+                            secondaryBtn,
+                          ],
+                        );
+                      }
+                      return IntrinsicHeight(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(child: primaryBtn),
+                            const SizedBox(width: 10),
+                            Expanded(child: secondaryBtn),
+                          ],
                         ),
-                      ),
-                      onPressed: _opening || _hiding || _currentUrl == null
-                          ? null
-                          : _openWeb,
-                      icon: const Icon(Icons.open_in_browser_rounded, size: 17),
-                      label: Text(_opening ? '正在请求浏览器…' : '打开$_itemLabel网页'),
-                    ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 8),
                   Padding(
@@ -1788,7 +1812,7 @@ class _DetailToolButton extends StatelessWidget {
                   label,
                   style: Journal.of(context).metadata.copyWith(
                         color: onPressed == null
-                            ? Journal.of(context).muted.withValues(alpha: 0.55)
+                            ? Journal.of(context).muted
                             : Journal.of(context).ink,
                         fontWeight: FontWeight.w500,
                         height: 1.35,
@@ -1802,7 +1826,7 @@ class _DetailToolButton extends StatelessWidget {
                   Icons.chevron_right_rounded,
                   size: 18,
                   color: onPressed == null
-                      ? Journal.of(context).muted.withValues(alpha: 0.35)
+                      ? Journal.of(context).ruleStrong
                       : Journal.of(context).muted,
                 ),
               ),
@@ -1907,12 +1931,10 @@ class _DetailDeadlineAlertBanner extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
       decoration: BoxDecoration(
-        color: journal.berryBg.withValues(
-          alpha: journal.isDark ? 0.65 : 0.85,
-        ),
+        color: journal.ochreBg,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: journal.berryBorder,
+          color: journal.ochreBorder,
           width: 0.8,
         ),
       ),
@@ -1924,7 +1946,7 @@ class _DetailDeadlineAlertBanner extends StatelessWidget {
             child: Icon(
               Icons.update_rounded,
               size: 16,
-              color: journal.berry,
+              color: journal.ochre,
             ),
           ),
           const SizedBox(width: 8),
@@ -1935,7 +1957,7 @@ class _DetailDeadlineAlertBanner extends StatelessWidget {
                 Text(
                   headline,
                   style: journal.metadata.copyWith(
-                    color: journal.berry,
+                    color: journal.ochre,
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
                     height: 1.35,

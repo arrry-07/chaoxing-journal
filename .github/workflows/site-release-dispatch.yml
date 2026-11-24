@@ -1,0 +1,87 @@
+name: Dispatch published release to site
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Formal release tag such as v1.90.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-release-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Notify arrry-07/chaoxing-journal-site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SITE_DISPATCH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+      RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+      RELEASE_DRAFT: ${{ github.event_name == 'release' && github.event.release.draft || 'false' }}
+      RELEASE_PRERELEASE: ${{ github.event_name == 'release' && github.event.release.prerelease || 'false' }}
+      RELEASE_URL: ${{ github.event_name == 'release' && github.event.release.html_url || '' }}
+    steps:
+      - name: Validate and dispatch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.request
+
+          token = os.environ.get("SITE_DISPATCH_TOKEN", "")
+          tag = os.environ.get("RELEASE_TAG", "")
+          draft = os.environ.get("RELEASE_DRAFT", "").lower()
+          prerelease = os.environ.get("RELEASE_PRERELEASE", "").lower()
+          release_url = os.environ.get("RELEASE_URL", "")
+
+          if not token:
+              print("[SKIP] SITE_DISPATCH_TOKEN is not configured; skipping arrry-07/chaoxing-journal-site dispatch.")
+              sys.exit(0)
+          if draft == "true" or prerelease == "true":
+              print("[SKIP] Draft or prerelease is not dispatched to the site.")
+              sys.exit(0)
+          if re.fullmatch(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", tag) is None:
+              print(f"[FAIL] Invalid formal release tag: {tag!r}")
+              sys.exit(1)
+
+          payload = {
+              "event_type": "chaoxing-release-published",
+              "client_payload": {
+                  "tag": tag,
+                  "release_url": release_url,
+                  "source_repo": "arrry-07/chaoxing-journal",
+              },
+          }
+          request = urllib.request.Request(
+              "https://api.github.com/repos/arrry-07/chaoxing-journal-site/dispatches",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {token}",
+                  "Content-Type": "application/json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  if response.status != 204:
+                      print(f"[FAIL] Site dispatch returned HTTP {response.status}.")
+                      sys.exit(1)
+          except urllib.error.HTTPError as error:
+              print(f"[FAIL] Site dispatch returned HTTP {error.code}.")
+              sys.exit(1)
+          print(f"[PASS] Dispatched {tag} to arrry-07/chaoxing-journal-site.")
+          PY

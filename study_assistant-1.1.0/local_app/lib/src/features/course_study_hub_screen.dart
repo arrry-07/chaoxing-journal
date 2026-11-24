@@ -365,7 +365,9 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                             label: '查看已设提醒',
                             onPressed: () {
                               Navigator.pop(sheetContext);
-                              context.push('/agenda');
+                              context.push(
+                                '/assignments/manual/${Uri.encodeComponent(latest.linkedManualEntryId!)}',
+                              );
                             },
                           )
                         else
@@ -401,7 +403,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                                       return;
                                     }
                                     if (created != null) {
-                                      _showSnack('已添加到个人待办并安排本地提醒');
+                                      _showSnack('已添加到待办并安排本地提醒');
                                     } else if (widget.store.error != null) {
                                       _showSnack(widget.store.error!);
                                     }
@@ -460,7 +462,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       return;
     }
     if (created != null) {
-      _showSnack(picked == null ? '已添加到个人待办' : '已添加到个人待办并设置本地提醒');
+      _showSnack(picked == null ? '已添加到待办' : '已添加到待办并设置本地提醒');
     } else if (widget.store.error != null) {
       _showSnack(widget.store.error!);
     }

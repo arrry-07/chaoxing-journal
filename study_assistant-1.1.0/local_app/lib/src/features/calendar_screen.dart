@@ -17,6 +17,7 @@ import '../services/interaction_feedback_service.dart';
 import 'assignment_list_screen.dart';
 import 'manual_agenda_screen.dart';
 import 'widgets/assignment_card.dart';
+import 'widgets/coursework_status_pill.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_info_popover.dart';
@@ -445,9 +446,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                           const infoBtn = JournalInfoButton(
                             title: '日历统计与圆点说明',
                             items: [
-                              '蓝色圆点表示当天有待交或待确认课业，珊瑚红圆点表示考试或已逾期，中性灰点表示个人待办。',
-                              '当天有效未完成条目达到 3 项时，日期格显示暖朱砂淡底。',
+                              '蓝点表示作业或课堂任务，橙点表示考试或考试通知，绿点表示个人待办；超过 3 项时显示“+”。',
                               '考试按开考日展示，作业与课堂任务按截止日展示，均使用北京时间。',
+                              '今天使用蓝色加粗数字标记，选中日期显示鼠尾草绿浅底圆圈。',
                               '左右滑动可切换月份；上滑或轻点底部横条可收拢为单周视图。',
                             ],
                           );
@@ -616,6 +617,35 @@ class _CalendarScreenState extends State<CalendarScreen>
                               },
                             ),
                           ),
+                        ),
+                      ),
+                      Padding(
+                        key: const ValueKey('calendar-dot-legend'),
+                        padding: const EdgeInsets.only(top: 6, bottom: 2),
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 14,
+                          runSpacing: 6,
+                          children: [
+                            _CalendarLegendDot(
+                              color: journal.accent,
+                              label: '作业',
+                              textStyle:
+                                  journal.metadata.copyWith(fontSize: 12),
+                            ),
+                            _CalendarLegendDot(
+                              color: journal.examOrange,
+                              label: '考试',
+                              textStyle:
+                                  journal.metadata.copyWith(fontSize: 12),
+                            ),
+                            _CalendarLegendDot(
+                              color: journal.todoGreen,
+                              label: '待办',
+                              textStyle:
+                                  journal.metadata.copyWith(fontSize: 12),
+                            ),
+                          ],
                         ),
                       ),
                       Semantics(
@@ -872,25 +902,49 @@ class _CalendarScreenState extends State<CalendarScreen>
     final unknown =
         items.where((a) => !a.isExam && !a.isPendingConfirmed).length;
     final exams = items.where((a) => a.isExam).length;
-    final coursework = widget.store.courseworkState;
-    final overdueCount = items
-        .where((a) =>
-            AssignmentQuery.timelineBucketAt(a, now, coursework: coursework) ==
-            AssignmentDeadlineBucket.overdue)
-        .length;
-    final personalCount = manualByDay[date]?.length ?? 0;
+    final manualEntries = manualByDay[date] ?? const <ManualEntry>[];
+    final manualExams =
+        manualEntries.where((e) => e.kind == ManualEntry.kindExam).length;
+    final personalCount = manualEntries.length;
+    final homeworkCount = items.length - exams;
+    final examCount = exams + manualExams;
+    final todoCount = personalCount - manualExams;
     final activeCount = dayWorkloadCounts[date] ?? 0;
     final isBusy = CalendarDayWorkload.isBusyCount(activeCount);
     final isSelected = selected == date;
     final isToday = date == today;
 
-    final dots = <Color>[];
-    if (exams > 0 || overdueCount > 0) dots.add(journal.berry);
-    if (items.length - exams > 0 && dots.length < 3) dots.add(journal.accent);
-    if (personalCount > 0 && dots.length < 3) dots.add(journal.muted);
-    if (dots.length == 1 && (items.length + personalCount) >= 2) {
-      dots.add(dots.first);
+    final categoryCounts = <int>[homeworkCount, examCount, todoCount];
+    final categoryColors = <Color>[
+      journal.accent,
+      journal.examOrange,
+      journal.todoGreen,
+    ];
+    final allocated = <int>[0, 0, 0];
+    var allocatedTotal = 0;
+    for (var i = 0; i < categoryCounts.length && allocatedTotal < 3; i++) {
+      if (categoryCounts[i] > 0) {
+        allocated[i] = 1;
+        allocatedTotal++;
+      }
     }
+    while (allocatedTotal < 3) {
+      var added = false;
+      for (var i = 0; i < categoryCounts.length && allocatedTotal < 3; i++) {
+        if (allocated[i] < categoryCounts[i]) {
+          allocated[i]++;
+          allocatedTotal++;
+          added = true;
+        }
+      }
+      if (!added) break;
+    }
+    final dots = <Color>[
+      for (var i = 0; i < allocated.length; i++)
+        for (var j = 0; j < allocated[i]; j++) categoryColors[i],
+    ];
+    final totalEvents = homeworkCount + examCount + todoCount;
+    final hasMoreDots = totalEvents > 3;
 
     final circleSize =
         (MediaQuery.textScalerOf(context).scale(14) * 1.9).clamp(32.0, 46.0);
@@ -915,21 +969,9 @@ class _CalendarScreenState extends State<CalendarScreen>
           child: SizedBox(
             height: cellHeight,
             child: Container(
-              key: isBusy
-                  ? ValueKey(
-                      'calendar-busy-day-${pageMonth.year}-${pageMonth.month}-$day')
-                  : null,
+              key: ValueKey(
+                  'calendar-day-${pageMonth.year}-${pageMonth.month}-$day'),
               margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 1.5),
-              decoration: isBusy
-                  ? BoxDecoration(
-                      color: journal.berryBg,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: journal.berryBorder,
-                        width: 0.7,
-                      ),
-                    )
-                  : null,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -944,9 +986,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: isSelected ? journal.accent : Colors.transparent,
-                      border: !isSelected && isToday
-                          ? Border.all(color: journal.accent, width: 1.3)
+                      color: isSelected ? journal.sage : Colors.transparent,
+                      border: isSelected
+                          ? Border.all(color: journal.sageBorder, width: 1.0)
                           : null,
                     ),
                     child: FittedBox(
@@ -956,14 +998,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                         maxLines: 1,
                         softWrap: false,
                         style: _dateStyle.copyWith(
-                          color: isSelected
-                              ? journal.onPrimaryFill
-                              : isToday
-                                  ? journal.accent
-                                  : isBusy
-                                      ? journal.berry
-                                      : journal.ink,
-                          fontWeight: isSelected || isToday || isBusy
+                          color: isToday ? journal.accent : journal.ink,
+                          fontWeight: isSelected || isToday
                               ? FontWeight.w700
                               : FontWeight.w500,
                         ),
@@ -972,25 +1008,42 @@ class _CalendarScreenState extends State<CalendarScreen>
                   ),
                   const SizedBox(height: 3),
                   SizedBox(
-                    height: 6,
+                    height: 10,
                     child: dots.isEmpty
                         ? const SizedBox.shrink()
-                        : Row(
-                            key: ValueKey('calendar-dots-$day'),
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              for (var i = 0; i < dots.length; i++) ...[
-                                if (i > 0) const SizedBox(width: 2.5),
-                                Container(
-                                  width: 4.5,
-                                  height: 4.5,
-                                  decoration: BoxDecoration(
-                                    color: dots[i],
-                                    shape: BoxShape.circle,
+                        : FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Row(
+                              key: ValueKey('calendar-dots-$day'),
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                for (var i = 0; i < dots.length; i++) ...[
+                                  if (i > 0) const SizedBox(width: 2.5),
+                                  Container(
+                                    width: 4.5,
+                                    height: 4.5,
+                                    decoration: BoxDecoration(
+                                      color: dots[i],
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
-                                ),
+                                ],
+                                if (hasMoreDots) ...[
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    '+',
+                                    key:
+                                        ValueKey('calendar-dots-overflow-$day'),
+                                    style: journal.metadata.copyWith(
+                                      fontSize: 9.5,
+                                      height: 1.0,
+                                      fontWeight: FontWeight.w700,
+                                      color: journal.muted,
+                                    ),
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
                   ),
                 ],
@@ -1005,8 +1058,13 @@ class _CalendarScreenState extends State<CalendarScreen>
   Widget _buildManualAgendaRow(
       BuildContext context, ManualEntry e, JournalPalette journal) {
     final exam = e.kind == 'exam';
-    final accent = exam ? journal.slate : journal.ink;
-    final label = exam ? '手动考试' : '个人待办';
+    final accent = exam ? journal.examOrange : journal.todoGreen;
+    final label = exam ? '考试' : '待办';
+    final notePreview = e.note.trim();
+    final subtitleParts = <String>[
+      manualTime(e.at),
+      if (e.course.trim().isNotEmpty) e.course.trim(),
+    ];
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       leading: Icon(
@@ -1015,13 +1073,46 @@ class _CalendarScreenState extends State<CalendarScreen>
         color: accent,
       ),
       title: Text(
-        '$label · ${e.title}',
-        style: journal.entryTitle.copyWith(color: accent),
+        e.title,
+        style: journal.entryTitle.copyWith(color: journal.ink),
       ),
-      subtitle: Text(manualTime(e.at), style: journal.metadata),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 3),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              CourseworkStatusPill(
+                label: label,
+                tone: exam ? CourseworkPillTone.exam : CourseworkPillTone.todo,
+              ),
+              const CourseworkStatusPill(
+                label: '自己添加',
+                tone: CourseworkPillTone.neutral,
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(subtitleParts.join(' · '), style: journal.metadata),
+          if (notePreview.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              notePreview,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: journal.metadata,
+            ),
+          ],
+        ],
+      ),
       trailing:
           Icon(Icons.chevron_right_rounded, size: 19, color: journal.muted),
-      onTap: () => context.push('/agenda'),
+      onTap: () =>
+          context.push('/assignments/manual/${Uri.encodeComponent(e.id)}'),
     );
   }
 
@@ -1080,6 +1171,37 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   double _calendarCellHeight(TextScaler textScaler) {
     final circleSize = (textScaler.scale(14) * 1.9).clamp(32.0, 46.0);
-    return math.max(48.0, circleSize + 16.0);
+    return math.max(50.0, circleSize + 18.0);
+  }
+}
+
+class _CalendarLegendDot extends StatelessWidget {
+  const _CalendarLegendDot({
+    required this.color,
+    required this.label,
+    required this.textStyle,
+  });
+
+  final Color color;
+  final String label;
+  final TextStyle textStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(label, style: textStyle),
+      ],
+    );
   }
 }

@@ -46,7 +46,7 @@ Assignment _classroom(
 void main() {
   test('FB-004 homework filter merges formal and supported classroom work', () {
     expect(homeTypeFilterChoices.map((choice) => choice.label),
-        ['全部', '作业', '考试']);
+        ['全部', '作业', '考试', '待办']);
     expect(normalizedHomeType(AssignmentTypeFilter.task),
         AssignmentTypeFilter.homework);
     expect(normalizedHomeType(AssignmentTypeFilter.examNotice),

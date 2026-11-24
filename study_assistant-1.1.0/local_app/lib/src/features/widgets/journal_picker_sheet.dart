@@ -25,6 +25,7 @@ class JournalPickerOption<T> {
     this.group,
     this.icon,
     this.keywords,
+    this.trailingText,
   });
 
   final Key? key;
@@ -34,6 +35,9 @@ class JournalPickerOption<T> {
   final String? group;
   final IconData? icon;
   final String? keywords;
+
+  /// Short status shown before the check mark, such as an item count.
+  final String? trailingText;
 }
 
 Future<T?> showJournalPickerSheet<T>(
@@ -413,11 +417,24 @@ class _JournalPickerSheetBodyState<T>
                                                 ],
                                               ),
                                             ),
+                                            if (opt.trailingText != null) ...[
+                                              const SizedBox(width: 10),
+                                              Text(
+                                                opt.trailingText!,
+                                                style: journal.metadata
+                                                    .copyWith(
+                                                        color: journal.ink),
+                                              ),
+                                            ],
                                             if (selected)
-                                              Icon(
-                                                Icons.check_rounded,
-                                                size: 20,
-                                                color: journal.accent,
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                    left: 8),
+                                                child: Icon(
+                                                  Icons.check_rounded,
+                                                  size: 20,
+                                                  color: journal.accent,
+                                                ),
                                               ),
                                           ],
                                         ),

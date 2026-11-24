@@ -635,8 +635,11 @@ void main() {
   testWidgets('same-location notification does not approve a pageless editor',
       (tester) async {
     final notifications = _CapturingNotifications();
-    await _launchApp(tester, '/agenda', notifications: notifications);
-    await tester.tap(find.text('添加个人安排'));
+    final store =
+        await _launchApp(tester, '/agenda', notifications: notifications);
+    Navigator.of(tester.element(find.byType(ManualAgendaScreen))).push(
+      MaterialPageRoute<void>(builder: (_) => ManualEntryEditor(store: store)),
+    );
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).first, '同址草稿');
     notifications.handler!('p:same');
@@ -936,6 +939,8 @@ void main() {
     expect(find.byType(CalendarScreen), findsOneWidget);
     expect(find.byType(JournalFloatingNavBar), findsOneWidget);
 
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('calendar-quick-add-entry')));
     await tester.pumpAndSettle();
     expect(find.byType(ManualEntryEditor), findsOneWidget);

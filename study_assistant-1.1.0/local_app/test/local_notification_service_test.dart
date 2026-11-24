@@ -71,7 +71,7 @@ void main() {
             },
           'getNotificationChannels' => [
               fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
-              fixture.channelRow('personal_schedule', '个人待办与考试提醒', 4),
+              fixture.channelRow('personal_schedule_v2', '待办与考试提醒', 4),
             ],
           'pendingNotificationRequests' || 'getActiveNotifications' => [],
           _ => true,
@@ -367,7 +367,7 @@ void main() {
               fixture.channelRow('assignment_silent', '静默作业通知', 2),
               fixture.channelRow('assignment_updates', '作业变化提醒', 3),
               fixture.channelRow('daily_summary', '每日课业摘要', 3),
-              fixture.channelRow('personal_schedule', '个人待办与考试提醒', 4),
+              fixture.channelRow('personal_schedule_v2', '待办与考试提醒', 4),
             ],
           'areNotificationsEnabled' || 'canScheduleExactNotifications' => true,
           'pendingNotificationRequests' || 'getActiveNotifications' => [],
@@ -412,7 +412,7 @@ void main() {
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       final channelList = <Map<String, Object?>>[
         fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
-        fixture.channelRow('personal_schedule', '个人待办与考试提醒', 4),
+        fixture.channelRow('personal_schedule_v2', '待办与考试提醒', 4),
       ];
       messenger.setMockMethodCallHandler(notifications, (call) async {
         calls.add(call);

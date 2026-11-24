@@ -115,17 +115,23 @@ void main() {
       expect(Journal.berry, const Color(0xFFB5493A));
       expect(Journal.berryBg, const Color(0xFFFBF2EF));
       expect(Journal.berryBorder, const Color(0xFFECD0C8));
-      expect(Journal.muted, const Color(0xFF4E545C));
+      expect(Journal.muted, const Color(0xFF434951));
+      expect(Journal.examOrange, const Color(0xFFAD4E0E));
+      expect(Journal.todoGreen, const Color(0xFF2A7A4B));
 
       expect(light.berry, Journal.berry);
       expect(light.berryBg, Journal.berryBg);
       expect(light.berryBorder, Journal.berryBorder);
       expect(light.muted, Journal.muted);
+      expect(light.examOrange, Journal.examOrange);
+      expect(light.todoGreen, Journal.todoGreen);
 
       expect(dark.berry, const Color(0xFFE27D70));
       expect(dark.berryBg, const Color(0xFF342222));
       expect(dark.berryBorder, const Color(0xFF61403C));
-      expect(dark.muted, const Color(0xFFBAB5AC));
+      expect(dark.muted, const Color(0xFFC4BFB6));
+      expect(dark.examOrange, const Color(0xFFF0A05A));
+      expect(dark.todoGreen, const Color(0xFF63C58A));
 
       expect(
           contrastRatio(light.berry, light.berryBg), greaterThanOrEqualTo(4.5));
@@ -135,6 +141,14 @@ void main() {
           contrastRatio(light.muted, light.paper), greaterThanOrEqualTo(4.5));
       expect(contrastRatio(light.muted, light.parchment),
           greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(light.examOrange, light.examOrangeBg),
+          greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(light.examOrange, light.sheet),
+          greaterThanOrEqualTo(3.0));
+      expect(contrastRatio(light.todoGreen, light.todoGreenBg),
+          greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(light.todoGreen, light.sheet),
+          greaterThanOrEqualTo(3.0));
 
       expect(
           contrastRatio(dark.berry, dark.berryBg), greaterThanOrEqualTo(4.5));
@@ -142,15 +156,27 @@ void main() {
       expect(contrastRatio(dark.muted, dark.paper), greaterThanOrEqualTo(4.5));
       expect(
           contrastRatio(dark.muted, dark.parchment), greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(dark.examOrange, dark.examOrangeBg),
+          greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(dark.examOrange, dark.sheet),
+          greaterThanOrEqualTo(3.0));
+      expect(contrastRatio(dark.todoGreen, dark.todoGreenBg),
+          greaterThanOrEqualTo(4.5));
+      expect(
+          contrastRatio(dark.todoGreen, dark.sheet), greaterThanOrEqualTo(3.0));
 
       final copied = light.copyWith(
         berryBorder: const Color(0xFF112233),
         berryBg: const Color(0xFF445566),
         muted: const Color(0xFF778899),
+        examOrange: const Color(0xFFAA5500),
+        todoGreen: const Color(0xFF116633),
       );
       expect(copied.berryBorder, const Color(0xFF112233));
       expect(copied.berryBg, const Color(0xFF445566));
       expect(copied.muted, const Color(0xFF778899));
+      expect(copied.examOrange, const Color(0xFFAA5500));
+      expect(copied.todoGreen, const Color(0xFF116633));
       expect(copied, isNot(equals(light)));
       expect(copied.dayHeading.color, const Color(0xFF778899));
       expect(copied.metadata.color, const Color(0xFF778899));
@@ -162,6 +188,14 @@ void main() {
       );
       expect(mid.berryBg, Color.lerp(light.berryBg, dark.berryBg, 0.5));
       expect(mid.muted, Color.lerp(light.muted, dark.muted, 0.5));
+      expect(
+        mid.examOrange,
+        Color.lerp(light.examOrange, dark.examOrange, 0.5),
+      );
+      expect(
+        mid.todoGreen,
+        Color.lerp(light.todoGreen, dark.todoGreen, 0.5),
+      );
     });
   });
 }

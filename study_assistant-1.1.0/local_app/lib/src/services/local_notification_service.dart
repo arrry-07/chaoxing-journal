@@ -37,7 +37,10 @@ class LocalNotificationService {
   final DateTime Function() _clock;
   final tz.Location? _location;
   String? lastWarning;
+  String? lastManualNotice;
   List<ReminderScheduleOutcome> lastScheduleOutcomes = const [];
+  Set<String> lastQuietHoursSkippedManualIds = const {};
+  Set<String> lastMissedWindowManualIds = const {};
   bool showDetails = false;
   bool allowUrgentNightBreakthrough = false;
   LocalCourseworkState courseworkState = const LocalCourseworkState.empty();
@@ -48,6 +51,7 @@ class LocalNotificationService {
   static const assignmentUpdatesChannel = 'assignment_updates';
   static const summaryChannel = 'daily_summary';
   static const manualChannel = 'personal_schedule';
+  static const manualV2Channel = 'personal_schedule_v2';
   static const _installDeadlineChannelDefaultKey =
       'deadline_channel_install_default_v1';
   static const _legacyInstallIndicatorKeys = [
@@ -82,10 +86,12 @@ class LocalNotificationService {
       importance: Importance.defaultImportance,
     ),
     AndroidNotificationChannel(
-      manualChannel,
-      '个人待办与考试提醒',
-      description: '个人待办和考试开始前提醒',
+      manualV2Channel,
+      '待办与考试提醒',
+      description: '待办和考试开始前提醒',
       importance: Importance.high,
+      playSound: true,
+      enableVibration: true,
     ),
   ];
   static const _extraChannels = <String, AndroidNotificationChannel>{
@@ -310,7 +316,7 @@ class LocalNotificationService {
           'retireLegacyAssignments',
           {
             'ownedIds': owned.toList()..sort(),
-            'excludeIds': [DailySummary.baseId + 8],
+            'excludeIds': [DailySummary.baseId + 8, DailySummary.baseId + 9],
           },
         );
       } catch (error) {
@@ -336,22 +342,53 @@ class LocalNotificationService {
     });
   }
 
+  static bool isManualReminderQuietHoursSkipped(
+    ManualEntry entry, {
+    required DateTime now,
+    bool allowUrgentNightBreakthrough = false,
+    tz.Location? location,
+  }) {
+    if (entry.done || !entry.remind || entry.at == null) return false;
+    final rawAt = entry.at!.subtract(const Duration(minutes: 30));
+    if (!rawAt.isAfter(now)) return false;
+    return DeadlineQuietHoursPolicy.adjustManualCandidate(
+          candidateAt: rawAt,
+          eventAt: entry.at!,
+          now: now,
+          allowUrgentNightBreakthrough: allowUrgentNightBreakthrough,
+          location: location,
+        ) ==
+        null;
+  }
+
+  static bool isManualReminderWindowMissed(
+    ManualEntry entry, {
+    required DateTime now,
+  }) {
+    if (entry.done || !entry.remind || entry.at == null) return false;
+    final rawAt = entry.at!.subtract(const Duration(minutes: 30));
+    return !rawAt.isAfter(now);
+  }
+
   NotificationPayloadHandler? _onPayload;
   String? _pendingPayload;
   Future<void> rescheduleManual(List<ManualEntry> entries) async {
     lastWarning = null;
+    lastManualNotice = null;
     lastScheduleOutcomes = const [];
+    lastQuietHoursSkippedManualIds = const {};
+    lastMissedWindowManualIds = const {};
     await _ensurePluginInitialized();
     final now = _clock();
     final schedules = <(ManualEntry, DateTime)>[];
     final validIds = <String>{};
+    final quietHoursSkippedIds = <String>{};
+    final missedWindowIds = <String>{};
     final seen = <String>{};
-    var reminderWindowMissed = false;
-    var quietHoursSkipped = false;
     for (final e in entries.where((e) => !e.done && e.remind && e.at != null)) {
       final rawAt = e.at!.subtract(const Duration(minutes: 30));
       if (!rawAt.isAfter(now)) {
-        reminderWindowMissed = true;
+        missedWindowIds.add(e.id);
         continue;
       }
       if (!seen.add(e.id)) {
@@ -365,21 +402,20 @@ class LocalNotificationService {
         location: _location,
       );
       if (at == null) {
-        quietHoursSkipped = true;
+        quietHoursSkippedIds.add(e.id);
         continue;
       }
       validIds.add(e.id);
       schedules.add((e, at));
     }
-    if (reminderWindowMissed) {
-      lastWarning =
-          _appendWarning(lastWarning, '部分个人安排的提前30分钟提醒时间已过，本次未安排提醒；请调整时间或关闭提醒');
-    } else if (quietHoursSkipped) {
-      lastWarning =
-          _appendWarning(lastWarning, '部分个人安排落在夜间静音时段且无可用白天时段，本次未安排有声提醒');
+    lastQuietHoursSkippedManualIds =
+        Set<String>.unmodifiable(quietHoursSkippedIds);
+    lastMissedWindowManualIds = Set<String>.unmodifiable(missedWindowIds);
+    if (missedWindowIds.isNotEmpty) {
+      lastManualNotice = '部分个人安排的提前30分钟提醒时间已过，本次未安排提醒；请调整时间或关闭提醒';
     }
     if (schedules.isNotEmpty) {
-      await _ensureAndroidChannel(manualChannel);
+      await _ensureAndroidChannel(manualV2Channel);
       if (defaultTargetPlatform == TargetPlatform.android) {
         // Scheduling can succeed even while Android suppresses delivery due
         // to the app permission or the user's channel setting. Surface that
@@ -419,8 +455,8 @@ class LocalNotificationService {
               entry.at!.difference(at).inMinutes.clamp(1, 525600);
           return _zonedSchedule(
               id: id,
-              channelId: manualChannel,
-              title: entry.kind == 'exam' ? '个人考试提醒' : '个人待办提醒',
+              channelId: manualV2Channel,
+              title: entry.kind == 'exam' ? '考试提醒' : '待办提醒',
               body: showDetails
                   ? '${entry.title} · $remainingMinutes分钟后到时，请核对个人安排'
                   : '有个人安排即将到时，请打开课业手记查看',
@@ -455,7 +491,7 @@ class LocalNotificationService {
             category: 'personal',
             stage: 'scheduleFailed',
             reasonCode: 'scheduleBatchFailed',
-            observedAt: DateTime.now(),
+            observedAt: _clock(),
             scheduledAt: at,
             expectedPayload: 'p:${entry.id}',
             evidenceState: 'recoveryPending',
@@ -543,6 +579,8 @@ class LocalNotificationService {
             nativeDetails?['ignoringBatteryOptimizations'] as bool?,
         lockscreenShowNotifications:
             nativeDetails?['lockscreenShowNotifications'] as bool?,
+        ringerMode: nativeDetails?['ringerMode'] as String?,
+        interruptionFilter: nativeDetails?['interruptionFilter'] as String?,
         lockscreenAllowPrivateNotifications:
             nativeDetails?['lockscreenAllowPrivateNotifications'] as bool?,
         pending:
@@ -629,6 +667,48 @@ class LocalNotificationService {
     );
   }
 
+  Future<bool> showTestManualNotification() => _runScheduleMutation(() async {
+        try {
+          await _ensureReadyForScheduling(manualV2Channel);
+          final health = await inspectHealth();
+          final channelStatus = health.manualChannel?.status;
+          if (health.notifications != true ||
+              (channelStatus != ReminderChannelStatus.enabled &&
+                  channelStatus != ReminderChannelStatus.unsupported)) {
+            return false;
+          }
+          await _plugin.show(
+            DailySummary.baseId + 9,
+            '待办测试提醒',
+            '如果你能听到提醒声音或看到通知横幅，待办与考试通知渠道工作正常。',
+            const NotificationDetails(
+              android: AndroidNotificationDetails(
+                manualV2Channel,
+                '待办与考试提醒',
+                channelDescription: '待办和考试开始前提醒',
+                importance: Importance.high,
+                priority: Priority.high,
+                playSound: true,
+                enableVibration: true,
+                category: AndroidNotificationCategory.reminder,
+                visibility: NotificationVisibility.private,
+              ),
+            ),
+            payload: 't:manual-notification-test',
+          );
+          return true;
+        } on PlatformException catch (error) {
+          debugPrint('[Notification] showTestManual: ${error.runtimeType}');
+          return false;
+        } on MissingPluginException catch (error) {
+          debugPrint('[Notification] showTestManual: ${error.runtimeType}');
+          return false;
+        } on StateError catch (error) {
+          debugPrint('[Notification] showTestManual: ${error.runtimeType}');
+          return false;
+        }
+      });
+
   Future<bool> showTestNotification() => _runScheduleMutation(() async {
         // Enqueue before initialization/health awaits so account/privacy cleanup
         // also retires a test notification whose display request is still in flight.
@@ -665,8 +745,41 @@ class LocalNotificationService {
         } on MissingPluginException catch (error) {
           debugPrint('[Notification] showTest: ${error.runtimeType}');
           return false;
+        } on StateError catch (error) {
+          debugPrint('[Notification] showTest: ${error.runtimeType}');
+          return false;
         }
       });
+
+  Future<void> migrateLegacyManualChannelIfNeeded(
+    List<ManualEntry> entries,
+  ) async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    final List<AndroidNotificationChannel>? existing;
+    final AndroidFlutterLocalNotificationsPlugin? android;
+    try {
+      await _ensurePluginInitialized();
+      android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      if (android == null) return;
+      existing = await android.getNotificationChannels();
+    } on MissingPluginException {
+      return;
+    } on UnimplementedError {
+      return;
+    } on Error catch (error) {
+      // Unmocked headless host unit tests never run Android's registerWith(),
+      // leaving flutter_local_notifications' late _instance uninitialized.
+      if (error.toString().startsWith('LateInitializationError:')) return;
+      rethrow;
+    }
+    if (existing == null || !existing.any((item) => item.id == manualChannel)) {
+      return;
+    }
+    await _ensureAndroidChannel(manualV2Channel);
+    await rescheduleManual(entries);
+    await _retireLegacyManualChannel(android);
+  }
 
   Future<bool> requestNotificationsPermission() async {
     await _ensurePluginInitialized();
@@ -681,7 +794,7 @@ class LocalNotificationService {
     lastWarning = null;
     lastScheduleOutcomes = const [];
     await _ensurePluginInitialized();
-    final now = DateTime.now();
+    final now = _clock();
     final desired = DailySummary.build(
       assignments,
       personal,
@@ -718,7 +831,7 @@ class LocalNotificationService {
         for (final notice in desired)
           'summary:${notice.at.millisecondsSinceEpoch}',
       };
-      final observedAt = DateTime.now();
+      final observedAt = _clock();
       final cancellations = <ReminderScheduleOutcome>[
         for (final prev in prior)
           if (prev.scheduledAtMs > now.millisecondsSinceEpoch &&
@@ -777,7 +890,7 @@ class LocalNotificationService {
             category: 'summary',
             stage: 'scheduleFailed',
             reasonCode: 'scheduleBatchFailed',
-            observedAt: DateTime.now(),
+            observedAt: _clock(),
             scheduledAt: notice.at,
             expectedPayload: 'd:summary',
             evidenceState: 'recoveryPending',
@@ -1761,7 +1874,8 @@ class LocalNotificationService {
               assignmentSilentChannel,
               assignmentUpdatesChannel,
               summaryChannel,
-              manualChannel
+              manualChannel,
+              manualV2Channel,
             }.contains(item.channelId));
   }
 
@@ -1787,6 +1901,7 @@ class LocalNotificationService {
         assignmentSilentChannel => 'assignments',
         assignmentUpdatesChannel => 'assignments',
         manualChannel => 'manual',
+        manualV2Channel => 'manual',
         summaryChannel => 'summary',
         _ => null,
       };
@@ -1805,8 +1920,20 @@ class LocalNotificationService {
     if (existing == null) {
       throw StateError('无法确认通知渠道 ${channel.id} 是否存在');
     }
-    if (existing.any((item) => item.id == channel.id)) return;
+    if (existing.any((item) => item.id == channel.id)) {
+      return;
+    }
     await android.createNotificationChannel(channel);
+  }
+
+  Future<void> _retireLegacyManualChannel(
+    AndroidFlutterLocalNotificationsPlugin android,
+  ) async {
+    try {
+      await android.deleteNotificationChannel(manualChannel);
+    } catch (_) {
+      // Legacy channel retirement is best-effort for older Android/mock plugins.
+    }
   }
 
   Future<
@@ -1926,7 +2053,7 @@ class LocalNotificationService {
       activeDeadline: status(targetDeadlineId),
       updates: status(assignmentUpdatesChannel),
       summary: status(summaryChannel),
-      manual: status(manualChannel),
+      manual: status(manualV2Channel),
       legacyV1: status(assignmentChannel),
       v2: status(assignmentV2Channel),
       silent: status(assignmentSilentChannel),
@@ -2084,8 +2211,8 @@ class LocalNotificationService {
         NotificationDetails(
           android: AndroidNotificationDetails(
             channelId,
-            channelId == manualChannel
-                ? '个人待办与考试提醒'
+            channelId == manualV2Channel || channelId == manualChannel
+                ? '待办与考试提醒'
                 : channelId == assignmentV2Channel
                     ? '作业截止提醒（增强有声）'
                     : '作业截止提醒',

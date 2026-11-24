@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'assignment.dart';
+import 'manual_attachment.dart';
 import 'personal_workspace.dart';
 
 DateTime? notebookDate(dynamic value) {
@@ -16,22 +17,84 @@ DateTime? notebookDate(dynamic value) {
 }
 
 class ManualEntry {
-  const ManualEntry(
-      {required this.id,
-      required this.title,
-      required this.kind,
-      this.course = '',
-      this.location = '',
-      this.note = '',
-      this.at,
-      this.done = false,
-      this.remind = false,
-      this.minutes = 0});
+  /// Shared identity for manual entries outside assignment storage.
+  static const pinPrefix = 'manual:';
+  static const kindTodo = 'todo';
+  static const kindExam = 'exam';
+  static const _legacyKeys = {
+    'id',
+    'title',
+    'kind',
+    'course',
+    'location',
+    'note',
+    'at',
+    'done',
+    'remind',
+    'minutes',
+  };
+  static const _optionalKeys = {'updatedAt', 'attachments'};
+
+  static bool isManualKey(String key) => key.startsWith(pinPrefix);
+
+  String get pinKey => '$pinPrefix$id';
+
+  const ManualEntry({
+    required this.id,
+    required this.title,
+    required this.kind,
+    this.course = '',
+    this.location = '',
+    this.note = '',
+    this.at,
+    this.done = false,
+    this.remind = false,
+    this.minutes = 0,
+    this.updatedAt,
+    this.attachments = const [],
+  });
+
   final String id, title, kind, course, location, note;
   final DateTime? at;
   final bool done, remind;
   final int minutes;
-  Map<String, dynamic> toJson() => {
+  final DateTime? updatedAt;
+  final List<ManualAttachment> attachments;
+
+  ManualEntry copyWith({
+    String? id,
+    String? title,
+    String? kind,
+    String? course,
+    String? location,
+    String? note,
+    DateTime? at,
+    bool clearAt = false,
+    bool? done,
+    bool? remind,
+    int? minutes,
+    DateTime? updatedAt,
+    bool clearUpdatedAt = false,
+    List<ManualAttachment>? attachments,
+  }) =>
+      ManualEntry(
+        id: id ?? this.id,
+        title: title ?? this.title,
+        kind: kind ?? this.kind,
+        course: course ?? this.course,
+        location: location ?? this.location,
+        note: note ?? this.note,
+        at: clearAt ? null : (at ?? this.at),
+        done: done ?? this.done,
+        remind: remind ?? this.remind,
+        minutes: minutes ?? this.minutes,
+        updatedAt: clearUpdatedAt ? null : (updatedAt ?? this.updatedAt),
+        attachments: attachments == null
+            ? this.attachments
+            : List<ManualAttachment>.unmodifiable(attachments),
+      );
+
+  Map<String, dynamic> toJson({bool portable = false}) => {
         'id': id,
         'title': title,
         'kind': kind,
@@ -41,21 +104,19 @@ class ManualEntry {
         'at': at?.toUtc().toIso8601String(),
         'done': done,
         'remind': remind,
-        'minutes': minutes
+        'minutes': minutes,
+        if (!portable && updatedAt != null)
+          'updatedAt': updatedAt!.toUtc().toIso8601String(),
+        if (!portable && attachments.isNotEmpty)
+          'attachments': [for (final item in attachments) item.toJson()],
       };
-  factory ManualEntry.fromJson(dynamic value) {
-    final j = PersonalWorkspace.map(value, {
-      'id',
-      'title',
-      'kind',
-      'course',
-      'location',
-      'note',
-      'at',
-      'done',
-      'remind',
-      'minutes'
-    });
+
+  factory ManualEntry.fromJson(dynamic value, {bool portable = false}) {
+    final j = PersonalWorkspace.map(
+      value,
+      _legacyKeys,
+      optionalKeys: portable ? const {} : _optionalKeys,
+    );
     final at = notebookDate(j['at']);
     if (!{'todo', 'exam'}.contains(j['kind']) ||
         j['done'] is! bool ||
@@ -67,29 +128,63 @@ class ManualEntry {
         (j['remind'] == true && at == null)) {
       PersonalWorkspace.bad();
     }
+    final updatedAt = portable ? null : notebookDate(j['updatedAt']);
+    final attachments = <ManualAttachment>[];
+    if (!portable && j.containsKey('attachments') && j['attachments'] != null) {
+      final rawList = PersonalWorkspace.list(
+        j['attachments'],
+        ManualAttachment.maxAttachmentsPerEntry,
+      );
+      final seenIds = <String>{};
+      final seenPaths = <String>{};
+      var imageCount = 0;
+      for (final raw in rawList) {
+        final attachment = ManualAttachment.fromJson(raw);
+        if (!seenIds.add(attachment.id) ||
+            !seenPaths.add(attachment.relativePath)) {
+          PersonalWorkspace.bad();
+        }
+        if (attachment.isImage) {
+          imageCount++;
+          if (imageCount > ManualAttachment.maxImagesPerEntry) {
+            PersonalWorkspace.bad();
+          }
+        }
+        attachments.add(attachment);
+      }
+    }
     return ManualEntry(
-        id: PersonalWorkspace.text(j['id'], 100),
-        title: PersonalWorkspace.text(j['title'], 200),
-        kind: j['kind'],
-        course: PersonalWorkspace.text(j['course'], 200, empty: true),
-        location: PersonalWorkspace.text(j['location'], 200, empty: true),
-        note: PersonalWorkspace.text(j['note'], 10000, empty: true),
-        at: at,
-        done: j['done'],
-        remind: j['remind'],
-        minutes: j['minutes']);
-  }
-  ManualEntry completed(bool value) => ManualEntry(
-      id: id,
-      title: title,
-      kind: kind,
-      course: course,
-      location: location,
-      note: note,
+      id: PersonalWorkspace.text(j['id'], 100),
+      title: PersonalWorkspace.text(j['title'], 200),
+      kind: j['kind'],
+      course: PersonalWorkspace.text(j['course'], 200, empty: true),
+      location: PersonalWorkspace.text(j['location'], 200, empty: true),
+      note: PersonalWorkspace.text(j['note'], 10000, empty: true),
       at: at,
-      done: value,
-      remind: remind,
-      minutes: minutes);
+      done: j['done'],
+      remind: j['remind'],
+      minutes: j['minutes'],
+      updatedAt: updatedAt,
+      attachments: attachments.isEmpty
+          ? const []
+          : List<ManualAttachment>.unmodifiable(attachments),
+    );
+  }
+
+  ManualEntry completed(bool value, {DateTime? now}) => ManualEntry(
+        id: id,
+        title: title,
+        kind: kind,
+        course: course,
+        location: location,
+        note: note,
+        at: at,
+        done: value,
+        remind: remind,
+        minutes: minutes,
+        updatedAt: now ?? DateTime.now(),
+        attachments: attachments,
+      );
 }
 
 class ArchivedAssignment {
@@ -175,24 +270,26 @@ class TermArchive {
                       (personal.work[a.id] ?? const PersonalWork())
                           .toJson(portable: true)))
           ],
-          entries: entries,
+          entries: [
+            for (final entry in entries) entry.copyWith(attachments: const [])
+          ],
           plans: personal.plans);
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toJson({bool portable = false}) => {
         'id': id,
         'label': label,
         'createdAt': createdAt.toUtc().toIso8601String(),
         'rows': rows.map((v) => v.toJson()).toList(),
-        'entries': entries.map((v) => v.toJson()).toList(),
+        'entries': entries.map((v) => v.toJson(portable: portable)).toList(),
         'plans': plans.map((v) => v.toJson()).toList()
       };
-  factory TermArchive.fromJson(dynamic value) {
+  factory TermArchive.fromJson(dynamic value, {bool portable = false}) {
     final j = PersonalWorkspace.map(
         value, {'id', 'label', 'createdAt', 'rows', 'entries', 'plans'});
     final rows = PersonalWorkspace.list(j['rows'], 2000)
         .map(ArchivedAssignment.fromJson)
         .toList();
     final entries = PersonalWorkspace.list(j['entries'], 500)
-        .map(ManualEntry.fromJson)
+        .map((v) => ManualEntry.fromJson(v, portable: portable))
         .toList();
     if (rows.map((v) => v.id).toSet().length != rows.length ||
         entries.map((v) => v.id).toSet().length != entries.length) {
@@ -220,27 +317,47 @@ class StudyNotebook {
         terms = List.unmodifiable(terms);
   final List<ManualEntry> entries;
   final List<TermArchive> terms;
-  Map<String, dynamic> toJson() => {
-        'version': 1,
-        'entries': entries.map((v) => v.toJson()).toList(),
-        'terms': terms.map((v) => v.toJson()).toList()
+
+  bool get _usesV2Format =>
+      entries.any((e) => e.updatedAt != null || e.attachments.isNotEmpty) ||
+      terms.any(
+        (t) => t.entries.any(
+          (e) => e.updatedAt != null || e.attachments.isNotEmpty,
+        ),
+      );
+
+  bool hasActiveEntry(String id) =>
+      entries.any((entry) => entry.id == id && !entry.done);
+  Map<String, dynamic> toJson({bool portable = false}) => {
+        'version': !portable && _usesV2Format ? 2 : 1,
+        'entries': entries.map((v) => v.toJson(portable: portable)).toList(),
+        'terms': terms.map((v) => v.toJson(portable: portable)).toList()
       };
-  String encode() => jsonEncode(toJson());
-  factory StudyNotebook.decode(String raw) {
+  String encode({bool portable = false}) =>
+      jsonEncode(toJson(portable: portable));
+  static StudyNotebook decodePortable(String raw) =>
+      _decode(raw, portable: true);
+  factory StudyNotebook.decode(String raw) => _decode(raw, portable: false);
+  static StudyNotebook _decode(String raw, {required bool portable}) {
     if (raw.length > 4 * 1024 * 1024 ||
         utf8.encode(raw).length > 4 * 1024 * 1024) {
       PersonalWorkspace.bad();
     }
-    return StudyNotebook.fromJson(jsonDecode(raw));
+    return StudyNotebook.fromJson(jsonDecode(raw), portable: portable);
   }
-  factory StudyNotebook.fromJson(dynamic value) {
+
+  factory StudyNotebook.fromJson(dynamic value, {bool portable = false}) {
     final j = PersonalWorkspace.map(value, {'version', 'entries', 'terms'});
-    if (j['version'] is! int || j['version'] != 1) PersonalWorkspace.bad();
+    final version = j['version'];
+    if (version is! int || (version != 1 && (portable || version != 2))) {
+      PersonalWorkspace.bad();
+    }
+    final entryPortable = portable || version == 1;
     final entries = PersonalWorkspace.list(j['entries'], 500)
-        .map(ManualEntry.fromJson)
+        .map((v) => ManualEntry.fromJson(v, portable: entryPortable))
         .toList();
     final terms = PersonalWorkspace.list(j['terms'], 12)
-        .map(TermArchive.fromJson)
+        .map((v) => TermArchive.fromJson(v, portable: entryPortable))
         .toList();
     if (entries.map((v) => v.id).toSet().length != entries.length ||
         terms.map((v) => v.id).toSet().length != terms.length) {

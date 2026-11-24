@@ -1,13 +1,15 @@
 name: study_assistant_mobile
 description: 学习通作业提醒本地版 App。
 publish_to: "none"
-version: 1.8.26+120
+version: 1.8.31+124
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
 
 dependencies:
   flutter:
+    sdk: flutter
+  flutter_localizations:
     sdk: flutter
   crypto: ^3.0.7
   dio: ^5.7.0

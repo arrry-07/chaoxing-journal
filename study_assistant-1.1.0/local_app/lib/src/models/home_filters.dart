@@ -29,7 +29,8 @@ enum AssignmentTypeFilter {
   homework('作业'),
   task('任务'),
   exam('考试'),
-  examNotice('考试通知');
+  examNotice('考试通知'),
+  todo('待办');
 
   const AssignmentTypeFilter(this.label);
   final String label;
@@ -38,7 +39,8 @@ enum AssignmentTypeFilter {
 const homeTypeFilterChoices = [
   AssignmentTypeFilter.all,
   AssignmentTypeFilter.homework,
-  AssignmentTypeFilter.exam
+  AssignmentTypeFilter.exam,
+  AssignmentTypeFilter.todo,
 ];
 const homeSortOrderChoices = [
   HomeSortOrder.deadlineAsc,

@@ -171,6 +171,7 @@ class LocalRecordFilterSpec {
 
   bool get isStatsScoped =>
       scope != LocalRecordScopeFilter.allLocal ||
+      termScope != CourseTermScope.allTerms ||
       courseKey != null ||
       timeRange != StatsTimeRange.all ||
       status != LocalRecordStatusFilter.all ||
@@ -185,6 +186,7 @@ class LocalRecordFilterSpec {
     String? courseKey,
     bool clearCourseKey = false,
     StatsTimeRange? timeRange,
+    CourseTermScope? termScope,
     String? query,
     LocalRecordSortOrder? sort,
   }) {
@@ -195,6 +197,7 @@ class LocalRecordFilterSpec {
       scope: scope ?? this.scope,
       courseKey: clearCourseKey ? null : courseKey ?? this.courseKey,
       timeRange: timeRange ?? this.timeRange,
+      termScope: termScope ?? this.termScope,
       query: query ?? this.query,
       sort: sort ?? this.sort,
     );
@@ -207,6 +210,7 @@ class LocalRecordFilterSpec {
         scope: LocalRecordScopeFilter.allLocal,
         courseKey: null,
         timeRange: StatsTimeRange.all,
+        termScope: CourseTermScope.allTerms,
         query: '',
         sort: sort,
       );
@@ -341,8 +345,8 @@ class LocalRecordQuery {
 
     // Coursework category: align base collection with the same term-scoped
     // statistics source used by StatsScreen, including archived courses.
-    final statsScoped =
-        spec.from == 'stats' || spec.scope != LocalRecordScopeFilter.allLocal;
+    final statsScoped = spec.scope != LocalRecordScopeFilter.allLocal ||
+        spec.termScope != CourseTermScope.allTerms;
     final baseGroups = statsScoped
         ? _statsScopedGroups(store, spec, now)
         : store.localCourseTaskGroups;

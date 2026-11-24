@@ -439,6 +439,7 @@ class StudyAssistantTheme {
       fontFamilyFallback: Journal.bodyFallback,
       dividerColor: journal.divider,
       textTheme: baseText,
+      primaryTextTheme: baseText,
       appBarTheme: AppBarTheme(
         centerTitle: false,
         elevation: 0,
@@ -574,7 +575,7 @@ class StudyAssistantTheme {
             return journal.onPrimaryFill;
           }
           if (states.contains(WidgetState.disabled)) {
-            return journal.muted.withValues(alpha: 0.5);
+            return journal.muted.withValues(alpha: 0.65);
           }
           return journal.ink;
         }),

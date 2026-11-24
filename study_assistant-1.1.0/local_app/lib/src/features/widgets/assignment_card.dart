@@ -91,6 +91,20 @@ class AssignmentCard extends StatelessWidget {
     return width;
   }
 
+  static double measureRailWidth(
+    BuildContext context, {
+    required bool inPinnedSection,
+  }) {
+    final journal = Journal.of(context);
+    return _measureRailWidth(
+      journal.time,
+      journal.metadata,
+      Directionality.of(context),
+      MediaQuery.textScalerOf(context),
+      inPinnedSection: inPinnedSection,
+    );
+  }
+
   static String _compactRemaining(DateTime deadline, DateTime now) {
     final diff = deadline.difference(now);
     if (diff.isNegative || diff.inSeconds <= 0) return '已逾期';
@@ -99,6 +113,9 @@ class AssignmentCard extends StatelessWidget {
     if (minutes < 1440) return '剩${(minutes / 60).ceil()}小时';
     return '剩${(minutes / 1440).ceil()}天';
   }
+
+  static String compactRemaining(DateTime deadline, DateTime now) =>
+      _compactRemaining(deadline, now);
 
   static String examStateLabel(Assignment assignment, DateTime now) {
     final exam = assignment.exam!;
@@ -287,10 +304,10 @@ class AssignmentCard extends StatelessWidget {
         (a.isExam ? a.timelineTrusted : resolvedDeadline != null) &&
         (today || d.difference(now) <= const Duration(hours: 48));
     final railTextColor = (highlightToday || pinUrgent)
-        ? journal.berry
+        ? journal.accent
         : clock.isEmpty
             ? (railLabel == '待定' ? journal.ochre : journal.muted)
-            : (overdue ? journal.muted : journal.ink.withValues(alpha: 0.88));
+            : (overdue ? journal.muted : journal.ink);
 
     final highlightPills = <Widget>[
       if (state.isNotEmpty && hasSpecialStatePill)
@@ -387,9 +404,7 @@ class AssignmentCard extends StatelessWidget {
           : Icon(
               opening ? Icons.hourglass_top_rounded : Icons.open_in_new_rounded,
               size: 18,
-              color: enabled
-                  ? journal.muted
-                  : journal.muted.withValues(alpha: 0.45),
+              color: enabled ? journal.muted : journal.ruleStrong,
             );
 
       if (largeText) {
@@ -490,10 +505,10 @@ class AssignmentCard extends StatelessWidget {
       final remLabel = overdue
           ? (isManualDeadline ? '手动已过' : '已逾期')
           : _compactRemaining(d, now);
-      final dateColor = pinUrgent ? journal.berry : journal.muted;
+      final dateColor = pinUrgent ? journal.accent : journal.muted;
       final clockColor =
-          pinUrgent ? journal.berry : (overdue ? journal.muted : journal.ink);
-      final remColor = pinUrgent ? journal.berry : journal.muted;
+          pinUrgent ? journal.accent : (overdue ? journal.muted : journal.ink);
+      final remColor = pinUrgent ? journal.accent : journal.muted;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,

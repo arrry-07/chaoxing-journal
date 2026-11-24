@@ -133,9 +133,12 @@ class ReminderDatabaseMigrationTest {
     fun freshDatabaseHasV7Indices() {
         val name = "fresh-v8-${System.nanoTime()}.db"
         names.add(name)
-        ReminderDatabase.openForTest(context, name).use { database ->
+        val database = ReminderDatabase.openForTest(context, name)
+        try {
             assertV7Indices(database.readableDatabase)
             assertEquals(8, database.readableDatabase.version)
+        } finally {
+            database.close()
         }
     }
 
@@ -158,7 +161,8 @@ class ReminderDatabaseMigrationTest {
             )
         }
 
-        ReminderDatabase.openForTest(context, name).use { database ->
+        val database = ReminderDatabase.openForTest(context, name)
+        try {
             val db = database.readableDatabase
             assertEquals(8L, database.readAccount(account)!!.pendingSignalVersion)
             assertEquals("迁移测试作业", database.snapshot(account, "cx:work:1:2:migrated")!!.title)
@@ -175,6 +179,8 @@ class ReminderDatabaseMigrationTest {
             assertEquals("recoveryPending", evidence.single().state)
             assertV7Indices(db)
             assertEquals(8, db.version)
+        } finally {
+            database.close()
         }
     }
 
@@ -203,7 +209,8 @@ class ReminderDatabaseMigrationTest {
             seedLegacyRows(db, account)
         }
 
-        ReminderDatabase.openForTest(context, name).use { database ->
+        val database = ReminderDatabase.openForTest(context, name)
+        try {
             assertEquals(8, database.readableDatabase.version)
             val state = database.readAccount(account)!!
             assertFalse(state.allowUrgentNightBreakthrough)
@@ -214,6 +221,8 @@ class ReminderDatabaseMigrationTest {
             assertEquals("unknown", legacyEvent.deadlineSource)
             // Legacy v7 deadline event lacking source must not be allowed to deliver/match.
             assertFalse(legacySnapshot.matchesEvent(legacyEvent, System.currentTimeMillis()))
+        } finally {
+            database.close()
         }
     }
 

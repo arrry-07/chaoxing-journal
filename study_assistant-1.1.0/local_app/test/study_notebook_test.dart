@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:study_assistant_mobile/src/models/manual_attachment.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
@@ -105,5 +106,37 @@ void main() {
         'A');
     await r.restoreBackupSnapshot(snapshot, 'A');
     expect((await r.loadNotebook()).entries.single.title, 'new');
+  });
+
+  test('TermArchive.capture strips manual entry attachments', () {
+    final archive = TermArchive.capture(
+      id: 't-att',
+      label: '测试归档',
+      rows: [f.sample('one')],
+      personal: PersonalWorkspace(),
+      entries: [
+        ManualEntry(
+          id: 'm-att-1',
+          title: '带图待办',
+          kind: ManualEntry.kindTodo,
+          updatedAt: DateTime.utc(2026, 11, 25, 4),
+          attachments: [
+            ManualAttachment(
+              id: 'a1',
+              kind: ManualAttachment.kindImage,
+              name: 'p.jpg',
+              relativePath: 'manual_attachments/a1.jpg',
+              mimeType: 'image/jpeg',
+              sizeBytes: 2048,
+              addedAt: DateTime.utc(2026, 11, 25, 4),
+            ),
+          ],
+        ),
+      ],
+    );
+    expect(archive.entries.single.attachments, isEmpty);
+    final raw = StudyNotebook(terms: [archive]).encode(portable: true);
+    expect(raw, isNot(contains('manual_attachments')));
+    expect(raw, isNot(contains('updatedAt')));
   });
 }

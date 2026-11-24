@@ -1,5 +1,6 @@
 import '../models/assignment.dart';
 import '../models/local_coursework_state.dart';
+import '../models/study_notebook.dart';
 import '../models/sync_report.dart';
 import 'assignment_query.dart';
 import 'coursework_deadline.dart';
@@ -33,7 +34,8 @@ class HomeSyncPresentation {
       required DateTime now,
       DateTime? successAt,
       bool? hasPreviousData,
-      bool serviceWarning = false}) {
+      bool serviceWarning = false,
+      bool widgetWarning = false}) {
     if (loading || report.phase == SyncPhase.running) {
       return HomeSyncPresentation(
           hasCache ? '正在更新…' : '正在读取作业…', HomeSyncAction.none);
@@ -143,6 +145,14 @@ class HomeSyncPresentation {
                 report.phase == SyncPhase.failed ? hasCache : showCached);
       }
     }
+    if (serviceWarning && widgetWarning) {
+      return const HomeSyncPresentation(
+          '作业已更新，提醒或小组件需要处理', HomeSyncAction.settings);
+    }
+    if (widgetWarning) {
+      return const HomeSyncPresentation(
+          '作业已更新，小组件需要处理', HomeSyncAction.settings);
+    }
     if (serviceWarning) {
       return const HomeSyncPresentation(
           '作业已更新，提醒需要处理', HomeSyncAction.settings);
@@ -186,6 +196,7 @@ class HomeDueSummary {
     required DateTime now,
     AssignmentDisplayIndex? index,
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+    List<ManualEntry> manualEntries = const [],
   }) {
     final todayDay = AssignmentQuery.dayKey(now);
     final day3End = DateTime(todayDay.year, todayDay.month, todayDay.day + 2);
@@ -226,6 +237,22 @@ class HomeDueSummary {
           !deadline.isAfter(now)) {
         continue;
       }
+      if (dueDay == todayDay) {
+        dueToday++;
+        dueIn3Days++;
+      } else if (!dueDay.isBefore(todayDay) && !dueDay.isAfter(day3End)) {
+        dueIn3Days++;
+      }
+    }
+    for (final entry in manualEntries) {
+      final at = entry.at;
+      if (entry.done ||
+          entry.kind != 'todo' ||
+          at == null ||
+          !at.isAfter(now)) {
+        continue;
+      }
+      final dueDay = AssignmentQuery.dayKey(at);
       if (dueDay == todayDay) {
         dueToday++;
         dueIn3Days++;

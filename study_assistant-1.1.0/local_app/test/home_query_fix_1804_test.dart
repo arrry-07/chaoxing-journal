@@ -183,8 +183,9 @@ void main() {
 
     await tester.tap(find.text('搜索与筛选'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('所选课程'));
-    await tester.tap(find.text('所选课程'));
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('home-course-filter')));
+    await tester.tap(find.byKey(const ValueKey('home-course-filter')));
     await tester.pumpAndSettle();
 
     expect(find.text('高等数学'), findsNothing);

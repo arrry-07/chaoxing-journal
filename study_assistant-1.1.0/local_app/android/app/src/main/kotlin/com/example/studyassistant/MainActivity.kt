@@ -2,6 +2,7 @@ package com.example.studyassistant
 
 import android.app.NotificationManager
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import java.util.zip.ZipFile
 import android.content.Intent
 import android.content.ComponentName
@@ -81,8 +82,11 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         interactionSoundBridge = InteractionSoundBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         BackgroundReminderBridge.attach(flutterEngine, this)
-        personalFileBridge = PersonalFileBridge(this,
-            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/personal_files"))
+        personalFileBridge = PersonalFileBridge(
+            this,
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/personal_files"),
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/manual_attachments"),
+        )
         backupBridge = BackupBridge(this,
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/backup"))
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "study_assistant/external_links").setMethodCallHandler { call, result ->
@@ -429,6 +433,7 @@ class MainActivity : FlutterActivity() {
             DeadlineChannelPolicy.CHANNEL_SILENT,
             "daily_summary",
             "personal_schedule",
+            "personal_schedule_v2",
         )
         val channelMap = buildMap<String, Any?> {
             for (id in channelIds) {
@@ -461,11 +466,34 @@ class MainActivity : FlutterActivity() {
         val lockscreenAllowPrivate = runCatching {
             Settings.Secure.getInt(contentResolver, "lock_screen_allow_private_notifications") == 1
         }.getOrNull()
+        val ringerMode = runCatching {
+            when (getSystemService(AudioManager::class.java)?.ringerMode) {
+                AudioManager.RINGER_MODE_SILENT -> "silent"
+                AudioManager.RINGER_MODE_VIBRATE -> "vibrate"
+                AudioManager.RINGER_MODE_NORMAL -> "normal"
+                else -> "unknown"
+            }
+        }.getOrDefault("unknown")
+        val interruptionFilter = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                when (manager?.currentInterruptionFilter) {
+                    NotificationManager.INTERRUPTION_FILTER_ALL -> "all"
+                    NotificationManager.INTERRUPTION_FILTER_PRIORITY -> "priority"
+                    NotificationManager.INTERRUPTION_FILTER_NONE -> "none"
+                    NotificationManager.INTERRUPTION_FILTER_ALARMS -> "alarms"
+                    else -> "unknown"
+                }
+            } else {
+                "unknown"
+            }
+        }.getOrDefault("unknown")
         return mapOf(
             "channels" to channelMap,
             "ignoringBatteryOptimizations" to ignoringBattery,
             "lockscreenShowNotifications" to lockscreenShow,
             "lockscreenAllowPrivateNotifications" to lockscreenAllowPrivate,
+            "ringerMode" to ringerMode,
+            "interruptionFilter" to interruptionFilter,
         )
     }
 

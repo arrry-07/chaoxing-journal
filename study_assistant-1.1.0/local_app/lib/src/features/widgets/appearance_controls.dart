@@ -357,7 +357,7 @@ class _SwatchPreview extends StatelessWidget {
               child: Container(
                 height: compact ? 2.5 : 3,
                 decoration: BoxDecoration(
-                  color: palette.ink.withValues(alpha: 0.48),
+                  color: palette.muted,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),

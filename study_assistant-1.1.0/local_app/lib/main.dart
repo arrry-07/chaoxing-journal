@@ -7,6 +7,7 @@ import 'src/features/course_study_hub_screen.dart';
 import 'src/features/daily_plan_screen.dart';
 import 'src/features/display_settings_screen.dart';
 import 'src/features/manual_agenda_screen.dart';
+import 'src/features/manual_entry_detail_screen.dart';
 import 'src/features/open_source_screen.dart';
 import 'src/features/term_archives_screen.dart';
 import 'src/features/personal_work_screen.dart';
@@ -21,6 +22,7 @@ import 'src/features/help_feedback_screen.dart';
 import 'src/features/local_records_screen.dart';
 import 'src/features/course_list_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
@@ -344,6 +346,13 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
           child: MaterialApp.router(
             title: '学习通课业手记',
             debugShowCheckedModeBanner: false,
+            locale: const Locale('zh', 'CN'),
+            supportedLocales: const [Locale('zh', 'CN')],
+            localizationsDelegates: const [
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
             theme: StudyAssistantTheme.light,
             darkTheme: StudyAssistantTheme.dark,
             themeAnimationDuration:
@@ -460,6 +469,34 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
               builder: (_, __) => AssignmentListScreen(store: assignmentStore),
             ),
             GoRoute(
+              path: '/assignments/new',
+              onExit: (_, __) =>
+                  _leaveGuard.confirmLeave(routeScope: '/assignments'),
+              builder: (_, state) => ManualEntryEditor(
+                store: assignmentStore,
+                initialCourse: state.uri.queryParameters['course'],
+                initialKind: state.uri.queryParameters['kind'],
+                routeScope: '/assignments',
+              ),
+            ),
+            GoRoute(
+              path: '/assignments/manual/:id/edit',
+              onExit: (_, __) =>
+                  _leaveGuard.confirmLeave(routeScope: '/assignments'),
+              builder: (_, state) => ManualEntryEditor(
+                store: assignmentStore,
+                entryId: state.pathParameters['id'],
+                routeScope: '/assignments',
+              ),
+            ),
+            GoRoute(
+              path: '/assignments/manual/:id',
+              builder: (_, state) => ManualEntryDetailScreen(
+                store: assignmentStore,
+                entryId: state.pathParameters['id']!,
+              ),
+            ),
+            GoRoute(
               path: '/assignments/:id',
               builder: (_, state) => AssignmentDetailScreen(
                 store: assignmentStore,
@@ -479,6 +516,7 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
               builder: (_, state) => ManualEntryEditor(
                 store: assignmentStore,
                 initialDay: _parseDayQuery(state.uri.queryParameters['day']),
+                initialKind: state.uri.queryParameters['kind'],
                 routeScope: '/calendar',
               ),
             ),
@@ -578,12 +616,16 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
 
   String _notificationTarget(String payload) {
     var missing = false;
-    final target =
-        AppDeepLinks.notificationLocation(payload, containsAssignment: (id) {
-      final exists = assignmentStore.findAssignment(id) != null;
-      missing = !exists;
-      return exists;
-    });
+    final target = AppDeepLinks.notificationLocation(
+      payload,
+      containsAssignment: (id) {
+        final exists = assignmentStore.findAssignment(id) != null;
+        missing = !exists;
+        return exists;
+      },
+      containsManualEntry: (id) =>
+          assignmentStore.notebook.entries.any((item) => item.id == id),
+    );
     if (missing) {
       debugPrint(
           '[NotificationRoute] assignment_missing_from_current_snapshot');

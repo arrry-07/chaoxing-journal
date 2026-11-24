@@ -28,8 +28,11 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
-// Android preserves a deleted channel's settings when it is recreated. On a
-// fresh test install, create the disabled channel before tests that create it.
+// Android preserves a channel's importance even after it is deleted and
+// recreated. Disabling a production channel here would leak into every later
+// test in this install, so the disabled-channel fixtures reuse one synthetic
+// channel and never touch production channels. NAME_ASCENDING keeps
+// zCreatesV2DeadlineChannelWithoutOverwritingExistingChannel last.
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
 class AssignmentNotificationPublisherTest {
     private lateinit var context: Context
@@ -37,6 +40,7 @@ class AssignmentNotificationPublisherTest {
     private lateinit var database: ReminderDatabase
     private lateinit var accountHash: String
     private var notificationId = 0
+    private val disabledChannelId = "synthetic-disabled-updates-tests"
 
     @Before
     fun setUp() {
@@ -53,9 +57,6 @@ class AssignmentNotificationPublisherTest {
         notificationManager = context.getSystemService(NotificationManager::class.java)
         database = ReminderDatabase.get(context)
         accountHash = "instrumentation-disabled-channel-${System.nanoTime()}"
-        notificationManager.deleteNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_UPDATES,
-        )
         notificationId = seedPendingNewAssignment()
     }
 
@@ -70,33 +71,49 @@ class AssignmentNotificationPublisherTest {
             )
         }
         runCatching { database.clearActiveAccount(accountHash) }
-        notificationManager.deleteNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_UPDATES,
+        // Keep the synthetic disabled channel between tests: Android remembers
+        // a deleted channel's importance, and recreating channels too often can
+        // hit the platform's per-app channel-creation rate limit.
+    }
+
+    private fun ensureDisabledSyntheticChannel(): String {
+        if (notificationManager.getNotificationChannel(disabledChannelId) == null) {
+            notificationManager.createNotificationChannel(
+                NotificationChannel(
+                    disabledChannelId,
+                    "测试关闭通道",
+                    NotificationManager.IMPORTANCE_NONE,
+                ),
+            )
+        }
+        assertEquals(
+            "测试前置条件：系统渠道必须处于关闭状态",
+            NotificationManager.IMPORTANCE_NONE,
+            notificationManager.getNotificationChannel(disabledChannelId).importance,
         )
+        return disabledChannelId
+    }
+
+    private fun deleteChannelAndWait(channelId: String) {
+        notificationManager.deleteNotificationChannel(channelId)
+        val deadline = System.currentTimeMillis() + 2_000
+        while (notificationManager.getNotificationChannel(channelId) != null &&
+            System.currentTimeMillis() < deadline
+        ) {
+            Thread.sleep(25)
+        }
     }
 
     @Test
     fun aDisabledChannelKeepsNewAssignmentPending() {
         assertTrue(LegacyAssignmentMigrationState.confirm(context))
-        notificationManager.createNotificationChannel(
-            NotificationChannel(
-                AssignmentNotificationPublisher.CHANNEL_UPDATES,
-                "测试关闭通道",
-                NotificationManager.IMPORTANCE_NONE,
-            ),
-        )
-        assertEquals(
-            "测试前置条件：系统渠道必须处于关闭状态",
-            NotificationManager.IMPORTANCE_NONE,
-            notificationManager.getNotificationChannel(
-                AssignmentNotificationPublisher.CHANNEL_UPDATES,
-            ).importance,
-        )
+        val disabledChannel = ensureDisabledSyntheticChannel()
         val result = AssignmentNotificationPublisher.publishPendingNewAssignments(
             context,
             database,
             accountHash,
             Instant.now(),
+            disabledChannel,
         )
 
         assertFalse(result.submitted)
@@ -116,15 +133,9 @@ class AssignmentNotificationPublisherTest {
     fun bDisabledChannelKeepsClassroomActivityPending() {
         assertTrue(LegacyAssignmentMigrationState.confirm(context))
         notificationId = seedPendingNewAssignment(formal = false)
-        notificationManager.createNotificationChannel(
-            NotificationChannel(
-                AssignmentNotificationPublisher.CHANNEL_UPDATES,
-                "测试关闭通道",
-                NotificationManager.IMPORTANCE_NONE,
-            ),
-        )
+        val disabledChannel = ensureDisabledSyntheticChannel()
         val result = AssignmentNotificationPublisher.publishPendingNewAssignments(
-            context, database, accountHash, Instant.now(),
+            context, database, accountHash, Instant.now(), disabledChannel,
         )
         assertFalse(result.submitted)
         assertEquals("对应通知通道已关闭，请在系统通知设置中重新开启", result.warning)
@@ -854,11 +865,16 @@ class AssignmentNotificationPublisherTest {
     fun unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel() {
         assertTrue(LegacyAssignmentMigrationState.confirm(context))
         val id = seedPendingNewAssignment()
+        val daytimeNow = ZonedDateTime.now(ZoneId.systemDefault())
+            .withHour(10)
+            .withMinute(0)
+            .withSecond(0)
+            .withNano(0)
         val result = AssignmentNotificationPublisher.publishPendingNewAssignments(
             context,
             database,
             accountHash,
-            Instant.now(),
+            daytimeNow.toInstant(),
         )
         assertTrue("publish result: $result", result.submitted)
         val active = notificationManager.activeNotifications.single { it.id == id && it.tag == null }
@@ -1021,12 +1037,8 @@ class AssignmentNotificationPublisherTest {
 
     @Test
     fun zCreatesV2DeadlineChannelWithoutOverwritingExistingChannel() {
-        notificationManager.deleteNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
-        )
-        notificationManager.deleteNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES,
-        )
+        deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2)
+        deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES)
         notificationManager.createNotificationChannel(
             NotificationChannel(
                 AssignmentNotificationPublisher.CHANNEL_DEADLINES,
@@ -1034,6 +1046,12 @@ class AssignmentNotificationPublisherTest {
                 NotificationManager.IMPORTANCE_LOW,
             ),
         )
+        // API 26 keeps a channel's importance immutable after first creation and
+        // may not purge a deleted channel within the same process; verify the
+        // preservation contract against the channel's actual pre-existing state.
+        val v1Before = notificationManager.getNotificationChannel(
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES,
+        )!!.importance
 
         AssignmentNotificationPublisher.ensureChannels(
             context,
@@ -1054,13 +1072,9 @@ class AssignmentNotificationPublisherTest {
         val v1 = notificationManager.getNotificationChannel(
             AssignmentNotificationPublisher.CHANNEL_DEADLINES,
         )
-        assertEquals(NotificationManager.IMPORTANCE_LOW, v1.importance)
-        notificationManager.deleteNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
-        )
-        notificationManager.deleteNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES,
-        )
+        assertEquals(v1Before, v1?.importance)
+        deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2)
+        deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES)
     }
 
     @Test
