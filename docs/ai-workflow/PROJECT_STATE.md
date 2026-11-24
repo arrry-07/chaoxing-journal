@@ -8,7 +8,7 @@
 - 终版验证：UTC 全量 `1894 passed / 1 skipped`、上海/洛杉矶核心各 `231 passed`、JVM `76`、Lint 0 错误、隔离 MuMu API 32 仪器测试 `112` 项 0 失败；正式双 ABI 包在 MuMu「学习通」保数据覆盖，版本 `1.8.26 (120)`，统计往期下钻 33/33。
 - **`dev` 已合入 1.9.0 首项预备修复**（`0806fee`）：补齐统计下钻 `LocalRecordFilterSpec.copyWith` / `isStatsScoped` / `resetToAllLocal`、`LocalRecordQuery.query` 的 `statsScoped` 退出及 `LocalRecordsScreen` 横幅学期标签/`didUpdateWidget`（附单元+组件回归），并将 `AssignmentNotificationPublisherTest#unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel` 改为设备本地固定白天 `10:00`；本地门禁（6 文件 75 项、`dart analyze` 0 问题）与隔离 ASCII 目录 `:app:compileDebugAndroidTestKotlin` 通过，全量 CI 与实机 `androidTest` 留待后续 PR/发版补齐。
 - 已启用[新版三段版本规则](VALIDATION.md#版本号与迭代分级规则)（`dev` 打 MuMu 自测包升 `Z`，正式版一律升 `Y` 归零 `Z`、`Y` 上限 `99`），并定稿 [v1.9.0 详细执行方案](../plans/2026-11-23-v1.9.0-首页手动课业混排与发版自动化方案.md)（首页手动课业混排 + `androidTest` 隔离脚本 + 波次 C-1，波次 B-2/C-2 暂缓）；详见[交接文档](handoffs/2026-11-23-v1.8.26-发版收口与下一轮起点交接.md)。
-- **首页混排阶段通过代码 Gate（`700f95f`）**：修复首页时间信任与置顶重排、窄屏卡片避让、真实切号回归和仪器测试中断判错。`1.8.27+121` 原签名自测包已保数据覆盖 MuMu「学习通」，界面验收待补。详见 [dev 本地状态](DEV_STATE.md)，通过后按 [路线图](../ROADMAP.md#dev-下一阶段)推进置顶持久化与隔离设备验证。
+- **首页混排阶段通过代码 Gate（`700f95f`）**：`1.8.27+121` 已在 MuMu「学习通」覆盖并验证原登录与课业、同日混排、置顶与退顶、完成撤销和日历联动。双向时间排序把未置顶的逾期项归入底部，实测逾期待办仍可手动置顶，方案口径待确认。详见 [dev 本地状态](DEV_STATE.md)。
 
 ## 最近 2 个正式发布版本
 
