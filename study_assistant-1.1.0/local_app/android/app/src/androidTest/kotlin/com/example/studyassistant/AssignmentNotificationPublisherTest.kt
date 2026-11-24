@@ -94,6 +94,16 @@ class AssignmentNotificationPublisherTest {
         return disabledChannelId
     }
 
+    private fun deleteChannelAndWait(channelId: String) {
+        notificationManager.deleteNotificationChannel(channelId)
+        val deadline = System.currentTimeMillis() + 2_000
+        while (notificationManager.getNotificationChannel(channelId) != null &&
+            System.currentTimeMillis() < deadline
+        ) {
+            Thread.sleep(25)
+        }
+    }
+
     @Test
     fun aDisabledChannelKeepsNewAssignmentPending() {
         assertTrue(LegacyAssignmentMigrationState.confirm(context))
@@ -1027,12 +1037,8 @@ class AssignmentNotificationPublisherTest {
 
     @Test
     fun zCreatesV2DeadlineChannelWithoutOverwritingExistingChannel() {
-        notificationManager.deleteNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
-        )
-        notificationManager.deleteNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES,
-        )
+        deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2)
+        deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES)
         notificationManager.createNotificationChannel(
             NotificationChannel(
                 AssignmentNotificationPublisher.CHANNEL_DEADLINES,
@@ -1040,6 +1046,12 @@ class AssignmentNotificationPublisherTest {
                 NotificationManager.IMPORTANCE_LOW,
             ),
         )
+        // API 26 keeps a channel's importance immutable after first creation and
+        // may not purge a deleted channel within the same process; verify the
+        // preservation contract against the channel's actual pre-existing state.
+        val v1Before = notificationManager.getNotificationChannel(
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES,
+        )!!.importance
 
         AssignmentNotificationPublisher.ensureChannels(
             context,
@@ -1060,13 +1072,9 @@ class AssignmentNotificationPublisherTest {
         val v1 = notificationManager.getNotificationChannel(
             AssignmentNotificationPublisher.CHANNEL_DEADLINES,
         )
-        assertEquals(NotificationManager.IMPORTANCE_LOW, v1.importance)
-        notificationManager.deleteNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
-        )
-        notificationManager.deleteNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES,
-        )
+        assertEquals(v1Before, v1?.importance)
+        deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2)
+        deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES)
     }
 
     @Test

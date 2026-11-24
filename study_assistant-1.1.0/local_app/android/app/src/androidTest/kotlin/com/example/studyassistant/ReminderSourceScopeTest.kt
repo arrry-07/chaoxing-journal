@@ -94,8 +94,8 @@ class ReminderSourceScopeTest {
                     database.onUpgrade(db, oldVersion, newVersion)
                 }
             }
-            helper.use {
-                val upgraded = it.writableDatabase
+            try {
+                val upgraded = helper.writableDatabase
                 assertEquals(3, upgraded.version)
                 upgraded.rawQuery("SELECT event_id, status, event_kind FROM events", null).use { row ->
                     assertTrue(row.moveToFirst())
@@ -107,6 +107,8 @@ class ReminderSourceScopeTest {
                     assertTrue(row.moveToFirst())
                     assertEquals("deadline", row.getString(0))
                 }
+            } finally {
+                helper.close()
             }
         } finally {
             SQLiteDatabase.deleteDatabase(file)
@@ -135,8 +137,8 @@ class ReminderSourceScopeTest {
                     database.onUpgrade(db, oldVersion, newVersion)
                 }
             }
-            helper.use {
-                val upgraded = it.writableDatabase
+            try {
+                val upgraded = helper.writableDatabase
                 assertEquals(4, upgraded.version)
                 upgraded.rawQuery(
                     "SELECT pending_signal_version, consumed_signal_version, " +
@@ -151,6 +153,8 @@ class ReminderSourceScopeTest {
                     assertEquals(0L, row.getLong(3))
                     assertTrue(row.isNull(4))
                 }
+            } finally {
+                helper.close()
             }
         } finally {
             SQLiteDatabase.deleteDatabase(file)
@@ -368,8 +372,8 @@ class ReminderSourceScopeTest {
                     database.onUpgrade(db, oldVersion, newVersion)
                 }
             }
-            helper.use {
-                val upgraded = it.writableDatabase
+            try {
+                val upgraded = helper.writableDatabase
                 assertEquals(2, upgraded.version)
                 upgraded.rawQuery("SELECT baselined_sources, pending_update, mutation_version " +
                     "FROM accounts WHERE account_hash = 'old'", null).use { row ->
@@ -394,6 +398,8 @@ class ReminderSourceScopeTest {
                     assertTrue(row.moveToFirst())
                     assertEquals("keep-history", row.getString(0))
                 }
+            } finally {
+                helper.close()
             }
         } finally {
             SQLiteDatabase.deleteDatabase(file)
