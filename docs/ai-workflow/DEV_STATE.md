@@ -3,23 +3,29 @@
 > 每项独立改动提交前更新本文件；只保留最近 5 条，更早记录随发布收口归档。
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办。
 
+## 2026-11-24 · 固化 dev 分支开发命名规范与方案更名（v1.8.27 / v1.8.28）
+
+- 已完成改动：根据维护者纠正，更新仓库 L0 规则（`AGENTS.md`）、`always_on` 路由（`.agents/rules/skill-routing.md`）、文档索引（`docs/README.md`）、迭代规范（`docs/ai-workflow/VALIDATION.md`）及全局技能（`staged-release-gate/SKILL.md`），明确 `dev` 分支日常开发与方案一律使用当前/本轮 `dev` 修订号（如 `v1.8.27`、`v1.8.28`、`v1.8.29`），严禁在未获正式发版指令前提前冠名下一正式版号；同步将两份已完成自测的方案重命名为 `2026-11-23-v1.8.27-首页手动课业混排与发版自动化方案.md` 与 `2026-11-24-v1.8.28-置顶持久化与隔离设备仪器测试方案.md` 并更新工程状态与路线图引用。
+- 当前 commit 与状态：仅修改规则、方案命名与文档索引，未触碰源码、版本号字段、Tag、Release 及并行主线程未跟踪产物；`verify_local_gate.py --skip-flutter-tests` 通过，L0 行数维持在预算内。
+- 下一步待办：后续 `dev` 新方案自 `v1.8.29` 起严格按 `dev` 修订号命名，仅在收到正式发版指令后冻结下一正式版号并进入 Stage 2。
+
 ## 2026-11-24 · 1.8.28+122 自测包收口（置顶持久化 + 隔离 androidTest + 工作流固化）
 
 - 已完成改动：Gate 通过后固化「Stage 1 → 独立 Gate → 升 `Z+1` 原签名自测 → MuMu 基础冒烟与核心路径 → dev 文档 → 下一轮提示词」闭环（`AGENTS.md`、`VALIDATION.md`、开发指南），明确 Gate 后直接打自测包、不逐轮询问 A/B；版本升至 `1.8.28+122`（仅 `pubspec.yaml` 与 `AppVersion`）；从 `772fe67` 的 `git archive` 干净 ASCII 输入、本机缓存 `--no-pub` 构建原签名双 ABI Release APK，并完成 MuMu「学习通」保数据覆盖与实屏验收。
 - 当前 commit 与状态：工作流 `0343a06`、版本 `772fe67`；APK `62109666` 字节、SHA-256 `039dd33ea1d091d8bbdae42924b67b4fc5fe1d9fdd457cf8976623c138464087`，包名 `com.example.studyassistant.journal`、`1.8.28 (122)`、min26/target36、ARM64/x86_64、非 debuggable、v2 证书 `d36a5715...`、16 KiB 对齐与 ZIP 472 条目 CRC 全通过。MuMu `127.0.0.1:16448` 覆盖安装成功，`firstInstallTime=2026-11-04 19:05:10` 保留、设备 `base.apk` 哈希一致；冷启动 2335ms，全程 logcat 0 条 `FATAL/FlutterError/RenderFlex overflowed`。实屏核对：登录态、40 门课程与 80 项课业保留，「关于我们」显示 `1.8.28 (122)`；手动待办与学习通作业按时间混排；置顶/取消置顶、拖拽调序在杀进程重启后保持；逾期项默认置底且可手动置顶；完成与撤销、统计 24/39 与往期 33/41 下钻、日历议程、提醒设置页均正常。截图与日志在 `D:\campus-tools\build-work\cx1828-preview-772fe67-20261124-170537`；临时条目 `QA1828-*` 已删除、置顶已清空、首页恢复「时间近到远 / 全部 / 全部」。未刷新学习通线上接口；仅误触外链打开一次作业页并取消签到弹窗，未提交任何内容。
 - 下一步待办：按 [ROADMAP](../ROADMAP.md#dev-下一阶段) 的下一轮候选方向规划；正式发版仍等维护者主动下达指令后进入 Stage 2（目标 `1.9.0`，构建号顺延高于 `+122`）。
 
-## 2026-11-24 · v1.9.0 Stage 1 完成：置顶持久化修复与隔离 androidTest 112 项通过
+## 2026-11-24 · 1.8.28 Stage 1 完成：置顶持久化修复与隔离 androidTest 112 项通过
 
 - 已完成改动：`assignment_manual_pin_test.dart` 新增可控仓库夹具与 6 项回归（修前 #1/#2/#5/#6 实测红灯，修后 10/10 全绿）；`assignment_store.dart` 将 `_savePins` 改为 `Future<bool>`（`StaleSessionWriteException` 返回 `false` 且不设 `_error`/`_recoveryWarnings`，`LocalStorageLeaseReleaseException` 仍返回 `true` 并记恢复告警），`_togglePinKey`/`reorderPinned` 写后守卫改为 `!persisted || !stillOwned()`，`_prunePins` 仅在 `persisted` 且会话未变时清 `_pinsNeedSave`，`saveNotebook` 补 `_pinsNeedSave ||` 重试入口与 `_prunePins` 后会话守卫（源码净增 20 行）。维护者批准的扩项：`AssignmentNotificationPublisherTest` 改用复用型合成关闭通道 `synthetic-disabled-updates-tests` 并走 internal 重载，移除对生产 `CHANNEL_UPDATES` 的 setUp/tearDown 删除；`run_android_tests.py` 的 `_run` 显式 `encoding="utf-8", errors="replace"`，`test_run_android_tests.py` 增 1 项回归。
 - 当前 commit 与状态：`ef0e39a`（修复 + 6 回归）、`3de0f59`（夹具与脚本，3 文件）已推送 `origin/dev`。M2 定向门禁退出码 0（8 文件 105 项、`dart analyze` 0 问题）；扩项后 M4 最终门禁 9 组 Python 100 项全过、L0 55 行。M3 用新 ASCII 镜像 `D:\campus-tools\build-work\androidtest-1828-20261124-155743`（JDK 17 + `D:\campus-tools\android`，`:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest` 全部成功）在隔离 MuMu `127.0.0.1:16384`（API 32、`x86_64`、`Asia/Shanghai`）实跑：batch1 `20/0/0/0`、batch2 `80/0/0/0`、batch3 `10/0/2/2`，合计 112 项 110 通过、2 假设跳过、0 失败；`AssignmentNotificationPublisherTest#unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel` 为 `STATUS_CODE=0`；跳过项为 `FeedbackEmailLaunchTest#systemCanOpenTheFixedMailtoDraftWhenAHandlerExists`（无邮件客户端）与 `RealAccountHeadlessEntryTest#realSessionRunsDaytimeBackgroundCheck`（未传 `-e realAccount true`）。未设 `PYTHONUTF8` 直接运行脚本退出码 0，日志 `androidtest-3batches.log`、`gradle-build.log` 均在该构建目录。保护实例 `127.0.0.1:16448` 仍 `1.8.27+121`、`firstInstallTime=2026-11-04 19:05:10`。
 - 下一步待办：Stage 1 已完成并停机，进入本方案独立 Gate 审查（建议 Diff 区间 `bff9e7c..HEAD`）；Gate 通过后再决定升 `1.8.28+122` 打 MuMu 自测包或进入 `v1.9.0` Stage 2。
 
-## 2026-11-24 · v1.9.0 下一阶段只读调查与方案定稿（置顶持久化与隔离设备 androidTest）
+## 2026-11-24 · 1.8.28 下一阶段只读调查与方案定稿（置顶持久化与隔离设备 androidTest）
 
-- 已完成改动：在基线 `0604293` 完成只读源码核实，并用仓外临时测试确认修前行为：`_savePins` 吞掉 `StaleSessionWriteException` 后，`_togglePinKey`（`togglePin`/`toggleManualPin`）与 `reorderPinned` 误返回 `true` 且污染内存 `_pinned`、`_prunePins` 误清 `_pinsNeedSave` 阻断后续 `refreshAssignments()`/`saveNotebook()` 补写重试；同时核对 `saveNotebook` 缺 `_pinsNeedSave ||` 与 `_prunePins` 后会话守卫，而 `_afterAssignmentsChanged` 及其 13 处提醒更新调用方已有 `_isSessionCurrent(snap)` 保护。已输出 Stage 1 → Gate → Stage 2 规格书 [v1.9.0 置顶持久化与隔离设备仪器测试方案](../plans/2026-11-24-v1.9.0-置顶持久化与隔离设备仪器测试方案.md)。
+- 已完成改动：在基线 `0604293` 完成只读源码核实，并用仓外临时测试确认修前行为：`_savePins` 吞掉 `StaleSessionWriteException` 后，`_togglePinKey`（`togglePin`/`toggleManualPin`）与 `reorderPinned` 误返回 `true` 且污染内存 `_pinned`、`_prunePins` 误清 `_pinsNeedSave` 阻断后续 `refreshAssignments()`/`saveNotebook()` 补写重试；同时核对 `saveNotebook` 缺 `_pinsNeedSave ||` 与 `_prunePins` 后会话守卫，而 `_afterAssignmentsChanged` 及其 13 处提醒更新调用方已有 `_isSessionCurrent(snap)` 保护。已输出 Stage 1 → Gate → Stage 2 规格书 [v1.8.28 置顶持久化与隔离设备仪器测试方案](../plans/2026-11-24-v1.8.28-置顶持久化与隔离设备仪器测试方案.md)。
 - 当前 commit 与状态：未改应用/测试/脚本代码（`pubspec.yaml` 仍 `1.8.27+121`）；仓外复现测试 `1 passed / 0 failed`（实测确认 4 项修前异常）；核验隔离 MuMu `127.0.0.1:16384`（API 32、`x86_64`、`Asia/Shanghai`）在线可重装，保护实例 `127.0.0.1:16448`（API 35、`1.8.27+121`、`firstInstallTime=2026-11-04 19:05:10`）完好，并确认工作树 `android/local.properties` 指向 `C:\rea-tools\android` 故隔离构建须用纯 ASCII 镜像写入 `D:\campus-tools\android` + `JDK 17` 预编译后传 `--skip-build`。
-- 下一步待办：按 [v1.9.0 置顶持久化与隔离设备仪器测试方案](../plans/2026-11-24-v1.9.0-置顶持久化与隔离设备仪器测试方案.md) 执行 Stage 1（M1 红灯回归 → M2 最小修复 → M3 隔离 MuMu 112 项实跑取证 → M4 状态回写），完成后停机进入独立 Gate 审查。
+- 下一步待办：按 [v1.8.28 置顶持久化与隔离设备仪器测试方案](../plans/2026-11-24-v1.8.28-置顶持久化与隔离设备仪器测试方案.md) 执行 Stage 1（M1 红灯回归 → M2 最小修复 → M3 隔离 MuMu 112 项实跑取证 → M4 状态回写），完成后停机进入独立 Gate 审查。
 
 ## 2026-11-24 11:55 · 1.8.27+121 首页混排阶段 MuMu 自测
 
@@ -29,10 +35,5 @@
 - 13:08 复测补充：逾期置顶规则已确认为「可手动置顶，未置顶的仍在底部」，方案与开发指南已同步。近到远与远到近两种排序下，学习通逾期作业和手动逾期待办均实测可置顶进入顶部置顶区，取消置顶后回到原逾期位置；混合置顶区可拖拽调序，取消置顶作业后手动待办仍保留。
 - 14:52 收尾补测：新建无时间待办落在「无截止日期」分组；统计仍为 `24/39`，手动待办未计入平台分母。勾选完成后条目退出首页并出现带「撤销」的提示，`我的 → 个人安排 → 个人待办与考试` 显示「未安排时间 · 个人已完成」，完成态跨页一致。带时间并开启提前 30 分钟提醒的待办在日历 11 月 25 日议程可见，`dumpsys alarm` 已出现该待办对应的精确闹钟（`2026-11-25 13:30`，`ScheduledNotificationReceiver`），实际弹窗投递需到时间点才能观察。工程脚本：androidTest 清单 21 类/3 批通过；受保护实例 `127.0.0.1:16448` dry-run 被拒绝（退出码 2）；`freeze_release.py --check` 通过；`test_check_release_metadata.py` 7 项通过。全部测试待办（`QA no-date`、`QA remind`、`MuMu QA 1827 followup`）已删除，个人安排页为空，首页恢复「时间近到远」。
 
-## 2026-11-24 · v1.9.0 Stage 1 Gate 增量返工
-
-- 已完成改动：切号回归实际恢复账号 B 后检查手记和置顶隔离。360dp 常规字号手动卡片避让完成按钮，并与学习通卡片对齐拖拽手柄。置顶保存后仅检查会话归属，学习通空课名保留为空，缺年考试投影仅用于普通时间轴。仪器测试脚本识别结果 `shortMsg`、`INSTRUMENTATION_FAILED` 与停在 `STATUS_CODE=1` 的用例。
-- 当前 commit 与状态：`640916d` 基于 `d97ba40`，版本为 `1.8.26+120`。本地门禁脚本退出码为 0，7 个 Flutter 文件 91 项（含 `FB-005`）、9 组 Python 共 99 项通过。原日志中 Dart 分析有 1 条 `use_super_parameters`，经 Gate 复审确认为阻断。隔离旧实现触发 5 个 Flutter 回归失败，仪器测试清单覆盖 21 个类，受保护设备 dry-run 拒绝执行。门禁日志 `chaoxing-v1.9.0-gate-20261124-112723.log`。
-- 下一步待办：静态分析阻断的处理见上条。MuMu 实机界面、隔离仪器测试和云端全量 CI 待相应验收。
 
 
