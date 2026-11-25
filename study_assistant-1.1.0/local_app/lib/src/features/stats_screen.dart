@@ -619,8 +619,8 @@ class _StatsScreenState extends State<StatsScreen> {
             if (own.expired > 0)
               _CourseStatPill(
                 text: '已逾期 ${own.expired}',
-                fg: journal.berry,
-                bg: journal.berryBg,
+                fg: journal.overdueAmber,
+                bg: journal.overdueAmberBg,
                 journal: journal,
               ),
             if (own.unknown > 0)

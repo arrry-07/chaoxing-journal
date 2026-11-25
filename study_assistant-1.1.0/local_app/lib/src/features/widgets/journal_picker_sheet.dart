@@ -53,6 +53,9 @@ Future<T?> showJournalPickerSheet<T>(
   String? initialFilterId,
   bool Function(JournalPickerOption<T> option, String filterId)?
       filterPredicate,
+  String? Function(
+          String? activeFilterId, List<JournalPickerOption<T>> filtered)?
+      filterNoticeBuilder,
 }) {
   final enableSearch = searchable ?? options.length > 6;
   return showModalBottomSheet<T>(
@@ -72,6 +75,7 @@ Future<T?> showJournalPickerSheet<T>(
       filterOptions: filterOptions,
       initialFilterId: initialFilterId,
       filterPredicate: filterPredicate,
+      filterNoticeBuilder: filterNoticeBuilder,
     ),
   );
 }
@@ -88,6 +92,7 @@ class _JournalPickerSheetBody<T> extends StatefulWidget {
     this.filterOptions = const [],
     this.initialFilterId,
     this.filterPredicate,
+    this.filterNoticeBuilder,
   });
 
   final String title;
@@ -101,6 +106,9 @@ class _JournalPickerSheetBody<T> extends StatefulWidget {
   final String? initialFilterId;
   final bool Function(JournalPickerOption<T> option, String filterId)?
       filterPredicate;
+  final String? Function(
+          String? activeFilterId, List<JournalPickerOption<T>> filtered)?
+      filterNoticeBuilder;
 
   @override
   State<_JournalPickerSheetBody<T>> createState() =>
@@ -170,6 +178,10 @@ class _JournalPickerSheetBodyState<T>
     final bottomPad = bottomInset > 0 ? 14.0 : 14.0 + bottomSafe;
     final maxHeight = MediaQuery.sizeOf(context).height * 0.78;
     final filtered = _filtered;
+    final filterNotice = widget.filterNoticeBuilder?.call(
+      _activeFilterId,
+      filtered,
+    );
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -448,6 +460,17 @@ class _JournalPickerSheetBodyState<T>
                         ),
                       ),
               ),
+              if (filtered.isNotEmpty &&
+                  filterNotice != null &&
+                  filterNotice.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    filterNotice,
+                    textAlign: TextAlign.center,
+                    style: journal.metadata,
+                  ),
+                ),
             ],
           ),
         ),

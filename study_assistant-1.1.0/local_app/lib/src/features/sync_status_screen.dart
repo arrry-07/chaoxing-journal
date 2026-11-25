@@ -29,6 +29,44 @@ class SyncStatusScreen extends StatefulWidget {
 
 class _SyncStatusScreenState extends State<SyncStatusScreen> {
   AssignmentStore get store => widget.store;
+  bool _savingBackground = false;
+
+  Future<void> _saveBackgroundCheckEnabled(bool value) async {
+    if (_savingBackground || store.isLoading) return;
+    setState(() => _savingBackground = true);
+    final ok = await store.saveBackgroundCheckEnabled(value);
+    if (!mounted) return;
+    setState(() => _savingBackground = false);
+    if (!ok) {
+      showJournalMessage(
+        context,
+        store.operationError ?? '保存后台检查设置失败，请稍后重试',
+      );
+      return;
+    }
+    showJournalMessage(context, value ? '已开启白天后台检查' : '已关闭白天后台检查');
+  }
+
+  Future<void> _saveBackgroundInterval(int minutes) async {
+    if (_savingBackground ||
+        store.isLoading ||
+        !store.backgroundCheckEnabled ||
+        store.backgroundCheckIntervalMinutes == minutes) {
+      return;
+    }
+    setState(() => _savingBackground = true);
+    final ok = await store.saveBackgroundCheckIntervalMinutes(minutes);
+    if (!mounted) return;
+    setState(() => _savingBackground = false);
+    if (!ok) {
+      showJournalMessage(
+        context,
+        store.operationError ?? '保存检查频率失败，请稍后重试',
+      );
+      return;
+    }
+    showJournalMessage(context, '已调整为每 ${minutes ~/ 60} 小时检查一次');
+  }
 
   Future<void> _runSync() async {
     final before = store.syncReport;
@@ -168,28 +206,41 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
+                      SwitchListTile(
+                        key: const ValueKey('sync-background-check-switch'),
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('白天后台检查', style: journal.section),
+                        subtitle: Text(
+                          '08:00 至次日 00:00 低频检查，实际执行由系统调度',
+                          style: journal.metadata,
+                        ),
+                        value: store.backgroundCheckEnabled,
+                        onChanged: store.isLoading || _savingBackground
+                            ? null
+                            : _saveBackgroundCheckEnabled,
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
                         children: [
-                          Icon(
-                            Icons.wb_sunny_outlined,
-                            size: 20,
-                            color: journal.ink,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text('白天后台检查', style: journal.section),
-                          ),
+                          for (final minutes in const [120, 240, 360])
+                            ChoiceChip(
+                              key:
+                                  ValueKey('sync-background-interval-$minutes'),
+                              label: Text('每 ${minutes ~/ 60} 小时'),
+                              selected: store.backgroundCheckIntervalMinutes ==
+                                  minutes,
+                              onSelected: store.isLoading ||
+                                      _savingBackground ||
+                                      !store.backgroundCheckEnabled
+                                  ? null
+                                  : (_) => _saveBackgroundInterval(minutes),
+                            ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        store.backgroundCheckEnabled
-                            ? '已开启，每 ${store.backgroundCheckIntervalMinutes ~/ 60} 小时在 08:00—次日 00:00 内检查。实际执行由系统调度，不承诺整点。'
-                            : '已关闭；手动刷新、通知监听（如开启）和已有缓存截止提醒不受影响。',
-                        style: journal.metadata,
-                      ),
                       if (store.nextBackgroundCheckAt != null) ...[
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
                         Text(
                           '下次目标：${DateFormat('M月d日 HH:mm').format(store.nextBackgroundCheckAt!.toLocal())}',
                           style: journal.metadata.copyWith(color: journal.ink),
@@ -202,7 +253,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                           expanded: false,
                           height: 40,
                           icon: Icons.tune_rounded,
-                          label: '调整后台检查与提醒',
+                          label: '通知触发与提醒设置',
                           onPressed: () => context.push('/reminders'),
                         ),
                       ),

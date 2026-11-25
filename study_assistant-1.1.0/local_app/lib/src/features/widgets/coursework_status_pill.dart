@@ -28,10 +28,10 @@ class CourseworkStatusPill extends StatelessWidget {
     final journal = Journal.of(context);
     final palette = switch (tone) {
       CourseworkPillTone.overdue => (
-          fg: journal.berry,
-          bg: journal.berryBg,
-          border: journal.berryBorder,
-          defaultIcon: Icons.warning_amber_rounded,
+          fg: journal.overdueAmber,
+          bg: journal.overdueAmberBg,
+          border: null,
+          defaultIcon: null,
         ),
       CourseworkPillTone.urgentToday => (
           fg: journal.accent,
@@ -54,8 +54,8 @@ class CourseworkStatusPill extends StatelessWidget {
       CourseworkPillTone.todo => (
           fg: journal.todoGreen,
           bg: journal.todoGreenBg,
-          border: journal.todoGreenBorder,
-          defaultIcon: Icons.task_alt_rounded,
+          border: null,
+          defaultIcon: null,
         ),
       CourseworkPillTone.completed => (
           fg: journal.ink,

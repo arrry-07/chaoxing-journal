@@ -336,6 +336,24 @@ class _CourseListScreenState extends State<CourseListScreen> {
                                             '学期：${termEntry?.term?.shortLabel ?? '未分组'}',
                                           ),
                                         ),
+                                        if (termEntry?.isUngrouped ?? false)
+                                          ActionChip(
+                                            key: ValueKey(
+                                                'course-mark-current-${course.key}'),
+                                            onPressed: store.isLoading
+                                                ? null
+                                                : () =>
+                                                    store.setCourseManualTerm(
+                                                      course.key,
+                                                      termCatalog.currentTerm,
+                                                    ),
+                                            avatar: const Icon(
+                                              Icons
+                                                  .check_circle_outline_rounded,
+                                              size: 15,
+                                            ),
+                                            label: const Text('标为本学期'),
+                                          ),
                                         ActionChip(
                                           key: ValueKey(
                                               'course-archive-btn-${course.key}'),
@@ -395,13 +413,17 @@ class _CourseListScreenState extends State<CourseListScreen> {
     required bool duplicateName,
     required JournalPalette journal,
   }) {
+    final isUngrouped = termEntry?.isUngrouped ?? false;
     final showTermLabel = termEntry != null &&
         (termEntry.term != null ||
             termEntry.state != CourseCatalogState.active);
     final parts = <String>[
       if (duplicateName && course.clazzId.isNotEmpty) '班级 ${course.clazzId}',
       if (course.teacherNames.isNotEmpty) course.teacherLabel,
-      if (showTermLabel) termEntry.stateLabel,
+      if (showTermLabel)
+        termEntry.stateLabel
+      else if (isUngrouped)
+        '未分组（未自动归入本学期）',
     ];
     if (parts.isEmpty) return null;
     return Text(

@@ -22,6 +22,9 @@ class Journal {
   static const berry = Color(0xFFB5493A);
   static const berryBg = Color(0xFFFBF2EF);
   static const berryBorder = Color(0xFFECD0C8);
+  static const overdueAmber = Color(0xFF8A5A00);
+  static const overdueAmberBg = Color(0xFFFAF2D6);
+  static const overdueInk = Color(0xFF5B5750);
   static const examOrange = Color(0xFFAD4E0E);
   static const examOrangeBg = Color(0xFFFDF2E6);
   static const examOrangeBorder = Color(0xFFEED3B6);
@@ -145,6 +148,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     required this.berry,
     required this.berryBg,
     required this.berryBorder,
+    required this.overdueAmber,
+    required this.overdueAmberBg,
+    required this.overdueInk,
     required this.examOrange,
     required this.examOrangeBg,
     required this.examOrangeBorder,
@@ -180,6 +186,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     berry: Journal.berry,
     berryBg: Journal.berryBg,
     berryBorder: Journal.berryBorder,
+    overdueAmber: Journal.overdueAmber,
+    overdueAmberBg: Journal.overdueAmberBg,
+    overdueInk: Journal.overdueInk,
     examOrange: Journal.examOrange,
     examOrangeBg: Journal.examOrangeBg,
     examOrangeBorder: Journal.examOrangeBorder,
@@ -216,6 +225,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     berry: Color(0xFFE27D70),
     berryBg: Color(0xFF342222),
     berryBorder: Color(0xFF61403C),
+    overdueAmber: Color(0xFFE8BE67),
+    overdueAmberBg: Color(0xFF332B19),
+    overdueInk: Color(0xFFB5AFA5),
     examOrange: Color(0xFFF0A05A),
     examOrangeBg: Color(0xFF33271D),
     examOrangeBorder: Color(0xFF5D432E),
@@ -250,6 +262,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
   final Color berry;
   final Color berryBg;
   final Color berryBorder;
+  final Color overdueAmber;
+  final Color overdueAmberBg;
+  final Color overdueInk;
   final Color examOrange;
   final Color examOrangeBg;
   final Color examOrangeBorder;
@@ -310,6 +325,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     Color? berry,
     Color? berryBg,
     Color? berryBorder,
+    Color? overdueAmber,
+    Color? overdueAmberBg,
+    Color? overdueInk,
     Color? examOrange,
     Color? examOrangeBg,
     Color? examOrangeBorder,
@@ -344,6 +362,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         berry: berry ?? this.berry,
         berryBg: berryBg ?? this.berryBg,
         berryBorder: berryBorder ?? this.berryBorder,
+        overdueAmber: overdueAmber ?? this.overdueAmber,
+        overdueAmberBg: overdueAmberBg ?? this.overdueAmberBg,
+        overdueInk: overdueInk ?? this.overdueInk,
         examOrange: examOrange ?? this.examOrange,
         examOrangeBg: examOrangeBg ?? this.examOrangeBg,
         examOrangeBorder: examOrangeBorder ?? this.examOrangeBorder,
@@ -384,6 +405,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
       berry: Color.lerp(berry, other.berry, t)!,
       berryBg: Color.lerp(berryBg, other.berryBg, t)!,
       berryBorder: Color.lerp(berryBorder, other.berryBorder, t)!,
+      overdueAmber: Color.lerp(overdueAmber, other.overdueAmber, t)!,
+      overdueAmberBg: Color.lerp(overdueAmberBg, other.overdueAmberBg, t)!,
+      overdueInk: Color.lerp(overdueInk, other.overdueInk, t)!,
       examOrange: Color.lerp(examOrange, other.examOrange, t)!,
       examOrangeBg: Color.lerp(examOrangeBg, other.examOrangeBg, t)!,
       examOrangeBorder:
@@ -425,6 +449,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
           berry == other.berry &&
           berryBg == other.berryBg &&
           berryBorder == other.berryBorder &&
+          overdueAmber == other.overdueAmber &&
+          overdueAmberBg == other.overdueAmberBg &&
+          overdueInk == other.overdueInk &&
           examOrange == other.examOrange &&
           examOrangeBg == other.examOrangeBg &&
           examOrangeBorder == other.examOrangeBorder &&
@@ -460,6 +487,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         berry,
         berryBg,
         berryBorder,
+        overdueAmber,
+        overdueAmberBg,
+        overdueInk,
         examOrange,
         examOrangeBg,
         examOrangeBorder,

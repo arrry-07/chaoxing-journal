@@ -150,7 +150,8 @@ void main() {
     expect(overdueHeading.style?.color, isNot(Journal.berry));
 
     final overduePill = tester.widget<Text>(find.textContaining('已逾期1天'));
-    expect(overduePill.style?.color, Journal.berry);
+    expect(overduePill.style?.color, isNot(Journal.berry));
+    expect(overduePill.style?.color, JournalPalette.light.overdueAmber);
 
     final todayItem = Assignment(
       id: 'cx:work:1:2:today-pill',

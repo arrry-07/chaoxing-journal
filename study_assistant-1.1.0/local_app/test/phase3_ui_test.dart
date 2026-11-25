@@ -74,7 +74,8 @@ void main() {
     await t.pumpAndSettle();
     expect(s.notebook.entries.single.title, '合成待办');
     expect(find.byType(ManualEntryEditor), findsNothing);
-    await t.tap(find.byType(Checkbox));
+    await t.tap(
+        find.byKey(ValueKey('agenda-toggle-${s.notebook.entries.single.id}')));
     await t.pumpAndSettle();
     expect(s.notebook.entries.single.done, isTrue);
     expect(s.assignments.single.status, 'pending');

@@ -102,7 +102,7 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(row);
     await t.pumpAndSettle();
-    expect(find.text('调整后台检查与提醒'), findsOneWidget);
+    expect(find.text('通知触发与提醒设置'), findsOneWidget);
     expect(find.byKey(const ValueKey('auto-sync-option-60')), findsNothing);
     await t.tap(find.byTooltip('返回我的'));
     await t.pumpAndSettle();

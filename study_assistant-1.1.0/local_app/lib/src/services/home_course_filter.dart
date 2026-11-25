@@ -20,6 +20,7 @@ class HomeCourseFilterOption {
     this.termLabel,
     this.archived = false,
     this.recalled = false,
+    this.ungrouped = false,
   });
 
   final String courseKey;
@@ -32,6 +33,7 @@ class HomeCourseFilterOption {
   final String? termLabel;
   final bool archived;
   final bool recalled;
+  final bool ungrouped;
 
   String get classLabel =>
       showCourseId ? '班级 $clazzId · 课程 $courseId' : '班级 $clazzId';
@@ -47,7 +49,9 @@ class HomeCourseFilterOption {
             ? (termLabel != null && termLabel!.isNotEmpty
                 ? '$termLabel · 已归档'
                 : '已归档')
-            : null;
+            : (termLabel == null || termLabel!.isEmpty) && ungrouped
+                ? '未分组'
+                : null;
     final parts = <String>[
       if (showClass) classLabel,
       if (teacherNames.isNotEmpty) teacherLabel,
@@ -174,6 +178,7 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
         termLabel: termEntry?.term?.label,
         archived: termEntry?.state == CourseCatalogState.archived,
         recalled: termEntry?.state == CourseCatalogState.recalled,
+        ungrouped: termEntry?.isUngrouped ?? false,
       ),
     );
   }

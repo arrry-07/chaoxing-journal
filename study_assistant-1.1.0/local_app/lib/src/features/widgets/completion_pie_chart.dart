@@ -11,13 +11,13 @@ class CompletionPieChart {
       ? [
           const Color(0xFF88A8F8),
           const Color(0xFF5F7DB8),
-          journal.berry,
+          journal.overdueAmber,
           const Color(0xFF6E6A63),
         ]
       : [
           const Color(0xFF4B6CB7),
           const Color(0xFF9EB5E5),
-          journal.berry,
+          journal.overdueAmber,
           const Color(0xFFD8DCE2),
         ];
 

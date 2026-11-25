@@ -1,4 +1,5 @@
 import '../models/assignment.dart';
+import '../models/assignment_change.dart';
 import '../models/course.dart';
 import '../models/course_notice.dart';
 import '../models/course_term_preferences.dart';
@@ -76,40 +77,73 @@ class AcademicTerm implements Comparable<AcademicTerm> {
     );
   }
 
+  static final RegExp _spanFolderLoosePattern = RegExp(
+    r'(?<!\d)(20\d{2})\s*[-—~/－至]\s*(20\d{2})\s*(?:学年)?\s*(?:[\(\[（【]?\s*([12一二])\s*[\)\]）】]?|第\s*([12一二])\s*学期|(?:年\s*)?(秋|春)(?:季学期|季|学期)?)',
+  );
+  static final RegExp _singleYearFolderLoosePattern = RegExp(
+    r'(?<!\d)(20\d{2})\s*(?:年\s*)?(秋|春)(?:季学期|季|学期)?',
+  );
+
   static AcademicTerm? tryParseFolderLabel(String? raw) {
     final text = raw?.trim();
     if (text == null || text.isEmpty) return null;
 
     final spanMatch = _spanFolderPattern.firstMatch(text);
     if (spanMatch != null) {
-      final start = int.tryParse(spanMatch.group(1)!);
-      final end = int.tryParse(spanMatch.group(2)!);
-      if (start == null ||
-          end == null ||
-          end != start + 1 ||
-          start < 2000 ||
-          start > 2100) {
-        return null;
-      }
-      final marker =
-          spanMatch.group(3) ?? spanMatch.group(4) ?? spanMatch.group(5) ?? '';
-      final isFall = marker == '1' || marker == '一' || marker == '秋';
-      final isSpring = marker == '2' || marker == '二' || marker == '春';
-      if (isFall) return AcademicTerm(start, AcademicSemester.fall);
-      if (isSpring) return AcademicTerm(start, AcademicSemester.spring);
-      return null;
+      return _parseSpanMatch(spanMatch);
     }
 
     final singleMatch = _singleYearFolderPattern.firstMatch(text);
     if (singleMatch != null) {
-      final year = int.tryParse(singleMatch.group(1)!);
-      if (year == null || year < 2000 || year > 2100) return null;
-      return singleMatch.group(2) == '秋'
-          ? AcademicTerm(year, AcademicSemester.fall)
-          : AcademicTerm(year - 1, AcademicSemester.spring);
+      return _parseSingleYearMatch(singleMatch);
     }
 
+    final matchedTerms = <AcademicTerm>{};
+    final spanRanges = <(int, int)>[];
+    for (final match in _spanFolderLoosePattern.allMatches(text)) {
+      final parsed = _parseSpanMatch(match);
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      spanRanges.add((match.start, match.end));
+    }
+
+    for (final match in _singleYearFolderLoosePattern.allMatches(text)) {
+      final overlapsSpan = spanRanges.any(
+        (range) => match.start < range.$2 && match.end > range.$1,
+      );
+      if (overlapsSpan) continue;
+      final parsed = _parseSingleYearMatch(match);
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+    }
+
+    return matchedTerms.length == 1 ? matchedTerms.first : null;
+  }
+
+  static AcademicTerm? _parseSpanMatch(RegExpMatch match) {
+    final start = int.tryParse(match.group(1)!);
+    final end = int.tryParse(match.group(2)!);
+    if (start == null ||
+        end == null ||
+        end != start + 1 ||
+        start < 2000 ||
+        start > 2100) {
+      return null;
+    }
+    final marker = match.group(3) ?? match.group(4) ?? match.group(5) ?? '';
+    final isFall = marker == '1' || marker == '一' || marker == '秋';
+    final isSpring = marker == '2' || marker == '二' || marker == '春';
+    if (isFall) return AcademicTerm(start, AcademicSemester.fall);
+    if (isSpring) return AcademicTerm(start, AcademicSemester.spring);
     return null;
+  }
+
+  static AcademicTerm? _parseSingleYearMatch(RegExpMatch match) {
+    final year = int.tryParse(match.group(1)!);
+    if (year == null || year < 2000 || year > 2100) return null;
+    return match.group(2) == '秋'
+        ? AcademicTerm(year, AcademicSemester.fall)
+        : AcademicTerm(year - 1, AcademicSemester.spring);
   }
 
   static List<AcademicTerm> recentSelectableTerms(
@@ -174,6 +208,15 @@ class CourseTermEntry {
   final DateTime? latestRecallEventUtc;
   final bool isFollowed;
 
+  bool get isUngrouped =>
+      source == CourseTermSource.ungrouped &&
+      override.archiveMode == CourseArchiveMode.auto;
+
+  bool get hasCurrentTermEvidence =>
+      override.archiveMode == CourseArchiveMode.restored ||
+      state == CourseCatalogState.recalled ||
+      (state == CourseCatalogState.active && !isUngrouped);
+
   String get stateLabel => switch (state) {
         CourseCatalogState.active => term?.label ?? '未分组',
         CourseCatalogState.recalled => '${term?.label ?? '往期'} · 补修/近期活跃',
@@ -200,6 +243,8 @@ class CourseTermCatalog {
   final Set<String> _unfollowedCourseKeys;
   final Set<String> _hiddenAssignmentIds;
   final LocalCourseworkState _coursework;
+
+  static const Duration maxFutureRecallHorizon = Duration(days: 180);
 
   /// Matches Chaoxing automated reminder broadcasts verified in Phase 3A.
   static bool isSystemReminderNotice(CourseNotice notice) =>
@@ -243,6 +288,76 @@ class CourseTermCatalog {
     return best;
   }
 
+  static bool _hasDeadlineBeforeTerm(
+    Assignment a,
+    AcademicTerm currentTerm,
+  ) {
+    if (a.isExam) {
+      final exam = a.exam;
+      if (exam != null && !exam.noticeOnly) {
+        if (exam.startTrusted &&
+            exam.startAt != null &&
+            AcademicTerm.fromInstant(exam.startAt!) < currentTerm) {
+          return true;
+        }
+        if (exam.endTrusted &&
+            exam.endAt != null &&
+            AcademicTerm.fromInstant(exam.endAt!) < currentTerm) {
+          return true;
+        }
+      }
+      return false;
+    }
+    return a.deadlineTrusted &&
+        !a.deadlineReadFailed &&
+        a.deadlineAt != null &&
+        AcademicTerm.fromInstant(a.deadlineAt!) < currentTerm;
+  }
+
+  static bool _hasNearFutureOrCurrentTermSignal(
+    Assignment a, {
+    required DateTime nowUtc,
+    required DateTime maxRecallUtc,
+    required AcademicTerm currentTerm,
+    required LocalCourseworkState coursework,
+  }) {
+    if (a.isExam) {
+      if (a.exam != null &&
+          !a.exam!.noticeOnly &&
+          !AssignmentQuery.isExamEnded(a, nowUtc) &&
+          a.timelineTrusted &&
+          a.timelineAt != null) {
+        final atUtc = a.timelineAt!.toUtc();
+        if (atUtc.isAfter(nowUtc) && !atUtc.isAfter(maxRecallUtc)) {
+          return true;
+        }
+      }
+    } else {
+      final resolved = CourseworkDeadline.resolveEntry(
+        a,
+        CourseworkDeadline.entryFor(a, coursework),
+      );
+      if (resolved != null) {
+        final atUtc = resolved.at.toUtc();
+        if (atUtc.isAfter(nowUtc) && !atUtc.isAfter(maxRecallUtc)) {
+          return true;
+        }
+      }
+    }
+    final hasLiveSync = a.lastSyncedAt.millisecondsSinceEpoch > 0;
+    if (hasLiveSync &&
+        a.publishedAt != null &&
+        AcademicTerm.fromInstant(a.publishedAt!) >= currentTerm) {
+      return true;
+    }
+    if (hasLiveSync &&
+        a.availableFromAt != null &&
+        AcademicTerm.fromInstant(a.availableFromAt!) >= currentTerm) {
+      return true;
+    }
+    return false;
+  }
+
   factory CourseTermCatalog.build({
     required Iterable<CourseRef> courses,
     required Iterable<Assignment> assignments,
@@ -252,7 +367,10 @@ class CourseTermCatalog {
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
     Set<String> unfollowedCourseKeys = const {},
     Set<String> hiddenAssignmentIds = const {},
+    Iterable<AssignmentChange> changes = const [],
   }) {
+    final nowUtc = now.toUtc();
+    final maxRecallUtc = nowUtc.add(maxFutureRecallHorizon);
     final currentTerm = AcademicTerm.fromInstant(now);
     final coursesByKey = <String, CourseRef>{
       for (final c in courses) c.key: c,
@@ -263,7 +381,9 @@ class CourseTermCatalog {
     };
 
     final assignmentsByCourse = <String, List<Assignment>>{};
+    final assignmentsById = <String, Assignment>{};
     for (final a in assignments) {
+      assignmentsById[a.id] = a;
       final key = a.courseKey;
       if (key == null || !catalogKeys.contains(key)) continue;
       (assignmentsByCourse[key] ??= []).add(a);
@@ -275,12 +395,62 @@ class CourseTermCatalog {
       (noticesByCourse[key] ??= []).add(n);
     }
 
+    final baseIsPastByCourse = <String, bool>{};
+    for (final key in catalogKeys) {
+      final course = coursesByKey[key];
+      final courseRecords = assignmentsByCourse[key] ?? const <Assignment>[];
+      final courseNotices = noticesByCourse[key] ?? const <CourseNotice>[];
+      final override = preferences.entryFor(key) ?? const CourseTermOverride();
+      final baseActivityUtc = _maxUtc([
+        for (final a in courseRecords) ..._trustedAssignmentTimestampsUtc(a),
+        for (final n in courseNotices)
+          if (n.publishedTrusted &&
+              n.publishedAt != null &&
+              !isSystemReminderNotice(n))
+            n.publishedAt!.toUtc(),
+      ]);
+      final manualTerm = AcademicTerm.tryParseKey(override.manualTermKey);
+      final folderTerm = AcademicTerm.tryParseFolderLabel(course?.folderName);
+      final baseTerm = manualTerm ??
+          folderTerm ??
+          (baseActivityUtc != null
+              ? AcademicTerm.fromInstant(baseActivityUtc)
+              : null);
+      baseIsPastByCourse[key] = baseTerm != null && baseTerm < currentTerm;
+    }
+
+    final publishedChangeTimesByCourse = <String, List<DateTime>>{};
+    for (final change in changes) {
+      if (change.kind != AssignmentChangeKind.published) continue;
+      if (AcademicTerm.fromInstant(change.at) != currentTerm) continue;
+      if (hiddenAssignmentIds.contains(change.assignmentId)) continue;
+      final a = assignmentsById[change.assignmentId];
+      if (a == null) continue;
+      final key = a.courseKey;
+      if (key == null || !catalogKeys.contains(key)) continue;
+      if (CourseworkDeadline.isEffectivelyCompleted(a, coursework)) continue;
+      if (_hasDeadlineBeforeTerm(a, currentTerm)) continue;
+      if ((baseIsPastByCourse[key] ?? false) &&
+          !_hasNearFutureOrCurrentTermSignal(
+            a,
+            nowUtc: nowUtc,
+            maxRecallUtc: maxRecallUtc,
+            currentTerm: currentTerm,
+            coursework: coursework,
+          )) {
+        continue;
+      }
+      (publishedChangeTimesByCourse[key] ??= []).add(change.at.toUtc());
+    }
+
     final entries = <String, CourseTermEntry>{};
     for (final key in catalogKeys) {
       final course = coursesByKey[key];
       final courseRecords = assignmentsByCourse[key] ?? const <Assignment>[];
       final courseNotices = noticesByCourse[key] ?? const <CourseNotice>[];
       final override = preferences.entryFor(key) ?? const CourseTermOverride();
+      final publishedChangeTimes =
+          publishedChangeTimesByCourse[key] ?? const <DateTime>[];
 
       final trustedActivityTimes = <DateTime>[
         for (final a in courseRecords) ..._trustedAssignmentTimestampsUtc(a),
@@ -289,6 +459,7 @@ class CourseTermCatalog {
               n.publishedAt != null &&
               !isSystemReminderNotice(n))
             n.publishedAt!.toUtc(),
+        ...publishedChangeTimes,
       ];
       final latestActivityUtc = _maxUtc(trustedActivityTimes);
 
@@ -317,7 +488,7 @@ class CourseTermCatalog {
       }
 
       DateTime? latestRecallEventUtc;
-      final recallSignals = <DateTime>[];
+      final recallSignals = <DateTime>[...publishedChangeTimes];
       for (final a in courseRecords) {
         if (hiddenAssignmentIds.contains(a.id)) continue;
         final completed = CourseworkDeadline.isEffectivelyCompleted(
@@ -331,7 +502,9 @@ class CourseTermCatalog {
                   a,
                   CourseworkDeadline.entryFor(a, coursework),
                 );
-          if (resolved != null && resolved.at.toUtc().isAfter(now.toUtc())) {
+          if (resolved != null &&
+              resolved.at.toUtc().isAfter(nowUtc) &&
+              !resolved.at.toUtc().isAfter(maxRecallUtc)) {
             recallSignals.add(
               _maxUtc([
                     resolved.at,
@@ -345,14 +518,21 @@ class CourseTermCatalog {
               !AssignmentQuery.isExamEnded(a, now) &&
               a.timelineTrusted &&
               a.timelineAt != null &&
-              a.timelineAt!.toUtc().isAfter(now.toUtc())) {
+              a.timelineAt!.toUtc().isAfter(nowUtc) &&
+              !a.timelineAt!.toUtc().isAfter(maxRecallUtc)) {
             recallSignals.add(a.timelineAt!.toUtc());
           }
         }
-        for (final ts in _trustedAssignmentTimestampsUtc(a)) {
-          if (AcademicTerm.fromInstant(ts) >= currentTerm) {
-            recallSignals.add(ts.toUtc());
-          }
+        final hasLiveSync = a.lastSyncedAt.millisecondsSinceEpoch > 0;
+        if (hasLiveSync &&
+            a.publishedAt != null &&
+            AcademicTerm.fromInstant(a.publishedAt!) >= currentTerm) {
+          recallSignals.add(a.publishedAt!.toUtc());
+        }
+        if (hasLiveSync &&
+            a.availableFromAt != null &&
+            AcademicTerm.fromInstant(a.availableFromAt!) >= currentTerm) {
+          recallSignals.add(a.availableFromAt!.toUtc());
         }
       }
       for (final n in courseNotices) {
@@ -435,6 +615,27 @@ class CourseTermCatalog {
             entry.courseKey,
       ];
 
+  bool isUngroupedCourse(String courseKey) =>
+      _entriesByCourseKey[courseKey]?.isUngrouped ?? false;
+
+  bool matchesHomeCoursePicker(
+    String courseKey,
+    String filterId, {
+    bool hasVisibleItems = false,
+  }) {
+    final entry = _entriesByCourseKey[courseKey];
+    return switch (filterId) {
+      'allTerms' => true,
+      'pastTerms' => entry != null &&
+          (entry.state == CourseCatalogState.archived ||
+              (entry.term != null && entry.term! < currentTerm)),
+      'ungrouped' => entry != null && entry.isUngrouped && !hasVisibleItems,
+      _ => (hasVisibleItems &&
+              (entry == null || entry.state != CourseCatalogState.archived)) ||
+          (entry != null && entry.hasCurrentTermEvidence),
+    };
+  }
+
   bool matchesCoursePickerScope(String courseKey, CourseTermScope scope) {
     final entry = _entriesByCourseKey[courseKey];
     if (entry == null) {
@@ -442,7 +643,7 @@ class CourseTermCatalog {
     }
     return switch (scope) {
       CourseTermScope.allTerms => true,
-      CourseTermScope.currentTerm => entry.state != CourseCatalogState.archived,
+      CourseTermScope.currentTerm => entry.hasCurrentTermEvidence,
       CourseTermScope.currentAcademicYear =>
         entry.state == CourseCatalogState.recalled ||
             entry.term == null ||
@@ -475,10 +676,16 @@ class CourseTermCatalog {
         return true;
       }
     }
-    for (final ts in _trustedAssignmentTimestampsUtc(a)) {
-      if (AcademicTerm.fromInstant(ts) >= currentTerm) {
-        return true;
-      }
+    final hasLiveSync = a.lastSyncedAt.millisecondsSinceEpoch > 0;
+    if (hasLiveSync &&
+        a.publishedAt != null &&
+        AcademicTerm.fromInstant(a.publishedAt!) >= currentTerm) {
+      return true;
+    }
+    if (hasLiveSync &&
+        a.availableFromAt != null &&
+        AcademicTerm.fromInstant(a.availableFromAt!) >= currentTerm) {
+      return true;
     }
     return false;
   }

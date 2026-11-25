@@ -285,6 +285,7 @@ void main() {
       addTearDown(store.dispose);
       await _home(tester, store, scale: 2);
       expect(find.text('今日计划 · 已完成$completed/2'), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-agenda-entry')), findsOneWidget);
       expect(find.byKey(const ValueKey('home-plan-entry')), findsNothing);
       expect(find.textContaining('预计'), findsNothing);
       expect(find.textContaining('选两三份'), findsNothing);
@@ -293,7 +294,8 @@ void main() {
     });
   }
 
-  testWidgets('empty plan has a 48dp toolbar entry which opens plan',
+  testWidgets(
+      'empty plan has a 48dp toolbar agenda entry and more menu opens plan',
       (tester) async {
     final store = _Store([]);
     addTearDown(store.dispose);
@@ -303,17 +305,29 @@ void main() {
           builder: (_, __) =>
               Scaffold(body: AssignmentListScreen(store: store))),
       GoRoute(
+          path: '/agenda',
+          builder: (_, __) => Scaffold(
+              appBar: AppBar(title: const Text('agenda-page')),
+              body: const SizedBox())),
+      GoRoute(
           path: '/plan',
           builder: (_, __) => const Scaffold(body: Text('plan-page'))),
     ]);
     addTearDown(router.dispose);
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
     await tester.pumpAndSettle();
-    final entry = find.byKey(const ValueKey('home-plan-entry'));
+    final entry = find.byKey(const ValueKey('home-agenda-entry'));
     expect(tester.getSize(entry).width, greaterThanOrEqualTo(48));
     expect(tester.getSize(entry).height, greaterThanOrEqualTo(48));
     expect(find.byKey(const ValueKey('home-plan-summary')), findsNothing);
     await tester.tap(entry);
+    await tester.pumpAndSettle();
+    expect(find.text('agenda-page'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-more-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('每日计划'));
     await tester.pumpAndSettle();
     expect(find.text('plan-page'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());

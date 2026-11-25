@@ -82,29 +82,30 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    for (final label in ['同步学习通', '个人安排', '显示与小组件', '学习记录']) {
+    for (final label in [
+      '我的课程',
+      '课程通知与章节',
+      '个人待办与考试',
+      '同步学习通',
+      '提醒与通知',
+      '学习记录',
+      '加密备份与恢复',
+    ]) {
       await tester.scrollUntilVisible(find.text(label), 180);
       expect(find.text(label), findsOneWidget);
     }
 
-    await tester.ensureVisible(find.text('个人安排'));
+    await tester.ensureVisible(find.text('个人待办与考试'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('个人安排'));
-    await tester.pumpAndSettle();
-    expect(find.byType(ProfileArrangementsScreen), findsOneWidget);
-    expect(find.text('个人待办与考试'), findsOneWidget);
-    expect(find.text('每日计划'), findsOneWidget);
-
     await tester.tap(find.text('个人待办与考试'));
     await tester.pumpAndSettle();
     expect(find.text('/agenda'), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.byType(ProfileArrangementsScreen), findsOneWidget);
-    await tester.pageBack();
-    await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(find.text('学习记录'), 180);
+    await tester.ensureVisible(find.text('学习记录'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('学习记录'));
     await tester.pumpAndSettle();
     expect(find.byType(ProfileRecordsScreen), findsOneWidget);

@@ -905,6 +905,7 @@ class AssignmentStore extends ChangeNotifier {
       });
       if (!_isSessionCurrent(snap)) return;
       changes = loaded;
+      _termCatalogCache = null;
     } on StaleSessionWriteException {
       return;
     } catch (_) {
@@ -1586,6 +1587,7 @@ class AssignmentStore extends ChangeNotifier {
       coursework: _courseworkState,
       unfollowedCourseKeys: _unfollowed,
       hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+      changes: changes,
     );
   }
 
@@ -2527,6 +2529,7 @@ class AssignmentStore extends ChangeNotifier {
     });
     await stage('作业变化', () async {
       changes = await changeLog.load();
+      _termCatalogCache = null;
     });
     await stage('时间变更确认状态', () async {
       final account = _account;
@@ -3870,6 +3873,7 @@ class AssignmentStore extends ChangeNotifier {
     _pendingReturnConfirmation = null;
     returnCheckMessage = null;
     changes = [];
+    _termCatalogCache = null;
     _acknowledgedDeadlineChangeIds = <String>{};
     await _run(() async {
       if (logoutGen != _generation || _disposed) return;

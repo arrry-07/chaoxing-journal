@@ -196,6 +196,31 @@ void main() {
         mid.todoGreen,
         Color.lerp(light.todoGreen, dark.todoGreen, 0.5),
       );
+
+      expect(contrastRatio(light.overdueAmber, light.overdueAmberBg),
+          greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(light.overdueInk, light.sheet),
+          greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(dark.overdueAmber, dark.overdueAmberBg),
+          greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(dark.overdueInk, dark.sheet),
+          greaterThanOrEqualTo(4.5));
+
+      final amberCopied = light.copyWith(
+        overdueAmber: const Color(0xFF996600),
+        overdueAmberBg: const Color(0xFFFAF0D0),
+        overdueInk: const Color(0xFF4F4A42),
+      );
+      expect(amberCopied.overdueAmber, const Color(0xFF996600));
+      expect(amberCopied.overdueAmberBg, const Color(0xFFFAF0D0));
+      expect(amberCopied.overdueInk, const Color(0xFF4F4A42));
+      expect(amberCopied, isNot(equals(light)));
+      expect(mid.overdueAmber,
+          Color.lerp(light.overdueAmber, dark.overdueAmber, 0.5));
+      expect(mid.overdueAmberBg,
+          Color.lerp(light.overdueAmberBg, dark.overdueAmberBg, 0.5));
+      expect(
+          mid.overdueInk, Color.lerp(light.overdueInk, dark.overdueInk, 0.5));
     });
   });
 }

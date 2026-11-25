@@ -54,6 +54,59 @@ class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
     Navigator.of(context).maybePop();
   }
 
+  Widget _buildCopyNoteButton(
+    BuildContext context,
+    JournalPalette journal,
+    ManualEntry entry,
+  ) {
+    return Semantics(
+      button: true,
+      label: '复制备注',
+      child: Material(
+        color: journal.parchment,
+        borderRadius: BorderRadius.circular(999),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          key: const ValueKey('manual-detail-copy-note'),
+          onTap: () async {
+            try {
+              await Clipboard.setData(ClipboardData(text: entry.note.trim()));
+              if (context.mounted) {
+                showJournalMessage(context, '已复制备注');
+              }
+            } catch (_) {
+              if (context.mounted) {
+                showJournalMessage(context, '无法写入剪贴板，请手动长按复制');
+              }
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.copy_outlined,
+                  size: 14,
+                  color: journal.ink,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '复制',
+                  style: journal.metadata.copyWith(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: journal.ink,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openEditor(BuildContext context, ManualEntry entry) async {
     if (_busy) return;
     final router = GoRouter.maybeOf(context);
@@ -201,15 +254,6 @@ class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
                 entry == null ? '个人安排详情' : (isExam ? '考试详情' : '待办详情'),
                 style: journal.section,
               ),
-              actions: [
-                if (entry != null)
-                  IconButton(
-                    key: const ValueKey('manual-detail-edit'),
-                    tooltip: '编辑',
-                    onPressed: _busy ? null : () => _openEditor(context, entry),
-                    icon: const Icon(Icons.edit_outlined),
-                  ),
-              ],
             ),
             body: entry == null
                 ? Center(
@@ -344,113 +388,109 @@ class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
         const SizedBox(height: 12),
         JournalGroupedCard(
           title: '安排详情',
-          padding: const EdgeInsets.all(14),
+          padding: EdgeInsets.zero,
+          dividerIndent: 16,
           children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _DetailMetaRow(
-                  icon: Icons.schedule_rounded,
-                  label: '时间',
-                  value: entry.at == null
-                      ? '无截止日期'
-                      : '${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(entry.at!))}（北京时间）',
-                ),
-                if (entry.course.trim().isNotEmpty) ...[
-                  const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                   _DetailMetaRow(
-                    icon: Icons.menu_book_outlined,
-                    label: '课程',
-                    value: entry.course.trim(),
+                    icon: Icons.schedule_rounded,
+                    label: '时间',
+                    value: entry.at == null
+                        ? '无截止日期'
+                        : '${DateFormat('yyyy年M月d日 HH:mm').format(AssignmentQuery.beijing(entry.at!))}（北京时间）',
                   ),
-                ],
-                if (entry.location.trim().isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  _DetailMetaRow(
-                    icon: Icons.location_on_outlined,
-                    label: '地点',
-                    value: entry.location.trim(),
-                  ),
-                ],
-                if (entry.minutes > 0) ...[
-                  const SizedBox(height: 10),
-                  _DetailMetaRow(
-                    icon: Icons.timer_outlined,
-                    label: '预计耗时',
-                    value: '${entry.minutes} 分钟',
-                  ),
-                ],
-                const SizedBox(height: 10),
-                _DetailMetaRow(
-                  icon: Icons.notifications_active_outlined,
-                  label: '提醒',
-                  value: reminderSummary,
-                ),
-                if (quietSkipped) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    key: const ValueKey('manual-detail-quiet-hours-notice'),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 11,
-                      vertical: 8,
+                  if (entry.course.trim().isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    _DetailMetaRow(
+                      icon: Icons.menu_book_outlined,
+                      label: '课程',
+                      value: entry.course.trim(),
                     ),
-                    decoration: BoxDecoration(
-                      color: journal.ochreBg.withValues(
-                        alpha: journal.isDark ? 0.65 : 0.72,
-                      ),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: journal.ochreBorder,
-                        width: 0.7,
-                      ),
+                  ],
+                  if (entry.location.trim().isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    _DetailMetaRow(
+                      icon: Icons.location_on_outlined,
+                      label: '地点',
+                      value: entry.location.trim(),
                     ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Icon(
-                            Icons.notifications_paused_outlined,
-                            size: 16,
-                            color: journal.ochre,
-                          ),
+                  ],
+                  if (entry.minutes > 0) ...[
+                    const SizedBox(height: 10),
+                    _DetailMetaRow(
+                      icon: Icons.timer_outlined,
+                      label: '预计耗时',
+                      value: '${entry.minutes} 分钟',
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  _DetailMetaRow(
+                    icon: Icons.notifications_active_outlined,
+                    label: '提醒',
+                    value: reminderSummary,
+                  ),
+                  if (quietSkipped) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      key: const ValueKey('manual-detail-quiet-hours-notice'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: journal.ochreBg.withValues(
+                          alpha: journal.isDark ? 0.65 : 0.72,
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '当前提醒时间落在夜间静音时段（23:30–07:30），且无可用白天时段；本次不会发出有声提醒，可在编辑中调整时间或关闭提醒。',
-                            style: journal.metadata.copyWith(
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: journal.ochreBorder,
+                          width: 0.7,
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Icon(
+                              Icons.notifications_paused_outlined,
+                              size: 16,
                               color: journal.ochre,
-                              height: 1.4,
                             ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '当前提醒时间落在夜间静音时段（23:30–07:30），且无可用白天时段；本次不会发出有声提醒，可在编辑中调整时间或关闭提醒。',
+                              style: journal.metadata.copyWith(
+                                color: journal.ochre,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ] else if (missedWindow) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '提前 30 分钟提醒时间已过，不会再安排本次提醒。',
-                    style: journal.metadata.copyWith(color: journal.ochre),
-                  ),
+                  ] else if (missedWindow) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      '提前 30 分钟提醒时间已过，不会再安排本次提醒。',
+                      style: journal.metadata.copyWith(color: journal.ochre),
+                    ),
+                  ],
                 ],
-                const SizedBox(height: 6),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    key: const ValueKey('manual-detail-reminder-status'),
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size(48, 48),
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      foregroundColor: journal.accent,
-                    ),
-                    onPressed: () => _openReminderStatus(context, entry),
-                    icon: const Icon(Icons.tune_rounded, size: 17),
-                    label: const Text('查看提醒状态'),
-                  ),
-                ),
-              ],
+              ),
+            ),
+            JournalGroupTile(
+              key: const ValueKey('manual-detail-reminder-status'),
+              icon: Icons.tune_rounded,
+              iconColor: journal.muted,
+              title: '查看提醒状态',
+              onTap: () => _openReminderStatus(context, entry),
             ),
           ],
         ),
@@ -458,37 +498,15 @@ class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
           const SizedBox(height: 12),
           JournalGroupedCard(
             title: '备注',
-            trailing: TextButton.icon(
-              key: const ValueKey('manual-detail-copy-note'),
-              style: TextButton.styleFrom(
-                minimumSize: const Size(48, 48),
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                foregroundColor: journal.accent,
-              ),
-              onPressed: () async {
-                try {
-                  await Clipboard.setData(
-                      ClipboardData(text: entry.note.trim()));
-                  if (context.mounted) {
-                    showJournalMessage(context, '已复制备注');
-                  }
-                } catch (_) {
-                  if (context.mounted) {
-                    showJournalMessage(context, '无法写入剪贴板，请手动长按复制');
-                  }
-                }
-              },
-              icon: const Icon(Icons.copy_outlined, size: 16),
-              label: const Text('复制'),
-            ),
-            padding: const EdgeInsets.all(14),
+            trailing: _buildCopyNoteButton(context, journal, entry),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
             children: [
               SelectableText(
                 entry.note.trim(),
                 key: const ValueKey('manual-detail-note'),
                 style: journal.entryTitle.copyWith(
                   fontWeight: FontWeight.w400,
-                  height: 1.5,
+                  height: 1.6,
                 ),
               ),
             ],

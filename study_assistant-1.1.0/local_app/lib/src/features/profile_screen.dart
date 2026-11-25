@@ -35,6 +35,10 @@ class ProfileScreen extends StatelessWidget {
       animation: store,
       builder: (context, _) {
         final journal = Journal.of(context);
+        final activeAgendaCount =
+            store.notebook.entries.where((e) => !e.done).length;
+        final doneAgendaCount =
+            store.notebook.entries.length - activeAgendaCount;
         return ListView(
           padding: EdgeInsets.zero,
           children: [
@@ -54,14 +58,50 @@ class ProfileScreen extends StatelessWidget {
                     clipBehavior: Clip.antiAlias,
                     child: IconTheme.merge(
                       data: IconThemeData(color: journal.ink),
-                      child: _SettingsTile(
-                        icon: Icons.school_outlined,
-                        title: '我的课程',
-                        subtitle: store.courses.isEmpty
-                            ? '暂无课程，前往查看与同步'
-                            : '已同步 ${store.courses.length} 门课程',
-                        compactSubtitle: true,
-                        onTap: () => context.push('/courses'),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _SettingsTile(
+                            icon: Icons.school_outlined,
+                            title: '我的课程',
+                            subtitle: store.courses.isEmpty
+                                ? '暂无课程，前往查看与同步'
+                                : '已同步 ${store.courses.length} 门课程',
+                            compactSubtitle: true,
+                            onTap: () => context.push('/courses'),
+                          ),
+                          Divider(
+                            height: 1,
+                            indent: 56,
+                            endIndent: 16,
+                            color: journal.divider,
+                          ),
+                          _SettingsTile(
+                            icon: Icons.library_books_outlined,
+                            title: '课程通知与章节',
+                            subtitle: store.courseNotices.items.isEmpty &&
+                                    store.courseChapters.byCourse.isEmpty
+                                ? '手动查看课程通知与章节任务点进度'
+                                : '未读通知 ${store.unreadCourseNoticeCount} 条 · 待完成小节 ${store.pendingChapterSectionCount} 处',
+                            compactSubtitle: true,
+                            onTap: () => context.push('/course-hub'),
+                          ),
+                          Divider(
+                            height: 1,
+                            indent: 56,
+                            endIndent: 16,
+                            color: journal.divider,
+                          ),
+                          _SettingsTile(
+                            icon: Icons.event_note_outlined,
+                            title: '个人待办与考试',
+                            subtitle: store.notebook.entries.isEmpty
+                                ? '手动记录待办与考试'
+                                : '进行中 $activeAgendaCount 项 · 已完成 $doneAgendaCount 项',
+                            compactSubtitle: true,
+                            onTap: () => context.push('/agenda'),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -87,53 +127,38 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   _SettingsCard(
-                    title: '学习与同步',
+                    title: '同步与提醒',
                     accentColor: journal.ink,
                     headerColor: journal.sage,
                     children: [
                       _SettingsTile(
                         icon: Icons.sync,
                         title: '同步学习通',
-                        subtitle: '更新课程与作业等学习数据',
+                        subtitle: '更新课业与调整白天后台检查',
                         compactSubtitle: true,
                         onTap: () => context.push('/sync'),
                       ),
-                      _SettingsTile(
-                        icon: Icons.event_note_outlined,
-                        title: '个人安排',
-                        subtitle: '个人待办、考试与每日计划',
-                        onTap: () => context.push('/profile/arrangements'),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.inventory_2_outlined,
-                        title: '学习记录',
-                        subtitle:
-                            '${store.localRecordGroups.length} 项课业 · ${store.changes.length} 条变化',
-                        onTap: () => context.push('/profile/records'),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.library_books_outlined,
-                        title: '课程通知与章节',
-                        subtitle: store.courseNotices.items.isEmpty &&
-                                store.courseChapters.byCourse.isEmpty
-                            ? '手动查看课程通知与章节任务点进度'
-                            : '未读通知 ${store.unreadCourseNoticeCount} 条 · 待完成小节 ${store.pendingChapterSectionCount} 处',
-                        onTap: () => context.push('/course-hub'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _SettingsCard(
-                    title: '数据与安全',
-                    accentColor: journal.ink,
-                    headerColor: journal.sage,
-                    children: [
                       _SettingsTile(
                         icon: Icons.notifications_none_rounded,
                         title: '提醒与通知',
                         subtitle: '权限状态、提前提醒时间与每日摘要',
                         compactSubtitle: true,
                         onTap: () => context.push('/reminders'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _SettingsCard(
+                    title: '记录与备份',
+                    accentColor: journal.ink,
+                    headerColor: journal.sage,
+                    children: [
+                      _SettingsTile(
+                        icon: Icons.inventory_2_outlined,
+                        title: '学习记录',
+                        subtitle:
+                            '${store.localRecordGroups.length} 项课业 · ${store.changes.length} 条变化',
+                        onTap: () => context.push('/profile/records'),
                       ),
                       _SettingsTile(
                         icon: Icons.enhanced_encryption_outlined,
