@@ -224,7 +224,7 @@ void main() {
     expect(find.text('第二次理论作业（办公自动化）'), findsOneWidget);
     expect(find.text('09-23 23:55'), findsNothing);
 
-    await tester.tap(find.text('返回'));
+    await tester.tap(find.byKey(const ValueKey('assignment-detail-back')));
     await tester.pumpAndSettle();
     expect(find.byType(AssignmentListScreen), findsOneWidget);
     expect(find.byType(JournalFloatingNavBar), findsOneWidget);

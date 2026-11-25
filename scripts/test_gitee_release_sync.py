@@ -1003,6 +1003,137 @@ class SafetyTests(unittest.TestCase):
 
         self.assertEqual(identity["versionCode"], 56)
 
+    def test_seed_promote_stable_fetches_retained_manual_when_seed_tags_older(
+        self,
+    ) -> None:
+        v174 = artifact("1.7.4", 56)
+        v180 = artifact("1.8.0", 67)
+        v174_gh_apk = (
+            "https://github.com/arrry-07/chaoxing-journal/releases/download/"
+            f"{v174.tag}/{v174.apk_name}"
+        )
+        v180_gh_apk = (
+            "https://github.com/arrry-07/chaoxing-journal/releases/download/"
+            f"{v180.tag}/{v180.apk_name}"
+        )
+        current_stable_json = {
+            "versionCode": 56,
+            "versionName": "1.7.4",
+            "applicationId": sync.APPLICATION_ID,
+            "apkUrl": (
+                "https://gitee.com/arrry-07/chaoxing-journal-updates/"
+                "releases/download/v1.7.4/chaoxing-journal-1.7.4.apk"
+            ),
+            "backupApkUrl": v174_gh_apk,
+            "sha256": v174.sha256,
+            "size": v174.size,
+            "notes": "1.7.4",
+        }
+        current_manual_json = {
+            "versionCode": 67,
+            "versionName": "1.8.0",
+            "applicationId": sync.APPLICATION_ID,
+            "apkUrl": (
+                "https://gitee.com/arrry-07/chaoxing-journal-updates/"
+                "releases/download/v1.8.0/chaoxing-journal-1.8.0.apk"
+            ),
+            "backupApkUrl": v180_gh_apk,
+            "sha256": v180.sha256,
+            "size": v180.size,
+            "notes": "1.8.0",
+        }
+
+        fetched_tags: list[str] = []
+
+        class FakeGitHub:
+            def __init__(self, _client: object, *, work_dir: Path, **_kw: object) -> None:
+                self.work_dir = work_dir
+
+            def download_and_verify(
+                self, tag: str | None, **_kw: object
+            ) -> tuple[sync.ReleaseArtifact, dict[str, object]]:
+                assert tag is not None
+                fetched_tags.append(tag)
+                art = v180 if tag == "v1.8.0" else v174
+                apk_dir = self.work_dir / art.tag
+                apk_dir.mkdir(parents=True, exist_ok=True)
+                (apk_dir / art.apk_name).write_bytes(b"PK\x03\x04fake")
+                return art, {"tag_name": art.tag, "body": art.notes}
+
+        class FakeGitee:
+            def __init__(self, *_a: object, **_kw: object) -> None:
+                pass
+
+            def verify_access(self) -> None:
+                pass
+
+            def list_releases(self) -> list[dict[str, object]]:
+                return []
+
+        published: dict[str, object] = {}
+
+        def fake_generate(art: sync.ReleaseArtifact, *, channel: str, **_kw: object) -> dict[str, object]:
+            return {
+                "versionCode": art.version_code,
+                "versionName": art.version_name,
+                "applicationId": sync.APPLICATION_ID,
+                "apkUrl": (
+                    f"https://gitee.com/arrry-07/chaoxing-journal-updates/"
+                    f"releases/download/{art.tag}/{art.apk_name}"
+                ),
+                "backupApkUrl": (
+                    "https://github.com/arrry-07/chaoxing-journal/releases/"
+                    f"download/{art.tag}/{art.apk_name}"
+                ),
+                "sha256": art.sha256,
+                "size": art.size,
+                "notes": f"{channel}:{art.version_name}",
+            }
+
+        def fake_publish(**kwargs: object) -> bool:
+            published.update(kwargs)
+            return True
+
+        with (
+            mock.patch.dict("os.environ", {"GITEE_TOKEN": "fake-token"}),
+            mock.patch.object(
+                sync,
+                "read_public_manifests",
+                return_value=(current_stable_json, current_manual_json),
+            ),
+            mock.patch.object(sync, "GitHubReleaseSource", FakeGitHub),
+            mock.patch.object(sync, "GiteeReleaseClient", FakeGitee),
+            mock.patch.object(
+                sync,
+                "verify_gitee_artifacts",
+                return_value={
+                    "v1.7.4": mock.Mock(body="1.7.4"),
+                    "v1.8.0": mock.Mock(body="1.8.0"),
+                },
+            ),
+            mock.patch.object(sync, "generate_manifest", side_effect=fake_generate),
+            mock.patch.object(sync, "publish_manifests", side_effect=fake_publish),
+            mock.patch.object(sync, "verify_published_manifests", return_value=None),
+            mock.patch.object(sync, "prune_gitee_releases", return_value=[]),
+        ):
+            rc = sync.main(
+                [
+                    "--mode",
+                    "seed",
+                    "--tags",
+                    "v1.7.4",
+                    "--promote-stable",
+                    "--aapt",
+                    "aapt",
+                    "--apksigner",
+                    "apksigner",
+                ]
+            )
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(fetched_tags, ["v1.7.4", "v1.8.0"])
+        self.assertEqual(published["stable_manifest"]["versionName"], "1.8.0")
+
 
 if __name__ == "__main__":
     unittest.main()

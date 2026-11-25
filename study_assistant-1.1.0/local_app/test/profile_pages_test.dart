@@ -185,8 +185,8 @@ void main() {
     expect(find.byType(SwitchListTile), findsNWidgets(2));
     expect(find.byType(CourseMark), findsNWidgets(2));
     expect(find.byIcon(Icons.functions_rounded), findsNWidgets(2));
-    expect(find.text('班级 2'), findsOneWidget);
-    expect(find.text('班级 3'), findsOneWidget);
+    expect(find.textContaining('班级 2'), findsOneWidget);
+    expect(find.textContaining('班级 3'), findsOneWidget);
     await t.tap(find.byType(SwitchListTile).first);
     await t.pumpAndSettle();
     expect(s.follows('1:2'), isFalse);

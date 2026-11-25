@@ -93,6 +93,29 @@ class _JournalAndroidPredictiveBackHostState
   _JournalPredictiveBackPhase _phase = _JournalPredictiveBackPhase.idle;
   PredictiveBackEvent? _startBackEvent;
   PredictiveBackEvent? _currentBackEvent;
+  SwipeEdge? _lastSwipeEdge;
+
+  bool _areAncestorRoutesCurrent(NavigatorState navigator) {
+    NavigatorState? current = navigator;
+    while (current != null) {
+      final enclosingContext = current.context;
+      final enclosingRoute = ModalRoute.of(enclosingContext);
+      if (enclosingRoute != null &&
+          (!enclosingRoute.isActive || !enclosingRoute.isCurrent)) {
+        return false;
+      }
+      final parentNavigator =
+          enclosingRoute?.navigator ?? Navigator.maybeOf(enclosingContext);
+      if (parentNavigator == null || identical(parentNavigator, current)) {
+        break;
+      }
+      if (parentNavigator.userGestureInProgress) {
+        return false;
+      }
+      current = parentNavigator;
+    }
+    return true;
+  }
 
   bool get _canStartPredictiveBack {
     if (!mounted || widget.reducedMotion) return false;
@@ -109,6 +132,9 @@ class _JournalAndroidPredictiveBackHostState
       return false;
     }
     if (navigator.userGestureInProgress) {
+      return false;
+    }
+    if (!_areAncestorRoutesCurrent(navigator)) {
       return false;
     }
     return true;
@@ -128,9 +154,13 @@ class _JournalAndroidPredictiveBackHostState
         !_gestureActive &&
         _phase != _JournalPredictiveBackPhase.idle) {
       if (mounted) {
-        setState(() => _phase = _JournalPredictiveBackPhase.idle);
+        setState(() {
+          _phase = _JournalPredictiveBackPhase.idle;
+          _lastSwipeEdge = null;
+        });
       } else {
         _phase = _JournalPredictiveBackPhase.idle;
+        _lastSwipeEdge = null;
       }
     }
   }
@@ -156,6 +186,7 @@ class _JournalAndroidPredictiveBackHostState
       _phase = _JournalPredictiveBackPhase.idle;
       _startBackEvent = null;
       _currentBackEvent = null;
+      _lastSwipeEdge = null;
     }
     _attachGestureNotifier();
   }
@@ -178,6 +209,7 @@ class _JournalAndroidPredictiveBackHostState
       _phase = _JournalPredictiveBackPhase.start;
       _startBackEvent = backEvent;
       _currentBackEvent = backEvent;
+      _lastSwipeEdge = backEvent.swipeEdge;
     });
     widget.route.handleStartBackGesture(
       progress: clampDouble(1.0 - backEvent.progress, 0.0, 1.0),
@@ -193,6 +225,7 @@ class _JournalAndroidPredictiveBackHostState
     setState(() {
       _phase = _JournalPredictiveBackPhase.update;
       _currentBackEvent = backEvent;
+      _lastSwipeEdge = backEvent.swipeEdge;
     });
     widget.route.handleUpdateBackGestureProgress(
       progress: clampDouble(1.0 - backEvent.progress, 0.0, 1.0),
@@ -210,9 +243,36 @@ class _JournalAndroidPredictiveBackHostState
     if (mounted) {
       if (!(widget.route.navigator?.userGestureInProgress ?? false)) {
         _phase = _JournalPredictiveBackPhase.idle;
+        _lastSwipeEdge = null;
       }
       setState(() {});
     }
+  }
+
+  void _recoverStalledCommitIfNeeded() {
+    if (!mounted) return;
+    final route = widget.route;
+    final navigator = route.navigator;
+    if (navigator == null ||
+        !route.isActive ||
+        !route.isCurrent ||
+        route.popGestureInProgress ||
+        navigator.userGestureInProgress) {
+      return;
+    }
+    if (widget.animation.value >= 1.0) {
+      return;
+    }
+    // Async GoRoute.onExit may veto pop after handleCommitBackGesture already
+    // ended userGestureInProgress while AnimationController stayed paused at
+    // value < 1.0 (with status still AnimationStatus.forward). Re-enter a
+    // paired gesture cycle so cancel animates smoothly back to 1.0 without
+    // unbalancing NavigatorState._userGesturesInProgress.
+    setState(() {
+      _phase = _JournalPredictiveBackPhase.cancel;
+    });
+    route.handleStartBackGesture(progress: widget.animation.value);
+    route.handleCancelBackGesture();
   }
 
   @override
@@ -224,8 +284,12 @@ class _JournalAndroidPredictiveBackHostState
     _currentBackEvent = null;
     widget.route.handleCommitBackGesture();
     if (mounted) {
-      if (!(widget.route.navigator?.userGestureInProgress ?? false)) {
+      final stillInGesture =
+          widget.route.navigator?.userGestureInProgress ?? false;
+      if (!stillInGesture) {
         _phase = _JournalPredictiveBackPhase.idle;
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => _recoverStalledCommitIfNeeded());
       }
       setState(() {});
     }
@@ -248,6 +312,7 @@ class _JournalAndroidPredictiveBackHostState
             phase: _phase,
             startBackEvent: _startBackEvent,
             currentBackEvent: _currentBackEvent,
+            lastSwipeEdge: _lastSwipeEdge,
             child: widget.child,
           );
         }
@@ -267,6 +332,7 @@ class _JournalPredictiveBackTransition extends StatefulWidget {
     required this.phase,
     required this.startBackEvent,
     required this.currentBackEvent,
+    required this.lastSwipeEdge,
     required this.child,
   });
 
@@ -274,6 +340,7 @@ class _JournalPredictiveBackTransition extends StatefulWidget {
   final _JournalPredictiveBackPhase phase;
   final PredictiveBackEvent? startBackEvent;
   final PredictiveBackEvent? currentBackEvent;
+  final SwipeEdge? lastSwipeEdge;
   final Widget child;
 
   @override
@@ -348,14 +415,19 @@ class _JournalPredictiveBackTransitionState
     };
 
     final xShift = (screenSize.width / _kDivisionFactor) - _kMargin;
+    final effectiveEdge =
+        widget.currentBackEvent?.swipeEdge ?? widget.lastSwipeEdge;
+    final commitEndX = (effectiveEdge == SwipeEdge.right ? -1.0 : 1.0) *
+        screenSize.height *
+        _kYPositionFactor;
     _positionAnimation = _animation.drive(
       switch (widget.phase) {
         _JournalPredictiveBackPhase.commit => Tween<Offset>(
             begin: _lastDrag,
-            end: Offset(screenSize.height * _kYPositionFactor, 0.0),
+            end: Offset(commitEndX, 0.0),
           ),
         _ => Tween<Offset>(
-            begin: switch (widget.currentBackEvent?.swipeEdge) {
+            begin: switch (effectiveEdge) {
               SwipeEdge.left ||
               null =>
                 Offset(xShift, _getYShiftPosition(screenSize.height)),
@@ -381,9 +453,10 @@ class _JournalPredictiveBackTransitionState
     if (widget.animation != oldWidget.animation) {
       _updateCurvedAnimations();
     }
-    if (widget.phase != oldWidget.phase ||
-        widget.currentBackEvent?.swipeEdge !=
-            oldWidget.currentBackEvent?.swipeEdge) {
+    final nextEdge = widget.currentBackEvent?.swipeEdge ?? widget.lastSwipeEdge;
+    final prevEdge =
+        oldWidget.currentBackEvent?.swipeEdge ?? oldWidget.lastSwipeEdge;
+    if (widget.phase != oldWidget.phase || nextEdge != prevEdge) {
       _updateAnimations(MediaQuery.sizeOf(context));
     }
   }

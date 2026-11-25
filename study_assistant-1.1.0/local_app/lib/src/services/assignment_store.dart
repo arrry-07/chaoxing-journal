@@ -985,7 +985,7 @@ class AssignmentStore extends ChangeNotifier {
   List<int> _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
   bool _allowUrgentDeadlineNightBreakthrough = false;
   static const _deadlineChannelV2AutoMigratedKey =
-      'deadline_channel_v2_auto_migrated_v1';
+      LocalAssignmentRepository.deadlineChannelV2AutoMigratedKey;
   String _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
   bool _migratedDeadlineChannelToV2ThisRestore = false;
   BackgroundCheckSettings _backgroundCheckSettings =
@@ -2502,7 +2502,20 @@ class AssignmentStore extends ChangeNotifier {
           if (_deadlineChannelId ==
                   LocalNotificationService.assignmentV2Channel &&
               !alreadyAutoMigrated) {
-            await prefs.setBool(_deadlineChannelV2AutoMigratedKey, true);
+            final snap = _captureSession();
+            try {
+              await _runScopedWrite(
+                snap,
+                (scopedPrefs) => scopedPrefs.setBool(
+                  _deadlineChannelV2AutoMigratedKey,
+                  true,
+                ),
+              );
+            } on StaleSessionWriteException {
+              // Session changed mid-restore; leave persisted state untouched.
+            } catch (_) {
+              // Keep running restore using the upgraded in-memory default.
+            }
           }
         }
       } else {

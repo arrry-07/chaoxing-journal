@@ -1703,6 +1703,20 @@ def synchronize(args: argparse.Namespace) -> int:
         )
         return 0
 
+    if (
+        (current_stable_json is None or target_stable != current_stable)
+        and target_stable.tag not in raw_releases
+    ):
+        fetched_stable, raw_stable = github.download_and_verify(
+            target_stable.tag,
+            aapt=aapt,
+            apksigner=apksigner,
+        )
+        target_stable = fetched_stable
+        if target_manual.tag == fetched_stable.tag:
+            target_manual = fetched_stable
+        raw_releases[fetched_stable.tag] = raw_stable
+
     verification_artifacts = {
         artifact.tag: artifact for artifact in artifacts
     }

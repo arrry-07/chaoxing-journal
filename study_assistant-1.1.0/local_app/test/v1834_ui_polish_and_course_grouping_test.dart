@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/main.dart';
@@ -728,6 +729,239 @@ void main() {
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }
+    });
+
+    testWidgets(
+        'JournalPageTransitionsBuilder declines predictive back inside nested ShellRoute when root dialog is open, preserves right-edge cancel sign, and recovers vetoed async commit',
+        (tester) async {
+      Future<bool> sendStartBackGesture({
+        double progress = 0.0,
+        int swipeEdge = 0,
+      }) async {
+        var handled = false;
+        final msg = const StandardMethodCodec().encodeMethodCall(
+          MethodCall('startBackGesture', <String, dynamic>{
+            'touchOffset': <double>[swipeEdge == 1 ? 395.0 : 5.0, 300.0],
+            'progress': progress,
+            'swipeEdge': swipeEdge,
+          }),
+        );
+        await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          SystemChannels.backGesture.name,
+          msg,
+          (ByteData? reply) {
+            if (reply != null) {
+              handled =
+                  const StandardMethodCodec().decodeEnvelope(reply) == true;
+            }
+          },
+        );
+        return handled;
+      }
+
+      Future<void> sendUpdateBackGesture(
+        double progress, {
+        int swipeEdge = 0,
+      }) async {
+        final msg = const StandardMethodCodec().encodeMethodCall(
+          MethodCall('updateBackGestureProgress', <String, dynamic>{
+            'touchOffset': <double>[swipeEdge == 1 ? 260.0 : 120.0, 310.0],
+            'progress': progress,
+            'swipeEdge': swipeEdge,
+          }),
+        );
+        await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          SystemChannels.backGesture.name,
+          msg,
+          (_) {},
+        );
+      }
+
+      Future<void> sendBackAction(String method) async {
+        final msg = const StandardMethodCodec().encodeMethodCall(
+          MethodCall(method),
+        );
+        await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          SystemChannels.backGesture.name,
+          msg,
+          (_) {},
+        );
+      }
+
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        // 1) Nested Navigator (ShellRoute) + root Dialog: predictive back must decline so root dialog handles pop.
+        final nestedKey = GlobalKey<NavigatorState>();
+        await tester.pumpWidget(MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: Navigator(
+            key: nestedKey,
+            onGenerateRoute: (_) => MaterialPageRoute<void>(
+              builder: (innerCtx) => Scaffold(
+                body: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(innerCtx).push(
+                      MaterialPageRoute<void>(
+                        builder: (secCtx) => Scaffold(
+                          body: Column(
+                            children: [
+                              const Text('嵌套二级页'),
+                              ElevatedButton(
+                                onPressed: () {
+                                  showDialog<void>(
+                                    context: secCtx,
+                                    useRootNavigator: true,
+                                    builder: (_) => const AlertDialog(
+                                      title: Text('根导航弹窗'),
+                                    ),
+                                  );
+                                },
+                                child: const Text('打开根弹窗'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('进入嵌套二级页'),
+                ),
+              ),
+            ),
+          ),
+        ));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('进入嵌套二级页'));
+        await tester.pumpAndSettle();
+        expect(find.text('嵌套二级页'), findsOneWidget);
+
+        // Without dialog, nested secondary page accepts right-edge predictive back and keeps negative dx on cancel.
+        expect(await sendStartBackGesture(swipeEdge: 1), isTrue);
+        await tester.pump();
+        await sendUpdateBackGesture(0.4, swipeEdge: 1);
+        await tester.pump();
+        await sendBackAction('cancelBackGesture');
+        await tester.pump(const Duration(milliseconds: 16));
+        final translates = tester
+            .widgetList<Transform>(
+              find.ancestor(
+                of: find.text('嵌套二级页'),
+                matching: find.byType(Transform),
+              ),
+            )
+            .map((t) => t.transform.getTranslation().x)
+            .where((dx) => dx != 0.0)
+            .toList();
+        expect(translates, isNotEmpty);
+        expect(translates.every((dx) => dx < 0.0), isTrue);
+        await tester.pumpAndSettle();
+        expect(find.text('嵌套二级页'), findsOneWidget);
+
+        // Open root-navigator dialog above nested secondary page -> predictive back MUST return false.
+        await tester.tap(find.text('打开根弹窗'));
+        await tester.pumpAndSettle();
+        expect(find.text('根导航弹窗'), findsOneWidget);
+        expect(await sendStartBackGesture(), isFalse);
+        expect(find.text('根导航弹窗'), findsOneWidget);
+        expect(find.text('嵌套二级页'), findsOneWidget);
+
+        // 2) Vetoed commit via real GoRouter async onExit returning false: animation recovers cleanly to 1.0.
+        ModalRoute<dynamic>? vetoedRoute;
+        final router = GoRouter(
+          initialLocation: '/home',
+          routes: [
+            GoRoute(
+              path: '/home',
+              builder: (context, _) => Scaffold(
+                body: ElevatedButton(
+                  onPressed: () => context.push('/veto'),
+                  child: const Text('去异步拦截页'),
+                ),
+              ),
+            ),
+            GoRoute(
+              path: '/veto',
+              onExit: (_, __) async => false,
+              builder: (context, _) {
+                vetoedRoute = ModalRoute.of(context);
+                return const Scaffold(body: Text('异步拦截页'));
+              },
+            ),
+          ],
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('去异步拦截页'));
+        await tester.pumpAndSettle();
+        expect(find.text('异步拦截页'), findsOneWidget);
+
+        expect(await sendStartBackGesture(), isTrue);
+        await tester.pump();
+        await sendUpdateBackGesture(0.45);
+        await tester.pump();
+        expect(vetoedRoute!.animation!.value, lessThan(0.9));
+
+        await sendBackAction('commitBackGesture');
+        await tester.pumpAndSettle();
+        expect(find.text('异步拦截页'), findsOneWidget);
+        expect(vetoedRoute!.animation!.value, closeTo(1.0, 0.001));
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    test(
+        'deadline_channel_v2_auto_migrated_v1 is account-scoped so secondary legacy accounts still migrate to v2',
+        () async {
+      SharedPreferences.setMockInitialValues({
+        'auto_sync_interval_minutes': 0,
+      });
+      FlutterSecureStorage.setMockInitialValues({});
+      final repo = LocalAssignmentRepository();
+      final prefs = await SharedPreferences.getInstance();
+
+      // Seed legacy Account B archived with v1 deadline channel, then switch to Account A.
+      await repo.activateAccount('student-b');
+      await repo.writeDeadlineChannelIdInPrefs(
+        prefs,
+        LocalNotificationService.assignmentChannel,
+      );
+      await repo.activateAccount('student-a');
+
+      final session = _Session('student-a');
+      final storeA = _FakeStore(session: session, repository: repo);
+      addTearDown(storeA.dispose);
+      await storeA.restoreSession();
+      expect(
+        storeA.activeDeadlineChannelId,
+        LocalNotificationService.assignmentV2Channel,
+      );
+      expect(
+        prefs.getBool(
+            LocalAssignmentRepository.deadlineChannelV2AutoMigratedKey),
+        isTrue,
+      );
+
+      // Switching back to Account B must isolate the marker and migrate B from v1 -> v2.
+      final storeB = _FakeStore(
+        session: _Session('student-b'),
+        repository: repo,
+      );
+      addTearDown(storeB.dispose);
+      await storeB.restoreSession();
+      expect(
+        storeB.activeDeadlineChannelId,
+        LocalNotificationService.assignmentV2Channel,
+      );
+      expect(
+        await repo.loadDeadlineChannelId('student-b'),
+        LocalNotificationService.assignmentV2Channel,
+      );
     });
 
     testWidgets(
