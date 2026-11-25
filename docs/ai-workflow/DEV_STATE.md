@@ -4,6 +4,12 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
+## 2026-11-25 · 自动化工作流与模型编排规则升级（仅规则与状态文档）
+
+- 已完成改动：同步升级 `AGENTS.md`、`.agents/rules/skill-routing.md` 与全局 `staged-release-gate`（含 `references/t3-goal-automation.md`）及 `GEMINI.md`：固化「一阶段一对话」（规划窗 `Carbon high` 100% 确认需求并落盘规格书后，默认输出新开 `Carbon high` 对话运行的 `/goal` 自动化闭环指令）、执行模型严格二选一（额度富裕优先 `Gemini 4 Hydrogen`，省额度备选 `DeepSeek V4.1 Flash`）、初审 `Neon` 与复审 `Carbon`/全新空白子会话 `Neon` 异构隔离、以及最多 3 轮返工熔断并将疑难问题写入文档后续处理。
+- 当前 commit 与状态：仅更新仓库规则与状态文档（前序 `v1.8.32` Stage 1 提交 `90a9e5b` 保持原样不变），L0 共 `52 <= 80` 行。
+- 下一步待办：继续推进 `v1.8.32`（基线 `7bf6253..HEAD`）的独立 Gate 审查、按需返工复审及 `1.8.32+125` 原签名自测包 MuMu 保数据实测收口。
+
 ## 2026-11-25 · v1.8.32 Stage 1 (M1–M6) 完成（待 Gate 独立审查）
 
 - 已完成改动：完成 `v1.8.32` Stage 1 全部元步骤 `M1`–`M6`：① `M1` 扩展 `CourseTermCatalog` 宽松年份目录解析、180 天召回上限、`published` 增量新作业证据（防 `syncAllTerms` 往期老课污染）及 `matchesHomeCoursePicker` 隔离静默 `ungrouped` 课至「未分组」，`AssignmentStore` 5 处 `changes` 赋值同步失效缓存，`JournalPickerSheet` 新增 `filterNoticeBuilder`，`CourseListScreen` 新增「未分组」副标与「标为本学期」快捷操作；② `M2` 新增 `overdueAmber`/`overdueAmberBg`/`overdueInk` 浅深双主题色板，去红降噪并切换统计页与饼图逾期色，重构 `ManualHomeCard` 与 `AssignmentCard` 左轨倒计时对齐、隐藏正常「提前30分提醒」并保留「自己添加」及手帐备注条；③ `M3` 对齐 `JournalGroupedCard` 43dp 头部，精修待办详情页复制胶囊、底部分割线「查看提醒状态」行并移除顶栏重复铅笔按钮；④ `M4` 重构 `ManualAgendaScreen` 为「进行中 + 默认折叠已完成（N）」双区并接入 `JournalSwipeTile` 左右滑、撤销 `SnackBar`（`TransientFeedbackController`）与长按菜单；⑤ `M5` 重组「我的」顶部 3 合 1 学习卡片（保留外置 `AppearanceControls` 与底部「关于与更新」5 项），`SyncStatusScreen` 内联白天后台检查开关与 2/4/6 小时频率，首页顶栏常驻 `待办` 并将 `每日计划` 收拢至 `更多` 菜单；⑥ `M6` 同步耦合测试并新增 M1/M2/M4/M5 回归测试。
