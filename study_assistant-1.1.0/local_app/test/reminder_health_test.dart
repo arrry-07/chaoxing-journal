@@ -1182,7 +1182,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
-    final tile = find.widgetWithText(ListTile, '作业变化通知渠道');
+    final tile = find.widgetWithText(ListTile, '新增作业通知渠道');
     await Scrollable.ensureVisible(tester.element(tile), alignment: 0.5);
     await tester.pumpAndSettle();
     await tester.tap(tile);

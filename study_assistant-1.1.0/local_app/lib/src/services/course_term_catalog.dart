@@ -87,10 +87,14 @@ class AcademicTerm implements Comparable<AcademicTerm> {
     r'(?<!\d)20\d{2}\s*(?:级|届|版|年制|期)',
   );
   static final RegExp _courseYearMonthSepPattern = RegExp(
-    r'(?<![a-zA-Z\d])(20\d{2})\s*(?:年\s*|[\.\-/])\s*(\d{1,2})(?:\s*(?:月\s*(\d{1,2})\s*[日号]?|[\.\-/]\s*(\d{1,2}))|\s*月)?(?![\d级届版班组节讲章周次])',
+    r'(?<![a-zA-Z\d])(20\d{2})\s*(?:'
+    r'年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*[日号]?)?'
+    r'|'
+    r'[\.\-/]\s*(\d{1,2})(?:\s*[\.\-/]\s*(\d{1,2})|\s*月)?'
+    r')(?![\d级届版班组节讲章周次])',
   );
   static final RegExp _courseYearMonthCompactPattern = RegExp(
-    r'(?<![a-zA-Z\d])(20\d{2})(0[1-9]|1[0-2])(?:(0[1-9]|[12]\d|3[01]))?(?![\d])',
+    r'(?<![a-zA-Z\d])(20\d{2})(0[1-9]|1[0-2])(?:(0[1-9]|[12]\d|3[01]))?(?![\d级届版班组节讲章周次])',
   );
 
   static AcademicTerm? tryParseCourseName(String? raw) {
@@ -142,11 +146,17 @@ class AcademicTerm implements Comparable<AcademicTerm> {
     for (final match in _courseYearMonthSepPattern.allMatches(text)) {
       if (overlapsEarlier(match.start, match.end)) continue;
       final year = int.tryParse(match.group(1)!);
-      final month = int.tryParse(match.group(2)!);
-      final dayRaw = match.group(3) ?? match.group(4);
+      final monthRaw = match.group(2) ?? match.group(4);
+      final month = monthRaw == null ? null : int.tryParse(monthRaw);
+      final dayRaw = match.group(3) ?? match.group(5);
       final day = dayRaw == null ? null : int.tryParse(dayRaw);
       final parsed = parseYearMonth(year, month, day);
-      if (parsed == null) return null;
+      if (parsed == null) {
+        if (month != null && month >= 1 && month <= 12 && day != null) {
+          return null;
+        }
+        continue;
+      }
       matchedTerms.add(parsed);
       singleRanges.add((match.start, match.end));
     }
@@ -158,7 +168,12 @@ class AcademicTerm implements Comparable<AcademicTerm> {
       final dayRaw = match.group(3);
       final day = dayRaw == null ? null : int.tryParse(dayRaw);
       final parsed = parseYearMonth(year, month, day);
-      if (parsed == null) return null;
+      if (parsed == null) {
+        if (month != null && month >= 1 && month <= 12 && day != null) {
+          return null;
+        }
+        continue;
+      }
       matchedTerms.add(parsed);
       singleRanges.add((match.start, match.end));
     }

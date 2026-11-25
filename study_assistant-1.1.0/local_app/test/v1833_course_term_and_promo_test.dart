@@ -61,6 +61,21 @@ void main() {
       expect(AcademicTerm.tryParseCourseName('课程 2026-13-01'), isNull);
       expect(AcademicTerm.tryParseCourseName('课程 2026-02-29'), isNull);
       expect(AcademicTerm.tryParseCourseName('课程 2025秋 2026春'), isNull);
+      expect(AcademicTerm.tryParseCourseName('高等数学 202501班'), isNull);
+      expect(AcademicTerm.tryParseCourseName('软件工程（202503班）'), isNull);
+      expect(AcademicTerm.tryParseCourseName('大学英语202502组'), isNull);
+      expect(AcademicTerm.tryParseCourseName('高等数学 2025年1学期'), isNull);
+      expect(AcademicTerm.tryParseCourseName('大学物理（2025年2学期）'), isNull);
+      expect(AcademicTerm.tryParseCourseName('2025年3大模块'), isNull);
+      expect(AcademicTerm.tryParseCourseName('高等数学（2025-26）'), isNull);
+      expect(
+        AcademicTerm.tryParseCourseName('高等数学 2025年9月'),
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
+      expect(
+        AcademicTerm.tryParseCourseName('高等数学 2025-2026第一学期（2025-26）'),
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
       expect(
         AcademicTerm.tryParseCourseName('课程 2025-2026春'),
         const AcademicTerm(2025, AcademicSemester.spring),

@@ -205,6 +205,16 @@ void main() {
           greaterThanOrEqualTo(4.5));
       expect(contrastRatio(dark.overdueInk, dark.sheet),
           greaterThanOrEqualTo(4.5));
+      for (final p in [light, dark]) {
+        expect(contrastRatio(p.onPrimaryFill, p.primaryFill),
+            greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.onInvertedSurface, p.ink),
+            greaterThanOrEqualTo(4.5));
+        expect(
+            contrastRatio(p.onPrimaryFill, p.berry), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.snackActionColor, p.ink),
+            greaterThanOrEqualTo(4.5));
+      }
 
       final skyCopied = light.copyWith(
         overdueSky: const Color(0xFF0284C7),

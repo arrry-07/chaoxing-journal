@@ -87,6 +87,7 @@ class _FakeNotifications extends LocalNotificationService {
   @override
   Future<void> retireLegacyUpdatesAndDeadlineChannelsIfNeeded({
     required bool retireDeadlineV1,
+    Future<bool> Function()? beforeRetireDeadlineV1,
   }) async {}
 }
 

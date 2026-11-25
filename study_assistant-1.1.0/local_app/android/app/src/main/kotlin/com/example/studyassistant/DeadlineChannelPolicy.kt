@@ -19,6 +19,17 @@ object DeadlineChannelPolicy {
     fun chimeUri(context: Context): Uri =
         Uri.parse("android.resource://${context.packageName}/raw/$CHIME_RAW_NAME")
 
+    fun isCustomSoundUri(
+        channelSound: String?,
+        defaultSound: String?,
+        builtinChime: String?,
+    ): Boolean {
+        if (channelSound == null || defaultSound == null) return false
+        if (channelSound == defaultSound) return false
+        if (builtinChime != null && channelSound == builtinChime) return false
+        return true
+    }
+
     fun normalizeChannelId(raw: String?): String? = when (raw?.trim()) {
         CHANNEL_DEADLINES -> CHANNEL_DEADLINES
         CHANNEL_DEADLINES_V2 -> CHANNEL_DEADLINES_V2

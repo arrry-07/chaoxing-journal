@@ -542,14 +542,8 @@ class _CourseListScreenState extends State<CourseListScreen> {
                 ),
               ),
             ),
-            AnimatedSize(
-              duration: JournalMotion.duration(
-                context,
-                const Duration(milliseconds: 220),
-              ),
-              curve: JournalMotion.easeDrawer,
-              alignment: Alignment.topCenter,
-              child: expanded
+            if (JournalMotion.isReducedMotion(context))
+              (expanded
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       mainAxisSize: MainAxisSize.min,
@@ -609,8 +603,74 @@ class _CourseListScreenState extends State<CourseListScreen> {
                         ],
                       ],
                     )
-                  : const SizedBox.shrink(),
-            ),
+                  : const SizedBox.shrink())
+            else
+              AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: JournalMotion.easeDrawer,
+                alignment: Alignment.topCenter,
+                child: expanded
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final entry in entries) ...[
+                            Divider(
+                              height: 0.6,
+                              thickness: 0.6,
+                              indent: 14,
+                              endIndent: 14,
+                              color: journal.divider,
+                            ),
+                            () {
+                              final course = coursesByKey[entry.courseKey];
+                              final teachers = course?.teacherLabel ?? '';
+                              return Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(14, 10, 10, 10),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            entry.courseName,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: journal.entryTitle,
+                                          ),
+                                          if (teachers.isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              teachers,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: journal.metadata,
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    TextButton(
+                                      key: restoreKeyBuilder(entry.courseKey),
+                                      onPressed: store.isLoading
+                                          ? null
+                                          : () => onRestore(entry),
+                                      child: const Text('恢复'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }(),
+                          ],
+                        ],
+                      )
+                    : const SizedBox.shrink(),
+              ),
           ],
         ),
       ],

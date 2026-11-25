@@ -28,6 +28,9 @@ class GiteeWorkflowTests(unittest.TestCase):
         self.assertIn("tags:", self.text)
         self.assertIn("retention:", self.text)
         self.assertIn("default: \"3\"", self.text)
+        self.assertIn("promote_stable:", self.text)
+        self.assertIn("type: boolean", self.text)
+        self.assertIn("default: false", self.text)
 
     def test_release_event_indexes_the_published_tag(self) -> None:
         self.assertIn(
@@ -38,6 +41,10 @@ class GiteeWorkflowTests(unittest.TestCase):
         self.assertIn(
             "TAGS: ${{ github.event_name == 'release' && "
             "github.event.release.tag_name || inputs.tags }}",
+            self.text,
+        )
+        self.assertIn(
+            "PROMOTE_STABLE: ${{ github.event_name != 'release' && inputs.promote_stable == true }}",
             self.text,
         )
 
@@ -55,10 +62,13 @@ class GiteeWorkflowTests(unittest.TestCase):
     def test_dispatch_inputs_are_not_interpolated_into_shell_source(self) -> None:
         self.assertNotIn('"${{ inputs.tags }}"', self.text)
         self.assertNotIn('--mode "${{ inputs.mode', self.text)
+        self.assertNotIn("${{ inputs.promote_stable }}", self.text)
         self.assertIn("|| inputs.tags }}", self.text)
         self.assertIn('args+=(--tags "$TAGS")', self.text)
         self.assertIn("|| inputs.mode || 'index' }}", self.text)
         self.assertIn("RETENTION: ${{ inputs.retention || '3' }}", self.text)
+        self.assertIn('if [[ "$PROMOTE_STABLE" == "true" ]]; then', self.text)
+        self.assertIn("args+=(--promote-stable)", self.text)
 
     def test_token_is_read_only_from_secret_environment(self) -> None:
         self.assertIn("GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}", self.text)

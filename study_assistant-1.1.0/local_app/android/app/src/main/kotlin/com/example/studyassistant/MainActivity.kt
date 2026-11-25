@@ -426,6 +426,7 @@ class MainActivity : FlutterActivity() {
             manager?.notificationChannels?.associateBy { it.id }.orEmpty()
         }.getOrDefault(emptyMap())
         val defaultSound = runCatching { Settings.System.DEFAULT_NOTIFICATION_URI }.getOrNull()
+        val builtinChime = runCatching { DeadlineChannelPolicy.chimeUri(this) }.getOrNull()
         val channelIds = listOf(
             DeadlineChannelPolicy.CHANNEL_DEADLINES,
             DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
@@ -450,7 +451,11 @@ class MainActivity : FlutterActivity() {
                             "exists" to true,
                             "importance" to channel.importance,
                             "soundMuted" to (sound == null),
-                            "customSound" to (sound != null && defaultSound != null && sound != defaultSound),
+                            "customSound" to DeadlineChannelPolicy.isCustomSoundUri(
+                                channelSound = sound?.toString(),
+                                defaultSound = defaultSound?.toString(),
+                                builtinChime = builtinChime?.toString(),
+                            ),
                             "vibrationEnabled" to runCatching { channel.shouldVibrate() }.getOrNull(),
                             "lockscreenVisibility" to runCatching { channel.lockscreenVisibility }.getOrNull(),
                         ),

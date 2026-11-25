@@ -395,7 +395,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       issues.add('系统通知权限未开启');
     }
     final channels = <(String, ReminderChannelHealth?)>[
-      ('作业变化渠道', current?.assignmentUpdatesChannel),
+      ('新增作业渠道', current?.assignmentUpdatesChannel),
       ('截止提醒渠道', current?.assignmentChannel),
       ('每日摘要渠道', current?.summaryChannel),
       ('个人日程渠道', current?.manualChannel),
@@ -795,7 +795,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
               ListTile(
                 dense: true,
                 leading: const Icon(Icons.sync_outlined),
-                title: const Text('作业变化通知渠道'),
+                title: const Text('新增作业通知渠道'),
                 subtitle:
                     Text(_channelStateText(_health?.assignmentUpdatesChannel)),
                 trailing: const Icon(Icons.chevron_right_rounded),

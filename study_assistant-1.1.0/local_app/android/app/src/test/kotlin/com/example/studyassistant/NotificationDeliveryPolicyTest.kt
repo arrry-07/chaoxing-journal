@@ -2,7 +2,9 @@ package com.example.studyassistant
 
 import android.app.NotificationManager
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NotificationDeliveryPolicyTest {
@@ -125,5 +127,18 @@ class NotificationDeliveryPolicyTest {
         assertEquals("daily_summary_v2", DeadlineChannelPolicy.CHANNEL_SUMMARY_V2)
         assertEquals("personal_schedule_v2", DeadlineChannelPolicy.CHANNEL_MANUAL_V2)
         assertEquals("journal_chime", DeadlineChannelPolicy.CHIME_RAW_NAME)
+    }
+
+    @Test
+    fun builtInChimeAndSystemDefaultAreNotReportedAsCustomSound() {
+        val defaultUri = "content://settings/system/notification_sound"
+        val chimeUri = "android.resource://com.example.studyassistant/raw/journal_chime"
+        val thirdPartyUri = "content://media/external/audio/media/42"
+
+        assertFalse(DeadlineChannelPolicy.isCustomSoundUri(null, defaultUri, chimeUri))
+        assertFalse(DeadlineChannelPolicy.isCustomSoundUri(chimeUri, null, chimeUri))
+        assertFalse(DeadlineChannelPolicy.isCustomSoundUri(defaultUri, defaultUri, chimeUri))
+        assertFalse(DeadlineChannelPolicy.isCustomSoundUri(chimeUri, defaultUri, chimeUri))
+        assertTrue(DeadlineChannelPolicy.isCustomSoundUri(thirdPartyUri, defaultUri, chimeUri))
     }
 }

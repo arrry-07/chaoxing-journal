@@ -429,14 +429,8 @@ class _AgendaState extends State<ManualAgendaScreen> {
                                   ),
                                 ),
                               ),
-                              AnimatedSize(
-                                duration: JournalMotion.duration(
-                                  context,
-                                  const Duration(milliseconds: 220),
-                                ),
-                                curve: JournalMotion.easeDrawer,
-                                alignment: Alignment.topCenter,
-                                child: _completedExpanded
+                              if (JournalMotion.isReducedMotion(context))
+                                (_completedExpanded
                                     ? Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.stretch,
@@ -454,8 +448,33 @@ class _AgendaState extends State<ManualAgendaScreen> {
                                           ],
                                         ],
                                       )
-                                    : const SizedBox.shrink(),
-                              ),
+                                    : const SizedBox.shrink())
+                              else
+                                AnimatedSize(
+                                  duration: const Duration(milliseconds: 220),
+                                  curve: JournalMotion.easeDrawer,
+                                  alignment: Alignment.topCenter,
+                                  child: _completedExpanded
+                                      ? Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            for (final e in doneRows) ...[
+                                              Divider(
+                                                height: 0.6,
+                                                thickness: 0.6,
+                                                indent: 52,
+                                                endIndent: 16,
+                                                color: journal.divider,
+                                              ),
+                                              _buildSwipeableRow(
+                                                  e, now, journal),
+                                            ],
+                                          ],
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
                             ],
                           ),
                         ],

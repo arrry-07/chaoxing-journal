@@ -590,4 +590,44 @@ void main() {
     expect(find.textContaining('/ 3'), findsOneWidget);
     expect(find.text('33%'), findsOneWidget);
   });
+
+  testWidgets(
+      'StatsScreen top 4-scope bar stays on one horizontal row with zero overflow at 320dp@2x',
+      (t) async {
+    t.view.physicalSize = const Size(320, 640);
+    t.view.devicePixelRatio = 1.0;
+    addTearDown(t.view.reset);
+
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final s = f.makeStore(f.Session());
+    addTearDown(s.dispose);
+    await s.restoreSession();
+
+    await t.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context)
+            .copyWith(textScaler: const TextScaler.linear(2.0)),
+        child: child!,
+      ),
+      home: Scaffold(body: StatsScreen(store: s, clock: () => now)),
+    ));
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+
+    final keys = [
+      for (final scope in CourseTermScope.values)
+        find.byKey(ValueKey('stats-term-scope-${scope.name}')),
+    ];
+    for (final k in keys) {
+      expect(k, findsOneWidget);
+    }
+    final rects = keys.map(t.getRect).toList(growable: false);
+    final baseY = rects.first.center.dy;
+    for (var i = 1; i < rects.length; i++) {
+      expect((rects[i].center.dy - baseY).abs(), lessThanOrEqualTo(1.0));
+      expect(rects[i].left, greaterThan(rects[i - 1].left));
+    }
+  });
 }

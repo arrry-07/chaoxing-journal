@@ -3482,7 +3482,7 @@ class AssignmentStore extends ChangeNotifier {
     }
     final targetChannel = _authenticated
         ? _deadlineChannelId
-        : LocalNotificationService.assignmentChannel;
+        : LocalNotificationService.assignmentV2Channel;
     notificationService.activeDeadlineChannelId = targetChannel;
     if (_nativeReminderAvailable) {
       try {
@@ -4709,18 +4709,6 @@ class AssignmentStore extends ChangeNotifier {
     notificationService.allowUrgentNightBreakthrough =
         _allowUrgentDeadlineNightBreakthrough;
     notificationService.courseworkState = _courseworkState;
-    if (_migratedDeadlineChannelToV2ThisRestore && !_nativeReminderAvailable) {
-      _migratedDeadlineChannelToV2ThisRestore = false;
-      try {
-        await notificationService.rescheduleAssignments(
-          courseAssignments,
-          offsetsMinutes: _reminderOffsetsMinutes,
-        );
-      } catch (error) {
-        _deadlineWarnings.add('截止提醒渠道升级重排未完成：$error');
-        _serviceWarnings.add('截止提醒渠道升级重排未完成：$error');
-      }
-    }
     try {
       await notificationService
           .migrateLegacyManualChannelIfNeeded(notebook.entries);
@@ -4738,13 +4726,48 @@ class AssignmentStore extends ChangeNotifier {
       _summaryWarnings.add('每日摘要提醒渠道迁移未完成：$error');
       _serviceWarnings.add('每日摘要提醒渠道迁移未完成：$error');
     }
+    var deadlineRescheduledForV2 = false;
     try {
       await notificationService.retireLegacyUpdatesAndDeadlineChannelsIfNeeded(
         retireDeadlineV1:
             _deadlineChannelId == LocalNotificationService.assignmentV2Channel,
+        beforeRetireDeadlineV1: !_nativeReminderAvailable
+            ? () async {
+                deadlineRescheduledForV2 = true;
+                await notificationService.rescheduleAssignments(
+                  courseAssignments,
+                  offsetsMinutes: _reminderOffsetsMinutes,
+                );
+                if (notificationService.lastDeadlineScheduleFailed) {
+                  final reason = notificationService.lastWarning ?? '截止提醒重排未完成';
+                  _deadlineWarnings.add('截止提醒渠道升级重排未完成：$reason');
+                  _serviceWarnings.add('截止提醒渠道升级重排未完成：$reason');
+                  return false;
+                }
+                return true;
+              }
+            : null,
       );
-    } catch (_) {
+    } catch (error) {
+      if (deadlineRescheduledForV2) {
+        _deadlineWarnings.add('截止提醒渠道升级重排未完成：$error');
+        _serviceWarnings.add('截止提醒渠道升级重排未完成：$error');
+      }
       // Best-effort legacy v1 channel cleanup.
+    }
+    if (_migratedDeadlineChannelToV2ThisRestore && !_nativeReminderAvailable) {
+      _migratedDeadlineChannelToV2ThisRestore = false;
+      if (!deadlineRescheduledForV2) {
+        try {
+          await notificationService.rescheduleAssignments(
+            courseAssignments,
+            offsetsMinutes: _reminderOffsetsMinutes,
+          );
+        } catch (error) {
+          _deadlineWarnings.add('截止提醒渠道升级重排未完成：$error');
+          _serviceWarnings.add('截止提醒渠道升级重排未完成：$error');
+        }
+      }
     }
   }
 

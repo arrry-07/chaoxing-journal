@@ -201,6 +201,8 @@ class LocalNotificationService {
   Future<void>? _pluginInitialization;
   final Map<String, Future<void>> _channelCreations = {};
   bool _pluginInitialized = false;
+  bool lastDeadlineScheduleFailed = false;
+  Timer? _pendingManualTestTimer;
   static Future<void> _scheduleMutationQueue = Future<void>.value();
   static const _scheduleCategories = ['assignments', 'manual', 'summary'];
   static const _scheduleJournalPrefix = 'notification_schedule_v2_journal_';
@@ -209,6 +211,8 @@ class LocalNotificationService {
 
   /// Privacy tightening must not retain detailed alarms if replacement fails.
   Future<void> cancelPrivateSchedules() async {
+    _pendingManualTestTimer?.cancel();
+    _pendingManualTestTimer = null;
     await _ensurePluginInitialized();
     await _runScheduleMutation(() async {
       final prefs = await SharedPreferences.getInstance();
@@ -709,6 +713,8 @@ class LocalNotificationService {
     Duration delay = Duration.zero,
   }) =>
       _runScheduleMutation(() async {
+        _pendingManualTestTimer?.cancel();
+        _pendingManualTestTimer = null;
         try {
           await _ensureReadyForScheduling(manualV2Channel);
           final health = await inspectHealth();
@@ -735,7 +741,11 @@ class LocalNotificationService {
               payload: 't:manual-notification-test',
             );
           } else {
-            Timer(delay, () {
+            late final Timer timer;
+            timer = Timer(delay, () {
+              if (identical(_pendingManualTestTimer, timer)) {
+                _pendingManualTestTimer = null;
+              }
               unawaited(
                 _plugin
                     .show(
@@ -748,6 +758,7 @@ class LocalNotificationService {
                     .catchError((_) {}),
               );
             });
+            _pendingManualTestTimer = timer;
           }
           return true;
         } on PlatformException catch (error) {
@@ -835,6 +846,7 @@ class LocalNotificationService {
 
   Future<void> retireLegacyUpdatesAndDeadlineChannelsIfNeeded({
     required bool retireDeadlineV1,
+    Future<bool> Function()? beforeRetireDeadlineV1,
   }) async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     final (:android, :existingIds) = await _readExistingAndroidChannelIds();
@@ -845,6 +857,10 @@ class LocalNotificationService {
     }
     if (retireDeadlineV1 && existingIds.contains(assignmentChannel)) {
       await _ensureAndroidChannel(assignmentV2Channel);
+      if (beforeRetireDeadlineV1 != null) {
+        final readyToRetire = await beforeRetireDeadlineV1();
+        if (!readyToRetire) return;
+      }
       await _retireLegacyChannel(android, assignmentChannel);
     }
   }
@@ -2170,6 +2186,7 @@ class LocalNotificationService {
     List<int>? offsetsMinutes,
   }) async {
     lastWarning = null;
+    lastDeadlineScheduleFailed = false;
     try {
       await _ensurePluginInitialized();
       final offsets = ReminderRuleStore.normalizeOffsets(offsetsMinutes);
@@ -2234,6 +2251,7 @@ class LocalNotificationService {
         },
       );
     } catch (error) {
+      lastDeadlineScheduleFailed = true;
       lastWarning =
           _appendWarning(lastWarning, '提醒批次未能完整更新：$error；旧提醒已尽量保留，请重试');
     }
