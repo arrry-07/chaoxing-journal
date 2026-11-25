@@ -6,9 +6,9 @@
 
 ## 2026-11-25 · 自动化工作流与模型编排规则升级（仅规则与状态文档）
 
-- 已完成改动：同步升级 `AGENTS.md`、`.agents/rules/skill-routing.md` 与全局 `staged-release-gate`（含 `references/t3-goal-automation.md`）及 `GEMINI.md`：固化「一阶段一对话」（规划窗 `Carbon high` 100% 确认需求并落盘规格书后，默认输出新开 `Carbon high` 对话运行的 `/goal` 自动化闭环指令）、执行模型严格二选一（额度富裕优先 `Gemini 4 Hydrogen`，省额度备选 `DeepSeek V4.1 Flash`）、初审 `Neon` 与复审 `Carbon`/全新空白子会话 `Neon` 异构隔离、以及最多 3 轮返工熔断并将疑难问题写入文档后续处理。
+- 已完成改动：升级 `AGENTS.md`、`.agents/rules/skill-routing.md`、全局 `staged-release-gate`（含 `references/t3-goal-automation.md`）与 `GEMINI.md`：固化每阶段硬性调 `t3_thread_launch` 开启真正独立的顶层新对话（仅底层受限时兜底无父历史 `delegate_task`，提示词禁带主线程上下文并显式声明忽略底层默认背景）、强模型审查/复审提示词铁律（只给目标、事实源、硬红线和输出标准，留足自主推理空间）、执行模型严格二选一（额度富裕优先 `Gemini 4 Hydrogen`，省额度 `DeepSeek V4.1 Flash`）、初审 `Neon` 与复审 `Carbon`/全新对话 `Neon` 异构隔离，以及超 3 轮返工疑难写文档后续处理。
 - 当前 commit 与状态：仅更新仓库规则与状态文档（前序 `v1.8.32` Stage 1 提交 `90a9e5b` 保持原样不变），L0 共 `52 <= 80` 行。
-- 下一步待办：继续推进 `v1.8.32`（基线 `7bf6253..HEAD`）的独立 Gate 审查、按需返工复审及 `1.8.32+125` 原签名自测包 MuMu 保数据实测收口。
+- 下一步待办：继续推进 `v1.8.32`（基线 `7bf6253..HEAD`）的独立顶层新对话 Gate 审查、按需返工复审及 `1.8.32+125` 原签名自测包 MuMu 保数据实测收口。
 
 ## 2026-11-25 · v1.8.32 Stage 1 (M1–M6) 完成（待 Gate 独立审查）
 
