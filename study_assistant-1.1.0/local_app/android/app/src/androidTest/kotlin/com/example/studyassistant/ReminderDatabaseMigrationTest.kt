@@ -49,7 +49,7 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v3")!!
 
-        assertEquals(8, database.readableDatabase.version)
+        assertEquals(9, database.readableDatabase.version)
         assertEquals(3L, account.pendingSignalVersion)
         assertEquals(2L, account.consumedSignalVersion)
         assertEquals(0L, account.attemptedSignalVersion)
@@ -78,7 +78,7 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v4")!!
 
-        assertEquals(8, database.readableDatabase.version)
+        assertEquals(9, database.readableDatabase.version)
         assertEquals(8L, account.pendingSignalVersion)
         assertEquals(6L, account.consumedSignalVersion)
         assertEquals(7L, account.attemptedSignalVersion)
@@ -112,7 +112,7 @@ class ReminderDatabaseMigrationTest {
         val database = ReminderDatabase.openForTest(context, name)
         val account = database.readAccount("migration-v5")!!
 
-        assertEquals(8, database.readableDatabase.version)
+        assertEquals(9, database.readableDatabase.version)
         assertEquals("legacy-v5-token", account.claimToken)
         assertMigratedBusinessDataIntact(database, "migration-v5")
 
@@ -131,12 +131,12 @@ class ReminderDatabaseMigrationTest {
 
     @Test
     fun freshDatabaseHasV7Indices() {
-        val name = "fresh-v8-${System.nanoTime()}.db"
+        val name = "fresh-v9-${System.nanoTime()}.db"
         names.add(name)
         val database = ReminderDatabase.openForTest(context, name)
         try {
             assertV7Indices(database.readableDatabase)
-            assertEquals(8, database.readableDatabase.version)
+            assertEquals(9, database.readableDatabase.version)
         } finally {
             database.close()
         }
@@ -178,7 +178,7 @@ class ReminderDatabaseMigrationTest {
             assertEquals("v6-evidence", evidence.single().logicalKey)
             assertEquals("recoveryPending", evidence.single().state)
             assertV7Indices(db)
-            assertEquals(8, db.version)
+            assertEquals(9, db.version)
         } finally {
             database.close()
         }
@@ -211,16 +211,100 @@ class ReminderDatabaseMigrationTest {
 
         val database = ReminderDatabase.openForTest(context, name)
         try {
-            assertEquals(8, database.readableDatabase.version)
+            assertEquals(9, database.readableDatabase.version)
             val state = database.readAccount(account)!!
             assertFalse(state.allowUrgentNightBreakthrough)
-            assertEquals(AssignmentNotificationPublisher.CHANNEL_DEADLINES, state.deadlineChannelId)
+            assertEquals(AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2, state.deadlineChannelId)
             val legacySnapshot = database.snapshot(account, "cx:work:1:2:migrated")!!
             val legacyEvent = database.eventsForAccount(account).single()
             assertEquals("unknown", legacySnapshot.deadlineSource)
             assertEquals("unknown", legacyEvent.deadlineSource)
             // Legacy v7 deadline event lacking source must not be allowed to deliver/match.
             assertFalse(legacySnapshot.matchesEvent(legacyEvent, System.currentTimeMillis()))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun v8ToV9MigratesLegacyDeadlineChannelToV2() {
+        val name = "migration-v8-${System.nanoTime()}.db"
+        val legacyAccount = "migration-v8-legacy"
+        val v2Account = "migration-v8-v2"
+        names.add(name)
+        createDatabase(name, version = 8, includeAttemptColumns = true, includeClaimToken = true) { db ->
+            seedV6Schema(db)
+            db.execSQL("CREATE INDEX IF NOT EXISTS events_notification_id ON events(notification_id)")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS events_account_assignment " +
+                    "ON events(account_hash, assignment_id, updated_at)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS notification_signals_received_at " +
+                    "ON notification_signals(account_hash, received_at)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS reminder_schedule_evidence_subject " +
+                    "ON reminder_schedule_evidence(" +
+                    "account_hash, history_generation, subject_kind, subject_id, confirmed_at)",
+            )
+            db.execSQL(
+                "ALTER TABLE accounts ADD COLUMN allow_urgent_night_breakthrough " +
+                    "INTEGER NOT NULL DEFAULT 0",
+            )
+            db.execSQL(
+                "ALTER TABLE accounts ADD COLUMN deadline_channel_id " +
+                    "TEXT NOT NULL DEFAULT 'assignment_deadlines'",
+            )
+            db.execSQL(
+                "ALTER TABLE snapshots ADD COLUMN deadline_source " +
+                    "TEXT NOT NULL DEFAULT 'unknown'",
+            )
+            db.execSQL(
+                "ALTER TABLE events ADD COLUMN deadline_source " +
+                    "TEXT NOT NULL DEFAULT 'unknown'",
+            )
+            insertAccount(db, legacyAccount, pendingVersion = 5, consumedVersion = 4)
+            db.execSQL(
+                "UPDATE accounts SET allow_urgent_night_breakthrough = 1, " +
+                    "deadline_channel_id = ? WHERE account_hash = ?",
+                arrayOf(AssignmentNotificationPublisher.CHANNEL_DEADLINES, legacyAccount),
+            )
+            insertAccount(db, v2Account, pendingVersion = 2, consumedVersion = 2)
+            db.execSQL(
+                "UPDATE accounts SET deadline_channel_id = ? WHERE account_hash = ?",
+                arrayOf(AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2, v2Account),
+            )
+            seedLegacyRows(db, legacyAccount)
+            db.execSQL(
+                "UPDATE snapshots SET deadline_source = 'courseWork' WHERE account_hash = ?",
+                arrayOf(legacyAccount),
+            )
+            db.execSQL(
+                "UPDATE events SET deadline_source = 'courseWork' WHERE account_hash = ?",
+                arrayOf(legacyAccount),
+            )
+        }
+
+        val database = ReminderDatabase.openForTest(context, name)
+        try {
+            assertEquals(9, database.readableDatabase.version)
+            val legacyState = database.readAccount(legacyAccount)!!
+            assertTrue(legacyState.allowUrgentNightBreakthrough)
+            assertEquals(
+                AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+                legacyState.deadlineChannelId,
+            )
+            assertEquals(5L, legacyState.pendingSignalVersion)
+            assertEquals(4L, legacyState.consumedSignalVersion)
+            assertEquals("courseWork", database.snapshot(legacyAccount, "cx:work:1:2:migrated")!!.deadlineSource)
+            assertEquals("courseWork", database.eventsForAccount(legacyAccount).single().deadlineSource)
+
+            val v2State = database.readAccount(v2Account)!!
+            assertEquals(
+                AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+                v2State.deadlineChannelId,
+            )
         } finally {
             database.close()
         }

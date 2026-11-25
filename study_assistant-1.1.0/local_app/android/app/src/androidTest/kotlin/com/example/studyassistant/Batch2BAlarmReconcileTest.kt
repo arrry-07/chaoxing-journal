@@ -68,7 +68,7 @@ class Batch2BAlarmReconcileTest {
                 LegacyAssignmentMigrationState.confirm(context),
             )
             val channel =
-                manager.getNotificationChannel(AssignmentNotificationPublisher.CHANNEL_UPDATES)
+                manager.getNotificationChannel(AssignmentNotificationPublisher.CHANNEL_UPDATES_V2)
             assertTrue(
                 "the test install needs a fresh or enabled updates channel",
                 channel == null || channel.importance != NotificationManager.IMPORTANCE_NONE,

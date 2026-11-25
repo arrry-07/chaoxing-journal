@@ -862,7 +862,7 @@ class AssignmentNotificationPublisherTest {
     }
 
     @Test
-    fun unknownTimeNewAssignmentPublishesSilentlyOnSilentChannel() {
+    fun unknownTimeNewAssignmentPublishesAudiblyOnUpdatesV2Channel() {
         assertTrue(LegacyAssignmentMigrationState.confirm(context))
         val id = seedPendingNewAssignment()
         val daytimeNow = ZonedDateTime.now(ZoneId.systemDefault())
@@ -878,7 +878,7 @@ class AssignmentNotificationPublisherTest {
         )
         assertTrue("publish result: $result", result.submitted)
         val active = notificationManager.activeNotifications.single { it.id == id && it.tag == null }
-        assertEquals(AssignmentNotificationPublisher.CHANNEL_SILENT, active.notification.channelId)
+        assertEquals(AssignmentNotificationPublisher.CHANNEL_UPDATES_V2, active.notification.channelId)
         notificationManager.cancel(id)
     }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
@@ -21,8 +22,10 @@ import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
+import 'package:study_assistant_mobile/src/models/reminder_history.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/background_check_settings.dart';
 import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -521,6 +524,164 @@ void main() {
         reason: 'cancelPrivateSchedules must cancel pending manual test timer',
       );
     });
+
+    test(
+        'cancelPrivateSchedules cancels manual test timer armed by an in-flight showTestManualNotification call',
+        () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      FlutterLocalNotificationsPlatform.instance =
+          AndroidFlutterLocalNotificationsPlugin();
+      SharedPreferences.setMockInitialValues({});
+      var showCount = 0;
+      final healthGate = Completer<void>();
+      var healthEntered = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(permissions, (call) async => 35);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'show') {
+          showCount++;
+          return true;
+        }
+        if (call.method == 'areNotificationsEnabled' && !healthEntered) {
+          healthEntered = true;
+          await healthGate.future;
+          return true;
+        }
+        return switch (call.method) {
+          'getNotificationAppLaunchDetails' => {
+              'notificationLaunchedApp': false
+            },
+          'getNotificationChannels' => [
+              {
+                'id': LocalNotificationService.manualV2Channel,
+                'name': '待办与考试提醒',
+                'description': '',
+                'groupId': null,
+                'showBadge': true,
+                'importance': 4,
+                'sound': 'journal_chime',
+                'playSound': true,
+                'enableLights': false,
+                'enableVibration': true,
+                'vibrationPattern': null,
+                'ledColor': 0,
+                'audioAttributesUsage': 5,
+              }
+            ],
+          'pendingNotificationRequests' || 'getActiveNotifications' => [],
+          'areNotificationsEnabled' || 'canScheduleExactNotifications' => true,
+          _ => true,
+        };
+      });
+
+      final service = LocalNotificationService();
+      final testFuture = service.showTestManualNotification(
+        delay: const Duration(milliseconds: 80),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(healthEntered, isTrue);
+      final cancelFuture = service.cancelPrivateSchedules();
+      healthGate.complete();
+      expect(await testFuture, isTrue);
+      await cancelFuture;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(
+        showCount,
+        0,
+        reason:
+            'queued cancelPrivateSchedules must cancel timer armed while in-flight',
+      );
+    });
+
+    test(
+        'native path preserves legacy assignment_deadlines channel when legacy assignment migration is unverified',
+        () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      FlutterLocalNotificationsPlatform.instance =
+          AndroidFlutterLocalNotificationsPlugin();
+      SharedPreferences.setMockInitialValues({
+        'auto_sync_interval_minutes': 0,
+      });
+      FlutterSecureStorage.setMockInitialValues({});
+      final existing = <String>{
+        'assignment_deadlines',
+        'assignment_updates',
+      };
+      final deleted = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(permissions, (call) async => 35);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        switch (call.method) {
+          case 'getNotificationAppLaunchDetails':
+            return {'notificationLaunchedApp': false};
+          case 'getNotificationChannels':
+            return [
+              for (final id in existing)
+                {
+                  'id': id,
+                  'name': id,
+                  'description': '',
+                  'groupId': null,
+                  'showBadge': true,
+                  'importance': 4,
+                  'sound': null,
+                  'playSound': false,
+                  'enableLights': false,
+                  'enableVibration': false,
+                  'vibrationPattern': null,
+                  'ledColor': 0,
+                  'audioAttributesUsage': 5,
+                }
+            ];
+          case 'createNotificationChannel':
+            existing.add((call.arguments as Map)['id'] as String);
+            return true;
+          case 'deleteNotificationChannel':
+            final id = call.arguments as String;
+            existing.remove(id);
+            deleted.add(id);
+            return true;
+          case 'pendingNotificationRequests':
+          case 'getActiveNotifications':
+            return <Map<String, Object?>>[];
+          case 'areNotificationsEnabled':
+          case 'canScheduleExactNotifications':
+            return true;
+          default:
+            return true;
+        }
+      });
+
+      final gateway = _DummyNativeGateway();
+      final repo = LocalAssignmentRepository(
+        backgroundReminderGateway: gateway,
+      );
+      await repo.activateAccount('native-unverified-user');
+      final store = AssignmentStore(
+        repository: repo,
+        sessionStore: _LegacySession('native-unverified-user'),
+        notificationService: _UnverifiedLegacyNotif(),
+        widgetSnapshotService: _DummyWidget(),
+        chaoxingClient: ChaoxingLocalClient(),
+        backgroundReminderGateway: gateway,
+        nativeReminderDeliveryEnabled: true,
+        manageBackgroundSchedule: true,
+      );
+      addTearDown(store.dispose);
+
+      await store.restoreSession();
+
+      expect(deleted, contains('assignment_updates'));
+      expect(
+        deleted,
+        isNot(contains('assignment_deadlines')),
+        reason:
+            'must not retire assignment_deadlines while native legacy migration is incomplete',
+      );
+      expect(existing, contains('assignment_deadlines'));
+    });
   });
 
   group('M3 JournalPickerSheet fixed height & 320dp@2x keyboard safety', () {
@@ -913,4 +1074,77 @@ class _LegacySession extends SecureSessionStore {
 class _DummyWidget extends WidgetSnapshotService {
   @override
   Future<void> saveAssignments(List<Assignment> assignments) async {}
+}
+
+class _UnverifiedLegacyNotif extends LocalNotificationService {
+  @override
+  Future<bool> isLegacyAssignmentMigrationComplete() async => false;
+
+  @override
+  Future<void> removeLegacyAssignmentSchedules() async {}
+}
+
+class _DummyNativeGateway extends BackgroundReminderGateway {
+  _DummyNativeGateway() : super();
+
+  @override
+  Future<bool> isAvailable() async => true;
+
+  @override
+  Future<int> ensureActiveAccount(String accountHash) async => 1;
+
+  @override
+  Future<bool> isSessionCurrent(String accountHash, int sessionEpoch) async =>
+      true;
+
+  @override
+  Future<ReminderHistoryControl> getReminderHistoryControl({
+    String? accountHash,
+    int? sessionEpoch,
+  }) async =>
+      const ReminderHistoryControl(
+        historyGeneration: 1,
+        recordingEnabled: true,
+        ownerMatches: true,
+        purgePending: false,
+        purgeToken: null,
+      );
+
+  @override
+  Future<int> enableReminderHistorySession({
+    required String accountHash,
+    required int sessionEpoch,
+    required int expectedHistoryGeneration,
+  }) async =>
+      1;
+
+  @override
+  Future<void> updateSettings(
+    String accountHash,
+    int sessionEpoch,
+    BackgroundCheckSettings settings, {
+    required bool showDetails,
+    bool reconcileSchedules = true,
+    bool allowUrgentNightBreakthrough = false,
+    String? deadlineChannelId,
+  }) async {}
+
+  @override
+  Future<void> reconcileDaytimeSchedule({
+    required DateTime? targetAt,
+    required bool enabled,
+    required int intervalMinutes,
+  }) async {}
+
+  @override
+  Future<bool> acquireWriteLease(String owner) async => true;
+
+  @override
+  Future<void> releaseWriteLease(String owner) async {}
+
+  @override
+  Future<void> cancelAssignmentDeliveryKeepEvents(String accountHash) async {}
+
+  @override
+  Future<void> cancelAssignmentReminders(String accountHash) async {}
 }

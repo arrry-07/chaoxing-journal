@@ -215,6 +215,8 @@ class LocalNotificationService {
     _pendingManualTestTimer = null;
     await _ensurePluginInitialized();
     await _runScheduleMutation(() async {
+      _pendingManualTestTimer?.cancel();
+      _pendingManualTestTimer = null;
       final prefs = await SharedPreferences.getInstance();
       final ids = <int>{};
       final validActiveManifests = <String>{};

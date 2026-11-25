@@ -2255,8 +2255,11 @@ class AssignmentStore extends ChangeNotifier {
       _recoveryWarnings.add('个人资料暂时无法恢复，不影响重新登录和读取作业');
     }
     await _reconcileBackgroundControls();
-    await _maybeMigrateLegacyAssignmentSchedules();
-    await _maybeMigrateLegacyManualSchedules();
+    final legacyAssignmentVerified =
+        await _maybeMigrateLegacyAssignmentSchedules();
+    await _maybeMigrateLegacyManualSchedules(
+      legacyAssignmentVerified: legacyAssignmentVerified,
+    );
     notifyListeners();
   }
 
@@ -4696,11 +4699,13 @@ class AssignmentStore extends ChangeNotifier {
     });
   }
 
-  Future<void> _maybeMigrateLegacyAssignmentSchedules() async {
-    await _ensureLegacyAssignmentVerified();
+  Future<bool> _maybeMigrateLegacyAssignmentSchedules() async {
+    return await _ensureLegacyAssignmentVerified();
   }
 
-  Future<void> _maybeMigrateLegacyManualSchedules() async {
+  Future<void> _maybeMigrateLegacyManualSchedules({
+    bool? legacyAssignmentVerified,
+  }) async {
     if (!_authenticated ||
         !_manageBackgroundSchedule ||
         _privacyCleanupPending) {
@@ -4726,11 +4731,24 @@ class AssignmentStore extends ChangeNotifier {
       _summaryWarnings.add('每日摘要提醒渠道迁移未完成：$error');
       _serviceWarnings.add('每日摘要提醒渠道迁移未完成：$error');
     }
+    var canRetireDeadlineV1 =
+        _deadlineChannelId == LocalNotificationService.assignmentV2Channel;
+    if (canRetireDeadlineV1 && _nativeReminderAvailable) {
+      if (legacyAssignmentVerified != null) {
+        canRetireDeadlineV1 = legacyAssignmentVerified;
+      } else {
+        try {
+          canRetireDeadlineV1 =
+              await notificationService.isLegacyAssignmentMigrationComplete();
+        } catch (_) {
+          canRetireDeadlineV1 = false;
+        }
+      }
+    }
     var deadlineRescheduledForV2 = false;
     try {
       await notificationService.retireLegacyUpdatesAndDeadlineChannelsIfNeeded(
-        retireDeadlineV1:
-            _deadlineChannelId == LocalNotificationService.assignmentV2Channel,
+        retireDeadlineV1: canRetireDeadlineV1,
         beforeRetireDeadlineV1: !_nativeReminderAvailable
             ? () async {
                 deadlineRescheduledForV2 = true;

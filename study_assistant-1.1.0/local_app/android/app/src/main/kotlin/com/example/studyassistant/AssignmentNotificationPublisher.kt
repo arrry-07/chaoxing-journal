@@ -534,6 +534,7 @@ object AssignmentNotificationPublisher {
                 )
                     .setWhen(active.notification.`when`)
                     .setSilent(true)
+                    .setOnlyAlertOnce(true)
                     .build()
                 // Preserve both the notification id and SUBMITTED history;
                 // this is a silent content update, not another new event.
