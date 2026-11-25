@@ -10,9 +10,11 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 
 PACKAGE = "com.example.studyassistant.journal"
 TEST_PACKAGE = f"{PACKAGE}.test"
@@ -60,6 +62,67 @@ ANDROID_TEST_BATCHES: dict[str, tuple[str, ...]] = {
         "ReminderApiMatrixTest",
     ),
 }
+
+LOCAL_FAST_TASKS: tuple[str, ...] = (
+    ":app:testDebugUnitTest",
+    ":app:compileDebugAndroidTestKotlin",
+    ":app:lintDebug",
+)
+
+MIRROR_SKIP_PREFIXES: tuple[tuple[str, ...], ...] = (
+    ("artifacts",),
+    ("build",),
+    (".gradle",),
+    (".kotlin",),
+    (".dart_tool",),
+    (".idea",),
+    (".flutter-plugins",),
+    (".flutter-plugins-dependencies",),
+    ("android", ".gradle"),
+    ("android", ".kotlin"),
+    ("android", "build"),
+    ("android", ".cxx"),
+    ("android", "local.properties"),
+    ("android", "key.properties"),
+    ("android", "app", "build"),
+    ("android", "app", ".cxx"),
+    ("android", "app", "src", "main", "java", "io", "flutter", "plugins"),
+    ("ios", "Flutter", "ephemeral"),
+    ("ios", "Flutter", "Generated.xcconfig"),
+    ("ios", "Flutter", "flutter_export_environment.sh"),
+)
+
+MIRROR_SKIP_NAMES: frozenset[str] = frozenset({
+    ".git",
+    ".kotlin",
+    "__pycache__",
+    ".DS_Store",
+})
+
+MIRROR_SKIP_SUFFIXES: tuple[str, ...] = (
+    ".log",
+    ".apk",
+    ".aab",
+    ".jks",
+    ".keystore",
+    ".idsig",
+)
+
+
+@dataclass(frozen=True)
+class SyncReport:
+    copied_files: tuple[str, ...]
+    removed_files: tuple[str, ...]
+    unchanged_files: int
+
+
+@dataclass(frozen=True)
+class LocalFastToolchain:
+    env: dict[str, str]
+    flutter_cmd: str
+    flutter_sdk: Path | None
+    sdk_dir: Path | None
+    java_home: Path | None
 
 
 class ManifestError(RuntimeError):
@@ -407,14 +470,52 @@ def _read_properties(path: Path) -> dict[str, str]:
     return values
 
 
+def _properties_lines(values: Mapping[str, str]) -> list[str]:
+    return [f"{key}={_properties_escape(value)}" for key, value in values.items()]
+
+
+def _read_active_property_lines(path: Path) -> list[str]:
+    if not path.is_file():
+        return []
+    lines: list[str] = []
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        lines.append(line)
+    return lines
+
+
 def _write_properties(path: Path, values: Mapping[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"{key}={_properties_escape(value)}" for key, value in values.items()]
+    lines = _properties_lines(values)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _has_android_36(path: Path) -> bool:
     return (path / "platforms" / "android-36").is_dir()
+
+
+def _has_flutter_bin(path: Path) -> bool:
+    return (path / "bin" / "flutter").exists() or (path / "bin" / "flutter.bat").exists()
+
+
+def _has_java_bin(path: Path) -> bool:
+    exe = "java.exe" if sys.platform == "win32" else "java"
+    return (path / "bin" / exe).is_file()
+
+
+def _is_jdk_17(path: Path) -> bool:
+    if not _has_java_bin(path):
+        return False
+    release_file = path / "release"
+    if release_file.is_file():
+        text = release_file.read_text(encoding="utf-8", errors="replace")
+        if re.search(r'JAVA_VERSION="17\b', text):
+            return True
+        if "JAVA_VERSION=" in text:
+            return False
+    return "17" in path.name
 
 
 def ensure_mirror_local_properties(
@@ -423,14 +524,17 @@ def ensure_mirror_local_properties(
     sdk_dir: Path | None,
     flutter_sdk: Path | None,
 ) -> None:
-    """Repair only the mirror copy; the shared worktree is never written."""
+    """Repair and escape only the mirror copy; the shared worktree is never written."""
 
     if mirror_root.resolve() == local_app_root().resolve():
         return
     properties_path = mirror_root / "android" / "local.properties"
     if not properties_path.parent.is_dir():
         return
+    raw_lines = _read_active_property_lines(properties_path)
     current = _read_properties(properties_path)
+    repo_hints = _read_properties(local_app_root() / "android" / "local.properties")
+
     current_sdk = current.get("sdk.dir", "")
     sdk_candidates: list[Path] = []
     if sdk_dir is not None:
@@ -441,6 +545,8 @@ def ensure_mirror_local_properties(
             sdk_candidates.append(Path(value))
     if current_sdk:
         sdk_candidates.append(Path(current_sdk))
+    if repo_hints.get("sdk.dir"):
+        sdk_candidates.append(Path(repo_hints["sdk.dir"]))
     sdk_candidates.append(Path.home() / "AppData" / "Local" / "Android" / "Sdk")
     chosen_sdk = next(
         (candidate for candidate in sdk_candidates if _has_android_36(candidate)),
@@ -453,13 +559,173 @@ def ensure_mirror_local_properties(
     ):
         current["sdk.dir"] = str(chosen_sdk)
         changed = True
+
     current_flutter = current.get("flutter.sdk", "")
-    if flutter_sdk is not None and Path(flutter_sdk).is_dir():
-        if not current_flutter or not (Path(current_flutter) / "bin" / "flutter").exists():
-            current["flutter.sdk"] = str(flutter_sdk)
-            changed = True
-    if changed:
+    flutter_candidates: list[Path] = []
+    if flutter_sdk is not None:
+        flutter_candidates.append(flutter_sdk)
+    if current_flutter:
+        flutter_candidates.append(Path(current_flutter))
+    if repo_hints.get("flutter.sdk"):
+        flutter_candidates.append(Path(repo_hints["flutter.sdk"]))
+    chosen_flutter = next(
+        (candidate for candidate in flutter_candidates if _has_flutter_bin(candidate)),
+        None,
+    )
+    if chosen_flutter is not None and (
+        not current_flutter
+        or not _has_flutter_bin(Path(current_flutter))
+        or (
+            flutter_sdk is not None
+            and Path(current_flutter).resolve() != chosen_flutter.resolve()
+        )
+    ):
+        current["flutter.sdk"] = str(chosen_flutter)
+        changed = True
+
+    expected_lines = _properties_lines(current)
+    if changed or (current and raw_lines != expected_lines):
         _write_properties(properties_path, current)
+
+
+def _handle_remove_readonly(func, path: str, _exc_info) -> None:  # noqa: ANN001
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+    func(path)
+
+
+def _safe_rmtree(path: Path) -> None:
+    if not path.exists():
+        return
+    target: str | Path = path
+    if sys.platform == "win32":
+        resolved = str(path.resolve())
+        if not resolved.startswith("\\\\?\\"):
+            target = "\\\\?\\" + resolved
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(target, onexc=_handle_remove_readonly)
+    else:
+        shutil.rmtree(target, onerror=_handle_remove_readonly)
+
+
+def _is_skipped_mirror_path(rel_parts: tuple[str, ...]) -> bool:
+    if not rel_parts:
+        return False
+    if any(part in MIRROR_SKIP_NAMES for part in rel_parts):
+        return True
+    if rel_parts[-1].lower().endswith(MIRROR_SKIP_SUFFIXES):
+        return True
+    for prefix in MIRROR_SKIP_PREFIXES:
+        if rel_parts[: len(prefix)] == prefix:
+            return True
+    return False
+
+
+def _files_equal(first: Path, second: Path) -> bool:
+    chunk_size = 65536
+    with first.open("rb") as left, second.open("rb") as right:
+        while True:
+            left_chunk = left.read(chunk_size)
+            right_chunk = right.read(chunk_size)
+            if left_chunk != right_chunk:
+                return False
+            if not left_chunk:
+                return True
+
+
+def sync_mirror_incremental(
+    source: Path,
+    destination: Path,
+    *,
+    clean: bool = False,
+) -> SyncReport:
+    """Incrementally mirror source -> destination while preserving Gradle/Flutter caches."""
+
+    if clean and destination.exists():
+        _safe_rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    expected_files: set[str] = set()
+    expected_dirs: set[str] = set()
+    copied: list[str] = []
+    unchanged = 0
+
+    for root, dirnames, filenames in os.walk(source, topdown=True):
+        root_path = Path(root)
+        rel_root = root_path.relative_to(source)
+        rel_root_parts = rel_root.parts
+        if rel_root_parts:
+            expected_dirs.add("/".join(rel_root_parts))
+
+        kept_dirs: list[str] = []
+        for dirname in dirnames:
+            child_parts = (*rel_root_parts, dirname)
+            if not _is_skipped_mirror_path(child_parts):
+                kept_dirs.append(dirname)
+        dirnames[:] = kept_dirs
+
+        for filename in filenames:
+            rel_parts = (*rel_root_parts, filename)
+            if _is_skipped_mirror_path(rel_parts):
+                continue
+            rel_posix = "/".join(rel_parts)
+            expected_files.add(rel_posix)
+            src_file = root_path / filename
+            dst_file = destination.joinpath(*rel_parts)
+            if dst_file.is_file():
+                src_stat = src_file.stat()
+                dst_stat = dst_file.stat()
+                if src_stat.st_size == dst_stat.st_size and (
+                    src_stat.st_mtime_ns == dst_stat.st_mtime_ns
+                    or _files_equal(src_file, dst_file)
+                ):
+                    unchanged += 1
+                    continue
+            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dst_file)
+            copied.append(rel_posix)
+
+    removed: list[str] = []
+    for root, dirnames, filenames in os.walk(destination, topdown=True):
+        root_path = Path(root)
+        rel_root_parts = root_path.relative_to(destination).parts
+        kept_dirs = []
+        for dirname in dirnames:
+            child_parts = (*rel_root_parts, dirname)
+            if not _is_skipped_mirror_path(child_parts):
+                kept_dirs.append(dirname)
+        dirnames[:] = kept_dirs
+
+        for filename in filenames:
+            rel_parts = (*rel_root_parts, filename)
+            if _is_skipped_mirror_path(rel_parts):
+                continue
+            rel_posix = "/".join(rel_parts)
+            if rel_posix not in expected_files:
+                (root_path / filename).unlink(missing_ok=True)
+                removed.append(rel_posix)
+
+    for root, dirnames, _filenames in os.walk(destination, topdown=False):
+        root_path = Path(root)
+        if root_path == destination:
+            continue
+        rel_parts = root_path.relative_to(destination).parts
+        if _is_skipped_mirror_path(rel_parts):
+            continue
+        if "/".join(rel_parts) not in expected_dirs:
+            try:
+                if not any(root_path.iterdir()):
+                    root_path.rmdir()
+            except OSError:
+                pass
+
+    return SyncReport(
+        copied_files=tuple(sorted(copied)),
+        removed_files=tuple(sorted(removed)),
+        unchanged_files=unchanged,
+    )
 
 
 def _build_root(
@@ -475,7 +741,7 @@ def _build_root(
         raise ManifestError(f"--work-dir must be ASCII: {work_dir}")
     destination = work_dir / "local_app"
     if destination.exists():
-        shutil.rmtree(destination)
+        _safe_rmtree(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(
         source,
@@ -493,22 +759,246 @@ def _build_root(
     return destination
 
 
-def _gradle_command(app_root: Path) -> list[str]:
+def _gradle_command(
+    app_root: Path,
+    tasks: Sequence[str] = (":app:assembleDebug", ":app:assembleDebugAndroidTest"),
+    *,
+    use_daemon: bool = False,
+) -> list[str]:
     if sys.platform == "win32":
-        return [
-            "cmd",
-            "/c",
-            str(app_root / "android" / "gradlew.bat"),
-            ":app:assembleDebug",
-            ":app:assembleDebugAndroidTest",
-            "--no-daemon",
-        ]
-    return [
-        str(app_root / "android" / "gradlew"),
-        ":app:assembleDebug",
-        ":app:assembleDebugAndroidTest",
-        "--no-daemon",
-    ]
+        cmd = ["cmd", "/c", str(app_root / "android" / "gradlew.bat"), *tasks]
+    else:
+        cmd = [str(app_root / "android" / "gradlew"), *tasks]
+    if not use_daemon:
+        cmd.append("--no-daemon")
+    return cmd
+
+
+def _resolve_local_fast_toolchain(
+    *,
+    sdk_dir: Path | None = None,
+    flutter_sdk: Path | None = None,
+    java_home: Path | None = None,
+) -> LocalFastToolchain:
+    env = os.environ.copy()
+    repo_hints = _read_properties(local_app_root() / "android" / "local.properties")
+
+    # 1. Flutter SDK & executable
+    flutter_candidates: list[Path] = []
+    if flutter_sdk is not None:
+        flutter_candidates.append(flutter_sdk)
+    if env.get("FLUTTER_ROOT"):
+        flutter_candidates.append(Path(env["FLUTTER_ROOT"]))
+    for tool_name in ("flutter.bat", "flutter"):
+        found = shutil.which(tool_name)
+        if found:
+            flutter_candidates.append(Path(found).resolve().parents[1])
+    if repo_hints.get("flutter.sdk"):
+        flutter_candidates.append(Path(repo_hints["flutter.sdk"]))
+    flutter_candidates.append(Path("D:/campus-tools/flutter"))
+    chosen_flutter = next(
+        (candidate for candidate in flutter_candidates if _has_flutter_bin(candidate)),
+        None,
+    )
+    if chosen_flutter is not None:
+        bin_name = "flutter.bat" if sys.platform == "win32" else "flutter"
+        candidate_bin = chosen_flutter / "bin" / bin_name
+        flutter_cmd = (
+            str(candidate_bin)
+            if candidate_bin.is_file()
+            else str(chosen_flutter / "bin" / "flutter")
+        )
+    else:
+        flutter_cmd = shutil.which("flutter.bat") or shutil.which("flutter") or "flutter"
+
+    # 2. Android SDK (requires platforms/android-36)
+    sdk_candidates: list[Path] = []
+    if sdk_dir is not None:
+        sdk_candidates.append(sdk_dir)
+    for key in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+        if env.get(key):
+            sdk_candidates.append(Path(env[key]))
+    if repo_hints.get("sdk.dir"):
+        sdk_candidates.append(Path(repo_hints["sdk.dir"]))
+    sdk_candidates.append(Path("D:/campus-tools/android"))
+    sdk_candidates.append(Path.home() / "AppData" / "Local" / "Android" / "Sdk")
+    chosen_sdk = next(
+        (candidate for candidate in sdk_candidates if _has_android_36(candidate)),
+        None,
+    )
+    if chosen_sdk is not None:
+        env["ANDROID_HOME"] = str(chosen_sdk)
+        env["ANDROID_SDK_ROOT"] = str(chosen_sdk)
+
+    # 3. JDK 17 (prefer explicit --java-home, else env JAVA_HOME if JDK 17, else probe sibling jdk17*)
+    chosen_java: Path | None = None
+    if java_home is not None:
+        if not _has_java_bin(java_home):
+            raise ManifestError(f"--java-home does not contain bin/java: {java_home}")
+        chosen_java = java_home
+    else:
+        env_java = Path(env["JAVA_HOME"]) if env.get("JAVA_HOME") else None
+        if env_java is not None and _is_jdk_17(env_java):
+            chosen_java = env_java
+        else:
+            jdk_roots: list[Path] = []
+            for anchor in (chosen_sdk, chosen_flutter):
+                if anchor is not None and anchor.parent.is_dir():
+                    jdk_roots.append(anchor.parent)
+            campus_tools = Path("D:/campus-tools")
+            if campus_tools.is_dir() and campus_tools not in jdk_roots:
+                jdk_roots.append(campus_tools)
+            jdk_candidates: list[Path] = []
+            for root in jdk_roots:
+                for pattern in ("jdk17*", "jdk-17*"):
+                    jdk_candidates.extend(sorted(root.glob(pattern)))
+            chosen_java = next(
+                (candidate for candidate in jdk_candidates if _is_jdk_17(candidate)),
+                None,
+            )
+    if chosen_java is not None:
+        env["JAVA_HOME"] = str(chosen_java)
+        java_bin = str(chosen_java / "bin")
+        existing_path = env.get("PATH", "")
+        if java_bin not in existing_path.split(os.pathsep):
+            env["PATH"] = f"{java_bin}{os.pathsep}{existing_path}" if existing_path else java_bin
+
+    return LocalFastToolchain(
+        env=env,
+        flutter_cmd=flutter_cmd,
+        flutter_sdk=chosen_flutter,
+        sdk_dir=chosen_sdk,
+        java_home=chosen_java,
+    )
+
+
+def _run_streaming(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str] | None = None,
+) -> int:
+    print("+ " + " ".join(str(part) for part in cmd), flush=True)
+    completed = subprocess.run(cmd, cwd=cwd, env=env)
+    return completed.returncode
+
+
+def _default_local_fast_dir() -> Path:
+    drive_d = Path("D:/")
+    if drive_d.exists():
+        return Path("D:/campus-tools/build-work/cx-android-cache")
+    return Path(tempfile.gettempdir()) / "cx-android-cache"
+
+
+def run_local_fast(
+    *,
+    cache_dir: Path | None = None,
+    tasks: Sequence[str] | None = None,
+    sdk_dir: Path | None = None,
+    flutter_sdk: Path | None = None,
+    java_home: Path | None = None,
+    clean_cache: bool = False,
+    force_pub_get: bool = False,
+    use_daemon: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Incrementally sync to persistent ASCII cache and run local Gradle checks."""
+
+    selected_tasks = tuple(tasks) if tasks else LOCAL_FAST_TASKS
+    target_cache = cache_dir or _default_local_fast_dir()
+    if not str(target_cache).isascii():
+        raise ManifestError(f"--cache-dir must be ASCII: {target_cache}")
+    mirror_root = target_cache / "local_app"
+    toolchain = _resolve_local_fast_toolchain(
+        sdk_dir=sdk_dir,
+        flutter_sdk=flutter_sdk,
+        java_home=java_home,
+    )
+    gradle_cmd = _gradle_command(
+        mirror_root,
+        tasks=selected_tasks,
+        use_daemon=use_daemon,
+    )
+
+    if dry_run:
+        print(f"[DRY-RUN] local-fast cache: {mirror_root}")
+        print(f"[DRY-RUN] JAVA_HOME={toolchain.java_home or toolchain.env.get('JAVA_HOME', '')}")
+        print(f"[DRY-RUN] ANDROID_SDK_ROOT={toolchain.sdk_dir or toolchain.env.get('ANDROID_SDK_ROOT', '')}")
+        print(f"[DRY-RUN] FLUTTER_SDK={toolchain.flutter_sdk or ''}")
+        print(f"+ {toolchain.flutter_cmd} --no-version-check pub get --offline (if needed)")
+        print("+ " + " ".join(gradle_cmd))
+        return 0
+
+    started_total = time.monotonic()
+    sync_started = time.monotonic()
+    report = sync_mirror_incremental(
+        local_app_root(),
+        mirror_root,
+        clean=clean_cache,
+    )
+    print(
+        f"[SYNC] {mirror_root} "
+        f"(copied={len(report.copied_files)}, removed={len(report.removed_files)}, "
+        f"unchanged={report.unchanged_files}, {time.monotonic() - sync_started:.1f}s)",
+        flush=True,
+    )
+
+    package_config = mirror_root / ".dart_tool" / "package_config.json"
+    local_props = mirror_root / "android" / "local.properties"
+    needs_pub_get = (
+        force_pub_get
+        or clean_cache
+        or not package_config.is_file()
+        or not local_props.is_file()
+        or "pubspec.yaml" in report.copied_files
+        or "pubspec.lock" in report.copied_files
+    )
+    if needs_pub_get:
+        ensure_mirror_local_properties(
+            mirror_root,
+            sdk_dir=toolchain.sdk_dir,
+            flutter_sdk=toolchain.flutter_sdk,
+        )
+        pub_started = time.monotonic()
+        pub_code = _run_streaming(
+            [toolchain.flutter_cmd, "--no-version-check", "pub", "get", "--offline"],
+            cwd=mirror_root,
+            env=toolchain.env,
+        )
+        if pub_code != 0:
+            print(f"[FAIL] flutter pub get --offline failed (exit={pub_code}).", file=sys.stderr)
+            return 1
+        print(f"[PASS] flutter pub get --offline ({time.monotonic() - pub_started:.1f}s)", flush=True)
+    else:
+        print("[SKIP] flutter pub get --offline (pubspec & package_config unchanged)", flush=True)
+
+    # Always normalize and escape local.properties AFTER pub get to prevent [PropertyEscape] lint failures.
+    ensure_mirror_local_properties(
+        mirror_root,
+        sdk_dir=toolchain.sdk_dir,
+        flutter_sdk=toolchain.flutter_sdk,
+    )
+
+    gradle_started = time.monotonic()
+    gradle_code = _run_streaming(
+        gradle_cmd,
+        cwd=mirror_root / "android",
+        env=toolchain.env,
+    )
+    if gradle_code != 0:
+        print(
+            f"[FAIL] Local Android fast check failed (exit={gradle_code}, "
+            f"{time.monotonic() - gradle_started:.1f}s).",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"[PASS] Local Android fast check ({' '.join(selected_tasks)}) "
+        f"succeeded (gradle={time.monotonic() - gradle_started:.1f}s, "
+        f"total={time.monotonic() - started_total:.1f}s).",
+        flush=True,
+    )
+    return 0
 
 
 def _find_apk(app_root: Path, name: str) -> Path:
@@ -711,6 +1201,21 @@ def _default_work_dir() -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-manifest-only", action="store_true")
+    parser.add_argument(
+        "--local-fast",
+        action="store_true",
+        help=(
+            "Incrementally mirror local_app to a persistent ASCII cache, repair "
+            "local.properties escaping, and run unit tests + androidTest compile + lint "
+            "without needing a device."
+        ),
+    )
+    parser.add_argument("--cache-dir", type=Path)
+    parser.add_argument("--gradle-tasks", nargs="+")
+    parser.add_argument("--clean-cache", action="store_true")
+    parser.add_argument("--force-pub-get", action="store_true")
+    parser.add_argument("--use-daemon", action="store_true")
+    parser.add_argument("--java-home", type=Path)
     parser.add_argument("--serial", action="append")
     parser.add_argument("--adb", default="adb")
     parser.add_argument("--work-dir", type=Path)
@@ -729,10 +1234,33 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[PASS] Android test manifest covers {total} classes in {len(batches)} batches.")
         if args.verify_manifest_only:
             return 0
+        if args.local_fast:
+            if args.oem_readonly_audit or args.doze_probe or args.allow_wipe_physical or args.serial:
+                print(
+                    "[FAIL] --local-fast runs host Gradle checks only and cannot be "
+                    "combined with --serial, --oem-readonly-audit, --doze-probe, or "
+                    "--allow-wipe-physical.",
+                    file=sys.stderr,
+                )
+                return 2
+            return run_local_fast(
+                cache_dir=args.cache_dir or args.work_dir,
+                tasks=args.gradle_tasks,
+                sdk_dir=args.sdk_dir,
+                flutter_sdk=args.flutter_sdk,
+                java_home=args.java_home,
+                clean_cache=args.clean_cache,
+                force_pub_get=args.force_pub_get,
+                use_daemon=args.use_daemon,
+                dry_run=args.dry_run,
+            )
 
         serials = normalize_serials(args.serial)
         if not serials:
-            print("[FAIL] --serial is required unless --verify-manifest-only is used.", file=sys.stderr)
+            print(
+                "[FAIL] --serial is required unless --verify-manifest-only or --local-fast is used.",
+                file=sys.stderr,
+            )
             return 2
         if args.oem_readonly_audit:
             if args.doze_probe or args.allow_wipe_physical or args.dry_run:

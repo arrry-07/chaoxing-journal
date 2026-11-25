@@ -4,11 +4,21 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
+from collections.abc import Sequence
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
+
+DEFAULT_TEST_CASE_TIMEOUT = "30s"
+DEFAULT_QUICK_FLUTTER_TIMEOUT_SECONDS = 300
+DEFAULT_FULL_FLUTTER_TIMEOUT_SECONDS = 900
+_FLUTTER_PROGRESS_RE = re.compile(r"^\d+:\d{2}\s+[+\-~]")
 
 
 def _resolve_tool(*names: str) -> str:
@@ -25,6 +35,123 @@ def _run_step(label: str, cmd: list[str], cwd: Path) -> None:
     if proc.returncode != 0:
         raise RuntimeError(f"[FAIL] {label} (exit={proc.returncode})")
     print(f"[PASS] {label}")
+
+
+def _build_flutter_test_cmd(
+    flutter_cmd: str,
+    tests: Sequence[str],
+    *,
+    test_case_timeout: str | None = DEFAULT_TEST_CASE_TIMEOUT,
+) -> list[str]:
+    cmd = [flutter_cmd, "--no-version-check", "test", "--no-pub"]
+    normalized = (test_case_timeout or "").strip()
+    if normalized:
+        cmd.extend(
+            [
+                "--timeout",
+                "none" if normalized.lower() == "none" else normalized,
+            ]
+        )
+    if tests:
+        cmd.extend(tests)
+    return cmd
+
+
+def _terminate_process_tree(proc: subprocess.Popen[str]) -> None:
+    if proc.poll() is not None:
+        return
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        try:
+            os.killpg(proc.pid, 9)
+        except OSError:
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _run_flutter_step(
+    label: str,
+    cmd: list[str],
+    cwd: Path,
+    *,
+    timeout_seconds: int | None,
+) -> None:
+    suffix = f" (hard timeout: {timeout_seconds}s)" if timeout_seconds and timeout_seconds > 0 else ""
+    print(f"==> {label}{suffix}", flush=True)
+    started = time.monotonic()
+    popen_kwargs: dict[str, object] = {
+        "cwd": cwd,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "bufsize": 1,
+    }
+    if sys.platform != "win32":
+        popen_kwargs["start_new_session"] = True
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+
+    recent_lines: deque[str] = deque(maxlen=10)
+    last_test_line: list[str] = []
+
+    def _drain_output() -> None:
+        if proc.stdout is None:
+            return
+        try:
+            for raw in proc.stdout:
+                sys.stdout.write(raw)
+                sys.stdout.flush()
+                cleaned = raw.replace("\r", "").strip()
+                if cleaned:
+                    recent_lines.append(cleaned)
+                    if _FLUTTER_PROGRESS_RE.match(cleaned):
+                        last_test_line.clear()
+                        last_test_line.append(cleaned)
+        except (OSError, ValueError):
+            pass
+
+    reader = threading.Thread(target=_drain_output, daemon=True)
+    reader.start()
+    effective_timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else None
+    try:
+        returncode = proc.wait(timeout=effective_timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_process_tree(proc)
+        reader.join(timeout=2)
+        last_seen = (
+            last_test_line[0]
+            if last_test_line
+            else (recent_lines[-1] if recent_lines else "<no output captured>")
+        )
+        raise RuntimeError(
+            f"[FAIL] {label} (timed out after {effective_timeout}s; "
+            f"last output: {last_seen})"
+        ) from None
+    finally:
+        reader.join(timeout=2)
+        if proc.stdout is not None:
+            try:
+                proc.stdout.close()
+            except OSError:
+                pass
+    elapsed = time.monotonic() - started
+    if returncode != 0:
+        raise RuntimeError(f"[FAIL] {label} (exit={returncode}, elapsed={elapsed:.1f}s)")
+    print(f"[PASS] {label} ({elapsed:.1f}s)")
 
 
 def _changed_dart_files(repo: Path, app_dir: Path) -> list[str]:
@@ -87,6 +214,24 @@ def main(argv: list[str] | None = None) -> int:
         "--release",
         action="store_true",
         help="Enforce formal release version metadata (never pass --allow-dev)",
+    )
+    parser.add_argument(
+        "--test-case-timeout",
+        default=DEFAULT_TEST_CASE_TIMEOUT,
+        help=(
+            "Per-test timeout forwarded to `flutter test --timeout` "
+            f"(default: {DEFAULT_TEST_CASE_TIMEOUT}; pass 'none' to disable)"
+        ),
+    )
+    parser.add_argument(
+        "--flutter-timeout",
+        type=int,
+        default=None,
+        help=(
+            "Outer hard wall-clock timeout in seconds for the flutter test process "
+            f"(default: {DEFAULT_QUICK_FLUTTER_TIMEOUT_SECONDS}s quick / "
+            f"{DEFAULT_FULL_FLUTTER_TIMEOUT_SECONDS}s full; <=0 disables)"
+        ),
     )
     args = parser.parse_args(argv)
     if args.mode == "quick" and not args.tests and not args.skip_flutter_tests:
@@ -189,16 +334,36 @@ def main(argv: list[str] | None = None) -> int:
         if args.skip_flutter_tests:
             print("[SKIP] Flutter tests (--skip-flutter-tests)")
         elif args.tests:
-            _run_step(
+            flutter_timeout = (
+                args.flutter_timeout
+                if args.flutter_timeout is not None
+                else DEFAULT_QUICK_FLUTTER_TIMEOUT_SECONDS
+            )
+            _run_flutter_step(
                 f"Targeted Flutter tests ({len(args.tests)} files)",
-                [flutter_cmd, "--no-version-check", "test", "--no-pub", *args.tests],
+                _build_flutter_test_cmd(
+                    flutter_cmd,
+                    args.tests,
+                    test_case_timeout=args.test_case_timeout,
+                ),
                 app_dir,
+                timeout_seconds=flutter_timeout,
             )
         elif args.mode == "full":
-            _run_step(
+            flutter_timeout = (
+                args.flutter_timeout
+                if args.flutter_timeout is not None
+                else DEFAULT_FULL_FLUTTER_TIMEOUT_SECONDS
+            )
+            _run_flutter_step(
                 "Full Flutter test suite",
-                [flutter_cmd, "--no-version-check", "test", "--no-pub"],
+                _build_flutter_test_cmd(
+                    flutter_cmd,
+                    (),
+                    test_case_timeout=args.test_case_timeout,
+                ),
                 app_dir,
+                timeout_seconds=flutter_timeout,
             )
         else:
             print("[SKIP] Flutter tests (quick mode without --tests; pass --tests or --mode full)")
