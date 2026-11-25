@@ -69,7 +69,7 @@ class ManualHomeCard extends StatelessWidget {
         : at == null
             ? journal.muted
             : overdue
-                ? journal.muted
+                ? journal.ink
                 : today
                     ? journal.accent
                     : journal.ink;
@@ -148,11 +148,7 @@ class ManualHomeCard extends StatelessWidget {
           Text(
             clock,
             style: journal.time.copyWith(
-              color: pinUrgent
-                  ? journal.accent
-                  : overdue
-                      ? journal.muted
-                      : journal.ink,
+              color: pinUrgent ? journal.accent : journal.ink,
               fontWeight: FontWeight.w600,
               height: 1.22,
             ),
@@ -246,11 +242,7 @@ class ManualHomeCard extends StatelessWidget {
             entry.title.trim(),
             maxLines: largeText ? null : 2,
             overflow: largeText ? null : TextOverflow.ellipsis,
-            style: overdue
-                ? journal.entryTitle.copyWith(
-                    color: journal.overdueInk,
-                  )
-                : journal.entryTitle,
+            style: journal.entryTitle,
           ),
         ),
         const SizedBox(height: 4),

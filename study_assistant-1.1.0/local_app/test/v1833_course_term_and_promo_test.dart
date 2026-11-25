@@ -80,6 +80,36 @@ void main() {
         AcademicTerm.tryParseCourseName('课程 2025-2026春'),
         const AcademicTerm(2025, AcademicSemester.spring),
       );
+      expect(
+        AcademicTerm.tryParseCourseName('数据结构 25-26(1)'),
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
+      expect(
+        AcademicTerm.tryParseCourseName('计算机网络 25-26-2'),
+        const AcademicTerm(2025, AcademicSemester.spring),
+      );
+      expect(
+        AcademicTerm.tryParseCourseName('编译原理 2025-2026上'),
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
+      expect(
+        AcademicTerm.tryParseCourseName('软件测试 2025-2026下'),
+        const AcademicTerm(2025, AcademicSemester.spring),
+      );
+      expect(
+        AcademicTerm.tryParseCourseName('高等数学 25秋'),
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
+      expect(
+        AcademicTerm.tryParseCourseName('线性代数 26春'),
+        const AcademicTerm(2025, AcademicSemester.spring),
+      );
+      expect(
+        AcademicTerm.tryParseCourseName('2025学年第一学期 大学英语'),
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
+      expect(AcademicTerm.tryParseCourseName('2025级分班级'), isNull);
+      expect(AcademicTerm.tryParseCourseName('高等数学 25-26-10'), isNull);
     });
 
     test(

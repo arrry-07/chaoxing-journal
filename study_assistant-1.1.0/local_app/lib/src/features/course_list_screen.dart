@@ -22,6 +22,8 @@ class CourseListScreen extends StatefulWidget {
 
 class _CourseListScreenState extends State<CourseListScreen> {
   final _searchController = TextEditingController();
+  final Set<String> _selectedCourseKeys = <String>{};
+  String? _lastAccountHash;
   bool _searching = false;
   bool _managingTerms = false;
   bool _autoPromoExpanded = false;
@@ -38,6 +40,7 @@ class _CourseListScreenState extends State<CourseListScreen> {
     if (q.isEmpty) return true;
     if (course.name.toLowerCase().contains(q)) return true;
     if (course.clazzId.toLowerCase().contains(q)) return true;
+    if ((course.clazzName ?? '').toLowerCase().contains(q)) return true;
     if (course.teacherNames.any((t) => t.toLowerCase().contains(q))) {
       return true;
     }
@@ -47,6 +50,49 @@ class _CourseListScreenState extends State<CourseListScreen> {
       return true;
     }
     return false;
+  }
+
+  Future<void> _pickBatchManualTerm(
+    BuildContext context,
+    AssignmentStore store,
+    Set<String> courseKeys,
+  ) async {
+    if (courseKeys.isEmpty) return;
+    final now = widget.clock?.call() ?? DateTime.now();
+    final selectableTerms = AcademicTerm.recentSelectableTerms(now, count: 8);
+    final selected = await showJournalPickerSheet<String>(
+      context,
+      title: '批量设置学期（${courseKeys.length} 门）',
+      selectedValue: '__auto__',
+      searchable: false,
+      displayPrefs: store.display,
+      options: [
+        const JournalPickerOption<String>(
+          key: ValueKey('term-option-auto'),
+          value: '__auto__',
+          label: '自动推断（清除手动设置）',
+          icon: Icons.auto_awesome_outlined,
+        ),
+        for (final term in selectableTerms)
+          JournalPickerOption<String>(
+            key: ValueKey('term-option-${term.key}'),
+            value: term.key,
+            label: term.label,
+            subtitle: term == AcademicTerm.fromInstant(now) ? '当前学期' : null,
+            icon: Icons.calendar_today_outlined,
+          ),
+      ],
+    );
+    if (selected == null || !mounted) return;
+    final saved = await store.batchUpdateCourseTerms(
+      courseKeys: courseKeys,
+      updateManualTerm: true,
+      manualTerm:
+          selected == '__auto__' ? null : AcademicTerm.tryParseKey(selected),
+    );
+    if (saved && mounted) {
+      setState(() => _selectedCourseKeys.clear());
+    }
   }
 
   Future<void> _pickManualTerm(
@@ -92,12 +138,22 @@ class _CourseListScreenState extends State<CourseListScreen> {
         animation: widget.store,
         builder: (context, _) {
           final store = widget.store;
+          if (_lastAccountHash != store.accountHash) {
+            _lastAccountHash = store.accountHash;
+            _selectedCourseKeys.clear();
+          }
           final journal = Journal.of(context);
           final termCatalog = store.termCatalog;
           final archivableKeys = termCatalog.archivablePastCourseKeys;
           final visibleCourses = store.courses
               .where((c) => !termCatalog.isBlocked(c.key))
               .toList(growable: false);
+          final visibleKeys = {for (final c in visibleCourses) c.key};
+          final selectedKeys = _selectedCourseKeys.intersection(visibleKeys);
+          final ungroupedKeys = [
+            for (final c in visibleCourses)
+              if (termCatalog.entryFor(c.key)?.isUngrouped ?? false) c.key,
+          ];
           final autoPromoEntries = termCatalog.autoBlockedPromoEntries.toList()
             ..sort((a, b) => compareNaturalPinyin(a.courseName, b.courseName));
           final manualBlockedEntries = termCatalog.manuallyBlockedEntries
@@ -131,7 +187,12 @@ class _CourseListScreenState extends State<CourseListScreen> {
                           : Icons.tune_rounded,
                     ),
                     onPressed: () {
-                      setState(() => _managingTerms = !_managingTerms);
+                      setState(() {
+                        _managingTerms = !_managingTerms;
+                        if (!_managingTerms) {
+                          _selectedCourseKeys.clear();
+                        }
+                      });
                     },
                   ),
                 if (store.courses.isNotEmpty)
@@ -262,6 +323,74 @@ class _CourseListScreenState extends State<CourseListScreen> {
                     ),
                     const SizedBox(height: 12),
                   ],
+                  if (_managingTerms && visibleCourses.isNotEmpty) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: journal.parchment,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: journal.cardBorder,
+                          width: 0.7,
+                        ),
+                      ),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            '已选 ${selectedKeys.length} 门',
+                            style: journal.metadata.copyWith(
+                              color: journal.ink,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (ungroupedKeys.isNotEmpty)
+                            OutlinedButton.icon(
+                              key:
+                                  const ValueKey('course-select-all-ungrouped'),
+                              onPressed: store.isLoading
+                                  ? null
+                                  : () => setState(() {
+                                        _selectedCourseKeys
+                                            .addAll(ungroupedKeys);
+                                      }),
+                              icon:
+                                  const Icon(Icons.checklist_rounded, size: 16),
+                              label: Text(
+                                '选中全部未分组（${ungroupedKeys.length}）',
+                              ),
+                            ),
+                          if (filtered.isNotEmpty &&
+                              selectedKeys.length < filtered.length)
+                            TextButton(
+                              key: const ValueKey('course-select-all-visible'),
+                              onPressed: store.isLoading
+                                  ? null
+                                  : () => setState(() {
+                                        for (final c in filtered) {
+                                          _selectedCourseKeys.add(c.key);
+                                        }
+                                      }),
+                              child: const Text('全选'),
+                            ),
+                          if (selectedKeys.isNotEmpty)
+                            TextButton(
+                              key: const ValueKey('course-clear-selection'),
+                              onPressed: store.isLoading
+                                  ? null
+                                  : () => setState(_selectedCourseKeys.clear),
+                              child: const Text('清空选择'),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (_managingTerms && archivableKeys.isNotEmpty) ...[
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),
@@ -303,28 +432,65 @@ class _CourseListScreenState extends State<CourseListScreen> {
                                 termEntry?.state == CourseCatalogState.archived;
                             final isRecalled =
                                 termEntry?.state == CourseCatalogState.recalled;
+                            final courseSelected =
+                                selectedKeys.contains(course.key);
                             return Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                SwitchListTile(
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 2,
-                                  ),
-                                  secondary: CourseMark(course.name, size: 28),
-                                  title: Text(course.name,
-                                      style: journal.entryTitle),
-                                  subtitle: _buildCourseSubtitle(
-                                    course: course,
-                                    termEntry: termEntry,
-                                    duplicateName: duplicateName,
-                                    journal: journal,
-                                  ),
-                                  value: store.follows(course.key),
-                                  onChanged: store.isLoading
-                                      ? null
-                                      : (v) =>
-                                          store.followCourse(course.key, v),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    if (_managingTerms)
+                                      Padding(
+                                        padding: const EdgeInsets.only(left: 4),
+                                        child: Checkbox(
+                                          key: ValueKey(
+                                            'course-select-${course.key}',
+                                          ),
+                                          value: courseSelected,
+                                          materialTapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                          visualDensity: VisualDensity.compact,
+                                          onChanged: store.isLoading
+                                              ? null
+                                              : (checked) => setState(() {
+                                                    if (checked == true) {
+                                                      _selectedCourseKeys
+                                                          .add(course.key);
+                                                    } else {
+                                                      _selectedCourseKeys
+                                                          .remove(course.key);
+                                                    }
+                                                  }),
+                                        ),
+                                      ),
+                                    Expanded(
+                                      child: SwitchListTile(
+                                        contentPadding: _managingTerms
+                                            ? const EdgeInsets.fromLTRB(
+                                                2, 2, 12, 2)
+                                            : const EdgeInsets.symmetric(
+                                                horizontal: 14,
+                                                vertical: 2,
+                                              ),
+                                        secondary:
+                                            CourseMark(course.name, size: 28),
+                                        title: Text(course.name,
+                                            style: journal.entryTitle),
+                                        subtitle: _buildCourseSubtitle(
+                                          course: course,
+                                          termEntry: termEntry,
+                                          duplicateName: duplicateName,
+                                          journal: journal,
+                                        ),
+                                        value: store.follows(course.key),
+                                        onChanged: store.isLoading
+                                            ? null
+                                            : (v) => store.followCourse(
+                                                course.key, v),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 if (_managingTerms)
                                   Padding(
@@ -479,6 +645,113 @@ class _CourseListScreenState extends State<CourseListScreen> {
                 ],
               ],
             ),
+            bottomNavigationBar: _managingTerms && selectedKeys.isNotEmpty
+                ? Material(
+                    color: journal.sheetElevated,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(color: journal.divider, width: 0.7),
+                        ),
+                      ),
+                      child: SafeArea(
+                        top: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            alignment: WrapAlignment.spaceBetween,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                '批量操作 · ${selectedKeys.length} 门',
+                                style: journal.metadata.copyWith(
+                                  color: journal.ink,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: [
+                                  FilledButton.tonalIcon(
+                                    key:
+                                        const ValueKey('course-batch-set-term'),
+                                    onPressed: store.isLoading
+                                        ? null
+                                        : () => _pickBatchManualTerm(
+                                              context,
+                                              store,
+                                              selectedKeys,
+                                            ),
+                                    icon: const Icon(
+                                      Icons.calendar_today_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('设学期'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    key: const ValueKey(
+                                        'course-batch-archive-selected'),
+                                    onPressed: store.isLoading
+                                        ? null
+                                        : () async {
+                                            final saved = await store
+                                                .batchUpdateCourseTerms(
+                                              courseKeys: selectedKeys,
+                                              archiveMode:
+                                                  CourseArchiveMode.archived,
+                                            );
+                                            if (saved && mounted) {
+                                              setState(
+                                                  _selectedCourseKeys.clear);
+                                            }
+                                          },
+                                    icon: const Icon(
+                                      Icons.archive_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('归档'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    key: const ValueKey(
+                                        'course-batch-block-selected'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: journal.berry,
+                                      side: BorderSide(
+                                        color: journal.berryBorder,
+                                      ),
+                                    ),
+                                    onPressed: store.isLoading
+                                        ? null
+                                        : () async {
+                                            final saved = await store
+                                                .batchUpdateCourseTerms(
+                                              courseKeys: selectedKeys,
+                                              blockMode:
+                                                  CourseBlockMode.blocked,
+                                            );
+                                            if (saved && mounted) {
+                                              setState(
+                                                  _selectedCourseKeys.clear);
+                                            }
+                                          },
+                                    icon: const Icon(
+                                      Icons.block_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('屏蔽'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : null,
           );
         },
       );

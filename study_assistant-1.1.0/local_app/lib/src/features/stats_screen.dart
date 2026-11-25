@@ -837,76 +837,100 @@ class _StatsTermScopeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
+    const scopes = CourseTermScope.values;
+    final selectedIndex = scopes.indexOf(selected).clamp(0, scopes.length - 1);
+    final duration = JournalMotion.duration(
+      context,
+      const Duration(milliseconds: 200),
+    );
     return Container(
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: journal.divider, width: 0.8),
         ),
       ),
-      child: Row(
-        children: [
-          for (final scope in CourseTermScope.values)
-            () {
-              final active = selected == scope;
-              final label = _shortLabel(scope);
-              return Expanded(
-                child: Semantics(
-                  button: true,
-                  selected: active,
-                  label: label,
-                  child: InkWell(
-                    key: ValueKey('stats-term-scope-${scope.name}'),
-                    onTap: () => onChanged(scope),
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 44),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 10,
-                            ),
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                label,
-                                maxLines: 1,
-                                softWrap: false,
-                                style: journal.pillLabel.copyWith(
-                                  fontSize: 14,
-                                  fontWeight: active
-                                      ? FontWeight.w600
-                                      : FontWeight.w400,
-                                  color:
-                                      active ? journal.accent : journal.muted,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tabWidth = constraints.maxWidth / scopes.length;
+          const indicatorWidth = 28.0;
+          final indicatorLeft =
+              tabWidth * selectedIndex + (tabWidth - indicatorWidth) / 2;
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Row(
+                children: [
+                  for (final scope in scopes)
+                    () {
+                      final active = selected == scope;
+                      final label = _shortLabel(scope);
+                      return Expanded(
+                        child: Semantics(
+                          button: true,
+                          selected: active,
+                          label: label,
+                          child: InkWell(
+                            key: ValueKey('stats-term-scope-${scope.name}'),
+                            onTap: () => onChanged(scope),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(minHeight: 44),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  4,
+                                  10,
+                                  4,
+                                  12.5,
+                                ),
+                                child: Center(
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      label,
+                                      maxLines: 1,
+                                      softWrap: false,
+                                      style: journal.pillLabel.copyWith(
+                                        fontSize: 14,
+                                        fontWeight: active
+                                            ? FontWeight.w600
+                                            : FontWeight.w400,
+                                        color: active
+                                            ? journal.accent
+                                            : journal.muted,
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                          AnimatedContainer(
-                            duration: JournalMotion.duration(
-                              context,
-                              const Duration(milliseconds: 180),
-                            ),
-                            curve: JournalMotion.easeOut,
-                            height: 2.5,
-                            width: active ? 28 : 0,
-                            decoration: BoxDecoration(
-                              color:
-                                  active ? journal.accent : Colors.transparent,
-                              borderRadius: BorderRadius.circular(1.5),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      );
+                    }(),
+                ],
+              ),
+              AnimatedPositioned(
+                duration: duration,
+                curve: JournalMotion.easeOut,
+                left: indicatorLeft.clamp(
+                  0.0,
+                  (constraints.maxWidth - indicatorWidth).clamp(
+                    0.0,
+                    double.infinity,
                   ),
                 ),
-              );
-            }(),
-        ],
+                bottom: 0,
+                width: indicatorWidth,
+                height: 2.5,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: journal.accent,
+                    borderRadius: BorderRadius.circular(1.5),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

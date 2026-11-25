@@ -9,7 +9,15 @@ import 'coursework_deadline.dart';
 
 enum AcademicSemester { fall, spring }
 
-enum CourseTermSource { manual, folder, courseName, activity, ungrouped }
+enum CourseTermSource {
+  manual,
+  folder,
+  courseName,
+  clazzName,
+  activity,
+  courseTime,
+  ungrouped,
+}
 
 enum CourseCatalogState { active, recalled, archived }
 
@@ -57,10 +65,16 @@ class AcademicTerm implements Comparable<AcademicTerm> {
 
   static final RegExp _keyPattern = RegExp(r'^(20\d{2})-(fall|spring)$');
   static final RegExp _spanFolderPattern = RegExp(
-    r'^(20\d{2})\s*[-—~/－至]\s*(20\d{2})\s*(?:学年)?\s*(?:[\(\[（【]?\s*([12一二])\s*[\)\]）】]?|第\s*([12一二])\s*学期|(?:年\s*)?(秋|春)(?:季学期|季|学期)?)\s*$',
+    r'^(20\d{2})\s*[-—~/－至]\s*(20\d{2})\s*(?:学年)?\s*(?:[\(\[（【\-—~]?\s*([12一二])(?![\d])\s*[\)\]）】]?|第\s*([12一二])\s*学期|(?:年\s*)?(秋|春|上|下)(?:季学期|季|学期)?)\s*$',
+  );
+  static final RegExp _shortSpanFolderPattern = RegExp(
+    r'^(2\d)\s*[-—~/－至]\s*(2\d)\s*(?:学年)?\s*(?:[\(\[（【\-—~]?\s*([12一二])(?![\d])\s*[\)\]）】]?|第\s*([12一二])\s*学期|(?:年\s*)?(秋|春|上|下)(?:季学期|季|学期)?)\s*$',
   );
   static final RegExp _singleYearFolderPattern = RegExp(
     r'^(20\d{2})\s*(?:年\s*)?(秋|春)(?:季学期|季|学期)?\s*$',
+  );
+  static final RegExp _shortSingleYearFolderPattern = RegExp(
+    r'^(2\d)\s*(?:年\s*)?(秋|春)(?:季学期|季|学期)?\s*$',
   );
 
   static AcademicTerm? tryParseKey(String? raw) {
@@ -78,13 +92,22 @@ class AcademicTerm implements Comparable<AcademicTerm> {
   }
 
   static final RegExp _spanFolderLoosePattern = RegExp(
-    r'(?<!\d)(20\d{2})\s*[-—~/－至]\s*(20\d{2})\s*(?:学年)?\s*(?:[\(\[（【]?\s*([12一二])\s*[\)\]）】]?|第\s*([12一二])\s*学期|(?:年\s*)?(秋|春)(?:季学期|季|学期)?)',
+    r'(?<![a-zA-Z\d])(20\d{2})\s*[-—~/－至]\s*(20\d{2})\s*(?:学年)?\s*(?:[\(\[（【\-—~]?\s*([12一二])(?![\d])\s*[\)\]）】]?|第\s*([12一二])\s*学期|(?:年\s*)?(秋|春|上|下)(?:季学期|季|学期)?)',
+  );
+  static final RegExp _shortSpanFolderLoosePattern = RegExp(
+    r'(?<![a-zA-Z\d])(2\d)\s*[-—~/－至]\s*(2\d)\s*(?:学年)?\s*(?:[\(\[（【\-—~]?\s*([12一二])(?![\d])\s*[\)\]）】]?|第\s*([12一二])\s*学期|(?:年\s*)?(秋|春|上|下)(?:季学期|季|学期)?)',
+  );
+  static final RegExp _academicYearOrdinalPattern = RegExp(
+    r'(?<![a-zA-Z\d])(20\d{2})\s*学年\s*第?\s*([12一二])\s*学期',
   );
   static final RegExp _singleYearFolderLoosePattern = RegExp(
-    r'(?<!\d)(20\d{2})\s*(?:年\s*)?(秋|春)(?:季学期|季|学期)?',
+    r'(?<![a-zA-Z\d])(20\d{2})\s*(?:年\s*)?(秋|春)(?:季学期|季|学期)?',
+  );
+  static final RegExp _shortSingleYearLoosePattern = RegExp(
+    r'(?<![a-zA-Z\d.])(2\d)\s*(?:年\s*)?(秋|春)(?:季学期|季|学期)?',
   );
   static final RegExp _courseNameNoisePattern = RegExp(
-    r'(?<!\d)20\d{2}\s*(?:级|届|版|年制|期)',
+    r'(?<!\d)(?:20)?\d{2}\s*(?:级|届|版|年制|期)',
   );
   static final RegExp _courseYearMonthSepPattern = RegExp(
     r'(?<![a-zA-Z\d])(20\d{2})\s*(?:'
@@ -117,9 +140,40 @@ class AcademicTerm implements Comparable<AcademicTerm> {
       spanRanges.add((match.start, match.end));
     }
 
+    for (final match in _shortSpanFolderLoosePattern.allMatches(text)) {
+      if (overlapsEarlier(match.start, match.end)) continue;
+      final parsed = _parseShortSpanMatch(match);
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      spanRanges.add((match.start, match.end));
+    }
+
+    for (final match in _academicYearOrdinalPattern.allMatches(text)) {
+      if (overlapsEarlier(match.start, match.end)) continue;
+      final year = int.tryParse(match.group(1)!);
+      final marker = match.group(2) ?? '';
+      if (year == null || year < 2000 || year > 2100) return null;
+      final parsed = (marker == '1' || marker == '一')
+          ? AcademicTerm(year, AcademicSemester.fall)
+          : (marker == '2' || marker == '二')
+              ? AcademicTerm(year, AcademicSemester.spring)
+              : null;
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      spanRanges.add((match.start, match.end));
+    }
+
     for (final match in _singleYearFolderLoosePattern.allMatches(text)) {
       if (overlapsEarlier(match.start, match.end)) continue;
       final parsed = _parseSingleYearMatch(match);
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      singleRanges.add((match.start, match.end));
+    }
+
+    for (final match in _shortSingleYearLoosePattern.allMatches(text)) {
+      if (overlapsEarlier(match.start, match.end)) continue;
+      final parsed = _parseShortSingleYearMatch(match);
       if (parsed == null) return null;
       matchedTerms.add(parsed);
       singleRanges.add((match.start, match.end));
@@ -190,13 +244,26 @@ class AcademicTerm implements Comparable<AcademicTerm> {
       return _parseSpanMatch(spanMatch);
     }
 
+    final shortSpanMatch = _shortSpanFolderPattern.firstMatch(text);
+    if (shortSpanMatch != null) {
+      return _parseShortSpanMatch(shortSpanMatch);
+    }
+
     final singleMatch = _singleYearFolderPattern.firstMatch(text);
     if (singleMatch != null) {
       return _parseSingleYearMatch(singleMatch);
     }
 
+    final shortSingleMatch = _shortSingleYearFolderPattern.firstMatch(text);
+    if (shortSingleMatch != null) {
+      return _parseShortSingleYearMatch(shortSingleMatch);
+    }
+
     final matchedTerms = <AcademicTerm>{};
     final spanRanges = <(int, int)>[];
+    bool overlapsEarlier(int start, int end) =>
+        spanRanges.any((range) => start < range.$2 && end > range.$1);
+
     for (final match in _spanFolderLoosePattern.allMatches(text)) {
       final parsed = _parseSpanMatch(match);
       if (parsed == null) return null;
@@ -204,17 +271,56 @@ class AcademicTerm implements Comparable<AcademicTerm> {
       spanRanges.add((match.start, match.end));
     }
 
+    for (final match in _shortSpanFolderLoosePattern.allMatches(text)) {
+      if (overlapsEarlier(match.start, match.end)) continue;
+      final parsed = _parseShortSpanMatch(match);
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      spanRanges.add((match.start, match.end));
+    }
+
+    for (final match in _academicYearOrdinalPattern.allMatches(text)) {
+      if (overlapsEarlier(match.start, match.end)) continue;
+      final year = int.tryParse(match.group(1)!);
+      final marker = match.group(2) ?? '';
+      if (year == null || year < 2000 || year > 2100) return null;
+      final parsed = (marker == '1' || marker == '一')
+          ? AcademicTerm(year, AcademicSemester.fall)
+          : (marker == '2' || marker == '二')
+              ? AcademicTerm(year, AcademicSemester.spring)
+              : null;
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      spanRanges.add((match.start, match.end));
+    }
+
     for (final match in _singleYearFolderLoosePattern.allMatches(text)) {
-      final overlapsSpan = spanRanges.any(
-        (range) => match.start < range.$2 && match.end > range.$1,
-      );
-      if (overlapsSpan) continue;
+      if (overlapsEarlier(match.start, match.end)) continue;
       final parsed = _parseSingleYearMatch(match);
       if (parsed == null) return null;
       matchedTerms.add(parsed);
+      spanRanges.add((match.start, match.end));
+    }
+
+    for (final match in _shortSingleYearLoosePattern.allMatches(text)) {
+      if (overlapsEarlier(match.start, match.end)) continue;
+      final parsed = _parseShortSingleYearMatch(match);
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      spanRanges.add((match.start, match.end));
     }
 
     return matchedTerms.length == 1 ? matchedTerms.first : null;
+  }
+
+  static AcademicTerm? _parseSpanMarker(int start, String marker) {
+    final isFall =
+        marker == '1' || marker == '一' || marker == '秋' || marker == '上';
+    final isSpring =
+        marker == '2' || marker == '二' || marker == '春' || marker == '下';
+    if (isFall) return AcademicTerm(start, AcademicSemester.fall);
+    if (isSpring) return AcademicTerm(start, AcademicSemester.spring);
+    return null;
   }
 
   static AcademicTerm? _parseSpanMatch(RegExpMatch match) {
@@ -228,16 +334,32 @@ class AcademicTerm implements Comparable<AcademicTerm> {
       return null;
     }
     final marker = match.group(3) ?? match.group(4) ?? match.group(5) ?? '';
-    final isFall = marker == '1' || marker == '一' || marker == '秋';
-    final isSpring = marker == '2' || marker == '二' || marker == '春';
-    if (isFall) return AcademicTerm(start, AcademicSemester.fall);
-    if (isSpring) return AcademicTerm(start, AcademicSemester.spring);
-    return null;
+    return _parseSpanMarker(start, marker);
+  }
+
+  static AcademicTerm? _parseShortSpanMatch(RegExpMatch match) {
+    final startShort = int.tryParse(match.group(1)!);
+    final endShort = int.tryParse(match.group(2)!);
+    if (startShort == null || endShort == null || endShort != startShort + 1) {
+      return null;
+    }
+    final start = 2000 + startShort;
+    final marker = match.group(3) ?? match.group(4) ?? match.group(5) ?? '';
+    return _parseSpanMarker(start, marker);
   }
 
   static AcademicTerm? _parseSingleYearMatch(RegExpMatch match) {
     final year = int.tryParse(match.group(1)!);
     if (year == null || year < 2000 || year > 2100) return null;
+    return match.group(2) == '秋'
+        ? AcademicTerm(year, AcademicSemester.fall)
+        : AcademicTerm(year - 1, AcademicSemester.spring);
+  }
+
+  static AcademicTerm? _parseShortSingleYearMatch(RegExpMatch match) {
+    final shortYear = int.tryParse(match.group(1)!);
+    if (shortYear == null) return null;
+    final year = 2000 + shortYear;
     return match.group(2) == '秋'
         ? AcademicTerm(year, AcademicSemester.fall)
         : AcademicTerm(year - 1, AcademicSemester.spring);
@@ -601,12 +723,19 @@ class CourseTermCatalog {
       final folderTerm = AcademicTerm.tryParseFolderLabel(course?.folderName);
       final courseNameTerm =
           AcademicTerm.tryParseCourseName(resolvedCourseName);
+      final clazzNameTerm =
+          AcademicTerm.tryParseCourseName(course?.normalizedClazzName);
+      final courseTimeInstant = course?.courseEndAt ?? course?.courseStartAt;
+      final courseTimeTerm = courseTimeInstant != null
+          ? AcademicTerm.fromInstant(courseTimeInstant)
+          : null;
       final baseTerm = manualTerm ??
           folderTerm ??
           courseNameTerm ??
+          clazzNameTerm ??
           (baseActivityUtc != null
               ? AcademicTerm.fromInstant(baseActivityUtc)
-              : null);
+              : courseTimeTerm);
       baseIsPastByCourse[key] = baseTerm != null && baseTerm < currentTerm;
     }
 
@@ -661,6 +790,12 @@ class CourseTermCatalog {
       final folderTerm = AcademicTerm.tryParseFolderLabel(course?.folderName);
       final courseNameTerm =
           AcademicTerm.tryParseCourseName(resolvedCourseName);
+      final clazzNameTerm =
+          AcademicTerm.tryParseCourseName(course?.normalizedClazzName);
+      final courseTimeInstant = course?.courseEndAt ?? course?.courseStartAt;
+      final courseTimeTerm = courseTimeInstant != null
+          ? AcademicTerm.fromInstant(courseTimeInstant)
+          : null;
 
       late final AcademicTerm? term;
       late final CourseTermSource source;
@@ -677,10 +812,18 @@ class CourseTermCatalog {
         term = courseNameTerm;
         source = CourseTermSource.courseName;
         explanation = '按课程名识别（${courseNameTerm.label}）';
+      } else if (clazzNameTerm != null) {
+        term = clazzNameTerm;
+        source = CourseTermSource.clazzName;
+        explanation = '按班级名识别（${clazzNameTerm.label}）';
       } else if (latestActivityUtc != null) {
         term = AcademicTerm.fromInstant(latestActivityUtc);
         source = CourseTermSource.activity;
         explanation = '按可信活动推断（${term.label}）';
+      } else if (courseTimeTerm != null) {
+        term = courseTimeTerm;
+        source = CourseTermSource.courseTime;
+        explanation = '按课程时间识别（${term.label}）';
       } else {
         term = null;
         source = CourseTermSource.ungrouped;

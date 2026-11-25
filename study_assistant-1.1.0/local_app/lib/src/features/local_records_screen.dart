@@ -216,8 +216,8 @@ class _LocalRecordsScreenState extends State<LocalRecordsScreen> {
         ),
       AssignmentStatBucket.expired => (
           label: label,
-          bg: journal.berryBg,
-          fg: journal.berry,
+          bg: journal.overdueSkyBg,
+          fg: journal.overdueSky,
         ),
       AssignmentStatBucket.pending => (
           label: label,

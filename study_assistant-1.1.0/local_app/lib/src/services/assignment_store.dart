@@ -181,18 +181,16 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<bool> saveHomeFilters(HomeFilters next, int expectedEpoch) {
     final account = _account;
-    if (account == null ||
-        !_authenticated ||
-        _disposed ||
-        _generation != expectedEpoch) {
+    if (account == null || !_isSessionStateCurrent(epoch: expectedEpoch)) {
       return Future<bool>.value(false);
     }
     final encoded = next.encode();
     final write = (_filterWrites ?? Future<void>.value()).then((_) async {
-      if (_disposed ||
-          !_authenticated ||
-          _generation != expectedEpoch ||
-          _account != account) {
+      if (!_isSessionStateCurrent(
+        epoch: expectedEpoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return false;
       }
       try {
@@ -200,19 +198,21 @@ class AssignmentStore extends ChangeNotifier {
       } on StaleSessionWriteException {
         return false;
       } catch (error) {
-        if (!_disposed &&
-            _authenticated &&
-            _generation == expectedEpoch &&
-            _account == account) {
+        if (_isSessionStateCurrent(
+          epoch: expectedEpoch,
+          account: account,
+          checkAccount: true,
+        )) {
           _error = _friendlyError(error);
           notifyListeners();
         }
         return false;
       }
-      if (_disposed ||
-          !_authenticated ||
-          _generation != expectedEpoch ||
-          _account != account) {
+      if (!_isSessionStateCurrent(
+        epoch: expectedEpoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return false;
       }
       _error = null;
@@ -230,14 +230,22 @@ class AssignmentStore extends ChangeNotifier {
     var saved = false;
     await _run(() async {
       if (account == null ||
-          !_authenticated ||
-          _generation != expectedEpoch ||
-          account != _account) {
+          !_isSessionStateCurrent(
+            epoch: expectedEpoch,
+            account: account,
+            checkAccount: true,
+            requireNotDisposed: false,
+          )) {
         return;
       }
       final next = update(notebook);
       await repository.saveNotebook(next, account);
-      if (_generation != expectedEpoch || !_authenticated) return;
+      if (!_isSessionStateCurrent(
+        epoch: expectedEpoch,
+        requireNotDisposed: false,
+      )) {
+        return;
+      }
       final previous = notebook;
       notebook = StudyNotebook.decode(next.encode());
       _invalidatePinnableKeys();
@@ -289,15 +297,23 @@ class AssignmentStore extends ChangeNotifier {
     var saved = false;
     await _run(() async {
       if (account == null ||
-          !_authenticated ||
-          _generation != expectedEpoch ||
-          account != _account) {
+          !_isSessionStateCurrent(
+            epoch: expectedEpoch,
+            account: account,
+            checkAccount: true,
+            requireNotDisposed: false,
+          )) {
         return;
       }
       final previous = personal;
       final next = update(previous);
       await repository.savePersonalWorkspace(next, account);
-      if (_generation != expectedEpoch || !_authenticated) return;
+      if (!_isSessionStateCurrent(
+        epoch: expectedEpoch,
+        requireNotDisposed: false,
+      )) {
+        return;
+      }
       personal = PersonalWorkspace.decode(next.encode());
       saved = true;
       final summarySettingsChanged =
@@ -331,18 +347,20 @@ class AssignmentStore extends ChangeNotifier {
     var saved = false;
     await _run(() async {
       if (account == null ||
-          !_authenticated ||
-          _disposed ||
-          _generation != epoch ||
-          account != _account) {
+          !_isSessionStateCurrent(
+            epoch: epoch,
+            account: account,
+            checkAccount: true,
+          )) {
         return;
       }
       final next = _courseNotices.markLocalRead(noticeId, read: read);
       await repository.saveCourseNotices(next, account);
-      if (_disposed ||
-          _generation != epoch ||
-          !_authenticated ||
-          account != _account) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       _courseNotices = next;
@@ -357,15 +375,23 @@ class AssignmentStore extends ChangeNotifier {
     var saved = false;
     await _run(() async {
       if (account == null ||
-          !_authenticated ||
-          _generation != epoch ||
-          account != _account) {
+          !_isSessionStateCurrent(
+            epoch: epoch,
+            account: account,
+            checkAccount: true,
+            requireNotDisposed: false,
+          )) {
         return;
       }
       final next =
           _courseNotices.markAllLocalRead(noticeIds: noticeIds?.toSet());
       await repository.saveCourseNotices(next, account);
-      if (_generation != epoch || !_authenticated || account != _account) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+        requireNotDisposed: false,
+      )) {
         return;
       }
       _courseNotices = next;
@@ -380,10 +406,11 @@ class AssignmentStore extends ChangeNotifier {
     if (account == null || !_authenticated) return false;
     var succeeded = false;
     await _run(() async {
-      if (_generation != epoch ||
-          !_authenticated ||
-          account != _account ||
-          _disposed) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       _syncCancelled = false;
@@ -409,6 +436,9 @@ class AssignmentStore extends ChangeNotifier {
                         courseName: c.name,
                         teacherNames: c.teacherNames,
                         folderName: c.folderName,
+                        clazzName: c.clazzName,
+                        courseStartAt: c.courseStartAt,
+                        courseEndAt: c.courseEndAt,
                       ))
                   .firstOrNull;
           if (match != null) targets.add(match);
@@ -423,6 +453,9 @@ class AssignmentStore extends ChangeNotifier {
                   courseName: c.name,
                   teacherNames: c.teacherNames,
                   folderName: c.folderName,
+                  clazzName: c.clazzName,
+                  courseStartAt: c.courseStartAt,
+                  courseEndAt: c.courseEndAt,
                 ));
           }
         }
@@ -436,11 +469,12 @@ class AssignmentStore extends ChangeNotifier {
         var updatedCount = 0;
         String? firstIssue;
         for (var i = 0; i < targets.length; i++) {
-          if (chapterCancelled() ||
-              _generation != epoch ||
-              !_authenticated ||
-              account != _account ||
-              _disposed) {
+          if (!_isSessionStateCurrent(
+            epoch: epoch,
+            account: account,
+            checkAccount: true,
+            syncOperation: chapterOperation,
+          )) {
             break;
           }
           final target = targets[i];
@@ -452,17 +486,17 @@ class AssignmentStore extends ChangeNotifier {
             try {
               snapshot = await chaoxingClient.fetchCourseChapters(target);
             } on ChaoxingAuthenticationException {
-              if (chapterCancelled() ||
-                  _generation != epoch ||
-                  !_authenticated ||
-                  _disposed) {
+              if (!_isSessionStateCurrent(
+                epoch: epoch,
+                syncOperation: chapterOperation,
+              )) {
                 break;
               }
               await _refreshChaoxingSession();
-              if (chapterCancelled() ||
-                  _generation != epoch ||
-                  !_authenticated ||
-                  _disposed) {
+              if (!_isSessionStateCurrent(
+                epoch: epoch,
+                syncOperation: chapterOperation,
+              )) {
                 break;
               }
               snapshot = await chaoxingClient.fetchCourseChapters(target);
@@ -1485,11 +1519,12 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   bool _ownsAuthenticatedSession(int generation, String? account) =>
-      !_disposed &&
-      _authenticated &&
       account != null &&
-      generation == _generation &&
-      account == _account;
+      _isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+      );
 
   Future<bool> _savePins(
       PinnedAssignments pins, String account, int generation) async {
@@ -1662,6 +1697,57 @@ class AssignmentStore extends ChangeNotifier {
       (current) => current.withArchiveMode(courseKey, mode),
       leaseWarning: '课程归档状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
     );
+  }
+
+  Future<bool> batchUpdateCourseTerms({
+    required Iterable<String> courseKeys,
+    AcademicTerm? manualTerm,
+    bool updateManualTerm = false,
+    CourseArchiveMode? archiveMode,
+    CourseBlockMode? blockMode,
+  }) async {
+    final keys = courseKeys.where((k) => k.trim().isNotEmpty).toSet();
+    if (keys.isEmpty) return true;
+    if (!updateManualTerm && archiveMode == null && blockMode == null) {
+      return true;
+    }
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    final saved = await _mutateCourseTermPreferences(
+      snap,
+      (current) {
+        var next = current;
+        if (updateManualTerm) {
+          next = next.withBatchManualTerm(keys, manualTerm?.key);
+        }
+        if (archiveMode != null) {
+          for (final key in keys) {
+            next = next.withArchiveMode(key, archiveMode);
+          }
+        }
+        if (blockMode != null) {
+          next = next.withBatchBlockMode(keys, blockMode);
+        }
+        return next;
+      },
+      leaseWarning: '批量课程设置已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+    final selectedCourseKey = homeFilters.courseKey;
+    if (saved &&
+        _isSessionCurrent(snap) &&
+        selectedCourseKey != null &&
+        keys.contains(selectedCourseKey) &&
+        termCatalog.isBlocked(selectedCourseKey)) {
+      final cleared = HomeFilters(
+        query: homeFilters.query,
+        courseKey: null,
+        deadline: homeFilters.deadline,
+        sortOrder: homeFilters.sortOrder,
+        type: homeFilters.type,
+      );
+      await saveHomeFilters(cleared, snap.generation);
+    }
+    return saved;
   }
 
   Future<bool> setCourseBlockMode(
@@ -3265,17 +3351,25 @@ class AssignmentStore extends ChangeNotifier {
     }
     var saved = false;
     await _run(() async {
-      if (accountEpoch != epoch ||
-          _account != account ||
-          _accountHash != accountHash ||
-          !_authenticated) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+        accountHash: accountHash,
+        checkAccountHash: true,
+        requireNotDisposed: false,
+      )) {
         return;
       }
       await _markReminderMutationPending();
-      if (accountEpoch != epoch ||
-          _account != account ||
-          _accountHash != accountHash ||
-          !_authenticated) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+        accountHash: accountHash,
+        checkAccountHash: true,
+        requireNotDisposed: false,
+      )) {
         return;
       }
       try {
@@ -3283,9 +3377,12 @@ class AssignmentStore extends ChangeNotifier {
           ids,
           hidden,
           canCommit: () async {
-            if (accountEpoch != epoch ||
-                _account != account ||
-                !_authenticated) {
+            if (!_isSessionStateCurrent(
+              epoch: epoch,
+              account: account,
+              checkAccount: true,
+              requireNotDisposed: false,
+            )) {
               return false;
             }
             if (!_nativeReminderAvailable) return true;
@@ -3299,10 +3396,14 @@ class AssignmentStore extends ChangeNotifier {
         if (accountEpoch != epoch) return;
         rethrow;
       }
-      if (accountEpoch != epoch ||
-          _account != account ||
-          _accountHash != accountHash ||
-          !_authenticated) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+        accountHash: accountHash,
+        checkAccountHash: true,
+        requireNotDisposed: false,
+      )) {
         return;
       }
       await _reloadJournal();
@@ -3538,11 +3639,12 @@ class AssignmentStore extends ChangeNotifier {
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
-    if (!_authenticated ||
-        _account != account ||
-        _generation != generation ||
-        _loading ||
-        _disposed) {
+    if (!_isSessionStateCurrent(
+          epoch: generation,
+          account: account,
+          checkAccount: true,
+        ) ||
+        _loading) {
       return false;
     }
     if (prefs.containsKey('journal_account_switch')) return false;
@@ -3564,10 +3666,11 @@ class AssignmentStore extends ChangeNotifier {
 
     var reconciled = false;
     await _run(() async {
-      if (!_authenticated ||
-          _account != account ||
-          _generation != generation ||
-          _disposed) {
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       final refreshed = await SharedPreferences.getInstance();
@@ -4894,6 +4997,9 @@ class AssignmentStore extends ChangeNotifier {
             name: ref.courseName,
             teacherNames: ref.teacherNames,
             folderName: ref.folderName,
+            clazzName: ref.clazzName,
+            courseStartAt: ref.courseStartAt,
+            courseEndAt: ref.courseEndAt,
           ),
       ];
       final liveCatalog = CourseTermCatalog.build(
@@ -5203,10 +5309,11 @@ class AssignmentStore extends ChangeNotifier {
       chaoxingClient.onProgress = null;
       chaoxingClient.shouldStop = null;
       chaoxingClient.nextSyncCourseSelector = null;
-      if (generation == _generation &&
-          !_disposed &&
-          !_syncCancelled &&
-          operation == _syncOperation &&
+      if (_isSessionStateCurrent(
+            epoch: generation,
+            expectedAuthenticated: null,
+            syncOperation: operation,
+          ) &&
           chaoxingClient.hasCourseResponse) {
         final nextCourses = chaoxingClient.courses
             .map((c) => CourseRef(
@@ -5215,6 +5322,9 @@ class AssignmentStore extends ChangeNotifier {
                   name: c.courseName,
                   teacherNames: c.teacherNames,
                   folderName: c.folderName,
+                  clazzName: c.clazzName,
+                  courseStartAt: c.courseStartAt,
+                  courseEndAt: c.courseEndAt,
                 ))
             .toList();
         final account = _account;
@@ -5514,18 +5624,39 @@ class AssignmentStore extends ChangeNotifier {
       final displayName = result.displayName ??
           _chaoxingDisplayName ??
           await sessionStore.readChaoxingDisplayName();
-      if (generation != _generation || _disposed || _account != account) return;
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+        expectedAuthenticated: null,
+      )) {
+        return;
+      }
       final avatarUrl = result.avatarUrl ??
           _chaoxingAvatarUrl ??
           await sessionStore.readChaoxingAvatarUrl();
-      if (generation != _generation || _disposed || _account != account) return;
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+        expectedAuthenticated: null,
+      )) {
+        return;
+      }
       await sessionStore.saveChaoxingAccount(
         account: account,
         password: password,
         displayName: displayName,
         avatarUrl: avatarUrl,
       );
-      if (generation != _generation || _disposed || _account != account) return;
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+        expectedAuthenticated: null,
+      )) {
+        return;
+      }
       _chaoxingDisplayName = displayName;
       _chaoxingAvatarUrl = avatarUrl;
     }
@@ -5813,19 +5944,38 @@ class AssignmentStore extends ChangeNotifier {
         syncOperation: syncOperation,
       );
 
-  bool _isSessionCurrent(_SessionSnapshot snap) {
-    if (_disposed ||
-        snap.generation != _generation ||
-        snap.authenticated != _authenticated ||
-        snap.account != _account) {
+  bool _isSessionStateCurrent({
+    required int epoch,
+    String? account,
+    bool checkAccount = false,
+    String? accountHash,
+    bool checkAccountHash = false,
+    bool? expectedAuthenticated = true,
+    bool requireNotDisposed = true,
+    int? syncOperation,
+  }) {
+    if (requireNotDisposed && _disposed) return false;
+    if (epoch != _generation) return false;
+    if (expectedAuthenticated != null &&
+        _authenticated != expectedAuthenticated) {
       return false;
     }
-    if (snap.syncOperation != null &&
-        (_syncCancelled || snap.syncOperation != _syncOperation)) {
+    if (checkAccount && account != _account) return false;
+    if (checkAccountHash && accountHash != _accountHash) return false;
+    if (syncOperation != null &&
+        (_syncCancelled || syncOperation != _syncOperation)) {
       return false;
     }
     return true;
   }
+
+  bool _isSessionCurrent(_SessionSnapshot snap) => _isSessionStateCurrent(
+        epoch: snap.generation,
+        account: snap.account,
+        checkAccount: true,
+        expectedAuthenticated: snap.authenticated,
+        syncOperation: snap.syncOperation,
+      );
 
   Future<bool> Function() _scopedWriteGateFor(_SessionSnapshot snap) {
     return () async {

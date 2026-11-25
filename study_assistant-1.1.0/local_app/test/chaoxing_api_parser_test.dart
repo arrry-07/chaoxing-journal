@@ -531,5 +531,74 @@ void main() {
       expect(retainedCourse.folderName, '单文件夹保留课容器');
       expect(retainedCourse.teacherNames, ['孙老师']);
     });
+
+    test(
+        'extracts empty-course folder name fallback, clazzName (excluding identical name), and conservative course boundaries',
+        () {
+      final result = ChaoxingApiParser.parseCourseRefsDetailed({
+        'channelList': [
+          {
+            'name': '2025-2026上',
+            'channelList': [
+              {
+                'content': {
+                  'clazz': {
+                    'data': [
+                      {
+                        'id': 301,
+                        'name': '计科25级(25-26-1)',
+                      },
+                    ],
+                  },
+                  'course': {
+                    'data': [
+                      {
+                        'id': 201,
+                        'name': '数据结构',
+                        'begindate': 1756684800000, // 2025-09-01 UTC
+                        'enddate': '2026-01-20',
+                      },
+                    ],
+                  },
+                },
+              },
+              {
+                'content': {
+                  'clazz': {
+                    'data': [
+                      {
+                        'id': 302,
+                        'name': '大学物理',
+                      },
+                    ],
+                  },
+                  'course': {
+                    'data': [
+                      {
+                        'id': 202,
+                        'name': '大学物理',
+                        'begindate': 0,
+                        'enddate': '1970-01-01',
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      final c1 = result.refs.singleWhere((c) => c.courseId == '201');
+      expect(c1.folderName, '2025-2026上');
+      expect(c1.clazzName, '计科25级(25-26-1)');
+      expect(c1.courseStartAt, DateTime.utc(2025, 9, 1));
+      expect(c1.courseEndAt, DateTime.utc(2026, 1, 20));
+
+      final c2 = result.refs.singleWhere((c) => c.courseId == '202');
+      expect(c2.clazzName, isNull);
+      expect(c2.courseStartAt, isNull);
+      expect(c2.courseEndAt, isNull);
+    });
   });
 }

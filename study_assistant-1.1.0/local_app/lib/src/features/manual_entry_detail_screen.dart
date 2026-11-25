@@ -16,6 +16,7 @@ import 'manual_agenda_screen.dart';
 import 'reminder_status_screen.dart';
 import 'widgets/coursework_status_pill.dart';
 import 'widgets/journal_buttons.dart';
+import 'widgets/journal_floating_detail_header.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/manual_attachment_gallery.dart';
 
@@ -37,9 +38,47 @@ class ManualEntryDetailScreen extends StatefulWidget {
 }
 
 class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
+  final ScrollController _scrollController = ScrollController();
+  final ValueNotifier<double> _headerProgress = ValueNotifier<double>(0.0);
   bool _busy = false;
 
   DateTime get _now => widget.clock?.call() ?? DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_handleScroll);
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients) return;
+    final next = ((_scrollController.offset - 24.0) / 40.0).clamp(0.0, 1.0);
+    if ((next - _headerProgress.value).abs() > 0.004 ||
+        next == 0.0 ||
+        next == 1.0) {
+      _headerProgress.value = next;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant ManualEntryDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.entryId != widget.entryId ||
+        oldWidget.store != widget.store) {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
+      _headerProgress.value = 0.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_handleScroll);
+    _scrollController.dispose();
+    _headerProgress.dispose();
+    super.dispose();
+  }
 
   void _navigateBack(BuildContext context) {
     final router = GoRouter.maybeOf(context);
@@ -249,61 +288,75 @@ class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
               .where((item) => item.id == widget.entryId)
               .firstOrNull;
           final isExam = entry?.kind == ManualEntry.kindExam;
+          final headerTitle = entry == null
+              ? '个人安排详情'
+              : (entry.title.trim().isNotEmpty
+                  ? entry.title.trim()
+                  : (isExam ? '考试详情' : '待办详情'));
 
           return Scaffold(
             backgroundColor: journal.paper,
-            appBar: AppBar(
-              backgroundColor: journal.paper,
-              scrolledUnderElevation: 0,
-              leading: IconButton(
-                key: const ValueKey('manual-detail-back'),
-                tooltip: '返回',
-                onPressed: () => _navigateBack(context),
-                icon: const Icon(Icons.arrow_back_rounded),
-              ),
-              title: Text(
-                entry == null ? '个人安排详情' : (isExam ? '考试详情' : '待办详情'),
-                style: journal.section,
-              ),
-            ),
-            body: entry == null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 420),
-                        child: JournalGroupedCard(
-                          padding: const EdgeInsets.all(20),
-                          children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Text(
-                                  '未找到这条个人安排',
-                                  style: journal.section,
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '该记录可能已被删除，或当前账号已切换。',
-                                  style: journal.metadata,
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 16),
-                                JournalSecondaryButton(
-                                  label: '返回',
-                                  outlined: true,
-                                  height: 48,
-                                  onPressed: () => _navigateBack(context),
-                                ),
-                              ],
+            body: Stack(
+              children: [
+                entry == null
+                    ? SafeArea(
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 420),
+                              child: JournalGroupedCard(
+                                padding: const EdgeInsets.all(20),
+                                children: [
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      Text(
+                                        '未找到这条个人安排',
+                                        style: journal.section,
+                                        textAlign: TextAlign.center,
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        '该记录可能已被删除，或当前账号已切换。',
+                                        style: journal.metadata,
+                                        textAlign: TextAlign.center,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      JournalSecondaryButton(
+                                        label: '返回',
+                                        outlined: true,
+                                        height: 48,
+                                        onPressed: () => _navigateBack(context),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
-                          ],
+                          ),
+                        ),
+                      )
+                    : Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 540),
+                          child: _buildDetailBody(context, entry, journal),
                         ),
                       ),
-                    ),
-                  )
-                : _buildDetailBody(context, entry, journal),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: JournalFloatingDetailHeader(
+                    backKey: const ValueKey('manual-detail-back'),
+                    title: headerTitle,
+                    progressListenable: _headerProgress,
+                    onBack: () => _navigateBack(context),
+                  ),
+                ),
+              ],
+            ),
           );
         },
       );
@@ -341,9 +394,10 @@ class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
                 : '开始前 30 分钟提醒';
 
     return ListView(
+      controller: _scrollController,
       padding: EdgeInsets.fromLTRB(
         18,
-        8,
+        MediaQuery.paddingOf(context).top + 64,
         18,
         JournalLayout.floatingNavClearance(context),
       ),

@@ -569,11 +569,7 @@ class _AgendaEntryRow extends StatelessWidget {
                               color: journal.muted,
                               decoration: TextDecoration.lineThrough,
                             )
-                          : overdue
-                              ? journal.entryTitle.copyWith(
-                                  color: journal.overdueInk,
-                                )
-                              : journal.entryTitle,
+                          : journal.entryTitle,
                     ),
                     const SizedBox(height: 4),
                     Wrap(

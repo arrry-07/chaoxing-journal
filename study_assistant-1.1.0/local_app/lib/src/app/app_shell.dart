@@ -12,6 +12,7 @@ import '../services/interaction_feedback_service.dart';
 import 'app_back_navigation_policy.dart';
 import 'journal.dart';
 import 'journal_motion.dart';
+import 'journal_page_transitions.dart';
 import 'transient_feedback.dart';
 import 'unsaved_edit_guard.dart';
 
@@ -448,11 +449,11 @@ class StudyAssistantTheme {
           journal.accent.withValues(alpha: journal.isDark ? 0.14 : 0.10),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
-          TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+          TargetPlatform.android: JournalPageTransitionsBuilder(),
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
           TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
-          TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
-          TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+          TargetPlatform.windows: JournalPageTransitionsBuilder(),
+          TargetPlatform.linux: JournalPageTransitionsBuilder(),
         },
       ),
       textTheme: baseText,

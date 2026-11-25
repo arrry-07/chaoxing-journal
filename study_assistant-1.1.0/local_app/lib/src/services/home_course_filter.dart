@@ -50,9 +50,7 @@ class HomeCourseFilterOption {
             ? (termLabel != null && termLabel!.isNotEmpty
                 ? '$termLabel · 已归档'
                 : '已归档')
-            : (termLabel == null || termLabel!.isEmpty) && ungrouped
-                ? '未分组'
-                : null;
+            : null;
     final parts = <String>[
       if (showClass) classLabel,
       if (teacherNames.isNotEmpty) teacherLabel,

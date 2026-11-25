@@ -471,19 +471,47 @@ void main() {
         name: '编译原理',
         teacherNames: ['陈教授', '助教甲'],
         folderName: '2026年秋季学期',
+        clazzName: '计科2401班（26秋）',
+        courseStartAt: null,
+      );
+      final courseWithDates = CourseRef(
+        courseId: '101',
+        clazzId: '201',
+        name: '编译原理',
+        teacherNames: const ['陈教授', '助教甲'],
+        folderName: '2026年秋季学期',
+        clazzName: '计科2401班（26秋）',
+        courseStartAt: DateTime.utc(2026, 9, 1),
+        courseEndAt: DateTime.utc(2027, 1, 15),
       );
       const plainCourse = CourseRef(
         courseId: '102',
         clazzId: '202',
         name: '操作系统',
       );
-      await repo.saveCourses([richCourse, plainCourse], account: 'alice');
+      await repo.saveCourses([courseWithDates, plainCourse], account: 'alice');
       final v9 = await repo.createBackupSnapshot('alice');
       final rawV9 = jsonDecode(v9.encode()) as Map<String, dynamic>;
       expect(rawV9['schema'], 9);
       final decodedV9 = BackupSnapshot.decode(v9.encode());
       expect(decodedV9.courses.first.teacherNames, ['陈教授', '助教甲']);
       expect(decodedV9.courses.first.folderName, '2026年秋季学期');
+      expect(decodedV9.courses.first.clazzName, '计科2401班（26秋）');
+      expect(
+        decodedV9.courses.first.courseStartAt?.toUtc(),
+        DateTime.utc(2026, 9, 1),
+      );
+      expect(
+        decodedV9.courses.first.courseEndAt?.toUtc(),
+        DateTime.utc(2027, 1, 15),
+      );
+
+      final outOfRangeDate = jsonDecode(v9.encode()) as Map<String, dynamic>;
+      (outOfRangeDate['courses'] as List).first['courseStartAt'] =
+          DateTime.utc(1999, 12, 31).toIso8601String();
+      expect(() => BackupSnapshot.decode(jsonEncode(outOfRangeDate)),
+          throwsFormatException);
+      expect(richCourse.clazzName, '计科2401班（26秋）');
 
       // Restoring an older backup without metadata must not wipe verified local metadata.
       final legacyV8 = BackupSnapshot.create(

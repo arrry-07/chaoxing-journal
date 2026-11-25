@@ -17,6 +17,7 @@ import '../services/coursework_deadline.dart';
 import '../services/interaction_feedback_service.dart';
 import 'widgets/data_recovery_warning.dart';
 import 'widgets/journal_buttons.dart';
+import 'widgets/journal_expansion_tile.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_info_popover.dart';
 import 'widgets/journal_picker_sheet.dart';
@@ -1124,14 +1125,14 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
-                      color: journal.berryBg,
+                      color: journal.slateBg,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       '未读',
                       style: journal.pillLabel.copyWith(
                         fontSize: 11.5,
-                        color: journal.berry,
+                        color: journal.accent,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1287,11 +1288,10 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                 node.state == ChapterTaskState.pendingPoints;
           }).toList();
 
-    return Theme(
+    return KeyedSubtree(
       // The ancestor stores expansion while the tile retains its row key.
       key: PageStorageKey((_accountHash, _accountEpoch, course.key)),
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
+      child: JournalExpansionTile(
         key: ValueKey('chapter-course-${course.key}'),
         leading: CourseMark(course.name, size: 26),
         title: Text(course.name, style: journal.entryTitle),
@@ -1308,18 +1308,12 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
           overflow: TextOverflow.ellipsis,
           style: journal.metadata,
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: '刷新 ${course.name} 章节进度',
-              onPressed: widget.store.isLoading
-                  ? null
-                  : () => _syncChapters(courseKey: course.key),
-              icon: const Icon(Icons.sync_rounded, size: 19),
-            ),
-            const Icon(Icons.expand_more_rounded),
-          ],
+        trailing: IconButton(
+          tooltip: '刷新 ${course.name} 章节进度',
+          onPressed: widget.store.isLoading
+              ? null
+              : () => _syncChapters(courseKey: course.key),
+          icon: const Icon(Icons.sync_rounded, size: 19),
         ),
         children: [
           if (snapshot == null)
@@ -1356,7 +1350,7 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                     },
                     style: journal.metadata.copyWith(
                       color: node.state == ChapterTaskState.pendingPoints
-                          ? journal.berry
+                          ? journal.accent
                           : journal.muted,
                     ),
                   ),

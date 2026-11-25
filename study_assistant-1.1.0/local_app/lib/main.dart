@@ -386,30 +386,14 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     return candidate;
   }
 
-  CustomTransitionPage<void> _buildPrimaryTabPage(
+  Page<void> _buildPrimaryTabPage(
     BuildContext context,
     GoRouterState state,
     Widget child,
   ) {
-    final reduced = JournalMotion.isReducedMotion(context);
-    return CustomTransitionPage<void>(
+    return NoTransitionPage<void>(
       key: state.pageKey,
-      transitionDuration: JournalMotion.duration(
-        context,
-        const Duration(milliseconds: 180),
-      ),
-      reverseTransitionDuration: JournalMotion.duration(
-        context,
-        const Duration(milliseconds: 140),
-      ),
       child: child,
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        if (reduced) return child;
-        return FadeTransition(
-          opacity: animation.drive(CurveTween(curve: JournalMotion.easeOut)),
-          child: child,
-        );
-      },
     );
   }
 

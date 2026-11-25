@@ -322,7 +322,7 @@ class AssignmentCard extends StatelessWidget {
         ? journal.accent
         : clock.isEmpty
             ? (railLabel == '待定' ? journal.ochre : journal.muted)
-            : (overdue ? journal.muted : journal.ink);
+            : journal.ink;
 
     final highlightPills = <Widget>[
       if (state.isNotEmpty && hasSpecialStatePill)
@@ -520,8 +520,7 @@ class AssignmentCard extends StatelessWidget {
           ? (isManualDeadline ? '手动已过' : '已逾期')
           : _compactRemaining(d, now);
       final dateColor = pinUrgent ? journal.accent : journal.muted;
-      final clockColor =
-          pinUrgent ? journal.accent : (overdue ? journal.muted : journal.ink);
+      final clockColor = pinUrgent ? journal.accent : journal.ink;
       final remColor = pinUrgent ? journal.accent : journal.muted;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -566,11 +565,7 @@ class AssignmentCard extends StatelessWidget {
               a.title.trim(),
               maxLines: largeText ? null : 2,
               overflow: largeText ? null : TextOverflow.ellipsis,
-              style: overdue
-                  ? journal.entryTitle.copyWith(
-                      color: journal.overdueInk,
-                    )
-                  : journal.entryTitle,
+              style: journal.entryTitle,
             ),
           )
         else if (hasCourse)

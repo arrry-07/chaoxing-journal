@@ -550,6 +550,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('picker-filter-allTerms')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('course-option-99:k99')), findsOneWidget);
-    expect(find.text('未分组'), findsWidgets);
+    expect(find.text('静默老课'), findsOneWidget);
+    expect(find.text('未分组'), findsNothing);
   });
 }

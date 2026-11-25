@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/app/journal_motion.dart';
+import 'package:study_assistant_mobile/src/app/journal_page_transitions.dart';
 import 'package:study_assistant_mobile/src/features/manual_agenda_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/journal_picker_sheet.dart';
 import 'package:study_assistant_mobile/src/features/widgets/journal_swipe_tile.dart';
@@ -53,8 +54,9 @@ void main() {
             greaterThanOrEqualTo(4.5));
         expect(_contrastRatio(p.overdueSky, p.overdueSkyBg),
             greaterThanOrEqualTo(4.5));
-        expect(
-            _contrastRatio(p.overdueInk, p.sheet), greaterThanOrEqualTo(4.5));
+        expect(_contrastRatio(p.muted, p.sheet), greaterThanOrEqualTo(4.5));
+        expect(_contrastRatio(p.accent, p.slateBg), greaterThanOrEqualTo(4.5));
+        expect(_contrastRatio(p.ochre, p.ochreBg), greaterThanOrEqualTo(4.5));
       }
       expect(JournalPalette.light.primaryFill, const Color(0xFF3D63DD));
       expect(JournalPalette.dark.primaryFill, const Color(0xFF88A8F8));
@@ -837,7 +839,7 @@ void main() {
         expect(theme.splashColor, Colors.transparent);
         expect(
           theme.pageTransitionsTheme.builders[TargetPlatform.android],
-          isA<PredictiveBackPageTransitionsBuilder>(),
+          isA<JournalPageTransitionsBuilder>(),
         );
         expect(
           theme.pageTransitionsTheme.builders[TargetPlatform.iOS],
@@ -845,7 +847,7 @@ void main() {
         );
         expect(
           theme.pageTransitionsTheme.builders[TargetPlatform.windows],
-          isA<FadeForwardsPageTransitionsBuilder>(),
+          isA<JournalPageTransitionsBuilder>(),
         );
       }
     });

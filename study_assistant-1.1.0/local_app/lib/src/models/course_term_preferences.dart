@@ -261,6 +261,48 @@ class CourseTermPreferences {
     return CourseTermPreferences(entries: updated);
   }
 
+  CourseTermPreferences withBatchManualTerm(
+    Iterable<String> courseKeys,
+    String? termKey,
+  ) {
+    if (termKey != null && !CourseTermOverride.isValidTermKey(termKey)) {
+      return this;
+    }
+    final updated = Map<String, CourseTermOverride>.from(entries);
+    for (final key in courseKeys) {
+      if (!isValidCourseKey(key)) continue;
+      final current = updated[key] ?? const CourseTermOverride();
+      final next = current.copyWith(
+        manualTermKey: termKey,
+        clearManualTerm: termKey == null,
+      );
+      if (next.isEmpty) {
+        updated.remove(key);
+      } else {
+        updated[key] = next;
+      }
+    }
+    return CourseTermPreferences(entries: updated);
+  }
+
+  CourseTermPreferences withBatchBlockMode(
+    Iterable<String> courseKeys,
+    CourseBlockMode mode,
+  ) {
+    final updated = Map<String, CourseTermOverride>.from(entries);
+    for (final key in courseKeys) {
+      if (!isValidCourseKey(key)) continue;
+      final current = updated[key] ?? const CourseTermOverride();
+      final next = current.copyWith(blockMode: mode);
+      if (next.isEmpty) {
+        updated.remove(key);
+      } else {
+        updated[key] = next;
+      }
+    }
+    return CourseTermPreferences(entries: updated);
+  }
+
   CourseTermPreferences mergeBackup(CourseTermPreferences imported) {
     if (imported.isEmpty) return this;
     final merged = Map<String, CourseTermOverride>.from(entries);
