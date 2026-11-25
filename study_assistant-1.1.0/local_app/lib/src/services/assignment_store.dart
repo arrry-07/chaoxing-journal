@@ -181,18 +181,16 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<bool> saveHomeFilters(HomeFilters next, int expectedEpoch) {
     final account = _account;
-    if (account == null ||
-        !_authenticated ||
-        _disposed ||
-        _generation != expectedEpoch) {
+    if (account == null || !_isSessionStateCurrent(epoch: expectedEpoch)) {
       return Future<bool>.value(false);
     }
     final encoded = next.encode();
     final write = (_filterWrites ?? Future<void>.value()).then((_) async {
-      if (_disposed ||
-          !_authenticated ||
-          _generation != expectedEpoch ||
-          _account != account) {
+      if (!_isSessionStateCurrent(
+        epoch: expectedEpoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return false;
       }
       try {
@@ -200,19 +198,21 @@ class AssignmentStore extends ChangeNotifier {
       } on StaleSessionWriteException {
         return false;
       } catch (error) {
-        if (!_disposed &&
-            _authenticated &&
-            _generation == expectedEpoch &&
-            _account == account) {
+        if (_isSessionStateCurrent(
+          epoch: expectedEpoch,
+          account: account,
+          checkAccount: true,
+        )) {
           _error = _friendlyError(error);
           notifyListeners();
         }
         return false;
       }
-      if (_disposed ||
-          !_authenticated ||
-          _generation != expectedEpoch ||
-          _account != account) {
+      if (!_isSessionStateCurrent(
+        epoch: expectedEpoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return false;
       }
       _error = null;
@@ -230,14 +230,22 @@ class AssignmentStore extends ChangeNotifier {
     var saved = false;
     await _run(() async {
       if (account == null ||
-          !_authenticated ||
-          _generation != expectedEpoch ||
-          account != _account) {
+          !_isSessionStateCurrent(
+            epoch: expectedEpoch,
+            account: account,
+            checkAccount: true,
+            requireNotDisposed: false,
+          )) {
         return;
       }
       final next = update(notebook);
       await repository.saveNotebook(next, account);
-      if (_generation != expectedEpoch || !_authenticated) return;
+      if (!_isSessionStateCurrent(
+        epoch: expectedEpoch,
+        requireNotDisposed: false,
+      )) {
+        return;
+      }
       final previous = notebook;
       notebook = StudyNotebook.decode(next.encode());
       _invalidatePinnableKeys();
@@ -289,15 +297,23 @@ class AssignmentStore extends ChangeNotifier {
     var saved = false;
     await _run(() async {
       if (account == null ||
-          !_authenticated ||
-          _generation != expectedEpoch ||
-          account != _account) {
+          !_isSessionStateCurrent(
+            epoch: expectedEpoch,
+            account: account,
+            checkAccount: true,
+            requireNotDisposed: false,
+          )) {
         return;
       }
       final previous = personal;
       final next = update(previous);
       await repository.savePersonalWorkspace(next, account);
-      if (_generation != expectedEpoch || !_authenticated) return;
+      if (!_isSessionStateCurrent(
+        epoch: expectedEpoch,
+        requireNotDisposed: false,
+      )) {
+        return;
+      }
       personal = PersonalWorkspace.decode(next.encode());
       saved = true;
       final summarySettingsChanged =
@@ -331,18 +347,20 @@ class AssignmentStore extends ChangeNotifier {
     var saved = false;
     await _run(() async {
       if (account == null ||
-          !_authenticated ||
-          _disposed ||
-          _generation != epoch ||
-          account != _account) {
+          !_isSessionStateCurrent(
+            epoch: epoch,
+            account: account,
+            checkAccount: true,
+          )) {
         return;
       }
       final next = _courseNotices.markLocalRead(noticeId, read: read);
       await repository.saveCourseNotices(next, account);
-      if (_disposed ||
-          _generation != epoch ||
-          !_authenticated ||
-          account != _account) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       _courseNotices = next;
@@ -357,15 +375,23 @@ class AssignmentStore extends ChangeNotifier {
     var saved = false;
     await _run(() async {
       if (account == null ||
-          !_authenticated ||
-          _generation != epoch ||
-          account != _account) {
+          !_isSessionStateCurrent(
+            epoch: epoch,
+            account: account,
+            checkAccount: true,
+            requireNotDisposed: false,
+          )) {
         return;
       }
       final next =
           _courseNotices.markAllLocalRead(noticeIds: noticeIds?.toSet());
       await repository.saveCourseNotices(next, account);
-      if (_generation != epoch || !_authenticated || account != _account) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+        requireNotDisposed: false,
+      )) {
         return;
       }
       _courseNotices = next;
@@ -380,10 +406,11 @@ class AssignmentStore extends ChangeNotifier {
     if (account == null || !_authenticated) return false;
     var succeeded = false;
     await _run(() async {
-      if (_generation != epoch ||
-          !_authenticated ||
-          account != _account ||
-          _disposed) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       _syncCancelled = false;
@@ -409,6 +436,9 @@ class AssignmentStore extends ChangeNotifier {
                         courseName: c.name,
                         teacherNames: c.teacherNames,
                         folderName: c.folderName,
+                        clazzName: c.clazzName,
+                        courseStartAt: c.courseStartAt,
+                        courseEndAt: c.courseEndAt,
                       ))
                   .firstOrNull;
           if (match != null) targets.add(match);
@@ -423,6 +453,9 @@ class AssignmentStore extends ChangeNotifier {
                   courseName: c.name,
                   teacherNames: c.teacherNames,
                   folderName: c.folderName,
+                  clazzName: c.clazzName,
+                  courseStartAt: c.courseStartAt,
+                  courseEndAt: c.courseEndAt,
                 ));
           }
         }
@@ -436,11 +469,12 @@ class AssignmentStore extends ChangeNotifier {
         var updatedCount = 0;
         String? firstIssue;
         for (var i = 0; i < targets.length; i++) {
-          if (chapterCancelled() ||
-              _generation != epoch ||
-              !_authenticated ||
-              account != _account ||
-              _disposed) {
+          if (!_isSessionStateCurrent(
+            epoch: epoch,
+            account: account,
+            checkAccount: true,
+            syncOperation: chapterOperation,
+          )) {
             break;
           }
           final target = targets[i];
@@ -452,17 +486,17 @@ class AssignmentStore extends ChangeNotifier {
             try {
               snapshot = await chaoxingClient.fetchCourseChapters(target);
             } on ChaoxingAuthenticationException {
-              if (chapterCancelled() ||
-                  _generation != epoch ||
-                  !_authenticated ||
-                  _disposed) {
+              if (!_isSessionStateCurrent(
+                epoch: epoch,
+                syncOperation: chapterOperation,
+              )) {
                 break;
               }
               await _refreshChaoxingSession();
-              if (chapterCancelled() ||
-                  _generation != epoch ||
-                  !_authenticated ||
-                  _disposed) {
+              if (!_isSessionStateCurrent(
+                epoch: epoch,
+                syncOperation: chapterOperation,
+              )) {
                 break;
               }
               snapshot = await chaoxingClient.fetchCourseChapters(target);
@@ -905,6 +939,7 @@ class AssignmentStore extends ChangeNotifier {
       });
       if (!_isSessionCurrent(snap)) return;
       changes = loaded;
+      _termCatalogCache = null;
     } on StaleSessionWriteException {
       return;
     } catch (_) {
@@ -949,7 +984,10 @@ class AssignmentStore extends ChangeNotifier {
   DateTime? _lastSyncAt;
   List<int> _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
   bool _allowUrgentDeadlineNightBreakthrough = false;
-  String _deadlineChannelId = LocalNotificationService.assignmentChannel;
+  static const _deadlineChannelV2AutoMigratedKey =
+      LocalAssignmentRepository.deadlineChannelV2AutoMigratedKey;
+  String _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+  bool _migratedDeadlineChannelToV2ThisRestore = false;
   BackgroundCheckSettings _backgroundCheckSettings =
       const BackgroundCheckSettings(
     enabled: true,
@@ -1481,11 +1519,12 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   bool _ownsAuthenticatedSession(int generation, String? account) =>
-      !_disposed &&
-      _authenticated &&
       account != null &&
-      generation == _generation &&
-      account == _account;
+      _isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+      );
 
   Future<bool> _savePins(
       PinnedAssignments pins, String account, int generation) async {
@@ -1586,6 +1625,7 @@ class AssignmentStore extends ChangeNotifier {
       coursework: _courseworkState,
       unfollowedCourseKeys: _unfollowed,
       hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+      changes: changes,
     );
   }
 
@@ -1659,6 +1699,84 @@ class AssignmentStore extends ChangeNotifier {
     );
   }
 
+  Future<bool> batchUpdateCourseTerms({
+    required Iterable<String> courseKeys,
+    AcademicTerm? manualTerm,
+    bool updateManualTerm = false,
+    CourseArchiveMode? archiveMode,
+    CourseBlockMode? blockMode,
+  }) async {
+    final keys = courseKeys.where((k) => k.trim().isNotEmpty).toSet();
+    if (keys.isEmpty) return true;
+    if (!updateManualTerm && archiveMode == null && blockMode == null) {
+      return true;
+    }
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    final saved = await _mutateCourseTermPreferences(
+      snap,
+      (current) {
+        var next = current;
+        if (updateManualTerm) {
+          next = next.withBatchManualTerm(keys, manualTerm?.key);
+        }
+        if (archiveMode != null) {
+          for (final key in keys) {
+            next = next.withArchiveMode(key, archiveMode);
+          }
+        }
+        if (blockMode != null) {
+          next = next.withBatchBlockMode(keys, blockMode);
+        }
+        return next;
+      },
+      leaseWarning: '批量课程设置已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+    final selectedCourseKey = homeFilters.courseKey;
+    if (saved &&
+        _isSessionCurrent(snap) &&
+        selectedCourseKey != null &&
+        keys.contains(selectedCourseKey) &&
+        termCatalog.isBlocked(selectedCourseKey)) {
+      final cleared = HomeFilters(
+        query: homeFilters.query,
+        courseKey: null,
+        deadline: homeFilters.deadline,
+        sortOrder: homeFilters.sortOrder,
+        type: homeFilters.type,
+      );
+      await saveHomeFilters(cleared, snap.generation);
+    }
+    return saved;
+  }
+
+  Future<bool> setCourseBlockMode(
+    String courseKey,
+    CourseBlockMode mode,
+  ) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    final saved = await _mutateCourseTermPreferences(
+      snap,
+      (current) => current.withBlockMode(courseKey, mode),
+      leaseWarning: '课程屏蔽状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+    if (saved &&
+        _isSessionCurrent(snap) &&
+        homeFilters.courseKey == courseKey &&
+        termCatalog.isBlocked(courseKey)) {
+      final cleared = HomeFilters(
+        query: homeFilters.query,
+        courseKey: null,
+        deadline: homeFilters.deadline,
+        sortOrder: homeFilters.sortOrder,
+        type: homeFilters.type,
+      );
+      await saveHomeFilters(cleared, snap.generation);
+    }
+    return saved;
+  }
+
   Future<bool> dismissCourseRecall(String courseKey) async {
     final snap = _captureSession();
     if (!snap.authenticated || snap.account == null) return false;
@@ -1727,7 +1845,8 @@ class AssignmentStore extends ChangeNotifier {
           if (!group.hidden &&
               group.primary.isInAssignmentScope &&
               (group.primary.courseKey == null ||
-                  follows(group.primary.courseKey!)))
+                  (follows(group.primary.courseKey!) &&
+                      !termCatalog.isBlocked(group.primary.courseKey!))))
             group.primary,
       ]);
 
@@ -1746,6 +1865,7 @@ class AssignmentStore extends ChangeNotifier {
             coursework: _courseworkState,
             unfollowedCourseKeys: _unfollowed,
             hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+            changes: changes,
           );
     return List.unmodifiable([
       for (final a in statsAssignments)
@@ -1759,6 +1879,7 @@ class AssignmentStore extends ChangeNotifier {
     final activeCatalog = homeCatalogAssignments;
     if (selectedCourseKey == null ||
         !follows(selectedCourseKey) ||
+        termCatalog.isBlocked(selectedCourseKey) ||
         termCatalog.isActiveOrRecalled(selectedCourseKey)) {
       return activeCatalog;
     }
@@ -2220,8 +2341,11 @@ class AssignmentStore extends ChangeNotifier {
       _recoveryWarnings.add('个人资料暂时无法恢复，不影响重新登录和读取作业');
     }
     await _reconcileBackgroundControls();
-    await _maybeMigrateLegacyAssignmentSchedules();
-    await _maybeMigrateLegacyManualSchedules();
+    final legacyAssignmentVerified =
+        await _maybeMigrateLegacyAssignmentSchedules();
+    await _maybeMigrateLegacyManualSchedules(
+      legacyAssignmentVerified: legacyAssignmentVerified,
+    );
     notifyListeners();
   }
 
@@ -2256,9 +2380,10 @@ class AssignmentStore extends ChangeNotifier {
     _journalRestoreFailed = false;
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
     _allowUrgentDeadlineNightBreakthrough = false;
-    _deadlineChannelId = LocalNotificationService.assignmentChannel;
+    _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+    _migratedDeadlineChannelToV2ThisRestore = false;
     notificationService.activeDeadlineChannelId =
-        LocalNotificationService.assignmentChannel;
+        LocalNotificationService.assignmentV2Channel;
     _lastSyncAt = null;
     _lastSyncAttemptAt = null;
     _serverBackoffUntil = null;
@@ -2340,14 +2465,65 @@ class AssignmentStore extends ChangeNotifier {
       final savedDeadlineChannel = (_authenticated && account != null)
           ? await repository.loadDeadlineChannelId(account)
           : null;
-      _deadlineChannelId = (_authenticated && account != null)
-          ? await notificationService.resolveDefaultDeadlineChannel(
-              storedChannelId: savedDeadlineChannel,
-            )
-          : LocalNotificationService.assignmentChannel;
+      if (_authenticated && account != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final alreadyAutoMigrated =
+            prefs.getBool(_deadlineChannelV2AutoMigratedKey) ?? false;
+        if (savedDeadlineChannel ==
+                LocalNotificationService.assignmentChannel &&
+            !alreadyAutoMigrated) {
+          final snap = _captureSession();
+          try {
+            await _runScopedWrite(
+              snap,
+              (scopedPrefs) async {
+                await repository.writeDeadlineChannelIdInPrefs(
+                  scopedPrefs,
+                  LocalNotificationService.assignmentV2Channel,
+                );
+                await scopedPrefs.setBool(
+                  _deadlineChannelV2AutoMigratedKey,
+                  true,
+                );
+              },
+            );
+            _migratedDeadlineChannelToV2ThisRestore = true;
+          } on StaleSessionWriteException {
+            // Session changed mid-restore; leave persisted state untouched.
+          } catch (_) {
+            // Keep running restore using the upgraded in-memory default below.
+          }
+          _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+        } else {
+          _deadlineChannelId =
+              await notificationService.resolveDefaultDeadlineChannel(
+            storedChannelId: savedDeadlineChannel,
+          );
+          if (_deadlineChannelId ==
+                  LocalNotificationService.assignmentV2Channel &&
+              !alreadyAutoMigrated) {
+            final snap = _captureSession();
+            try {
+              await _runScopedWrite(
+                snap,
+                (scopedPrefs) => scopedPrefs.setBool(
+                  _deadlineChannelV2AutoMigratedKey,
+                  true,
+                ),
+              );
+            } on StaleSessionWriteException {
+              // Session changed mid-restore; leave persisted state untouched.
+            } catch (_) {
+              // Keep running restore using the upgraded in-memory default.
+            }
+          }
+        }
+      } else {
+        _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+      }
       notificationService.activeDeadlineChannelId = _authenticated
           ? _deadlineChannelId
-          : LocalNotificationService.assignmentChannel;
+          : LocalNotificationService.assignmentV2Channel;
     });
     await stage('自动同步设置', () async {
       final snap = _captureSession();
@@ -2527,6 +2703,7 @@ class AssignmentStore extends ChangeNotifier {
     });
     await stage('作业变化', () async {
       changes = await changeLog.load();
+      _termCatalogCache = null;
     });
     await stage('时间变更确认状态', () async {
       final account = _account;
@@ -3187,17 +3364,25 @@ class AssignmentStore extends ChangeNotifier {
     }
     var saved = false;
     await _run(() async {
-      if (accountEpoch != epoch ||
-          _account != account ||
-          _accountHash != accountHash ||
-          !_authenticated) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+        accountHash: accountHash,
+        checkAccountHash: true,
+        requireNotDisposed: false,
+      )) {
         return;
       }
       await _markReminderMutationPending();
-      if (accountEpoch != epoch ||
-          _account != account ||
-          _accountHash != accountHash ||
-          !_authenticated) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+        accountHash: accountHash,
+        checkAccountHash: true,
+        requireNotDisposed: false,
+      )) {
         return;
       }
       try {
@@ -3205,9 +3390,12 @@ class AssignmentStore extends ChangeNotifier {
           ids,
           hidden,
           canCommit: () async {
-            if (accountEpoch != epoch ||
-                _account != account ||
-                !_authenticated) {
+            if (!_isSessionStateCurrent(
+              epoch: epoch,
+              account: account,
+              checkAccount: true,
+              requireNotDisposed: false,
+            )) {
               return false;
             }
             if (!_nativeReminderAvailable) return true;
@@ -3221,10 +3409,14 @@ class AssignmentStore extends ChangeNotifier {
         if (accountEpoch != epoch) return;
         rethrow;
       }
-      if (accountEpoch != epoch ||
-          _account != account ||
-          _accountHash != accountHash ||
-          !_authenticated) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+        accountHash: accountHash,
+        checkAccountHash: true,
+        requireNotDisposed: false,
+      )) {
         return;
       }
       await _reloadJournal();
@@ -3368,10 +3560,13 @@ class AssignmentStore extends ChangeNotifier {
       try {
         await _runScopedWrite(
           snap,
-          (prefs) => repository.writeDeadlineChannelIdInPrefs(
-            prefs,
-            normalized,
-          ),
+          (prefs) async {
+            await repository.writeDeadlineChannelIdInPrefs(
+              prefs,
+              normalized,
+            );
+            await prefs.setBool(_deadlineChannelV2AutoMigratedKey, true);
+          },
         );
       } on StaleSessionWriteException {
         return;
@@ -3380,7 +3575,7 @@ class AssignmentStore extends ChangeNotifier {
       _deadlineChannelId = normalized;
       notificationService.activeDeadlineChannelId = snap.authenticated
           ? normalized
-          : LocalNotificationService.assignmentChannel;
+          : LocalNotificationService.assignmentV2Channel;
       saved = true;
       await _afterAssignmentsChanged(updateSummary: false);
     });
@@ -3404,7 +3599,7 @@ class AssignmentStore extends ChangeNotifier {
     }
     final targetChannel = _authenticated
         ? _deadlineChannelId
-        : LocalNotificationService.assignmentChannel;
+        : LocalNotificationService.assignmentV2Channel;
     notificationService.activeDeadlineChannelId = targetChannel;
     if (_nativeReminderAvailable) {
       try {
@@ -3457,11 +3652,12 @@ class AssignmentStore extends ChangeNotifier {
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
-    if (!_authenticated ||
-        _account != account ||
-        _generation != generation ||
-        _loading ||
-        _disposed) {
+    if (!_isSessionStateCurrent(
+          epoch: generation,
+          account: account,
+          checkAccount: true,
+        ) ||
+        _loading) {
       return false;
     }
     if (prefs.containsKey('journal_account_switch')) return false;
@@ -3483,10 +3679,11 @@ class AssignmentStore extends ChangeNotifier {
 
     var reconciled = false;
     await _run(() async {
-      if (!_authenticated ||
-          _account != account ||
-          _generation != generation ||
-          _disposed) {
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       final refreshed = await SharedPreferences.getInstance();
@@ -3870,6 +4067,7 @@ class AssignmentStore extends ChangeNotifier {
     _pendingReturnConfirmation = null;
     returnCheckMessage = null;
     changes = [];
+    _termCatalogCache = null;
     _acknowledgedDeadlineChangeIds = <String>{};
     await _run(() async {
       if (logoutGen != _generation || _disposed) return;
@@ -3971,9 +4169,9 @@ class AssignmentStore extends ChangeNotifier {
       _needsProfileRecovery = false;
       _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
       _allowUrgentDeadlineNightBreakthrough = false;
-      _deadlineChannelId = LocalNotificationService.assignmentChannel;
+      _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
       notificationService.activeDeadlineChannelId =
-          LocalNotificationService.assignmentChannel;
+          LocalNotificationService.assignmentV2Channel;
       _chaoxingDisplayName = null;
       _chaoxingAvatarUrl = null;
       _error = null;
@@ -4133,7 +4331,7 @@ class AssignmentStore extends ChangeNotifier {
         snap.authenticated && _allowUrgentDeadlineNightBreakthrough;
     notificationService.activeDeadlineChannelId = snap.authenticated
         ? _deadlineChannelId
-        : LocalNotificationService.assignmentChannel;
+        : LocalNotificationService.assignmentV2Channel;
     if (!_privacyCleanupPending) {
       if (updateAssignmentReminders) {
         if (_nativeReminderAvailable && _authenticated) {
@@ -4617,11 +4815,13 @@ class AssignmentStore extends ChangeNotifier {
     });
   }
 
-  Future<void> _maybeMigrateLegacyAssignmentSchedules() async {
-    await _ensureLegacyAssignmentVerified();
+  Future<bool> _maybeMigrateLegacyAssignmentSchedules() async {
+    return await _ensureLegacyAssignmentVerified();
   }
 
-  Future<void> _maybeMigrateLegacyManualSchedules() async {
+  Future<void> _maybeMigrateLegacyManualSchedules({
+    bool? legacyAssignmentVerified,
+  }) async {
     if (!_authenticated ||
         !_manageBackgroundSchedule ||
         _privacyCleanupPending) {
@@ -4636,6 +4836,72 @@ class AssignmentStore extends ChangeNotifier {
     } catch (error) {
       _manualWarnings.add('个人日程提醒渠道迁移未完成：$error');
       _serviceWarnings.add('个人日程提醒渠道迁移未完成：$error');
+    }
+    try {
+      await notificationService.migrateLegacySummaryChannelIfNeeded(
+        courseAssignments,
+        personal,
+        _lastSyncAt,
+      );
+    } catch (error) {
+      _summaryWarnings.add('每日摘要提醒渠道迁移未完成：$error');
+      _serviceWarnings.add('每日摘要提醒渠道迁移未完成：$error');
+    }
+    var canRetireDeadlineV1 =
+        _deadlineChannelId == LocalNotificationService.assignmentV2Channel;
+    if (canRetireDeadlineV1 && _nativeReminderAvailable) {
+      if (legacyAssignmentVerified != null) {
+        canRetireDeadlineV1 = legacyAssignmentVerified;
+      } else {
+        try {
+          canRetireDeadlineV1 =
+              await notificationService.isLegacyAssignmentMigrationComplete();
+        } catch (_) {
+          canRetireDeadlineV1 = false;
+        }
+      }
+    }
+    var deadlineRescheduledForV2 = false;
+    try {
+      await notificationService.retireLegacyUpdatesAndDeadlineChannelsIfNeeded(
+        retireDeadlineV1: canRetireDeadlineV1,
+        beforeRetireDeadlineV1: !_nativeReminderAvailable
+            ? () async {
+                deadlineRescheduledForV2 = true;
+                await notificationService.rescheduleAssignments(
+                  courseAssignments,
+                  offsetsMinutes: _reminderOffsetsMinutes,
+                );
+                if (notificationService.lastDeadlineScheduleFailed) {
+                  final reason = notificationService.lastWarning ?? '截止提醒重排未完成';
+                  _deadlineWarnings.add('截止提醒渠道升级重排未完成：$reason');
+                  _serviceWarnings.add('截止提醒渠道升级重排未完成：$reason');
+                  return false;
+                }
+                return true;
+              }
+            : null,
+      );
+    } catch (error) {
+      if (deadlineRescheduledForV2) {
+        _deadlineWarnings.add('截止提醒渠道升级重排未完成：$error');
+        _serviceWarnings.add('截止提醒渠道升级重排未完成：$error');
+      }
+      // Best-effort legacy v1 channel cleanup.
+    }
+    if (_migratedDeadlineChannelToV2ThisRestore && !_nativeReminderAvailable) {
+      _migratedDeadlineChannelToV2ThisRestore = false;
+      if (!deadlineRescheduledForV2) {
+        try {
+          await notificationService.rescheduleAssignments(
+            courseAssignments,
+            offsetsMinutes: _reminderOffsetsMinutes,
+          );
+        } catch (error) {
+          _deadlineWarnings.add('截止提醒渠道升级重排未完成：$error');
+          _serviceWarnings.add('截止提醒渠道升级重排未完成：$error');
+        }
+      }
     }
   }
 
@@ -4744,6 +5010,9 @@ class AssignmentStore extends ChangeNotifier {
             name: ref.courseName,
             teacherNames: ref.teacherNames,
             folderName: ref.folderName,
+            clazzName: ref.clazzName,
+            courseStartAt: ref.courseStartAt,
+            courseEndAt: ref.courseEndAt,
           ),
       ];
       final liveCatalog = CourseTermCatalog.build(
@@ -4755,6 +5024,7 @@ class AssignmentStore extends ChangeNotifier {
         coursework: _courseworkState,
         unfollowedCourseKeys: _unfollowed,
         hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+        changes: changes,
       );
       return SyncScopeSelection.select(
         catalog: catalog,
@@ -4785,7 +5055,9 @@ class AssignmentStore extends ChangeNotifier {
     final catalog = termCatalog;
     final eligibleKeys = [
       for (final entry in catalog.entries)
-        if (entry.isFollowed && entry.state == CourseCatalogState.archived)
+        if (entry.isFollowed &&
+            !entry.isBlocked &&
+            entry.state == CourseCatalogState.archived)
           entry.courseKey,
     ];
     final batch = _historicalSweepState.selectNextBatch(
@@ -5050,10 +5322,11 @@ class AssignmentStore extends ChangeNotifier {
       chaoxingClient.onProgress = null;
       chaoxingClient.shouldStop = null;
       chaoxingClient.nextSyncCourseSelector = null;
-      if (generation == _generation &&
-          !_disposed &&
-          !_syncCancelled &&
-          operation == _syncOperation &&
+      if (_isSessionStateCurrent(
+            epoch: generation,
+            expectedAuthenticated: null,
+            syncOperation: operation,
+          ) &&
           chaoxingClient.hasCourseResponse) {
         final nextCourses = chaoxingClient.courses
             .map((c) => CourseRef(
@@ -5062,6 +5335,9 @@ class AssignmentStore extends ChangeNotifier {
                   name: c.courseName,
                   teacherNames: c.teacherNames,
                   folderName: c.folderName,
+                  clazzName: c.clazzName,
+                  courseStartAt: c.courseStartAt,
+                  courseEndAt: c.courseEndAt,
                 ))
             .toList();
         final account = _account;
@@ -5361,18 +5637,39 @@ class AssignmentStore extends ChangeNotifier {
       final displayName = result.displayName ??
           _chaoxingDisplayName ??
           await sessionStore.readChaoxingDisplayName();
-      if (generation != _generation || _disposed || _account != account) return;
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+        expectedAuthenticated: null,
+      )) {
+        return;
+      }
       final avatarUrl = result.avatarUrl ??
           _chaoxingAvatarUrl ??
           await sessionStore.readChaoxingAvatarUrl();
-      if (generation != _generation || _disposed || _account != account) return;
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+        expectedAuthenticated: null,
+      )) {
+        return;
+      }
       await sessionStore.saveChaoxingAccount(
         account: account,
         password: password,
         displayName: displayName,
         avatarUrl: avatarUrl,
       );
-      if (generation != _generation || _disposed || _account != account) return;
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+        expectedAuthenticated: null,
+      )) {
+        return;
+      }
       _chaoxingDisplayName = displayName;
       _chaoxingAvatarUrl = avatarUrl;
     }
@@ -5422,7 +5719,8 @@ class AssignmentStore extends ChangeNotifier {
   Set<String> _archivedReminderCourseKeys() {
     return {
       for (final entry in termCatalog.entries)
-        if (entry.state == CourseCatalogState.archived) entry.courseKey,
+        if (entry.state == CourseCatalogState.archived || entry.isBlocked)
+          entry.courseKey,
     };
   }
 
@@ -5659,19 +5957,38 @@ class AssignmentStore extends ChangeNotifier {
         syncOperation: syncOperation,
       );
 
-  bool _isSessionCurrent(_SessionSnapshot snap) {
-    if (_disposed ||
-        snap.generation != _generation ||
-        snap.authenticated != _authenticated ||
-        snap.account != _account) {
+  bool _isSessionStateCurrent({
+    required int epoch,
+    String? account,
+    bool checkAccount = false,
+    String? accountHash,
+    bool checkAccountHash = false,
+    bool? expectedAuthenticated = true,
+    bool requireNotDisposed = true,
+    int? syncOperation,
+  }) {
+    if (requireNotDisposed && _disposed) return false;
+    if (epoch != _generation) return false;
+    if (expectedAuthenticated != null &&
+        _authenticated != expectedAuthenticated) {
       return false;
     }
-    if (snap.syncOperation != null &&
-        (_syncCancelled || snap.syncOperation != _syncOperation)) {
+    if (checkAccount && account != _account) return false;
+    if (checkAccountHash && accountHash != _accountHash) return false;
+    if (syncOperation != null &&
+        (_syncCancelled || syncOperation != _syncOperation)) {
       return false;
     }
     return true;
   }
+
+  bool _isSessionCurrent(_SessionSnapshot snap) => _isSessionStateCurrent(
+        epoch: snap.generation,
+        account: snap.account,
+        checkAccount: true,
+        expectedAuthenticated: snap.authenticated,
+        syncOperation: snap.syncOperation,
+      );
 
   Future<bool> Function() _scopedWriteGateFor(_SessionSnapshot snap) {
     return () async {

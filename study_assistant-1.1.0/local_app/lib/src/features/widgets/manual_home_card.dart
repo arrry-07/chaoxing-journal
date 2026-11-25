@@ -3,7 +3,6 @@ import 'package:intl/intl.dart' hide TextDirection;
 
 import '../../app/journal.dart';
 import '../../models/assignment.dart';
-import '../../models/display_preferences.dart';
 import '../../models/study_notebook.dart';
 import '../../services/assignment_query.dart';
 import '../../services/home_manual_timeline.dart';
@@ -55,6 +54,7 @@ class ManualHomeCard extends StatelessWidget {
     final railWidth = AssignmentCard.measureRailWidth(
       context,
       inPinnedSection: inPinnedSection,
+      showCountdown: countdown,
     );
     final today =
         at != null && AssignmentQuery.dayKey(at) == AssignmentQuery.dayKey(now);
@@ -69,7 +69,7 @@ class ManualHomeCard extends StatelessWidget {
         : at == null
             ? journal.muted
             : overdue
-                ? journal.muted
+                ? journal.ink
                 : today
                     ? journal.accent
                     : journal.ink;
@@ -88,6 +88,30 @@ class ManualHomeCard extends StatelessWidget {
         );
       }
       if (!inPinnedSection) {
+        if (countdown && !overdue) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                clock,
+                style: journal.time.copyWith(
+                  color: railTextColor,
+                  fontWeight: FontWeight.w600,
+                  height: 1.22,
+                ),
+              ),
+              Text(
+                AssignmentCard.compactRemaining(at, now),
+                style: journal.metadata.copyWith(
+                  fontSize: 11,
+                  height: 1.22,
+                  color: today ? journal.accent : journal.muted,
+                ),
+              ),
+            ],
+          );
+        }
         return Text(
           clock,
           style: journal.time.copyWith(
@@ -124,11 +148,7 @@ class ManualHomeCard extends StatelessWidget {
           Text(
             clock,
             style: journal.time.copyWith(
-              color: pinUrgent
-                  ? journal.accent
-                  : overdue
-                      ? journal.muted
-                      : journal.ink,
+              color: pinUrgent ? journal.accent : journal.ink,
               fontWeight: FontWeight.w600,
               height: 1.22,
             ),
@@ -169,13 +189,11 @@ class ManualHomeCard extends StatelessWidget {
             ? '不足30分未排提醒'
             : quietHoursSkipped
                 ? '夜间静音时段未排期'
-                : '提前30分提醒';
+                : null;
     final auxiliary = <String>[
       if (entry.location.trim().isNotEmpty) '地点 ${entry.location.trim()}',
       if (reminderLabel != null) reminderLabel,
       if (entry.attachments.isNotEmpty) '附件 ${entry.attachments.length}',
-      if (countdown && !inPinnedSection && at != null && !overdue)
-        DisplayPreferences.remaining(at, now),
       if (at == null) '无截止日期',
     ];
 
@@ -224,11 +242,7 @@ class ManualHomeCard extends StatelessWidget {
             entry.title.trim(),
             maxLines: largeText ? null : 2,
             overflow: largeText ? null : TextOverflow.ellipsis,
-            style: overdue
-                ? journal.entryTitle.copyWith(
-                    color: journal.isDark ? journal.muted : journal.ochre,
-                  )
-                : journal.entryTitle,
+            style: journal.entryTitle,
           ),
         ),
         const SizedBox(height: 4),
@@ -250,17 +264,36 @@ class ManualHomeCard extends StatelessWidget {
         ),
         if (auxiliary.isNotEmpty) ...[
           const SizedBox(height: 4),
-          for (final line in auxiliary) Text(line, style: journal.metadata),
-        ],
-        if (entry.note.trim().isNotEmpty) ...[
-          const SizedBox(height: 4),
           Text(
-            entry.note.trim(),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+            auxiliary.join(' · '),
+            maxLines: largeText ? null : 2,
+            overflow: largeText ? null : TextOverflow.ellipsis,
             style: journal.metadata,
           ),
         ],
+        if (entry.note.trim().isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(top: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+            decoration: BoxDecoration(
+              color: Color.lerp(
+                journal.sheet,
+                journal.parchment,
+                journal.isDark ? 0.45 : 0.55,
+              ),
+              borderRadius:
+                  const BorderRadius.horizontal(right: Radius.circular(6)),
+              border: Border(
+                left: BorderSide(color: journal.ruleStrong, width: 2.0),
+              ),
+            ),
+            child: Text(
+              entry.note.trim(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: journal.metadata.copyWith(fontSize: 12.5, height: 1.4),
+            ),
+          ),
       ],
     );
 
@@ -278,6 +311,8 @@ class ManualHomeCard extends StatelessWidget {
                   entry.title,
                   if (entry.course.trim().isNotEmpty) entry.course.trim(),
                   typeLabel,
+                  if (clock.isNotEmpty) clock,
+                  if (reminderLabel != null) reminderLabel,
                   if (entry.attachments.isNotEmpty)
                     '有${entry.attachments.length}个附件',
                   if (overdue) overdueLabel,

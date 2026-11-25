@@ -144,7 +144,7 @@ class ReminderApiMatrixTest {
             database,
             accountHash,
             daytimeNow.toInstant(),
-            AssignmentNotificationPublisher.CHANNEL_UPDATES,
+            AssignmentNotificationPublisher.CHANNEL_UPDATES_V2,
         )
         assertFalse(deadlineResult.submitted)
         assertFalse(newResult.submitted)

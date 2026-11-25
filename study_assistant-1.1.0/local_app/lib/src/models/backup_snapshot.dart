@@ -421,6 +421,9 @@ class BackupSnapshot {
           'name',
           if (value.containsKey('teacherNames')) 'teacherNames',
           if (value.containsKey('folderName')) 'folderName',
+          if (value.containsKey('clazzName')) 'clazzName',
+          if (value.containsKey('courseStartAt')) 'courseStartAt',
+          if (value.containsKey('courseEndAt')) 'courseEndAt',
         });
         final teacherRaw = c['teacherNames'];
         final teacherList = <String>[];
@@ -437,12 +440,26 @@ class BackupSnapshot {
         final folderName = c.containsKey('folderName')
             ? _text(c['folderName'], max: 120)
             : null;
+        final clazzName =
+            c.containsKey('clazzName') ? _text(c['clazzName'], max: 120) : null;
+        DateTime? parseCourseDate(String key) {
+          if (!c.containsKey(key)) return null;
+          final parsed = _date(c[key]).toUtc();
+          if (parsed.year < 2000 || parsed.year > 2100) _bad();
+          return parsed;
+        }
+
+        final courseStartAt = parseCourseDate('courseStartAt');
+        final courseEndAt = parseCourseDate('courseEndAt');
         courses.add(CourseRef(
           courseId: _text(c['courseId']),
           clazzId: _text(c['clazzId']),
           name: _text(c['name']),
           teacherNames: List.unmodifiable(teacherList),
           folderName: folderName,
+          clazzName: clazzName,
+          courseStartAt: courseStartAt,
+          courseEndAt: courseEndAt,
         ));
       }
     }

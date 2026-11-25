@@ -33,6 +33,8 @@ class JournalGroupedCard extends StatelessWidget {
     final hasHeader = title != null ||
         trailing != null ||
         (infoItems != null && infoItems!.isNotEmpty);
+    final compactTrailingHeader =
+        trailing != null && (infoItems == null || infoItems!.isEmpty);
     final headerFill = journal.sectionHeaderFill;
 
     return Material(
@@ -48,13 +50,18 @@ class JournalGroupedCard extends StatelessWidget {
         children: [
           if (hasHeader)
             Container(
+              constraints: compactTrailingHeader
+                  ? const BoxConstraints(minHeight: 43)
+                  : null,
               decoration: BoxDecoration(
                 color: headerFill,
                 border: Border(
                   bottom: BorderSide(color: journal.divider, width: 0.6),
                 ),
               ),
-              padding: const EdgeInsets.fromLTRB(16, 12, 12, 10),
+              padding: compactTrailingHeader
+                  ? const EdgeInsets.fromLTRB(16, 2, 8, 2)
+                  : const EdgeInsets.fromLTRB(16, 12, 12, 10),
               child: Row(
                 children: [
                   if (title != null)

@@ -531,5 +531,182 @@ void main() {
       expect(retainedCourse.folderName, '单文件夹保留课容器');
       expect(retainedCourse.teacherNames, ['孙老师']);
     });
+
+    test(
+        'extracts empty-course folder name fallback, clazzName (excluding identical name), and conservative course boundaries',
+        () {
+      final result = ChaoxingApiParser.parseCourseRefsDetailed({
+        'channelList': [
+          {
+            'name': '2025-2026上',
+            'channelList': [
+              {
+                'content': {
+                  'clazz': {
+                    'data': [
+                      {
+                        'id': 301,
+                        'name': '计科25级(25-26-1)',
+                      },
+                    ],
+                  },
+                  'course': {
+                    'data': [
+                      {
+                        'id': 201,
+                        'name': '数据结构',
+                        'begindate': 1756684800000, // 2025-09-01 UTC
+                        'enddate': '2026-01-20',
+                      },
+                    ],
+                  },
+                },
+              },
+              {
+                'content': {
+                  'clazz': {
+                    'data': [
+                      {
+                        'id': 302,
+                        'name': '大学物理',
+                      },
+                    ],
+                  },
+                  'course': {
+                    'data': [
+                      {
+                        'id': 202,
+                        'name': '大学物理',
+                        'begindate': 0,
+                        'enddate': '1970-01-01',
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      final c1 = result.refs.singleWhere((c) => c.courseId == '201');
+      expect(c1.folderName, '2025-2026上');
+      expect(c1.clazzName, '计科25级(25-26-1)');
+      expect(c1.courseStartAt, DateTime.utc(2025, 9, 1));
+      expect(c1.courseEndAt, DateTime.utc(2026, 1, 20));
+
+      final c2 = result.refs.singleWhere((c) => c.courseId == '202');
+      expect(c2.clazzName, isNull);
+      expect(c2.courseStartAt, isNull);
+      expect(c2.courseEndAt, isNull);
+    });
+
+    test(
+        'clamps extreme boundary numbers without throwing and falls back past 0/empty boundary candidates',
+        () {
+      final result = ChaoxingApiParser.parseCourseRefsDetailed({
+        'channelList': [
+          {
+            'content': {
+              'clazz': {
+                'data': [
+                  {'id': 401, 'name': '极值边界测试班'},
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 301,
+                    'name': '数值溢出防护课',
+                    'begindate': 99999999999999999,
+                    'enddate': 1e18,
+                  },
+                ],
+              },
+            },
+          },
+          {
+            'content': {
+              'clazz': {
+                'data': [
+                  {'id': 402, 'name': '字符串极大数班'},
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 302,
+                    'name': '字符串越界防护课',
+                    'begindate': '99999999999999999',
+                    'enddate': '1e18',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            'content': {
+              'begindate': 1756684800, // 2025-09-01 UTC (seconds)
+              'endTime': '2026-01-20',
+              'clazz': {
+                'data': [
+                  {'id': 403, 'name': '零值回落测试班'},
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 303,
+                    'name': '候选键顺序回落课',
+                    'begindate': 0,
+                    'startTime': '',
+                    'enddate': '',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            'content': {
+              'clazz': {
+                'data': [
+                  {'id': 404, 'name': '空串跳过测试班'},
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 304,
+                    'name': '空串回落到startTime课',
+                    'begindate': '',
+                    'startTime': 1756684800000,
+                    'enddate': 0,
+                    'endTime': '2026-01-20',
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      });
+
+      expect(result.refs, hasLength(4));
+
+      final c1 = result.refs.singleWhere((c) => c.courseId == '301');
+      expect(c1.courseStartAt, isNull);
+      expect(c1.courseEndAt, isNull);
+
+      final c2 = result.refs.singleWhere((c) => c.courseId == '302');
+      expect(c2.courseStartAt, isNull);
+      expect(c2.courseEndAt, isNull);
+
+      final c3 = result.refs.singleWhere((c) => c.courseId == '303');
+      expect(c3.courseStartAt, DateTime.utc(2025, 9, 1));
+      expect(c3.courseEndAt, DateTime.utc(2026, 1, 20));
+
+      final c4 = result.refs.singleWhere((c) => c.courseId == '304');
+      expect(c4.courseStartAt, DateTime.utc(2025, 9, 1));
+      expect(c4.courseEndAt, DateTime.utc(2026, 1, 20));
+    });
   });
 }

@@ -33,7 +33,7 @@ Future<void> showJournalContextMenu({
   if (actions.isEmpty) return;
   JournalMotion.mediumThreshold(displayPrefs);
   final reduced = JournalMotion.isReducedMotion(context);
-  final duration = reduced ? Duration.zero : const Duration(milliseconds: 210);
+  final duration = reduced ? Duration.zero : const Duration(milliseconds: 190);
 
   await Navigator.of(context, rootNavigator: true).push<void>(
     PageRouteBuilder<void>(
@@ -42,7 +42,7 @@ Future<void> showJournalContextMenu({
       barrierColor: Colors.transparent,
       transitionDuration: duration,
       reverseTransitionDuration:
-          reduced ? Duration.zero : const Duration(milliseconds: 150),
+          reduced ? Duration.zero : const Duration(milliseconds: 110),
       pageBuilder: (routeContext, animation, secondaryAnimation) =>
           _JournalContextMenuOverlay(
         animation: animation,
@@ -247,7 +247,13 @@ class _JournalContextMenuOverlayState
           final t = _curved.value;
           final sigma = reduced ? 0.0 : 12.0 * t;
           final scaleCard = reduced ? 1.0 : 1.0 + 0.02 * t;
-          final menuScale = reduced ? 1.0 : 0.90 + 0.10 * t;
+          final menuScale = reduced ? 1.0 : 0.94 + 0.06 * t;
+          final backdrop = ColoredBox(
+            color: (journal.isDark
+                    ? const Color(0xFF0B0A09)
+                    : const Color(0xFF1F2328))
+                .withValues(alpha: (journal.isDark ? 0.48 : 0.22) * t),
+          );
 
           return Stack(
             children: [
@@ -255,16 +261,13 @@ class _JournalContextMenuOverlayState
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _dismiss,
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-                    child: ColoredBox(
-                      color: (journal.isDark
-                              ? const Color(0xFF0B0A09)
-                              : const Color(0xFF1F2328))
-                          .withValues(
-                              alpha: (journal.isDark ? 0.48 : 0.22) * t),
-                    ),
-                  ),
+                  child: sigma < 0.4
+                      ? backdrop
+                      : BackdropFilter(
+                          filter:
+                              ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+                          child: backdrop,
+                        ),
                 ),
               ),
               if (widget.previewCard != null && cardHeight > 0)

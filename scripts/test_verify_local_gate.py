@@ -64,6 +64,74 @@ class VerifyLocalGateTests(unittest.TestCase):
             subprocess.run(["git", "checkout", "-b", "main"], cwd=repo, check=True, capture_output=True)
             self.assertFalse(mod._should_allow_dev_metadata(repo, release_flag=False))
 
+    def test_build_flutter_test_cmd_applies_default_and_custom_timeouts(self) -> None:
+        default_cmd = mod._build_flutter_test_cmd("flutter", ["test/a_test.dart"])
+        self.assertEqual(
+            [
+                "flutter",
+                "--no-version-check",
+                "test",
+                "--no-pub",
+                "--timeout",
+                mod.DEFAULT_TEST_CASE_TIMEOUT,
+                "test/a_test.dart",
+            ],
+            default_cmd,
+        )
+        # Flutter test defaults to 30s when --timeout is omitted, so 'none' must be
+        # forwarded explicitly to disable per-test timeouts.
+        disabled_cmd = mod._build_flutter_test_cmd(
+            "flutter",
+            ["test/a_test.dart"],
+            test_case_timeout="NONE",
+        )
+        self.assertEqual(
+            [
+                "flutter",
+                "--no-version-check",
+                "test",
+                "--no-pub",
+                "--timeout",
+                "none",
+                "test/a_test.dart",
+            ],
+            disabled_cmd,
+        )
+        omitted_cmd = mod._build_flutter_test_cmd(
+            "flutter",
+            ["test/a_test.dart"],
+            test_case_timeout="",
+        )
+        self.assertNotIn("--timeout", omitted_cmd)
+        self.assertEqual(
+            ["flutter", "--no-version-check", "test", "--no-pub", "test/a_test.dart"],
+            omitted_cmd,
+        )
+
+    def test_run_flutter_step_kills_hung_process_and_reports_last_test_line(self) -> None:
+        # Emit bare '\r' without trailing '\n' (plus HH:MM:SS prefix and ANSI codes) to prove
+        # chunked decoding records the active progress frame immediately without blocking on '\n'.
+        hung_script = (
+            "import sys, time\n"
+            "sys.stdout.write('\\x1b[32m00:01 +0: loading test/fake_hang_test.dart\\x1b[0m\\r"
+            "\\x1b[33m01:02:03 +1950: fakeAsync bare-cr hung case\\x1b[0m\\r')\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(30)\n"
+        )
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            with self.assertRaises(RuntimeError) as raised:
+                mod._run_flutter_step(
+                    "Targeted Flutter tests (1 files)",
+                    [sys.executable, "-c", hung_script],
+                    Path(__file__).resolve().parent,
+                    timeout_seconds=1,
+                )
+        message = str(raised.exception)
+        self.assertIn("timed out after 1s", message)
+        self.assertIn("01:02:03 +1950: fakeAsync bare-cr hung case", message)
+        self.assertNotIn("\x1b[", message)
+
 
 if __name__ == "__main__":
     unittest.main()

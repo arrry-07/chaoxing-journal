@@ -11,6 +11,7 @@ import '../services/assignment_store.dart';
 import '../services/interaction_feedback_service.dart';
 import '../services/sync_issue_presentation.dart';
 import 'widgets/journal_buttons.dart';
+import 'widgets/journal_expansion_tile.dart';
 import 'widgets/journal_grouped_card.dart';
 
 class SyncStatusScreen extends StatefulWidget {
@@ -29,6 +30,44 @@ class SyncStatusScreen extends StatefulWidget {
 
 class _SyncStatusScreenState extends State<SyncStatusScreen> {
   AssignmentStore get store => widget.store;
+  bool _savingBackground = false;
+
+  Future<void> _saveBackgroundCheckEnabled(bool value) async {
+    if (_savingBackground || store.isLoading) return;
+    setState(() => _savingBackground = true);
+    final ok = await store.saveBackgroundCheckEnabled(value);
+    if (!mounted) return;
+    setState(() => _savingBackground = false);
+    if (!ok) {
+      showJournalMessage(
+        context,
+        store.operationError ?? '保存后台检查设置失败，请稍后重试',
+      );
+      return;
+    }
+    showJournalMessage(context, value ? '已开启白天后台检查' : '已关闭白天后台检查');
+  }
+
+  Future<void> _saveBackgroundInterval(int minutes) async {
+    if (_savingBackground ||
+        store.isLoading ||
+        !store.backgroundCheckEnabled ||
+        store.backgroundCheckIntervalMinutes == minutes) {
+      return;
+    }
+    setState(() => _savingBackground = true);
+    final ok = await store.saveBackgroundCheckIntervalMinutes(minutes);
+    if (!mounted) return;
+    setState(() => _savingBackground = false);
+    if (!ok) {
+      showJournalMessage(
+        context,
+        store.operationError ?? '保存检查频率失败，请稍后重试',
+      );
+      return;
+    }
+    showJournalMessage(context, '已调整为每 ${minutes ~/ 60} 小时检查一次');
+  }
 
   Future<void> _runSync() async {
     final before = store.syncReport;
@@ -168,28 +207,41 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
+                      SwitchListTile(
+                        key: const ValueKey('sync-background-check-switch'),
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('白天后台检查', style: journal.section),
+                        subtitle: Text(
+                          '08:00 至次日 00:00 低频检查，实际执行由系统调度',
+                          style: journal.metadata,
+                        ),
+                        value: store.backgroundCheckEnabled,
+                        onChanged: store.isLoading || _savingBackground
+                            ? null
+                            : _saveBackgroundCheckEnabled,
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
                         children: [
-                          Icon(
-                            Icons.wb_sunny_outlined,
-                            size: 20,
-                            color: journal.ink,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text('白天后台检查', style: journal.section),
-                          ),
+                          for (final minutes in const [120, 240, 360])
+                            ChoiceChip(
+                              key:
+                                  ValueKey('sync-background-interval-$minutes'),
+                              label: Text('每 ${minutes ~/ 60} 小时'),
+                              selected: store.backgroundCheckIntervalMinutes ==
+                                  minutes,
+                              onSelected: store.isLoading ||
+                                      _savingBackground ||
+                                      !store.backgroundCheckEnabled
+                                  ? null
+                                  : (_) => _saveBackgroundInterval(minutes),
+                            ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        store.backgroundCheckEnabled
-                            ? '已开启，每 ${store.backgroundCheckIntervalMinutes ~/ 60} 小时在 08:00—次日 00:00 内检查。实际执行由系统调度，不承诺整点。'
-                            : '已关闭；手动刷新、通知监听（如开启）和已有缓存截止提醒不受影响。',
-                        style: journal.metadata,
-                      ),
                       if (store.nextBackgroundCheckAt != null) ...[
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
                         Text(
                           '下次目标：${DateFormat('M月d日 HH:mm').format(store.nextBackgroundCheckAt!.toLocal())}',
                           style: journal.metadata.copyWith(color: journal.ink),
@@ -202,7 +254,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                           expanded: false,
                           height: 40,
                           icon: Icons.tune_rounded,
-                          label: '调整后台检查与提醒',
+                          label: '通知触发与提醒设置',
                           onPressed: () => context.push('/reminders'),
                         ),
                       ),
@@ -274,37 +326,33 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                   dividerIndent: 16,
                   children: [
                     if (store.syncReport.sourceResults.isNotEmpty)
-                      Theme(
-                        data: Theme.of(context)
-                            .copyWith(dividerColor: Colors.transparent),
-                        child: ExpansionTile(
-                          title: Text('读取来源', style: journal.entryTitle),
-                          children: [
-                            for (final source in store.syncReport.sourceResults)
-                              ListTile(
-                                title: Text(const {
-                                      'courseWork': '正式作业',
-                                      'classroomActivity:35': '个人与分组任务',
-                                      'classroomActivity:42': '随堂练习',
-                                      'classroomActivity:77': 'AI 实践',
-                                      'exam': '课程考试',
-                                      'examAccount': '账号考试',
-                                      'examNotice': '考试通知',
-                                      'courseNotice': '课程通知',
-                                      'taskEnginePlan': '课程任务计划探测',
-                                      'groupHistory': '课程群补充',
-                                    }[source.source] ??
-                                    '其他来源'),
-                                subtitle: Text('${switch (source.phase) {
-                                  SyncSourcePhase.success => '读取完成',
-                                  SyncSourcePhase.partial => '部分信息待重试',
-                                  SyncSourcePhase.failed => '读取失败',
-                                  SyncSourcePhase.notEnabled => '尚未启用',
-                                }} · ${source.recordCount} 条 · ${source.unconfirmedCount} 条待确认'
-                                    '${source.reasonCodes.isEmpty ? '' : '\n原因：${source.reasonCodes.map(_reasonLabel).join('、')}'}'),
-                              ),
-                          ],
-                        ),
+                      JournalExpansionTile(
+                        title: Text('读取来源', style: journal.entryTitle),
+                        children: [
+                          for (final source in store.syncReport.sourceResults)
+                            ListTile(
+                              title: Text(const {
+                                    'courseWork': '正式作业',
+                                    'classroomActivity:35': '个人与分组任务',
+                                    'classroomActivity:42': '随堂练习',
+                                    'classroomActivity:77': 'AI 实践',
+                                    'exam': '课程考试',
+                                    'examAccount': '账号考试',
+                                    'examNotice': '考试通知',
+                                    'courseNotice': '课程通知',
+                                    'taskEnginePlan': '课程任务计划探测',
+                                    'groupHistory': '课程群补充',
+                                  }[source.source] ??
+                                  '其他来源'),
+                              subtitle: Text('${switch (source.phase) {
+                                SyncSourcePhase.success => '读取完成',
+                                SyncSourcePhase.partial => '部分信息待重试',
+                                SyncSourcePhase.failed => '读取失败',
+                                SyncSourcePhase.notEnabled => '尚未启用',
+                              }} · ${source.recordCount} 条 · ${source.unconfirmedCount} 条待确认'
+                                  '${source.reasonCodes.isEmpty ? '' : '\n原因：${source.reasonCodes.map(_reasonLabel).join('、')}'}'),
+                            ),
+                        ],
                       ),
                     if (store.syncReport.issues.isNotEmpty)
                       Builder(builder: (context) {
@@ -325,113 +373,101 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                           return names[key] ?? '课程信息待刷新';
                         }
 
-                        return Theme(
-                          data: Theme.of(context)
-                              .copyWith(dividerColor: Colors.transparent),
-                          child: ExpansionTile(
-                            key: const ValueKey('sync-issue-groups'),
-                            initiallyExpanded: widget.expandIssues,
-                            title: Text(
-                              '问题明细（${groups.length} 组，共 ${store.syncReport.issues.length} 条）',
-                              style: journal.entryTitle,
-                            ),
-                            children: [
-                              for (var groupIndex = 0;
-                                  groupIndex < groups.length;
-                                  groupIndex++)
-                                Builder(builder: (context) {
-                                  final group = groups[groupIndex];
-                                  final courses = group.issues
-                                      .map(courseLabel)
-                                      .toSet()
-                                      .toList();
-                                  final courseSummary = courses.length > 3
-                                      ? '${courses.take(3).join('、')} 等 ${courses.length} 项'
-                                      : courses.join('、');
-                                  return ExpansionTile(
-                                      key: ValueKey(
-                                          'sync-issue-group-$groupIndex'),
-                                      title: Text(group.message),
-                                      subtitle: Text(
-                                          '${syncIssueStageLabel(group.stage)} · '
-                                          '${syncIssueKindLabel(group.kind)} · '
-                                          '${group.count} 条\n涉及：$courseSummary'),
-                                      children: [
-                                        ListTile(
-                                          title: Text(
-                                              '下一步：${syncIssueNextAction(group.kind)}'),
-                                        ),
-                                        ExpansionTile(
-                                          key: ValueKey(
-                                              'sync-issue-raw-$groupIndex'),
-                                          title: Text(
-                                              '查看原始条目（${group.issues.length}）'),
-                                          children: [
-                                            for (final issue in group.issues)
-                                              ListTile(
-                                                title: Text(
-                                                    '${courseLabel(issue)} · '
-                                                    '${syncIssueKindLabel(issue.kind)}'),
-                                                subtitle: Text(
-                                                    '${syncIssueStageLabel(issue.stage)} · '
-                                                    '${issue.kind.name}'
-                                                    '${issue.httpStatus == null ? '' : ' · HTTP ${issue.httpStatus}'}'
-                                                    '${issue.elapsedMs == null ? '' : ' · ${issue.elapsedMs}ms'}'),
-                                              ),
-                                          ],
-                                        ),
-                                      ]);
-                                }),
-                            ],
+                        return JournalExpansionTile(
+                          key: const ValueKey('sync-issue-groups'),
+                          initiallyExpanded: widget.expandIssues,
+                          title: Text(
+                            '问题明细（${groups.length} 组，共 ${store.syncReport.issues.length} 条）',
+                            style: journal.entryTitle,
                           ),
+                          children: [
+                            for (var groupIndex = 0;
+                                groupIndex < groups.length;
+                                groupIndex++)
+                              Builder(builder: (context) {
+                                final group = groups[groupIndex];
+                                final courses = group.issues
+                                    .map(courseLabel)
+                                    .toSet()
+                                    .toList();
+                                final courseSummary = courses.length > 3
+                                    ? '${courses.take(3).join('、')} 等 ${courses.length} 项'
+                                    : courses.join('、');
+                                return JournalExpansionTile(
+                                  key: ValueKey('sync-issue-group-$groupIndex'),
+                                  title: Text(group.message),
+                                  subtitle: Text(
+                                      '${syncIssueStageLabel(group.stage)} · '
+                                      '${syncIssueKindLabel(group.kind)} · '
+                                      '${group.count} 条\n涉及：$courseSummary'),
+                                  children: [
+                                    ListTile(
+                                      title: Text(
+                                          '下一步：${syncIssueNextAction(group.kind)}'),
+                                    ),
+                                    JournalExpansionTile(
+                                      key: ValueKey(
+                                          'sync-issue-raw-$groupIndex'),
+                                      title: Text(
+                                          '查看原始条目（${group.issues.length}）'),
+                                      children: [
+                                        for (final issue in group.issues)
+                                          ListTile(
+                                            title: Text(
+                                                '${courseLabel(issue)} · '
+                                                '${syncIssueKindLabel(issue.kind)}'),
+                                            subtitle: Text(
+                                                '${syncIssueStageLabel(issue.stage)} · '
+                                                '${issue.kind.name}'
+                                                '${issue.httpStatus == null ? '' : ' · HTTP ${issue.httpStatus}'}'
+                                                '${issue.elapsedMs == null ? '' : ' · ${issue.elapsedMs}ms'}'),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                );
+                              }),
+                          ],
                         );
                       }),
                     if (store.chaoxingClient.requestTimings.isNotEmpty)
-                      Theme(
-                        data: Theme.of(context)
-                            .copyWith(dividerColor: Colors.transparent),
-                        child: ExpansionTile(
-                          title: Text('本机临时请求采样', style: journal.entryTitle),
-                          subtitle: Text(
-                            '完整读取或会话重置时清空，累计耗时包含本地解析',
-                            style: journal.metadata,
-                          ),
-                          children: [
-                            for (final e
-                                in store.chaoxingClient.requestTimings.entries)
-                              ListTile(
-                                title: Text(e.key),
-                                subtitle: Text(
-                                    '${e.value.count}次 · 累计${e.value.elapsedMs}毫秒 · 网络/HTTP失败${e.value.httpFailures}次'),
-                              ),
-                          ],
+                      JournalExpansionTile(
+                        title: Text('本机临时请求采样', style: journal.entryTitle),
+                        subtitle: Text(
+                          '完整读取或会话重置时清空，累计耗时包含本地解析',
+                          style: journal.metadata,
                         ),
+                        children: [
+                          for (final e
+                              in store.chaoxingClient.requestTimings.entries)
+                            ListTile(
+                              title: Text(e.key),
+                              subtitle: Text(
+                                  '${e.value.count}次 · 累计${e.value.elapsedMs}毫秒 · 网络/HTTP失败${e.value.httpFailures}次'),
+                            ),
+                        ],
                       ),
                     if (store
                         .chaoxingClient.diagnostics.phaseElapsedMs.isNotEmpty)
-                      Theme(
-                        data: Theme.of(context)
-                            .copyWith(dividerColor: Colors.transparent),
-                        child: ExpansionTile(
-                          title: Text('本机同步阶段采样', style: journal.entryTitle),
-                          subtitle: Text('仅客户端采集阶段，不含保存与提醒重排',
-                              style: journal.metadata),
-                          children: [
-                            for (final entry in store.chaoxingClient.diagnostics
-                                .phaseElapsedMs.entries)
-                              ListTile(
-                                title: Text(const {
-                                      'courseList': '课程索引',
-                                      'formalWork': '正式作业',
-                                      'classroomTasks': '课堂任务',
-                                      'exams': '考试与通知',
-                                      'taskEnginePlan': '课程任务计划探测',
-                                    }[entry.key] ??
-                                    entry.key),
-                                trailing: Text('${entry.value} 毫秒'),
-                              ),
-                          ],
-                        ),
+                      JournalExpansionTile(
+                        title: Text('本机同步阶段采样', style: journal.entryTitle),
+                        subtitle:
+                            Text('仅客户端采集阶段，不含保存与提醒重排', style: journal.metadata),
+                        children: [
+                          for (final entry in store.chaoxingClient.diagnostics
+                              .phaseElapsedMs.entries)
+                            ListTile(
+                              title: Text(const {
+                                    'courseList': '课程索引',
+                                    'formalWork': '正式作业',
+                                    'classroomTasks': '课堂任务',
+                                    'exams': '考试与通知',
+                                    'taskEnginePlan': '课程任务计划探测',
+                                  }[entry.key] ??
+                                  entry.key),
+                              trailing: Text('${entry.value} 毫秒'),
+                            ),
+                        ],
                       ),
                   ],
                 ),

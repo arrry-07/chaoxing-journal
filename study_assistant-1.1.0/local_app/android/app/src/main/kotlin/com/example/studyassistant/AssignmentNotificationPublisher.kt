@@ -24,6 +24,9 @@ object AssignmentNotificationPublisher {
     const val CHANNEL_DEADLINES = DeadlineChannelPolicy.CHANNEL_DEADLINES
     const val CHANNEL_DEADLINES_V2 = DeadlineChannelPolicy.CHANNEL_DEADLINES_V2
     const val CHANNEL_UPDATES = DeadlineChannelPolicy.CHANNEL_UPDATES
+    const val CHANNEL_UPDATES_V2 = DeadlineChannelPolicy.CHANNEL_UPDATES_V2
+    const val CHANNEL_SUMMARY_V2 = DeadlineChannelPolicy.CHANNEL_SUMMARY_V2
+    const val CHANNEL_MANUAL_V2 = DeadlineChannelPolicy.CHANNEL_MANUAL_V2
     const val CHANNEL_SILENT = DeadlineChannelPolicy.CHANNEL_SILENT
     const val TEST_NOTIFICATION_ID = DeadlineChannelPolicy.TEST_NOTIFICATION_ID
     private const val EXTRA_DELIVERY_TOKEN = "com.example.studyassistant.DELIVERY_TOKEN"
@@ -61,32 +64,42 @@ object AssignmentNotificationPublisher {
         )
     }
 
+    private fun buildAudibleChannel(
+        context: Context,
+        channelId: String,
+        name: String,
+        channelDescription: String,
+    ): NotificationChannel = NotificationChannel(
+        channelId,
+        name,
+        NotificationManager.IMPORTANCE_HIGH,
+    ).apply {
+        description = channelDescription
+        setSound(
+            DeadlineChannelPolicy.chimeUri(context),
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build(),
+        )
+        enableVibration(true)
+        vibrationPattern = DeadlineChannelPolicy.DEFAULT_VIBRATION_PATTERN
+        lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+        setShowBadge(true)
+    }
+
     fun ensureDeadlineChannel(context: Context, channelId: String) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        val normalized = DeadlineChannelPolicy.normalizeChannelId(channelId) ?: CHANNEL_DEADLINES
+        val normalized = DeadlineChannelPolicy.normalizeChannelId(channelId) ?: CHANNEL_DEADLINES_V2
         if (manager.getNotificationChannel(normalized) != null) return
         if (normalized == CHANNEL_DEADLINES_V2) {
             manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_DEADLINES_V2,
-                    "作业截止提醒（增强有声）",
-                    NotificationManager.IMPORTANCE_HIGH,
-                ).apply {
-                    description = "学习通作业截止与考试开考有声提醒"
-                    val soundUri = Settings.System.DEFAULT_NOTIFICATION_URI
-                    if (soundUri != null) {
-                        setSound(
-                            soundUri,
-                            AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                                .build(),
-                        )
-                    }
-                    enableVibration(true)
-                    vibrationPattern = DeadlineChannelPolicy.DEFAULT_VIBRATION_PATTERN
-                    lockscreenVisibility = Notification.VISIBILITY_PRIVATE
-                },
+                buildAudibleChannel(
+                    context = context,
+                    channelId = CHANNEL_DEADLINES_V2,
+                    name = "作业截止提醒",
+                    channelDescription = "学习通作业截止与考试开考提醒",
+                ),
             )
         } else {
             manager.createNotificationChannel(
@@ -103,31 +116,40 @@ object AssignmentNotificationPublisher {
 
     fun ensureChannels(context: Context, activeDeadlineChannelId: String? = null) {
         val manager = context.getSystemService(NotificationManager::class.java)
+        ensureDeadlineChannel(context, CHANNEL_DEADLINES_V2)
         val deadlineChannel = DeadlineChannelPolicy.normalizeChannelId(activeDeadlineChannelId)
             ?: DeadlineChannelPolicy.resolveFromSystem(context)
-        ensureDeadlineChannel(context, deadlineChannel)
-        if (manager.getNotificationChannel(CHANNEL_UPDATES) == null) {
+        if (deadlineChannel != CHANNEL_DEADLINES_V2) {
+            ensureDeadlineChannel(context, deadlineChannel)
+        }
+        if (manager.getNotificationChannel(CHANNEL_UPDATES_V2) == null) {
             manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_UPDATES,
-                    "作业变化提醒",
-                    NotificationManager.IMPORTANCE_DEFAULT,
-                ).apply {
-                    description = "学习通作业新增提醒"
-                },
+                buildAudibleChannel(
+                    context = context,
+                    channelId = CHANNEL_UPDATES_V2,
+                    name = "新增作业提醒",
+                    channelDescription = "学习通新增作业与考试有声提醒",
+                ),
             )
         }
-        if (manager.getNotificationChannel(CHANNEL_SILENT) == null) {
+        if (manager.getNotificationChannel(CHANNEL_SUMMARY_V2) == null) {
             manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_SILENT,
-                    "静默作业通知",
-                    NotificationManager.IMPORTANCE_LOW,
-                ).apply {
-                    description = "未知截止时间的新增作业静默提示"
-                    setSound(null, null)
-                    enableVibration(false)
-                },
+                buildAudibleChannel(
+                    context = context,
+                    channelId = CHANNEL_SUMMARY_V2,
+                    name = "每日课业摘要",
+                    channelDescription = "基于最近一次本机快照的课业摘要",
+                ),
+            )
+        }
+        if (manager.getNotificationChannel(CHANNEL_MANUAL_V2) == null) {
+            manager.createNotificationChannel(
+                buildAudibleChannel(
+                    context = context,
+                    channelId = CHANNEL_MANUAL_V2,
+                    name = "待办与考试提醒",
+                    channelDescription = "待办和考试开始前提醒",
+                ),
             )
         }
     }
@@ -271,7 +293,7 @@ object AssignmentNotificationPublisher {
             }
         }
         val activeChannel = DeadlineChannelPolicy.normalizeChannelId(account.deadlineChannelId)
-            ?: CHANNEL_DEADLINES
+            ?: CHANNEL_DEADLINES_V2
         ensureDeadlineChannel(context, activeChannel)
         notificationWarning(context, activeChannel)?.let {
             return blocked(
@@ -330,7 +352,7 @@ object AssignmentNotificationPublisher {
         database: ReminderDatabase,
         accountHash: String,
         now: Instant = Instant.now(),
-    ): PublishResult = publishPendingNewAssignments(context, database, accountHash, now, CHANNEL_UPDATES)
+    ): PublishResult = publishPendingNewAssignments(context, database, accountHash, now, CHANNEL_UPDATES_V2)
 
     internal fun publishPendingNewAssignments(
         context: Context,
@@ -387,23 +409,6 @@ object AssignmentNotificationPublisher {
                 it,
             )
         }
-        val unknownDeadlineOnly = todo.all { it.deadlineAt == null }
-        val deliveryChannelId = if (unknownDeadlineOnly && channelId == CHANNEL_UPDATES) {
-            CHANNEL_SILENT
-        } else {
-            channelId
-        }
-        if (deliveryChannelId != channelId) {
-            notificationWarning(context, deliveryChannelId)?.let {
-                return blocked(
-                    context,
-                    database,
-                    todo,
-                    "newAssignment",
-                    it,
-                )
-            }
-        }
         val single = todo.singleOrNull()
         val notificationId = if (single != null) {
             single.notificationId
@@ -417,12 +422,8 @@ object AssignmentNotificationPublisher {
             todo,
             account.showDetails,
             now,
-            deliveryChannelId,
-        )
-            .apply {
-                if (unknownDeadlineOnly) setSilent(true)
-            }
-            .build()
+            channelId,
+        ).build()
         return submit(
             context,
             database,
@@ -533,6 +534,7 @@ object AssignmentNotificationPublisher {
                 )
                     .setWhen(active.notification.`when`)
                     .setSilent(true)
+                    .setOnlyAlertOnce(true)
                     .build()
                 // Preserve both the notification id and SUBMITTED history;
                 // this is a silent content update, not another new event.
@@ -1127,9 +1129,9 @@ object AssignmentNotificationPublisher {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return "notificationPermissionOff"
         val channelId = channelIdOverride ?: if (category == "newAssignment") {
-            CHANNEL_UPDATES
+            CHANNEL_UPDATES_V2
         } else {
-            CHANNEL_DEADLINES
+            CHANNEL_DEADLINES_V2
         }
         val channel = context.getSystemService(NotificationManager::class.java)
             .getNotificationChannel(channelId)
@@ -1257,8 +1259,11 @@ object AssignmentNotificationPublisher {
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setSound(DeadlineChannelPolicy.chimeUri(context))
+            .setVibrate(DeadlineChannelPolicy.DEFAULT_VIBRATION_PATTERN)
+            .setDefaults(NotificationCompat.DEFAULT_LIGHTS)
             .setAutoCancel(true)
-            .setOnlyAlertOnce(true)
+            .setOnlyAlertOnce(false)
 
     private fun clickIntent(
         context: Context,

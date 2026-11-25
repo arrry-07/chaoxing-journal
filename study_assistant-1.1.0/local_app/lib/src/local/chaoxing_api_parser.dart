@@ -10,6 +10,9 @@ class ChaoxingCourseRef {
     this.cpi,
     this.teacherNames = const [],
     this.folderName,
+    this.clazzName,
+    this.courseStartAt,
+    this.courseEndAt,
   });
 
   final String courseId;
@@ -18,6 +21,9 @@ class ChaoxingCourseRef {
   final String? cpi;
   final List<String> teacherNames;
   final String? folderName;
+  final String? clazzName;
+  final DateTime? courseStartAt;
+  final DateTime? courseEndAt;
 }
 
 class ChaoxingApiParser {
@@ -92,6 +98,54 @@ class ChaoxingApiParser {
     return (names: tfNames, conflicted: false);
   }
 
+  static final int _minCourseBoundaryMs =
+      DateTime.utc(2000, 1, 1).millisecondsSinceEpoch;
+  static final int _maxCourseBoundaryMs =
+      DateTime.utc(2100, 12, 31, 23, 59, 59, 999).millisecondsSinceEpoch;
+
+  static DateTime? _parseCourseBoundaryUtc(dynamic raw) {
+    if (raw == null) return null;
+    DateTime? dt;
+    if (raw is num) {
+      if (!raw.isFinite || raw <= 0) return null;
+      final num msNum = raw < 100000000000 ? raw * 1000 : raw;
+      if (!msNum.isFinite ||
+          msNum < _minCourseBoundaryMs ||
+          msNum > _maxCourseBoundaryMs) {
+        return null;
+      }
+      dt = DateTime.fromMillisecondsSinceEpoch(msNum.truncate(), isUtc: true);
+    } else if (raw is String) {
+      final text = raw.trim();
+      if (text.isEmpty) return null;
+      final numeric = num.tryParse(text);
+      if (numeric != null) {
+        return _parseCourseBoundaryUtc(numeric);
+      }
+      final dateOnly =
+          RegExp(r'^(\d{4})-(\d{1,2})-(\d{1,2})$').firstMatch(text);
+      if (dateOnly != null) {
+        final y = int.parse(dateOnly.group(1)!);
+        final m = int.parse(dateOnly.group(2)!);
+        final d = int.parse(dateOnly.group(3)!);
+        dt = DateTime.utc(y, m, d);
+        if (dt.year != y || dt.month != m || dt.day != d) return null;
+      } else {
+        dt = DateTime.tryParse(text)?.toUtc();
+      }
+    }
+    if (dt == null || dt.year < 2000 || dt.year > 2100) return null;
+    return dt.toUtc();
+  }
+
+  static DateTime? _firstCourseBoundaryUtc(List<dynamic> candidates) {
+    for (final raw in candidates) {
+      final parsed = _parseCourseBoundaryUtc(raw);
+      if (parsed != null) return parsed;
+    }
+    return null;
+  }
+
   static ({
     List<ChaoxingCourseRef> refs,
     int rejected,
@@ -119,9 +173,6 @@ class ChaoxingApiParser {
           if (content != channel)
             for (final key in childKeys) ...?_asList(content?[key]),
         ];
-        final ownFolder =
-            _stringValue(content?['folderName'] ?? channel?['folderName']);
-        final nextFolder = ownFolder ?? parentFolder;
         final markedFolder = content?['folderName'] != null ||
             content?['datatype']?.toString() == '1' ||
             channel?['cataName'] == '文件夹';
@@ -138,6 +189,12 @@ class ChaoxingApiParser {
             childKeys.any((key) =>
                 _asList(channel?[key]) != null ||
                 _asList(content?[key]) != null);
+        final ownFolder =
+            _stringValue(content?['folderName'] ?? channel?['folderName']) ??
+                ((markedFolder || (isFolder && !hasCourse))
+                    ? _stringValue(content?['name'] ?? channel?['name'])
+                    : null);
+        final nextFolder = ownFolder ?? parentFolder;
         if (hasCourse || !isFolder) {
           yield (item: item, folderName: isFolder ? nextFolder : parentFolder);
         }
@@ -150,6 +207,9 @@ class ChaoxingApiParser {
     final courses = <ChaoxingCourseRef>[];
     final indexByKey = <String, int>{};
     final foldersByKey = <String, Set<String>>{};
+    final clazzNamesByKey = <String, Set<String>>{};
+    final startAtsByKey = <String, Set<int>>{};
+    final endAtsByKey = <String, Set<int>>{};
     final teacherSignaturesByKey = <String, Set<String>>{};
     final teacherConflictKeys = <String>{};
     var rejected = 0;
@@ -199,11 +259,56 @@ class ChaoxingApiParser {
         continue;
       }
 
+      final rawClazzCandidate = courseData != null
+          ? _stringValue(
+              clazzData?['name'] ??
+                  clazzData?['clazzName'] ??
+                  content['clazzName'] ??
+                  content['name'],
+            )
+          : _stringValue(
+              clazzData?['name'] ??
+                  clazzData?['clazzName'] ??
+                  content['clazzName'],
+            );
+      final String? rawClazzName =
+          (rawClazzCandidate == null || rawClazzCandidate == courseName)
+              ? null
+              : (rawClazzCandidate.length > 120
+                  ? rawClazzCandidate.substring(0, 120)
+                  : rawClazzCandidate);
+      final courseStartAt = _firstCourseBoundaryUtc([
+        courseData?['begindate'],
+        courseData?['startTime'],
+        courseData?['startdate'],
+        content['begindate'],
+        content['startTime'],
+        content['startdate'],
+      ]);
+      final courseEndAt = _firstCourseBoundaryUtc([
+        courseData?['enddate'],
+        courseData?['endTime'],
+        content['enddate'],
+        content['endTime'],
+      ]);
+
       final key = '$courseId:$clazzId';
       final teacherInfo = _extractTeachers(courseData, content);
       final folders = foldersByKey.putIfAbsent(key, () => <String>{});
       if (entry.folderName != null && entry.folderName!.isNotEmpty) {
         folders.add(entry.folderName!);
+      }
+      final clazzNames = clazzNamesByKey.putIfAbsent(key, () => <String>{});
+      if (rawClazzName != null) {
+        clazzNames.add(rawClazzName);
+      }
+      final startAts = startAtsByKey.putIfAbsent(key, () => <int>{});
+      if (courseStartAt != null) {
+        startAts.add(courseStartAt.millisecondsSinceEpoch);
+      }
+      final endAts = endAtsByKey.putIfAbsent(key, () => <int>{});
+      if (courseEndAt != null) {
+        endAts.add(courseEndAt.millisecondsSinceEpoch);
       }
       if (teacherInfo.conflicted) {
         teacherConflictKeys.add(key);
@@ -217,6 +322,14 @@ class ChaoxingApiParser {
         duplicates++;
         final existing = courses[existingIdx];
         final resolvedFolder = folders.length == 1 ? folders.single : null;
+        final resolvedClazzName =
+            clazzNames.length == 1 ? clazzNames.single : null;
+        final resolvedStartAt = startAts.length == 1
+            ? DateTime.fromMillisecondsSinceEpoch(startAts.single, isUtc: true)
+            : null;
+        final resolvedEndAt = endAts.length == 1
+            ? DateTime.fromMillisecondsSinceEpoch(endAts.single, isUtc: true)
+            : null;
         final teacherConflict = teacherConflictKeys.contains(key) ||
             (teacherSignaturesByKey[key]?.length ?? 0) > 1;
         final resolvedTeachers = teacherConflict
@@ -231,6 +344,9 @@ class ChaoxingApiParser {
           cpi: existing.cpi,
           teacherNames: resolvedTeachers,
           folderName: resolvedFolder,
+          clazzName: resolvedClazzName,
+          courseStartAt: resolvedStartAt,
+          courseEndAt: resolvedEndAt,
         );
         continue;
       }
@@ -245,6 +361,9 @@ class ChaoxingApiParser {
           teacherNames:
               teacherInfo.conflicted ? const <String>[] : teacherInfo.names,
           folderName: entry.folderName,
+          clazzName: rawClazzName,
+          courseStartAt: courseStartAt,
+          courseEndAt: courseEndAt,
         ),
       );
     }

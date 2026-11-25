@@ -5,11 +5,17 @@ class CourseRef {
     required this.name,
     this.teacherNames = const [],
     this.folderName,
+    this.clazzName,
+    this.courseStartAt,
+    this.courseEndAt,
   });
 
   final String courseId, clazzId, name;
   final List<String> teacherNames;
   final String? folderName;
+  final String? clazzName;
+  final DateTime? courseStartAt;
+  final DateTime? courseEndAt;
 
   String get key => '$courseId:$clazzId';
 
@@ -20,8 +26,17 @@ class CourseRef {
     return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
   }
 
+  String? get normalizedClazzName {
+    final trimmed = clazzName?.trim();
+    return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+  }
+
   bool get hasMetadata =>
-      teacherNames.isNotEmpty || normalizedFolderName != null;
+      teacherNames.isNotEmpty ||
+      normalizedFolderName != null ||
+      normalizedClazzName != null ||
+      courseStartAt != null ||
+      courseEndAt != null;
 
   CourseRef copyWith({
     String? courseId,
@@ -30,6 +45,12 @@ class CourseRef {
     List<String>? teacherNames,
     String? folderName,
     bool clearFolderName = false,
+    String? clazzName,
+    bool clearClazzName = false,
+    DateTime? courseStartAt,
+    bool clearCourseStartAt = false,
+    DateTime? courseEndAt,
+    bool clearCourseEndAt = false,
   }) =>
       CourseRef(
         courseId: courseId ?? this.courseId,
@@ -37,13 +58,25 @@ class CourseRef {
         name: name ?? this.name,
         teacherNames: teacherNames ?? this.teacherNames,
         folderName: clearFolderName ? null : (folderName ?? this.folderName),
+        clazzName: clearClazzName ? null : (clazzName ?? this.clazzName),
+        courseStartAt:
+            clearCourseStartAt ? null : (courseStartAt ?? this.courseStartAt),
+        courseEndAt:
+            clearCourseEndAt ? null : (courseEndAt ?? this.courseEndAt),
       );
 
   CourseRef mergeMissingMetadata(CourseRef fallback) {
     final nextTeachers =
         teacherNames.isNotEmpty ? teacherNames : fallback.teacherNames;
     final nextFolder = normalizedFolderName ?? fallback.normalizedFolderName;
-    if (nextTeachers == teacherNames && nextFolder == normalizedFolderName) {
+    final nextClazzName = normalizedClazzName ?? fallback.normalizedClazzName;
+    final nextStartAt = courseStartAt ?? fallback.courseStartAt;
+    final nextEndAt = courseEndAt ?? fallback.courseEndAt;
+    if (nextTeachers == teacherNames &&
+        nextFolder == normalizedFolderName &&
+        nextClazzName == normalizedClazzName &&
+        nextStartAt == courseStartAt &&
+        nextEndAt == courseEndAt) {
       return this;
     }
     return CourseRef(
@@ -52,6 +85,9 @@ class CourseRef {
       name: name,
       teacherNames: List.unmodifiable(nextTeachers),
       folderName: nextFolder,
+      clazzName: nextClazzName,
+      courseStartAt: nextStartAt,
+      courseEndAt: nextEndAt,
     );
   }
 
@@ -61,6 +97,11 @@ class CourseRef {
         'name': name,
         if (teacherNames.isNotEmpty) 'teacherNames': teacherNames,
         if (normalizedFolderName != null) 'folderName': normalizedFolderName,
+        if (normalizedClazzName != null) 'clazzName': normalizedClazzName,
+        if (courseStartAt != null)
+          'courseStartAt': courseStartAt!.toUtc().toIso8601String(),
+        if (courseEndAt != null)
+          'courseEndAt': courseEndAt!.toUtc().toIso8601String(),
       };
 
   static List<String> _decodeTeacherNames(dynamic raw) {
@@ -82,12 +123,22 @@ class CourseRef {
     return List.unmodifiable(unique);
   }
 
-  static String? _decodeFolderName(dynamic raw) {
+  static String? _decodeBoundedText(dynamic raw, {required String error}) {
     if (raw == null) return null;
-    if (raw is! String) throw const FormatException('课程目录名称格式无效');
+    if (raw is! String) throw FormatException(error);
     final trimmed = raw.trim();
     if (trimmed.isEmpty) return null;
     return trimmed.length > 120 ? trimmed.substring(0, 120) : trimmed;
+  }
+
+  static DateTime? _decodeUtcDate(dynamic raw, {required String error}) {
+    if (raw == null) return null;
+    if (raw is! String) throw FormatException(error);
+    final parsed = DateTime.tryParse(raw.trim());
+    if (parsed == null || parsed.year < 2000 || parsed.year > 2100) {
+      throw FormatException(error);
+    }
+    return parsed.toUtc();
   }
 
   factory CourseRef.fromJson(Map<String, dynamic> j) => CourseRef(
@@ -95,6 +146,9 @@ class CourseRef {
         clazzId: j['clazzId'] as String,
         name: j['name'] as String,
         teacherNames: _decodeTeacherNames(j['teacherNames']),
-        folderName: _decodeFolderName(j['folderName']),
+        folderName: _decodeBoundedText(j['folderName'], error: '课程目录名称格式无效'),
+        clazzName: _decodeBoundedText(j['clazzName'], error: '课程班级名称格式无效'),
+        courseStartAt: _decodeUtcDate(j['courseStartAt'], error: '课程开始时间格式无效'),
+        courseEndAt: _decodeUtcDate(j['courseEndAt'], error: '课程结束时间格式无效'),
       );
 }

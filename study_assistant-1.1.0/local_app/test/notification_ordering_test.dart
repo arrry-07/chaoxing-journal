@@ -97,8 +97,8 @@ void main() {
         case 'getNotificationChannels':
           return [
             for (final id in [
-              'assignment_deadlines',
-              'daily_summary',
+              'assignment_deadlines_v2',
+              'daily_summary_v2',
               'personal_schedule_v2'
             ])
               h.channelRow(id, id, 4)
@@ -134,7 +134,7 @@ void main() {
           // payload. Keep this seam faithful to the shipped native plugin.
           active.add({
             'id': args['id'],
-            'channelId': 'assignment_deadlines',
+            'channelId': 'assignment_deadlines_v2',
             'tag': null
           });
           events.add('show-done');

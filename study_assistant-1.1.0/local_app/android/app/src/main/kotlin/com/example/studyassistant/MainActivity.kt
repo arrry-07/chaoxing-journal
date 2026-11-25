@@ -426,14 +426,17 @@ class MainActivity : FlutterActivity() {
             manager?.notificationChannels?.associateBy { it.id }.orEmpty()
         }.getOrDefault(emptyMap())
         val defaultSound = runCatching { Settings.System.DEFAULT_NOTIFICATION_URI }.getOrNull()
+        val builtinChime = runCatching { DeadlineChannelPolicy.chimeUri(this) }.getOrNull()
         val channelIds = listOf(
             DeadlineChannelPolicy.CHANNEL_DEADLINES,
             DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
             DeadlineChannelPolicy.CHANNEL_UPDATES,
+            DeadlineChannelPolicy.CHANNEL_UPDATES_V2,
             DeadlineChannelPolicy.CHANNEL_SILENT,
             "daily_summary",
+            DeadlineChannelPolicy.CHANNEL_SUMMARY_V2,
             "personal_schedule",
-            "personal_schedule_v2",
+            DeadlineChannelPolicy.CHANNEL_MANUAL_V2,
         )
         val channelMap = buildMap<String, Any?> {
             for (id in channelIds) {
@@ -448,7 +451,11 @@ class MainActivity : FlutterActivity() {
                             "exists" to true,
                             "importance" to channel.importance,
                             "soundMuted" to (sound == null),
-                            "customSound" to (sound != null && defaultSound != null && sound != defaultSound),
+                            "customSound" to DeadlineChannelPolicy.isCustomSoundUri(
+                                channelSound = sound?.toString(),
+                                defaultSound = defaultSound?.toString(),
+                                builtinChime = builtinChime?.toString(),
+                            ),
                             "vibrationEnabled" to runCatching { channel.shouldVibrate() }.getOrNull(),
                             "lockscreenVisibility" to runCatching { channel.lockscreenVisibility }.getOrNull(),
                         ),
@@ -498,6 +505,6 @@ class MainActivity : FlutterActivity() {
     }
 
     private companion object {
-        const val ASSIGNMENT_DEADLINE_CHANNEL_ID = "assignment_deadlines"
+        const val ASSIGNMENT_DEADLINE_CHANNEL_ID = DeadlineChannelPolicy.CHANNEL_DEADLINES_V2
     }
 }

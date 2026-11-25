@@ -173,7 +173,8 @@ void main() {
         MaterialApp(home: Scaffold(body: SyncStatusScreen(store: s))));
     expect(find.byKey(const ValueKey('auto-sync-option-off')), findsNothing);
     expect(find.byKey(const ValueKey('auto-sync-option-15')), findsNothing);
-    expect(find.text('调整后台检查与提醒'), findsOneWidget);
+    expect(find.text('白天后台检查'), findsOneWidget);
+    expect(find.text('通知触发与提醒设置'), findsOneWidget);
     expect(s.autoSyncIntervalMinutes, 240);
   });
 

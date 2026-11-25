@@ -14,53 +14,114 @@ import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import 'manual_entry_detail_screen.dart';
 import 'reminder_status_screen.dart';
+import 'widgets/coursework_status_pill.dart';
 import 'widgets/data_recovery_warning.dart';
 import 'widgets/journal_buttons.dart';
+import 'widgets/journal_context_menu.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_picker_sheet.dart';
+import 'widgets/journal_swipe_tile.dart';
 import 'widgets/manual_attachment_picker_section.dart';
 
 String manualTime(DateTime? at) => at == null
     ? '未安排时间'
     : '${DateFormat('yyyy-MM-dd HH:mm').format(AssignmentQuery.beijing(at))} 北京时间';
 
+String _compactAgendaTime(DateTime? at, DateTime now) {
+  if (at == null) return '未安排时间';
+  final bAt = AssignmentQuery.beijing(at);
+  final bNow = AssignmentQuery.beijing(now);
+  final clock = DateFormat('HH:mm').format(bAt);
+  final atDay = DateTime(bAt.year, bAt.month, bAt.day);
+  final today = DateTime(bNow.year, bNow.month, bNow.day);
+  if (atDay == today) return '今天 $clock';
+  if (atDay == today.add(const Duration(days: 1))) return '明天 $clock';
+  if (bAt.year == bNow.year) return '${bAt.month}月${bAt.day}日 $clock';
+  return '${bAt.year}年${bAt.month}月${bAt.day}日 $clock';
+}
+
 class ManualAgendaScreen extends StatefulWidget {
-  const ManualAgendaScreen({super.key, required this.store});
+  const ManualAgendaScreen({super.key, required this.store, this.clock});
   final AssignmentStore store;
+  final DateTime Function()? clock;
   @override
   State<ManualAgendaScreen> createState() => _AgendaState();
 }
 
 class _AgendaState extends State<ManualAgendaScreen> {
   late final int epoch;
+  final _feedback = TransientFeedbackController();
+
   @override
   void initState() {
     super.initState();
     epoch = widget.store.accountEpoch;
   }
 
-  bool busy = false;
-  String? message;
-  String filter = 'all';
+  @override
+  void dispose() {
+    _feedback.dispose();
+    super.dispose();
+  }
 
-  Future<void> update(StudyNotebook Function(StudyNotebook) action) async {
+  bool busy = false;
+  String filter = 'all';
+  bool _completedExpanded = false;
+
+  Future<void> _toggleDoneWithUndo(ManualEntry e) async {
     if (busy) return;
     setState(() => busy = true);
-    final ok = await widget.store.saveNotebook(action, epoch);
-    if (mounted) {
-      setState(() {
-        busy = false;
-        message = widget.store.saveFeedback(
-          ok,
-          successMessage: '个人安排已保存',
-          failureMessage: '个人安排保存失败，请核对账号后重试',
-          warnings: widget.store.manualSaveWarnings,
-        );
-      });
+    final nextDone = !e.done;
+    final ok = await widget.store.saveNotebook(
+      (n) => n.withEntries([
+        for (final q in n.entries) q.id == e.id ? q.completed(nextDone) : q,
+      ]),
+      epoch,
+    );
+    if (!mounted) return;
+    setState(() => busy = false);
+    if (!ok) {
+      showJournalMessage(
+        context,
+        widget.store.operationError ?? '个人安排保存失败，请核对账号后重试',
+      );
+      return;
     }
+    final warnings = widget.store.manualSaveWarnings;
+    final warningSuffix = warnings.isEmpty ? '' : '；${warnings.join('；')}';
+    if (nextDone) {
+      JournalMotion.complete(widget.store.display);
+    } else {
+      JournalMotion.tap(widget.store.display);
+    }
+    _feedback.show(
+      context,
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text(
+          nextDone ? '已完成「${e.title}」$warningSuffix' : '已恢复为未完成$warningSuffix',
+        ),
+        action: SnackBarAction(
+          label: '撤销',
+          onPressed: () {
+            if (widget.store.accountEpoch != epoch) return;
+            unawaited(
+              widget.store.saveNotebook(
+                (n) => n.withEntries([
+                  for (final q in n.entries)
+                    q.id == e.id ? q.completed(!nextDone) : q,
+                ]),
+                epoch,
+              ),
+            );
+          },
+        ),
+      ),
+    );
   }
 
   Future<void> remove(ManualEntry e) async {
+    if (busy) return;
     final yes = await showDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
@@ -78,10 +139,24 @@ class _AgendaState extends State<ManualAgendaScreen> {
                       onPressed: () => Navigator.pop(c, true),
                       child: const Text('删除'))
                 ]));
-    if (mounted && yes == true) {
-      await update(
-          (n) => n.withEntries(n.entries.where((v) => v.id != e.id).toList()));
+    if (!mounted || yes != true) return;
+    setState(() => busy = true);
+    final ok = await widget.store.saveNotebook(
+      (n) => n.withEntries(n.entries.where((v) => v.id != e.id).toList()),
+      epoch,
+    );
+    if (!mounted) return;
+    setState(() => busy = false);
+    if (!ok) {
+      showJournalMessage(
+        context,
+        widget.store.operationError ?? '个人安排保存失败，请核对账号后重试',
+      );
+      return;
     }
+    final warnings = widget.store.manualSaveWarnings;
+    final warningSuffix = warnings.isEmpty ? '' : '；${warnings.join('；')}';
+    showJournalMessage(context, '已删除个人安排$warningSuffix');
   }
 
   Future<void> edit([ManualEntry? e]) async {
@@ -108,21 +183,136 @@ class _AgendaState extends State<ManualAgendaScreen> {
             )));
   }
 
+  void _openDetail(ManualEntry e) {
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      router.push('/assignments/manual/${Uri.encodeComponent(e.id)}');
+    } else {
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ManualEntryDetailScreen(
+            store: widget.store,
+            entryId: e.id,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _openEntryMenu(BuildContext itemContext, ManualEntry e) async {
+    final box = itemContext.findRenderObject() as RenderBox?;
+    Rect? anchorRect;
+    if (box != null && box.hasSize) {
+      anchorRect = box.localToGlobal(Offset.zero) & box.size;
+    }
+    await showJournalContextMenu(
+      context: context,
+      anchorRect: anchorRect,
+      displayPrefs: widget.store.display,
+      actions: [
+        JournalContextMenuAction(
+          label: '编辑',
+          icon: Icons.edit_outlined,
+          onSelected: () => unawaited(edit(e)),
+        ),
+        JournalContextMenuAction(
+          label: e.done ? '恢复未完成' : '标记完成',
+          icon: e.done ? Icons.undo_rounded : Icons.check_rounded,
+          onSelected: () => unawaited(_toggleDoneWithUndo(e)),
+        ),
+        JournalContextMenuAction(
+          label: '删除',
+          icon: Icons.delete_outline_rounded,
+          destructive: true,
+          onSelected: () => unawaited(remove(e)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSwipeableRow(
+    ManualEntry e,
+    DateTime now,
+    JournalPalette journal,
+  ) {
+    return JournalSwipeTile(
+      key: ValueKey('agenda-swipe-${e.id}'),
+      displayPrefs: widget.store.display,
+      enabled: !busy,
+      rightAction: e.done
+          ? JournalSwipeAction(
+              label: '恢复未完成',
+              icon: Icons.undo_rounded,
+              color: journal.accent,
+              backgroundColor: journal.sage,
+              onTrigger: () => unawaited(_toggleDoneWithUndo(e)),
+            )
+          : JournalSwipeAction(
+              label: '标记完成',
+              icon: Icons.check_rounded,
+              color: journal.todoGreen,
+              backgroundColor: journal.todoGreenBg,
+              onTrigger: () => unawaited(_toggleDoneWithUndo(e)),
+            ),
+      leftAction: JournalSwipeAction(
+        label: '删除',
+        icon: Icons.delete_outline_rounded,
+        color: journal.berry,
+        backgroundColor: journal.berryBg,
+        onTrigger: () => unawaited(remove(e)),
+      ),
+      child: Builder(
+        builder: (rowContext) => _AgendaEntryRow(
+          entry: e,
+          now: now,
+          busy: busy,
+          onToggleDone: () => unawaited(_toggleDoneWithUndo(e)),
+          onTap: () => _openDetail(e),
+          onLongPress: () => unawaited(_openEntryMenu(rowContext, e)),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
       animation: widget.store,
       builder: (context, _) {
         final journal = Journal.of(context);
-        final rows = widget.store.notebook.entries
+        final now = widget.clock?.call() ?? DateTime.now();
+        final allEntries = widget.store.notebook.entries;
+        final activeAllCount = allEntries.where((e) => !e.done).length;
+        final activeTodoCount = allEntries
+            .where((e) => !e.done && e.kind == ManualEntry.kindTodo)
+            .length;
+        final activeExamCount = allEntries
+            .where((e) => !e.done && e.kind == ManualEntry.kindExam)
+            .length;
+        final scoped = allEntries
             .where((e) => filter == 'all' || e.kind == filter)
-            .toList()
+            .toList(growable: false);
+        final activeRows = scoped.where((e) => !e.done).toList()
           ..sort((a, b) {
-            final done = (a.done ? 1 : 0).compareTo(b.done ? 1 : 0);
-            return done != 0
-                ? done
-                : (a.at ?? DateTime.utc(2200))
-                    .compareTo(b.at ?? DateTime.utc(2200));
+            final cmp = (a.at ?? DateTime.utc(2200))
+                .compareTo(b.at ?? DateTime.utc(2200));
+            return cmp != 0 ? cmp : a.id.compareTo(b.id);
           });
+        final doneRows = scoped.where((e) => e.done).toList()
+          ..sort((a, b) {
+            final aKey = a.updatedAt ??
+                a.at ??
+                DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+            final bKey = b.updatedAt ??
+                b.at ??
+                DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+            final cmp = bKey.compareTo(aKey);
+            return cmp != 0 ? cmp : a.id.compareTo(b.id);
+          });
+        final filterCounts = {
+          'all': activeAllCount,
+          'todo': activeTodoCount,
+          'exam': activeExamCount,
+        };
         return Scaffold(
             backgroundColor: journal.paper,
             appBar: AppBar(
@@ -141,18 +331,22 @@ class _AgendaState extends State<ManualAgendaScreen> {
                     style: journal.metadata,
                   ),
                   const SizedBox(height: 12),
-                  Wrap(spacing: 8, children: [
+                  Wrap(spacing: 8, runSpacing: 6, children: [
                     for (final item
                         in {'all': '全部', 'todo': '待办', 'exam': '考试'}.entries)
                       ChoiceChip(
-                          label: Text(item.value),
+                          label: Text(
+                            (filterCounts[item.key] ?? 0) > 0
+                                ? '${item.value} (${filterCounts[item.key]})'
+                                : item.value,
+                          ),
                           selected: filter == item.key,
                           onSelected: busy
                               ? null
                               : (_) => setState(() => filter = item.key))
                   ]),
                   const SizedBox(height: 12),
-                  if (rows.isEmpty)
+                  if (activeRows.isEmpty && doneRows.isEmpty)
                     JournalGroupedCard(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 22),
@@ -160,66 +354,133 @@ class _AgendaState extends State<ManualAgendaScreen> {
                         Text('还没有个人安排，点击下方按钮添加待办或考试。', style: journal.metadata),
                       ],
                     )
-                  else
-                    JournalGroupedCard(
-                      dividerIndent: 52,
-                      children: [
-                        for (final e in rows)
-                          ListTile(
-                              leading: Checkbox(
-                                  value: e.done,
-                                  onChanged: busy
-                                      ? null
-                                      : (v) => update((n) => n.withEntries([
-                                            for (final q in n.entries)
-                                              q.id == e.id
-                                                  ? q.completed(v ?? false)
-                                                  : q
-                                          ]))),
-                              title: Text(
-                                '${e.kind == 'exam' ? '考试' : '待办'} · ${e.title}',
-                                style: journal.entryTitle,
-                              ),
-                              subtitle: Text(
-                                '${manualTime(e.at)}${e.course.isEmpty ? '' : '\n${e.course}'}${e.location.isEmpty ? '' : ' · ${e.location}'}${e.minutes == 0 ? '' : '\n预计 ${e.minutes} 分钟'}${e.done ? ' · 个人已完成' : ''}',
-                                style: journal.metadata,
-                              ),
-                              onTap: busy
-                                  ? null
-                                  : () {
-                                      final router = GoRouter.maybeOf(context);
-                                      if (router != null) {
-                                        router.push(
-                                          '/assignments/manual/${Uri.encodeComponent(e.id)}',
-                                        );
-                                      } else {
-                                        Navigator.of(context,
-                                                rootNavigator: true)
-                                            .push(
-                                          MaterialPageRoute<void>(
-                                            builder: (_) =>
-                                                ManualEntryDetailScreen(
-                                              store: widget.store,
-                                              entryId: e.id,
-                                            ),
+                  else ...[
+                    if (activeRows.isEmpty)
+                      JournalGroupedCard(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 20),
+                        children: [
+                          Text('当前筛选下的个人安排已全部完成', style: journal.metadata),
+                        ],
+                      )
+                    else
+                      JournalGroupedCard(
+                        key: const ValueKey('agenda-active-card'),
+                        dividerIndent: 52,
+                        children: [
+                          for (final e in activeRows)
+                            _buildSwipeableRow(e, now, journal),
+                        ],
+                      ),
+                    if (doneRows.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      JournalGroupedCard(
+                        key: const ValueKey('agenda-completed-card'),
+                        dividerIndent: 52,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              InkWell(
+                                key: const ValueKey('agenda-completed-toggle'),
+                                onTap: () {
+                                  JournalMotion.tap(widget.store.display);
+                                  setState(() {
+                                    _completedExpanded = !_completedExpanded;
+                                  });
+                                },
+                                child: ConstrainedBox(
+                                  constraints:
+                                      const BoxConstraints(minHeight: 48),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 12),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.check_circle_outline_rounded,
+                                          size: 18,
+                                          color: journal.todoGreen,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            '已完成（${doneRows.length}）',
+                                            style: journal.section
+                                                .copyWith(fontSize: 15),
                                           ),
-                                        );
-                                      }
-                                    },
-                              trailing: IconButton(
-                                  tooltip: '删除个人日程',
-                                  onPressed: busy ? null : () => remove(e),
-                                  icon: const Icon(
-                                      Icons.delete_outline_rounded))),
-                      ],
-                    ),
-                  if (message != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: Semantics(
-                          liveRegion: true,
-                          child: Text(message!, style: journal.metadata)),
-                    ),
+                                        ),
+                                        AnimatedRotation(
+                                          turns: _completedExpanded ? 0.5 : 0.0,
+                                          duration: JournalMotion.duration(
+                                            context,
+                                            const Duration(milliseconds: 200),
+                                          ),
+                                          curve: JournalMotion.easeOut,
+                                          child: Icon(
+                                            Icons.expand_more_rounded,
+                                            size: 20,
+                                            color: journal.muted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (JournalMotion.isReducedMotion(context))
+                                (_completedExpanded
+                                    ? Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          for (final e in doneRows) ...[
+                                            Divider(
+                                              height: 0.6,
+                                              thickness: 0.6,
+                                              indent: 52,
+                                              endIndent: 16,
+                                              color: journal.divider,
+                                            ),
+                                            _buildSwipeableRow(e, now, journal),
+                                          ],
+                                        ],
+                                      )
+                                    : const SizedBox.shrink())
+                              else
+                                AnimatedSize(
+                                  duration: const Duration(milliseconds: 220),
+                                  curve: JournalMotion.easeDrawer,
+                                  alignment: Alignment.topCenter,
+                                  child: _completedExpanded
+                                      ? Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            for (final e in doneRows) ...[
+                                              Divider(
+                                                height: 0.6,
+                                                thickness: 0.6,
+                                                indent: 52,
+                                                endIndent: 16,
+                                                color: journal.divider,
+                                              ),
+                                              _buildSwipeableRow(
+                                                  e, now, journal),
+                                            ],
+                                          ],
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
                   const SizedBox(height: 16),
                   JournalPrimaryButton(
                     icon: Icons.add_rounded,
@@ -231,11 +492,132 @@ class _AgendaState extends State<ManualAgendaScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '最多保存 500 项；勾选完成或删除后将自动移除该项未来提醒。',
+                    '最多保存 500 项；右滑可快速完成或恢复，左滑可删除，勾选完成或删除后将自动移除该项未来提醒。',
                     style: journal.metadata,
                   ),
                 ]));
       });
+}
+
+class _AgendaEntryRow extends StatelessWidget {
+  const _AgendaEntryRow({
+    required this.entry,
+    required this.now,
+    required this.busy,
+    required this.onToggleDone,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final ManualEntry entry;
+  final DateTime now;
+  final bool busy;
+  final VoidCallback onToggleDone;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    final isExam = entry.kind == ManualEntry.kindExam;
+    final at = entry.at;
+    final overdue = !entry.done && at != null && !at.isAfter(now);
+    final overdueDays = overdue ? now.difference(at).inDays : 0;
+    final overdueLabel = overdueDays > 0 ? '已逾期$overdueDays天' : '已逾期';
+    final metaParts = <String>[
+      if (entry.course.trim().isNotEmpty) entry.course.trim(),
+      _compactAgendaTime(at, now),
+      if (entry.location.trim().isNotEmpty) entry.location.trim(),
+      if (entry.attachments.isNotEmpty) '附件 ${entry.attachments.length}',
+    ];
+
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: busy ? null : onTap,
+        onLongPress: busy ? null : onLongPress,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(6, 10, 12, 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              IconButton(
+                key: ValueKey('agenda-toggle-${entry.id}'),
+                tooltip: entry.done ? '恢复为未完成' : '标记完成',
+                constraints:
+                    const BoxConstraints.tightFor(width: 48, height: 48),
+                padding: EdgeInsets.zero,
+                onPressed: busy ? null : onToggleDone,
+                icon: Icon(
+                  entry.done
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  size: 22,
+                  color: entry.done ? journal.todoGreen : journal.muted,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      entry.title,
+                      style: entry.done
+                          ? journal.entryTitle.copyWith(
+                              color: journal.muted,
+                              decoration: TextDecoration.lineThrough,
+                            )
+                          : journal.entryTitle,
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        CourseworkStatusPill(
+                          label: isExam ? '考试' : '待办',
+                          tone: isExam
+                              ? CourseworkPillTone.exam
+                              : CourseworkPillTone.todo,
+                        ),
+                        if (overdue)
+                          CourseworkStatusPill(
+                            label: overdueLabel,
+                            tone: CourseworkPillTone.overdue,
+                          ),
+                        Text(
+                          metaParts.join(' · '),
+                          style: journal.metadata.copyWith(fontSize: 12.5),
+                        ),
+                      ],
+                    ),
+                    if (!entry.done && entry.note.trim().isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        entry.note.trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: journal.metadata.copyWith(fontSize: 12.5),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: journal.muted,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class ManualEntryEditor extends StatefulWidget {

@@ -74,7 +74,9 @@ void main() {
         h.resolve(Response(
             requestOptions: o,
             statusCode: 200,
-            data: [startup ? release(current) : release(nextPatch)]));
+            data: o.uri.path.endsWith('/latest')
+                ? release(current)
+                : [release(nextPatch)]));
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
@@ -86,7 +88,7 @@ void main() {
     await manual;
     expect(task.update?.versionName, nextPatch);
     expect(paths, [
-      '/repos/arrry-07/chaoxing-journal/releases',
+      '/repos/arrry-07/chaoxing-journal/releases/latest',
       '/repos/arrry-07/chaoxing-journal/releases'
     ]);
   });
@@ -109,7 +111,8 @@ void main() {
     expect(calls, 1);
   });
 
-  test('startup automatically offers a non-latest patch without downloading',
+  test(
+      'startup checks latest only and leaves non-latest patches to manual check',
       () async {
     final current = AppVersion.releaseName;
     final nextPatch = nextPatchVersion();
@@ -126,13 +129,13 @@ void main() {
       }));
     final task = AppUpdateController(service: AppUpdateService(dio: dio));
     addTearDown(task.dispose);
-    expect(await task.checkOnStartup(), true);
+    expect(await task.checkOnStartup(), false);
     expect(task.showBanner, false);
-    expect(task.update!.versionName, nextPatch);
+    expect(task.update, isNull);
     await task.check();
     expect(task.update!.versionName, nextPatch);
     expect(paths, [
-      '/repos/arrry-07/chaoxing-journal/releases',
+      '/repos/arrry-07/chaoxing-journal/releases/latest',
       '/repos/arrry-07/chaoxing-journal/releases'
     ]);
   });
@@ -145,9 +148,9 @@ void main() {
     test('startup iteration gate for ${row.$1}', () async {
       final dio = Dio()
         ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
-          expect(o.uri.path.endsWith('/releases'), true);
+          expect(o.uri.path.endsWith('/releases/latest'), true);
           h.resolve(Response(
-              requestOptions: o, statusCode: 200, data: [release(row.$1)]));
+              requestOptions: o, statusCode: 200, data: release(row.$1)));
         }));
       final task = AppUpdateController(service: AppUpdateService(dio: dio));
       addTearDown(task.dispose);

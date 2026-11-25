@@ -141,6 +141,7 @@ void main() {
       expect(find.text('自己添加'), findsNWidgets(2));
       expect(find.text('手动待办'), findsNothing);
       expect(find.text('手动考试'), findsNothing);
+      expect(find.text('提前30分提醒'), findsNothing);
       final noteWidget = tester.widget<Text>(find.textContaining('第一行提示内容'));
       expect(noteWidget.maxLines, 2);
       expect(noteWidget.overflow, TextOverflow.ellipsis);
@@ -335,8 +336,36 @@ void main() {
     expect(find.text('已完成'), findsOneWidget);
     expect(find.text('标为未完成'), findsOneWidget);
 
-    // Edit button routes to /edit
-    await tester.tap(find.byKey(const ValueKey('manual-detail-edit')));
+    // Check reminder status link & note header height parity
+    final detailHeader = find.text('安排详情');
+    final noteHeader = find.text('备注');
+    expect(detailHeader, findsOneWidget);
+    expect(noteHeader, findsOneWidget);
+    final detailCardBox = tester.getSize(
+      find.ancestor(of: detailHeader, matching: find.byType(Container)).first,
+    );
+    final noteCardBox = tester.getSize(
+      find.ancestor(of: noteHeader, matching: find.byType(Container)).first,
+    );
+    expect((noteCardBox.height - detailCardBox.height).abs(),
+        lessThanOrEqualTo(6.0));
+    final copyButtonSize =
+        tester.getSize(find.byKey(const ValueKey('manual-detail-copy-note')));
+    expect(copyButtonSize.width, greaterThanOrEqualTo(44));
+    expect(copyButtonSize.height, greaterThanOrEqualTo(40));
+    expect(
+      find.byKey(const ValueKey('manual-detail-reminder-status')),
+      findsOneWidget,
+    );
+
+    // Top app bar should no longer have duplicate edit button; bottom edit button routes to /edit
+    expect(find.byKey(const ValueKey('manual-detail-edit')), findsNothing);
+    final editBtn = find.byKey(const ValueKey('manual-detail-edit-button'));
+    await tester.scrollUntilVisible(editBtn, 180,
+        scrollable: find.byType(Scrollable).first);
+    await tester.ensureVisible(editBtn);
+    await tester.pumpAndSettle();
+    await tester.tap(editBtn);
     await tester.pumpAndSettle();
     expect(find.byType(ManualEntryEditor), findsOneWidget);
     Navigator.of(tester.element(find.byType(ManualEntryEditor))).pop();

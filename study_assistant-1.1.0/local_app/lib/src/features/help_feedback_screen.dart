@@ -160,7 +160,14 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     if (!validateProblem()) return;
     await Clipboard.setData(ClipboardData(text: feedbackBody()));
     if (mounted) {
-      showJournalMessage(context, '反馈内容已复制，尚未发送');
+      showJournalMessage(context, '反馈内容已复制，请粘贴发送（尚未自动发送）');
+    }
+  }
+
+  Future<void> copyEmail() async {
+    await Clipboard.setData(const ClipboardData(text: _feedbackEmail));
+    if (mounted) {
+      showJournalMessage(context, '收件邮箱已复制');
     }
   }
 
@@ -297,32 +304,40 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
           ),
           const SizedBox(height: 16),
           JournalPrimaryButton(
-            label: '通过邮件反馈',
-            onPressed: composeEmail,
+            buttonKey: const ValueKey('feedback-copy-content'),
+            icon: Icons.copy_rounded,
+            label: '一键复制反馈内容',
+            onPressed: copy,
           ),
           const SizedBox(height: 10),
           JournalSecondaryButton(
-            label: '复制反馈内容',
-            onPressed: copy,
+            buttonKey: const ValueKey('feedback-copy-email'),
+            icon: Icons.alternate_email_rounded,
+            label: '一键复制收件邮箱（$_feedbackEmail）',
+            onPressed: copyEmail,
           ),
-          const SizedBox(height: 6),
-          TextButton(
-            onPressed: () async {
-              final ok = await links
-                  .openUrl('${AppUpdateService.repositoryUrl}/issues');
-              if (!ok && context.mounted) {
-                showJournalMessage(context, '无法打开反馈页面，请先复制保存');
-              }
-            },
-            child: const Text('打开 GitHub 反馈页面'),
-          ),
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              '邮件入口只会打开系统邮件草稿，不会自动发送。',
-              style: journal.metadata.copyWith(fontSize: 12.5),
-            ),
+          const SizedBox(height: 12),
+          JournalGroupedCard(
+            dividerIndent: 16,
+            children: [
+              JournalGroupTile(
+                icon: Icons.mail_outline_rounded,
+                title: '尝试用系统邮件发送',
+                subtitle: '打开本机邮件客户端草稿，不会自动发送',
+                onTap: composeEmail,
+              ),
+              JournalGroupTile(
+                icon: Icons.open_in_new_rounded,
+                title: '打开 GitHub 反馈页面',
+                onTap: () async {
+                  final ok = await links
+                      .openUrl('${AppUpdateService.repositoryUrl}/issues');
+                  if (!ok && context.mounted) {
+                    showJournalMessage(context, '无法打开反馈页面，请先复制保存');
+                  }
+                },
+              ),
+            ],
           ),
         ],
       ),

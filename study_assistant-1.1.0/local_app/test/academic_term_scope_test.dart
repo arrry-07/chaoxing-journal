@@ -7,6 +7,7 @@ import 'package:study_assistant_mobile/src/features/course_list_screen.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/assignment_change.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/course_notice.dart';
 import 'package:study_assistant_mobile/src/models/course_term_preferences.dart';
@@ -734,6 +735,8 @@ void main() {
         150,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.ensureVisible(termBtn);
+      await tester.pumpAndSettle();
       await tester.tap(termBtn);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('term-option-2026-fall')));
@@ -743,6 +746,275 @@ void main() {
         '2026-fall',
       );
       expect(tester.takeException(), isNull);
+    });
+
+    test(
+        'parses tolerant folder labels with prefixes/suffixes while rejecting relative or ambiguous labels',
+        () {
+      expect(
+        AcademicTerm.tryParseFolderLabel('2025-2026(1) 必修'),
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
+      expect(
+        AcademicTerm.tryParseFolderLabel('我的课程/2025-2026(1)'),
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
+      expect(
+        AcademicTerm.tryParseFolderLabel('2026年秋季课程'),
+        const AcademicTerm(2026, AcademicSemester.fall),
+      );
+      expect(
+        AcademicTerm.tryParseFolderLabel('大二上(2026秋)'),
+        const AcademicTerm(2026, AcademicSemester.fall),
+      );
+
+      for (final invalid in const [
+        '大二上学期',
+        '大一下',
+        '专业核心课',
+        '期末冲刺文件夹',
+        '2024-2026(1)',
+        '2025秋 2026春',
+      ]) {
+        expect(AcademicTerm.tryParseFolderLabel(invalid), isNull,
+            reason: invalid);
+      }
+    });
+
+    test(
+        'incremental published change elevates ungrouped course without letting syncAllTerms past-course old work pollute currentTerm',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      const ungrouped = CourseRef(courseId: '101', clazzId: '1', name: '新开选修');
+      const pastCourse = CourseRef(
+        courseId: '102',
+        clazzId: '2',
+        name: '往期老课',
+        folderName: '2025年秋',
+      );
+      const farFutureCourse = CourseRef(
+        courseId: '103',
+        clazzId: '3',
+        name: '常年题库课',
+        folderName: '2025年秋',
+      );
+      final newWork = Assignment(
+        id: 'cx:work:101:1:1',
+        courseName: '新开选修',
+        title: '第一次讨论',
+        deadlineAt: null,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+      final oldCompletedFromSweep = Assignment(
+        id: 'cx:work:102:2:1',
+        courseName: '往期老课',
+        title: '去年已交作业',
+        deadlineAt: DateTime.utc(2025, 11, 1),
+        requirementsText: '',
+        status: 'submitted',
+        lastSyncedAt: now,
+      );
+      final oldNoDeadlinePendingFromSweep = Assignment(
+        id: 'cx:work:102:2:2',
+        courseName: '往期老课',
+        title: '去年无截止旧题',
+        deadlineAt: null,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+      final farFutureWork = Assignment(
+        id: 'cx:work:103:3:1',
+        courseName: '常年题库课',
+        title: '超远期练习',
+        deadlineAt: now.add(const Duration(days: 400)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+
+      final catalog = CourseTermCatalog.build(
+        courses: const [ungrouped, pastCourse, farFutureCourse],
+        assignments: [
+          newWork,
+          oldCompletedFromSweep,
+          oldNoDeadlinePendingFromSweep,
+          farFutureWork,
+        ],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+        changes: [
+          AssignmentChange(
+            assignmentId: newWork.id,
+            title: newWork.title,
+            courseName: newWork.courseName,
+            kind: AssignmentChangeKind.published,
+            at: now,
+            before: '',
+            after: 'pending',
+          ),
+          AssignmentChange(
+            assignmentId: oldCompletedFromSweep.id,
+            title: oldCompletedFromSweep.title,
+            courseName: oldCompletedFromSweep.courseName,
+            kind: AssignmentChangeKind.published,
+            at: now,
+            before: '',
+            after: 'submitted',
+          ),
+          AssignmentChange(
+            assignmentId: oldNoDeadlinePendingFromSweep.id,
+            title: oldNoDeadlinePendingFromSweep.title,
+            courseName: oldNoDeadlinePendingFromSweep.courseName,
+            kind: AssignmentChangeKind.published,
+            at: now,
+            before: '',
+            after: 'pending',
+          ),
+        ],
+      );
+
+      expect(
+        catalog.entryFor(ungrouped.key)!.term,
+        const AcademicTerm(2026, AcademicSemester.fall),
+      );
+      expect(catalog.entryFor(ungrouped.key)!.hasCurrentTermEvidence, isTrue);
+      expect(
+          catalog.entryFor(pastCourse.key)!.state, CourseCatalogState.archived);
+      expect(catalog.matchesHomeCoursePicker(pastCourse.key, 'currentTerm'),
+          isFalse);
+      expect(catalog.entryFor(farFutureCourse.key)!.state,
+          CourseCatalogState.archived);
+      expect(
+          catalog.matchesHomeCoursePicker(farFutureCourse.key, 'currentTerm'),
+          isFalse);
+    });
+
+    test(
+        'matchesHomeCoursePicker isolates ungrouped courses from currentTerm while keeping sync eligibility',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      const silentUngrouped =
+          CourseRef(courseId: '201', clazzId: '1', name: '静默老课');
+      const activeCourse = CourseRef(
+        courseId: '202',
+        clazzId: '2',
+        name: '本学期专业课',
+        folderName: '2026年秋',
+      );
+      final catalog = CourseTermCatalog.build(
+        courses: const [silentUngrouped, activeCourse],
+        assignments: const [],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      expect(catalog.isActiveOrRecalled(silentUngrouped.key), isTrue);
+      expect(catalog.isUngroupedCourse(silentUngrouped.key), isTrue);
+      expect(
+          catalog.matchesHomeCoursePicker(silentUngrouped.key, 'currentTerm'),
+          isFalse);
+      expect(
+          catalog.matchesHomeCoursePicker(silentUngrouped.key, 'currentTerm',
+              hasVisibleItems: true),
+          isTrue);
+      expect(
+          catalog.matchesHomeCoursePicker(
+              silentUngrouped.key, 'currentAcademicYear'),
+          isFalse);
+      expect(
+          catalog.matchesHomeCoursePicker(
+              silentUngrouped.key, 'currentAcademicYear',
+              hasVisibleItems: true),
+          isTrue);
+      expect(catalog.matchesHomeCoursePicker(silentUngrouped.key, 'allTerms'),
+          isTrue);
+      expect(catalog.matchesHomeCoursePicker(activeCourse.key, 'currentTerm'),
+          isTrue);
+      expect(
+          catalog.matchesHomeCoursePicker(
+              activeCourse.key, 'currentAcademicYear'),
+          isTrue);
+    });
+
+    test(
+        'stats scope enforces 180-day recall horizon while retaining current-term submitted recall work',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      const pastCourse = CourseRef(
+        courseId: '301',
+        clazzId: '1',
+        name: '往期补修课',
+        folderName: '2025年秋',
+      );
+      final nearRecall = Assignment(
+        id: 'cx:work:301:1:1',
+        courseName: '往期补修课',
+        title: '三天后补交作业',
+        deadlineAt: now.add(const Duration(days: 3)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+      final farFutureExercise = Assignment(
+        id: 'cx:work:301:1:2',
+        courseName: '往期补修课',
+        title: '超远期常年练习',
+        deadlineAt: now.add(const Duration(days: 400)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+      final currentTermSubmitted = Assignment(
+        id: 'cx:work:301:1:3',
+        courseName: '往期补修课',
+        title: '本学期已提交补修',
+        deadlineAt: now.subtract(const Duration(days: 2)),
+        deadlineTrusted: true,
+        publishedAt: null,
+        requirementsText: '',
+        status: 'submitted',
+        lastSyncedAt: now,
+      );
+
+      final catalog = CourseTermCatalog.build(
+        courses: const [pastCourse],
+        assignments: [nearRecall, farFutureExercise, currentTermSubmitted],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      expect(
+          catalog.entryFor(pastCourse.key)!.state, CourseCatalogState.recalled);
+      expect(
+        catalog.matchesAssignmentInStatsScope(
+          nearRecall,
+          CourseTermScope.currentTerm,
+        ),
+        isTrue,
+      );
+      expect(
+        catalog.matchesAssignmentInStatsScope(
+          currentTermSubmitted,
+          CourseTermScope.currentTerm,
+        ),
+        isTrue,
+      );
+      expect(
+        catalog.matchesAssignmentInStatsScope(
+          farFutureExercise,
+          CourseTermScope.currentTerm,
+        ),
+        isFalse,
+      );
     });
   });
 }

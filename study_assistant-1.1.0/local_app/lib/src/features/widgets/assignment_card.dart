@@ -54,7 +54,8 @@ class AssignmentCard extends StatelessWidget {
     TextStyle,
     TextDirection,
     TextScaler,
-    bool
+    bool,
+    bool,
   )? _cachedRailKey;
   static double _cachedRailWidth = 0;
 
@@ -64,8 +65,10 @@ class AssignmentCard extends StatelessWidget {
     TextDirection direction,
     TextScaler scaler, {
     required bool inPinnedSection,
+    bool showCountdown = false,
   }) {
-    final key = (style, metaStyle, direction, scaler, inPinnedSection);
+    final key =
+        (style, metaStyle, direction, scaler, inPinnedSection, showCountdown);
     if (_cachedRailKey == key) return _cachedRailWidth;
     double widthFor(String text, TextStyle s) {
       final painter = TextPainter(
@@ -82,8 +85,10 @@ class AssignmentCard extends StatelessWidget {
     if (inPinnedSection) {
       final dateWidth = widthFor('12/31',
           metaStyle.copyWith(fontSize: 11.5, fontWeight: FontWeight.w600));
-      final remWidth = widthFor('剩23小时', metaStyle.copyWith(fontSize: 11));
       if (dateWidth > width) width = dateWidth;
+    }
+    if (inPinnedSection || showCountdown) {
+      final remWidth = widthFor('剩23小时', metaStyle.copyWith(fontSize: 11));
       if (remWidth > width) width = remWidth;
     }
     _cachedRailKey = key;
@@ -94,6 +99,7 @@ class AssignmentCard extends StatelessWidget {
   static double measureRailWidth(
     BuildContext context, {
     required bool inPinnedSection,
+    bool showCountdown = false,
   }) {
     final journal = Journal.of(context);
     return _measureRailWidth(
@@ -102,6 +108,7 @@ class AssignmentCard extends StatelessWidget {
       Directionality.of(context),
       MediaQuery.textScalerOf(context),
       inPinnedSection: inPinnedSection,
+      showCountdown: showCountdown,
     );
   }
 
@@ -280,12 +287,20 @@ class AssignmentCard extends StatelessWidget {
         : bucket == AssignmentDeadlineBucket.confirmedNoDeadline
             ? '—'
             : '待定';
+    final railCountdown = !showFullDeadline &&
+        !inPinnedSection &&
+        countdown &&
+        hasTime &&
+        !overdue &&
+        !a.isExam &&
+        !isManualDeadline;
     final railWidth = _measureRailWidth(
       journal.time,
       journal.metadata,
       Directionality.of(context),
       MediaQuery.textScalerOf(context),
       inPinnedSection: inPinnedSection,
+      showCountdown: !showFullDeadline && !inPinnedSection && countdown,
     );
     final largeText = JournalLayout.isLargeText(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
@@ -307,7 +322,7 @@ class AssignmentCard extends StatelessWidget {
         ? journal.accent
         : clock.isEmpty
             ? (railLabel == '待定' ? journal.ochre : journal.muted)
-            : (overdue ? journal.muted : journal.ink);
+            : journal.ink;
 
     final highlightPills = <Widget>[
       if (state.isNotEmpty && hasSpecialStatePill)
@@ -352,7 +367,6 @@ class AssignmentCard extends StatelessWidget {
         for (final line in examLines) Text(line, style: journal.metadata),
       ] else if (showFullDeadline ||
           inPinnedSection ||
-          countdown ||
           !hasTime ||
           isManualDeadline)
         Text(
@@ -506,8 +520,7 @@ class AssignmentCard extends StatelessWidget {
           ? (isManualDeadline ? '手动已过' : '已逾期')
           : _compactRemaining(d, now);
       final dateColor = pinUrgent ? journal.accent : journal.muted;
-      final clockColor =
-          pinUrgent ? journal.accent : (overdue ? journal.muted : journal.ink);
+      final clockColor = pinUrgent ? journal.accent : journal.ink;
       final remColor = pinUrgent ? journal.accent : journal.muted;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -552,11 +565,7 @@ class AssignmentCard extends StatelessWidget {
               a.title.trim(),
               maxLines: largeText ? null : 2,
               overflow: largeText ? null : TextOverflow.ellipsis,
-              style: overdue
-                  ? journal.entryTitle.copyWith(
-                      color: journal.isDark ? journal.muted : journal.ochre,
-                    )
-                  : journal.entryTitle,
+              style: journal.entryTitle,
             ),
           )
         else if (hasCourse)
@@ -670,18 +679,45 @@ class AssignmentCard extends StatelessWidget {
                                     )
                                   : inPinnedSection
                                       ? buildPinnedRail()
-                                      : Text(
-                                          railLabel,
-                                          style: journal.time.copyWith(
-                                            color: railTextColor,
-                                            fontWeight: clock.isEmpty
-                                                ? FontWeight.w500
-                                                : FontWeight.w600,
-                                            fontSize: clock.isEmpty
-                                                ? 14
-                                                : journal.time.fontSize,
-                                          ),
-                                        ),
+                                      : railCountdown
+                                          ? Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  railLabel,
+                                                  style: journal.time.copyWith(
+                                                    color: railTextColor,
+                                                    fontWeight: FontWeight.w600,
+                                                    height: 1.22,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  _compactRemaining(d, now),
+                                                  style:
+                                                      journal.metadata.copyWith(
+                                                    fontSize: 11,
+                                                    height: 1.22,
+                                                    color: highlightToday
+                                                        ? journal.accent
+                                                        : journal.muted,
+                                                  ),
+                                                ),
+                                              ],
+                                            )
+                                          : Text(
+                                              railLabel,
+                                              style: journal.time.copyWith(
+                                                color: railTextColor,
+                                                fontWeight: clock.isEmpty
+                                                    ? FontWeight.w500
+                                                    : FontWeight.w600,
+                                                fontSize: clock.isEmpty
+                                                    ? 14
+                                                    : journal.time.fontSize,
+                                              ),
+                                            ),
                             ),
                             const SizedBox(width: railGap),
                             Expanded(child: bodyColumn),

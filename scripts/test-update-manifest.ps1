@@ -126,6 +126,7 @@ Write-Output $signerOutput
   Case 'code must increase' @{ PreviousVersionCode = 57 } @() 'greater than'
   Case 'version cannot decrease' @{ PreviousVersionName = '1.7.6' } @() 'backwards'
   Case 'stable rejects patch' @{ Channel = 'stable' } @() 'major or minor'
+  Case 'stable supports hotfix switch' @{ Channel = 'stable'; AllowHotfix = $true } @() ''
   Case 'stable accepts minor' @{ Channel = 'stable'; PreviousVersionName = '1.6.99' }
   Case 'stable accepts major' @{ Channel = 'stable'; PreviousVersionName = '0.99.99' }
   Case 'invalid current version' @{ VersionName = '1.7' } @() 'three numeric'

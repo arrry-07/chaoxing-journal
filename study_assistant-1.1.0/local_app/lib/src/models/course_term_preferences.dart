@@ -4,26 +4,32 @@ import 'assignment.dart';
 
 enum CourseArchiveMode { auto, archived, restored }
 
+enum CourseBlockMode { auto, blocked, allowed }
+
 class CourseTermOverride {
   const CourseTermOverride({
     this.manualTermKey,
     this.archiveMode = CourseArchiveMode.auto,
+    this.blockMode = CourseBlockMode.auto,
     this.dismissedRecallCursorUtc,
   });
 
   final String? manualTermKey;
   final CourseArchiveMode archiveMode;
+  final CourseBlockMode blockMode;
   final DateTime? dismissedRecallCursorUtc;
 
   bool get isEmpty =>
       manualTermKey == null &&
       archiveMode == CourseArchiveMode.auto &&
+      blockMode == CourseBlockMode.auto &&
       dismissedRecallCursorUtc == null;
 
   CourseTermOverride copyWith({
     String? manualTermKey,
     bool clearManualTerm = false,
     CourseArchiveMode? archiveMode,
+    CourseBlockMode? blockMode,
     DateTime? dismissedRecallCursorUtc,
     bool clearDismissedRecallCursor = false,
   }) =>
@@ -31,6 +37,7 @@ class CourseTermOverride {
         manualTermKey:
             clearManualTerm ? null : (manualTermKey ?? this.manualTermKey),
         archiveMode: archiveMode ?? this.archiveMode,
+        blockMode: blockMode ?? this.blockMode,
         dismissedRecallCursorUtc: clearDismissedRecallCursor
             ? null
             : (dismissedRecallCursorUtc ?? this.dismissedRecallCursorUtc)
@@ -41,6 +48,7 @@ class CourseTermOverride {
         if (manualTermKey != null) 'manualTermKey': manualTermKey,
         if (archiveMode != CourseArchiveMode.auto)
           'archiveMode': archiveMode.name,
+        if (blockMode != CourseBlockMode.auto) 'blockMode': blockMode.name,
         if (dismissedRecallCursorUtc != null)
           'dismissedRecallCursorUtc':
               dismissedRecallCursorUtc!.toUtc().toIso8601String(),
@@ -63,6 +71,7 @@ class CourseTermOverride {
     const allowedKeys = {
       'manualTermKey',
       'archiveMode',
+      'blockMode',
       'dismissedRecallCursorUtc',
     };
     if (strict && raw.keys.any((k) => !allowedKeys.contains(k))) {
@@ -93,6 +102,22 @@ class CourseTermOverride {
       }
       archiveMode = parsedMode;
     }
+    final rawBlock = raw['blockMode'];
+    var blockMode = CourseBlockMode.auto;
+    if (rawBlock != null) {
+      if (rawBlock is! String) {
+        throw const FormatException('课程屏蔽模式格式无效');
+      }
+      final parsedBlock =
+          CourseBlockMode.values.where((m) => m.name == rawBlock).firstOrNull;
+      if (parsedBlock == null) {
+        throw const FormatException('课程屏蔽模式未知');
+      }
+      if (strict && parsedBlock == CourseBlockMode.auto) {
+        throw const FormatException('课程屏蔽默认值不应冗余序列化');
+      }
+      blockMode = parsedBlock;
+    }
     final rawCursor = raw['dismissedRecallCursorUtc'];
     DateTime? cursorUtc;
     if (rawCursor != null) {
@@ -113,6 +138,7 @@ class CourseTermOverride {
     final entry = CourseTermOverride(
       manualTermKey: manualTerm,
       archiveMode: archiveMode,
+      blockMode: blockMode,
       dismissedRecallCursorUtc: cursorUtc,
     );
     if (strict && entry.isEmpty) {
@@ -126,6 +152,7 @@ class CourseTermOverride {
       other is CourseTermOverride &&
       manualTermKey == other.manualTermKey &&
       archiveMode == other.archiveMode &&
+      blockMode == other.blockMode &&
       (dismissedRecallCursorUtc == null
           ? other.dismissedRecallCursorUtc == null
           : other.dismissedRecallCursorUtc != null &&
@@ -136,6 +163,7 @@ class CourseTermOverride {
   int get hashCode => Object.hash(
         manualTermKey,
         archiveMode,
+        blockMode,
         dismissedRecallCursorUtc?.toUtc(),
       );
 }
@@ -201,6 +229,14 @@ class CourseTermPreferences {
     return _withEntry(courseKey, current.copyWith(archiveMode: mode));
   }
 
+  CourseTermPreferences withBlockMode(
+    String courseKey,
+    CourseBlockMode mode,
+  ) {
+    final current = entries[courseKey] ?? const CourseTermOverride();
+    return _withEntry(courseKey, current.copyWith(blockMode: mode));
+  }
+
   CourseTermPreferences withDismissedRecallCursor(
     String courseKey,
     DateTime? cursorUtc,
@@ -221,6 +257,48 @@ class CourseTermPreferences {
       if (!isValidCourseKey(key)) continue;
       final current = updated[key] ?? const CourseTermOverride();
       updated[key] = current.copyWith(archiveMode: CourseArchiveMode.archived);
+    }
+    return CourseTermPreferences(entries: updated);
+  }
+
+  CourseTermPreferences withBatchManualTerm(
+    Iterable<String> courseKeys,
+    String? termKey,
+  ) {
+    if (termKey != null && !CourseTermOverride.isValidTermKey(termKey)) {
+      return this;
+    }
+    final updated = Map<String, CourseTermOverride>.from(entries);
+    for (final key in courseKeys) {
+      if (!isValidCourseKey(key)) continue;
+      final current = updated[key] ?? const CourseTermOverride();
+      final next = current.copyWith(
+        manualTermKey: termKey,
+        clearManualTerm: termKey == null,
+      );
+      if (next.isEmpty) {
+        updated.remove(key);
+      } else {
+        updated[key] = next;
+      }
+    }
+    return CourseTermPreferences(entries: updated);
+  }
+
+  CourseTermPreferences withBatchBlockMode(
+    Iterable<String> courseKeys,
+    CourseBlockMode mode,
+  ) {
+    final updated = Map<String, CourseTermOverride>.from(entries);
+    for (final key in courseKeys) {
+      if (!isValidCourseKey(key)) continue;
+      final current = updated[key] ?? const CourseTermOverride();
+      final next = current.copyWith(blockMode: mode);
+      if (next.isEmpty) {
+        updated.remove(key);
+      } else {
+        updated[key] = next;
+      }
     }
     return CourseTermPreferences(entries: updated);
   }

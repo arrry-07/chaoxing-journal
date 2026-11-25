@@ -15,6 +15,7 @@ import '../services/local_notification_service.dart';
 import '../services/permission_settings_service.dart';
 import '../services/reminder_rule_store.dart';
 import 'widgets/journal_buttons.dart';
+import 'widgets/journal_expansion_tile.dart';
 import 'widgets/journal_grouped_card.dart';
 
 class ReminderSettingsScreen extends StatefulWidget {
@@ -395,7 +396,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       issues.add('系统通知权限未开启');
     }
     final channels = <(String, ReminderChannelHealth?)>[
-      ('作业变化渠道', current?.assignmentUpdatesChannel),
+      ('新增作业渠道', current?.assignmentUpdatesChannel),
       ('截止提醒渠道', current?.assignmentChannel),
       ('每日摘要渠道', current?.summaryChannel),
       ('个人日程渠道', current?.manualChannel),
@@ -427,7 +428,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       }
     }
 
+    checkChannelAudioAndVibration(current?.assignmentUpdatesChannel, '新增作业渠道');
     checkChannelAudioAndVibration(current?.assignmentChannel, '截止提醒渠道');
+    checkChannelAudioAndVibration(current?.summaryChannel, '每日摘要渠道');
     checkChannelAudioAndVibration(current?.manualChannel, '个人日程渠道');
     if (current?.scheduleRecoveryPending == true) {
       issues.add('存在待恢复的调度事务');
@@ -483,7 +486,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       infoItems: const [
         '权限开启与已安排不等于绝对准时送达：厂商省电策略、锁屏限制或应用被强制停止都可能拦截后台提醒。',
         '每日摘要按当前快照预安排未来 7 天，超过 7 天未打开应用将停止摘要，且不会在后台自动拉取新作业。',
-        '待办与考试提醒已升级至新版有声渠道（v2），旧渠道自定义设置已重置；如曾调整系统铃声或静音规则请在此重新核对。',
+        '全套通知渠道已升级至内置清铃有声 v2（截止提醒、新增作业、每日摘要与待办提醒）；如曾调整系统铃声或静音规则，可点击下方渠道条目核对。',
         '若某条课业提醒异常，可在下方查看「提醒记录与原因」。',
       ],
       dividerIndent: 16,
@@ -638,9 +641,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                               setState(() {
                                 _healthMessage = switch (outcome.status) {
                                   TestDeadlineNotificationStatus.scheduled =>
-                                    '已安排测试有声提醒（约 3 秒后送达，可先锁屏观察）；请核对声音、短振与锁屏横幅，实际效果取决于系统与渠道设置。',
+                                    '已安排测试有声提醒（约 3 秒后送达）；点击后建议 3 秒内切回桌面或锁屏观察响铃、振动与横幅（部分国产系统前台会抑制提醒音与横幅）。',
                                   TestDeadlineNotificationStatus.posted =>
-                                    '已请求系统显示测试有声提醒；请下拉通知栏核对，实际声音、短振与锁屏显示取决于系统与渠道设置。',
+                                    '已请求系统显示测试有声提醒；点击后建议 3 秒内切回桌面或锁屏观察响铃、振动与横幅（部分国产系统前台会抑制提醒音与横幅）。',
                                   TestDeadlineNotificationStatus.quietHours =>
                                     outcome.warning ??
                                         '当前处于夜间静音时段（23:30–07:30），测试提醒不会穿透静音；请在 07:30 后重试。',
@@ -685,11 +688,13 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                             try {
                               final ok = await widget
                                   .assignmentStore.notificationService
-                                  .showTestManualNotification();
+                                  .showTestManualNotification(
+                                delay: const Duration(seconds: 3),
+                              );
                               if (!mounted) return;
                               setState(() {
                                 _healthMessage = ok
-                                    ? '已发送待办测试提醒；若未听到声音，请检查手机是否静音或系统渠道铃声设置。'
+                                    ? '已安排待办测试提醒（约 3 秒后送达）；点击后建议 3 秒内切回桌面或锁屏观察响铃、振动与横幅（部分国产系统前台会抑制提醒音与横幅）。'
                                     : '未能发送待办测试提醒，请检查通知权限与待办提醒渠道。';
                               });
                               await _loadHealth(force: true);
@@ -755,146 +760,143 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
           subtitle: '查看最近安排、延后、撤销和受阻记录',
           onTap: () => context.push('/reminder-history'),
         ),
-        Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            initiallyExpanded: widget.initialExpandHealth,
-            tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-            title: Text('权限、通知渠道与技术详情', style: journal.entryTitle),
-            subtitle: Text('点击核对系统权限、四条通知渠道与后台计数', style: journal.metadata),
-            children: [
-              Divider(
-                  height: 0.6,
-                  thickness: 0.6,
-                  indent: 16,
-                  endIndent: 16,
-                  color: journal.divider),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.notifications_active_outlined),
-                title: const Text('通知权限'),
-                subtitle: Text(_stateText(_health?.notifications)),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: _requestNotificationPermission,
+        JournalExpansionTile(
+          initiallyExpanded: widget.initialExpandHealth,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+          title: Text('权限、通知渠道与技术详情', style: journal.entryTitle),
+          subtitle: Text('点击核对系统权限、四条通知渠道与后台计数', style: journal.metadata),
+          children: [
+            Divider(
+                height: 0.6,
+                thickness: 0.6,
+                indent: 16,
+                endIndent: 16,
+                color: journal.divider),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.notifications_active_outlined),
+              title: const Text('通知权限'),
+              subtitle: Text(_stateText(_health?.notifications)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: _requestNotificationPermission,
+            ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.lock_clock_outlined),
+              title: const Text('截止提醒通知渠道'),
+              subtitle: Text(_channelStateText(_health?.assignmentChannel)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _openNotificationChannel(
+                widget.assignmentStore.activeDeadlineChannelId,
+                '截止提醒通知渠道',
               ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.lock_clock_outlined),
-                title: const Text('截止提醒通知渠道'),
-                subtitle: Text(_channelStateText(_health?.assignmentChannel)),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _openNotificationChannel(
-                  widget.assignmentStore.activeDeadlineChannelId,
-                  '截止提醒通知渠道',
-                ),
+            ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.sync_outlined),
+              title: const Text('新增作业通知渠道'),
+              subtitle:
+                  Text(_channelStateText(_health?.assignmentUpdatesChannel)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _openNotificationChannel(
+                LocalNotificationService.assignmentUpdatesV2Channel,
+                '新增作业通知渠道',
               ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.sync_outlined),
-                title: const Text('作业变化通知渠道'),
-                subtitle:
-                    Text(_channelStateText(_health?.assignmentUpdatesChannel)),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _openNotificationChannel(
-                  'assignment_updates',
-                  '作业变化通知渠道',
-                ),
+            ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.summarize_outlined),
+              title: const Text('每日摘要通知渠道'),
+              subtitle: Text(_channelStateText(_health?.summaryChannel)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _openNotificationChannel(
+                LocalNotificationService.summaryV2Channel,
+                '每日摘要通知渠道',
               ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.summarize_outlined),
-                title: const Text('每日摘要通知渠道'),
-                subtitle: Text(_channelStateText(_health?.summaryChannel)),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _openNotificationChannel(
-                  'daily_summary',
-                  '每日摘要通知渠道',
-                ),
+            ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.event_note_outlined),
+              title: const Text('个人日程通知渠道'),
+              subtitle: Text(_channelStateText(_health?.manualChannel)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _openNotificationChannel(
+                LocalNotificationService.manualV2Channel,
+                '个人日程通知渠道',
               ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.event_note_outlined),
-                title: const Text('个人日程通知渠道'),
-                subtitle: Text(_channelStateText(_health?.manualChannel)),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _openNotificationChannel(
-                  LocalNotificationService.manualV2Channel,
-                  '个人日程通知渠道',
-                ),
+            ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.alarm_on_outlined),
+              title: const Text('精确闹钟'),
+              subtitle: Text(_exactAlarmText),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _openPermissionSettings(
+                widget.permissionSettingsService.openExactAlarmSettingsResult,
+                destination: '精确闹钟设置',
               ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.alarm_on_outlined),
-                title: const Text('精确闹钟'),
-                subtitle: Text(_exactAlarmText),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _openPermissionSettings(
-                  widget.permissionSettingsService.openExactAlarmSettingsResult,
-                  destination: '精确闹钟设置',
-                ),
+            ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.notifications_paused_outlined),
+              title: const Text('学习通通知使用权'),
+              subtitle: Text(_notificationListenerText),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () async {
+                await _openPermissionSettings(
+                  widget.permissionSettingsService
+                      .openNotificationListenerSettingsResult,
+                  destination: '通知使用权设置',
+                );
+                await _refreshListenerGranted();
+              },
+            ),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.battery_saver_outlined),
+              title: const Text('本应用电池与后台设置'),
+              subtitle: Text(_batterySettingsText),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _openPermissionSettings(
+                widget.permissionSettingsService.openBatterySettingsResult,
+                destination: '本应用电池与后台设置',
+                batterySettings: true,
               ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.notifications_paused_outlined),
-                title: const Text('学习通通知使用权'),
-                subtitle: Text(_notificationListenerText),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () async {
-                  await _openPermissionSettings(
-                    widget.permissionSettingsService
-                        .openNotificationListenerSettingsResult,
-                    destination: '通知使用权设置',
-                  );
-                  await _refreshListenerGranted();
-                },
-              ),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.battery_saver_outlined),
-                title: const Text('本应用电池与后台设置'),
-                subtitle: Text(_batterySettingsText),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _openPermissionSettings(
-                  widget.permissionSettingsService.openBatterySettingsResult,
-                  destination: '本应用电池与后台设置',
-                  batterySettings: true,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '技术状态 · 调度事务：$_recoveryText\n'
+                    '截止渠道：$_deadlineChannelSummaryText · 静默新作业渠道：${_channelStateText(_health?.silentChannel)}\n'
+                    '锁屏隐私策略：$_lockscreenPrivacyText\n'
+                    '原生作业截止事件：${_nativeText((v) => '${v.pendingDeadlineCount} 条')} · 待处理新增作业事件：${_nativeText((v) => '${v.pendingNewCount} 条')}\n'
+                    '已安排摘要：${_localCount(_health?.summaryPending)} · 个人提醒：${_localCount(_health?.manualPending)} · 新增基线：$_baselineText\n'
+                    '下次后台检查：${_backgroundHealth?.nextCheckAt == null ? widget.assignmentStore.nextBackgroundCheckAt?.toLocal().toString().substring(0, 16) ?? '未安排' : _backgroundHealth!.nextCheckAt!.toLocal().toString().substring(0, 16)}'
+                    '${_backgroundError != null && _backgroundHealth?.nextCheckAt != null ? '（上次结果）' : ''}\n'
+                    '最近完整同步：${widget.assignmentStore.lastSyncAt?.toLocal().toString().substring(0, 16) ?? '尚无完整同步'}',
+                    style: journal.metadata.copyWith(fontSize: 12),
+                  ),
+                  if (_backgroundHealth?.migrationPending == true) ...[
+                    const SizedBox(height: 6),
                     Text(
-                      '技术状态 · 调度事务：$_recoveryText\n'
-                      '截止渠道：$_deadlineChannelSummaryText · 静默新作业渠道：${_channelStateText(_health?.silentChannel)}\n'
-                      '锁屏隐私策略：$_lockscreenPrivacyText\n'
-                      '原生作业截止事件：${_nativeText((v) => '${v.pendingDeadlineCount} 条')} · 待处理新增作业事件：${_nativeText((v) => '${v.pendingNewCount} 条')}\n'
-                      '已安排摘要：${_localCount(_health?.summaryPending)} · 个人提醒：${_localCount(_health?.manualPending)} · 新增基线：$_baselineText\n'
-                      '下次后台检查：${_backgroundHealth?.nextCheckAt == null ? widget.assignmentStore.nextBackgroundCheckAt?.toLocal().toString().substring(0, 16) ?? '未安排' : _backgroundHealth!.nextCheckAt!.toLocal().toString().substring(0, 16)}'
-                      '${_backgroundError != null && _backgroundHealth?.nextCheckAt != null ? '（上次结果）' : ''}\n'
-                      '最近完整同步：${widget.assignmentStore.lastSyncAt?.toLocal().toString().substring(0, 16) ?? '尚无完整同步'}',
-                      style: journal.metadata.copyWith(fontSize: 12),
+                      '提醒迁移或快照恢复尚未完成，系统已暂停不确定的作业自动投递。',
+                      style: journal.metadata.copyWith(color: journal.berry),
                     ),
-                    if (_backgroundHealth?.migrationPending == true) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        '提醒迁移或快照恢复尚未完成，系统已暂停不确定的作业自动投递。',
-                        style: journal.metadata.copyWith(color: journal.berry),
-                      ),
-                    ],
-                    if (_backgroundHealth?.lastFailure != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        '最近后台失败：${_backgroundHealth!.lastFailure}',
-                        style: journal.metadata.copyWith(color: journal.berry),
-                      ),
-                    ],
                   ],
-                ),
+                  if (_backgroundHealth?.lastFailure != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      '最近后台失败：${_backgroundHealth!.lastFailure}',
+                      style: journal.metadata.copyWith(color: journal.berry),
+                    ),
+                  ],
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ],
     );

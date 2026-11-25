@@ -66,8 +66,8 @@ void main() {
     );
 
     for (final (title, accent) in [
-      ('学习与同步', Journal.ink),
-      ('数据与安全', Journal.ink),
+      ('同步与提醒', Journal.ink),
+      ('记录与备份', Journal.ink),
       ('关于与更新', Journal.ink),
     ]) {
       await tester.scrollUntilVisible(
@@ -85,7 +85,7 @@ void main() {
         (headerBox.decoration as BoxDecoration?)?.color,
         JournalPalette.light.sectionHeaderFill,
       );
-      if (title == '数据与安全') {
+      if (title == '同步与提醒') {
         final healthIcon = find.byIcon(Icons.notifications_none_rounded);
         expect(tester.widget<Icon>(healthIcon).color, foreground);
       }
@@ -205,7 +205,7 @@ void main() {
     await tester.pumpWidget(
         MaterialApp(home: Scaffold(body: ProfileScreen(store: store))));
     expect(tester.getTopLeft(find.text('外观与交互')).dy,
-        lessThan(tester.getTopLeft(find.text('学习与同步')).dy));
+        lessThan(tester.getTopLeft(find.text('同步与提醒')).dy));
     await tester.tap(find.text('深色'));
     await tester.pumpAndSettle();
     expect(store.display.themeMode, JournalThemeMode.dark);
@@ -467,7 +467,7 @@ void main() {
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('提醒与通知'), findsOneWidget);
     expect(find.text('同步学习通'), findsOneWidget);
-    for (final label in ['外观与交互', '显示与小组件', '个人安排', '学习记录']) {
+    for (final label in ['外观与交互', '显示与小组件', '个人待办与考试', '学习记录']) {
       await tester.scrollUntilVisible(find.text(label), 180);
       expect(find.text(label), findsOneWidget);
     }
@@ -537,7 +537,7 @@ void main() {
             widgetSnapshotService: _NoopWidgetSnapshotService());
         addTearDown(store.dispose);
         const entries = {
-          '同步学习通': ('更新课程与作业等学习数据', '/sync'),
+          '同步学习通': ('更新课业与调整白天后台检查', '/sync'),
           '提醒与通知': ('权限状态、提前提醒时间与每日摘要', '/reminders'),
           '帮助与反馈': ('查看使用说明，反馈问题与建议', '/help'),
           '开源许可': ('查看应用使用的开源组件及许可证', null),
@@ -603,7 +603,7 @@ void main() {
       MaterialApp(home: Scaffold(body: ProfileScreen(store: store))),
     );
 
-    for (final title in ['外观与交互', '学习与同步', '数据与安全', '关于与更新']) {
+    for (final title in ['外观与交互', '同步与提醒', '记录与备份', '关于与更新']) {
       await tester.scrollUntilVisible(find.text(title).hitTestable(), 180);
       expect(find.text(title), findsOneWidget);
     }
@@ -670,6 +670,8 @@ void main() {
     expect(tester.takeException(), isNull);
 
     await tester.scrollUntilVisible(find.text('浅色'), 180);
+    await tester.ensureVisible(find.text('浅色'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('浅色'));
     await tester.pumpAndSettle();
     expect(store.display.themeMode, JournalThemeMode.light);

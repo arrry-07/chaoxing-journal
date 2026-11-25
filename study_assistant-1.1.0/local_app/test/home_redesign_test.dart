@@ -195,7 +195,7 @@ void main() {
     expect(find.text('待确认作业'), findsOneWidget);
     expect(find.text('提交状态未知'), findsWidgets);
     expect(find.text('需要确认'), findsNothing);
-    await t.scrollUntilVisible(find.byTooltip('今日计划'), -180);
+    await t.scrollUntilVisible(find.byTooltip('个人待办与考试'), -180);
 
     s.testEpoch++;
     s.homeFilters = const HomeFilters();

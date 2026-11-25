@@ -19,7 +19,6 @@ import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_web_link.dart';
-import '../services/course_term_catalog.dart';
 import '../services/external_link_service.dart';
 import '../services/home_course_filter.dart';
 import '../services/home_manual_timeline.dart';
@@ -182,7 +181,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   }
 
   bool _refreshing = false;
-  String? get _courseKey => store.homeFilters.courseKey;
+  String? get _courseKey {
+    final key = store.homeFilters.courseKey;
+    if (key != null && store.termCatalog.isBlocked(key)) return null;
+    return key;
+  }
+
   String get _query => store.homeFilters.query;
   AssignmentDeadlineFilter get _deadlineFilter => store.homeFilters.deadline;
   HomeSortOrder get _sortOrder =>
@@ -231,7 +235,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         backgroundColor: journal.ink,
         content: Text(
           message,
-          style: journal.metadata.copyWith(color: journal.onPrimaryFill),
+          style: journal.metadata.copyWith(color: journal.onInvertedSurface),
         ),
         action: effectiveAction != null && effectiveLabel != null
             ? SnackBarAction(
@@ -391,18 +395,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           onSelected: () => _manualActions.openEditor(context),
         ),
         JournalContextMenuAction(
+          label: '每日计划',
+          icon: Icons.today_outlined,
+          onSelected: () {
+            if (mounted) context.push('/plan');
+          },
+        ),
+        JournalContextMenuAction(
           label: '复制近 7 天待办',
           icon: Icons.copy_all_outlined,
           onSelected: () => unawaited(
             _copyNext7DaysTodos(now: widget.clock?.call() ?? DateTime.now()),
           ),
-        ),
-        JournalContextMenuAction(
-          label: '管理个人待办与考试',
-          icon: Icons.event_note_outlined,
-          onSelected: () {
-            if (mounted) context.push('/agenda');
-          },
         ),
         JournalContextMenuAction(
           label: '同步详情',
@@ -642,7 +646,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           for (final group in store.localRecordGroups)
             if (!group.hidden &&
                 (group.primary.courseKey == null ||
-                    store.follows(group.primary.courseKey!)))
+                    (store.follows(group.primary.courseKey!) &&
+                        !termCatalog.isBlocked(group.primary.courseKey!))))
               ...group.sources,
         ];
         final pickerIndex = allFollowedSources.isEmpty
@@ -658,7 +663,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           assignments: pickerAssignments,
           catalog: [
             for (final course in store.courses)
-              if (store.follows(course.key)) course,
+              if (store.follows(course.key) &&
+                  !termCatalog.isBlocked(course.key))
+                course,
           ],
           records: allFollowedSources,
           selectedCourseKey: _courseKey,
@@ -972,18 +979,19 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   );
 
               final actionsRow = Row(mainAxisSize: MainAxisSize.min, children: [
-                if (plans.isEmpty)
+                if (recoveryScope == null)
                   action(
-                    '计划',
+                    '待办',
                     IconButton(
-                        key: const ValueKey('home-plan-entry'),
-                        tooltip: '今日计划',
-                        padding: const EdgeInsets.only(bottom: 12),
-                        iconSize: 21,
-                        constraints:
-                            const BoxConstraints(minWidth: 48, minHeight: 48),
-                        onPressed: () => context.push('/plan'),
-                        icon: const Icon(Icons.checklist_rounded)),
+                      key: const ValueKey('home-agenda-entry'),
+                      tooltip: '个人待办与考试',
+                      padding: const EdgeInsets.only(bottom: 12),
+                      iconSize: 21,
+                      constraints:
+                          const BoxConstraints(minWidth: 48, minHeight: 48),
+                      onPressed: () => context.push('/agenda'),
+                      icon: const Icon(Icons.checklist_rounded),
+                    ),
                   ),
                 action(
                   '刷新',
@@ -1602,12 +1610,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               onPressed: () => _manualActions.openEditor(context),
               icon: const Icon(Icons.add_rounded),
             ),
-          IconButton(
-            tooltip: '今日计划',
-            iconSize: 20,
-            onPressed: () => context.push('/plan'),
-            icon: const Icon(Icons.checklist_rounded),
-          ),
+          if (recoveryScope == null)
+            IconButton(
+              key: const ValueKey('home-sliver-agenda-entry'),
+              tooltip: '个人待办与考试',
+              iconSize: 20,
+              onPressed: () => context.push('/agenda'),
+              icon: const Icon(Icons.checklist_rounded),
+            ),
           IconButton(
             tooltip: '刷新作业',
             enableFeedback: false,
@@ -2501,6 +2511,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             label: '本学期',
                           ),
                           JournalPickerFilterOption(
+                            id: 'currentAcademicYear',
+                            label: '本学年',
+                          ),
+                          JournalPickerFilterOption(
                             id: 'pastTerms',
                             label: '往期',
                           ),
@@ -2512,14 +2526,18 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                         initialFilterId: 'currentTerm',
                         filterPredicate: (option, filterId) {
                           if (option.value.isEmpty) return true;
-                          final scope = switch (filterId) {
-                            'pastTerms' => CourseTermScope.pastTerms,
-                            'allTerms' => CourseTermScope.allTerms,
-                            _ => CourseTermScope.currentTerm,
-                          };
-                          return store.termCatalog
-                              .matchesCoursePickerScope(option.value, scope);
+                          return store.termCatalog.matchesHomeCoursePicker(
+                            option.value,
+                            filterId,
+                            hasVisibleItems: (counts[option.value] ?? 0) > 0,
+                          );
                         },
+                        filterNoticeBuilder: (filterId, filtered) =>
+                            filterId == 'currentTerm' &&
+                                    filtered.every((o) => o.value.isEmpty) &&
+                                    courseOptions.isNotEmpty
+                                ? '本学期暂未识别出课程，可切换到「本学年」或「全部学期」查看'
+                                : null,
                         options: [
                           const JournalPickerOption<String>(
                             value: '',

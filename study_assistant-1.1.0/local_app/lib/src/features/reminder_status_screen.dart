@@ -162,8 +162,8 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
             bg: journal.parchment,
           ),
         ReminderExplanationStatus.unconfirmed => (
-            fg: journal.berry,
-            bg: journal.berryBg,
+            fg: journal.ochre,
+            bg: journal.ochreBg,
           ),
         ReminderExplanationStatus.queryFailed => (
             fg: journal.berry,

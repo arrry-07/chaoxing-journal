@@ -5,6 +5,7 @@ import '../models/study_notebook.dart';
 import '../services/assignment_store.dart';
 import 'manual_agenda_screen.dart';
 import 'widgets/journal_buttons.dart';
+import 'widgets/journal_expansion_tile.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_info_popover.dart';
 
@@ -325,86 +326,78 @@ class TermArchiveDetail extends StatelessWidget {
                               ]
                             : [
                                 for (final row in term.rows)
-                                  Theme(
-                                    data: Theme.of(context).copyWith(
-                                      dividerColor: Colors.transparent,
+                                  JournalExpansionTile(
+                                    tilePadding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
                                     ),
-                                    child: ExpansionTile(
-                                      tilePadding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                      ),
-                                      title: Text(
-                                        row.title,
-                                        style: journal.entryTitle,
-                                      ),
-                                      subtitle: Text(
-                                        '${row.course} · ${row.completed ? '已完成' : row.status == 'unknown' ? '提交未知' : '未完成'}',
-                                        style: journal.metadata,
-                                      ),
-                                      children: [
-                                        Padding(
-                                          padding: const EdgeInsets.fromLTRB(
-                                            16,
-                                            0,
-                                            16,
-                                            14,
-                                          ),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.stretch,
-                                            children: [
-                                              Text(
-                                                row.deadline == null
-                                                    ? '截止时间未确认 / 无截止'
-                                                    : manualTime(row.deadline),
-                                                style: journal.metadata,
-                                              ),
-                                              if (row.note.note.isNotEmpty) ...[
-                                                const SizedBox(height: 6),
-                                                SelectableText(
-                                                  row.note.note,
-                                                  style: journal.metadata
-                                                      .copyWith(
-                                                          color: journal.ink),
-                                                ),
-                                              ],
-                                              for (final step in row.note.steps)
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          top: 4),
-                                                  child: Text(
-                                                    '${step.done ? '已勾选' : '未勾选'} · ${step.text}',
-                                                    style: journal.metadata,
-                                                  ),
-                                                ),
-                                              for (final link in row.note.links)
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          top: 6),
-                                                  child: SelectableText(
-                                                    '${link.label}\n${link.url}',
-                                                    style: journal.metadata,
-                                                  ),
-                                                ),
-                                              if (row.note.note.isEmpty &&
-                                                  row.note.steps.isEmpty &&
-                                                  row.note.links.isEmpty)
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          top: 4),
-                                                  child: Text(
-                                                    '无个人笔记',
-                                                    style: journal.metadata,
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
+                                    title: Text(
+                                      row.title,
+                                      style: journal.entryTitle,
+                                    ),
+                                    subtitle: Text(
+                                      '${row.course} · ${row.completed ? '已完成' : row.status == 'unknown' ? '提交未知' : '未完成'}',
+                                      style: journal.metadata,
+                                    ),
+                                    children: [
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          16,
+                                          0,
+                                          16,
+                                          14,
                                         ),
-                                      ],
-                                    ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            Text(
+                                              row.deadline == null
+                                                  ? '截止时间未确认 / 无截止'
+                                                  : manualTime(row.deadline),
+                                              style: journal.metadata,
+                                            ),
+                                            if (row.note.note.isNotEmpty) ...[
+                                              const SizedBox(height: 6),
+                                              SelectableText(
+                                                row.note.note,
+                                                style: journal.metadata
+                                                    .copyWith(
+                                                        color: journal.ink),
+                                              ),
+                                            ],
+                                            for (final step in row.note.steps)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                    top: 4),
+                                                child: Text(
+                                                  '${step.done ? '已勾选' : '未勾选'} · ${step.text}',
+                                                  style: journal.metadata,
+                                                ),
+                                              ),
+                                            for (final link in row.note.links)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                    top: 6),
+                                                child: SelectableText(
+                                                  '${link.label}\n${link.url}',
+                                                  style: journal.metadata,
+                                                ),
+                                              ),
+                                            if (row.note.note.isEmpty &&
+                                                row.note.steps.isEmpty &&
+                                                row.note.links.isEmpty)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                    top: 4),
+                                                child: Text(
+                                                  '无个人笔记',
+                                                  style: journal.metadata,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                   ),
                               ],
                       ),

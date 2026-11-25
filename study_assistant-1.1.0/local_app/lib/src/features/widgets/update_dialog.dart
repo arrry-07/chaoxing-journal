@@ -5,6 +5,7 @@ import '../../app/transient_feedback.dart';
 import '../../services/app_update_controller.dart';
 import '../../services/app_update_service.dart';
 import '../../services/external_link_service.dart';
+import 'journal_expansion_tile.dart';
 
 Future<void> showUpdateDialog(
     BuildContext context, AppUpdateController task) async {
@@ -279,7 +280,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                             !task.busy &&
                             task.downloadedPath == null) ...[
                           const SizedBox(height: 16),
-                          ExpansionTile(
+                          JournalExpansionTile(
                               tilePadding: EdgeInsets.zero,
                               title: Text('下载选项', style: journal.metadata),
                               children: [

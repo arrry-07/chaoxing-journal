@@ -90,7 +90,8 @@ class JournalPrimaryButton extends StatelessWidget {
             child: child,
           );
 
-    return _PressableScale(enabled: enabled, pressScale: 0.98, child: button);
+    return JournalPressableScale(
+        enabled: enabled, pressScale: 0.98, child: button);
   }
 }
 
@@ -162,7 +163,7 @@ class JournalSecondaryButton extends StatelessWidget {
             child: labelWidget,
           );
 
-    return _PressableScale(
+    return JournalPressableScale(
       enabled: onPressed != null,
       pressScale: 0.97,
       child: button,
@@ -205,7 +206,7 @@ class JournalPillButton extends StatelessWidget {
       constraints: const BoxConstraints(minHeight: 48),
       child: Center(
         widthFactor: 1.0,
-        child: _PressableScale(
+        child: JournalPressableScale(
           enabled: onPressed != null,
           pressScale: 0.97,
           child: Material(
@@ -258,10 +259,11 @@ class JournalPillButton extends StatelessWidget {
   }
 }
 
-class _PressableScale extends StatefulWidget {
-  const _PressableScale({
-    required this.enabled,
-    required this.pressScale,
+class JournalPressableScale extends StatefulWidget {
+  const JournalPressableScale({
+    super.key,
+    this.enabled = true,
+    this.pressScale = 0.96,
     required this.child,
   });
 
@@ -270,10 +272,10 @@ class _PressableScale extends StatefulWidget {
   final Widget child;
 
   @override
-  State<_PressableScale> createState() => _PressableScaleState();
+  State<JournalPressableScale> createState() => _JournalPressableScaleState();
 }
 
-class _PressableScaleState extends State<_PressableScale> {
+class _JournalPressableScaleState extends State<JournalPressableScale> {
   bool _pressed = false;
 
   @override
@@ -292,7 +294,7 @@ class _PressableScaleState extends State<_PressableScale> {
         scale: _pressed && widget.enabled && !reduced ? widget.pressScale : 1.0,
         duration: JournalMotion.duration(
           context,
-          const Duration(milliseconds: 120),
+          const Duration(milliseconds: 110),
         ),
         curve: JournalMotion.easeOut,
         child: widget.child,

@@ -225,7 +225,9 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
     final threshold = showingRight ? _rightThreshold : _leftThreshold;
     final progress = (_offset.abs() / threshold).clamp(0.0, 1.0);
     final reached = _offset.abs() >= threshold;
-    final iconScale = reached ? 1.18 : (0.84 + 0.16 * progress);
+    final reduced = JournalMotion.isReducedMotion(context);
+    final iconScale =
+        reduced ? 1.0 : (reached ? 1.20 : (0.86 + 0.14 * progress));
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -266,8 +268,14 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
                               ),
                               const SizedBox(width: 8),
                             ],
-                            Transform.scale(
+                            AnimatedScale(
                               scale: iconScale,
+                              duration: reduced
+                                  ? Duration.zero
+                                  : Duration(milliseconds: reached ? 160 : 90),
+                              curve: reached
+                                  ? Curves.easeOutBack
+                                  : JournalMotion.easeOut,
                               child: Icon(
                                 activeAction.icon,
                                 size: 20,

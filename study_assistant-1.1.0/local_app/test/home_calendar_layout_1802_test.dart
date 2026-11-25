@@ -285,6 +285,7 @@ void main() {
       addTearDown(store.dispose);
       await _home(tester, store, scale: 2);
       expect(find.text('今日计划 · 已完成$completed/2'), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-agenda-entry')), findsOneWidget);
       expect(find.byKey(const ValueKey('home-plan-entry')), findsNothing);
       expect(find.textContaining('预计'), findsNothing);
       expect(find.textContaining('选两三份'), findsNothing);
@@ -293,7 +294,8 @@ void main() {
     });
   }
 
-  testWidgets('empty plan has a 48dp toolbar entry which opens plan',
+  testWidgets(
+      'empty plan has a 48dp toolbar agenda entry and more menu opens plan',
       (tester) async {
     final store = _Store([]);
     addTearDown(store.dispose);
@@ -303,19 +305,95 @@ void main() {
           builder: (_, __) =>
               Scaffold(body: AssignmentListScreen(store: store))),
       GoRoute(
+          path: '/agenda',
+          builder: (_, __) => Scaffold(
+              appBar: AppBar(title: const Text('agenda-page')),
+              body: const SizedBox())),
+      GoRoute(
           path: '/plan',
           builder: (_, __) => const Scaffold(body: Text('plan-page'))),
     ]);
     addTearDown(router.dispose);
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
     await tester.pumpAndSettle();
-    final entry = find.byKey(const ValueKey('home-plan-entry'));
+    final entry = find.byKey(const ValueKey('home-agenda-entry'));
     expect(tester.getSize(entry).width, greaterThanOrEqualTo(48));
     expect(tester.getSize(entry).height, greaterThanOrEqualTo(48));
     expect(find.byKey(const ValueKey('home-plan-summary')), findsNothing);
     await tester.tap(entry);
     await tester.pumpAndSettle();
+    expect(find.text('agenda-page'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('home-more-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('每日计划'));
+    await tester.pumpAndSettle();
     expect(find.text('plan-page'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'scrolled home sliver header opens agenda and hides in recovery scope',
+      (tester) async {
+    final now = DateTime.now();
+    final store = _Store([
+      for (var i = 0; i < 12; i++)
+        _work('item-$i', deadline: now.add(Duration(days: i + 1))),
+    ]);
+    addTearDown(store.dispose);
+    final router = GoRouter(initialLocation: '/assignments', routes: [
+      GoRoute(
+        path: '/assignments',
+        builder: (_, __) => Scaffold(body: AssignmentListScreen(store: store)),
+      ),
+      GoRoute(
+        path: '/agenda',
+        builder: (_, __) => Scaffold(
+          appBar: AppBar(title: const Text('agenda-sliver-page')),
+          body: const SizedBox(),
+        ),
+      ),
+    ]);
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
+    await tester.pumpAndSettle();
+
+    final sliverAgenda = find.byKey(const ValueKey('home-sliver-agenda-entry'));
+    expect(sliverAgenda, findsOneWidget);
+    await tester.tap(sliverAgenda);
+    await tester.pumpAndSettle();
+    expect(find.text('agenda-sliver-page'), findsOneWidget);
+
+    final recoveryStore = _Store([
+      for (var i = 0; i < 12; i++) _exam('unknown-$i'),
+    ]);
+    addTearDown(recoveryStore.dispose);
+    final recoveryRouter = GoRouter(
+      initialLocation:
+          '/assignments?${AssignmentRecoveryScope.queryParameter}=${AssignmentRecoveryScope.examUnknown.queryValue}',
+      routes: [
+        GoRoute(
+          path: '/assignments',
+          builder: (_, __) =>
+              Scaffold(body: AssignmentListScreen(store: recoveryStore)),
+        ),
+      ],
+    );
+    addTearDown(recoveryRouter.dispose);
+
+    await tester.pumpWidget(MaterialApp.router(routerConfig: recoveryRouter));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('home-sliver-agenda-entry')),
+      findsNothing,
+    );
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

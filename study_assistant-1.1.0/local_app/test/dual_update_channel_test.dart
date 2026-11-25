@@ -19,6 +19,11 @@ String nextPatchVersion() {
   return '${parts[0]}.${parts[1]}.${parts[2] + 1}';
 }
 
+String nextMinorVersion() {
+  final parts = AppVersion.releaseName.split('.').map(int.parse).toList();
+  return '${parts[0]}.${parts[1] + 1}.0';
+}
+
 Map<String, dynamic> manifest({
   required String versionName,
   required int versionCode,
@@ -287,32 +292,79 @@ void main() {
     expect(result.update!.versionCode, AppVersion.code + 1);
   });
 
-  test('startup uses the same dual-source selection', () async {
+  test(
+      'startup only reads stable manifest and stays silent when manual advances',
+      () async {
     final newer = nextPatchVersion();
+    final paths = <String>[];
     final dio = Dio(BaseOptions(validateStatus: (_) => true))
       ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        paths.add(options.uri.toString());
         handler.resolve(Response(
           requestOptions: options,
           statusCode: 200,
-          data: options.uri.host == 'raw.giteeusercontent.com'
+          data: options.uri.path.contains('update-manual.json')
               ? manifest(
-                  versionName: AppVersion.releaseName,
-                  versionCode: AppVersion.code,
+                  versionName: newer,
+                  versionCode: AppVersion.code + 1,
                 )
-              : [release(versionName: newer)],
+              : options.uri.host == 'raw.giteeusercontent.com'
+                  ? manifest(
+                      versionName: AppVersion.releaseName,
+                      versionCode: AppVersion.code,
+                    )
+                  : [release(versionName: newer)],
         ));
       }));
 
-    final result = await dualService(dio)
-        .checkForStartup(currentVersionCode: AppVersion.code);
+    final service = dualService(dio);
+    final startup =
+        await service.checkForStartup(currentVersionCode: AppVersion.code);
+    expect(startup.status, UpdateCheckStatus.upToDate);
+    expect(paths, [service.stableManifestUrl]);
+
+    final manual =
+        await service.checkConfigured(currentVersionCode: AppVersion.code);
+    expect(manual.status, UpdateCheckStatus.available);
+    expect(manual.update!.versionName, newer);
+  });
+
+  test(
+      'startup falls back to latest GitHub release only when Gitee stable fails',
+      () async {
+    final newer = nextPatchVersion();
+    final paths = <String>[];
+    final dio = Dio(BaseOptions(validateStatus: (_) => true))
+      ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+        paths.add(options.uri.toString());
+        if (options.uri.host == 'raw.giteeusercontent.com') {
+          handler.reject(DioException.connectionError(
+            requestOptions: options,
+            reason: 'Gitee stable unreachable',
+          ));
+          return;
+        }
+        handler.resolve(Response(
+          requestOptions: options,
+          statusCode: 200,
+          data: release(versionName: newer),
+        ));
+      }));
+
+    final service = dualService(dio);
+    final result =
+        await service.checkForStartup(currentVersionCode: AppVersion.code);
 
     expect(result.status, UpdateCheckStatus.available);
     expect(result.update!.versionName, newer);
+    expect(paths, [
+      service.stableManifestUrl,
+      'https://api.github.com/repos/arrry-07/chaoxing-journal/releases/latest',
+    ]);
   });
 
-  test('ignored dual-source version stays silent until a manual check',
-      () async {
-    final newer = nextPatchVersion();
+  test('ignored stable version stays silent until a manual check', () async {
+    final newer = nextMinorVersion();
     final dio = Dio(BaseOptions(validateStatus: (_) => true))
       ..interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
         handler.resolve(Response(
@@ -320,8 +372,8 @@ void main() {
           statusCode: 200,
           data: options.uri.host == 'raw.giteeusercontent.com'
               ? manifest(
-                  versionName: AppVersion.releaseName,
-                  versionCode: AppVersion.code,
+                  versionName: newer,
+                  versionCode: AppVersion.code + 1,
                 )
               : [release(versionName: newer)],
         ));
@@ -329,7 +381,7 @@ void main() {
     final service = dualService(dio);
     final first = AppUpdateController(service: service);
     addTearDown(first.dispose);
-    await first.check();
+    await first.checkOnStartup();
     expect(await first.ignoreCurrentVersion(), isTrue);
 
     final second = AppUpdateController(service: service);

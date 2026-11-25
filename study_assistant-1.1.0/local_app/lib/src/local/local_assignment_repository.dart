@@ -91,6 +91,8 @@ class LocalAssignmentRepository {
       'allow_urgent_deadline_night_breakthrough_v1';
   static const deadlineNotificationChannelKey =
       'deadline_notification_channel_v1';
+  static const deadlineChannelV2AutoMigratedKey =
+      'deadline_channel_v2_auto_migrated_v1';
   static const _maxAcknowledgedDeadlineChanges = 300;
   static const _acknowledgedDeadlineRecoveryWarning =
       '部分时间变更已读状态无法读取，原始数据已保留备份；本次以未确认状态临时显示，请勿覆盖原数据。';
@@ -154,6 +156,7 @@ class LocalAssignmentRepository {
     '${_acknowledgedDeadlineChangesKey}_recovery_backups',
     allowUrgentNightBreakthroughKey,
     deadlineNotificationChannelKey,
+    deadlineChannelV2AutoMigratedKey,
     '${_noticesKey}_recovery_backup',
     '${_noticesKey}_recovery_backups',
     '${_chaptersKey}_recovery_backup',
@@ -169,12 +172,19 @@ class LocalAssignmentRepository {
         return HomeFilters.decode(raw is String ? raw : null);
       });
 
+  Future<void> writeHomeFiltersInPrefs(
+    SharedPreferences prefs,
+    HomeFilters filters,
+  ) async {
+    await _require(prefs.setString(_homeFiltersKey, filters.encode()));
+  }
+
   Future<void> saveHomeFilters(HomeFilters filters, String account) =>
       _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
         _checkOwner(prefs, account);
         try {
-          await _require(prefs.setString(_homeFiltersKey, filters.encode()));
+          await writeHomeFiltersInPrefs(prefs, filters);
         } catch (_) {
           // The plugin updates its cache before the platform write succeeds.
           // Reload so a failed preference cannot reappear on route restoration.

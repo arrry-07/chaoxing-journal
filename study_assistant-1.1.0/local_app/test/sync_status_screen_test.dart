@@ -51,6 +51,9 @@ void main() {
     final store = await _storeWithCachedRecords(report);
     await tester.pumpWidget(MaterialApp(home: SyncStatusScreen(store: store)));
     await tester.scrollUntilVisible(find.text('读取来源'), 250);
+    await tester.scrollUntilVisible(find.text('读取来源'), 200);
+    await tester.ensureVisible(find.text('读取来源'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('读取来源'));
     await tester.pumpAndSettle();
     for (final text in [
@@ -223,7 +226,7 @@ void main() {
     );
 
     expect(find.text('白天后台检查'), findsOneWidget);
-    expect(find.text('调整后台检查与提醒'), findsOneWidget);
+    expect(find.text('通知触发与提醒设置'), findsOneWidget);
     expect(find.byKey(const ValueKey('auto-sync-option-15')), findsNothing);
     expect(find.byKey(const ValueKey('auto-sync-option-30')), findsNothing);
     expect(find.byKey(const ValueKey('auto-sync-option-60')), findsNothing);
@@ -248,7 +251,13 @@ void main() {
     );
 
     expect(store.backgroundCheckEnabled, isFalse);
-    expect(find.textContaining('已关闭；手动刷新'), findsOneWidget);
+    expect(
+      tester
+          .widget<SwitchListTile>(
+              find.byKey(const ValueKey('sync-background-check-switch')))
+          .value,
+      isFalse,
+    );
   });
 
   testWidgets('issue query opens grouped details immediately', (tester) async {
@@ -284,6 +293,11 @@ void main() {
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.text('问题明细（1 组，共 1 条）'),
+      200,
+    );
+    await tester.pumpAndSettle();
     expect(find.text('问题明细（1 组，共 1 条）'), findsOneWidget);
     expect(find.textContaining('作业详情未识别'), findsOneWidget);
     expect(find.textContaining('涉及：课程信息待刷新'), findsOneWidget);
@@ -539,6 +553,9 @@ void main() {
     expect(
         find.byKey(const ValueKey('sync-cached-record-status')), findsNothing);
 
+    await tester.scrollUntilVisible(find.text('读取来源'), 200);
+    await tester.ensureVisible(find.text('读取来源'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('读取来源'));
     await tester.pumpAndSettle();
     expect(find.textContaining('读取完成 · 8 条'), findsOneWidget);
@@ -658,6 +675,42 @@ void main() {
     await tester.tap(allBtn);
     await tester.pumpAndSettle();
     expect(fullScanCalled, isTrue);
+  });
+
+  testWidgets('inline background check switch and interval chips persist',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 240});
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(MaterialApp(
+      home: SyncStatusScreen(store: store),
+    ));
+    await tester.pumpAndSettle();
+
+    final toggle = find.byKey(const ValueKey('sync-background-check-switch'));
+    await tester.scrollUntilVisible(toggle, 180);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+
+    final chip120 = find.byKey(const ValueKey('sync-background-interval-120'));
+    await tester.ensureVisible(chip120);
+    await tester.tap(chip120);
+    await tester.pumpAndSettle();
+    expect(store.backgroundCheckIntervalMinutes, 120);
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(store.backgroundCheckEnabled, isFalse);
+    expect(
+      tester.widget<ChoiceChip>(chip120).onSelected,
+      isNull,
+    );
   });
 }
 

@@ -8,6 +8,7 @@ import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
+import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
 import 'package:study_assistant_mobile/src/services/home_course_filter.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -77,11 +78,17 @@ Assignment _work({
       lastSyncedAt: DateTime.now(),
     );
 
-List<CourseRef> _sameNameCatalog() => const [
-      CourseRef(courseId: '1', clazzId: 'k1', name: '同名课程'),
-      CourseRef(courseId: '2', clazzId: 'k2', name: '同名课程'),
-      CourseRef(courseId: '3', clazzId: 'k3', name: '同名课程'),
-    ];
+List<CourseRef> _sameNameCatalog() {
+  final current = AcademicTerm.fromInstant(DateTime.now());
+  return [
+    CourseRef(
+        courseId: '1', clazzId: 'k1', name: '同名课程', folderName: current.label),
+    CourseRef(
+        courseId: '2', clazzId: 'k2', name: '同名课程', folderName: current.label),
+    CourseRef(
+        courseId: '3', clazzId: 'k3', name: '同名课程', folderName: current.label),
+  ];
+}
 
 Future<void> _pump(
   WidgetTester tester,
@@ -504,5 +511,46 @@ void main() {
     await tester.tap(find.text('应用'));
     await tester.pumpAndSettle();
     expect(find.text('往期遗留讨论'), findsNothing);
+  });
+
+  testWidgets(
+      'ungrouped silent courses are excluded from currentTerm picker and shown in ungrouped with filterNoticeBuilder',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 20, 4);
+    final store = _Store(catalog: const [
+      CourseRef(
+        courseId: '99',
+        clazzId: 'k99',
+        name: '静默老课',
+      ),
+    ])
+      ..replaceAssignmentsForTest(const []);
+    addTearDown(store.dispose);
+
+    tester.view.physicalSize = const Size(420, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home:
+          Scaffold(body: AssignmentListScreen(store: store, clock: () => now)),
+    ));
+    await tester.pumpAndSettle();
+
+    await _openFilters(tester);
+    await _openCourseMenu(tester);
+
+    expect(find.byKey(const ValueKey('course-option-99:k99')), findsNothing);
+    expect(
+      find.text('本学期暂未识别出课程，可切换到「本学年」或「全部学期」查看'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('picker-filter-allTerms')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('course-option-99:k99')), findsOneWidget);
+    expect(find.text('静默老课'), findsOneWidget);
+    expect(find.text('未分组'), findsNothing);
   });
 }

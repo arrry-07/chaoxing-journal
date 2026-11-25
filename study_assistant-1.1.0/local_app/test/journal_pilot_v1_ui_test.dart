@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
+import 'package:study_assistant_mobile/src/app/journal.dart';
 import 'package:study_assistant_mobile/src/features/assignment_detail_screen.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/coursework_status_pill.dart';
@@ -82,7 +83,10 @@ void main() {
     expect(find.byType(CourseworkStatusPill), findsWidgets);
     expect(find.text('无日期与待确认'), findsOneWidget);
     expect(find.text('已逾期置底'), findsOneWidget);
-    expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.warning_amber_rounded), findsNothing);
+    final overduePillText =
+        tester.widget<Text>(find.textContaining('已逾期').last);
+    expect(overduePillText.style?.color, JournalPalette.light.overdueSky);
     expect(find.byIcon(Icons.help_outline_rounded), findsOneWidget);
 
     final futureY = tester.getTopLeft(find.text('赣鄱文化调研微视频脚本初稿')).dy;
@@ -220,7 +224,7 @@ void main() {
     expect(find.text('第二次理论作业（办公自动化）'), findsOneWidget);
     expect(find.text('09-23 23:55'), findsNothing);
 
-    await tester.tap(find.text('返回'));
+    await tester.tap(find.byKey(const ValueKey('assignment-detail-back')));
     await tester.pumpAndSettle();
     expect(find.byType(AssignmentListScreen), findsOneWidget);
     expect(find.byType(JournalFloatingNavBar), findsOneWidget);

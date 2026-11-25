@@ -115,7 +115,7 @@ void main() {
       expect(Journal.berry, const Color(0xFFB5493A));
       expect(Journal.berryBg, const Color(0xFFFBF2EF));
       expect(Journal.berryBorder, const Color(0xFFECD0C8));
-      expect(Journal.muted, const Color(0xFF434951));
+      expect(Journal.muted, const Color(0xFF363C44));
       expect(Journal.examOrange, const Color(0xFFAD4E0E));
       expect(Journal.todoGreen, const Color(0xFF2A7A4B));
 
@@ -196,6 +196,38 @@ void main() {
         mid.todoGreen,
         Color.lerp(light.todoGreen, dark.todoGreen, 0.5),
       );
+
+      expect(contrastRatio(light.overdueSky, light.overdueSkyBg),
+          greaterThanOrEqualTo(4.5));
+      expect(contrastRatio(dark.overdueSky, dark.overdueSkyBg),
+          greaterThanOrEqualTo(4.5));
+      for (final p in [light, dark]) {
+        expect(contrastRatio(p.ink, p.sheet), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.muted, p.sheet), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.muted, p.paper), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.accent, p.slateBg), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.ochre, p.ochreBg), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.onPrimaryFill, p.primaryFill),
+            greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.onInvertedSurface, p.ink),
+            greaterThanOrEqualTo(4.5));
+        expect(
+            contrastRatio(p.onPrimaryFill, p.berry), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.snackActionColor, p.ink),
+            greaterThanOrEqualTo(4.5));
+      }
+
+      final skyCopied = light.copyWith(
+        overdueSky: const Color(0xFF0284C7),
+        overdueSkyBg: const Color(0xFFE0F2FE),
+      );
+      expect(skyCopied.overdueSky, const Color(0xFF0284C7));
+      expect(skyCopied.overdueSkyBg, const Color(0xFFE0F2FE));
+      expect(skyCopied, isNot(equals(light)));
+      expect(
+          mid.overdueSky, Color.lerp(light.overdueSky, dark.overdueSky, 0.5));
+      expect(mid.overdueSkyBg,
+          Color.lerp(light.overdueSkyBg, dark.overdueSkyBg, 0.5));
     });
   });
 }

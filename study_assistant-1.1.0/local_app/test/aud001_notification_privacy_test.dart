@@ -570,10 +570,10 @@ void main() {
     expect(args['body'], isNot(contains('机密作业')));
 
     await store.logout();
-    expect(store.isUsingV2DeadlineChannel, isFalse);
+    expect(store.isUsingV2DeadlineChannel, isTrue);
     expect(
       store.activeDeadlineChannelId,
-      LocalNotificationService.assignmentChannel,
+      LocalNotificationService.assignmentV2Channel,
     );
   });
 }

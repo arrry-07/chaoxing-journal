@@ -22,6 +22,8 @@ import 'assignment_list_screen.dart' show AssignmentRecoveryScope;
 import 'widgets/assignment_card.dart';
 import 'widgets/coursework_status_pill.dart';
 import 'widgets/journal_buttons.dart';
+import 'widgets/journal_expansion_tile.dart';
+import 'widgets/journal_floating_detail_header.dart';
 import 'widgets/journal_grouped_card.dart';
 
 class DetailRequirementsDisplay {
@@ -151,6 +153,8 @@ class AssignmentDetailScreen extends StatefulWidget {
 class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     with WidgetsBindingObserver {
   final _links = ExternalLinkService();
+  final ScrollController _scrollController = ScrollController();
+  final ValueNotifier<double> _headerProgress = ValueNotifier<double>(0.0);
   bool _opening = false, _hiding = false, _refreshing = false;
   bool _togglingPin = false;
   bool _savingManualDeadline = false;
@@ -165,8 +169,19 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _scrollController.addListener(_handleScroll);
     _now = widget.clock?.call() ?? DateTime.now();
     _clock = Timer.periodic(const Duration(minutes: 1), (_) => _refreshClock());
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients) return;
+    final next = ((_scrollController.offset - 24.0) / 40.0).clamp(0.0, 1.0);
+    if ((next - _headerProgress.value).abs() > 0.004 ||
+        next == 0.0 ||
+        next == 1.0) {
+      _headerProgress.value = next;
+    }
   }
 
   @override
@@ -176,6 +191,10 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
         oldWidget.store != widget.store) {
       _presentedDeadlineAlert = null;
       _attemptedAckChangeIds.clear();
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
+      _headerProgress.value = 0.0;
     }
   }
 
@@ -191,6 +210,9 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
 
   @override
   void dispose() {
+    _scrollController.removeListener(_handleScroll);
+    _scrollController.dispose();
+    _headerProgress.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _clock?.cancel();
     super.dispose();
@@ -634,25 +656,48 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                     .firstOrNull ??
                 original;
         if (assignment == null) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                const Text('此作业尚未在当前账号的本机记录中找到，请刷新后重试。'),
-                if (_actionMessage != null)
-                  Semantics(liveRegion: true, child: Text(_actionMessage!)),
-                TextButton.icon(
-                  onPressed:
-                      _refreshing || widget.store.isLoading ? null : _refresh,
-                  icon: const Icon(Icons.refresh),
-                  label: Text(_refreshing ? '正在刷新…' : '刷新作业信息'),
+          return Scaffold(
+            backgroundColor: journal.paper,
+            body: Stack(
+              children: [
+                SafeArea(
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        const Text('此作业尚未在当前账号的本机记录中找到，请刷新后重试。'),
+                        if (_actionMessage != null)
+                          Semantics(
+                              liveRegion: true, child: Text(_actionMessage!)),
+                        TextButton.icon(
+                          onPressed: _refreshing || widget.store.isLoading
+                              ? null
+                              : _refresh,
+                          icon: const Icon(Icons.refresh),
+                          label: Text(_refreshing ? '正在刷新…' : '刷新作业信息'),
+                        ),
+                        FilledButton.icon(
+                          onPressed: () => context.go('/assignments'),
+                          icon: const Icon(Icons.home_outlined),
+                          label: const Text('返回主页'),
+                        ),
+                      ]),
+                    ),
+                  ),
                 ),
-                FilledButton.icon(
-                  onPressed: () => context.go('/assignments'),
-                  icon: const Icon(Icons.home_outlined),
-                  label: const Text('返回主页'),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: JournalFloatingDetailHeader(
+                    backKey: const ValueKey('assignment-detail-back'),
+                    title: _itemLabel,
+                    onBack: () => context.canPop()
+                        ? context.pop()
+                        : context.go('/assignments'),
+                  ),
                 ),
-              ]),
+              ],
             ),
           );
         }
@@ -907,7 +952,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                   (
                     icon: Icons.schedule_rounded,
                     iconColor: !hasActiveManual && overdue
-                        ? journal.berry
+                        ? journal.overdueSky
                         : journal.muted,
                     label: !assignment.deadlineTrusted ||
                             assignment.deadlineReadFailed
@@ -927,7 +972,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                   (
                     icon: Icons.edit_calendar_outlined,
                     iconColor: hasActiveManual && overdue
-                        ? journal.berry
+                        ? journal.overdueSky
                         : journal.ink,
                     label: hasActiveManual ? '手动截止（官方待确认）' : '手动旧记录（已被官方接管）',
                     value: DateFormat('yyyy年M月d日 HH:mm', 'zh_CN')
@@ -950,795 +995,816 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
         final showRestoreNotice = _actionMessage != null &&
             _actionMessageTarget == _DetailNoticeTarget.restore;
 
-        return Material(
-          color: journal.paper,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 540),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return Scaffold(
+          backgroundColor: journal.paper,
+          body: Stack(
+            children: [
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 540),
+                  child: ListView(
+                    controller: _scrollController,
+                    padding: EdgeInsets.fromLTRB(
+                      18,
+                      MediaQuery.paddingOf(context).top + 64,
+                      18,
+                      28,
+                    ),
                     children: [
-                      TextButton.icon(
-                        key: const ValueKey('assignment-detail-back'),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: const Size(48, 48),
+                      if (_actionMessageTarget == _DetailNoticeTarget.pin &&
+                          _actionMessage != null) ...[
+                        _DetailActionNotice(
+                          key: const ValueKey('assignment-pin-result'),
+                          message: _actionMessage!,
                         ),
-                        onPressed: () => context.canPop()
-                            ? context.pop()
-                            : context.go('/assignments'),
-                        icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                        label: const Text('返回'),
-                      ),
-                      if (pinTarget != null)
-                        TextButton.icon(
-                          key: const ValueKey('assignment-detail-pin'),
-                          style: TextButton.styleFrom(
-                            enableFeedback: false,
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            minimumSize: const Size(48, 48),
-                            foregroundColor:
-                                pinned ? journal.ink : journal.muted,
-                          ),
-                          onPressed: _togglingPin || _hiding
-                              ? null
-                              : () => _togglePin(pinTarget),
-                          icon: Icon(
-                            pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                            size: 18,
-                          ),
-                          label: Text(pinned ? '已置顶' : '置顶'),
+                        const SizedBox(height: 8),
+                      ],
+                      Material(
+                        key: const ValueKey('assignment-detail-sheet'),
+                        color: journal.sheet,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side:
+                              BorderSide(color: journal.cardBorder, width: 0.8),
                         ),
-                    ],
-                  ),
-                  if (_actionMessageTarget == _DetailNoticeTarget.pin &&
-                      _actionMessage != null)
-                    _DetailActionNotice(
-                      key: const ValueKey('assignment-pin-result'),
-                      message: _actionMessage!,
-                    ),
-                  const SizedBox(height: 8),
-                  Material(
-                    key: const ValueKey('assignment-detail-sheet'),
-                    color: journal.sheet,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(color: journal.cardBorder, width: 0.8),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (showCourseLabel) ...[
-                            if (verifiedCourseKey != null)
-                              InkWell(
-                                key: const ValueKey(
-                                  'assignment-detail-course-link',
+                        clipBehavior: Clip.antiAlias,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (showCourseLabel) ...[
+                                if (verifiedCourseKey != null)
+                                  InkWell(
+                                    key: const ValueKey(
+                                      'assignment-detail-course-link',
+                                    ),
+                                    borderRadius: BorderRadius.circular(8),
+                                    onTap: () {
+                                      JournalMotion.tap(widget.store.display);
+                                      GoRouter.maybeOf(context)?.push(
+                                        Uri(
+                                          path: '/course-hub',
+                                          queryParameters: {
+                                            'courseKey': verifiedCourseKey,
+                                          },
+                                        ).toString(),
+                                      );
+                                    },
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 2),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              displayCourse,
+                                              key: const ValueKey(
+                                                'assignment-detail-course',
+                                              ),
+                                              style: journal.metadata.copyWith(
+                                                color: journal.ink,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 2),
+                                          Icon(
+                                            Icons.chevron_right_rounded,
+                                            size: 16,
+                                            color: journal.muted,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  Text(
+                                    displayCourse,
+                                    key: const ValueKey(
+                                        'assignment-detail-course'),
+                                    style: journal.metadata,
+                                  ),
+                                const SizedBox(height: 4),
+                              ],
+                              if (displayTitle.isNotEmpty)
+                                Text(
+                                  displayTitle,
+                                  key:
+                                      const ValueKey('assignment-detail-title'),
+                                  style: journal.section.copyWith(
+                                    fontSize: 20.5,
+                                    height: 1.34,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
-                                borderRadius: BorderRadius.circular(8),
-                                onTap: () {
-                                  JournalMotion.tap(widget.store.display);
-                                  GoRouter.maybeOf(context)?.push(
-                                    Uri(
-                                      path: '/course-hub',
-                                      queryParameters: {
-                                        'courseKey': verifiedCourseKey,
-                                      },
-                                    ).toString(),
-                                  );
-                                },
-                                child: Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 2),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
+                              if (statusWidgets.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  key: const ValueKey(
+                                      'assignment-detail-status'),
+                                  spacing: 8,
+                                  runSpacing: 6,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: statusWidgets,
+                                ),
+                              ],
+                              if (hasTimeLine) ...[
+                                const SizedBox(height: 12),
+                                Divider(
+                                  height: 1,
+                                  thickness: 0.6,
+                                  color: journal.divider,
+                                ),
+                                const SizedBox(height: 12),
+                                if (assignment.isExam)
+                                  Column(
+                                    key: const ValueKey(
+                                        'assignment-detail-time'),
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Flexible(
-                                        child: Text(
-                                          displayCourse,
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '考试安排',
+                                              style: journal.metadata.copyWith(
+                                                fontSize: 12.5,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                          if (hasExamTime)
+                                            Text(
+                                              '北京时间',
+                                              style: journal.metadata.copyWith(
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      for (var i = 0;
+                                          i < examLines.length;
+                                          i++) ...[
+                                        if (i > 0) const SizedBox(height: 6),
+                                        _ExamDetailRow(line: examLines[i]),
+                                      ],
+                                    ],
+                                  )
+                                else
+                                  Column(
+                                    key: const ValueKey(
+                                        'assignment-detail-time'),
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '时间安排',
+                                              style: journal.metadata.copyWith(
+                                                fontSize: 12.5,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                          if (hasWorkBeijingTime)
+                                            Text(
+                                              '北京时间',
+                                              style: journal.metadata.copyWith(
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      for (var i = 0;
+                                          i < workTimeRows.length;
+                                          i++) ...[
+                                        if (i > 0) const SizedBox(height: 8),
+                                        Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.only(top: 2),
+                                              child: Icon(
+                                                workTimeRows[i].icon,
+                                                size: 17,
+                                                color:
+                                                    workTimeRows[i].iconColor,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    workTimeRows[i].label,
+                                                    style: journal.metadata
+                                                        .copyWith(
+                                                      fontSize: 12.5,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 1),
+                                                  Text(
+                                                    workTimeRows[i].value,
+                                                    style:
+                                                        journal.time.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                      if (!assignment.isExam &&
+                                          (canEditManual ||
+                                              manualAt != null)) ...[
+                                        const SizedBox(height: 10),
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 6,
+                                          crossAxisAlignment:
+                                              WrapCrossAlignment.center,
+                                          children: [
+                                            if (canEditManual)
+                                              OutlinedButton.icon(
+                                                key: const ValueKey(
+                                                    'assignment-set-manual-deadline'),
+                                                style: OutlinedButton.styleFrom(
+                                                  minimumSize:
+                                                      const Size(48, 48),
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 8),
+                                                  foregroundColor: journal.ink,
+                                                  backgroundColor:
+                                                      journal.parchment,
+                                                  side: BorderSide(
+                                                    color: journal.cardBorder,
+                                                    width: 0.8,
+                                                  ),
+                                                ),
+                                                onPressed:
+                                                    _savingManualDeadline ||
+                                                            _refreshing ||
+                                                            _hiding
+                                                        ? null
+                                                        : () =>
+                                                            _pickManualDeadline(
+                                                              courseworkTarget,
+                                                              existing:
+                                                                  manualAt,
+                                                            ),
+                                                icon: const Icon(
+                                                  Icons.edit_calendar_outlined,
+                                                  size: 17,
+                                                ),
+                                                label: Text(hasActiveManual
+                                                    ? '修改手动截止'
+                                                    : '手动设置截止时间'),
+                                              ),
+                                            if (manualAt != null)
+                                              TextButton.icon(
+                                                key: const ValueKey(
+                                                    'assignment-clear-manual-deadline'),
+                                                style: TextButton.styleFrom(
+                                                  minimumSize:
+                                                      const Size(48, 48),
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 8),
+                                                  foregroundColor:
+                                                      journal.berry,
+                                                ),
+                                                onPressed: _savingManualDeadline ||
+                                                        _refreshing ||
+                                                        _hiding
+                                                    ? null
+                                                    : () =>
+                                                        _clearManualDeadline(
+                                                            courseworkTarget),
+                                                icon: const Icon(
+                                                    Icons.clear_rounded,
+                                                    size: 17),
+                                                label: Text(hasActiveManual
+                                                    ? '清除手动截止'
+                                                    : '清除手动旧记录'),
+                                              ),
+                                          ],
+                                        ),
+                                      ],
+                                      if (showManualNotice) ...[
+                                        const SizedBox(height: 8),
+                                        _DetailActionNotice(
                                           key: const ValueKey(
-                                            'assignment-detail-course',
-                                          ),
-                                          style: journal.metadata.copyWith(
-                                            color: journal.ink,
-                                          ),
+                                              'assignment-manual-deadline-result'),
+                                          message: _actionMessage!,
                                         ),
-                                      ),
-                                      const SizedBox(width: 2),
-                                      Icon(
-                                        Icons.chevron_right_rounded,
-                                        size: 16,
-                                        color: journal.muted,
-                                      ),
+                                      ],
                                     ],
                                   ),
+                              ],
+                              if (displayDeadlineAlert != null) ...[
+                                const SizedBox(height: 12),
+                                _DetailDeadlineAlertBanner(
+                                  alert: displayDeadlineAlert,
                                 ),
-                              )
-                            else
-                              Text(
-                                displayCourse,
-                                key: const ValueKey('assignment-detail-course'),
-                                style: journal.metadata,
-                              ),
-                            const SizedBox(height: 4),
-                          ],
-                          if (displayTitle.isNotEmpty)
-                            Text(
-                              displayTitle,
-                              key: const ValueKey('assignment-detail-title'),
-                              style: journal.section.copyWith(
-                                fontSize: 20.5,
-                                height: 1.34,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          if (statusWidgets.isNotEmpty) ...[
-                            const SizedBox(height: 10),
-                            Wrap(
-                              key: const ValueKey('assignment-detail-status'),
-                              spacing: 8,
-                              runSpacing: 6,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: statusWidgets,
-                            ),
-                          ],
-                          if (hasTimeLine) ...[
-                            const SizedBox(height: 12),
-                            Divider(
-                              height: 1,
-                              thickness: 0.6,
-                              color: journal.divider,
-                            ),
-                            const SizedBox(height: 12),
-                            if (assignment.isExam)
-                              Column(
-                                key: const ValueKey('assignment-detail-time'),
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
+                              ],
+                              if (verificationNotes.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  key: const ValueKey(
+                                      'assignment-detail-verification'),
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 11,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: journal.ochreBg.withValues(
+                                      alpha: journal.isDark ? 0.65 : 0.72,
+                                    ),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: journal.ochreBorder,
+                                      width: 0.7,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Expanded(
-                                        child: Text(
-                                          '考试安排',
-                                          style: journal.metadata.copyWith(
-                                            fontSize: 12.5,
-                                            fontWeight: FontWeight.w500,
-                                          ),
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Icon(
+                                          Icons.info_outline_rounded,
+                                          size: 15,
+                                          color: journal.ochre,
                                         ),
                                       ),
-                                      if (hasExamTime)
-                                        Text(
-                                          '北京时间',
-                                          style: journal.metadata.copyWith(
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  for (var i = 0;
-                                      i < examLines.length;
-                                      i++) ...[
-                                    if (i > 0) const SizedBox(height: 6),
-                                    _ExamDetailRow(line: examLines[i]),
-                                  ],
-                                ],
-                              )
-                            else
-                              Column(
-                                key: const ValueKey('assignment-detail-time'),
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
+                                      const SizedBox(width: 8),
                                       Expanded(
-                                        child: Text(
-                                          '时间安排',
-                                          style: journal.metadata.copyWith(
-                                            fontSize: 12.5,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ),
-                                      if (hasWorkBeijingTime)
-                                        Text(
-                                          '北京时间',
-                                          style: journal.metadata.copyWith(
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  for (var i = 0;
-                                      i < workTimeRows.length;
-                                      i++) ...[
-                                    if (i > 0) const SizedBox(height: 8),
-                                    Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Padding(
-                                          padding:
-                                              const EdgeInsets.only(top: 2),
-                                          child: Icon(
-                                            workTimeRows[i].icon,
-                                            size: 17,
-                                            color: workTimeRows[i].iconColor,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            for (var i = 0;
+                                                i < verificationNotes.length;
+                                                i++) ...[
+                                              if (i > 0)
+                                                const SizedBox(height: 4),
                                               Text(
-                                                workTimeRows[i].label,
+                                                verificationNotes[i],
                                                 style:
                                                     journal.metadata.copyWith(
+                                                  color: journal.ochre,
                                                   fontSize: 12.5,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 1),
-                                              Text(
-                                                workTimeRows[i].value,
-                                                style: journal.time.copyWith(
-                                                  fontWeight: FontWeight.w600,
+                                                  height: 1.4,
                                                 ),
                                               ),
                                             ],
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              if (unverifiedTimes.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                JournalExpansionTile(
+                                  key: const ValueKey(
+                                      'assignment-unverified-times'),
+                                  tilePadding: EdgeInsets.zero,
+                                  childrenPadding:
+                                      const EdgeInsets.only(bottom: 2),
+                                  title: Text(
+                                    '未核实的时间记录',
+                                    style: journal.metadata.copyWith(
+                                      color: journal.ink,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  children: [
+                                    for (final line in unverifiedTimes)
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Padding(
+                                          padding:
+                                              const EdgeInsets.only(bottom: 4),
+                                          child: Text(
+                                            line,
+                                            style: journal.metadata,
                                           ),
                                         ),
-                                      ],
-                                    ),
-                                  ],
-                                  if (!assignment.isExam &&
-                                      (canEditManual || manualAt != null)) ...[
-                                    const SizedBox(height: 10),
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 6,
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
-                                      children: [
-                                        if (canEditManual)
-                                          OutlinedButton.icon(
-                                            key: const ValueKey(
-                                                'assignment-set-manual-deadline'),
-                                            style: OutlinedButton.styleFrom(
-                                              minimumSize: const Size(48, 48),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 12,
-                                                      vertical: 8),
-                                              foregroundColor: journal.ink,
-                                              backgroundColor:
-                                                  journal.parchment,
-                                              side: BorderSide(
-                                                color: journal.cardBorder,
-                                                width: 0.8,
-                                              ),
-                                            ),
-                                            onPressed: _savingManualDeadline ||
-                                                    _refreshing ||
-                                                    _hiding
-                                                ? null
-                                                : () => _pickManualDeadline(
-                                                      courseworkTarget,
-                                                      existing: manualAt,
-                                                    ),
-                                            icon: const Icon(
-                                              Icons.edit_calendar_outlined,
-                                              size: 17,
-                                            ),
-                                            label: Text(hasActiveManual
-                                                ? '修改手动截止'
-                                                : '手动设置截止时间'),
-                                          ),
-                                        if (manualAt != null)
-                                          TextButton.icon(
-                                            key: const ValueKey(
-                                                'assignment-clear-manual-deadline'),
-                                            style: TextButton.styleFrom(
-                                              minimumSize: const Size(48, 48),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 10,
-                                                      vertical: 8),
-                                              foregroundColor: journal.berry,
-                                            ),
-                                            onPressed: _savingManualDeadline ||
-                                                    _refreshing ||
-                                                    _hiding
-                                                ? null
-                                                : () => _clearManualDeadline(
-                                                    courseworkTarget),
-                                            icon: const Icon(
-                                                Icons.clear_rounded,
-                                                size: 17),
-                                            label: Text(hasActiveManual
-                                                ? '清除手动截止'
-                                                : '清除手动旧记录'),
-                                          ),
-                                      ],
-                                    ),
-                                  ],
-                                  if (showManualNotice) ...[
-                                    const SizedBox(height: 8),
-                                    _DetailActionNotice(
-                                      key: const ValueKey(
-                                          'assignment-manual-deadline-result'),
-                                      message: _actionMessage!,
-                                    ),
-                                  ],
-                                ],
-                              ),
-                          ],
-                          if (displayDeadlineAlert != null) ...[
-                            const SizedBox(height: 12),
-                            _DetailDeadlineAlertBanner(
-                              alert: displayDeadlineAlert,
-                            ),
-                          ],
-                          if (verificationNotes.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            Container(
-                              key: const ValueKey(
-                                  'assignment-detail-verification'),
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 11,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: journal.ochreBg.withValues(
-                                  alpha: journal.isDark ? 0.65 : 0.72,
-                                ),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: journal.ochreBorder,
-                                  width: 0.7,
-                                ),
-                              ),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2),
-                                    child: Icon(
-                                      Icons.info_outline_rounded,
-                                      size: 15,
-                                      color: journal.ochre,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        for (var i = 0;
-                                            i < verificationNotes.length;
-                                            i++) ...[
-                                          if (i > 0) const SizedBox(height: 4),
-                                          Text(
-                                            verificationNotes[i],
-                                            style: journal.metadata.copyWith(
-                                              color: journal.ochre,
-                                              fontSize: 12.5,
-                                              height: 1.4,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                          if (unverifiedTimes.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Theme(
-                              data: Theme.of(context).copyWith(
-                                dividerColor: Colors.transparent,
-                              ),
-                              child: ExpansionTile(
-                                key: const ValueKey(
-                                    'assignment-unverified-times'),
-                                tilePadding: EdgeInsets.zero,
-                                childrenPadding:
-                                    const EdgeInsets.only(bottom: 2),
-                                title: Text(
-                                  '未核实的时间记录',
-                                  style: journal.metadata.copyWith(
-                                    color: journal.ink,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                children: [
-                                  for (final line in unverifiedTimes)
+                                      ),
                                     Align(
                                       alignment: Alignment.centerLeft,
-                                      child: Padding(
-                                        padding:
-                                            const EdgeInsets.only(bottom: 4),
-                                        child: Text(
-                                          line,
-                                          style: journal.metadata,
+                                      child: Text(
+                                        '时间记录尚未核实，仅供参考，不作为当前考试安排。以上时间均为北京时间。',
+                                        style: journal.metadata.copyWith(
+                                          fontSize: 12.5,
                                         ),
                                       ),
                                     ),
-                                  Align(
-                                    alignment: Alignment.centerLeft,
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (showPersonalPreview) ...[
+                        const SizedBox(height: 12),
+                        _DetailPersonalNotePreviewCard(
+                          targetAssignmentId: personalTargetId,
+                          note: notePreviewText,
+                          steps: personalSteps,
+                        ),
+                      ],
+                      if (isHidden) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: journal.parchment,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.visibility_off_outlined,
+                                    color: journal.muted,
+                                    size: 20,
+                                  ),
+                                  SizedBox(width: 10),
+                                  Expanded(
                                     child: Text(
-                                      '时间记录尚未核实，仅供参考，不作为当前考试安排。以上时间均为北京时间。',
-                                      style: journal.metadata.copyWith(
-                                        fontSize: 12.5,
-                                      ),
+                                      '当前课业已在本机隐藏，不参与首页、日历、统计、小组件与提醒',
+                                      style: journal.metadata,
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (showPersonalPreview) ...[
-                    const SizedBox(height: 12),
-                    _DetailPersonalNotePreviewCard(
-                      targetAssignmentId: personalTargetId,
-                      note: notePreviewText,
-                      steps: personalSteps,
-                    ),
-                  ],
-                  if (isHidden) ...[
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: journal.parchment,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                Icons.visibility_off_outlined,
-                                color: journal.muted,
-                                size: 20,
+                              const SizedBox(height: 10),
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  backgroundColor: journal.sheet,
+                                ),
+                                onPressed: _hiding || _opening || _refreshing
+                                    ? null
+                                    : () => _restore(sourceGroup, original!),
+                                icon: const Icon(Icons.visibility_outlined,
+                                    size: 18),
+                                label: const Text('恢复到课业清单'),
                               ),
-                              SizedBox(width: 10),
-                              Expanded(
+                              if (showRestoreNotice) ...[
+                                const SizedBox(height: 10),
+                                _DetailActionNotice(message: _actionMessage!),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (showRequirements) ...[
+                        const SizedBox(height: 14),
+                        JournalGroupedCard(
+                          title: reqDisplay.title,
+                          dividerIndent: 16,
+                          children: [
+                            if (reqDisplay.body.isNotEmpty)
+                              Padding(
+                                padding: EdgeInsets.fromLTRB(
+                                  16,
+                                  12,
+                                  16,
+                                  reqDisplay.trimmedRedundantLines ? 10 : 14,
+                                ),
                                 child: Text(
-                                  '当前课业已在本机隐藏，不参与首页、日历、统计、小组件与提醒',
-                                  style: journal.metadata,
+                                  reqDisplay.body,
+                                  key: const ValueKey(
+                                      'assignment-detail-requirements'),
+                                  style: journal.metadata.copyWith(
+                                    color: journal.ink,
+                                    fontSize: 14.5,
+                                    height: 1.55,
+                                  ),
                                 ),
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              backgroundColor: journal.sheet,
+                            if (reqDisplay.trimmedRedundantLines)
+                              _RawNoticeTile(
+                                tileKey: reqDisplay.body.isEmpty
+                                    ? const ValueKey(
+                                        'assignment-detail-requirements')
+                                    : null,
+                                rawText: reqDisplay.rawText,
+                              ),
+                          ],
+                        ),
+                      ],
+                      if (sources.length > 1) ...[
+                        const SizedBox(height: 14),
+                        JournalGroupedCard(
+                          children: [
+                            JournalExpansionTile(
+                              key: const ValueKey('assignment-source-records'),
+                              tilePadding:
+                                  const EdgeInsets.symmetric(horizontal: 14),
+                              childrenPadding: const EdgeInsets.only(bottom: 8),
+                              title: Text(
+                                '来源记录 · ${sources.length} 条',
+                                style: journal.metadata.copyWith(
+                                  color: journal.ink,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              children: [
+                                for (final source in sources)
+                                  ListTile(
+                                    dense: true,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 14),
+                                    title: Text(
+                                      '${_sourceType(source)} · ${source.statusLabel}',
+                                    ),
+                                    subtitle: Text(
+                                      '读取 ${DateFormat('yyyy-MM-dd HH:mm').format(source.lastSyncedAt.toLocal())}',
+                                    ),
+                                    trailing: TextButton(
+                                      onPressed: () =>
+                                          _showSourceDetail(source),
+                                      child: const Text('查看'),
+                                    ),
+                                  ),
+                              ],
                             ),
-                            onPressed: _hiding || _opening || _refreshing
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final stackButtons = constraints.maxWidth < 320 ||
+                              MediaQuery.textScalerOf(context).scale(14) >=
+                                  18.0;
+                          final primaryBtn = JournalPrimaryButton(
+                            buttonKey: const ValueKey('assignment-detail-open'),
+                            height: 48,
+                            padding: stackButtons
                                 ? null
-                                : () => _restore(sourceGroup, original!),
-                            icon:
-                                const Icon(Icons.visibility_outlined, size: 18),
-                            label: const Text('恢复到课业清单'),
-                          ),
-                          if (showRestoreNotice) ...[
-                            const SizedBox(height: 10),
-                            _DetailActionNotice(message: _actionMessage!),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                  if (showRequirements) ...[
-                    const SizedBox(height: 14),
-                    JournalGroupedCard(
-                      title: reqDisplay.title,
-                      dividerIndent: 16,
-                      children: [
-                        if (reqDisplay.body.isNotEmpty)
-                          Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              16,
-                              12,
-                              16,
-                              reqDisplay.trimmedRedundantLines ? 10 : 14,
-                            ),
-                            child: Text(
-                              reqDisplay.body,
-                              key: const ValueKey(
-                                  'assignment-detail-requirements'),
-                              style: journal.metadata.copyWith(
-                                color: journal.ink,
-                                fontSize: 14.5,
-                                height: 1.55,
-                              ),
-                            ),
-                          ),
-                        if (reqDisplay.trimmedRedundantLines)
-                          _RawNoticeTile(
-                            tileKey: reqDisplay.body.isEmpty
-                                ? const ValueKey(
-                                    'assignment-detail-requirements')
-                                : null,
-                            rawText: reqDisplay.rawText,
-                          ),
-                      ],
-                    ),
-                  ],
-                  if (sources.length > 1) ...[
-                    const SizedBox(height: 14),
-                    JournalGroupedCard(
-                      children: [
-                        Theme(
-                          data: Theme.of(context)
-                              .copyWith(dividerColor: Colors.transparent),
-                          child: ExpansionTile(
-                            key: const ValueKey('assignment-source-records'),
-                            tilePadding:
-                                const EdgeInsets.symmetric(horizontal: 14),
-                            childrenPadding: const EdgeInsets.only(bottom: 8),
-                            title: Text(
-                              '来源记录 · ${sources.length} 条',
-                              style: journal.metadata.copyWith(
-                                color: journal.ink,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            children: [
-                              for (final source in sources)
-                                ListTile(
-                                  dense: true,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 14),
-                                  title: Text(
-                                    '${_sourceType(source)} · ${source.statusLabel}',
-                                  ),
-                                  subtitle: Text(
-                                    '读取 ${DateFormat('yyyy-MM-dd HH:mm').format(source.lastSyncedAt.toLocal())}',
-                                  ),
-                                  trailing: TextButton(
-                                    onPressed: () => _showSourceDetail(source),
-                                    child: const Text('查看'),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final stackButtons = constraints.maxWidth < 320 ||
-                          MediaQuery.textScalerOf(context).scale(14) >= 18.0;
-                      final primaryBtn = JournalPrimaryButton(
-                        buttonKey: const ValueKey('assignment-detail-open'),
-                        height: 48,
-                        padding: stackButtons
-                            ? null
-                            : const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 12),
-                        singleLineLabel: !stackButtons,
-                        backgroundColor: journal.isDark
-                            ? journal.primaryFill
-                            : const Color(0xFF34322F),
-                        foregroundColor: journal.isDark
-                            ? journal.onPrimaryFill
-                            : const Color(0xFFFFF7EC),
-                        onPressed: _opening || _hiding || _currentUrl == null
-                            ? null
-                            : _openAssignment,
-                        icon: Icons.open_in_new_rounded,
-                        label: _opening
-                            ? '正在打开…'
-                            : assignment.isExam
-                                ? '在学习通内查看$_itemLabel'
-                                : '在学习通内打开作业',
-                      );
-                      final secondaryBtn = JournalSecondaryButton(
-                        buttonKey: const ValueKey('assignment-detail-open-web'),
-                        height: 48,
-                        outlined: true,
-                        padding: stackButtons
-                            ? null
-                            : const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 12),
-                        singleLineLabel: !stackButtons,
-                        onPressed: _opening || _hiding || _currentUrl == null
-                            ? null
-                            : _openWeb,
-                        icon: Icons.open_in_browser_rounded,
-                        label: _opening ? '正在请求浏览器…' : '打开$_itemLabel网页',
-                      );
-                      if (stackButtons) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            primaryBtn,
-                            const SizedBox(height: 10),
-                            secondaryBtn,
-                          ],
-                        );
-                      }
-                      return IntrinsicHeight(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(child: primaryBtn),
-                            const SizedBox(width: 10),
-                            Expanded(child: secondaryBtn),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Text(
-                      '将在学习通内打开$_itemLabel网页；浏览器打开可能需要另行登录，返回可刷新核对状态。',
-                      style: journal.metadata.copyWith(
-                        fontSize: 12.5,
-                        height: 1.45,
-                      ),
-                    ),
-                  ),
-                  if (_currentUrl == null) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      '$_itemLabel链接暂不可用，请刷新信息；尚未开放时请稍后重试。',
-                      style: journal.metadata.copyWith(
-                        color: journal.ochre,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ],
-                  if (showOpeningNotice) ...[
-                    const SizedBox(height: 10),
-                    _DetailActionNotice(
-                      key: const ValueKey('assignment-open-result'),
-                      message: _actionMessage!,
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  JournalGroupedCard(
-                    title: '手记工具',
-                    dividerIndent: 16,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        child: _DetailToolButton(
-                          onPressed: () => context.push(
-                            '/personal/${Uri.encodeComponent(widget.assignmentId)}',
-                          ),
-                          icon: Icons.edit_note_rounded,
-                          label: '个人清单与备注',
-                          iconSize: 20,
-                        ),
-                      ),
-                      if (!isHidden &&
-                          !assignment.isExam &&
-                          !assignment.isCompleted)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          child: _DetailToolButton(
-                            key: const ValueKey(
-                                'assignment-detail-local-complete'),
+                                : const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 12),
+                            singleLineLabel: !stackButtons,
                             onPressed:
-                                _savingManualDeadline || _hiding || _refreshing
+                                _opening || _hiding || _currentUrl == null
+                                    ? null
+                                    : _openAssignment,
+                            icon: Icons.open_in_new_rounded,
+                            label: _opening
+                                ? '正在打开…'
+                                : assignment.isExam
+                                    ? '在学习通内查看$_itemLabel'
+                                    : '在学习通内打开作业',
+                          );
+                          final secondaryBtn = JournalSecondaryButton(
+                            buttonKey:
+                                const ValueKey('assignment-detail-open-web'),
+                            height: 48,
+                            outlined: true,
+                            padding: stackButtons
+                                ? null
+                                : const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 12),
+                            singleLineLabel: !stackButtons,
+                            onPressed:
+                                _opening || _hiding || _currentUrl == null
+                                    ? null
+                                    : _openWeb,
+                            icon: Icons.open_in_browser_rounded,
+                            label: _opening ? '正在请求浏览器…' : '打开$_itemLabel网页',
+                          );
+                          if (stackButtons) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                primaryBtn,
+                                const SizedBox(height: 10),
+                                secondaryBtn,
+                              ],
+                            );
+                          }
+                          return IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(child: primaryBtn),
+                                const SizedBox(width: 10),
+                                Expanded(child: secondaryBtn),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(
+                          '将在学习通内打开$_itemLabel网页；浏览器打开可能需要另行登录，返回可刷新核对状态。',
+                          style: journal.metadata.copyWith(
+                            fontSize: 12.5,
+                            height: 1.45,
+                          ),
+                        ),
+                      ),
+                      if (_currentUrl == null) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          '$_itemLabel链接暂不可用，请刷新信息；尚未开放时请稍后重试。',
+                          style: journal.metadata.copyWith(
+                            color: journal.ochre,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ],
+                      if (showOpeningNotice) ...[
+                        const SizedBox(height: 10),
+                        _DetailActionNotice(
+                          key: const ValueKey('assignment-open-result'),
+                          message: _actionMessage!,
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      JournalGroupedCard(
+                        title: '手记工具',
+                        dividerIndent: 16,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            child: _DetailToolButton(
+                              onPressed: () => context.push(
+                                '/personal/${Uri.encodeComponent(widget.assignmentId)}',
+                              ),
+                              icon: Icons.edit_note_rounded,
+                              label: '个人清单与备注',
+                              iconSize: 20,
+                            ),
+                          ),
+                          if (!isHidden &&
+                              !assignment.isExam &&
+                              !assignment.isCompleted)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              child: _DetailToolButton(
+                                key: const ValueKey(
+                                    'assignment-detail-local-complete'),
+                                onPressed: _savingManualDeadline ||
+                                        _hiding ||
+                                        _refreshing
                                     ? null
                                     : () => _toggleLocallyCompleted(
                                           courseworkTarget,
                                           !localDoneOnly,
                                         ),
-                            icon: localDoneOnly
-                                ? Icons.undo_rounded
-                                : Icons.check_circle_outline_rounded,
-                            label: localDoneOnly ? '撤销本机完成标记' : '标记为本机已完成',
+                                icon: localDoneOnly
+                                    ? Icons.undo_rounded
+                                    : Icons.check_circle_outline_rounded,
+                                label: localDoneOnly ? '撤销本机完成标记' : '标记为本机已完成',
+                              ),
+                            ),
+                          if (!isHidden)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              child: _DetailToolButton(
+                                onPressed: () => context.push('/plan'),
+                                icon: Icons.checklist_rounded,
+                                label: '安排每日计划',
+                              ),
+                            ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            child: _DetailToolButton(
+                              onPressed: () => context.push(
+                                '/reminder-status/assignment/'
+                                '${Uri.encodeComponent(assignment.id)}',
+                              ),
+                              icon: Icons.notifications_active_outlined,
+                              label: '提醒状态',
+                            ),
                           ),
-                        ),
-                      if (!isHidden)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          child: _DetailToolButton(
-                            onPressed: () => context.push('/plan'),
-                            icon: Icons.checklist_rounded,
-                            label: '安排每日计划',
-                          ),
-                        ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        child: _DetailToolButton(
-                          onPressed: () => context.push(
-                            '/reminder-status/assignment/'
-                            '${Uri.encodeComponent(assignment.id)}',
-                          ),
-                          icon: Icons.notifications_active_outlined,
-                          label: '提醒状态',
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  JournalGroupedCard(
-                    title: '记录管理',
-                    dividerIndent: 16,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        child: _DetailToolButton(
-                          onPressed:
-                              _refreshing || widget.store.isLoading || _hiding
+                      const SizedBox(height: 14),
+                      JournalGroupedCard(
+                        title: '记录管理',
+                        dividerIndent: 16,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            child: _DetailToolButton(
+                              onPressed: _refreshing ||
+                                      widget.store.isLoading ||
+                                      _hiding
                                   ? null
                                   : _refresh,
-                          icon: Icons.refresh_rounded,
-                          label: _refreshing ? '正在刷新…' : '刷新$_itemLabel信息',
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        child: _DetailToolButton(
-                          onPressed:
-                              _currentUrl == null || _hiding ? null : _copyLink,
-                          icon: Icons.copy_outlined,
-                          label: '复制$_itemLabel链接',
-                          iconSize: 17,
-                        ),
-                      ),
-                      if (showRecordsNotice)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                          child: _DetailActionNotice(
-                            key: const ValueKey('assignment-records-result'),
-                            message: _actionMessage!,
+                              icon: Icons.refresh_rounded,
+                              label: _refreshing ? '正在刷新…' : '刷新$_itemLabel信息',
+                            ),
                           ),
-                        ),
-                      if (!isHidden && !assignment.isCompleted)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          child: _DetailToolButton(
-                            key: const ValueKey('assignment-detail-hide'),
-                            onPressed: _hiding || _opening || _refreshing
-                                ? null
-                                : _hide,
-                            icon: Icons.visibility_off_outlined,
-                            label: sources.length > 1
-                                ? '在本机隐藏此$_itemLabel（${sources.length} 条来源）'
-                                : '在本机隐藏此$_itemLabel',
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            child: _DetailToolButton(
+                              onPressed: _currentUrl == null || _hiding
+                                  ? null
+                                  : _copyLink,
+                              icon: Icons.copy_outlined,
+                              label: '复制$_itemLabel链接',
+                              iconSize: 17,
+                            ),
                           ),
-                        ),
+                          if (showRecordsNotice)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                              child: _DetailActionNotice(
+                                key:
+                                    const ValueKey('assignment-records-result'),
+                                message: _actionMessage!,
+                              ),
+                            ),
+                          if (!isHidden && !assignment.isCompleted)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              child: _DetailToolButton(
+                                key: const ValueKey('assignment-detail-hide'),
+                                onPressed: _hiding || _opening || _refreshing
+                                    ? null
+                                    : _hide,
+                                icon: Icons.visibility_off_outlined,
+                                label: sources.length > 1
+                                    ? '在本机隐藏此$_itemLabel（${sources.length} 条来源）'
+                                    : '在本机隐藏此$_itemLabel',
+                              ),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
-                ],
+                ),
               ),
-            ),
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: JournalFloatingDetailHeader(
+                  backKey: const ValueKey('assignment-detail-back'),
+                  title: displayTitle,
+                  progressListenable: _headerProgress,
+                  onBack: () => context.canPop()
+                      ? context.pop()
+                      : context.go('/assignments'),
+                  trailing: pinTarget == null
+                      ? null
+                      : ValueListenableBuilder<double>(
+                          valueListenable: _headerProgress,
+                          builder: (context, progress, _) =>
+                              JournalFloatingActionCapsule(
+                            buttonKey: const ValueKey('assignment-detail-pin'),
+                            label: pinned ? '已置顶' : '置顶',
+                            icon: pinned
+                                ? Icons.push_pin
+                                : Icons.push_pin_outlined,
+                            active: pinned,
+                            enabled: !_togglingPin && !_hiding,
+                            scrollProgress: progress,
+                            onPressed: () => _togglePin(pinTarget),
+                          ),
+                        ),
+                ),
+              ),
+            ],
           ),
         );
       },
@@ -1880,32 +1946,29 @@ class _RawNoticeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        key: tileKey,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        title: Text(
-          '查看通知原文',
-          style: journal.metadata.copyWith(
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-          ),
+    return JournalExpansionTile(
+      key: tileKey,
+      tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      title: Text(
+        '查看通知原文',
+        style: journal.metadata.copyWith(
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
         ),
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: SelectableText(
-              rawText,
-              style: journal.metadata.copyWith(
-                fontSize: 12.5,
-                height: 1.5,
-              ),
+      ),
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SelectableText(
+            rawText,
+            style: journal.metadata.copyWith(
+              fontSize: 12.5,
+              height: 1.5,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

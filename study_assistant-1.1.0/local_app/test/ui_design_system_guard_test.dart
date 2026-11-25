@@ -221,11 +221,11 @@ void main() {
 
   group('Wave B-1 UI static design-system contract', () {
     test(
-        'features contain zero legacy native pickers, popup menus, or eyebrows',
+        'features contain zero legacy native pickers, popup menus, ExpansionTiles, or eyebrows',
         () {
       final featuresDir = _resolveFeaturesDir();
       final legacyWidgetRe = RegExp(
-        r'\b(?:DropdownButtonFormField|DropdownButton|PopupMenuButton|DropdownMenu|SimpleDialog)\b',
+        r'\b(?:DropdownButtonFormField|DropdownButton|PopupMenuButton|DropdownMenu|SimpleDialog|ExpansionTile)\b',
       );
       final eyebrowArgRe = RegExp(r'\beyebrow\s*:');
       final violations = <String>[];

@@ -46,7 +46,9 @@ class _FakeNotifications extends LocalNotificationService {
   Future<ReminderHealth> inspectHealth() async => health;
 
   @override
-  Future<bool> showTestManualNotification() async {
+  Future<bool> showTestManualNotification({
+    Duration delay = Duration.zero,
+  }) async {
     manualTestCalls++;
     return true;
   }
@@ -74,6 +76,19 @@ class _FakeNotifications extends LocalNotificationService {
   Future<void> migrateLegacyManualChannelIfNeeded(
     List<ManualEntry> entries,
   ) async {}
+
+  @override
+  Future<void> migrateLegacySummaryChannelIfNeeded(
+    List<Assignment> assignments,
+    PersonalWorkspace personal,
+    DateTime? lastSync,
+  ) async {}
+
+  @override
+  Future<void> retireLegacyUpdatesAndDeadlineChannelsIfNeeded({
+    required bool retireDeadlineV1,
+    Future<bool> Function()? beforeRetireDeadlineV1,
+  }) async {}
 }
 
 class _NoopSnapshot extends WidgetSnapshotService {
@@ -181,8 +196,8 @@ void main() {
       var throwOnDelete = true;
       final channels = <Map<String, Object?>>[
         lns_fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
-        lns_fixture.channelRow('assignment_updates', '作业变化提醒', 3),
-        lns_fixture.channelRow('daily_summary', '每日课业摘要', 3),
+        lns_fixture.channelRow('assignment_updates_v2', '新增作业提醒', 4),
+        lns_fixture.channelRow('daily_summary_v2', '每日课业摘要', 4),
         lns_fixture.channelRow('personal_schedule', '个人待办与考试提醒', 4),
       ];
       final pendingRequests = <Map<String, Object?>>[
@@ -503,7 +518,9 @@ class _ThrowingTestManualNotifications extends _FakeNotifications {
   _ThrowingTestManualNotifications(super.health);
 
   @override
-  Future<bool> showTestManualNotification() async {
+  Future<bool> showTestManualNotification({
+    Duration delay = Duration.zero,
+  }) async {
     throw StateError('channel unreadable');
   }
 }
