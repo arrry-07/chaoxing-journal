@@ -19,6 +19,7 @@ DEFAULT_TEST_CASE_TIMEOUT = "30s"
 DEFAULT_QUICK_FLUTTER_TIMEOUT_SECONDS = 300
 DEFAULT_FULL_FLUTTER_TIMEOUT_SECONDS = 900
 _FLUTTER_PROGRESS_RE = re.compile(r"^\d+:\d{2}\s+[+\-~]")
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
 def _resolve_tool(*names: str) -> str:
@@ -105,22 +106,27 @@ def _run_flutter_step(
         popen_kwargs["start_new_session"] = True
     proc = subprocess.Popen(cmd, **popen_kwargs)
 
+    state_lock = threading.Lock()
     recent_lines: deque[str] = deque(maxlen=10)
-    last_test_line: list[str] = []
+    last_test_line: str | None = None
 
     def _drain_output() -> None:
+        nonlocal last_test_line
         if proc.stdout is None:
             return
         try:
             for raw in proc.stdout:
                 sys.stdout.write(raw)
                 sys.stdout.flush()
-                cleaned = raw.replace("\r", "").strip()
-                if cleaned:
-                    recent_lines.append(cleaned)
-                    if _FLUTTER_PROGRESS_RE.match(cleaned):
-                        last_test_line.clear()
-                        last_test_line.append(cleaned)
+                plain = _ANSI_ESCAPE_RE.sub("", raw)
+                for segment in plain.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+                    cleaned = segment.strip()
+                    if not cleaned:
+                        continue
+                    with state_lock:
+                        recent_lines.append(cleaned)
+                        if _FLUTTER_PROGRESS_RE.match(cleaned):
+                            last_test_line = cleaned
         except (OSError, ValueError):
             pass
 
@@ -132,21 +138,27 @@ def _run_flutter_step(
     except subprocess.TimeoutExpired:
         _terminate_process_tree(proc)
         reader.join(timeout=2)
-        last_seen = (
-            last_test_line[0]
-            if last_test_line
-            else (recent_lines[-1] if recent_lines else "<no output captured>")
-        )
+        with state_lock:
+            last_seen = (
+                last_test_line
+                if last_test_line is not None
+                else (recent_lines[-1] if recent_lines else "<no output captured>")
+            )
         raise RuntimeError(
             f"[FAIL] {label} (timed out after {effective_timeout}s; "
             f"last output: {last_seen})"
         ) from None
+    except BaseException:
+        _terminate_process_tree(proc)
+        raise
     finally:
+        if proc.poll() is None:
+            _terminate_process_tree(proc)
         reader.join(timeout=2)
-        if proc.stdout is not None:
+        if proc.stdout is not None and not reader.is_alive():
             try:
                 proc.stdout.close()
-            except OSError:
+            except (OSError, ValueError):
                 pass
     elapsed = time.monotonic() - started
     if returncode != 0:
@@ -333,33 +345,28 @@ def main(argv: list[str] | None = None) -> int:
         # 7. Flutter tests
         if args.skip_flutter_tests:
             print("[SKIP] Flutter tests (--skip-flutter-tests)")
-        elif args.tests:
-            flutter_timeout = (
-                args.flutter_timeout
-                if args.flutter_timeout is not None
-                else DEFAULT_QUICK_FLUTTER_TIMEOUT_SECONDS
-            )
-            _run_flutter_step(
-                f"Targeted Flutter tests ({len(args.tests)} files)",
-                _build_flutter_test_cmd(
-                    flutter_cmd,
-                    args.tests,
-                    test_case_timeout=args.test_case_timeout,
-                ),
-                app_dir,
-                timeout_seconds=flutter_timeout,
-            )
-        elif args.mode == "full":
-            flutter_timeout = (
-                args.flutter_timeout
-                if args.flutter_timeout is not None
+        elif args.tests or args.mode == "full":
+            is_targeted = bool(args.tests)
+            default_timeout = (
+                DEFAULT_QUICK_FLUTTER_TIMEOUT_SECONDS
+                if is_targeted
                 else DEFAULT_FULL_FLUTTER_TIMEOUT_SECONDS
             )
+            flutter_timeout = (
+                args.flutter_timeout
+                if args.flutter_timeout is not None
+                else default_timeout
+            )
+            label = (
+                f"Targeted Flutter tests ({len(args.tests)} files)"
+                if is_targeted
+                else "Full Flutter test suite"
+            )
             _run_flutter_step(
-                "Full Flutter test suite",
+                label,
                 _build_flutter_test_cmd(
                     flutter_cmd,
-                    (),
+                    args.tests if is_targeted else (),
                     test_case_timeout=args.test_case_timeout,
                 ),
                 app_dir,

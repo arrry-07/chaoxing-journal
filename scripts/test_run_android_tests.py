@@ -642,8 +642,11 @@ class AndroidTestRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             mirror = root / "mirror"
-            sdk = root / "sdk"
-            flutter_sdk = root / "flutter"
+            # Guarantee a colon in path on both Windows (drive letter) and POSIX CI.
+            sdk = root / ("sdk" if sys.platform == "win32" else "drive:sdk")
+            flutter_sdk = root / ("flutter" if sys.platform == "win32" else "drive:flutter")
+            self.assertIn(":", str(sdk))
+            self.assertIn(":", str(flutter_sdk))
             (sdk / "platforms" / "android-36").mkdir(parents=True)
             (flutter_sdk / "bin").mkdir(parents=True)
             (flutter_sdk / "bin" / "flutter").write_text("", encoding="utf-8")
@@ -665,14 +668,30 @@ class AndroidTestRunnerTests(unittest.TestCase):
                 flutter_sdk=flutter_sdk,
             )
             rewritten = properties.read_text(encoding="utf-8")
-            if ":" in str(sdk):
-                self.assertIn("\\:", rewritten)
-                self.assertNotIn(f"sdk.dir={raw_sdk}\n", rewritten)
+            self.assertIn("\\:", rewritten)
+            self.assertNotIn(f"sdk.dir={raw_sdk}\n", rewritten)
+            self.assertNotIn(f"flutter.sdk={raw_flutter}\n", rewritten)
             values = runner._read_properties(properties)
             self.assertEqual(str(sdk), values["sdk.dir"])
             self.assertEqual(str(flutter_sdk), values["flutter.sdk"])
             self.assertEqual("1.8.33", values["flutter.versionName"])
             self.assertEqual("126", values["flutter.versionCode"])
+
+    def test_sync_mirror_incremental_rejects_overlapping_or_nested_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            src = root / "workspace" / "local_app"
+            (src / "lib").mkdir(parents=True)
+            sentinel = src / "lib" / "main.dart"
+            sentinel.write_text("void main() {}\n", encoding="utf-8")
+
+            for bad_dest in (src, src / "nested_cache", src.parent):
+                with self.subTest(bad_dest=bad_dest):
+                    with self.assertRaises(runner.ManifestError):
+                        runner.sync_mirror_incremental(src, bad_dest, clean=True)
+            # Source files must remain completely intact even when clean=True was passed.
+            self.assertTrue(sentinel.is_file())
+            self.assertEqual("void main() {}\n", sentinel.read_text(encoding="utf-8"))
 
     def test_local_fast_dry_run_includes_android_test_kotlin_compile_and_lint(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -700,10 +719,19 @@ class AndroidTestRunnerTests(unittest.TestCase):
             root = Path(raw)
             src = root / "repo_app"
             cache = root / "cache"
-            sdk = root / "sdk"
-            flutter_sdk = root / "flutter"
+            sdk = root / ("sdk" if sys.platform == "win32" else "drive:sdk")
+            flutter_sdk = root / ("flutter" if sys.platform == "win32" else "drive:flutter")
+            self.assertIn(":", str(sdk))
             (src / "android").mkdir(parents=True)
+            (src / "lib").mkdir(parents=True)
+            (src / "test").mkdir(parents=True)
+            (src / "ios").mkdir(parents=True)
+            (src / "tool").mkdir(parents=True)
             (src / "android" / "build.gradle").write_text("// gradle\n", encoding="utf-8")
+            (src / "lib" / "main.dart").write_text("void main() {}\n", encoding="utf-8")
+            (src / "test" / "ignored_test.dart").write_text("void main() {}\n", encoding="utf-8")
+            (src / "ios" / "Runner.swift").write_text("// ios\n", encoding="utf-8")
+            (src / "tool" / "ignored.py").write_text("pass\n", encoding="utf-8")
             (src / "pubspec.yaml").write_text("name: demo\n", encoding="utf-8")
             (src / "pubspec.lock").write_text("packages: {}\n", encoding="utf-8")
             (sdk / "platforms" / "android-36").mkdir(parents=True)
@@ -719,6 +747,7 @@ class AndroidTestRunnerTests(unittest.TestCase):
                     events.append("pub_get")
                     (cwd / ".dart_tool").mkdir(parents=True, exist_ok=True)
                     (cwd / ".dart_tool" / "package_config.json").write_text("{}", encoding="utf-8")
+                    (cwd / ".flutter-plugins-dependencies").write_text("{}", encoding="utf-8")
                     # Simulate flutter pub get writing unescaped colon in local.properties
                     raw_sdk = str(sdk).replace("\\", "\\\\")
                     (cwd / "android" / "local.properties").write_text(
@@ -729,8 +758,7 @@ class AndroidTestRunnerTests(unittest.TestCase):
                 if "gradlew" in joined:
                     events.append("gradle")
                     props_text = (cwd / "local.properties").read_text(encoding="utf-8")
-                    if ":" in str(sdk):
-                        self.assertIn("\\:", props_text)
+                    self.assertIn("\\:", props_text)
                     self.assertIn(":app:compileDebugAndroidTestKotlin", cmd)
                     return 0
                 raise AssertionError(f"Unexpected command: {cmd}")
@@ -755,6 +783,86 @@ class AndroidTestRunnerTests(unittest.TestCase):
             self.assertEqual(0, second_code)
             # First run executes pub get then gradle; second warm run skips pub get and runs gradle directly.
             self.assertEqual(["pub_get", "gradle", "gradle"], events)
+            # Allowlist mirroring copies lib/android/pubspec* only, excluding test/ios/tool.
+            mirror_root = cache / "local_app"
+            self.assertTrue((mirror_root / "lib" / "main.dart").is_file())
+            self.assertFalse((mirror_root / "test").exists())
+            self.assertFalse((mirror_root / "ios").exists())
+            self.assertFalse((mirror_root / "tool").exists())
+
+    def test_local_fast_retries_pub_get_after_failure_missing_plugins_or_sdk_switch(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            src = root / "repo_app"
+            cache = root / "cache"
+            sdk = root / ("sdk" if sys.platform == "win32" else "drive:sdk")
+            flutter_a = root / "flutter_a"
+            flutter_b = root / "flutter_b"
+            (src / "android").mkdir(parents=True)
+            (src / "android" / "build.gradle").write_text("// gradle\n", encoding="utf-8")
+            (src / "pubspec.yaml").write_text("name: demo\nversion: 1.0.0+1\n", encoding="utf-8")
+            (src / "pubspec.lock").write_text("packages: {}\n", encoding="utf-8")
+            (sdk / "platforms" / "android-36").mkdir(parents=True)
+            for flutter_sdk in (flutter_a, flutter_b):
+                (flutter_sdk / "bin").mkdir(parents=True)
+                (flutter_sdk / "bin" / "flutter").write_text("", encoding="utf-8")
+                (flutter_sdk / "bin" / "flutter.bat").write_text("", encoding="utf-8")
+
+            events: list[str] = []
+            fail_next_pub = {"value": False}
+
+            def fake_streaming(cmd, *, cwd, env=None):  # noqa: ANN001
+                joined = " ".join(cmd)
+                if "pub get" in joined:
+                    events.append("pub_get")
+                    if fail_next_pub["value"]:
+                        fail_next_pub["value"] = False
+                        return 1
+                    (cwd / ".dart_tool").mkdir(parents=True, exist_ok=True)
+                    (cwd / ".dart_tool" / "package_config.json").write_text("{}", encoding="utf-8")
+                    (cwd / ".flutter-plugins-dependencies").write_text("{}", encoding="utf-8")
+                    return 0
+                if "gradlew" in joined:
+                    events.append("gradle")
+                    return 0
+                raise AssertionError(f"Unexpected command: {cmd}")
+
+            with (
+                mock.patch.object(runner, "local_app_root", return_value=src),
+                mock.patch.object(runner, "_run_streaming", side_effect=fake_streaming),
+                contextlib.redirect_stdout(StringIO()),
+                contextlib.redirect_stderr(StringIO()),
+            ):
+                # 1. Warm initial cache with flutter_a.
+                self.assertEqual(0, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_a))
+                # 2. Bump pubspec.yaml and fail pub get -> mirror pubspec is now copied, but stamp must NOT advance.
+                (src / "pubspec.yaml").write_text("name: demo\nversion: 1.0.1+2\n", encoding="utf-8")
+                fail_next_pub["value"] = True
+                self.assertEqual(1, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_a))
+                # 3. Retry without changing pubspec -> pub get MUST run again before Gradle.
+                self.assertEqual(0, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_a))
+                # 4. Delete .flutter-plugins-dependencies -> must re-run pub get.
+                (cache / "local_app" / ".flutter-plugins-dependencies").unlink()
+                self.assertEqual(0, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_a))
+                # 5. Switch Flutter SDK -> stamp mismatch must trigger pub get.
+                self.assertEqual(0, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_b))
+
+            self.assertEqual(
+                [
+                    "pub_get",
+                    "gradle",
+                    "pub_get",  # failed attempt
+                    "pub_get",  # retried after failure
+                    "gradle",
+                    "pub_get",  # missing .flutter-plugins-dependencies
+                    "gradle",
+                    "pub_get",  # switched flutter SDK
+                    "gradle",
+                ],
+                events,
+            )
 
     def test_local_fast_rejects_device_serial_combination(self) -> None:
         stdout = StringIO()

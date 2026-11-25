@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -68,6 +69,17 @@ LOCAL_FAST_TASKS: tuple[str, ...] = (
     ":app:compileDebugAndroidTestKotlin",
     ":app:lintDebug",
 )
+
+LOCAL_FAST_MIRROR_ENTRIES: tuple[str, ...] = (
+    "android",
+    "lib",
+    "assets",
+    "pubspec.yaml",
+    "pubspec.lock",
+    "analysis_options.yaml",
+)
+
+PUB_STAMP_REL_PATH: tuple[str, ...] = (".dart_tool", ".local_fast_pub_stamp")
 
 MIRROR_SKIP_PREFIXES: tuple[tuple[str, ...], ...] = (
     ("artifacts",),
@@ -635,13 +647,47 @@ def _files_equal(first: Path, second: Path) -> bool:
                 return True
 
 
+def _filter_kept_dirs(
+    dirnames: Sequence[str],
+    rel_root_parts: tuple[str, ...],
+    *,
+    allowed_root: frozenset[str] | None = None,
+) -> list[str]:
+    kept: list[str] = []
+    for dirname in dirnames:
+        if not rel_root_parts and allowed_root is not None and dirname not in allowed_root:
+            continue
+        child_parts = (*rel_root_parts, dirname)
+        if not _is_skipped_mirror_path(child_parts):
+            kept.append(dirname)
+    return kept
+
+
+def _assert_non_overlapping_paths(source: Path, destination: Path) -> None:
+    src_resolved = source.resolve()
+    dst_resolved = destination.resolve()
+    if (
+        src_resolved == dst_resolved
+        or src_resolved in dst_resolved.parents
+        or dst_resolved in src_resolved.parents
+    ):
+        raise ManifestError(
+            "Refusing overlapping mirror paths: "
+            f"source={src_resolved}, destination={dst_resolved}"
+        )
+
+
 def sync_mirror_incremental(
     source: Path,
     destination: Path,
     *,
     clean: bool = False,
+    include_entries: Sequence[str] | None = None,
 ) -> SyncReport:
     """Incrementally mirror source -> destination while preserving Gradle/Flutter caches."""
+
+    _assert_non_overlapping_paths(source, destination)
+    allowed_root = frozenset(include_entries) if include_entries is not None else None
 
     if clean and destination.exists():
         _safe_rmtree(destination)
@@ -659,14 +705,15 @@ def sync_mirror_incremental(
         if rel_root_parts:
             expected_dirs.add("/".join(rel_root_parts))
 
-        kept_dirs: list[str] = []
-        for dirname in dirnames:
-            child_parts = (*rel_root_parts, dirname)
-            if not _is_skipped_mirror_path(child_parts):
-                kept_dirs.append(dirname)
-        dirnames[:] = kept_dirs
+        dirnames[:] = _filter_kept_dirs(
+            dirnames,
+            rel_root_parts,
+            allowed_root=allowed_root,
+        )
 
         for filename in filenames:
+            if not rel_root_parts and allowed_root is not None and filename not in allowed_root:
+                continue
             rel_parts = (*rel_root_parts, filename)
             if _is_skipped_mirror_path(rel_parts):
                 continue
@@ -691,12 +738,7 @@ def sync_mirror_incremental(
     for root, dirnames, filenames in os.walk(destination, topdown=True):
         root_path = Path(root)
         rel_root_parts = root_path.relative_to(destination).parts
-        kept_dirs = []
-        for dirname in dirnames:
-            child_parts = (*rel_root_parts, dirname)
-            if not _is_skipped_mirror_path(child_parts):
-                kept_dirs.append(dirname)
-        dirnames[:] = kept_dirs
+        dirnames[:] = _filter_kept_dirs(dirnames, rel_root_parts)
 
         for filename in filenames:
             rel_parts = (*rel_root_parts, filename)
@@ -890,6 +932,24 @@ def _default_local_fast_dir() -> Path:
     return Path(tempfile.gettempdir()) / "cx-android-cache"
 
 
+def _compute_pub_stamp(
+    mirror_root: Path,
+    flutter_sdk: Path | None,
+    flutter_cmd: str,
+) -> str:
+    digest = hashlib.sha256()
+    sdk_identity = str(flutter_sdk.resolve()) if flutter_sdk is not None else flutter_cmd
+    digest.update(f"sdk={sdk_identity}\n".encode("utf-8"))
+    for filename in ("pubspec.yaml", "pubspec.lock"):
+        path = mirror_root / filename
+        digest.update(f"file={filename}\n".encode("utf-8"))
+        if path.is_file():
+            digest.update(path.read_bytes())
+        else:
+            digest.update(b"<missing>")
+    return digest.hexdigest()
+
+
 def run_local_fast(
     *,
     cache_dir: Path | None = None,
@@ -909,6 +969,7 @@ def run_local_fast(
     if not str(target_cache).isascii():
         raise ManifestError(f"--cache-dir must be ASCII: {target_cache}")
     mirror_root = target_cache / "local_app"
+    _assert_non_overlapping_paths(local_app_root(), mirror_root)
     toolchain = _resolve_local_fast_toolchain(
         sdk_dir=sdk_dir,
         flutter_sdk=flutter_sdk,
@@ -935,6 +996,7 @@ def run_local_fast(
         local_app_root(),
         mirror_root,
         clean=clean_cache,
+        include_entries=LOCAL_FAST_MIRROR_ENTRIES,
     )
     print(
         f"[SYNC] {mirror_root} "
@@ -944,14 +1006,26 @@ def run_local_fast(
     )
 
     package_config = mirror_root / ".dart_tool" / "package_config.json"
+    plugins_deps = mirror_root / ".flutter-plugins-dependencies"
     local_props = mirror_root / "android" / "local.properties"
+    pub_stamp_path = mirror_root.joinpath(*PUB_STAMP_REL_PATH)
+    expected_stamp = _compute_pub_stamp(
+        mirror_root,
+        toolchain.flutter_sdk,
+        toolchain.flutter_cmd,
+    )
+    current_stamp = (
+        pub_stamp_path.read_text(encoding="utf-8").strip()
+        if pub_stamp_path.is_file()
+        else ""
+    )
     needs_pub_get = (
         force_pub_get
         or clean_cache
         or not package_config.is_file()
+        or not plugins_deps.is_file()
         or not local_props.is_file()
-        or "pubspec.yaml" in report.copied_files
-        or "pubspec.lock" in report.copied_files
+        or current_stamp != expected_stamp
     )
     if needs_pub_get:
         ensure_mirror_local_properties(
@@ -968,9 +1042,11 @@ def run_local_fast(
         if pub_code != 0:
             print(f"[FAIL] flutter pub get --offline failed (exit={pub_code}).", file=sys.stderr)
             return 1
+        pub_stamp_path.parent.mkdir(parents=True, exist_ok=True)
+        pub_stamp_path.write_text(expected_stamp + "\n", encoding="utf-8")
         print(f"[PASS] flutter pub get --offline ({time.monotonic() - pub_started:.1f}s)", flush=True)
     else:
-        print("[SKIP] flutter pub get --offline (pubspec & package_config unchanged)", flush=True)
+        print("[SKIP] flutter pub get --offline (pubspec, sdk & plugin metadata unchanged)", flush=True)
 
     # Always normalize and escape local.properties AFTER pub get to prevent [PropertyEscape] lint failures.
     ensure_mirror_local_properties(
