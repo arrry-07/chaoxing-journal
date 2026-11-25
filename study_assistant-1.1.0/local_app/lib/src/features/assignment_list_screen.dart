@@ -1602,12 +1602,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               onPressed: () => _manualActions.openEditor(context),
               icon: const Icon(Icons.add_rounded),
             ),
-          IconButton(
-            tooltip: '今日计划',
-            iconSize: 20,
-            onPressed: () => context.push('/plan'),
-            icon: const Icon(Icons.checklist_rounded),
-          ),
+          if (recoveryScope == null)
+            IconButton(
+              key: const ValueKey('home-sliver-agenda-entry'),
+              tooltip: '个人待办与考试',
+              iconSize: 20,
+              onPressed: () => context.push('/agenda'),
+              icon: const Icon(Icons.checklist_rounded),
+            ),
           IconButton(
             tooltip: '刷新作业',
             enableFeedback: false,

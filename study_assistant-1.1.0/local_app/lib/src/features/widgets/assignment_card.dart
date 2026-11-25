@@ -300,7 +300,7 @@ class AssignmentCard extends StatelessWidget {
       Directionality.of(context),
       MediaQuery.textScalerOf(context),
       inPinnedSection: inPinnedSection,
-      showCountdown: railCountdown,
+      showCountdown: !showFullDeadline && !inPinnedSection && countdown,
     );
     final largeText = JournalLayout.isLargeText(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);

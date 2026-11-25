@@ -41,8 +41,9 @@ String _compactAgendaTime(DateTime? at, DateTime now) {
 }
 
 class ManualAgendaScreen extends StatefulWidget {
-  const ManualAgendaScreen({super.key, required this.store});
+  const ManualAgendaScreen({super.key, required this.store, this.clock});
   final AssignmentStore store;
+  final DateTime Function()? clock;
   @override
   State<ManualAgendaScreen> createState() => _AgendaState();
 }
@@ -278,7 +279,7 @@ class _AgendaState extends State<ManualAgendaScreen> {
       animation: widget.store,
       builder: (context, _) {
         final journal = Journal.of(context);
-        final now = DateTime.now();
+        final now = widget.clock?.call() ?? DateTime.now();
         final allEntries = widget.store.notebook.entries;
         final activeAllCount = allEntries.where((e) => !e.done).length;
         final activeTodoCount = allEntries

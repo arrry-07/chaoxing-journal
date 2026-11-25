@@ -63,11 +63,10 @@ class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
       button: true,
       label: '复制备注',
       child: Material(
-        color: journal.parchment,
-        borderRadius: BorderRadius.circular(999),
-        clipBehavior: Clip.antiAlias,
+        type: MaterialType.transparency,
         child: InkWell(
           key: const ValueKey('manual-detail-copy-note'),
+          borderRadius: BorderRadius.circular(999),
           onTap: () async {
             try {
               await Clipboard.setData(ClipboardData(text: entry.note.trim()));
@@ -80,26 +79,38 @@ class _ManualEntryDetailScreenState extends State<ManualEntryDetailScreen> {
               }
             }
           },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.copy_outlined,
-                  size: 14,
-                  color: journal.ink,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 40),
+            child: Center(
+              widthFactor: 1,
+              heightFactor: 1,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: journal.parchment,
+                  borderRadius: BorderRadius.circular(999),
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  '复制',
-                  style: journal.metadata.copyWith(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: journal.ink,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.copy_outlined,
+                      size: 14,
+                      color: journal.ink,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '复制',
+                      style: journal.metadata.copyWith(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: journal.ink,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),

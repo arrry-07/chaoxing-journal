@@ -6,7 +6,9 @@ import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart'
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
+import 'package:study_assistant_mobile/src/features/widgets/manual_home_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -344,5 +346,81 @@ void main() {
         find.byKey(const ValueKey('assignment-card-gap-cx:work:1:2:gap'));
     expect(gap, findsOneWidget);
     expect(tester.getSize(gap).height, 4);
+  });
+
+  testWidgets(
+      'mixed timeline cards align title left edge across upcoming, overdue, and manual entries',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    final now = DateTime.utc(2026, 11, 13, 4);
+    final upcomingWork = Assignment(
+      id: 'cx:work:1:2:upcoming',
+      courseName: '高等数学',
+      title: '未逾期作业',
+      deadlineAt: now.add(const Duration(hours: 5)),
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final overdueWork = Assignment(
+      id: 'cx:work:1:2:overdue',
+      courseName: '高等数学',
+      title: '已逾期作业',
+      deadlineAt: now.subtract(const Duration(days: 2)),
+      requirementsText: '',
+      status: 'overdue',
+      lastSyncedAt: now,
+    );
+    final manualEntry = ManualEntry(
+      id: 'm-align',
+      title: '手动待办',
+      kind: ManualEntry.kindTodo,
+      course: '高等数学',
+      at: now.subtract(const Duration(hours: 4)),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: Column(
+            children: [
+              AssignmentCard(
+                assignment: upcomingWork,
+                now: now,
+                onTap: () {},
+                onOpenAssignment: () {},
+                showFullDeadline: false,
+                countdown: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+              ),
+              AssignmentCard(
+                assignment: overdueWork,
+                now: now,
+                onTap: () {},
+                onOpenAssignment: () {},
+                showFullDeadline: false,
+                countdown: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+              ),
+              ManualHomeCard(
+                entry: manualEntry,
+                now: now,
+                onTap: () {},
+                onToggleDone: () {},
+                countdown: true,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
+
+    final upcomingDx = tester.getTopLeft(find.text('未逾期作业')).dx;
+    final overdueDx = tester.getTopLeft(find.text('已逾期作业')).dx;
+    final manualDx = tester.getTopLeft(find.text('手动待办')).dx;
+
+    expect(overdueDx, closeTo(upcomingDx, 0.01));
+    expect(manualDx, closeTo(upcomingDx, 0.01));
+    expect(tester.takeException(), isNull);
   });
 }

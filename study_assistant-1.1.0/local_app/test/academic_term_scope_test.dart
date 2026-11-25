@@ -930,6 +930,81 @@ void main() {
       expect(catalog.matchesHomeCoursePicker(activeCourse.key, 'ungrouped'),
           isFalse);
     });
+
+    test(
+        'stats scope enforces 180-day recall horizon while retaining current-term submitted recall work',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      const pastCourse = CourseRef(
+        courseId: '301',
+        clazzId: '1',
+        name: '往期补修课',
+        folderName: '2025年秋',
+      );
+      final nearRecall = Assignment(
+        id: 'cx:work:301:1:1',
+        courseName: '往期补修课',
+        title: '三天后补交作业',
+        deadlineAt: now.add(const Duration(days: 3)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+      final farFutureExercise = Assignment(
+        id: 'cx:work:301:1:2',
+        courseName: '往期补修课',
+        title: '超远期常年练习',
+        deadlineAt: now.add(const Duration(days: 400)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+      final currentTermSubmitted = Assignment(
+        id: 'cx:work:301:1:3',
+        courseName: '往期补修课',
+        title: '本学期已提交补修',
+        deadlineAt: now.subtract(const Duration(days: 2)),
+        deadlineTrusted: true,
+        publishedAt: null,
+        requirementsText: '',
+        status: 'submitted',
+        lastSyncedAt: now,
+      );
+
+      final catalog = CourseTermCatalog.build(
+        courses: const [pastCourse],
+        assignments: [nearRecall, farFutureExercise, currentTermSubmitted],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      expect(
+          catalog.entryFor(pastCourse.key)!.state, CourseCatalogState.recalled);
+      expect(
+        catalog.matchesAssignmentInStatsScope(
+          nearRecall,
+          CourseTermScope.currentTerm,
+        ),
+        isTrue,
+      );
+      expect(
+        catalog.matchesAssignmentInStatsScope(
+          currentTermSubmitted,
+          CourseTermScope.currentTerm,
+        ),
+        isTrue,
+      );
+      expect(
+        catalog.matchesAssignmentInStatsScope(
+          farFutureExercise,
+          CourseTermScope.currentTerm,
+        ),
+        isFalse,
+      );
+    });
   });
 }
 

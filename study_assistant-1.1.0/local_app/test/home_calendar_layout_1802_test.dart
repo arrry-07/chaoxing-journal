@@ -332,4 +332,68 @@ void main() {
     expect(find.text('plan-page'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+      'scrolled home sliver header opens agenda and hides in recovery scope',
+      (tester) async {
+    final now = DateTime.now();
+    final store = _Store([
+      for (var i = 0; i < 12; i++)
+        _work('item-$i', deadline: now.add(Duration(days: i + 1))),
+    ]);
+    addTearDown(store.dispose);
+    final router = GoRouter(initialLocation: '/assignments', routes: [
+      GoRoute(
+        path: '/assignments',
+        builder: (_, __) => Scaffold(body: AssignmentListScreen(store: store)),
+      ),
+      GoRoute(
+        path: '/agenda',
+        builder: (_, __) => Scaffold(
+          appBar: AppBar(title: const Text('agenda-sliver-page')),
+          body: const SizedBox(),
+        ),
+      ),
+    ]);
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
+    await tester.pumpAndSettle();
+
+    final sliverAgenda = find.byKey(const ValueKey('home-sliver-agenda-entry'));
+    expect(sliverAgenda, findsOneWidget);
+    await tester.tap(sliverAgenda);
+    await tester.pumpAndSettle();
+    expect(find.text('agenda-sliver-page'), findsOneWidget);
+
+    final recoveryStore = _Store([
+      for (var i = 0; i < 12; i++) _exam('unknown-$i'),
+    ]);
+    addTearDown(recoveryStore.dispose);
+    final recoveryRouter = GoRouter(
+      initialLocation:
+          '/assignments?${AssignmentRecoveryScope.queryParameter}=${AssignmentRecoveryScope.examUnknown.queryValue}',
+      routes: [
+        GoRoute(
+          path: '/assignments',
+          builder: (_, __) =>
+              Scaffold(body: AssignmentListScreen(store: recoveryStore)),
+        ),
+      ],
+    );
+    addTearDown(recoveryRouter.dispose);
+
+    await tester.pumpWidget(MaterialApp.router(routerConfig: recoveryRouter));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('home-sliver-agenda-entry')),
+      findsNothing,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }

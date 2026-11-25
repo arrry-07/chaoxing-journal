@@ -33,6 +33,10 @@ class _NoopNotificationService extends LocalNotificationService {
   Future<void> removeLegacyAssignmentSchedules() async {}
 
   @override
+  Future<void> migrateLegacyManualChannelIfNeeded(
+      List<ManualEntry> entries) async {}
+
+  @override
   Future<void> cancelPrivateSchedules() async {}
 
   @override
@@ -73,7 +77,6 @@ Future<AssignmentStore> _buildStore({
     sessionStore: _MemorySessionStore(),
     notificationService: notifications ?? _NoopNotificationService(),
     widgetSnapshotService: _NoopWidgetSnapshotService(),
-    manageBackgroundSchedule: false,
   );
   await store.restoreSession();
   if (initial.isNotEmpty) {
@@ -86,29 +89,45 @@ Future<AssignmentStore> _buildStore({
 }
 
 void main() {
+  final fixedNow = DateTime.utc(2026, 11, 20, 4);
+
   testWidgets(
       'swipe right completes entry into collapsed section, undo restores, and expand allows swipe back to active',
       (tester) async {
-    final now = DateTime.now();
     final entry = ManualEntry(
       id: 'm-1',
       title: '完成实验报告',
       kind: ManualEntry.kindTodo,
       course: '操作系统',
-      at: now.add(const Duration(hours: 4)),
+      at: fixedNow.add(const Duration(hours: 4)),
     );
-    final store = await _buildStore(initial: [entry]);
+    final tomorrowEntry = ManualEntry(
+      id: 'm-2',
+      title: '准备明天的答辩',
+      kind: ManualEntry.kindExam,
+      at: fixedNow.add(const Duration(days: 1)),
+    );
+    final store = await _buildStore(initial: [entry, tomorrowEntry]);
     addTearDown(store.dispose);
 
     await tester.pumpWidget(MaterialApp(
       theme: StudyAssistantTheme.light,
-      home: ManualAgendaScreen(store: store),
+      home: ManualAgendaScreen(store: store, clock: () => fixedNow),
     ));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('agenda-active-card')), findsOneWidget);
     expect(find.byKey(const ValueKey('agenda-completed-card')), findsNothing);
+    expect(find.text('全部 (2)'), findsOneWidget);
+    expect(find.text('待办 (1)'), findsOneWidget);
+    expect(find.text('考试 (1)'), findsOneWidget);
+    expect(find.textContaining('今天 16:00'), findsOneWidget);
+    expect(find.textContaining('明天 12:00'), findsOneWidget);
     expect(find.text('完成实验报告'), findsOneWidget);
+
+    await tester.tap(find.text('待办 (1)'));
+    await tester.pumpAndSettle();
+    expect(find.text('准备明天的答辩'), findsNothing);
 
     await tester.drag(
       find.byKey(const ValueKey('agenda-swipe-m-1')),
@@ -116,7 +135,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(store.notebook.entries.single.done, isTrue);
+    expect(
+        store.notebook.entries.firstWhere((e) => e.id == 'm-1').done, isTrue);
     expect(find.byKey(const ValueKey('agenda-active-card')), findsNothing);
     expect(find.text('当前筛选下的个人安排已全部完成'), findsOneWidget);
     expect(find.byKey(const ValueKey('agenda-completed-card')), findsOneWidget);
@@ -127,13 +147,17 @@ void main() {
     await tester.tap(find.text('撤销'));
     await tester.pumpAndSettle();
 
-    expect(store.notebook.entries.single.done, isFalse);
+    expect(
+      store.notebook.entries.firstWhere((e) => e.id == 'm-1').done,
+      isFalse,
+    );
     expect(find.byKey(const ValueKey('agenda-active-card')), findsOneWidget);
     expect(find.byKey(const ValueKey('agenda-completed-card')), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('agenda-toggle-m-1')));
     await tester.pumpAndSettle();
-    expect(store.notebook.entries.single.done, isTrue);
+    expect(
+        store.notebook.entries.firstWhere((e) => e.id == 'm-1').done, isTrue);
 
     await tester.tap(find.byKey(const ValueKey('agenda-completed-toggle')));
     await tester.pumpAndSettle();
@@ -144,26 +168,28 @@ void main() {
       const Offset(240, 0),
     );
     await tester.pumpAndSettle();
-    expect(store.notebook.entries.single.done, isFalse);
+    expect(
+      store.notebook.entries.firstWhere((e) => e.id == 'm-1').done,
+      isFalse,
+    );
     expect(find.byKey(const ValueKey('agenda-active-card')), findsOneWidget);
   });
 
   testWidgets(
       'swipe left opens delete confirmation dialog and appends warnings',
       (tester) async {
-    final now = DateTime.now();
     final e1 = ManualEntry(
       id: 'm-del',
       title: '待删除日程',
       kind: ManualEntry.kindTodo,
-      at: now.add(const Duration(hours: 6)),
+      at: fixedNow.add(const Duration(hours: 6)),
       remind: true,
     );
     final e2 = ManualEntry(
       id: 'm-keep',
       title: '保留日程',
       kind: ManualEntry.kindTodo,
-      at: now.add(const Duration(hours: 8)),
+      at: fixedNow.add(const Duration(hours: 8)),
     );
     final store = await _buildStore(
       initial: [e1, e2],
@@ -173,7 +199,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(
       theme: StudyAssistantTheme.light,
-      home: ManualAgendaScreen(store: store),
+      home: ManualAgendaScreen(store: store, clock: () => fixedNow),
     ));
     await tester.pumpAndSettle();
 
@@ -193,11 +219,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(store.notebook.entries.map((e) => e.id).toList(), ['m-keep']);
-    expect(find.textContaining('已删除个人安排'), findsOneWidget);
+    expect(
+      find.textContaining('已删除个人安排；个人日程提醒未能更新'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(const ValueKey('agenda-toggle-m-keep')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('已完成「保留日程」'), findsOneWidget);
+    expect(
+      find.textContaining('已完成「保留日程」；个人日程提醒未能更新'),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -208,7 +240,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(
       theme: StudyAssistantTheme.light,
-      home: ManualAgendaScreen(store: emptyStore),
+      home: ManualAgendaScreen(store: emptyStore, clock: () => fixedNow),
     ));
     await tester.pumpAndSettle();
     expect(find.text('还没有个人安排，点击下方按钮添加待办或考试。'), findsOneWidget);
@@ -221,7 +253,7 @@ void main() {
         course: '编译原理与实践',
         location: '教三 302',
         note: '携带学生证和计算器，提前十分钟入场',
-        at: DateTime.now().add(const Duration(hours: 2)),
+        at: fixedNow.add(const Duration(hours: 2)),
       ),
     ]);
     addTearDown(store.dispose);
@@ -239,7 +271,7 @@ void main() {
               .copyWith(textScaler: const TextScaler.linear(2.0)),
           child: child!,
         ),
-        home: ManualAgendaScreen(store: store),
+        home: ManualAgendaScreen(store: store, clock: () => fixedNow),
       ));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);

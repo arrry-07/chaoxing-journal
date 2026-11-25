@@ -349,6 +349,10 @@ void main() {
     );
     expect((noteCardBox.height - detailCardBox.height).abs(),
         lessThanOrEqualTo(6.0));
+    final copyButtonSize =
+        tester.getSize(find.byKey(const ValueKey('manual-detail-copy-note')));
+    expect(copyButtonSize.width, greaterThanOrEqualTo(44));
+    expect(copyButtonSize.height, greaterThanOrEqualTo(40));
     expect(
       find.byKey(const ValueKey('manual-detail-reminder-status')),
       findsOneWidget,

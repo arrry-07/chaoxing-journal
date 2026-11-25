@@ -60,7 +60,7 @@ class JournalGroupedCard extends StatelessWidget {
                 ),
               ),
               padding: compactTrailingHeader
-                  ? const EdgeInsets.fromLTRB(16, 7, 12, 7)
+                  ? const EdgeInsets.fromLTRB(16, 2, 8, 2)
                   : const EdgeInsets.fromLTRB(16, 12, 12, 10),
               child: Row(
                 children: [

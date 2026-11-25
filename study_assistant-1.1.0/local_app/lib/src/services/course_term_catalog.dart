@@ -314,6 +314,34 @@ class CourseTermCatalog {
         AcademicTerm.fromInstant(a.deadlineAt!) < currentTerm;
   }
 
+  static List<DateTime> _trustedCurrentTermDeadlineOrExamTimesUtc(
+    Assignment a,
+    AcademicTerm currentTerm,
+  ) {
+    final times = <DateTime>[];
+    if (a.isExam) {
+      final exam = a.exam;
+      if (exam != null && !exam.noticeOnly) {
+        if (exam.startTrusted &&
+            exam.startAt != null &&
+            AcademicTerm.fromInstant(exam.startAt!) == currentTerm) {
+          times.add(exam.startAt!.toUtc());
+        }
+        if (exam.endTrusted &&
+            exam.endAt != null &&
+            AcademicTerm.fromInstant(exam.endAt!) == currentTerm) {
+          times.add(exam.endAt!.toUtc());
+        }
+      }
+    } else if (a.deadlineTrusted &&
+        !a.deadlineReadFailed &&
+        a.deadlineAt != null &&
+        AcademicTerm.fromInstant(a.deadlineAt!) == currentTerm) {
+      times.add(a.deadlineAt!.toUtc());
+    }
+    return times;
+  }
+
   static bool _hasNearFutureOrCurrentTermSignal(
     Assignment a, {
     required DateTime nowUtc,
@@ -534,6 +562,9 @@ class CourseTermCatalog {
             AcademicTerm.fromInstant(a.availableFromAt!) >= currentTerm) {
           recallSignals.add(a.availableFromAt!.toUtc());
         }
+        recallSignals.addAll(
+          _trustedCurrentTermDeadlineOrExamTimesUtc(a, currentTerm),
+        );
       }
       for (final n in courseNotices) {
         if (n.publishedTrusted &&
@@ -655,6 +686,8 @@ class CourseTermCatalog {
 
   bool _isRecordCurrentTermOrRecall(Assignment a) {
     if (_hiddenAssignmentIds.contains(a.id)) return false;
+    final nowUtc = now.toUtc();
+    final maxRecallUtc = nowUtc.add(maxFutureRecallHorizon);
     final completed = CourseworkDeadline.isEffectivelyCompleted(a, _coursework);
     if (!completed) {
       final resolved = a.isExam
@@ -663,17 +696,22 @@ class CourseTermCatalog {
               a,
               CourseworkDeadline.entryFor(a, _coursework),
             );
-      if (resolved != null && resolved.at.toUtc().isAfter(now.toUtc())) {
-        return true;
+      if (resolved != null) {
+        final atUtc = resolved.at.toUtc();
+        if (atUtc.isAfter(nowUtc) && !atUtc.isAfter(maxRecallUtc)) {
+          return true;
+        }
       }
       if (a.isExam &&
           a.exam != null &&
           !a.exam!.noticeOnly &&
           !AssignmentQuery.isExamEnded(a, now) &&
           a.timelineTrusted &&
-          a.timelineAt != null &&
-          a.timelineAt!.toUtc().isAfter(now.toUtc())) {
-        return true;
+          a.timelineAt != null) {
+        final atUtc = a.timelineAt!.toUtc();
+        if (atUtc.isAfter(nowUtc) && !atUtc.isAfter(maxRecallUtc)) {
+          return true;
+        }
       }
     }
     final hasLiveSync = a.lastSyncedAt.millisecondsSinceEpoch > 0;
@@ -685,6 +723,9 @@ class CourseTermCatalog {
     if (hasLiveSync &&
         a.availableFromAt != null &&
         AcademicTerm.fromInstant(a.availableFromAt!) >= currentTerm) {
+      return true;
+    }
+    if (_trustedCurrentTermDeadlineOrExamTimesUtc(a, currentTerm).isNotEmpty) {
       return true;
     }
     return false;

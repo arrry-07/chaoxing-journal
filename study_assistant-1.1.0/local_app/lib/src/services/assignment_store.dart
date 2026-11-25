@@ -1748,6 +1748,7 @@ class AssignmentStore extends ChangeNotifier {
             coursework: _courseworkState,
             unfollowedCourseKeys: _unfollowed,
             hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+            changes: changes,
           );
     return List.unmodifiable([
       for (final a in statsAssignments)
@@ -4759,6 +4760,7 @@ class AssignmentStore extends ChangeNotifier {
         coursework: _courseworkState,
         unfollowedCourseKeys: _unfollowed,
         hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+        changes: changes,
       );
       return SyncScopeSelection.select(
         catalog: catalog,
