@@ -4,11 +4,11 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
-## 2026-11-25 · 自动化工作流与强模型提示词规则精炼（仅规则与状态文档）
+## 2026-11-25 · 研发与审查工作流实战减负优化（仅规则与状态文档）
 
-- 已完成改动：精炼 `AGENTS.md`、`.agents/rules/skill-routing.md`、全局 `staged-release-gate`（含 `references/t3-goal-automation.md`）与 `GEMINI.md`：按工具最佳实效采用「人机顶层两窗分离（规划窗 vs. `/goal` 总控窗）+ 总控内每步新建零父历史 `delegate_task` 子任务」（避免 `t3_thread_launch` 刷屏左侧会话栏与轮询脆弱性，去掉冗余防御性废话），固化强模型（`Neon` 初审 / `Carbon` 复审及总控）极简四要素提示词原则、执行模型按配额二选一（`Hydrogen` 优先 / `DeepSeek V4.1 Flash` 备选）与 3 轮返工疑难落盘规则。
-- 当前 commit 与状态：仅更新仓库规则与状态文档（`v1.8.32` Stage 1 提交 `90a9e5b` 保持不变），L0 共 `52 <= 80` 行。
-- 下一步待办：继续完成 `v1.8.32`（基线 `7bf6253..HEAD`）的独立 Gate 审查、按需返工复审及 `1.8.32+125` 原签名自测包 MuMu 保数据实测收口。
+- 已完成改动：重构全局 `staged-release-gate`（含 `references/t3-goal-automation.md`）、三套 T3 Antigravity 实例 `GEMINI.md`、`~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md` 及本仓 `AGENTS.md`、`.agents/rules/skill-routing.md`、`VALIDATION.md`：① 按改动体量拆为「≤3 文件轻快档 / 跨模块 `/goal` 标准档 / Stage 2 发版档」并精简状态文档为阶段收口一更；② 计划规格书由 11 章八股压缩为 4 个高信噪比模块，支持同窗 `/clear`（首选）或新对话切入 `/goal`；③ Gate 初审区分「≤2 文件小瑕疵总控直修」与「实质缺陷返工 + 双锚点异构复审 + 第 2 轮强模型升级攻坚」，校准 `orchestrator_capabilities` 跨实例档位核验并隔离 `code-review` 子代理嵌套冲突、精简 `delivery-no-pseudoblock`。
+- 当前 commit 与状态：仅更新工作流规则与状态文档（`v1.8.32` Stage 1 代码提交 `90a9e5b` 保持不变），L0 行数符合 `<= 80` 门禁。
+- 下一步待办：在当前对话发 `/clear`（或新开 `Carbon high` 对话）运行续接 `/goal` 指令，完成 `v1.8.32`（`7bf6253..90a9e5b`）的独立 Gate 审查与 `1.8.32+125` 原签名自测包 MuMu 实测收口。
 
 ## 2026-11-25 · v1.8.32 Stage 1 (M1–M6) 完成（待 Gate 独立审查）
 
