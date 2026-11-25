@@ -58,6 +58,7 @@ class _CourseListScreenState extends State<CourseListScreen> {
     Set<String> courseKeys,
   ) async {
     if (courseKeys.isEmpty) return;
+    final expectedEpoch = store.accountEpoch;
     final now = widget.clock?.call() ?? DateTime.now();
     final selectableTerms = AcademicTerm.recentSelectableTerms(now, count: 8);
     final selected = await showJournalPickerSheet<String>(
@@ -83,14 +84,16 @@ class _CourseListScreenState extends State<CourseListScreen> {
           ),
       ],
     );
-    if (selected == null || !mounted) return;
+    if (selected == null || !mounted || store.accountEpoch != expectedEpoch) {
+      return;
+    }
     final saved = await store.batchUpdateCourseTerms(
       courseKeys: courseKeys,
       updateManualTerm: true,
       manualTerm:
           selected == '__auto__' ? null : AcademicTerm.tryParseKey(selected),
     );
-    if (saved && mounted) {
+    if (saved && mounted && store.accountEpoch == expectedEpoch) {
       setState(() => _selectedCourseKeys.clear());
     }
   }
@@ -367,7 +370,8 @@ class _CourseListScreenState extends State<CourseListScreen> {
                               ),
                             ),
                           if (filtered.isNotEmpty &&
-                              selectedKeys.length < filtered.length)
+                              !filtered
+                                  .every((c) => selectedKeys.contains(c.key)))
                             TextButton(
                               key: const ValueKey('course-select-all-visible'),
                               onPressed: store.isLoading

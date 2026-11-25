@@ -98,14 +98,23 @@ class ChaoxingApiParser {
     return (names: tfNames, conflicted: false);
   }
 
+  static final int _minCourseBoundaryMs =
+      DateTime.utc(2000, 1, 1).millisecondsSinceEpoch;
+  static final int _maxCourseBoundaryMs =
+      DateTime.utc(2100, 12, 31, 23, 59, 59, 999).millisecondsSinceEpoch;
+
   static DateTime? _parseCourseBoundaryUtc(dynamic raw) {
     if (raw == null) return null;
     DateTime? dt;
     if (raw is num) {
       if (!raw.isFinite || raw <= 0) return null;
-      var ms = raw.toInt();
-      if (ms < 100000000000) ms *= 1000;
-      dt = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+      final num msNum = raw < 100000000000 ? raw * 1000 : raw;
+      if (!msNum.isFinite ||
+          msNum < _minCourseBoundaryMs ||
+          msNum > _maxCourseBoundaryMs) {
+        return null;
+      }
+      dt = DateTime.fromMillisecondsSinceEpoch(msNum.truncate(), isUtc: true);
     } else if (raw is String) {
       final text = raw.trim();
       if (text.isEmpty) return null;
@@ -127,6 +136,14 @@ class ChaoxingApiParser {
     }
     if (dt == null || dt.year < 2000 || dt.year > 2100) return null;
     return dt.toUtc();
+  }
+
+  static DateTime? _firstCourseBoundaryUtc(List<dynamic> candidates) {
+    for (final raw in candidates) {
+      final parsed = _parseCourseBoundaryUtc(raw);
+      if (parsed != null) return parsed;
+    }
+    return null;
   }
 
   static ({
@@ -260,20 +277,20 @@ class ChaoxingApiParser {
               : (rawClazzCandidate.length > 120
                   ? rawClazzCandidate.substring(0, 120)
                   : rawClazzCandidate);
-      final courseStartAt = _parseCourseBoundaryUtc(
-        courseData?['begindate'] ??
-            courseData?['startTime'] ??
-            courseData?['startdate'] ??
-            content['begindate'] ??
-            content['startTime'] ??
-            content['startdate'],
-      );
-      final courseEndAt = _parseCourseBoundaryUtc(
-        courseData?['enddate'] ??
-            courseData?['endTime'] ??
-            content['enddate'] ??
-            content['endTime'],
-      );
+      final courseStartAt = _firstCourseBoundaryUtc([
+        courseData?['begindate'],
+        courseData?['startTime'],
+        courseData?['startdate'],
+        content['begindate'],
+        content['startTime'],
+        content['startdate'],
+      ]);
+      final courseEndAt = _firstCourseBoundaryUtc([
+        courseData?['enddate'],
+        courseData?['endTime'],
+        content['enddate'],
+        content['endTime'],
+      ]);
 
       final key = '$courseId:$clazzId';
       final teacherInfo = _extractTeachers(courseData, content);

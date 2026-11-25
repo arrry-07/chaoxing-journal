@@ -600,5 +600,113 @@ void main() {
       expect(c2.courseStartAt, isNull);
       expect(c2.courseEndAt, isNull);
     });
+
+    test(
+        'clamps extreme boundary numbers without throwing and falls back past 0/empty boundary candidates',
+        () {
+      final result = ChaoxingApiParser.parseCourseRefsDetailed({
+        'channelList': [
+          {
+            'content': {
+              'clazz': {
+                'data': [
+                  {'id': 401, 'name': '极值边界测试班'},
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 301,
+                    'name': '数值溢出防护课',
+                    'begindate': 99999999999999999,
+                    'enddate': 1e18,
+                  },
+                ],
+              },
+            },
+          },
+          {
+            'content': {
+              'clazz': {
+                'data': [
+                  {'id': 402, 'name': '字符串极大数班'},
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 302,
+                    'name': '字符串越界防护课',
+                    'begindate': '99999999999999999',
+                    'enddate': '1e18',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            'content': {
+              'begindate': 1756684800, // 2025-09-01 UTC (seconds)
+              'endTime': '2026-01-20',
+              'clazz': {
+                'data': [
+                  {'id': 403, 'name': '零值回落测试班'},
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 303,
+                    'name': '候选键顺序回落课',
+                    'begindate': 0,
+                    'startTime': '',
+                    'enddate': '',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            'content': {
+              'clazz': {
+                'data': [
+                  {'id': 404, 'name': '空串跳过测试班'},
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 304,
+                    'name': '空串回落到startTime课',
+                    'begindate': '',
+                    'startTime': 1756684800000,
+                    'enddate': 0,
+                    'endTime': '2026-01-20',
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      });
+
+      expect(result.refs, hasLength(4));
+
+      final c1 = result.refs.singleWhere((c) => c.courseId == '301');
+      expect(c1.courseStartAt, isNull);
+      expect(c1.courseEndAt, isNull);
+
+      final c2 = result.refs.singleWhere((c) => c.courseId == '302');
+      expect(c2.courseStartAt, isNull);
+      expect(c2.courseEndAt, isNull);
+
+      final c3 = result.refs.singleWhere((c) => c.courseId == '303');
+      expect(c3.courseStartAt, DateTime.utc(2025, 9, 1));
+      expect(c3.courseEndAt, DateTime.utc(2026, 1, 20));
+
+      final c4 = result.refs.singleWhere((c) => c.courseId == '304');
+      expect(c4.courseStartAt, DateTime.utc(2025, 9, 1));
+      expect(c4.courseEndAt, DateTime.utc(2026, 1, 20));
+    });
   });
 }

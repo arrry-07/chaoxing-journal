@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -53,16 +55,48 @@ double _contrastRatio(Color fg, Color bg) {
 
 class _Session extends SecureSessionStore {
   _Session([this.account = '13800000001']);
-  String account;
+  String? account;
 
   @override
   Future<String?> readChaoxingAccount() async => account;
   @override
-  Future<String?> readChaoxingPassword() async => 'pw';
+  Future<String?> readChaoxingPassword() async => account == null ? null : 'pw';
   @override
   Future<String?> readChaoxingDisplayName() async => '同学';
   @override
   Future<String?> readChaoxingAvatarUrl() async => null;
+  @override
+  Future<void> saveChaoxingAccount({
+    required String account,
+    required String password,
+    String? displayName,
+    String? avatarUrl,
+  }) async {
+    this.account = account;
+  }
+
+  @override
+  Future<void> clearWebSession() async {}
+
+  @override
+  Future<void> clear() async {
+    account = null;
+  }
+}
+
+class _SwitchableClient extends ChaoxingLocalClient {
+  @override
+  bool get needsSessionInitialization => false;
+
+  @override
+  Future<ChaoxingLoginResult> login({
+    required String account,
+    required String password,
+  }) async =>
+      ChaoxingLoginResult(success: true, displayName: '用户-$account');
+
+  @override
+  Future<List<Assignment>> fetchAssignments() async => const [];
 }
 
 class _NoopNotif extends LocalNotificationService {
@@ -97,12 +131,13 @@ class _FakeStore extends AssignmentStore {
     _Session? session,
     super.repository,
     this.explanationOverride,
+    ChaoxingLocalClient? chaoxingClient,
     super.clock,
   }) : super(
           sessionStore: session ?? _Session(),
           notificationService: _NoopNotif(),
           widgetSnapshotService: _NoopWidget(),
-          chaoxingClient: ChaoxingLocalClient(),
+          chaoxingClient: chaoxingClient ?? ChaoxingLocalClient(),
           manageBackgroundSchedule: true,
         );
 
@@ -509,6 +544,189 @@ void main() {
           );
         }
         await tester.pumpAndSettle();
+      }
+    });
+
+    testWidgets(
+        'JournalPageTransitionsBuilder handles Android predictive back commit, cancel, and route guards',
+        (tester) async {
+      Future<bool> sendStartBackGesture({
+        double progress = 0.0,
+        int swipeEdge = 0,
+        bool isButtonEvent = false,
+      }) async {
+        bool handled = false;
+        final msg = const StandardMethodCodec().encodeMethodCall(
+          MethodCall('startBackGesture', <String, dynamic>{
+            'touchOffset': <double>[5.0, 300.0],
+            'progress': progress,
+            'swipeEdge': swipeEdge,
+            if (isButtonEvent) 'isButtonEvent': true,
+          }),
+        );
+        await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          SystemChannels.backGesture.name,
+          msg,
+          (ByteData? reply) {
+            if (reply != null) {
+              handled =
+                  const StandardMethodCodec().decodeEnvelope(reply) == true;
+            }
+          },
+        );
+        return handled;
+      }
+
+      Future<void> sendUpdateBackGesture(double progress) async {
+        final msg = const StandardMethodCodec().encodeMethodCall(
+          MethodCall('updateBackGestureProgress', <String, dynamic>{
+            'touchOffset': <double>[120.0, 310.0],
+            'progress': progress,
+            'swipeEdge': 0,
+          }),
+        );
+        await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          SystemChannels.backGesture.name,
+          msg,
+          (_) {},
+        );
+      }
+
+      Future<void> sendBackAction(String method) async {
+        final msg = const StandardMethodCodec().encodeMethodCall(
+          MethodCall(method),
+        );
+        await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          SystemChannels.backGesture.name,
+          msg,
+          (_) {},
+        );
+      }
+
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      try {
+        var canPopThird = false;
+        var reducedMotion = false;
+        late StateSetter setHostState;
+
+        await tester.pumpWidget(StatefulBuilder(
+          builder: (context, setState) {
+            setHostState = setState;
+            return MaterialApp(
+              theme: StudyAssistantTheme.light,
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(disableAnimations: reducedMotion),
+                child: child!,
+              ),
+              home: Builder(
+                builder: (context) => Scaffold(
+                  body: Column(
+                    children: [
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const Scaffold(
+                                body: Text('预测性返回目标页'),
+                              ),
+                            ),
+                          );
+                        },
+                        child: const Text('去目标页'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => StatefulBuilder(
+                                builder: (ctx, _) => PopScope(
+                                  canPop: canPopThird,
+                                  child: const Scaffold(
+                                    body: Text('禁止手势返回页'),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                        child: const Text('去禁返页'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ));
+        await tester.pumpAndSettle();
+
+        // 1) Root route cannot be popped via predictive back.
+        expect(await sendStartBackGesture(), isFalse);
+
+        // 2) Push second page -> cancel branch keeps route active and restores parallax host.
+        await tester.tap(find.text('去目标页'));
+        await tester.pumpAndSettle();
+        expect(find.text('预测性返回目标页'), findsOneWidget);
+
+        expect(await sendStartBackGesture(), isTrue);
+        await tester.pump();
+        await sendUpdateBackGesture(0.35);
+        await tester.pump();
+        expect(
+          find.ancestor(
+            of: find.text('预测性返回目标页'),
+            matching: find.byType(Transform),
+          ),
+          findsWidgets,
+        );
+        expect(
+          find.ancestor(
+            of: find.text('预测性返回目标页'),
+            matching: find.byType(FadeTransition),
+          ),
+          findsNothing,
+        );
+
+        await sendBackAction('cancelBackGesture');
+        await tester.pumpAndSettle();
+        expect(find.text('预测性返回目标页'), findsOneWidget);
+
+        // 3) Commit branch pops route back to root.
+        expect(await sendStartBackGesture(), isTrue);
+        await tester.pump();
+        await sendUpdateBackGesture(0.45);
+        await tester.pump();
+        await sendBackAction('commitBackGesture');
+        await tester.pumpAndSettle();
+        expect(find.text('预测性返回目标页'), findsNothing);
+        expect(find.text('去目标页'), findsOneWidget);
+
+        // 4) Non-poppable route (PopScope canPop: false) and disableAnimations reject predictive gesture.
+        await tester.tap(find.text('去禁返页'));
+        await tester.pumpAndSettle();
+        expect(await sendStartBackGesture(), isFalse);
+
+        // With disableAnimations: true, even a poppable route declines predictive back.
+        canPopThird = true;
+        reducedMotion = true;
+        setHostState(() {});
+        await tester.pumpAndSettle();
+        expect(await sendStartBackGesture(), isFalse);
+
+        // Re-enable animations and verify clean pop.
+        reducedMotion = false;
+        setHostState(() {});
+        await tester.pumpAndSettle();
+        expect(await sendStartBackGesture(), isTrue);
+        await tester.pump();
+        await sendUpdateBackGesture(0.5);
+        await tester.pump();
+        await sendBackAction('commitBackGesture');
+        await tester.pumpAndSettle();
+        expect(find.text('去目标页'), findsOneWidget);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
       }
     });
 
@@ -996,6 +1214,111 @@ void main() {
       expect(find.textContaining('批量操作'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets(
+        'CourseListScreen keeps select-all visible on disjoint search subset and aborts batch term write across accountEpoch change',
+        (tester) async {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      const courseA = CourseRef(
+        courseId: 'c-a',
+        clazzId: 'k1',
+        name: '编译原理',
+      );
+      const courseB = CourseRef(
+        courseId: 'c-b',
+        clazzId: 'k2',
+        name: '操作系统',
+      );
+      const courseC = CourseRef(
+        courseId: 'c-c',
+        clazzId: 'k3',
+        name: '线性代数',
+      );
+
+      final session = _Session('13800000001');
+      SharedPreferences.setMockInitialValues({
+        'auto_sync_interval_minutes': 0,
+      });
+      FlutterSecureStorage.setMockInitialValues({});
+      final repo = LocalAssignmentRepository();
+      await repo.activateAccount('13800000001');
+      await repo.saveCourses(
+        const [courseA, courseB, courseC],
+        account: '13800000001',
+      );
+      await repo.activateAccount('13800000002');
+      await repo.saveCourses(
+        const [courseA, courseB, courseC],
+        account: '13800000002',
+      );
+      await repo.activateAccount('13800000001');
+      final store = _FakeStore(
+        session: session,
+        repository: repo,
+        chaoxingClient: _SwitchableClient(),
+        clock: () => now,
+      );
+      await store.restoreSession();
+      addTearDown(store.dispose);
+
+      await tester.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: CourseListScreen(store: store, clock: () => now),
+      ));
+      await tester.pumpAndSettle();
+
+      // Enter manage mode, select 2 courses (courseA, courseB).
+      await tester.tap(find.byKey(const ValueKey('course-list-manage-terms')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('course-select-c-a:k1')));
+      await tester.tap(find.byKey(const ValueKey('course-select-c-b:k2')));
+      await tester.pumpAndSettle();
+
+      // Search for a smaller disjoint subset (only courseC, 1 unselected item < 2 selected).
+      await tester.tap(find.byKey(const ValueKey('course-list-search-toggle')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('course-list-search')),
+        '线性代数',
+      );
+      await tester.pumpAndSettle();
+
+      final selectAllFinder =
+          find.byKey(const ValueKey('course-select-all-visible'));
+      expect(selectAllFinder, findsOneWidget);
+      await tester.tap(selectAllFinder);
+      await tester.pumpAndSettle();
+      expect(selectAllFinder, findsNothing);
+
+      // Clear search and test accountEpoch guard in _pickBatchManualTerm.
+      await tester.tap(find.byKey(const ValueKey('course-list-search-toggle')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('course-clear-selection')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('course-select-c-a:k1')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('course-batch-set-term')));
+      await tester.pumpAndSettle();
+      expect(find.text('自动推断（清除手动设置）'), findsOneWidget);
+
+      // Switch account while picker sheet is open -> accountEpoch changes.
+      await store.loginChaoxing(
+        account: '13800000002',
+        password: 'pw',
+        agreementAccepted: true,
+      );
+      await tester.pumpAndSettle();
+
+      // Selecting a term now must NOT mutate the new account's term preferences.
+      final fallOption = find.byKey(const ValueKey('term-option-2026-fall'));
+      expect(fallOption, findsOneWidget);
+      await tester.tap(fallOption);
+      await tester.pumpAndSettle();
+
+      expect(store.account, '13800000002');
+      expect(store.courseTermPreferences.entryFor(courseA.key), isNull);
+    });
   });
 
   group('M5 · JournalExpansionTile 平滑折叠、保态与窄屏嵌套零溢出', () {
@@ -1124,6 +1447,88 @@ void main() {
 
       expect(find.textContaining('HTTP 500'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'JournalExpansionTile persists PageStorageKey state without leaking plain ValueKey tiles into PageStorageBucket',
+        (tester) async {
+      final bucket = PageStorageBucket();
+
+      // 1) Mount two tiles: one with ancestor PageStorageKey, one with plain ValueKey only.
+      await tester.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: PageStorage(
+            bucket: bucket,
+            child: ListView(
+              children: const [
+                KeyedSubtree(
+                  key: PageStorageKey<String>('persisted-course-1'),
+                  child: JournalExpansionTile(
+                    key: ValueKey('persisted-row-1'),
+                    title: Text('带 PageStorageKey 分组'),
+                    children: [Text('保态子内容')],
+                  ),
+                ),
+                JournalExpansionTile(
+                  key: ValueKey('plain-detail-row'),
+                  title: Text('仅 ValueKey 折叠项'),
+                  children: [Text('临时子内容')],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ));
+
+      await tester.tap(find.text('带 PageStorageKey 分组'));
+      await tester.tap(find.text('仅 ValueKey 折叠项'));
+      await tester.pumpAndSettle();
+      expect(find.text('保态子内容'), findsOneWidget);
+      expect(find.text('临时子内容'), findsOneWidget);
+
+      // 2) Unmount the page completely (simulating tab switch / object change) and
+      // remount fresh widget instances under the same PageStorageBucket:
+      // PageStorageKey tile must restore expanded; plain ValueKey tile must start collapsed.
+      await tester.pumpWidget(MaterialApp(
+        key: UniqueKey(),
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: PageStorage(
+            bucket: bucket,
+            child: ListView(
+              key: UniqueKey(),
+              children: const [
+                KeyedSubtree(
+                  key: PageStorageKey<String>('persisted-course-1'),
+                  child: JournalExpansionTile(
+                    key: ValueKey('persisted-row-1'),
+                    title: Text('带 PageStorageKey 分组'),
+                    children: [Text('保态子内容')],
+                  ),
+                ),
+                JournalExpansionTile(
+                  key: ValueKey('plain-detail-row'),
+                  title: Text('仅 ValueKey 折叠项'),
+                  children: [Text('临时子内容')],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final plainCtx =
+          tester.element(find.byKey(const ValueKey('plain-detail-row')));
+      expect(bucket.readState(plainCtx), isNull);
+      expect(
+        bucket.readState(plainCtx,
+            identifier: const ValueKey('plain-detail-row')),
+        isNull,
+      );
+      expect(find.text('保态子内容'), findsOneWidget);
+      expect(find.text('临时子内容'), findsNothing);
     });
   });
 }

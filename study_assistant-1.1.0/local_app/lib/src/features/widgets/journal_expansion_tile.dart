@@ -52,22 +52,12 @@ class _JournalExpansionTileState extends State<JournalExpansionTile>
     super.initState();
   }
 
-  Object? _storageIdentifier(BuildContext context) {
-    final ancestor = context.findAncestorWidgetOfExactType<KeyedSubtree>();
-    if (ancestor?.key is PageStorageKey) return ancestor!.key;
-    if (widget.key is PageStorageKey) return widget.key;
-    return widget.key;
-  }
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_initializedFromStorage) return;
     _initializedFromStorage = true;
-    final stored = PageStorage.maybeOf(context)?.readState(
-      context,
-      identifier: _storageIdentifier(context),
-    );
+    final stored = PageStorage.maybeOf(context)?.readState(context);
     if (stored is bool && stored != _expanded) {
       _expanded = stored;
       updateKeepAlive();
@@ -80,11 +70,7 @@ class _JournalExpansionTileState extends State<JournalExpansionTile>
   void _toggle() {
     setState(() {
       _expanded = !_expanded;
-      PageStorage.maybeOf(context)?.writeState(
-        context,
-        _expanded,
-        identifier: _storageIdentifier(context),
-      );
+      PageStorage.maybeOf(context)?.writeState(context, _expanded);
       updateKeepAlive();
     });
     widget.onExpansionChanged?.call(_expanded);
