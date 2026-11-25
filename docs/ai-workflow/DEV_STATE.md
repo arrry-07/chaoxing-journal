@@ -1,12 +1,12 @@
 # dev 本地状态
 
-> 每项独立改动提交前更新本文件；只保留最近 5 条，更早记录随发布收口归档。
+> 阶段收口或停机交接提交时更新本文件（同一阶段中间小提交无需重复刷写）；只保留最近 5 条，更早记录随发布收口归档。
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
 ## 2026-11-25 · 研发流程与本地门禁四项提效优化（工具脚本 + 规则文档）
 
-- 已完成改动：落地四项本地门禁与 `/goal` 闭环提效优化并完成双轴代码审查返修加固：① [verify_local_gate.py](../../scripts/verify_local_gate.py) 为 Flutter 单测接入默认 `--timeout 30s`（`--test-case-timeout none` 正确透传禁用）与外层进程树超时熔断（quick 300s / full 900s，锁保护 ANSI/`\r` 逐帧解析并回显最后卡住的用例，覆盖超时与 `KeyboardInterrupt` 全进程树清理），回归见 [test_verify_local_gate.py](../../scripts/test_verify_local_gate.py)；② [run_android_tests.py](../../scripts/run_android_tests.py) 新增 `--local-fast` 持久化 ASCII 白名单增量镜像快检（仅同步 `android/`/`lib/`/`assets/`/`pubspec*`/`analysis_options.yaml`、拦截源/目标目录重叠或嵌套、以成功后落盘的 SHA-256 `pubspec+SDK` 指纹及 `.flutter-plugins-dependencies` 判定按需离线 `flutter pub get`、每次 `pub get` 后重写转义 `android/local.properties` 根除 `[PropertyEscape]`，一次跑通 `:app:testDebugUnitTest` + `:app:compileDebugAndroidTestKotlin` + `:app:lintDebug`），补齐跨平台（Windows/Linux CI 无条件触发）与失败重试回归见 [test_run_android_tests.py](../../scripts/test_run_android_tests.py)；③ 同步更新 [AGENTS.md](../../AGENTS.md)、[VALIDATION.md](VALIDATION.md)、[开发与贡献.md](../guides/开发与贡献.md)、[.agents/rules/skill-routing.md](../../.agents/rules/skill-routing.md) 与全局 `staged-release-gate` 技能，固化标准档体量软上限（≤ 4–5 模块 / ≤ 25–30 文件）、Stage 1 原生快检硬要求与 Gate 3 窄补丁（≤ 10 文件）增量终审。
+- 已完成改动：落地四项本地门禁与 `/goal` 闭环提效优化并完成两轮双轴代码审查收口加固：① [verify_local_gate.py](../../scripts/verify_local_gate.py) 为 Flutter 单测接入默认 `--timeout 30s`（`--test-case-timeout none` 正确透传禁用）与外层进程树超时熔断（quick 300s / full 900s，`os.read` 增量 UTF-8 解码实时捕获裸 `\r` 与 `HH:MM:SS` 卡死用例帧，覆盖超时与 `KeyboardInterrupt` 进程树清理），回归见 [test_verify_local_gate.py](../../scripts/test_verify_local_gate.py)；② [run_android_tests.py](../../scripts/run_android_tests.py) 新增 `--local-fast` 持久化 ASCII 白名单增量镜像快检（彻底清理白名单外 `ios/`/`test/`/`tool/` 历史残留、2s 窗口防同 tick 等长文件漏拷、拦截源/目标目录重叠或嵌套、执行前预删旧 `.local_fast_pub_stamp` 并校验 `pubspec+SDK 版本+插件注册类` 按需运行 `flutter pub get --offline --enforce-lockfile`、完整 `.properties` 转义/反转义根除 `[PropertyEscape]`，一次跑通 `:app:testDebugUnitTest` + `:app:compileDebugAndroidTestKotlin` + `:app:lintDebug`），回归见 [test_run_android_tests.py](../../scripts/test_run_android_tests.py)；③ 同步更新 [AGENTS.md](../../AGENTS.md)、[VALIDATION.md](VALIDATION.md)、[开发与贡献.md](../guides/开发与贡献.md)、[.agents/rules/skill-routing.md](../../.agents/rules/skill-routing.md) 与全局 `staged-release-gate` 技能（含 Windows 下 Python `subprocess.run` 调 `acp-mcp-call` 标准方式），固化标准档软上限（≤ 4–5 模块 / ≤ 25–30 文件）、Stage 1 原生快检硬要求与 Gate 3 窄补丁（≤ 10 文件）增量终审。
 - 当前 commit 与状态：仅变更门禁脚本、脚本单测与工作流规则文档（未改应用源码、版本 `1.8.33+126`、`main` / Tag / Release 或线上索引），L0 行数 `52 <= 80`，随本提交推送 `origin/dev`。
 - 下一步待办：下一轮跨模块迭代按新门禁与体量上限推进，或在维护者明确发出正式发版指令后冻结版本进入 Stage 2 发布流程。
 

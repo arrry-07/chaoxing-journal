@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 from io import StringIO
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -739,11 +740,24 @@ class AndroidTestRunnerTests(unittest.TestCase):
             (flutter_sdk / "bin" / "flutter").write_text("", encoding="utf-8")
             (flutter_sdk / "bin" / "flutter.bat").write_text("", encoding="utf-8")
 
+            # Seed legacy non-allowlist residuals (including skipped ios/Flutter/ephemeral & __pycache__)
+            # to prove upgrading an older full-mirror cache removes them completely.
+            (cache / "local_app" / "ios" / "Flutter" / "ephemeral").mkdir(parents=True)
+            (cache / "local_app" / "ios" / "Flutter" / "Generated.xcconfig").write_text("X=1\n", encoding="utf-8")
+            (cache / "local_app" / "ios" / "Flutter" / "flutter_export_environment.sh").write_text("", encoding="utf-8")
+            (cache / "local_app" / "ios" / "Flutter" / "ephemeral" / "flutter_lldbinit").write_text("", encoding="utf-8")
+            (cache / "local_app" / "tool" / "__pycache__").mkdir(parents=True)
+            (cache / "local_app" / "tool" / "__pycache__" / "old.pyc").write_bytes(b"00")
+            (cache / "local_app" / "test").mkdir(parents=True)
+            (cache / "local_app" / "test" / "legacy_test.dart").write_text("void main() {}\n", encoding="utf-8")
+            (cache / "local_app" / "startup-tests.log").write_text("legacy\n", encoding="utf-8")
+
             events: list[str] = []
 
             def fake_streaming(cmd, *, cwd, env=None):  # noqa: ANN001
                 joined = " ".join(cmd)
                 if "pub get" in joined:
+                    self.assertIn("--enforce-lockfile", cmd)
                     events.append("pub_get")
                     (cwd / ".dart_tool").mkdir(parents=True, exist_ok=True)
                     (cwd / ".dart_tool" / "package_config.json").write_text("{}", encoding="utf-8")
@@ -789,6 +803,51 @@ class AndroidTestRunnerTests(unittest.TestCase):
             self.assertFalse((mirror_root / "test").exists())
             self.assertFalse((mirror_root / "ios").exists())
             self.assertFalse((mirror_root / "tool").exists())
+            self.assertFalse((mirror_root / "startup-tests.log").exists())
+
+    def test_sync_mirror_incremental_detects_racy_same_mtime_equal_size_edit(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            src = root / "src"
+            dst = root / "dst"
+            (src / "lib").mkdir(parents=True)
+            src_file = src / "lib" / "version.dart"
+            src_file.write_text("const code = 100;\n", encoding="utf-8")
+
+            first = runner.sync_mirror_incremental(src, dst)
+            self.assertEqual(("lib/version.dart",), first.copied_files)
+            pinned_stat = (dst / "lib" / "version.dart").stat()
+
+            # Overwrite with identical byte length and force identical mtime_ns within the racy window.
+            src_file.write_text("const code = 200;\n", encoding="utf-8")
+            os.utime(src_file, ns=(pinned_stat.st_atime_ns, pinned_stat.st_mtime_ns))
+
+            second = runner.sync_mirror_incremental(src, dst)
+            self.assertEqual(("lib/version.dart",), second.copied_files)
+            self.assertEqual("const code = 200;\n", (dst / "lib" / "version.dart").read_text(encoding="utf-8"))
+
+    def test_properties_unescape_handles_unicode_and_escaped_delimiters_without_double_backslash(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            mirror = root / "mirror"
+            (mirror / "android").mkdir(parents=True)
+            props = mirror / "android" / "local.properties"
+            props.write_text(
+                "custom.note=D\\:\\\\codex\\\\\\u5b66\\u4e60\\=ok\\#1\n",
+                encoding="utf-8",
+            )
+            parsed = runner._read_properties(props)
+            self.assertEqual("D:\\codex\\学习=ok#1", parsed["custom.note"])
+            runner._write_properties(props, parsed)
+            reparsed = runner._read_properties(props)
+            self.assertEqual(parsed, reparsed)
+
+    def test_default_local_fast_dir_requires_campus_tools_directory(self) -> None:
+        with mock.patch.object(Path, "is_dir", return_value=False):
+            fallback = runner._default_local_fast_dir()
+        self.assertEqual(Path(tempfile.gettempdir()) / "cx-android-cache", fallback)
 
     def test_local_fast_retries_pub_get_after_failure_missing_plugins_or_sdk_switch(
         self,
@@ -809,9 +868,11 @@ class AndroidTestRunnerTests(unittest.TestCase):
                 (flutter_sdk / "bin").mkdir(parents=True)
                 (flutter_sdk / "bin" / "flutter").write_text("", encoding="utf-8")
                 (flutter_sdk / "bin" / "flutter.bat").write_text("", encoding="utf-8")
+                (flutter_sdk / "version").write_text("3.44.9\n", encoding="utf-8")
 
             events: list[str] = []
             fail_next_pub = {"value": False}
+            plugins_json = '{"plugins":{"android":[{"name":"shared_preferences_android"}]}}'
 
             def fake_streaming(cmd, *, cwd, env=None):  # noqa: ANN001
                 joined = " ".join(cmd)
@@ -822,7 +883,21 @@ class AndroidTestRunnerTests(unittest.TestCase):
                         return 1
                     (cwd / ".dart_tool").mkdir(parents=True, exist_ok=True)
                     (cwd / ".dart_tool" / "package_config.json").write_text("{}", encoding="utf-8")
-                    (cwd / ".flutter-plugins-dependencies").write_text("{}", encoding="utf-8")
+                    (cwd / ".flutter-plugins-dependencies").write_text(plugins_json, encoding="utf-8")
+                    reg = (
+                        cwd
+                        / "android"
+                        / "app"
+                        / "src"
+                        / "main"
+                        / "java"
+                        / "io"
+                        / "flutter"
+                        / "plugins"
+                        / "GeneratedPluginRegistrant.java"
+                    )
+                    reg.parent.mkdir(parents=True, exist_ok=True)
+                    reg.write_text("class GeneratedPluginRegistrant {}\n", encoding="utf-8")
                     return 0
                 if "gradlew" in joined:
                     events.append("gradle")
@@ -837,28 +912,61 @@ class AndroidTestRunnerTests(unittest.TestCase):
             ):
                 # 1. Warm initial cache with flutter_a.
                 self.assertEqual(0, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_a))
-                # 2. Bump pubspec.yaml and fail pub get -> mirror pubspec is now copied, but stamp must NOT advance.
-                (src / "pubspec.yaml").write_text("name: demo\nversion: 1.0.1+2\n", encoding="utf-8")
+                # 2. Bump pubspec.yaml, fail pub get, then revert pubspec.yaml back to 1.0.0+1 ->
+                #    because old stamp was unlinked before pub get ran, retry MUST still run pub get!
+                (src / "pubspec.yaml").write_text("name: demo\nversion: 1.0.1+20\n", encoding="utf-8")
                 fail_next_pub["value"] = True
                 self.assertEqual(1, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_a))
-                # 3. Retry without changing pubspec -> pub get MUST run again before Gradle.
+                (src / "pubspec.yaml").write_text("name: demo\nversion: 1.0.0+1\n", encoding="utf-8")
                 self.assertEqual(0, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_a))
-                # 4. Delete .flutter-plugins-dependencies -> must re-run pub get.
-                (cache / "local_app" / ".flutter-plugins-dependencies").unlink()
+                # 3. Force pub get and fail -> next normal run without --force-pub-get MUST re-run pub get.
+                fail_next_pub["value"] = True
+                self.assertEqual(
+                    1,
+                    runner.run_local_fast(
+                        cache_dir=cache,
+                        sdk_dir=sdk,
+                        flutter_sdk=flutter_a,
+                        force_pub_get=True,
+                    ),
+                )
                 self.assertEqual(0, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_a))
-                # 5. Switch Flutter SDK -> stamp mismatch must trigger pub get.
+                # 4. Delete GeneratedPluginRegistrant.java while Android plugins exist -> must re-run pub get.
+                (
+                    cache
+                    / "local_app"
+                    / "android"
+                    / "app"
+                    / "src"
+                    / "main"
+                    / "java"
+                    / "io"
+                    / "flutter"
+                    / "plugins"
+                    / "GeneratedPluginRegistrant.java"
+                ).unlink()
+                self.assertEqual(0, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_a))
+                # 5. Upgrade Flutter SDK version in-place -> stamp mismatch must trigger pub get.
+                (flutter_a / "version").write_text("3.45.0\n", encoding="utf-8")
+                self.assertEqual(0, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_a))
+                # 6. Switch Flutter SDK directory -> stamp mismatch must trigger pub get.
                 self.assertEqual(0, runner.run_local_fast(cache_dir=cache, sdk_dir=sdk, flutter_sdk=flutter_b))
 
             self.assertEqual(
                 [
                     "pub_get",
                     "gradle",
-                    "pub_get",  # failed attempt
-                    "pub_get",  # retried after failure
+                    "pub_get",  # failed attempt after edit
+                    "pub_get",  # retried even after reverting pubspec.yaml
                     "gradle",
-                    "pub_get",  # missing .flutter-plugins-dependencies
+                    "pub_get",  # failed --force-pub-get
+                    "pub_get",  # retried on normal run after --force-pub-get failure
                     "gradle",
-                    "pub_get",  # switched flutter SDK
+                    "pub_get",  # missing GeneratedPluginRegistrant.java
+                    "gradle",
+                    "pub_get",  # in-place flutter version upgrade
+                    "gradle",
+                    "pub_get",  # switched flutter SDK path
                     "gradle",
                 ],
                 events,

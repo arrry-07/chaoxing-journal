@@ -109,10 +109,12 @@ class VerifyLocalGateTests(unittest.TestCase):
         )
 
     def test_run_flutter_step_kills_hung_process_and_reports_last_test_line(self) -> None:
+        # Emit bare '\r' without trailing '\n' (plus HH:MM:SS prefix and ANSI codes) to prove
+        # chunked decoding records the active progress frame immediately without blocking on '\n'.
         hung_script = (
             "import sys, time\n"
             "sys.stdout.write('\\x1b[32m00:01 +0: loading test/fake_hang_test.dart\\x1b[0m\\r"
-            "\\x1b[33m00:02 +1: fakeAsync hung case\\x1b[0m\\n')\n"
+            "\\x1b[33m01:02:03 +1950: fakeAsync bare-cr hung case\\x1b[0m\\r')\n"
             "sys.stdout.flush()\n"
             "time.sleep(30)\n"
         )
@@ -127,7 +129,7 @@ class VerifyLocalGateTests(unittest.TestCase):
                 )
         message = str(raised.exception)
         self.assertIn("timed out after 1s", message)
-        self.assertIn("00:02 +1: fakeAsync hung case", message)
+        self.assertIn("01:02:03 +1950: fakeAsync bare-cr hung case", message)
         self.assertNotIn("\x1b[", message)
 
 

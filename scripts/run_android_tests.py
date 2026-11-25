@@ -7,6 +7,7 @@ import argparse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -78,6 +79,18 @@ LOCAL_FAST_MIRROR_ENTRIES: tuple[str, ...] = (
     "pubspec.lock",
     "analysis_options.yaml",
 )
+
+PRESERVED_ROOT_CACHE_ENTRIES: frozenset[str] = frozenset({
+    "build",
+    ".gradle",
+    ".kotlin",
+    ".dart_tool",
+    ".idea",
+    ".flutter-plugins",
+    ".flutter-plugins-dependencies",
+})
+
+RACY_MTIME_WINDOW_NS = 2_000_000_000
 
 PUB_STAMP_REL_PATH: tuple[str, ...] = (".dart_tool", ".local_fast_pub_stamp")
 
@@ -461,12 +474,33 @@ def _print_commands(serial: str, adb: str, app_apk: Path, test_apk: Path, batche
             print("+ " + " ".join(cmd))
 
 
+_PROPERTIES_UNESCAPE_RE = re.compile(r"\\(?:u([0-9a-fA-F]{4})|(.))")
+
+
 def _properties_unescape(value: str) -> str:
-    return value.replace("\\:", ":").replace("\\\\", "\\")
+    def _replace(match: re.Match[str]) -> str:
+        hex_digits = match.group(1)
+        if hex_digits is not None:
+            return chr(int(hex_digits, 16))
+        ch = match.group(2)
+        return {"t": "\t", "n": "\n", "r": "\r", "f": "\f"}.get(ch, ch)
+
+    return _PROPERTIES_UNESCAPE_RE.sub(_replace, value)
 
 
 def _properties_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace(":", "\\:")
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace("\t", "\\t")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\f", "\\f")
+        .replace(":", "\\:")
+        .replace("=", "\\=")
+    )
+    if escaped.startswith((" ", "#", "!")):
+        escaped = "\\" + escaped
+    return escaped
 
 
 def _read_properties(path: Path) -> dict[str, str]:
@@ -530,6 +564,66 @@ def _is_jdk_17(path: Path) -> bool:
     return "17" in path.name
 
 
+def _probe_android_sdk(
+    *,
+    sdk_dir: Path | None,
+    env: Mapping[str, str],
+    repo_hints: Mapping[str, str],
+    current_sdk: str = "",
+) -> Path | None:
+    sdk_candidates: list[Path] = []
+    if sdk_dir is not None:
+        sdk_candidates.append(sdk_dir)
+    for key in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+        value = env.get(key)
+        if value:
+            sdk_candidates.append(Path(value))
+    if current_sdk:
+        sdk_candidates.append(Path(current_sdk))
+    if repo_hints.get("sdk.dir"):
+        sdk_candidates.append(Path(repo_hints["sdk.dir"]))
+    campus_sdk = Path("D:/campus-tools/android")
+    if campus_sdk.is_dir():
+        sdk_candidates.append(campus_sdk)
+    sdk_candidates.append(Path.home() / "AppData" / "Local" / "Android" / "Sdk")
+    return next(
+        (candidate for candidate in sdk_candidates if _has_android_36(candidate)),
+        None,
+    )
+
+
+def _probe_flutter_sdk(
+    *,
+    flutter_sdk: Path | None,
+    env: Mapping[str, str],
+    repo_hints: Mapping[str, str],
+    current_flutter: str = "",
+    prefer_current: bool = False,
+) -> Path | None:
+    flutter_candidates: list[Path] = []
+    if flutter_sdk is not None:
+        flutter_candidates.append(flutter_sdk)
+    if prefer_current and current_flutter:
+        flutter_candidates.append(Path(current_flutter))
+    if env.get("FLUTTER_ROOT"):
+        flutter_candidates.append(Path(env["FLUTTER_ROOT"]))
+    for tool_name in ("flutter.bat", "flutter"):
+        found = shutil.which(tool_name)
+        if found:
+            flutter_candidates.append(Path(found).resolve().parents[1])
+    if not prefer_current and current_flutter:
+        flutter_candidates.append(Path(current_flutter))
+    if repo_hints.get("flutter.sdk"):
+        flutter_candidates.append(Path(repo_hints["flutter.sdk"]))
+    campus_flutter = Path("D:/campus-tools/flutter")
+    if campus_flutter.is_dir():
+        flutter_candidates.append(campus_flutter)
+    return next(
+        (candidate for candidate in flutter_candidates if _has_flutter_bin(candidate)),
+        None,
+    )
+
+
 def ensure_mirror_local_properties(
     mirror_root: Path,
     *,
@@ -548,21 +642,11 @@ def ensure_mirror_local_properties(
     repo_hints = _read_properties(local_app_root() / "android" / "local.properties")
 
     current_sdk = current.get("sdk.dir", "")
-    sdk_candidates: list[Path] = []
-    if sdk_dir is not None:
-        sdk_candidates.append(sdk_dir)
-    for key in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
-        value = os.environ.get(key)
-        if value:
-            sdk_candidates.append(Path(value))
-    if current_sdk:
-        sdk_candidates.append(Path(current_sdk))
-    if repo_hints.get("sdk.dir"):
-        sdk_candidates.append(Path(repo_hints["sdk.dir"]))
-    sdk_candidates.append(Path.home() / "AppData" / "Local" / "Android" / "Sdk")
-    chosen_sdk = next(
-        (candidate for candidate in sdk_candidates if _has_android_36(candidate)),
-        None,
+    chosen_sdk = _probe_android_sdk(
+        sdk_dir=sdk_dir,
+        env=os.environ,
+        repo_hints=repo_hints,
+        current_sdk=current_sdk,
     )
     changed = False
     if chosen_sdk is not None and (
@@ -573,16 +657,12 @@ def ensure_mirror_local_properties(
         changed = True
 
     current_flutter = current.get("flutter.sdk", "")
-    flutter_candidates: list[Path] = []
-    if flutter_sdk is not None:
-        flutter_candidates.append(flutter_sdk)
-    if current_flutter:
-        flutter_candidates.append(Path(current_flutter))
-    if repo_hints.get("flutter.sdk"):
-        flutter_candidates.append(Path(repo_hints["flutter.sdk"]))
-    chosen_flutter = next(
-        (candidate for candidate in flutter_candidates if _has_flutter_bin(candidate)),
-        None,
+    chosen_flutter = _probe_flutter_sdk(
+        flutter_sdk=flutter_sdk,
+        env=os.environ,
+        repo_hints=repo_hints,
+        current_flutter=current_flutter,
+        prefer_current=True,
     )
     if chosen_flutter is not None and (
         not current_flutter
@@ -697,6 +777,7 @@ def sync_mirror_incremental(
     expected_dirs: set[str] = set()
     copied: list[str] = []
     unchanged = 0
+    sync_wall_ns = time.time_ns()
 
     for root, dirnames, filenames in os.walk(source, topdown=True):
         root_path = Path(root)
@@ -724,9 +805,12 @@ def sync_mirror_incremental(
             if dst_file.is_file():
                 src_stat = src_file.stat()
                 dst_stat = dst_file.stat()
-                if src_stat.st_size == dst_stat.st_size and (
+                mtime_trusted = (
                     src_stat.st_mtime_ns == dst_stat.st_mtime_ns
-                    or _files_equal(src_file, dst_file)
+                    and (sync_wall_ns - src_stat.st_mtime_ns) >= RACY_MTIME_WINDOW_NS
+                )
+                if src_stat.st_size == dst_stat.st_size and (
+                    mtime_trusted or _files_equal(src_file, dst_file)
                 ):
                     unchanged += 1
                     continue
@@ -735,6 +819,21 @@ def sync_mirror_incremental(
             copied.append(rel_posix)
 
     removed: list[str] = []
+    if allowed_root is not None:
+        kept_top_entries = allowed_root | PRESERVED_ROOT_CACHE_ENTRIES
+        for top_entry in sorted(destination.iterdir(), key=lambda item: item.name):
+            if top_entry.name in kept_top_entries:
+                continue
+            if top_entry.is_symlink() or top_entry.is_file():
+                removed.append(top_entry.name)
+                top_entry.unlink(missing_ok=True)
+            elif top_entry.is_dir():
+                for sub_root, _sub_dirs, sub_files in os.walk(top_entry):
+                    rel_sub = Path(sub_root).relative_to(destination).parts
+                    for fname in sub_files:
+                        removed.append("/".join((*rel_sub, fname)))
+                _safe_rmtree(top_entry)
+
     for root, dirnames, filenames in os.walk(destination, topdown=True):
         root_path = Path(root)
         rel_root_parts = root_path.relative_to(destination).parts
@@ -826,21 +925,10 @@ def _resolve_local_fast_toolchain(
     repo_hints = _read_properties(local_app_root() / "android" / "local.properties")
 
     # 1. Flutter SDK & executable
-    flutter_candidates: list[Path] = []
-    if flutter_sdk is not None:
-        flutter_candidates.append(flutter_sdk)
-    if env.get("FLUTTER_ROOT"):
-        flutter_candidates.append(Path(env["FLUTTER_ROOT"]))
-    for tool_name in ("flutter.bat", "flutter"):
-        found = shutil.which(tool_name)
-        if found:
-            flutter_candidates.append(Path(found).resolve().parents[1])
-    if repo_hints.get("flutter.sdk"):
-        flutter_candidates.append(Path(repo_hints["flutter.sdk"]))
-    flutter_candidates.append(Path("D:/campus-tools/flutter"))
-    chosen_flutter = next(
-        (candidate for candidate in flutter_candidates if _has_flutter_bin(candidate)),
-        None,
+    chosen_flutter = _probe_flutter_sdk(
+        flutter_sdk=flutter_sdk,
+        env=env,
+        repo_hints=repo_hints,
     )
     if chosen_flutter is not None:
         bin_name = "flutter.bat" if sys.platform == "win32" else "flutter"
@@ -854,19 +942,10 @@ def _resolve_local_fast_toolchain(
         flutter_cmd = shutil.which("flutter.bat") or shutil.which("flutter") or "flutter"
 
     # 2. Android SDK (requires platforms/android-36)
-    sdk_candidates: list[Path] = []
-    if sdk_dir is not None:
-        sdk_candidates.append(sdk_dir)
-    for key in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
-        if env.get(key):
-            sdk_candidates.append(Path(env[key]))
-    if repo_hints.get("sdk.dir"):
-        sdk_candidates.append(Path(repo_hints["sdk.dir"]))
-    sdk_candidates.append(Path("D:/campus-tools/android"))
-    sdk_candidates.append(Path.home() / "AppData" / "Local" / "Android" / "Sdk")
-    chosen_sdk = next(
-        (candidate for candidate in sdk_candidates if _has_android_36(candidate)),
-        None,
+    chosen_sdk = _probe_android_sdk(
+        sdk_dir=sdk_dir,
+        env=env,
+        repo_hints=repo_hints,
     )
     if chosen_sdk is not None:
         env["ANDROID_HOME"] = str(chosen_sdk)
@@ -925,11 +1004,15 @@ def _run_streaming(
     return completed.returncode
 
 
+def _default_campus_build_dir(subdir: str) -> Path:
+    campus_tools = Path("D:/campus-tools")
+    if campus_tools.is_dir():
+        return campus_tools / "build-work" / subdir
+    return Path(tempfile.gettempdir()) / subdir
+
+
 def _default_local_fast_dir() -> Path:
-    drive_d = Path("D:/")
-    if drive_d.exists():
-        return Path("D:/campus-tools/build-work/cx-android-cache")
-    return Path(tempfile.gettempdir()) / "cx-android-cache"
+    return _default_campus_build_dir("cx-android-cache")
 
 
 def _compute_pub_stamp(
@@ -940,6 +1023,12 @@ def _compute_pub_stamp(
     digest = hashlib.sha256()
     sdk_identity = str(flutter_sdk.resolve()) if flutter_sdk is not None else flutter_cmd
     digest.update(f"sdk={sdk_identity}\n".encode("utf-8"))
+    if flutter_sdk is not None:
+        for rel in (("version",), ("bin", "cache", "engine.stamp")):
+            stamp_file = flutter_sdk.joinpath(*rel)
+            if stamp_file.is_file():
+                digest.update(f"sdk_meta={'/'.join(rel)}\n".encode("utf-8"))
+                digest.update(stamp_file.read_bytes())
     for filename in ("pubspec.yaml", "pubspec.lock"):
         path = mirror_root / filename
         digest.update(f"file={filename}\n".encode("utf-8"))
@@ -948,6 +1037,38 @@ def _compute_pub_stamp(
         else:
             digest.update(b"<missing>")
     return digest.hexdigest()
+
+
+def _has_required_plugin_registrant(mirror_root: Path) -> bool:
+    registrant = (
+        mirror_root
+        / "android"
+        / "app"
+        / "src"
+        / "main"
+        / "java"
+        / "io"
+        / "flutter"
+        / "plugins"
+        / "GeneratedPluginRegistrant.java"
+    )
+    if registrant.is_file():
+        return True
+    plugins_deps = mirror_root / ".flutter-plugins-dependencies"
+    if not plugins_deps.is_file():
+        return False
+    try:
+        payload = json.loads(plugins_deps.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    plugins = payload.get("plugins")
+    if isinstance(plugins, dict):
+        android_plugins = plugins.get("android")
+        if isinstance(android_plugins, list) and android_plugins:
+            return False
+    return True
 
 
 def run_local_fast(
@@ -986,7 +1107,9 @@ def run_local_fast(
         print(f"[DRY-RUN] JAVA_HOME={toolchain.java_home or toolchain.env.get('JAVA_HOME', '')}")
         print(f"[DRY-RUN] ANDROID_SDK_ROOT={toolchain.sdk_dir or toolchain.env.get('ANDROID_SDK_ROOT', '')}")
         print(f"[DRY-RUN] FLUTTER_SDK={toolchain.flutter_sdk or ''}")
-        print(f"+ {toolchain.flutter_cmd} --no-version-check pub get --offline (if needed)")
+        print(
+            f"+ {toolchain.flutter_cmd} --no-version-check pub get --offline --enforce-lockfile (if needed)"
+        )
         print("+ " + " ".join(gradle_cmd))
         return 0
 
@@ -1025,9 +1148,11 @@ def run_local_fast(
         or not package_config.is_file()
         or not plugins_deps.is_file()
         or not local_props.is_file()
+        or not _has_required_plugin_registrant(mirror_root)
         or current_stamp != expected_stamp
     )
     if needs_pub_get:
+        pub_stamp_path.unlink(missing_ok=True)
         ensure_mirror_local_properties(
             mirror_root,
             sdk_dir=toolchain.sdk_dir,
@@ -1035,18 +1160,34 @@ def run_local_fast(
         )
         pub_started = time.monotonic()
         pub_code = _run_streaming(
-            [toolchain.flutter_cmd, "--no-version-check", "pub", "get", "--offline"],
+            [
+                toolchain.flutter_cmd,
+                "--no-version-check",
+                "pub",
+                "get",
+                "--offline",
+                "--enforce-lockfile",
+            ],
             cwd=mirror_root,
             env=toolchain.env,
         )
         if pub_code != 0:
-            print(f"[FAIL] flutter pub get --offline failed (exit={pub_code}).", file=sys.stderr)
+            print(
+                f"[FAIL] flutter pub get --offline --enforce-lockfile failed (exit={pub_code}).",
+                file=sys.stderr,
+            )
             return 1
         pub_stamp_path.parent.mkdir(parents=True, exist_ok=True)
         pub_stamp_path.write_text(expected_stamp + "\n", encoding="utf-8")
-        print(f"[PASS] flutter pub get --offline ({time.monotonic() - pub_started:.1f}s)", flush=True)
+        print(
+            f"[PASS] flutter pub get --offline --enforce-lockfile ({time.monotonic() - pub_started:.1f}s)",
+            flush=True,
+        )
     else:
-        print("[SKIP] flutter pub get --offline (pubspec, sdk & plugin metadata unchanged)", flush=True)
+        print(
+            "[SKIP] flutter pub get --offline --enforce-lockfile (pubspec, sdk & plugin metadata unchanged)",
+            flush=True,
+        )
 
     # Always normalize and escape local.properties AFTER pub get to prevent [PropertyEscape] lint failures.
     ensure_mirror_local_properties(
@@ -1268,10 +1409,7 @@ def _run_batch(
 
 
 def _default_work_dir() -> Path:
-    drive_d = Path("D:/")
-    if drive_d.exists():
-        return Path("D:/campus-tools/build-work/androidtest-run")
-    return Path(tempfile.gettempdir()) / "androidtest-run"
+    return _default_campus_build_dir("androidtest-run")
 
 
 def main(argv: list[str] | None = None) -> int:

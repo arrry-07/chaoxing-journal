@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 from collections import deque
 from collections.abc import Sequence
 import os
@@ -18,7 +19,7 @@ import time
 DEFAULT_TEST_CASE_TIMEOUT = "30s"
 DEFAULT_QUICK_FLUTTER_TIMEOUT_SECONDS = 300
 DEFAULT_FULL_FLUTTER_TIMEOUT_SECONDS = 900
-_FLUTTER_PROGRESS_RE = re.compile(r"^\d+:\d{2}\s+[+\-~]")
+_FLUTTER_PROGRESS_RE = re.compile(r"^\d+:\d{2}(?::\d{2})?\s+[+\-~]")
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
@@ -58,7 +59,7 @@ def _build_flutter_test_cmd(
     return cmd
 
 
-def _terminate_process_tree(proc: subprocess.Popen[str]) -> None:
+def _terminate_process_tree(proc: subprocess.Popen[bytes] | subprocess.Popen[str]) -> None:
     if proc.poll() is not None:
         return
     if sys.platform == "win32":
@@ -97,10 +98,6 @@ def _run_flutter_step(
         "cwd": cwd,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.STDOUT,
-        "text": True,
-        "encoding": "utf-8",
-        "errors": "replace",
-        "bufsize": 1,
     }
     if sys.platform != "win32":
         popen_kwargs["start_new_session"] = True
@@ -109,24 +106,56 @@ def _run_flutter_step(
     state_lock = threading.Lock()
     recent_lines: deque[str] = deque(maxlen=10)
     last_test_line: str | None = None
+    partial_line = ""
+
+    def _record_segment(segment: str) -> None:
+        nonlocal last_test_line
+        cleaned = _ANSI_ESCAPE_RE.sub("", segment).strip()
+        if not cleaned:
+            return
+        with state_lock:
+            recent_lines.append(cleaned)
+            if _FLUTTER_PROGRESS_RE.match(cleaned):
+                last_test_line = cleaned
 
     def _drain_output() -> None:
-        nonlocal last_test_line
+        nonlocal partial_line
         if proc.stdout is None:
             return
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        fd = proc.stdout.fileno()
+        buffer = ""
         try:
-            for raw in proc.stdout:
-                sys.stdout.write(raw)
+            while True:
+                chunk = os.read(fd, 4096)
+                if not chunk:
+                    tail = decoder.decode(b"", final=True)
+                    if tail:
+                        sys.stdout.write(tail)
+                        sys.stdout.flush()
+                        buffer += tail
+                    break
+                text = decoder.decode(chunk, final=False)
+                if not text:
+                    continue
+                sys.stdout.write(text)
                 sys.stdout.flush()
-                plain = _ANSI_ESCAPE_RE.sub("", raw)
-                for segment in plain.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-                    cleaned = segment.strip()
-                    if not cleaned:
-                        continue
-                    with state_lock:
-                        recent_lines.append(cleaned)
-                        if _FLUTTER_PROGRESS_RE.match(cleaned):
-                            last_test_line = cleaned
+                buffer += text
+                parts = re.split(r"[\r\n]+", buffer)
+                if buffer.endswith(("\r", "\n")):
+                    for seg in parts:
+                        _record_segment(seg)
+                    buffer = ""
+                else:
+                    for seg in parts[:-1]:
+                        _record_segment(seg)
+                    buffer = parts[-1]
+                with state_lock:
+                    partial_line = _ANSI_ESCAPE_RE.sub("", buffer).strip()
+            if buffer:
+                _record_segment(buffer)
+                with state_lock:
+                    partial_line = ""
         except (OSError, ValueError):
             pass
 
@@ -139,10 +168,16 @@ def _run_flutter_step(
         _terminate_process_tree(proc)
         reader.join(timeout=2)
         with state_lock:
+            candidate_partial = (
+                partial_line
+                if partial_line and _FLUTTER_PROGRESS_RE.match(partial_line)
+                else None
+            )
             last_seen = (
-                last_test_line
-                if last_test_line is not None
-                else (recent_lines[-1] if recent_lines else "<no output captured>")
+                candidate_partial
+                or last_test_line
+                or partial_line
+                or (recent_lines[-1] if recent_lines else "<no output captured>")
             )
         raise RuntimeError(
             f"[FAIL] {label} (timed out after {effective_timeout}s; "
