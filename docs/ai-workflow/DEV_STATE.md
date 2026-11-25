@@ -4,6 +4,12 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
+## 2026-11-25 · v1.8.32 (1.8.32+125) Gate 审查通过与 MuMu 保数据自测收口
+
+- 已完成改动：因 `antigravity-acp` 运行时未开放 `delegate_task`，本轮改由零父历史只读 `research (pro)`（`47b126e1`）初审 + 规划模型复核查出 6 项局部问题并一次性修复（吸顶栏 `home-sliver-agenda-entry`、首页 `AssignmentCard` 列表级左轨同宽对齐、`AssignmentStore` 两处 `CourseTermCatalog.build` 补传 `changes`、`CourseTermCatalog` 180 天统计召回上限与本学期可信截止补修、待办详情复制热区 `48×40dp` 扩区、`ManualAgendaScreen` `clock` 注入与固定时钟/警告回归），通过 11 项定向门禁（`91` 项测试全绿、`dart analyze` 0 问题）推 `origin/dev`（`2d88084`），并由新只读 `research (pro)`（`af207197`）双锚点复审返回 `PASS`（0 阻断 / 0 中级 / 0 次要）；随后升至 `1.8.32+125`（`fab514f`），在干净 ASCII 目录 `D:\campus-tools\build-work\cx1832-125-20261125-141728` 用 JDK 17 原签名构建双 ABI 自测包 `D:\campus-tools\artifacts\cx1832-preview\chaoxing-journal-1.8.32+125.apk`（`63,748,670` 字节，SHA-256 `2d4feaa52fe95c30dc0b8eb0bf3bb239fb3d37c909b88a22f9f805cbfd7fa184`，`verify_apk_and_report.py` 全部通过），在 MuMu「学习通」（`emulator-5558`，API 35）保数据 `-r` 覆盖安装（保留 `firstInstallTime=2026-11-04 19:05:10` 及全部课业/课程/手帐数据，设备 `base.apk` 哈希一致，未触发线上刷新接口）完成 M1–M5 与浅/深双主题目视及全交互验收（`logcat` 0 崩溃），截图存 `D:\campus-tools\artifacts\cx1832-preview\screenshots`。
+- 当前 commit 与状态：Stage 1 与 6 项 Gate 修复已合入 `2d88084`，自测升版提交 `fab514f`（未触碰 `main` / Tag / Release / `update-*.json`），本次随状态文档更新推送 `origin/dev`；L0 行数 `<= 80`。
+- 下一步待办：可在 `dev` 继续攒批下一轮迭代，或在维护者明确发出正式发版指令后冻结版本进入 Stage 2 发布流程。
+
 ## 2026-11-25 · 研发与审查工作流实战减负优化（仅规则与状态文档）
 
 - 已完成改动：重构全局 `staged-release-gate`（含 `references/t3-goal-automation.md`）、三套 T3 Antigravity 实例 `GEMINI.md`、`~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md` 及本仓 `AGENTS.md`、`.agents/rules/skill-routing.md`、`VALIDATION.md`：① 按改动体量拆为「≤3 文件轻快档 / 跨模块 `/goal` 标准档 / Stage 2 发版档」并精简状态文档为阶段收口一更；② 计划规格书由 11 章八股压缩为 4 个高信噪比模块，支持同窗 `/clear`（首选）或新对话切入 `/goal`；③ Gate 初审区分「≤2 文件小瑕疵总控直修」与「实质缺陷返工 + 双锚点异构复审 + 第 2 轮强模型升级攻坚」，校准 `orchestrator_capabilities` 跨实例档位核验并隔离 `code-review` 子代理嵌套冲突、精简 `delivery-no-pseudoblock`。

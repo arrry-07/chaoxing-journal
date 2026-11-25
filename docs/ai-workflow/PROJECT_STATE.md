@@ -6,7 +6,7 @@
 
 - **1.8.31+124 已正式发布收口**（PR `#64` 合入 `77b5e8a`，annotated Tag `v1.8.31` → `642cb62`，GitHub Release `457363482` 于 2026-11-25 公开并设为 `latest`），详见[验收与发布记录](../reviews/2026-11-25-v1.8.31-体验升级与待办附件验收与发布记录.md)。
 - **验证与双端交付**：`TZ=UTC` 本地全套 `--release --mode full` 通过（Flutter `+1977 ~1 / 0 failed`、Python 9 组 `114` 项、`dart analyze` 0 问题、Android JVM `80/80` + Lint `BUILD SUCCESSFUL`）；PR `#64` / `main` / Tag CI、`site-release-dispatch` 与 `gitee-release-sync`（`update-manual.json=1.8.31+124`）全部 `success`；原签名双 ABI 包在 **MuMu「学习通」**（API 35）与**华为真机 CDY-AN00**（API 29）双端保数据覆盖通过 M2–M7、真机拍照/相册 9 图/PDF 20MB 附件全链路及外部打开核验。
-- **当前分支基线**：`v1.8.30` / `v1.8.31` 方案、`v1.8.26` 交接与 `v1.8.25` 验收均已收口归档；[v1.8.32 方案](../plans/2026-11-25-v1.8.32-本学期筛选卡片视觉与待办交互优化方案.md) 已完成 Stage 1（`M1`–`M6`）待 Gate 独立审查（详见[dev 本地状态](DEV_STATE.md)）。
+- **当前分支基线**：`v1.8.30` / `v1.8.31` 方案、`v1.8.26` 交接与 `v1.8.25` 验收均已收口归档；[v1.8.32 方案](../plans/2026-11-25-v1.8.32-本学期筛选卡片视觉与待办交互优化方案.md) 已通过独立 Gate 审查并完成 `1.8.32+125` 原签名包 MuMu 保数据自测验收（待积攒下批迭代或正式发版指令，详见[dev 本地状态](DEV_STATE.md)）。
 
 ## 最近 2 个正式发布版本
 
