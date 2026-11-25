@@ -1539,12 +1539,6 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                             : const EdgeInsets.symmetric(
                                 horizontal: 10, vertical: 12),
                         singleLineLabel: !stackButtons,
-                        backgroundColor: journal.isDark
-                            ? journal.primaryFill
-                            : const Color(0xFF34322F),
-                        foregroundColor: journal.isDark
-                            ? journal.onPrimaryFill
-                            : const Color(0xFFFFF7EC),
                         onPressed: _opening || _hiding || _currentUrl == null
                             ? null
                             : _openAssignment,

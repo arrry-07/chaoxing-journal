@@ -9,16 +9,16 @@ class CompletionPieChart {
 
   static List<Color> colorsFor(JournalPalette journal) => journal.isDark
       ? [
-          const Color(0xFF88A8F8),
-          const Color(0xFF5F7DB8),
-          journal.overdueAmber,
+          const Color(0xFF7B9DF6),
+          const Color(0xFF3E4F75),
+          journal.overdueSky,
           const Color(0xFF6E6A63),
         ]
       : [
-          const Color(0xFF4B6CB7),
-          const Color(0xFF9EB5E5),
-          journal.overdueAmber,
-          const Color(0xFFD8DCE2),
+          const Color(0xFF3D63DD),
+          const Color(0xFFC5D5F5),
+          journal.overdueSky,
+          const Color(0xFFDBDCE0),
         ];
 
   static const labels = ['已完成', '待完成', '已逾期', '提交未知'];

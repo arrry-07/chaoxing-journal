@@ -30,6 +30,11 @@ on:
           - "3"
           - "4"
           - "5"
+      promote_stable:
+        description: Promote update-stable.json for major updates or hotfixes
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,6 +54,7 @@ jobs:
       MODE: ${{ github.event_name == 'release' && 'index' || inputs.mode || 'index' }}
       TAGS: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tags }}
       RETENTION: ${{ inputs.retention || '3' }}
+      PROMOTE_STABLE: ${{ github.event_name != 'release' && inputs.promote_stable == true }}
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
     steps:
@@ -86,6 +92,9 @@ jobs:
           )
           if [[ -n "$TAGS" ]]; then
             args+=(--tags "$TAGS")
+          fi
+          if [[ "$PROMOTE_STABLE" == "true" ]]; then
+            args+=(--promote-stable)
           fi
           if [[ "$MODE" != "index" ]]; then
             AAPT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools/36.0.0/aapt"

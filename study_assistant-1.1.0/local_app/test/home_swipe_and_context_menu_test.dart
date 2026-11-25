@@ -204,7 +204,7 @@ void main() {
     // Group header owns '今天'; card must not repeat '今天截止' pill.
     expect(find.text('今天'), findsOneWidget);
     expect(find.text('今天截止'), findsNothing);
-    expect(find.textContaining('剩余'), findsOneWidget);
+    expect(find.text('剩3小时'), findsOneWidget);
 
     // Pin the item and check merged single metadata line in pinned section.
     await store.togglePin(item);

@@ -430,10 +430,12 @@ class MainActivity : FlutterActivity() {
             DeadlineChannelPolicy.CHANNEL_DEADLINES,
             DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
             DeadlineChannelPolicy.CHANNEL_UPDATES,
+            DeadlineChannelPolicy.CHANNEL_UPDATES_V2,
             DeadlineChannelPolicy.CHANNEL_SILENT,
             "daily_summary",
+            DeadlineChannelPolicy.CHANNEL_SUMMARY_V2,
             "personal_schedule",
-            "personal_schedule_v2",
+            DeadlineChannelPolicy.CHANNEL_MANUAL_V2,
         )
         val channelMap = buildMap<String, Any?> {
             for (id in channelIds) {
@@ -498,6 +500,6 @@ class MainActivity : FlutterActivity() {
     }
 
     private companion object {
-        const val ASSIGNMENT_DEADLINE_CHANNEL_ID = "assignment_deadlines"
+        const val ASSIGNMENT_DEADLINE_CHANNEL_ID = DeadlineChannelPolicy.CHANNEL_DEADLINES_V2
     }
 }

@@ -12,7 +12,7 @@ class PermissionSettingsService {
   const PermissionSettingsService();
 
   static const _channel = MethodChannel('study_assistant/permissions');
-  static const _assignmentDeadlineChannelId = 'assignment_deadlines';
+  static const _assignmentDeadlineChannelId = 'assignment_deadlines_v2';
 
   Future<SettingsOpenResult> openNotificationSettingsResult() =>
       _openResult('openNotificationSettingsResult');

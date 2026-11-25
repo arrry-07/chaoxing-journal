@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/app/app_version.dart';
 import 'package:study_assistant_mobile/src/features/help_feedback_screen.dart';
@@ -27,6 +28,46 @@ class _Links extends ExternalLinkService {
 }
 
 void main() {
+  testWidgets('feedback copy content and copy email buttons validate and copy',
+      (tester) async {
+    String? clipboardText;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        clipboardText = (call.arguments as Map?)?['text'] as String?;
+      }
+      return null;
+    });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    final links = _Links(result: true);
+    await tester.pumpWidget(MaterialApp(home: FeedbackScreen(links: links)));
+
+    await tester.tap(find.byKey(const ValueKey('feedback-copy-content')));
+    await tester.pump();
+    expect(find.text('请先描述遇到的问题'), findsOneWidget);
+    expect(clipboardText, isNull);
+
+    await tester.enterText(find.byType(TextField).at(0), '偶现通知不响铃');
+    await tester.enterText(find.byType(TextField).at(1), '步骤 A -> B');
+    await tester.tap(find.byKey(const ValueKey('feedback-copy-content')));
+    await tester.pumpAndSettle();
+
+    expect(clipboardText, contains('学习通课业手记 ${AppVersion.display}'));
+    expect(clipboardText, contains('问题：偶现通知不响铃'));
+    expect(clipboardText, contains('复现步骤：步骤 A -> B'));
+    expect(find.text('反馈内容已复制，请粘贴发送（尚未自动发送）'), findsOneWidget);
+    expect(find.textContaining('反馈已发送'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('feedback-copy-email')));
+    await tester.pumpAndSettle();
+    expect(clipboardText, '397079535@qq.com');
+    expect(find.text('收件邮箱已复制'), findsOneWidget);
+  });
+
   testWidgets('feedback email composes a versioned draft and keeps the form',
       (tester) async {
     final links = _Links(result: true);
@@ -36,7 +77,12 @@ void main() {
     await tester.enterText(find.byType(TextField).at(0), problem);
     await tester.enterText(find.byType(TextField).at(1), steps);
 
-    await tester.tap(find.text('通过邮件反馈'));
+    await tester.scrollUntilVisible(
+      find.text('尝试用系统邮件发送'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('尝试用系统邮件发送'));
     await tester.pumpAndSettle();
 
     expect(links.calls, hasLength(1));
@@ -61,7 +107,12 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: FeedbackScreen(links: links)));
     await tester.enterText(find.byType(TextField).at(0), '中文问题');
 
-    await tester.tap(find.text('通过邮件反馈'));
+    await tester.scrollUntilVisible(
+      find.text('尝试用系统邮件发送'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('尝试用系统邮件发送'));
     await tester.pumpAndSettle();
 
     expect(find.text('未能打开邮件草稿'), findsOneWidget);
@@ -75,7 +126,12 @@ void main() {
     final links = _Links(result: true);
     await tester.pumpWidget(MaterialApp(home: FeedbackScreen(links: links)));
 
-    await tester.tap(find.text('通过邮件反馈'));
+    await tester.scrollUntilVisible(
+      find.text('尝试用系统邮件发送'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('尝试用系统邮件发送'));
     await tester.pump();
 
     expect(links.calls, isEmpty);
@@ -98,13 +154,14 @@ void main() {
       home: FeedbackScreen(links: _Links(result: true)),
     ));
 
+    expect(find.byKey(const ValueKey('feedback-copy-content')), findsOneWidget);
+    expect(find.byKey(const ValueKey('feedback-copy-email')), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('打开 GitHub 反馈页面'),
       180,
       scrollable: find.byType(Scrollable).first,
     );
-    expect(find.text('通过邮件反馈'), findsOneWidget);
-    expect(find.text('复制反馈内容'), findsOneWidget);
+    expect(find.text('尝试用系统邮件发送'), findsOneWidget);
     expect(find.text('打开 GitHub 反馈页面'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

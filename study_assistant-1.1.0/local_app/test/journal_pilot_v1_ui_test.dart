@@ -86,7 +86,7 @@ void main() {
     expect(find.byIcon(Icons.warning_amber_rounded), findsNothing);
     final overduePillText =
         tester.widget<Text>(find.textContaining('已逾期').last);
-    expect(overduePillText.style?.color, JournalPalette.light.overdueAmber);
+    expect(overduePillText.style?.color, JournalPalette.light.overdueSky);
     expect(find.byIcon(Icons.help_outline_rounded), findsOneWidget);
 
     final futureY = tester.getTopLeft(find.text('赣鄱文化调研微视频脚本初稿')).dy;

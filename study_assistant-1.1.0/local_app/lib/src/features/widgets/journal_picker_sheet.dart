@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../app/journal.dart';
@@ -173,308 +175,329 @@ class _JournalPickerSheetBodyState<T>
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-    final bottomSafe = MediaQuery.paddingOf(context).bottom;
+    final media = MediaQuery.of(context);
+    final screenHeight = media.size.height;
+    final topSafe = media.padding.top;
+    final bottomInset = media.viewInsets.bottom;
+    final bottomSafe = media.padding.bottom;
     final bottomPad = bottomInset > 0 ? 14.0 : 14.0 + bottomSafe;
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.78;
+    final useFixedHeight =
+        widget.filterOptions.isNotEmpty || widget.enableSearch;
+    final availableHeight = math.max(
+      240.0,
+      screenHeight - topSafe - bottomInset - 16.0,
+    );
+    final targetHeight = math.min(screenHeight * 0.74, availableHeight);
+    final maxHeight = useFixedHeight ? targetHeight : screenHeight * 0.78;
     final filtered = _filtered;
     final filterNotice = widget.filterNoticeBuilder?.call(
       _activeFilterId,
       filtered,
     );
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottomInset),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxHeight),
-        child: Container(
-          decoration: BoxDecoration(
-            color: journal.sheetElevated,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            border: Border(
-              top: BorderSide(color: journal.cardBorder, width: 0.8),
-            ),
-          ),
-          padding: EdgeInsets.fromLTRB(18, 12, 18, bottomPad),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: journal.ruleStrong,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+    final listBody = KeyedSubtree(
+      key: ValueKey(_activeFilterId),
+      child: filtered.isEmpty
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 28),
+                child: Text(
+                  widget.emptyText,
+                  textAlign: TextAlign.center,
+                  style: journal.metadata,
                 ),
               ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(widget.title, style: journal.section),
-                  ),
-                  IconButton(
-                    tooltip: '关闭',
-                    visualDensity: VisualDensity.compact,
-                    icon: Icon(Icons.close_rounded,
-                        size: 20, color: journal.muted),
-                    onPressed: _close,
-                  ),
-                ],
+            )
+          : Material(
+              color: journal.sheet,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: journal.cardBorder, width: 0.8),
               ),
-              if (widget.filterOptions.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
+              clipBehavior: Clip.antiAlias,
+              child: ListView.builder(
+                shrinkWrap: !useFixedHeight,
+                padding: EdgeInsets.zero,
+                itemCount: filtered.length,
+                itemBuilder: (context, index) {
+                  final opt = filtered[index];
+                  final selected = opt.value == widget.selectedValue;
+                  final prevGroup =
+                      index > 0 ? filtered[index - 1].group : null;
+                  final showGroup = opt.group != null && opt.group != prevGroup;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      for (var i = 0; i < widget.filterOptions.length; i++) ...[
-                        if (i > 0) const SizedBox(width: 8),
-                        ChoiceChip(
-                          key: ValueKey(
-                              'picker-filter-${widget.filterOptions[i].id}'),
-                          selected:
-                              _activeFilterId == widget.filterOptions[i].id,
-                          onSelected: (_) {
+                      if (index > 0 && !showGroup)
+                        Divider(
+                          height: 0.6,
+                          thickness: 0.6,
+                          indent: opt.icon != null ? 50 : 16,
+                          endIndent: 16,
+                          color: journal.divider,
+                        ),
+                      if (showGroup) ...[
+                        if (index > 0)
+                          Divider(
+                            height: 0.6,
+                            thickness: 0.6,
+                            color: journal.divider,
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                          child: Text(
+                            opt.group!,
+                            style: journal.dayHeading,
+                          ),
+                        ),
+                      ],
+                      Material(
+                        key: opt.key,
+                        color: selected
+                            ? journal.sage.withValues(alpha: 0.65)
+                            : Colors.transparent,
+                        child: InkWell(
+                          onTap: () {
+                            if (_popped) return;
                             if (widget.displayPrefs != null) {
                               JournalMotion.tap(widget.displayPrefs!);
                             }
-                            setState(() {
-                              _activeFilterId = widget.filterOptions[i].id;
-                            });
+                            _close(opt.value);
                           },
-                          label: Text(widget.filterOptions[i].label),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-              if (widget.enableSearch) ...[
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _controller,
-                  onChanged: (value) => setState(() => _query = value),
-                  style: journal.entryTitle.copyWith(fontSize: 14.5),
-                  decoration: InputDecoration(
-                    hintText: widget.searchHint,
-                    hintStyle: journal.metadata,
-                    filled: true,
-                    fillColor: journal.parchment,
-                    isDense: true,
-                    prefixIcon: Icon(
-                      Icons.search_rounded,
-                      size: 19,
-                      color: journal.muted,
-                    ),
-                    suffixIcon: _query.isNotEmpty
-                        ? IconButton(
-                            tooltip: '清空',
-                            icon: Icon(Icons.close_rounded,
-                                size: 17, color: journal.muted),
-                            onPressed: () {
-                              _controller.clear();
-                              setState(() => _query = '');
-                            },
-                          )
-                        : null,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 11,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide(color: journal.accent, width: 1.1),
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              Flexible(
-                child: filtered.isEmpty
-                    ? Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 28),
-                        child: Text(
-                          widget.emptyText,
-                          textAlign: TextAlign.center,
-                          style: journal.metadata,
-                        ),
-                      )
-                    : Material(
-                        color: journal.sheet,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          side:
-                              BorderSide(color: journal.cardBorder, width: 0.8),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          padding: EdgeInsets.zero,
-                          itemCount: filtered.length,
-                          itemBuilder: (context, index) {
-                            final opt = filtered[index];
-                            final selected = opt.value == widget.selectedValue;
-                            final prevGroup =
-                                index > 0 ? filtered[index - 1].group : null;
-                            final showGroup =
-                                opt.group != null && opt.group != prevGroup;
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (index > 0 && !showGroup)
-                                  Divider(
-                                    height: 0.6,
-                                    thickness: 0.6,
-                                    indent: opt.icon != null ? 50 : 16,
-                                    endIndent: 16,
-                                    color: journal.divider,
-                                  ),
-                                if (showGroup) ...[
-                                  if (index > 0)
-                                    Divider(
-                                      height: 0.6,
-                                      thickness: 0.6,
-                                      color: journal.divider,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(minHeight: 48),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                              child: Row(
+                                children: [
+                                  if (opt.icon != null) ...[
+                                    Icon(
+                                      opt.icon,
+                                      size: 20,
+                                      color: selected
+                                          ? journal.accent
+                                          : journal.ink,
                                     ),
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                        16, 10, 16, 4),
-                                    child: Text(
-                                      opt.group!,
-                                      style: journal.dayHeading,
+                                    const SizedBox(width: 12),
+                                  ],
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          opt.label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: journal.entryTitle.copyWith(
+                                            color: journal.ink,
+                                            fontWeight: selected
+                                                ? FontWeight.w600
+                                                : FontWeight.w500,
+                                          ),
+                                        ),
+                                        if (opt.subtitle != null &&
+                                            opt.subtitle!.isNotEmpty) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            opt.subtitle!,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: journal.metadata
+                                                .copyWith(fontSize: 12),
+                                          ),
+                                        ],
+                                      ],
                                     ),
                                   ),
-                                ],
-                                Material(
-                                  key: opt.key,
-                                  color: selected
-                                      ? journal.sage.withValues(alpha: 0.65)
-                                      : Colors.transparent,
-                                  child: InkWell(
-                                    onTap: () {
-                                      if (_popped) return;
-                                      if (widget.displayPrefs != null) {
-                                        JournalMotion.tap(widget.displayPrefs!);
-                                      }
-                                      _close(opt.value);
-                                    },
-                                    child: ConstrainedBox(
-                                      constraints:
-                                          const BoxConstraints(minHeight: 48),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 16,
-                                          vertical: 12,
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            if (opt.icon != null) ...[
-                                              Icon(
-                                                opt.icon,
-                                                size: 20,
-                                                color: selected
-                                                    ? journal.accent
-                                                    : journal.ink,
-                                              ),
-                                              const SizedBox(width: 12),
-                                            ],
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Text(
-                                                    opt.label,
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: journal.entryTitle
-                                                        .copyWith(
-                                                      color: selected
-                                                          ? journal.ink
-                                                          : journal.ink,
-                                                      fontWeight: selected
-                                                          ? FontWeight.w600
-                                                          : FontWeight.w500,
-                                                    ),
-                                                  ),
-                                                  if (opt.subtitle != null &&
-                                                      opt.subtitle!
-                                                          .isNotEmpty) ...[
-                                                    const SizedBox(height: 2),
-                                                    Text(
-                                                      opt.subtitle!,
-                                                      maxLines: 2,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: journal.metadata
-                                                          .copyWith(
-                                                              fontSize: 12),
-                                                    ),
-                                                  ],
-                                                ],
-                                              ),
-                                            ),
-                                            if (opt.trailingText != null) ...[
-                                              const SizedBox(width: 10),
-                                              Text(
-                                                opt.trailingText!,
-                                                style: journal.metadata
-                                                    .copyWith(
-                                                        color: journal.ink),
-                                              ),
-                                            ],
-                                            if (selected)
-                                              Padding(
-                                                padding: const EdgeInsets.only(
-                                                    left: 8),
-                                                child: Icon(
-                                                  Icons.check_rounded,
-                                                  size: 20,
-                                                  color: journal.accent,
-                                                ),
-                                              ),
-                                          ],
-                                        ),
+                                  if (opt.trailingText != null) ...[
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      opt.trailingText!,
+                                      style: journal.metadata
+                                          .copyWith(color: journal.ink),
+                                    ),
+                                  ],
+                                  if (selected)
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 8),
+                                      child: Icon(
+                                        Icons.check_rounded,
+                                        size: 20,
+                                        color: journal.accent,
                                       ),
                                     ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                       ),
+                    ],
+                  );
+                },
               ),
-              if (filtered.isNotEmpty &&
-                  filterNotice != null &&
-                  filterNotice.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 10),
-                  child: Text(
-                    filterNotice,
-                    textAlign: TextAlign.center,
-                    style: journal.metadata,
-                  ),
-                ),
-            ],
-          ),
+            ),
+    );
+
+    final animatedList = AnimatedSwitcher(
+      duration: JournalMotion.duration(
+        context,
+        const Duration(milliseconds: 160),
+      ),
+      switchInCurve: JournalMotion.easeOut,
+      switchOutCurve: JournalMotion.easeOut,
+      transitionBuilder: (child, anim) =>
+          FadeTransition(opacity: anim, child: child),
+      child: listBody,
+    );
+
+    final sheetContainer = Container(
+      decoration: BoxDecoration(
+        color: journal.sheetElevated,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border(
+          top: BorderSide(color: journal.cardBorder, width: 0.8),
         ),
       ),
+      padding: EdgeInsets.fromLTRB(18, 12, 18, bottomPad),
+      child: Column(
+        mainAxisSize: useFixedHeight ? MainAxisSize.max : MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: journal.ruleStrong,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Text(widget.title, style: journal.section),
+              ),
+              IconButton(
+                tooltip: '关闭',
+                visualDensity: VisualDensity.compact,
+                icon: Icon(Icons.close_rounded, size: 20, color: journal.muted),
+                onPressed: _close,
+              ),
+            ],
+          ),
+          if (widget.filterOptions.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < widget.filterOptions.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 8),
+                    ChoiceChip(
+                      key: ValueKey(
+                          'picker-filter-${widget.filterOptions[i].id}'),
+                      selected: _activeFilterId == widget.filterOptions[i].id,
+                      onSelected: (_) {
+                        if (widget.displayPrefs != null) {
+                          JournalMotion.tap(widget.displayPrefs!);
+                        }
+                        setState(() {
+                          _activeFilterId = widget.filterOptions[i].id;
+                        });
+                      },
+                      label: Text(widget.filterOptions[i].label),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+          if (widget.enableSearch) ...[
+            const SizedBox(height: 10),
+            TextField(
+              controller: _controller,
+              onChanged: (value) => setState(() => _query = value),
+              style: journal.entryTitle.copyWith(fontSize: 14.5),
+              decoration: InputDecoration(
+                hintText: widget.searchHint,
+                hintStyle: journal.metadata,
+                filled: true,
+                fillColor: journal.parchment,
+                isDense: true,
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  size: 19,
+                  color: journal.muted,
+                ),
+                suffixIcon: _query.isNotEmpty
+                    ? IconButton(
+                        tooltip: '清空',
+                        icon: Icon(Icons.close_rounded,
+                            size: 17, color: journal.muted),
+                        onPressed: () {
+                          _controller.clear();
+                          setState(() => _query = '');
+                        },
+                      )
+                    : null,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 11,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: journal.accent, width: 1.1),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          if (useFixedHeight)
+            Expanded(
+              child: widget.filterOptions.isNotEmpty ? animatedList : listBody,
+            )
+          else
+            Flexible(child: listBody),
+          if (filtered.isNotEmpty &&
+              filterNotice != null &&
+              filterNotice.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                filterNotice,
+                textAlign: TextAlign.center,
+                style: journal.metadata,
+              ),
+            ),
+        ],
+      ),
+    );
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: useFixedHeight
+          ? SizedBox(height: targetHeight, child: sheetContainer)
+          : ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              child: sheetContainer,
+            ),
     );
   }
 }

@@ -75,7 +75,7 @@ class NotificationDeliveryPolicyTest {
             ),
         )
         assertEquals(
-            DeadlineChannelPolicy.CHANNEL_DEADLINES,
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
             DeadlineChannelPolicy.resolveDefaultChannelId(
                 explicitSelection = null,
                 channelQuerySucceeded = true,
@@ -94,7 +94,7 @@ class NotificationDeliveryPolicyTest {
             ),
         )
         assertEquals(
-            DeadlineChannelPolicy.CHANNEL_DEADLINES,
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
             DeadlineChannelPolicy.resolveDefaultChannelId(
                 explicitSelection = null,
                 channelQuerySucceeded = false,
@@ -117,5 +117,13 @@ class NotificationDeliveryPolicyTest {
                 existingChannelIds = setOf(DeadlineChannelPolicy.CHANNEL_DEADLINES_V2),
             ),
         )
+    }
+
+    @Test
+    fun v2ChannelIdsAndChimeResourceConstantStayAligned() {
+        assertEquals("assignment_updates_v2", DeadlineChannelPolicy.CHANNEL_UPDATES_V2)
+        assertEquals("daily_summary_v2", DeadlineChannelPolicy.CHANNEL_SUMMARY_V2)
+        assertEquals("personal_schedule_v2", DeadlineChannelPolicy.CHANNEL_MANUAL_V2)
+        assertEquals("journal_chime", DeadlineChannelPolicy.CHIME_RAW_NAME)
     }
 }

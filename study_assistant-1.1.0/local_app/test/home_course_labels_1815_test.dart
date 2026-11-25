@@ -543,11 +543,11 @@ void main() {
 
     expect(find.byKey(const ValueKey('course-option-99:k99')), findsNothing);
     expect(
-      find.text('本学期暂未识别出课程，可切换到「未分组」或「全部学期」查看'),
+      find.text('本学期暂未识别出课程，可切换到「本学年」或「全部学期」查看'),
       findsOneWidget,
     );
 
-    await tester.tap(find.byKey(const ValueKey('picker-filter-ungrouped')));
+    await tester.tap(find.byKey(const ValueKey('picker-filter-allTerms')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('course-option-99:k99')), findsOneWidget);
     expect(find.text('未分组'), findsWidgets);

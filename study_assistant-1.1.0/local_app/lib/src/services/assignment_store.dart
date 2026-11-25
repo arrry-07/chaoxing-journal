@@ -950,7 +950,10 @@ class AssignmentStore extends ChangeNotifier {
   DateTime? _lastSyncAt;
   List<int> _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
   bool _allowUrgentDeadlineNightBreakthrough = false;
-  String _deadlineChannelId = LocalNotificationService.assignmentChannel;
+  static const _deadlineChannelV2AutoMigratedKey =
+      'deadline_channel_v2_auto_migrated_v1';
+  String _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+  bool _migratedDeadlineChannelToV2ThisRestore = false;
   BackgroundCheckSettings _backgroundCheckSettings =
       const BackgroundCheckSettings(
     enabled: true,
@@ -1661,6 +1664,33 @@ class AssignmentStore extends ChangeNotifier {
     );
   }
 
+  Future<bool> setCourseBlockMode(
+    String courseKey,
+    CourseBlockMode mode,
+  ) async {
+    final snap = _captureSession();
+    if (!snap.authenticated || snap.account == null) return false;
+    final saved = await _mutateCourseTermPreferences(
+      snap,
+      (current) => current.withBlockMode(courseKey, mode),
+      leaseWarning: '课程屏蔽状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
+    );
+    if (saved &&
+        _isSessionCurrent(snap) &&
+        homeFilters.courseKey == courseKey &&
+        termCatalog.isBlocked(courseKey)) {
+      final cleared = HomeFilters(
+        query: homeFilters.query,
+        courseKey: null,
+        deadline: homeFilters.deadline,
+        sortOrder: homeFilters.sortOrder,
+        type: homeFilters.type,
+      );
+      await saveHomeFilters(cleared, snap.generation);
+    }
+    return saved;
+  }
+
   Future<bool> dismissCourseRecall(String courseKey) async {
     final snap = _captureSession();
     if (!snap.authenticated || snap.account == null) return false;
@@ -1729,7 +1759,8 @@ class AssignmentStore extends ChangeNotifier {
           if (!group.hidden &&
               group.primary.isInAssignmentScope &&
               (group.primary.courseKey == null ||
-                  follows(group.primary.courseKey!)))
+                  (follows(group.primary.courseKey!) &&
+                      !termCatalog.isBlocked(group.primary.courseKey!))))
             group.primary,
       ]);
 
@@ -1762,6 +1793,7 @@ class AssignmentStore extends ChangeNotifier {
     final activeCatalog = homeCatalogAssignments;
     if (selectedCourseKey == null ||
         !follows(selectedCourseKey) ||
+        termCatalog.isBlocked(selectedCourseKey) ||
         termCatalog.isActiveOrRecalled(selectedCourseKey)) {
       return activeCatalog;
     }
@@ -2259,9 +2291,10 @@ class AssignmentStore extends ChangeNotifier {
     _journalRestoreFailed = false;
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
     _allowUrgentDeadlineNightBreakthrough = false;
-    _deadlineChannelId = LocalNotificationService.assignmentChannel;
+    _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+    _migratedDeadlineChannelToV2ThisRestore = false;
     notificationService.activeDeadlineChannelId =
-        LocalNotificationService.assignmentChannel;
+        LocalNotificationService.assignmentV2Channel;
     _lastSyncAt = null;
     _lastSyncAttemptAt = null;
     _serverBackoffUntil = null;
@@ -2343,14 +2376,52 @@ class AssignmentStore extends ChangeNotifier {
       final savedDeadlineChannel = (_authenticated && account != null)
           ? await repository.loadDeadlineChannelId(account)
           : null;
-      _deadlineChannelId = (_authenticated && account != null)
-          ? await notificationService.resolveDefaultDeadlineChannel(
-              storedChannelId: savedDeadlineChannel,
-            )
-          : LocalNotificationService.assignmentChannel;
+      if (_authenticated && account != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final alreadyAutoMigrated =
+            prefs.getBool(_deadlineChannelV2AutoMigratedKey) ?? false;
+        if (savedDeadlineChannel ==
+                LocalNotificationService.assignmentChannel &&
+            !alreadyAutoMigrated) {
+          final snap = _captureSession();
+          try {
+            await _runScopedWrite(
+              snap,
+              (scopedPrefs) async {
+                await repository.writeDeadlineChannelIdInPrefs(
+                  scopedPrefs,
+                  LocalNotificationService.assignmentV2Channel,
+                );
+                await scopedPrefs.setBool(
+                  _deadlineChannelV2AutoMigratedKey,
+                  true,
+                );
+              },
+            );
+            _migratedDeadlineChannelToV2ThisRestore = true;
+          } on StaleSessionWriteException {
+            // Session changed mid-restore; leave persisted state untouched.
+          } catch (_) {
+            // Keep running restore using the upgraded in-memory default below.
+          }
+          _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+        } else {
+          _deadlineChannelId =
+              await notificationService.resolveDefaultDeadlineChannel(
+            storedChannelId: savedDeadlineChannel,
+          );
+          if (_deadlineChannelId ==
+                  LocalNotificationService.assignmentV2Channel &&
+              !alreadyAutoMigrated) {
+            await prefs.setBool(_deadlineChannelV2AutoMigratedKey, true);
+          }
+        }
+      } else {
+        _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+      }
       notificationService.activeDeadlineChannelId = _authenticated
           ? _deadlineChannelId
-          : LocalNotificationService.assignmentChannel;
+          : LocalNotificationService.assignmentV2Channel;
     });
     await stage('自动同步设置', () async {
       final snap = _captureSession();
@@ -3372,10 +3443,13 @@ class AssignmentStore extends ChangeNotifier {
       try {
         await _runScopedWrite(
           snap,
-          (prefs) => repository.writeDeadlineChannelIdInPrefs(
-            prefs,
-            normalized,
-          ),
+          (prefs) async {
+            await repository.writeDeadlineChannelIdInPrefs(
+              prefs,
+              normalized,
+            );
+            await prefs.setBool(_deadlineChannelV2AutoMigratedKey, true);
+          },
         );
       } on StaleSessionWriteException {
         return;
@@ -3384,7 +3458,7 @@ class AssignmentStore extends ChangeNotifier {
       _deadlineChannelId = normalized;
       notificationService.activeDeadlineChannelId = snap.authenticated
           ? normalized
-          : LocalNotificationService.assignmentChannel;
+          : LocalNotificationService.assignmentV2Channel;
       saved = true;
       await _afterAssignmentsChanged(updateSummary: false);
     });
@@ -3976,9 +4050,9 @@ class AssignmentStore extends ChangeNotifier {
       _needsProfileRecovery = false;
       _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
       _allowUrgentDeadlineNightBreakthrough = false;
-      _deadlineChannelId = LocalNotificationService.assignmentChannel;
+      _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
       notificationService.activeDeadlineChannelId =
-          LocalNotificationService.assignmentChannel;
+          LocalNotificationService.assignmentV2Channel;
       _chaoxingDisplayName = null;
       _chaoxingAvatarUrl = null;
       _error = null;
@@ -4138,7 +4212,7 @@ class AssignmentStore extends ChangeNotifier {
         snap.authenticated && _allowUrgentDeadlineNightBreakthrough;
     notificationService.activeDeadlineChannelId = snap.authenticated
         ? _deadlineChannelId
-        : LocalNotificationService.assignmentChannel;
+        : LocalNotificationService.assignmentV2Channel;
     if (!_privacyCleanupPending) {
       if (updateAssignmentReminders) {
         if (_nativeReminderAvailable && _authenticated) {
@@ -4635,12 +4709,42 @@ class AssignmentStore extends ChangeNotifier {
     notificationService.allowUrgentNightBreakthrough =
         _allowUrgentDeadlineNightBreakthrough;
     notificationService.courseworkState = _courseworkState;
+    if (_migratedDeadlineChannelToV2ThisRestore && !_nativeReminderAvailable) {
+      _migratedDeadlineChannelToV2ThisRestore = false;
+      try {
+        await notificationService.rescheduleAssignments(
+          courseAssignments,
+          offsetsMinutes: _reminderOffsetsMinutes,
+        );
+      } catch (error) {
+        _deadlineWarnings.add('截止提醒渠道升级重排未完成：$error');
+        _serviceWarnings.add('截止提醒渠道升级重排未完成：$error');
+      }
+    }
     try {
       await notificationService
           .migrateLegacyManualChannelIfNeeded(notebook.entries);
     } catch (error) {
       _manualWarnings.add('个人日程提醒渠道迁移未完成：$error');
       _serviceWarnings.add('个人日程提醒渠道迁移未完成：$error');
+    }
+    try {
+      await notificationService.migrateLegacySummaryChannelIfNeeded(
+        courseAssignments,
+        personal,
+        _lastSyncAt,
+      );
+    } catch (error) {
+      _summaryWarnings.add('每日摘要提醒渠道迁移未完成：$error');
+      _serviceWarnings.add('每日摘要提醒渠道迁移未完成：$error');
+    }
+    try {
+      await notificationService.retireLegacyUpdatesAndDeadlineChannelsIfNeeded(
+        retireDeadlineV1:
+            _deadlineChannelId == LocalNotificationService.assignmentV2Channel,
+      );
+    } catch (_) {
+      // Best-effort legacy v1 channel cleanup.
     }
   }
 
@@ -4791,7 +4895,9 @@ class AssignmentStore extends ChangeNotifier {
     final catalog = termCatalog;
     final eligibleKeys = [
       for (final entry in catalog.entries)
-        if (entry.isFollowed && entry.state == CourseCatalogState.archived)
+        if (entry.isFollowed &&
+            !entry.isBlocked &&
+            entry.state == CourseCatalogState.archived)
           entry.courseKey,
     ];
     final batch = _historicalSweepState.selectNextBatch(
@@ -5428,7 +5534,8 @@ class AssignmentStore extends ChangeNotifier {
   Set<String> _archivedReminderCourseKeys() {
     return {
       for (final entry in termCatalog.entries)
-        if (entry.state == CourseCatalogState.archived) entry.courseKey,
+        if (entry.state == CourseCatalogState.archived || entry.isBlocked)
+          entry.courseKey,
     };
   }
 

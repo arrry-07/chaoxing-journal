@@ -173,26 +173,37 @@ class AppUpdateService {
         listReleases: true);
   }
 
-  /// Discover every newer public release on cold start, including patches.
-  /// The controller still honours ignored versions and never auto-downloads.
+  /// Check only the stable update channel on cold start so routine patch or
+  /// minor releases do not pop up on launch unless promoted to stable.
+  /// Official Gitee stable failure falls back to GitHub releases/latest only.
   Future<UpdateCheckResult> checkForStartup(
       {required int currentVersionCode, CancelToken? cancelToken}) async {
-    if (manualManifestUrl.isEmpty &&
-        manifestUrl.isEmpty &&
-        stableManifestUrl.isNotEmpty) {
-      await cleanupStaleDownloads();
+    await cleanupStaleDownloads();
+    if (stableManifestUrl.isNotEmpty) {
       return _checkManifestWithFallback(
-          manifestUrl: stableManifestUrl,
-          currentVersionName: AppVersion.releaseName,
-          currentVersionCode: currentVersionCode,
-          startupOnly: false,
-          githubListReleases: false,
-          cancelToken: cancelToken);
+        manifestUrl: stableManifestUrl,
+        currentVersionName: AppVersion.releaseName,
+        currentVersionCode: currentVersionCode,
+        startupOnly: false,
+        githubListReleases: false,
+        cancelToken: cancelToken,
+      );
     }
-    return checkForManualUpdate(
+    if (manifestUrl.isNotEmpty) {
+      return _checkManifestWithFallback(
+        manifestUrl: manifestUrl,
+        currentVersionName: AppVersion.releaseName,
+        currentVersionCode: currentVersionCode,
+        startupOnly: false,
+        githubListReleases: false,
+        cancelToken: cancelToken,
+      );
+    }
+    return _checkGitHub(
       currentVersionName: AppVersion.releaseName,
       currentVersionCode: currentVersionCode,
       cancelToken: cancelToken,
+      listReleases: false,
     );
   }
 

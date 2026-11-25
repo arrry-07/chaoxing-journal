@@ -62,16 +62,12 @@ class SyncScopeSelection {
     required CourseTermCatalog termCatalog,
     Set<String> targetedCourseKeys = const {},
   }) {
-    if (scope == AssignmentSyncScope.all) {
-      return SyncScopeSelection.all(catalog);
-    }
-
     final targets = <ChaoxingCourseRef>[];
     final skipped = <String>{};
     for (final ref in catalog) {
       final key = courseKeyOf(ref);
       final include = switch (scope) {
-        AssignmentSyncScope.all => true,
+        AssignmentSyncScope.all => !termCatalog.isBlocked(key),
         AssignmentSyncScope.current => termCatalog.isActiveOrRecalled(key),
         AssignmentSyncScope.targeted ||
         AssignmentSyncScope.historicalSweep =>
@@ -88,7 +84,8 @@ class SyncScopeSelection {
       scope: scope,
       targetCourses: targets,
       skippedCourseKeys: skipped,
-      includeAccountExams: scope == AssignmentSyncScope.current,
+      includeAccountExams: scope == AssignmentSyncScope.current ||
+          scope == AssignmentSyncScope.all,
     );
   }
 }

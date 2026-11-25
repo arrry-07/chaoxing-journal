@@ -427,7 +427,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       }
     }
 
+    checkChannelAudioAndVibration(current?.assignmentUpdatesChannel, '新增作业渠道');
     checkChannelAudioAndVibration(current?.assignmentChannel, '截止提醒渠道');
+    checkChannelAudioAndVibration(current?.summaryChannel, '每日摘要渠道');
     checkChannelAudioAndVibration(current?.manualChannel, '个人日程渠道');
     if (current?.scheduleRecoveryPending == true) {
       issues.add('存在待恢复的调度事务');
@@ -483,7 +485,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       infoItems: const [
         '权限开启与已安排不等于绝对准时送达：厂商省电策略、锁屏限制或应用被强制停止都可能拦截后台提醒。',
         '每日摘要按当前快照预安排未来 7 天，超过 7 天未打开应用将停止摘要，且不会在后台自动拉取新作业。',
-        '待办与考试提醒已升级至新版有声渠道（v2），旧渠道自定义设置已重置；如曾调整系统铃声或静音规则请在此重新核对。',
+        '全套通知渠道已升级至内置清铃有声 v2（截止提醒、新增作业、每日摘要与待办提醒）；如曾调整系统铃声或静音规则，可点击下方渠道条目核对。',
         '若某条课业提醒异常，可在下方查看「提醒记录与原因」。',
       ],
       dividerIndent: 16,
@@ -638,9 +640,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                               setState(() {
                                 _healthMessage = switch (outcome.status) {
                                   TestDeadlineNotificationStatus.scheduled =>
-                                    '已安排测试有声提醒（约 3 秒后送达，可先锁屏观察）；请核对声音、短振与锁屏横幅，实际效果取决于系统与渠道设置。',
+                                    '已安排测试有声提醒（约 3 秒后送达）；点击后建议 3 秒内切回桌面或锁屏观察响铃、振动与横幅（部分国产系统前台会抑制提醒音与横幅）。',
                                   TestDeadlineNotificationStatus.posted =>
-                                    '已请求系统显示测试有声提醒；请下拉通知栏核对，实际声音、短振与锁屏显示取决于系统与渠道设置。',
+                                    '已请求系统显示测试有声提醒；点击后建议 3 秒内切回桌面或锁屏观察响铃、振动与横幅（部分国产系统前台会抑制提醒音与横幅）。',
                                   TestDeadlineNotificationStatus.quietHours =>
                                     outcome.warning ??
                                         '当前处于夜间静音时段（23:30–07:30），测试提醒不会穿透静音；请在 07:30 后重试。',
@@ -685,11 +687,13 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                             try {
                               final ok = await widget
                                   .assignmentStore.notificationService
-                                  .showTestManualNotification();
+                                  .showTestManualNotification(
+                                delay: const Duration(seconds: 3),
+                              );
                               if (!mounted) return;
                               setState(() {
                                 _healthMessage = ok
-                                    ? '已发送待办测试提醒；若未听到声音，请检查手机是否静音或系统渠道铃声设置。'
+                                    ? '已安排待办测试提醒（约 3 秒后送达）；点击后建议 3 秒内切回桌面或锁屏观察响铃、振动与横幅（部分国产系统前台会抑制提醒音与横幅）。'
                                     : '未能发送待办测试提醒，请检查通知权限与待办提醒渠道。';
                               });
                               await _loadHealth(force: true);
@@ -796,8 +800,8 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                     Text(_channelStateText(_health?.assignmentUpdatesChannel)),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => _openNotificationChannel(
-                  'assignment_updates',
-                  '作业变化通知渠道',
+                  LocalNotificationService.assignmentUpdatesV2Channel,
+                  '新增作业通知渠道',
                 ),
               ),
               ListTile(
@@ -807,7 +811,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                 subtitle: Text(_channelStateText(_health?.summaryChannel)),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => _openNotificationChannel(
-                  'daily_summary',
+                  LocalNotificationService.summaryV2Channel,
                   '每日摘要通知渠道',
                 ),
               ),

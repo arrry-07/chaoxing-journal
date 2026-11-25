@@ -70,7 +70,7 @@ void main() {
               'notificationLaunchedApp': false
             },
           'getNotificationChannels' => [
-              fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
+              fixture.channelRow('assignment_deadlines_v2', '作业截止提醒', 4),
               fixture.channelRow('personal_schedule_v2', '待办与考试提醒', 4),
             ],
           'pendingNotificationRequests' || 'getActiveNotifications' => [],
@@ -226,7 +226,7 @@ void main() {
     });
 
     test(
-        'resolveDefaultDeadlineChannel picks v2 on fresh install and preserves v1 on upgrade or failure',
+        'resolveDefaultDeadlineChannel defaults to v2 and honors explicit stored selection',
         () async {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -268,6 +268,12 @@ void main() {
       await upgradeByChannel.initializeSafely();
       expect(
         await upgradeByChannel.resolveDefaultDeadlineChannel(),
+        LocalNotificationService.assignmentV2Channel,
+      );
+      expect(
+        await upgradeByChannel.resolveDefaultDeadlineChannel(
+          storedChannelId: LocalNotificationService.assignmentChannel,
+        ),
         LocalNotificationService.assignmentChannel,
       );
       expect(
@@ -284,21 +290,21 @@ void main() {
       await upgradeByLegacyKey.initializeSafely();
       expect(
         await upgradeByLegacyKey.resolveDefaultDeadlineChannel(),
-        LocalNotificationService.assignmentChannel,
+        LocalNotificationService.assignmentV2Channel,
       );
 
       SharedPreferences.setMockInitialValues({});
       failChannelQuery = true;
       expect(
         await LocalNotificationService().resolveDefaultDeadlineChannel(),
-        LocalNotificationService.assignmentChannel,
+        LocalNotificationService.assignmentV2Channel,
       );
 
       final failedInit = LocalNotificationService();
       await failedInit.initializeSafely();
       expect(
         await failedInit.resolveDefaultDeadlineChannel(),
-        LocalNotificationService.assignmentChannel,
+        LocalNotificationService.assignmentV2Channel,
       );
 
       failChannelQuery = false;
@@ -365,8 +371,8 @@ void main() {
               fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
               fixture.channelRow('assignment_deadlines_v2', '作业截止提醒（增强有声）', 4),
               fixture.channelRow('assignment_silent', '静默作业通知', 2),
-              fixture.channelRow('assignment_updates', '作业变化提醒', 3),
-              fixture.channelRow('daily_summary', '每日课业摘要', 3),
+              fixture.channelRow('assignment_updates_v2', '新增作业提醒', 4),
+              fixture.channelRow('daily_summary_v2', '每日课业摘要', 4),
               fixture.channelRow('personal_schedule_v2', '待办与考试提醒', 4),
             ],
           'areNotificationsEnabled' || 'canScheduleExactNotifications' => true,

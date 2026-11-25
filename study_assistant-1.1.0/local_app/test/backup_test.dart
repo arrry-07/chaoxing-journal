@@ -528,7 +528,8 @@ void main() {
       // Strict validation on schema 9 courseTermPreferences roundtrip & invalid overrides.
       final termPrefs = CourseTermPreferences()
           .withManualTerm('101:201', '2026-fall')
-          .withArchiveMode('102:202', CourseArchiveMode.archived);
+          .withArchiveMode('102:202', CourseArchiveMode.archived)
+          .withBlockMode('103:203', CourseBlockMode.blocked);
       await repo.saveCourseTermPreferences(termPrefs, 'alice');
       final withTerms = await repo.createBackupSnapshot('alice');
       final decodedTerms = BackupSnapshot.decode(withTerms.encode());
@@ -542,6 +543,17 @@ void main() {
         },
       };
       expect(() => BackupSnapshot.decode(jsonEncode(badTerms)),
+          throwsFormatException);
+
+      final redundantAutoBlock =
+          jsonDecode(withTerms.encode()) as Map<String, dynamic>;
+      redundantAutoBlock['courseTermPreferences'] = {
+        'version': 1,
+        'entries': {
+          '101:201': {'blockMode': 'auto'},
+        },
+      };
+      expect(() => BackupSnapshot.decode(jsonEncode(redundantAutoBlock)),
           throwsFormatException);
     });
 

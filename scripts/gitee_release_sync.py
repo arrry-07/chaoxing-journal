@@ -154,10 +154,15 @@ def choose_effective_manual_release(
 def choose_stable_release(
     current: ReleaseArtifact,
     candidate: ReleaseArtifact,
+    *,
+    promote_stable: bool = False,
 ) -> ReleaseArtifact:
-    current_version = version_tuple(current.version_name)
-    candidate_version = version_tuple(candidate.version_name)
-    if candidate_version[:2] > current_version[:2]:
+    if not promote_stable:
+        return current
+    if (
+        _release_key(candidate) >= _release_key(current)
+        and candidate.version_code > current.version_code
+    ):
         return candidate
     return current
 
@@ -1122,6 +1127,12 @@ def generate_manifest(
                 str(previous.version_code),
             ]
         )
+        if (
+            channel == "stable"
+            and version_tuple(artifact.version_name)[:2]
+            == version_tuple(previous.version_name)[:2]
+        ):
+            arguments.append("-AllowHotfix")
     return _run_manifest_script(arguments, work_dir=work_dir)
 
 
@@ -1321,8 +1332,8 @@ def render_readme(
 
 本仓库公开学习通课业手记的国内更新清单和经过校验的 Android 安装包。
 
-- stable：`{stable}`，只随主/次版本前进。
-- manual：`{manual}`，指向最新正式补丁。
+- stable：`{stable}`，仅在大更新或紧急热修时推进。
+- manual：`{manual}`，指向最新正式发布。
 - 最多保留 3 个 APK Release；更早版本请前往 GitHub Releases。
 - GitHub 是每次正式发布的必发源和备用下载源，Gitee 是国内批量镜像。
 
@@ -1534,7 +1545,11 @@ def synchronize_index(
             github_repository=args.github_repository,
         )
         assert manual_manifest is not None
-    target_stable = choose_stable_release(current_stable, target_manual)
+    target_stable = choose_stable_release(
+        current_stable,
+        target_manual,
+        promote_stable=getattr(args, "promote_stable", False),
+    )
     if target_stable is current_stable:
         stable_manifest = current_stable_json
     else:
@@ -1669,7 +1684,11 @@ def synchronize(args: argparse.Namespace) -> int:
         current_stable = min(artifacts, key=_release_key)
     if current_stable is None:
         raise SyncError("Stable manifest is missing; seed must run first.")
-    target_stable = choose_stable_release(current_stable, target_manual)
+    target_stable = choose_stable_release(
+        current_stable,
+        target_manual,
+        promote_stable=getattr(args, "promote_stable", False),
+    )
     if args.dry_run:
         print(
             json.dumps(
@@ -1836,6 +1855,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--aapt", default="")
     parser.add_argument("--apksigner", default="")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--promote-stable", action="store_true")
     return parser
 
 

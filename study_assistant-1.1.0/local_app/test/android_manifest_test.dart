@@ -283,4 +283,22 @@ void main() {
       expect(browser, isNot(contains('Uri.parse')));
     },
   );
+
+  test(
+    'bundled journal_chime audio resource is present and kept by keep.xml',
+    () {
+      final chime = File('android/app/src/main/res/raw/journal_chime.wav');
+      expect(chime.existsSync(), isTrue);
+      expect(chime.lengthSync(), greaterThan(1000));
+      expect(chime.lengthSync(), lessThanOrEqualTo(50 * 1024));
+
+      final keepXml =
+          File('android/app/src/main/res/raw/keep.xml').readAsStringSync();
+      expect(keepXml, contains('@raw/journal_chime'));
+
+      final manifest =
+          File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+      expect(manifest, contains('android:enableOnBackInvokedCallback="true"'));
+    },
+  );
 }

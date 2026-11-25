@@ -181,7 +181,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   }
 
   bool _refreshing = false;
-  String? get _courseKey => store.homeFilters.courseKey;
+  String? get _courseKey {
+    final key = store.homeFilters.courseKey;
+    if (key != null && store.termCatalog.isBlocked(key)) return null;
+    return key;
+  }
+
   String get _query => store.homeFilters.query;
   AssignmentDeadlineFilter get _deadlineFilter => store.homeFilters.deadline;
   HomeSortOrder get _sortOrder =>
@@ -230,7 +235,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         backgroundColor: journal.ink,
         content: Text(
           message,
-          style: journal.metadata.copyWith(color: journal.onPrimaryFill),
+          style: journal.metadata.copyWith(color: journal.onInvertedSurface),
         ),
         action: effectiveAction != null && effectiveLabel != null
             ? SnackBarAction(
@@ -641,7 +646,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           for (final group in store.localRecordGroups)
             if (!group.hidden &&
                 (group.primary.courseKey == null ||
-                    store.follows(group.primary.courseKey!)))
+                    (store.follows(group.primary.courseKey!) &&
+                        !termCatalog.isBlocked(group.primary.courseKey!))))
               ...group.sources,
         ];
         final pickerIndex = allFollowedSources.isEmpty
@@ -657,7 +663,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           assignments: pickerAssignments,
           catalog: [
             for (final course in store.courses)
-              if (store.follows(course.key)) course,
+              if (store.follows(course.key) &&
+                  !termCatalog.isBlocked(course.key))
+                course,
           ],
           records: allFollowedSources,
           selectedCourseKey: _courseKey,
@@ -2503,8 +2511,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             label: '本学期',
                           ),
                           JournalPickerFilterOption(
-                            id: 'ungrouped',
-                            label: '未分组',
+                            id: 'currentAcademicYear',
+                            label: '本学年',
                           ),
                           JournalPickerFilterOption(
                             id: 'pastTerms',
@@ -2528,7 +2536,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             filterId == 'currentTerm' &&
                                     filtered.every((o) => o.value.isEmpty) &&
                                     courseOptions.isNotEmpty
-                                ? '本学期暂未识别出课程，可切换到「未分组」或「全部学期」查看'
+                                ? '本学期暂未识别出课程，可切换到「本学年」或「全部学期」查看'
                                 : null,
                         options: [
                           const JournalPickerOption<String>(

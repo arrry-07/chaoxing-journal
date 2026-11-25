@@ -44,7 +44,7 @@ data class ReminderAccountState(
         if (baselineCompleted) setOf("courseWork") else emptySet(),
     val claimToken: String? = null,
     val allowUrgentNightBreakthrough: Boolean = false,
-    val deadlineChannelId: String = AssignmentNotificationPublisher.CHANNEL_DEADLINES,
+    val deadlineChannelId: String = AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
 )
 
 data class NotificationSignalClaim(
@@ -224,7 +224,7 @@ class ReminderDatabase private constructor(
                 next_check_at INTEGER,
                 migration_state TEXT NOT NULL DEFAULT 'legacy_pending',
                 allow_urgent_night_breakthrough INTEGER NOT NULL DEFAULT 0,
-                deadline_channel_id TEXT NOT NULL DEFAULT 'assignment_deadlines',
+                deadline_channel_id TEXT NOT NULL DEFAULT 'assignment_deadlines_v2',
                 updated_at INTEGER NOT NULL
             )
             """.trimIndent(),
@@ -353,6 +353,12 @@ class ReminderDatabase private constructor(
             db.execSQL(
                 "ALTER TABLE events ADD COLUMN deadline_source " +
                     "TEXT NOT NULL DEFAULT 'unknown'",
+            )
+        }
+        if (oldVersion < 9 && newVersion >= 9) {
+            db.execSQL(
+                "UPDATE accounts SET deadline_channel_id = 'assignment_deadlines_v2' " +
+                    "WHERE deadline_channel_id = 'assignment_deadlines'",
             )
         }
     }
@@ -572,7 +578,7 @@ class ReminderDatabase private constructor(
                 putNull("last_failure")
                 put("pending_update", 0)
                 put("allow_urgent_night_breakthrough", 0)
-                put("deadline_channel_id", AssignmentNotificationPublisher.CHANNEL_DEADLINES)
+                put("deadline_channel_id", AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2)
             },
             keepAccountHash?.let { "account_hash != ?" },
             keepAccountHash?.let { arrayOf(it) },
@@ -2241,7 +2247,7 @@ class ReminderDatabase private constructor(
         const val STATUS_INVALID = "invalid"
 
         private const val DATABASE_NAME = "assignment_reminders_v1.db"
-        private const val DATABASE_VERSION = 8
+        private const val DATABASE_VERSION = 9
         private const val DAY_MILLIS = 86_400_000L
         private const val TAG = "ReminderDatabase"
 

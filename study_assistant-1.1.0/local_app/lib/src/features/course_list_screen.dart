@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app/journal.dart';
+import '../app/journal_motion.dart';
 import '../models/course.dart';
 import '../models/course_term_preferences.dart';
+import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import '../services/course_term_catalog.dart';
 import 'widgets/journal_grouped_card.dart';
@@ -22,6 +24,8 @@ class _CourseListScreenState extends State<CourseListScreen> {
   final _searchController = TextEditingController();
   bool _searching = false;
   bool _managingTerms = false;
+  bool _autoPromoExpanded = false;
+  bool _manualBlockedExpanded = false;
   String _query = '';
 
   @override
@@ -91,17 +95,25 @@ class _CourseListScreenState extends State<CourseListScreen> {
           final journal = Journal.of(context);
           final termCatalog = store.termCatalog;
           final archivableKeys = termCatalog.archivablePastCourseKeys;
+          final visibleCourses = store.courses
+              .where((c) => !termCatalog.isBlocked(c.key))
+              .toList(growable: false);
+          final autoPromoEntries = termCatalog.autoBlockedPromoEntries.toList()
+            ..sort((a, b) => compareNaturalPinyin(a.courseName, b.courseName));
+          final manualBlockedEntries = termCatalog.manuallyBlockedEntries
+              .toList()
+            ..sort((a, b) => compareNaturalPinyin(a.courseName, b.courseName));
           final nameCounts = <String, int>{};
-          for (final c in store.courses) {
+          for (final c in visibleCourses) {
             final trimmed = c.name.trim();
             nameCounts[trimmed] = (nameCounts[trimmed] ?? 0) + 1;
           }
           final q = _query.trim().toLowerCase();
           final filtered = _searching
-              ? store.courses
+              ? visibleCourses
                   .where((c) => _matches(c, termCatalog.entryFor(c.key), q))
                   .toList(growable: false)
-              : store.courses;
+              : visibleCourses;
 
           return Scaffold(
             backgroundColor: journal.paper,
@@ -270,7 +282,12 @@ class _CourseListScreenState extends State<CourseListScreen> {
                     JournalGroupedCard(
                       padding: const EdgeInsets.all(18),
                       children: [
-                        Text('没有匹配的课程或教师，请调整关键词后重试。', style: journal.metadata),
+                        Text(
+                          _searching
+                              ? '没有匹配的课程或教师，请调整关键词后重试。'
+                              : '暂无展示中的课程，可在下方折叠区恢复已过滤或已屏蔽课程。',
+                          style: journal.metadata,
+                        ),
                       ],
                     )
                   else
@@ -377,6 +394,21 @@ class _CourseListScreenState extends State<CourseListScreen> {
                                           label:
                                               Text(isArchived ? '恢复在学' : '归档'),
                                         ),
+                                        ActionChip(
+                                          key: ValueKey(
+                                              'course-block-btn-${course.key}'),
+                                          onPressed: store.isLoading
+                                              ? null
+                                              : () => store.setCourseBlockMode(
+                                                    course.key,
+                                                    CourseBlockMode.blocked,
+                                                  ),
+                                          avatar: const Icon(
+                                            Icons.block_outlined,
+                                            size: 15,
+                                          ),
+                                          label: const Text('屏蔽'),
+                                        ),
                                         if (isRecalled)
                                           ActionChip(
                                             key: ValueKey(
@@ -400,12 +432,190 @@ class _CourseListScreenState extends State<CourseListScreen> {
                           }(),
                       ],
                     ),
+                  if (autoPromoEntries.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _buildBlockedSectionCard(
+                      context: context,
+                      journal: journal,
+                      store: store,
+                      toggleKey: const ValueKey('course-auto-promo-toggle'),
+                      title: '已自动过滤的活动课（${autoPromoEntries.length}）',
+                      icon: Icons.campaign_outlined,
+                      expanded: _autoPromoExpanded,
+                      onToggle: () => setState(
+                          () => _autoPromoExpanded = !_autoPromoExpanded),
+                      entries: autoPromoEntries,
+                      restoreKeyBuilder: (key) =>
+                          ValueKey('course-restore-promo-$key'),
+                      onRestore: (entry) => store.setCourseBlockMode(
+                        entry.courseKey,
+                        CourseBlockMode.allowed,
+                      ),
+                    ),
+                  ],
+                  if (manualBlockedEntries.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _buildBlockedSectionCard(
+                      context: context,
+                      journal: journal,
+                      store: store,
+                      toggleKey: const ValueKey('course-manual-blocked-toggle'),
+                      title: '已手动屏蔽的课程（${manualBlockedEntries.length}）',
+                      icon: Icons.visibility_off_outlined,
+                      expanded: _manualBlockedExpanded,
+                      onToggle: () => setState(() =>
+                          _manualBlockedExpanded = !_manualBlockedExpanded),
+                      entries: manualBlockedEntries,
+                      restoreKeyBuilder: (key) =>
+                          ValueKey('course-restore-blocked-$key'),
+                      onRestore: (entry) => store.setCourseBlockMode(
+                        entry.courseKey,
+                        entry.isAutoPromo
+                            ? CourseBlockMode.allowed
+                            : CourseBlockMode.auto,
+                      ),
+                    ),
+                  ],
                 ],
               ],
             ),
           );
         },
       );
+
+  Widget _buildBlockedSectionCard({
+    required BuildContext context,
+    required JournalPalette journal,
+    required AssignmentStore store,
+    required Key toggleKey,
+    required String title,
+    required IconData icon,
+    required bool expanded,
+    required VoidCallback onToggle,
+    required List<CourseTermEntry> entries,
+    required Key Function(String courseKey) restoreKeyBuilder,
+    required Future<bool> Function(CourseTermEntry entry) onRestore,
+  }) {
+    final coursesByKey = {for (final c in store.courses) c.key: c};
+    return JournalGroupedCard(
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              key: toggleKey,
+              onTap: () {
+                JournalMotion.tap(store.display);
+                onToggle();
+              },
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 48),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  child: Row(
+                    children: [
+                      Icon(icon, size: 18, color: journal.muted),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: journal.section.copyWith(fontSize: 15),
+                        ),
+                      ),
+                      AnimatedRotation(
+                        turns: expanded ? 0.5 : 0.0,
+                        duration: JournalMotion.duration(
+                          context,
+                          const Duration(milliseconds: 200),
+                        ),
+                        curve: JournalMotion.easeOut,
+                        child: Icon(
+                          Icons.expand_more_rounded,
+                          size: 20,
+                          color: journal.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            AnimatedSize(
+              duration: JournalMotion.duration(
+                context,
+                const Duration(milliseconds: 220),
+              ),
+              curve: JournalMotion.easeDrawer,
+              alignment: Alignment.topCenter,
+              child: expanded
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final entry in entries) ...[
+                          Divider(
+                            height: 0.6,
+                            thickness: 0.6,
+                            indent: 14,
+                            endIndent: 14,
+                            color: journal.divider,
+                          ),
+                          () {
+                            final course = coursesByKey[entry.courseKey];
+                            final teachers = course?.teacherLabel ?? '';
+                            return Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(14, 10, 10, 10),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          entry.courseName,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: journal.entryTitle,
+                                        ),
+                                        if (teachers.isNotEmpty) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            teachers,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: journal.metadata,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  TextButton(
+                                    key: restoreKeyBuilder(entry.courseKey),
+                                    onPressed: store.isLoading
+                                        ? null
+                                        : () => onRestore(entry),
+                                    child: const Text('恢复'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }(),
+                        ],
+                      ],
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   Widget? _buildCourseSubtitle({
     required CourseRef course,

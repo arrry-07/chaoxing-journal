@@ -153,7 +153,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(service.channelId, 'assignment_deadlines');
+    expect(service.channelId, 'assignment_deadlines_v2');
     expect(
       find.textContaining('已打开相关系统设置列表'),
       findsOneWidget,
@@ -1187,6 +1187,8 @@ void main() {
     );
     addTearDown(store.dispose);
     await store.restoreSession();
+    await store
+        .saveDeadlineChannelId(LocalNotificationService.assignmentChannel);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -1232,6 +1234,8 @@ void main() {
     );
     addTearDown(store.dispose);
     await store.restoreSession();
+    await store
+        .saveDeadlineChannelId(LocalNotificationService.assignmentChannel);
 
     await tester.pumpWidget(
       MaterialApp(

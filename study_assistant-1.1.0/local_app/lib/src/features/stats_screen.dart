@@ -274,24 +274,15 @@ class _StatsScreenState extends State<StatsScreen> {
               children: [
                 const JournalHeading('课业统计', bookTitle: true),
                 const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    for (final scope in CourseTermScope.values)
-                      ChoiceChip(
-                        key: ValueKey('stats-term-scope-${scope.name}'),
-                        selected: _termScope == scope,
-                        onSelected: (_) {
-                          if (_termScope == scope) return;
-                          JournalMotion.tap(store.display);
-                          setState(() => _termScope = scope);
-                        },
-                        label: Text(scope.label),
-                      ),
-                  ],
+                _StatsTermScopeBar(
+                  selected: _termScope,
+                  onChanged: (scope) {
+                    if (_termScope == scope) return;
+                    JournalMotion.tap(store.display);
+                    setState(() => _termScope = scope);
+                  },
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 _StatsRangeSegmentedBar(
                   selected: _range,
                   onChanged: (next) {
@@ -619,8 +610,8 @@ class _StatsScreenState extends State<StatsScreen> {
             if (own.expired > 0)
               _CourseStatPill(
                 text: '已逾期 ${own.expired}',
-                fg: journal.overdueAmber,
-                bg: journal.overdueAmberBg,
+                fg: journal.overdueSky,
+                bg: journal.overdueSkyBg,
                 journal: journal,
               ),
             if (own.unknown > 0)
@@ -827,6 +818,100 @@ class _CourseStatPill extends StatelessWidget {
   }
 }
 
+class _StatsTermScopeBar extends StatelessWidget {
+  const _StatsTermScopeBar({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final CourseTermScope selected;
+  final ValueChanged<CourseTermScope> onChanged;
+
+  static String _shortLabel(CourseTermScope scope) => switch (scope) {
+        CourseTermScope.currentTerm => '本学期',
+        CourseTermScope.currentAcademicYear => '本学年',
+        CourseTermScope.pastTerms => '往期',
+        CourseTermScope.allTerms => '全部',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: journal.divider, width: 0.8),
+        ),
+      ),
+      child: Row(
+        children: [
+          for (final scope in CourseTermScope.values)
+            () {
+              final active = selected == scope;
+              final label = _shortLabel(scope);
+              return Expanded(
+                child: Semantics(
+                  button: true,
+                  selected: active,
+                  label: label,
+                  child: InkWell(
+                    key: ValueKey('stats-term-scope-${scope.name}'),
+                    onTap: () => onChanged(scope),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 44),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 10,
+                            ),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                softWrap: false,
+                                style: journal.pillLabel.copyWith(
+                                  fontSize: 14,
+                                  fontWeight: active
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                  color:
+                                      active ? journal.accent : journal.muted,
+                                ),
+                              ),
+                            ),
+                          ),
+                          AnimatedContainer(
+                            duration: JournalMotion.duration(
+                              context,
+                              const Duration(milliseconds: 180),
+                            ),
+                            curve: JournalMotion.easeOut,
+                            height: 2.5,
+                            width: active ? 28 : 0,
+                            decoration: BoxDecoration(
+                              color:
+                                  active ? journal.accent : Colors.transparent,
+                              borderRadius: BorderRadius.circular(1.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }(),
+        ],
+      ),
+    );
+  }
+}
+
 class _StatsRangeSegmentedBar extends StatelessWidget {
   const _StatsRangeSegmentedBar({
     required this.selected,
@@ -840,10 +925,10 @@ class _StatsRangeSegmentedBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
     return Container(
-      padding: const EdgeInsets.all(3.5),
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: journal.segmentTrack,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: journal.segmentBorder,
       ),
       child: Row(
@@ -858,12 +943,12 @@ class _StatsRangeSegmentedBar extends StatelessWidget {
                     const Duration(milliseconds: 180),
                   ),
                   curve: JournalMotion.easeOut,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 6.5),
                   decoration: BoxDecoration(
                     color: selected == range
                         ? journal.segmentThumb
                         : Colors.transparent,
-                    borderRadius: BorderRadius.circular(11),
+                    borderRadius: BorderRadius.circular(9.5),
                     border: selected == range ? journal.segmentBorder : null,
                     boxShadow: selected == range
                         ? [
@@ -883,7 +968,7 @@ class _StatsRangeSegmentedBar extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: journal.pillLabel.copyWith(
-                      fontSize: 13,
+                      fontSize: 12.5,
                       fontWeight:
                           selected == range ? FontWeight.w600 : FontWeight.w500,
                       color: selected == range ? journal.ink : journal.muted,

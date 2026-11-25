@@ -22,9 +22,9 @@ class Journal {
   static const berry = Color(0xFFB5493A);
   static const berryBg = Color(0xFFFBF2EF);
   static const berryBorder = Color(0xFFECD0C8);
-  static const overdueAmber = Color(0xFF8A5A00);
-  static const overdueAmberBg = Color(0xFFFAF2D6);
-  static const overdueInk = Color(0xFF5B5750);
+  static const overdueSky = Color(0xFF0369A1);
+  static const overdueSkyBg = Color(0xFFE0F2FE);
+  static const overdueInk = Color(0xFF475569);
   static const examOrange = Color(0xFFAD4E0E);
   static const examOrangeBg = Color(0xFFFDF2E6);
   static const examOrangeBorder = Color(0xFFEED3B6);
@@ -148,8 +148,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     required this.berry,
     required this.berryBg,
     required this.berryBorder,
-    required this.overdueAmber,
-    required this.overdueAmberBg,
+    required this.overdueSky,
+    required this.overdueSkyBg,
     required this.overdueInk,
     required this.examOrange,
     required this.examOrangeBg,
@@ -174,7 +174,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     sheetElevated: Color(0xFFFFFFFF),
     parchment: Journal.parchment,
     ink: Journal.ink,
-    primaryFill: Journal.ink,
+    primaryFill: Journal.slate,
     onPrimaryFill: Color(0xFFFFFFFF),
     muted: Journal.muted,
     sage: Journal.sage,
@@ -186,8 +186,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     berry: Journal.berry,
     berryBg: Journal.berryBg,
     berryBorder: Journal.berryBorder,
-    overdueAmber: Journal.overdueAmber,
-    overdueAmberBg: Journal.overdueAmberBg,
+    overdueSky: Journal.overdueSky,
+    overdueSkyBg: Journal.overdueSkyBg,
     overdueInk: Journal.overdueInk,
     examOrange: Journal.examOrange,
     examOrangeBg: Journal.examOrangeBg,
@@ -213,7 +213,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     sheetElevated: Color(0xFF2B2A26),
     parchment: Color(0xFF2E2D29),
     ink: Color(0xFFEAE6DF),
-    primaryFill: Color(0xFFEAE6DF),
+    primaryFill: Color(0xFF88A8F8),
     onPrimaryFill: Color(0xFF1A1917),
     muted: Color(0xFFC4BFB6),
     sage: Color(0xFF252B3B),
@@ -225,9 +225,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     berry: Color(0xFFE27D70),
     berryBg: Color(0xFF342222),
     berryBorder: Color(0xFF61403C),
-    overdueAmber: Color(0xFFE8BE67),
-    overdueAmberBg: Color(0xFF332B19),
-    overdueInk: Color(0xFFB5AFA5),
+    overdueSky: Color(0xFF5CC8FF),
+    overdueSkyBg: Color(0xFF152B3A),
+    overdueInk: Color(0xFFA8B7C5),
     examOrange: Color(0xFFF0A05A),
     examOrangeBg: Color(0xFF33271D),
     examOrangeBorder: Color(0xFF5D432E),
@@ -262,8 +262,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
   final Color berry;
   final Color berryBg;
   final Color berryBorder;
-  final Color overdueAmber;
-  final Color overdueAmberBg;
+  final Color overdueSky;
+  final Color overdueSkyBg;
   final Color overdueInk;
   final Color examOrange;
   final Color examOrangeBg;
@@ -281,6 +281,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
   final Color navGlassHighlight;
 
   Color get accent => slate;
+
+  Color get onInvertedSurface =>
+      isDark ? const Color(0xFF1A1917) : const Color(0xFFFFFFFF);
 
   /// Action text on the inverted (ink-filled) snackbar. Dark mode inverts the
   /// fill to warm ivory, so the action needs a deep blue to stay >= 4.5:1.
@@ -325,8 +328,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     Color? berry,
     Color? berryBg,
     Color? berryBorder,
-    Color? overdueAmber,
-    Color? overdueAmberBg,
+    Color? overdueSky,
+    Color? overdueSkyBg,
     Color? overdueInk,
     Color? examOrange,
     Color? examOrangeBg,
@@ -362,8 +365,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         berry: berry ?? this.berry,
         berryBg: berryBg ?? this.berryBg,
         berryBorder: berryBorder ?? this.berryBorder,
-        overdueAmber: overdueAmber ?? this.overdueAmber,
-        overdueAmberBg: overdueAmberBg ?? this.overdueAmberBg,
+        overdueSky: overdueSky ?? this.overdueSky,
+        overdueSkyBg: overdueSkyBg ?? this.overdueSkyBg,
         overdueInk: overdueInk ?? this.overdueInk,
         examOrange: examOrange ?? this.examOrange,
         examOrangeBg: examOrangeBg ?? this.examOrangeBg,
@@ -405,8 +408,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
       berry: Color.lerp(berry, other.berry, t)!,
       berryBg: Color.lerp(berryBg, other.berryBg, t)!,
       berryBorder: Color.lerp(berryBorder, other.berryBorder, t)!,
-      overdueAmber: Color.lerp(overdueAmber, other.overdueAmber, t)!,
-      overdueAmberBg: Color.lerp(overdueAmberBg, other.overdueAmberBg, t)!,
+      overdueSky: Color.lerp(overdueSky, other.overdueSky, t)!,
+      overdueSkyBg: Color.lerp(overdueSkyBg, other.overdueSkyBg, t)!,
       overdueInk: Color.lerp(overdueInk, other.overdueInk, t)!,
       examOrange: Color.lerp(examOrange, other.examOrange, t)!,
       examOrangeBg: Color.lerp(examOrangeBg, other.examOrangeBg, t)!,
@@ -449,8 +452,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
           berry == other.berry &&
           berryBg == other.berryBg &&
           berryBorder == other.berryBorder &&
-          overdueAmber == other.overdueAmber &&
-          overdueAmberBg == other.overdueAmberBg &&
+          overdueSky == other.overdueSky &&
+          overdueSkyBg == other.overdueSkyBg &&
           overdueInk == other.overdueInk &&
           examOrange == other.examOrange &&
           examOrangeBg == other.examOrangeBg &&
@@ -487,8 +490,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         berry,
         berryBg,
         berryBorder,
-        overdueAmber,
-        overdueAmberBg,
+        overdueSky,
+        overdueSkyBg,
         overdueInk,
         examOrange,
         examOrangeBg,

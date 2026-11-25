@@ -84,6 +84,9 @@ int _compareKey(_NaturalKey left, _NaturalKey right) {
   return _compareNatural(left.raw, right.raw);
 }
 
+int compareNaturalPinyin(String a, String b) =>
+    _compareKey(_NaturalKey(a), _NaturalKey(b));
+
 int _nameGroupRank(AssignmentDeadlineBucket bucket) => switch (bucket) {
       AssignmentDeadlineBucket.notExpiredWithDeadline ||
       AssignmentDeadlineBucket.confirmedNoDeadline =>

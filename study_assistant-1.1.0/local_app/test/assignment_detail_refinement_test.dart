@@ -156,11 +156,11 @@ void main() {
     final openButton = tester.widget<FilledButton>(open);
     expect(
       openButton.style?.backgroundColor?.resolve(const <WidgetState>{}),
-      const Color(0xFF34322F),
+      JournalPalette.light.primaryFill,
     );
     expect(
       openButton.style?.foregroundColor?.resolve(const <WidgetState>{}),
-      const Color(0xFFFFF7EC),
+      JournalPalette.light.onPrimaryFill,
     );
     final openWeb = find.byKey(const ValueKey('assignment-detail-open-web'));
     await reveal(openWeb);
@@ -913,13 +913,15 @@ void main() {
         expect(openButton.onPressed, isNotNull);
         expect(
           openButton.style?.backgroundColor?.resolve(const <WidgetState>{}),
-          mode.dark ? JournalPalette.dark.primaryFill : const Color(0xFF34322F),
+          mode.dark
+              ? JournalPalette.dark.primaryFill
+              : JournalPalette.light.primaryFill,
         );
         expect(
           openButton.style?.foregroundColor?.resolve(const <WidgetState>{}),
           mode.dark
               ? JournalPalette.dark.onPrimaryFill
-              : const Color(0xFFFFF7EC),
+              : JournalPalette.light.onPrimaryFill,
         );
         expect(tester.getSize(open).height, greaterThanOrEqualTo(46));
 

@@ -32,7 +32,8 @@ param(
   [string]$BackupApkUrl = '',
   [string]$AaptPath = '',
   [string]$ApkSignerPath = '',
-  [string]$ExpectedSignerSha256 = 'd36a571510e046dd196d7384f849f82b4fcff05ce3affb334765d5c752265d8a'
+  [string]$ExpectedSignerSha256 = 'd36a571510e046dd196d7384f849f82b4fcff05ce3affb334765d5c752265d8a',
+  [switch]$AllowHotfix
 )
 
 $ErrorActionPreference = 'Stop'
@@ -134,7 +135,7 @@ if ($InitializeStableBaseline) {
   $previous = $PreviousVersionName.Split('.') | ForEach-Object { [int]$_ }
   $newIteration = $current[0] -gt $previous[0] -or
       ($current[0] -eq $previous[0] -and $current[1] -gt $previous[1])
-  if ($Channel -eq 'stable' -and -not $newIteration) {
+  if ($Channel -eq 'stable' -and -not $newIteration -and -not $AllowHotfix) {
     throw 'Stable manifests may only advance the major or minor version.'
   }
   if ($VersionCode -le $PreviousVersionCode) {

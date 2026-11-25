@@ -231,11 +231,13 @@ void main() {
     expect(result.update!.versionCode, AppVersion.code + 1);
   });
 
-  test('startup and manual both discover a patch from the manual manifest',
+  test('startup reads stable manifest while manual reads manual manifest',
       () async {
     final paths = <String>[];
     final dio = manifestDio(
-      (options) => manifest(),
+      (options) => options.uri.path.endsWith('stable.json')
+          ? manifest(versionName: iterationVersion())
+          : manifest(),
       paths: paths,
     );
     final service = AppUpdateService(
@@ -247,14 +249,14 @@ void main() {
     final startup =
         await service.checkForStartup(currentVersionCode: AppVersion.code);
     expect(startup.status, UpdateCheckStatus.available);
-    expect(startup.update!.versionName, patchVersion());
+    expect(startup.update!.versionName, iterationVersion());
 
     final manual =
         await service.checkConfigured(currentVersionCode: AppVersion.code);
     expect(manual.status, UpdateCheckStatus.available);
     expect(manual.update!.versionName, patchVersion());
     expect(paths, [
-      'https://updates.example.org/manual.json',
+      'https://updates.example.org/stable.json',
       'https://updates.example.org/manual.json',
     ]);
   });

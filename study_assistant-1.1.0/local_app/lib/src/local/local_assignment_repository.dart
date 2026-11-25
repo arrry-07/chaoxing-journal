@@ -169,12 +169,19 @@ class LocalAssignmentRepository {
         return HomeFilters.decode(raw is String ? raw : null);
       });
 
+  Future<void> writeHomeFiltersInPrefs(
+    SharedPreferences prefs,
+    HomeFilters filters,
+  ) async {
+    await _require(prefs.setString(_homeFiltersKey, filters.encode()));
+  }
+
   Future<void> saveHomeFilters(HomeFilters filters, String account) =>
       _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
         _checkOwner(prefs, account);
         try {
-          await _require(prefs.setString(_homeFiltersKey, filters.encode()));
+          await writeHomeFiltersInPrefs(prefs, filters);
         } catch (_) {
           // The plugin updates its cache before the platform write succeeds.
           // Reload so a failed preference cannot reappear on route restoration.

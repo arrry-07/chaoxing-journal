@@ -378,49 +378,86 @@ class _AgendaState extends State<ManualAgendaScreen> {
                         key: const ValueKey('agenda-completed-card'),
                         dividerIndent: 52,
                         children: [
-                          InkWell(
-                            key: const ValueKey('agenda-completed-toggle'),
-                            onTap: () {
-                              JournalMotion.tap(widget.store.display);
-                              setState(() {
-                                _completedExpanded = !_completedExpanded;
-                              });
-                            },
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(minHeight: 48),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 12),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.check_circle_outline_rounded,
-                                      size: 18,
-                                      color: journal.todoGreen,
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              InkWell(
+                                key: const ValueKey('agenda-completed-toggle'),
+                                onTap: () {
+                                  JournalMotion.tap(widget.store.display);
+                                  setState(() {
+                                    _completedExpanded = !_completedExpanded;
+                                  });
+                                },
+                                child: ConstrainedBox(
+                                  constraints:
+                                      const BoxConstraints(minHeight: 48),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 12),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.check_circle_outline_rounded,
+                                          size: 18,
+                                          color: journal.todoGreen,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            '已完成（${doneRows.length}）',
+                                            style: journal.section
+                                                .copyWith(fontSize: 15),
+                                          ),
+                                        ),
+                                        AnimatedRotation(
+                                          turns: _completedExpanded ? 0.5 : 0.0,
+                                          duration: JournalMotion.duration(
+                                            context,
+                                            const Duration(milliseconds: 200),
+                                          ),
+                                          curve: JournalMotion.easeOut,
+                                          child: Icon(
+                                            Icons.expand_more_rounded,
+                                            size: 20,
+                                            color: journal.muted,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        '已完成（${doneRows.length}）',
-                                        style: journal.section
-                                            .copyWith(fontSize: 15),
-                                      ),
-                                    ),
-                                    Icon(
-                                      _completedExpanded
-                                          ? Icons.expand_less_rounded
-                                          : Icons.expand_more_rounded,
-                                      size: 20,
-                                      color: journal.muted,
-                                    ),
-                                  ],
+                                  ),
                                 ),
                               ),
-                            ),
+                              AnimatedSize(
+                                duration: JournalMotion.duration(
+                                  context,
+                                  const Duration(milliseconds: 220),
+                                ),
+                                curve: JournalMotion.easeDrawer,
+                                alignment: Alignment.topCenter,
+                                child: _completedExpanded
+                                    ? Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          for (final e in doneRows) ...[
+                                            Divider(
+                                              height: 0.6,
+                                              thickness: 0.6,
+                                              indent: 52,
+                                              endIndent: 16,
+                                              color: journal.divider,
+                                            ),
+                                            _buildSwipeableRow(e, now, journal),
+                                          ],
+                                        ],
+                                      )
+                                    : const SizedBox.shrink(),
+                              ),
+                            ],
                           ),
-                          if (_completedExpanded)
-                            for (final e in doneRows)
-                              _buildSwipeableRow(e, now, journal),
                         ],
                       ),
                     ],

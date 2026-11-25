@@ -2,14 +2,22 @@ package com.example.studyassistant
 
 import android.app.NotificationManager
 import android.content.Context
+import android.net.Uri
 
 object DeadlineChannelPolicy {
     const val CHANNEL_DEADLINES = "assignment_deadlines"
     const val CHANNEL_DEADLINES_V2 = "assignment_deadlines_v2"
     const val CHANNEL_UPDATES = "assignment_updates"
+    const val CHANNEL_UPDATES_V2 = "assignment_updates_v2"
+    const val CHANNEL_SUMMARY_V2 = "daily_summary_v2"
+    const val CHANNEL_MANUAL_V2 = "personal_schedule_v2"
     const val CHANNEL_SILENT = "assignment_silent"
+    const val CHIME_RAW_NAME = "journal_chime"
     const val TEST_NOTIFICATION_ID = 1_900_000_008
     val DEFAULT_VIBRATION_PATTERN = longArrayOf(0L, 180L, 90L, 180L)
+
+    fun chimeUri(context: Context): Uri =
+        Uri.parse("android.resource://${context.packageName}/raw/$CHIME_RAW_NAME")
 
     fun normalizeChannelId(raw: String?): String? = when (raw?.trim()) {
         CHANNEL_DEADLINES -> CHANNEL_DEADLINES
@@ -23,9 +31,6 @@ object DeadlineChannelPolicy {
         existingChannelIds: Set<String>,
     ): String {
         normalizeChannelId(explicitSelection)?.let { return it }
-        if (!channelQuerySucceeded) return CHANNEL_DEADLINES
-        if (CHANNEL_DEADLINES_V2 in existingChannelIds) return CHANNEL_DEADLINES_V2
-        if (CHANNEL_DEADLINES in existingChannelIds) return CHANNEL_DEADLINES
         return CHANNEL_DEADLINES_V2
     }
 

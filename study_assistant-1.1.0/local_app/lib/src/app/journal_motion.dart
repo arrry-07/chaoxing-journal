@@ -23,7 +23,9 @@ class JournalMotion {
     damping: 37.4, // damping ratio ~0.82
   );
 
-  static const Curve easeOut = Curves.easeOutCubic;
+  static const Curve easeOut = Cubic(0.23, 1.0, 0.32, 1.0);
+  static const Curve easeDrawer = Cubic(0.32, 0.72, 0.0, 1.0);
+  static const Curve easeInOut = Cubic(0.77, 0.0, 0.175, 1.0);
 
   static bool isReducedMotion(BuildContext context) =>
       MediaQuery.maybeDisableAnimationsOf(context) ?? false;

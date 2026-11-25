@@ -9,13 +9,13 @@ import 'coursework_deadline.dart';
 
 enum AcademicSemester { fall, spring }
 
-enum CourseTermSource { manual, folder, activity, ungrouped }
+enum CourseTermSource { manual, folder, courseName, activity, ungrouped }
 
 enum CourseCatalogState { active, recalled, archived }
 
 enum CourseTermScope {
   currentTerm('本学期'),
-  currentAcademicYear('当前学年'),
+  currentAcademicYear('本学年'),
   pastTerms('往期'),
   allTerms('全部学期');
 
@@ -83,6 +83,88 @@ class AcademicTerm implements Comparable<AcademicTerm> {
   static final RegExp _singleYearFolderLoosePattern = RegExp(
     r'(?<!\d)(20\d{2})\s*(?:年\s*)?(秋|春)(?:季学期|季|学期)?',
   );
+  static final RegExp _courseNameNoisePattern = RegExp(
+    r'(?<!\d)20\d{2}\s*(?:级|届|版|年制|期)',
+  );
+  static final RegExp _courseYearMonthSepPattern = RegExp(
+    r'(?<![a-zA-Z\d])(20\d{2})\s*(?:年\s*|[\.\-/])\s*(\d{1,2})(?:\s*(?:月\s*(\d{1,2})\s*[日号]?|[\.\-/]\s*(\d{1,2}))|\s*月)?(?![\d级届版班组节讲章周次])',
+  );
+  static final RegExp _courseYearMonthCompactPattern = RegExp(
+    r'(?<![a-zA-Z\d])(20\d{2})(0[1-9]|1[0-2])(?:(0[1-9]|[12]\d|3[01]))?(?![\d])',
+  );
+
+  static AcademicTerm? tryParseCourseName(String? raw) {
+    final original = raw?.trim();
+    if (original == null || original.isEmpty) return null;
+    final text = original.replaceAll(_courseNameNoisePattern, ' ');
+
+    final matchedTerms = <AcademicTerm>{};
+    final spanRanges = <(int, int)>[];
+    final singleRanges = <(int, int)>[];
+
+    bool overlapsEarlier(int start, int end) =>
+        spanRanges.any((r) => start < r.$2 && end > r.$1) ||
+        singleRanges.any((r) => start < r.$2 && end > r.$1);
+
+    for (final match in _spanFolderLoosePattern.allMatches(text)) {
+      final parsed = _parseSpanMatch(match);
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      spanRanges.add((match.start, match.end));
+    }
+
+    for (final match in _singleYearFolderLoosePattern.allMatches(text)) {
+      if (overlapsEarlier(match.start, match.end)) continue;
+      final parsed = _parseSingleYearMatch(match);
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      singleRanges.add((match.start, match.end));
+    }
+
+    AcademicTerm? parseYearMonth(int? year, int? month, int? day) {
+      if (year == null ||
+          year < 2000 ||
+          year > 2100 ||
+          month == null ||
+          month < 1 ||
+          month > 12) {
+        return null;
+      }
+      if (day != null) {
+        final check = DateTime.utc(year, month, day);
+        if (check.year != year || check.month != month || check.day != day) {
+          return null;
+        }
+      }
+      return AcademicTerm.fromInstant(DateTime.utc(year, month, 15));
+    }
+
+    for (final match in _courseYearMonthSepPattern.allMatches(text)) {
+      if (overlapsEarlier(match.start, match.end)) continue;
+      final year = int.tryParse(match.group(1)!);
+      final month = int.tryParse(match.group(2)!);
+      final dayRaw = match.group(3) ?? match.group(4);
+      final day = dayRaw == null ? null : int.tryParse(dayRaw);
+      final parsed = parseYearMonth(year, month, day);
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      singleRanges.add((match.start, match.end));
+    }
+
+    for (final match in _courseYearMonthCompactPattern.allMatches(text)) {
+      if (overlapsEarlier(match.start, match.end)) continue;
+      final year = int.tryParse(match.group(1)!);
+      final month = int.tryParse(match.group(2)!);
+      final dayRaw = match.group(3);
+      final day = dayRaw == null ? null : int.tryParse(dayRaw);
+      final parsed = parseYearMonth(year, month, day);
+      if (parsed == null) return null;
+      matchedTerms.add(parsed);
+      singleRanges.add((match.start, match.end));
+    }
+
+    return matchedTerms.length == 1 ? matchedTerms.first : null;
+  }
 
   static AcademicTerm? tryParseFolderLabel(String? raw) {
     final text = raw?.trim();
@@ -195,6 +277,7 @@ class CourseTermEntry {
     required this.latestTrustedActivityUtc,
     required this.latestRecallEventUtc,
     required this.isFollowed,
+    this.isAutoPromo = false,
   });
 
   final String courseKey;
@@ -207,6 +290,16 @@ class CourseTermEntry {
   final DateTime? latestTrustedActivityUtc;
   final DateTime? latestRecallEventUtc;
   final bool isFollowed;
+  final bool isAutoPromo;
+
+  bool get isBlocked =>
+      override.blockMode == CourseBlockMode.blocked ||
+      (isAutoPromo && override.blockMode == CourseBlockMode.auto);
+
+  bool get isAutoBlockedPromo =>
+      isAutoPromo && override.blockMode == CourseBlockMode.auto;
+
+  bool get isManuallyBlocked => override.blockMode == CourseBlockMode.blocked;
 
   bool get isUngrouped =>
       source == CourseTermSource.ungrouped &&
@@ -245,6 +338,55 @@ class CourseTermCatalog {
   final LocalCourseworkState _coursework;
 
   static const Duration maxFutureRecallHorizon = Duration(days: 180);
+
+  static const List<String> _officialPromoKeywords = [
+    '官方举办',
+    '学习通官方',
+    '超星官方',
+    '超星尔雅官方',
+    '泛雅官方',
+    '官方活动',
+    '官方赛事',
+    '官方推荐',
+    '学习通活动',
+    '超星活动',
+    '超星集团',
+    '超星小助手',
+    '官方助手',
+    '活动主办方',
+    '超星杯',
+    '学习通杯',
+    '共读活动',
+    '打卡挑战赛',
+    '官方训练营',
+    '官方公开课',
+    '官方体验课',
+    '有奖征集',
+    '学习通使用指南',
+    '学习通新手引导',
+    '学习通新生引导',
+    '超星平台使用',
+    '超星平台操作',
+  ];
+
+  static bool isOfficialPromoCourse(
+    String? courseName, [
+    Iterable<String> teacherNames = const [],
+  ]) {
+    final fields = <String>[
+      if (courseName != null && courseName.trim().isNotEmpty)
+        courseName.trim().toLowerCase(),
+      for (final t in teacherNames)
+        if (t.trim().isNotEmpty) t.trim().toLowerCase(),
+    ];
+    if (fields.isEmpty) return false;
+    for (final text in fields) {
+      for (final keyword in _officialPromoKeywords) {
+        if (text.contains(keyword)) return true;
+      }
+    }
+    return false;
+  }
 
   /// Matches Chaoxing automated reminder broadcasts verified in Phase 3A.
   static bool isSystemReminderNotice(CourseNotice notice) =>
@@ -437,10 +579,16 @@ class CourseTermCatalog {
               !isSystemReminderNotice(n))
             n.publishedAt!.toUtc(),
       ]);
+      final resolvedCourseName = course?.name ??
+          courseRecords.firstOrNull?.courseName ??
+          courseNotices.firstOrNull?.courseName;
       final manualTerm = AcademicTerm.tryParseKey(override.manualTermKey);
       final folderTerm = AcademicTerm.tryParseFolderLabel(course?.folderName);
+      final courseNameTerm =
+          AcademicTerm.tryParseCourseName(resolvedCourseName);
       final baseTerm = manualTerm ??
           folderTerm ??
+          courseNameTerm ??
           (baseActivityUtc != null
               ? AcademicTerm.fromInstant(baseActivityUtc)
               : null);
@@ -491,8 +639,13 @@ class CourseTermCatalog {
       ];
       final latestActivityUtc = _maxUtc(trustedActivityTimes);
 
+      final resolvedCourseName = course?.name ??
+          courseRecords.firstOrNull?.courseName ??
+          courseNotices.firstOrNull?.courseName;
       final manualTerm = AcademicTerm.tryParseKey(override.manualTermKey);
       final folderTerm = AcademicTerm.tryParseFolderLabel(course?.folderName);
+      final courseNameTerm =
+          AcademicTerm.tryParseCourseName(resolvedCourseName);
 
       late final AcademicTerm? term;
       late final CourseTermSource source;
@@ -505,6 +658,10 @@ class CourseTermCatalog {
         term = folderTerm;
         source = CourseTermSource.folder;
         explanation = '目录「${course!.folderName!.trim()}」';
+      } else if (courseNameTerm != null) {
+        term = courseNameTerm;
+        source = CourseTermSource.courseName;
+        explanation = '按课程名识别（${courseNameTerm.label}）';
       } else if (latestActivityUtc != null) {
         term = AcademicTerm.fromInstant(latestActivityUtc);
         source = CourseTermSource.activity;
@@ -595,12 +752,13 @@ class CourseTermCatalog {
           }
       }
 
+      final isAutoPromo = isOfficialPromoCourse(
+        resolvedCourseName,
+        course?.teacherNames ?? const [],
+      );
       entries[key] = CourseTermEntry(
         courseKey: key,
-        courseName: course?.name ??
-            courseRecords.firstOrNull?.courseName ??
-            courseNotices.firstOrNull?.courseName ??
-            key,
+        courseName: resolvedCourseName ?? key,
         term: term,
         source: source,
         explanation: explanation,
@@ -609,6 +767,7 @@ class CourseTermCatalog {
         latestTrustedActivityUtc: latestActivityUtc,
         latestRecallEventUtc: latestRecallEventUtc,
         isFollowed: !unfollowedCourseKeys.contains(key),
+        isAutoPromo: isAutoPromo,
       );
     }
 
@@ -626,9 +785,24 @@ class CourseTermCatalog {
 
   Iterable<CourseTermEntry> get entries => _entriesByCourseKey.values;
 
+  bool isBlocked(String courseKey) =>
+      _entriesByCourseKey[courseKey]?.isBlocked ?? false;
+
+  List<CourseTermEntry> get autoBlockedPromoEntries => [
+        for (final entry in _entriesByCourseKey.values)
+          if (entry.isAutoBlockedPromo) entry,
+      ];
+
+  List<CourseTermEntry> get manuallyBlockedEntries => [
+        for (final entry in _entriesByCourseKey.values)
+          if (entry.isManuallyBlocked) entry,
+      ];
+
   bool isActiveOrRecalled(String courseKey) {
     final entry = _entriesByCourseKey[courseKey];
-    return entry == null || entry.state != CourseCatalogState.archived;
+    if (entry == null) return true;
+    if (entry.isBlocked) return false;
+    return entry.state != CourseCatalogState.archived;
   }
 
   bool isRecalled(String courseKey) =>
@@ -639,7 +813,8 @@ class CourseTermCatalog {
 
   List<String> get archivablePastCourseKeys => [
         for (final entry in _entriesByCourseKey.values)
-          if (entry.override.archiveMode == CourseArchiveMode.auto &&
+          if (!entry.isBlocked &&
+              entry.override.archiveMode == CourseArchiveMode.auto &&
               entry.state == CourseCatalogState.archived &&
               entry.term != null &&
               entry.term! < currentTerm)
@@ -655,12 +830,19 @@ class CourseTermCatalog {
     bool hasVisibleItems = false,
   }) {
     final entry = _entriesByCourseKey[courseKey];
+    if (entry != null && entry.isBlocked) return false;
     return switch (filterId) {
       'allTerms' => true,
       'pastTerms' => entry != null &&
           (entry.state == CourseCatalogState.archived ||
               (entry.term != null && entry.term! < currentTerm)),
-      'ungrouped' => entry != null && entry.isUngrouped && !hasVisibleItems,
+      'currentAcademicYear' => (hasVisibleItems &&
+              (entry == null || entry.state != CourseCatalogState.archived)) ||
+          (entry != null &&
+              (entry.state == CourseCatalogState.recalled ||
+                  (entry.term != null &&
+                      entry.term!.academicYearStart ==
+                          currentTerm.academicYearStart))),
       _ => (hasVisibleItems &&
               (entry == null || entry.state != CourseCatalogState.archived)) ||
           (entry != null && entry.hasCurrentTermEvidence),
@@ -669,6 +851,7 @@ class CourseTermCatalog {
 
   bool matchesCoursePickerScope(String courseKey, CourseTermScope scope) {
     final entry = _entriesByCourseKey[courseKey];
+    if (entry != null && entry.isBlocked) return false;
     if (entry == null) {
       return scope != CourseTermScope.pastTerms;
     }
@@ -677,8 +860,8 @@ class CourseTermCatalog {
       CourseTermScope.currentTerm => entry.hasCurrentTermEvidence,
       CourseTermScope.currentAcademicYear =>
         entry.state == CourseCatalogState.recalled ||
-            entry.term == null ||
-            entry.term!.academicYearStart == currentTerm.academicYearStart,
+            (entry.term != null &&
+                entry.term!.academicYearStart == currentTerm.academicYearStart),
       CourseTermScope.pastTerms => entry.state == CourseCatalogState.archived ||
           (entry.term != null && entry.term! < currentTerm),
     };
@@ -747,7 +930,8 @@ class CourseTermCatalog {
 
   bool matchesAssignmentInStatsScope(Assignment a, CourseTermScope scope) {
     final courseKey = a.courseKey;
-    if (courseKey != null && _unfollowedCourseKeys.contains(courseKey)) {
+    if (courseKey != null &&
+        (_unfollowedCourseKeys.contains(courseKey) || isBlocked(courseKey))) {
       return false;
     }
     if (courseKey == null) {
@@ -756,6 +940,9 @@ class CourseTermCatalog {
     final entry = _entriesByCourseKey[courseKey];
     if (entry == null) {
       return scope != CourseTermScope.pastTerms;
+    }
+    if (entry.isBlocked) {
+      return false;
     }
     switch (scope) {
       case CourseTermScope.allTerms:

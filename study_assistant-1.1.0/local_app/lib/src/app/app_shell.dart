@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -348,7 +349,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         backgroundColor: journal.ink,
         content: Text(
           '再滑一次退出课业手记',
-          style: journal.metadata.copyWith(color: journal.onPrimaryFill),
+          style: journal.metadata.copyWith(color: journal.onInvertedSurface),
         ),
       ),
     );
@@ -438,6 +439,22 @@ class StudyAssistantTheme {
       fontFamily: Journal.bodyFamily,
       fontFamilyFallback: Journal.bodyFallback,
       dividerColor: journal.divider,
+      splashFactory: NoSplash.splashFactory,
+      splashColor: Colors.transparent,
+      highlightColor:
+          journal.ink.withValues(alpha: journal.isDark ? 0.08 : 0.055),
+      hoverColor: journal.ink.withValues(alpha: journal.isDark ? 0.05 : 0.035),
+      focusColor:
+          journal.accent.withValues(alpha: journal.isDark ? 0.14 : 0.10),
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
+          TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+        },
+      ),
       textTheme: baseText,
       primaryTextTheme: baseText,
       appBarTheme: AppBarTheme(
@@ -547,7 +564,7 @@ class StudyAssistantTheme {
         behavior: SnackBarBehavior.floating,
         backgroundColor: journal.ink,
         contentTextStyle: journal.metadata.copyWith(
-          color: journal.onPrimaryFill,
+          color: journal.onInvertedSurface,
         ),
         actionTextColor: journal.snackActionColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),

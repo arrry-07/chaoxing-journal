@@ -81,9 +81,23 @@ class VersionSelectionTests(unittest.TestCase):
         stable = artifact("1.7.4", 56)
         candidate = artifact("1.8.0", 60)
 
-        selected = sync.choose_stable_release(stable, candidate)
+        self.assertEqual(
+            sync.choose_stable_release(stable, candidate),
+            stable,
+        )
+        self.assertEqual(
+            sync.choose_stable_release(stable, candidate, promote_stable=True),
+            candidate,
+        )
 
-        self.assertEqual(selected, candidate)
+    def test_promote_stable_accepts_same_minor_hotfix(self) -> None:
+        stable = artifact("1.90.0", 130)
+        hotfix = artifact("1.90.1", 131)
+
+        self.assertEqual(
+            sync.choose_stable_release(stable, hotfix, promote_stable=True),
+            hotfix,
+        )
 
     def test_highest_public_release_wins_even_when_latest_flag_is_elsewhere(
         self,

@@ -386,6 +386,33 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
     return candidate;
   }
 
+  CustomTransitionPage<void> _buildPrimaryTabPage(
+    BuildContext context,
+    GoRouterState state,
+    Widget child,
+  ) {
+    final reduced = JournalMotion.isReducedMotion(context);
+    return CustomTransitionPage<void>(
+      key: state.pageKey,
+      transitionDuration: JournalMotion.duration(
+        context,
+        const Duration(milliseconds: 180),
+      ),
+      reverseTransitionDuration: JournalMotion.duration(
+        context,
+        const Duration(milliseconds: 140),
+      ),
+      child: child,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        if (reduced) return child;
+        return FadeTransition(
+          opacity: animation.drive(CurveTween(curve: JournalMotion.easeOut)),
+          child: child,
+        );
+      },
+    );
+  }
+
   GoRouter _buildRouter() {
     final platformUri = Uri.tryParse(
         WidgetsBinding.instance.platformDispatcher.defaultRouteName);
@@ -466,7 +493,11 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                 builder: (_, __) => BackupScreen(store: assignmentStore)),
             GoRoute(
               path: '/assignments',
-              builder: (_, __) => AssignmentListScreen(store: assignmentStore),
+              pageBuilder: (context, state) => _buildPrimaryTabPage(
+                context,
+                state,
+                AssignmentListScreen(store: assignmentStore),
+              ),
             ),
             GoRoute(
               path: '/assignments/new',
@@ -507,7 +538,11 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
               path: '/calendar',
               onExit: (_, __) =>
                   _leaveGuard.confirmLeave(routeScope: '/calendar'),
-              builder: (_, __) => CalendarScreen(store: assignmentStore),
+              pageBuilder: (context, state) => _buildPrimaryTabPage(
+                context,
+                state,
+                CalendarScreen(store: assignmentStore),
+              ),
             ),
             GoRoute(
               path: '/calendar/new',
@@ -522,7 +557,11 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
             ),
             GoRoute(
               path: '/stats',
-              builder: (_, __) => StatsScreen(store: assignmentStore),
+              pageBuilder: (context, state) => _buildPrimaryTabPage(
+                context,
+                state,
+                StatsScreen(store: assignmentStore),
+              ),
             ),
             GoRoute(
               path: '/sync',
@@ -553,7 +592,11 @@ class _StudyAssistantAppState extends State<StudyAssistantApp>
                 builder: (_, __) => CourseListScreen(store: assignmentStore)),
             GoRoute(
               path: '/profile',
-              builder: (_, __) => ProfileScreen(store: assignmentStore),
+              pageBuilder: (context, state) => _buildPrimaryTabPage(
+                context,
+                state,
+                ProfileScreen(store: assignmentStore),
+              ),
             ),
             GoRoute(
               path: '/profile/arrangements',

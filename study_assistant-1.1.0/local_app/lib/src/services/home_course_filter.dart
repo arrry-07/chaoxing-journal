@@ -1,6 +1,7 @@
 import '../models/assignment.dart';
 import '../models/course.dart';
 import '../models/study_notebook.dart';
+import 'assignment_query.dart';
 import 'course_term_catalog.dart';
 
 /// A course filter entry resolved from the account's full course catalog.
@@ -183,8 +184,10 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
     );
   }
   options.sort((a, b) {
-    final byName = _normalized(a.name).compareTo(_normalized(b.name));
+    final byName = compareNaturalPinyin(a.name, b.name);
     if (byName != 0) return byName;
+    final byTeacher = compareNaturalPinyin(a.teacherLabel, b.teacherLabel);
+    if (byTeacher != 0) return byTeacher;
     final byClass = a.clazzId.compareTo(b.clazzId);
     if (byClass != 0) return byClass;
     final byCourse = a.courseId.compareTo(b.courseId);
@@ -235,9 +238,15 @@ List<HomeCourseFilterOption> sortHomeCourseOptionsByCount(
       (index: index, option: options[index]),
   ];
   indexed.sort((left, right) {
-    final byCount = (counts[right.option.courseKey] ?? 0)
-        .compareTo(counts[left.option.courseKey] ?? 0);
+    final leftCount = counts[left.option.courseKey] ?? 0;
+    final rightCount = counts[right.option.courseKey] ?? 0;
+    final byCount = rightCount.compareTo(leftCount);
     if (byCount != 0) return byCount;
+    if (leftCount == 0) {
+      final byGrouped = (left.option.ungrouped ? 1 : 0)
+          .compareTo(right.option.ungrouped ? 1 : 0);
+      if (byGrouped != 0) return byGrouped;
+    }
     return left.index.compareTo(right.index);
   });
   return List.unmodifiable([for (final item in indexed) item.option]);

@@ -99,7 +99,7 @@ void main() {
     );
     expect(
       calls.single.arguments,
-      {'channelId': 'assignment_deadlines'},
+      {'channelId': 'assignment_deadlines_v2'},
     );
   });
 

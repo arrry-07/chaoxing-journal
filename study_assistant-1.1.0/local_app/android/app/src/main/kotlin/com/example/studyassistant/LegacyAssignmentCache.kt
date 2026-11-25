@@ -69,6 +69,7 @@ internal class LegacyAssignmentCache private constructor(
                 DeadlineChannelPolicy.CHANNEL_DEADLINES,
                 DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
                 DeadlineChannelPolicy.CHANNEL_UPDATES,
+                DeadlineChannelPolicy.CHANNEL_UPDATES_V2,
             ) &&
                 (!item.has("tag") || item.isNull("tag"))
     }

@@ -735,6 +735,8 @@ void main() {
         150,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.ensureVisible(termBtn);
+      await tester.pumpAndSettle();
       await tester.tap(termBtn);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('term-option-2026-fall')));
@@ -921,14 +923,23 @@ void main() {
           catalog.matchesHomeCoursePicker(silentUngrouped.key, 'currentTerm',
               hasVisibleItems: true),
           isTrue);
-      expect(catalog.matchesHomeCoursePicker(silentUngrouped.key, 'ungrouped'),
+      expect(
+          catalog.matchesHomeCoursePicker(
+              silentUngrouped.key, 'currentAcademicYear'),
+          isFalse);
+      expect(
+          catalog.matchesHomeCoursePicker(
+              silentUngrouped.key, 'currentAcademicYear',
+              hasVisibleItems: true),
           isTrue);
       expect(catalog.matchesHomeCoursePicker(silentUngrouped.key, 'allTerms'),
           isTrue);
       expect(catalog.matchesHomeCoursePicker(activeCourse.key, 'currentTerm'),
           isTrue);
-      expect(catalog.matchesHomeCoursePicker(activeCourse.key, 'ungrouped'),
-          isFalse);
+      expect(
+          catalog.matchesHomeCoursePicker(
+              activeCourse.key, 'currentAcademicYear'),
+          isTrue);
     });
 
     test(

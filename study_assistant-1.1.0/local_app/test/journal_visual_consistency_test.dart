@@ -197,28 +197,28 @@ void main() {
         Color.lerp(light.todoGreen, dark.todoGreen, 0.5),
       );
 
-      expect(contrastRatio(light.overdueAmber, light.overdueAmberBg),
+      expect(contrastRatio(light.overdueSky, light.overdueSkyBg),
           greaterThanOrEqualTo(4.5));
       expect(contrastRatio(light.overdueInk, light.sheet),
           greaterThanOrEqualTo(4.5));
-      expect(contrastRatio(dark.overdueAmber, dark.overdueAmberBg),
+      expect(contrastRatio(dark.overdueSky, dark.overdueSkyBg),
           greaterThanOrEqualTo(4.5));
       expect(contrastRatio(dark.overdueInk, dark.sheet),
           greaterThanOrEqualTo(4.5));
 
-      final amberCopied = light.copyWith(
-        overdueAmber: const Color(0xFF996600),
-        overdueAmberBg: const Color(0xFFFAF0D0),
-        overdueInk: const Color(0xFF4F4A42),
+      final skyCopied = light.copyWith(
+        overdueSky: const Color(0xFF0284C7),
+        overdueSkyBg: const Color(0xFFE0F2FE),
+        overdueInk: const Color(0xFF475569),
       );
-      expect(amberCopied.overdueAmber, const Color(0xFF996600));
-      expect(amberCopied.overdueAmberBg, const Color(0xFFFAF0D0));
-      expect(amberCopied.overdueInk, const Color(0xFF4F4A42));
-      expect(amberCopied, isNot(equals(light)));
-      expect(mid.overdueAmber,
-          Color.lerp(light.overdueAmber, dark.overdueAmber, 0.5));
-      expect(mid.overdueAmberBg,
-          Color.lerp(light.overdueAmberBg, dark.overdueAmberBg, 0.5));
+      expect(skyCopied.overdueSky, const Color(0xFF0284C7));
+      expect(skyCopied.overdueSkyBg, const Color(0xFFE0F2FE));
+      expect(skyCopied.overdueInk, const Color(0xFF475569));
+      expect(skyCopied, isNot(equals(light)));
+      expect(
+          mid.overdueSky, Color.lerp(light.overdueSky, dark.overdueSky, 0.5));
+      expect(mid.overdueSkyBg,
+          Color.lerp(light.overdueSkyBg, dark.overdueSkyBg, 0.5));
       expect(
           mid.overdueInk, Color.lerp(light.overdueInk, dark.overdueInk, 0.5));
     });
