@@ -17,6 +17,7 @@
   - 全面根治通知无声问题：作业截止、新增作业、每日摘要与个人日程统一升级为内置手记轻脆提示音的高优有声 `v2` 渠道（`assignment_deadlines_v2` / `assignment_updates_v2` / `daily_summary_v2` / `personal_schedule_v2`），取消未知截止新作业强制静默，原生提醒数据库升至 `v9` 自动迁移老用户默认渠道并补齐国产 ROM 响铃兼容标志。
   - 冷启动更新检查收敛为只读 `update-stable.json`（Gitee 失败时仅回退 GitHub `releases/latest`），手动检查保持双源发现最新正式版；本版作为重大体验更新，发布时同步推进 `update-manual.json` 与 `update-stable.json`。
   - **重要迁移说明**：首次升级安装本版本时，原生提醒数据库自动升至 `v9` 并将作业截止、新增作业与每日摘要通知自动迁移至内置提示音的高优有声 `v2` 渠道；若此前曾在系统设置中自定义过旧通知渠道的铃声或免打扰规则，可在系统通知设置中按需微调。
+- PR [#65](https://github.com/arrry-07/chaoxing-journal/pull/65) 合入 `ea64137`，已发布 [v1.90.0](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.90.0)。[验收与发布记录](docs/reviews/2026-11-25-v1.90.0-体验重构配色转场与提醒正式发布验收记录.md)
 
 ## 1.8.31（124）
 
@@ -37,7 +38,7 @@
 - **课程学期归档、精选同步与单课聚合**：完成 `FB-008` 完整能力——课程教师/目录元数据透传与 `schema 9` 加密备份、统一学期归属/批量归档/往期召回；同步默认当前学期优先并保留 24 小时有界往期巡检与全量扫描入口；系统提醒默认折叠且红点隔离；详情页课名可直达单课切片。
 - **Android 冲刺提醒与提醒体检**：截止提醒默认在 `[23:30, 07:30)` 夜间静音顺延，可选 `≤1h` 紧急穿透；原生 `SQLite v8` 在投递前二次校验；提供温和 / 推荐冲刺 / 极致死线三档频率预设并迁移保留既有自定义；新增版本化有声渠道 `assignment_deadlines_v2` 与静默新作业渠道 `assignment_silent`，补齐体检详情与无隐私 3 秒测试触发。
 - **日历、考前条、复制与桌面小组件**：首页增加 14 天近期考试细条；日历对 `>=3` 项扎堆日使用暖朱砂淡底并提供「+ 记一条」；首页「更多」浮层支持脱敏复制近 7 天待办；桌面小组件对齐宣纸浅色 / 深夜暖灰 / 朱砂语义色，采用 `tnum` 排版、手动截止前缀，并随系统深浅色与字号变化即时重排。
-- PR [#63](https://github.com/arrry-07/chaoxing-journal/pull/63) 合入 `7021e47`，已发布 [v1.8.26](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.26)。[验收与发布记录](docs/reviews/2026-11-23-v1.8.26-五阶段体验升级学期归档与提醒重构验收与发布记录.md)
+- PR [#63](https://github.com/arrry-07/chaoxing-journal/pull/63) 合入 `7021e47`，已发布 [v1.8.26](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.26)。[验收与发布记录](docs/archive/reviews/2026-11-23-v1.8.26-五阶段体验升级学期归档与提醒重构验收与发布记录.md)
 
 ## 1.8.25（114） — 统计与快捷隐藏修复、并发安全纵深与原生提醒性能升级（正式发布，2026-11-23）
 
