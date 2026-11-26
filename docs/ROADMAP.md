@@ -2,8 +2,9 @@
 
 ## 2026-11-26 当前状态校准
 
-正式基线为 **1.91.0+131**（PR `#66` 合入 `5ab698b`，`v1.91.0` 指向 `5ab698b`，Release `459234902`，Gitee `manual` & `stable` 双通道已同步至 `1.91.0+131`，未传 APK 镜像）；上一版 **1.90.0+127**（PR `#65` 合入 `ea64137`，`v1.90.0` 指向 `ea64137`，Release `458482127`）。版本状态与最近两版验收入口见 [PROJECT_STATE.md](ai-workflow/PROJECT_STATE.md)，已交付行为见 [CHANGELOG.md](../CHANGELOG.md)。
+正式基线为 **1.92.0+132**（PR `#67`–`#69` 最终合入 `55e5d6e`，`v1.92.0` 指向 `55e5d6e`，Release `459719737`，Gitee `manual` & `stable` 双通道已同步至 `1.92.0+132`，未传 APK 镜像）；上一版 **1.91.0+131**（PR `#66` 合入 `5ab698b`，`v1.91.0` 指向 `5ab698b`，Release `459234902`）。版本状态与最近两版验收入口见 [PROJECT_STATE.md](ai-workflow/PROJECT_STATE.md)，已交付行为见 [CHANGELOG.md](../CHANGELOG.md)。
 
+- **1.92.0 已交付**（含 `v1.91.1`）：应用级单一真源 `ClawdCompanionController` 与三档显示设置（「全部主页面 / 仅首页 / 关闭」）、等高 `38dp` 物理像素对齐 `ClawdTitleStage`（标题右侧安全区 6 套有限巡逻、摸头眯眼爱心 600ms 驻留、拎起乱蹬弹簧落回安全区，0 遮挡标题与右侧 4 按钮）、去蓝星纯粹状态行与避让 `home-sync-status` 的暖纸反差萌气泡、四主栏紧邻标题轻客串（含 `NoTransitionPage` 切页即响应与二级页暂停主动冒泡）、零外部体积 8 项原生 `48 kHz` 8-bit 芯片音效、提醒试听 `prepareAsync()` 异步化与系统勿扰（DND）拦截反馈、`CourseStudyHubScreen` 折叠统一至 `JournalExpansionTile` 与 `AssignmentStore` 剩余 6 处会话守卫收口。MuMu（API 35）保数据浅/深双主题 6/6 项实机验收通过。
 - **1.91.0 已交付**（汇总 `v1.90.1`–`v1.90.4`）：首页悬浮顶栏浅/深双主题渐变毛玻璃与 5 色标渐隐羽化裙边、`14×12` 点阵 Clawd 像素伙伴（6 套空闲动作、3 档连击、完成/置顶欢呼、同步小跑与一键开关）、主页光学纸感层次与全站阻尼弹簧微交互；课程活动投票与同批 `clazzId` 队列学期精准归类；4 渠道内置提示音高优有声 `v3` 通知（`SQLite v10` 安全迁移）、通知音量归零告警与紧凑密度触控热区修复。MuMu（API 35）保数据浅/深双主题 7/7 项实机验收通过。
 - **1.90.0 已交付**（汇总 `v1.8.32`–`v1.8.34`）：全站手记钴蓝主色与晴空天蓝逾期语义统一（取消未完成逾期标题与时钟灰化、浅色 `muted` 加深至 `#363C44`、全仓非危险红清扫）；一级 4 主栏零重影瞬切、二级页面 100% 不透明实底视差横滑（完整保留 Android 14+ 预测性手势返回与嵌套路由防抢占）、统计页 4 等分钴蓝滑块顶栏与 6 文件 13 处 `JournalExpansionTile` 平滑折叠；作业/待办悬浮毛玻璃顶栏；超星 `backclazzdata` 课程元数据补提（文件夹名/`clazzName`/起止时间）、宽松学期识别、首页课程筛选定高 4 档去噪、「我的课程」多选批量归类与官方活动课自动屏蔽；待办双区滑动与「我的」页 3 合 1 精简；全套 4 渠道内置提示音高优有声 `v2` 通知（`SQLite v9` 自动迁移）及冷启动仅读 `update-stable.json` 收敛。MuMu（API 35）保数据升级全项通过。
 - **1.8.31 已交付**（汇总 `v1.8.27`–`v1.8.31`）：首页手动课业混排与置顶持久化、`androidTest` API `26/30/31/32/33/34/35` 矩阵补齐；`v1.8.30`（`M1–M7`：待办/完整课程筛选、实色对比度提升与非危险红收敛、文楷与中文本地化、日历三色事件点与图例、待办详情页、`personal_schedule_v2` 与静音诊断）；`v1.8.31` 待办附件（向后兼容存储升级与 `updatedAt`、拍照/9 图相册/20 MB 文件复制至私有目录、全屏缩放与系统打开、全生命周期清理与备份说明）。双端在 MuMu（API 35）与华为 `CDY-AN00`（API 29）实测通过。
@@ -14,15 +15,16 @@
 
 <a id="dev-下一阶段"></a>
 
-### dev 下一阶段规划（2026-11-26）
+### dev 下一阶段规划（2026-11-27）
 
-`v1.8.32`（[归档方案](archive/plans/2026-11-25-v1.8.32-本学期筛选卡片视觉与待办交互优化方案.md)）、`v1.8.33`（[归档方案](archive/plans/2026-11-25-v1.8.33-课程过滤更新收敛通知有声与交互精修方案.md)）与 `v1.8.34`（[归档方案](archive/plans/2026-11-25-v1.8.34-配色统一无重叠转场悬浮详情顶栏与体验精修方案.md)）均已随 `1.90.0+127` 正式交付并归档。
+`v1.91.1`（[归档方案](archive/plans/2026-11-26-v1.91.1-Clawd2.0文字舞台8bit音效与轻量收口方案.md)）已随 `1.92.0+132` 正式交付并归档；`v1.90.1`–`v1.90.4` 与 `v1.8.32`–`v1.8.34` 亦已归档。
 
 后续独立阶段候选方向（按价值排序，开工前复核真源）：
 
-1. **`AssignmentStore` 领域拆缝**：在立项云同步前按领域拆分 `AssignmentStore` 接缝，并顺带修正 3 处旧文案口径（`freeze_release.py`、`更新渠道与国内分发.md`、`安装与使用.md`）。
-2. **独立大版本云端后端（Supabase 反馈直发 `FB-017` + 跨设备端到端加密云同步 `FB-015`）**：采用免费 Supabase（500MB 库 + 1GB 存储 + 网页后台）配 GitHub Actions 每日保活、按需前置 Cloudflare Worker 域名反代，统一承接 App 内直发反馈与多端加密同步；`FB-015` 以 Supabase 端到端加密为主方案、WebDAV 保留为无服务端备选（前置 `PersonalWorkspace` 迁移与 `ManualEntry.updatedAt` 已于 `1.8.31` 落地，详见[长期功能分期](#long-term-phases)）。
-3. **真实样本与物理 OEM 通知复核**：在实体真机复测 `v2` 有声渠道（`@raw/journal_chime` + `SQLite v9`）锁屏/Doze/国产后台限流表现，补充自然 `9010`、`backclazzdata` 新字段存在率与官方活动课精度、缺年改期/`completeTime` 真实样本；界面定型后按维护者确认评估 Wave B-2 浅/深 Golden 与 Wave C-2 官网截图产线。
+1. **P0 小步快修 · `CalendarScreen` 气泡滚动锚点对齐**：为 `calendar_screen.dart` 补齐零滚动归一化锚点与 `ScrollUpdateNotification` 滚动收起，与 `StatsScreen` / `ProfileScreen` 保持完全一致。
+2. **P1 · `AssignmentStore` 与 `AssignmentListScreen` 领域拆缝重构**：在立项云同步前按领域拆分 `AssignmentStore`（6,292 行）与 `AssignmentListScreen`（3,465 行）清晰接缝，并顺带修正 3 处旧文案口径（`freeze_release.py`、`更新渠道与国内分发.md`、`安装与使用.md`），借助日常 `dev → main` 集成 PR 节奏分批过云端 CI。
+3. **P1 · 独立大版本云端后端（Supabase 反馈直发 `FB-017` + 跨设备端到端加密云同步 `FB-015`）**：采用免费 Supabase（500MB 库 + 1GB 存储 + 网页后台）配 GitHub Actions 每日保活、按需前置 Cloudflare Worker 域名反代，统一承接 App 内直发反馈与多端加密同步；`FB-015` 以 Supabase 端到端加密为主方案、WebDAV 保留为无服务端备选（前置 `PersonalWorkspace` 迁移与 `ManualEntry.updatedAt` 已于 `1.8.31` 落地，详见[长期功能分期](#long-term-phases)）。
+4. **P2 · 真实样本与物理 OEM 通知/音画复核**：在实体真机复测 `v3` 有声渠道（`@raw/journal_chime` + `SQLite v10`）锁屏/Doze/120Hz 高刷/8-bit 外放/国产后台限流表现，补充自然 `9010`、`backclazzdata` 新字段存在率与官方活动课精度、缺年改期/`completeTime` 真实样本；界面定型后按维护者确认评估 Wave B-2 浅/深 Golden 与 Wave C-2 官网截图产线。
 
 ## 1.8.26+ 治理基线与产品排期
 

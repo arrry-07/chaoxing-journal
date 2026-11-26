@@ -6,6 +6,12 @@
 
 ---
 
+## 2026-11-27 · 1.92.0 发布后滚动归档
+
+- **滑出当前窗口的正式版本：1.90.0+127（2026-11-26）**：
+  - [PR #65](https://github.com/arrry-07/chaoxing-journal/pull/65) 合入 `ea64137`，annotated Tag `v1.90.0` 指向 `ea64137`，GitHub Release `458482127` 已公开（Gitee `manual` & `stable` 曾双同步至 `1.90.0+127`）。原签名包 `1.90.0+127` 交付全站手记钴蓝主色与晴空天蓝逾期语义统一、取消逾期标题灰化与浅色辅助墨色加深、一级零重影瞬切与二级不透明视差横滑、作业/待办毛玻璃悬浮顶栏与 `JournalExpansionTile`、课程「未分组」源头补提/去噪/批量归类与官方活动课自动屏蔽、待办双区滑动与「我的」3 合 1 精简、全套 4 渠道内置提示音有声 `v2` 通知（`SQLite v9`）及冷启动仅读稳定通道收敛。详见[归档验收记录](reviews/2026-11-25-v1.90.0-体验重构配色转场与提醒正式发布验收记录.md)。
+- **v1.91.1 迭代与 1.92.0+132 正式收口**：完成应用级单一真源 `ClawdCompanionController` 与三档显示、等高 `38dp` 物理像素对齐 `ClawdTitleStage`（右侧安全区 6 套有限巡逻/摸头爱心 600ms 驻留/拎起弹簧落回、0 遮挡标题与 4 按钮）、去蓝星纯粹状态行与避让 `home-sync-status` 的暖纸反差萌气泡、四主栏紧邻标题轻客串（含 `NoTransitionPage` 切页即响应与二级页暂停冒泡）、零体积 8 项原生 `48 kHz` 8-bit 芯片音效、试听异步化与勿扰检测、`JournalExpansionTile` 全仓统一及 `AssignmentStore` 6 处会话守卫收口，最终由 [PR #67](https://github.com/arrry-07/chaoxing-journal/pull/67) / [PR #68](https://github.com/arrry-07/chaoxing-journal/pull/68) / [PR #69](https://github.com/arrry-07/chaoxing-journal/pull/69)（`55e5d6e`）/ `v1.92.0`（`1.92.0+132`，Release `459719737`，Gitee `manual` & `stable` 双同步）正式交付。归档方案：[v1.91.1 方案](plans/2026-11-26-v1.91.1-Clawd2.0文字舞台8bit音效与轻量收口方案.md)。
+
 ## 2026-11-26 · 1.91.0 发布后滚动归档
 
 - **滑出当前窗口的正式版本：1.8.31+124（2026-11-25）**：

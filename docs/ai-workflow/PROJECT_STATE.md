@@ -2,18 +2,18 @@
 
 <a id="dev-当前迭代进度"></a>
 
-## 当前迭代进度（正式版 1.91.0+131；dev 与 main 已同步收口）
+## 当前迭代进度（正式版 1.92.0+132；dev 与 main 已同步收口）
 
-- **1.91.0+131 正式基线（当前最新）**：PR `#66` 合入 `5ab698b`，annotated Tag `v1.91.0`（`662616aa` → `5ab698b`），GitHub Release `459234902`（`latest`，`64,280,402` B，SHA-256 `a9a1fdf1...`），Gitee `update-manual.json` 与 `update-stable.json` 双索引均已推进至 `1.91.0+131`（未传 APK 镜像）；已完成 MuMu「学习通」保数据浅/深双主题 7/7 项实机验收（0 崩溃/0 溢出，4 条 `v3` 有声渠道就绪），详见[验收与发布记录](../reviews/2026-11-26-v1.91.0-悬浮顶栏羽化Clawd像素伙伴光学质感与有声v3正式发布验收记录.md)。
-- **dev 当前状态**：与 `main` 同步收口（无在途未归档方案，下一轮 `dev` 自测包自 `1.91.1+132` 起步），详见[dev 本地状态](DEV_STATE.md)。
+- **1.92.0+132 正式基线（当前最新）**：PR `#67` / `#68` / `#69` 最终合入 `55e5d6e`，annotated Tag `v1.92.0`（`5b7bf90e` → `55e5d6e`），GitHub Release `459719737`（`latest`，`64,607,886` B，SHA-256 `f5fffb04...`），Gitee `update-manual.json` 与 `update-stable.json` 双索引均已推进至 `1.92.0+132`（未传 APK 镜像）；已完成 MuMu「学习通」保数据浅/深双主题 6/6 项实机验收（0 崩溃/0 溢出，4 条 `v3` 有声渠道就绪），详见[验收与发布记录](../reviews/2026-11-26-v1.92.0-Clawd2.0文字舞台8bit音效与轻量收口正式发布验收记录.md)。
+- **dev 当前状态**：与 `main` 同步收口（无在途未归档方案，下一轮 `dev` 自测包自 `1.92.1+133` 起步），详见[dev 本地状态](DEV_STATE.md)。
 
 ## 最近 2 个正式发布版本
 
-- **1.91.0+131（当前正式版，2026-11-26）**。PR `#66` 合入 `5ab698b`，`v1.91.0` 指向 `5ab698b`（汇总交付 `v1.90.1`–`v1.90.4`）：首页悬浮顶栏（`JournalSliverHeader`）浅/深双主题渐变毛玻璃与 `18dp` 5 色标渐隐羽化裙边、顶栏 `14×12` 物理像素对齐 Clawd 像素伙伴（6 套有限空闲动作、3 档连击、完成/置顶欢呼、同步 4 腿小跑与一键开关）、主页光学纸感层次与全站阻尼弹簧微交互、课程活动投票与同批 `clazzId` 队列学期精准归类、全套 4 渠道有声 `v3` 通知（`SQLite v10` 安全迁移与通知音量归零告警）及紧凑密度触控修复。Gitee `manual` 与 `stable` 均推进至 `1.91.0+131`。[验收与发布记录](../reviews/2026-11-26-v1.91.0-悬浮顶栏羽化Clawd像素伙伴光学质感与有声v3正式发布验收记录.md) · [GitHub Release](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.91.0)
-- **1.90.0+127（上一正式版，2026-11-26）**。PR `#65` 合入 `ea64137`，`v1.90.0` 指向 `ea64137`（汇总交付 `v1.8.32`–`v1.8.34`）：全站手记钴蓝主色与晴空天蓝逾期语义统一、取消逾期标题灰化与浅色辅助墨色加深、一级零重影瞬切与二级不透明视差横滑（保留 Android 14+ 预测性手势返回）、作业/待办毛玻璃悬浮顶栏与统一 `JournalExpansionTile`、课程「未分组」源头补提/去噪/批量归类与官方活动课自动屏蔽、待办双区滑动与「我的」3 合 1 精简、全套 4 渠道内置提示音有声 `v2` 通知（`SQLite v9`）及冷启动仅读稳定通道收敛。Gitee `manual` 与 `stable` 均推进至 `1.90.0+127`。[验收与发布记录](../reviews/2026-11-25-v1.90.0-体验重构配色转场与提醒正式发布验收记录.md) · [GitHub Release](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.90.0)
+- **1.92.0+132（当前正式版，2026-11-26）**。PR `#67`–`#69` 最终合入 `55e5d6e`，`v1.92.0` 指向 `55e5d6e`：应用级单一真源 `ClawdCompanionController` 与三档显示设置、等高 `38dp` 物理像素对齐 `ClawdTitleStage`（右侧安全区 6 套有限巡逻/摸头爱心短驻留/拎起弹簧落回、0 遮挡标题与 4 按钮）、去蓝星纯粹状态行与避让 `home-sync-status` 的暖纸反差萌气泡、四主栏紧邻标题轻客串（含 `NoTransitionPage` 切页即响应与二级页暂停冒泡）、零体积 8 项原生 `48 kHz` 8-bit 芯片音效、试听异步化与勿扰检测、`JournalExpansionTile` 全仓统一及 `AssignmentStore` 6 处会话守卫收口。Gitee `manual` 与 `stable` 均推进至 `1.92.0+132`。[验收与发布记录](../reviews/2026-11-26-v1.92.0-Clawd2.0文字舞台8bit音效与轻量收口正式发布验收记录.md) · [GitHub Release](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.92.0)
+- **1.91.0+131（上一正式版，2026-11-26）**。PR `#66` 合入 `5ab698b`，`v1.91.0` 指向 `5ab698b`（汇总交付 `v1.90.1`–`v1.90.4`）：首页悬浮顶栏浅/深双主题渐变毛玻璃与 `18dp` 5 色标渐隐羽化裙边、顶栏 `14×12` 物理像素对齐 Clawd 像素伙伴、主页光学纸感层次与全站阻尼弹簧微交互、课程活动投票与同批 `clazzId` 队列学期精准归类、全套 4 渠道有声 `v3` 通知（`SQLite v10` 安全迁移与通知音量归零告警）及紧凑密度触控修复。Gitee `manual` 与 `stable` 均推进至 `1.91.0+131`。[验收与发布记录](../reviews/2026-11-26-v1.91.0-悬浮顶栏羽化Clawd像素伙伴光学质感与有声v3正式发布验收记录.md) · [GitHub Release](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.91.0)
 
 ## 待补证与按需入口
 
-- 隔离 API 26/30/31/32/33/34/35 已覆盖 4 批 22 类 `androidTest` 0 失败；物理 OEM 真机复测 `v3` 有声渠道锁屏外放/通知音量归零/Doze/120Hz 高刷/移除动画联动、多校 `backclazzdata` 与 `clazzId` 分布、官方活动课精度、自然 `9010` 及真实改期/`completeTime` 样本仍待按样本补证。
-- `AssignmentStore` / `AssignmentListScreen` 拆缝重构、`FB-002`、30 天发布时间核实及云端同步/反馈（`FB-015` / `FB-017`）规划见[反馈台账](../待处理体验反馈.md) 与 [路线图](../ROADMAP.md)。
+- 隔离 API 26/30/31/32/33/34/35 已覆盖 4 批 22 类 `androidTest` 0 失败；物理 OEM 真机复测 `v3` 有声渠道锁屏外放/通知音量归零/Doze/120Hz 高刷/8-bit 外放与移除动画联动、多校 `backclazzdata` 与 `clazzId` 分布、官方活动课精度、自然 `9010` 及真实改期/`completeTime` 样本仍待按样本补证。
+- `CalendarScreen` 气泡滚动锚点对齐、`AssignmentStore` / `AssignmentListScreen` 拆缝重构、`FB-002`、30 天发布时间核实及云端同步/反馈（`FB-015` / `FB-017`）规划见[反馈台账](../待处理体验反馈.md) 与 [路线图](../ROADMAP.md)。
 - [仓库规则](../../AGENTS.md) · [文档路由](../README.md) · [验证范围](VALIDATION.md) · [历史工程状态](../archive/PROJECT_STATE_HISTORY.md)（仅按用户点名的版本追溯）
