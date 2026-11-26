@@ -365,24 +365,14 @@ class ClawdCompanionController extends ChangeNotifier {
     if (shouldClearInteractive) {
       if (_clearComboInternal()) changed = true;
       if (_clearBubbleInternal()) changed = true;
-      if (_transientPose != ClawdTransientPose.none) {
-        _poseResetTimer?.cancel();
-        _poseResetTimer = null;
-        _transientPose = ClawdTransientPose.none;
-        changed = true;
-      }
+      if (clearTransientPose(notify: false)) changed = true;
       _proactiveDelayTimer?.cancel();
       _proactiveDelayTimer = null;
     } else if (_reducedMotion) {
       if (_clearComboInternal()) changed = true;
       _proactiveDelayTimer?.cancel();
       _proactiveDelayTimer = null;
-      if (_transientPose != ClawdTransientPose.none) {
-        _poseResetTimer?.cancel();
-        _poseResetTimer = null;
-        _transientPose = ClawdTransientPose.none;
-        changed = true;
-      }
+      if (clearTransientPose(notify: false)) changed = true;
     }
 
     _reconcileSyncTimer();
@@ -546,10 +536,16 @@ class ClawdCompanionController extends ChangeNotifier {
 
   void endPet() {
     if (_disposed) return;
-    if (_transientPose == ClawdTransientPose.petting) {
-      _transientPose = ClawdTransientPose.none;
-      notifyListeners();
+    if (_transientPose != ClawdTransientPose.petting) return;
+    if (_reducedMotion || !_canInteract) {
+      clearTransientPose(notify: true);
+      return;
     }
+    _setTransientPose(
+      ClawdTransientPose.petting,
+      const Duration(milliseconds: 600),
+    );
+    notifyListeners();
   }
 
   void startGrab({ClawdPageContextSnapshot? snapshot}) {
@@ -702,6 +698,20 @@ class ClawdCompanionController extends ChangeNotifier {
     if (_clearBubbleInternal()) {
       notifyListeners();
     }
+  }
+
+  /// Idempotently cancels any pending transient-pose timer and resets
+  /// [transientPose] to [ClawdTransientPose.none]. Pass `notify: false`
+  /// when calling from widget lifecycle hooks invoked during `build()`.
+  bool clearTransientPose({bool notify = true}) {
+    _poseResetTimer?.cancel();
+    _poseResetTimer = null;
+    if (_transientPose == ClawdTransientPose.none) return false;
+    _transientPose = ClawdTransientPose.none;
+    if (notify && !_disposed) {
+      notifyListeners();
+    }
+    return true;
   }
 
   void resetForAccountChange() {

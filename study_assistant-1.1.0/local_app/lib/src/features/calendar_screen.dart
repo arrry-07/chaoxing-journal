@@ -118,7 +118,9 @@ class _CalendarScreenState extends State<CalendarScreen>
   void _syncClawdEnvironment({bool notify = true}) {
     final controller = _clawdController;
     if (controller == null) return;
-    final busy = _refreshing || widget.store.isLoading;
+    final busy = _refreshing ||
+        widget.store.isLoading ||
+        widget.store.syncReport.phase == SyncPhase.running;
     final hasError = ClawdCompanionController.resolveHasBlockingSyncNotice(
       widget.store,
       localBusy: _refreshing,
