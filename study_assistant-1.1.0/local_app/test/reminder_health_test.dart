@@ -393,7 +393,7 @@ void main() {
         return [
           channelRow('assignment_deadlines', '作业截止提醒', 4),
           channelRow('daily_summary', '每日课业摘要', 3),
-          channelRow('personal_schedule_v2', '待办与考试提醒', 4),
+          channelRow('personal_schedule_v3', '待办与考试提醒', 4),
         ];
       }
       if (call.method == 'pendingNotificationRequests') return [];

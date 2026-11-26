@@ -1331,6 +1331,75 @@ void main() {
   });
 
   testWidgets(
+      'vibrate ringer suppresses duplicate volume warning and preview asks for ringer mode',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final notif = _DetailedHealthNotificationService(
+      const ReminderHealth(
+        notifications: true,
+        exact: true,
+        ringerMode: 'vibrate',
+        notificationStreamVolume: 0,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: true,
+        assignmentChannel:
+            ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 4),
+      ),
+    )..chimePreviewResult = const NotificationChimePreviewResult(
+        played: false,
+        supported: true,
+        notificationStreamVolume: 0,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: true,
+        ringerMode: 'vibrate',
+      );
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: notif,
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            initialExpandHealth: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('reminder-health-ringer-warning')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('reminder-health-notification-volume-warning')),
+      findsNothing,
+    );
+    expect(find.textContaining('即使处于响铃模式'), findsNothing);
+    expect(find.textContaining('系统通知音量为 0 或已静音'), findsNothing);
+
+    final previewButton =
+        find.byKey(const ValueKey('preview-notification-chime-button'));
+    await scrollTo(tester, previewButton);
+    await tester.tap(previewButton);
+    await tester.pumpAndSettle();
+
+    expect(notif.previewChimeCalls, 1);
+    expect(
+      find.text('当前手机处于静音或振动模式，无法听到试听铃声；请切换为响铃模式后再试。'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('请按音量键调高通知音量'), findsNothing);
+  });
+
+  testWidgets(
       'send test audible notification button reports daytime schedule and nighttime quiet block',
       (tester) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});

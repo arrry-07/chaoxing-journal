@@ -554,12 +554,11 @@ class CourseTermCatalog {
     DateTime? candidate;
     if (a.isExam) {
       final exam = a.exam;
-      if (exam != null && !exam.noticeOnly) {
-        if (exam.startTrusted && exam.startAt != null) {
-          candidate = exam.startAt!.toUtc();
-        } else if (exam.endTrusted && exam.endAt != null) {
-          candidate = exam.endAt!.toUtc();
-        }
+      if (exam == null || exam.noticeOnly) return null;
+      if (exam.startTrusted && exam.startAt != null) {
+        candidate = exam.startAt!.toUtc();
+      } else if (exam.endTrusted && exam.endAt != null) {
+        candidate = exam.endAt!.toUtc();
       }
     } else if (a.deadlineTrusted &&
         !a.deadlineReadFailed &&

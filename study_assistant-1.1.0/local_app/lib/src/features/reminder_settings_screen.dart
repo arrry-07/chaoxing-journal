@@ -387,14 +387,14 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       setState(() {
         if (!result.supported) {
           _healthMessage = '当前环境不支持直接试听清铃（请使用“发送测试有声提醒”确认）。';
+        } else if (result.isPhoneMutedOrVibrate) {
+          _healthMessage = '当前手机处于静音或振动模式，无法听到试听铃声；请切换为响铃模式后再试。';
         } else if (result.isNotificationVolumeZero) {
           final volText = result.notificationStreamMaxVolume != null &&
                   result.notificationStreamVolume != null
               ? '（${result.notificationStreamVolume}/${result.notificationStreamMaxVolume}）'
               : '';
           _healthMessage = '当前系统通知音量为 0 或已静音$volText，无法听到试听铃声；请按音量键调高通知音量后再试。';
-        } else if (result.isPhoneMutedOrVibrate) {
-          _healthMessage = '当前手机处于静音或振动模式，无法听到试听铃声；请切换为响铃模式后再试。';
         } else if (result.played) {
           _healthMessage = '已播放内置清铃提示音（如未听到，请调高系统通知音量）。';
         } else {
@@ -434,6 +434,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
 
   Widget _buildHealthSummaryCard(JournalPalette journal) {
     final current = _health;
+    final showNotificationVolumeWarning =
+        current?.isNotificationVolumeZero == true &&
+            current?.isPhoneMutedOrVibrate != true;
     final issues = <String>[];
     if (current?.notifications == false) {
       issues.add('系统通知权限未开启');
@@ -475,7 +478,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     checkChannelAudioAndVibration(current?.assignmentChannel, '截止提醒渠道');
     checkChannelAudioAndVibration(current?.summaryChannel, '每日摘要渠道');
     checkChannelAudioAndVibration(current?.manualChannel, '个人日程渠道');
-    if (current?.isNotificationVolumeZero == true) {
+    if (showNotificationVolumeWarning) {
       issues.add('系统通知音量为 0 或已静音');
     }
     if (current?.scheduleRecoveryPending == true) {
@@ -629,7 +632,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                   ),
                 ),
               ],
-              if (current?.isNotificationVolumeZero == true) ...[
+              if (showNotificationVolumeWarning) ...[
                 const SizedBox(height: 8),
                 Container(
                   key: const ValueKey(

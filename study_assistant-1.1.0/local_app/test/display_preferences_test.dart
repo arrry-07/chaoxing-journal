@@ -14,9 +14,11 @@ import 'package:study_assistant_mobile/src/services/local_notification_service.d
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 import 'package:flutter/material.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
+import 'package:study_assistant_mobile/src/features/widgets/manual_home_card.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/models/widget_snapshot.dart';
 
@@ -609,6 +611,54 @@ void main() {
       expect(t.getSize(action).width, greaterThanOrEqualTo(48));
       expect(t.getSize(action).height, greaterThanOrEqualTo(48));
     }
+  });
+
+  testWidgets(
+      'compact manual card keeps 48dp height and touch target at 0.85x text',
+      (t) async {
+    t.view.physicalSize = const Size(360, 800);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+    final now = DateTime.utc(2026, 11, 26, 2);
+    final entry = ManualEntry(
+      id: 'm-compact',
+      title: '无备注待办',
+      kind: ManualEntry.kindTodo,
+      at: now.add(const Duration(hours: 2)),
+    );
+
+    await t.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context)
+            .copyWith(textScaler: const TextScaler.linear(0.85)),
+        child: child!,
+      ),
+      home: Scaffold(
+        body: SizedBox(
+          width: 360,
+          child: ManualHomeCard(
+            entry: entry,
+            now: now,
+            compact: true,
+            onTap: () {},
+            onToggleDone: () {},
+          ),
+        ),
+      ),
+    ));
+    await t.pumpAndSettle();
+
+    expect(t.takeException(), isNull);
+    expect(
+      t.getSize(find.byType(ManualHomeCard)).height,
+      greaterThanOrEqualTo(48),
+    );
+    final complete = find.byKey(ValueKey('complete-manual-${entry.id}'));
+    expect(complete, findsOneWidget);
+    expect(t.getSize(complete).width, greaterThanOrEqualTo(48));
+    expect(t.getSize(complete).height, greaterThanOrEqualTo(48));
   });
 
   test('preferences round trip and recover malformed/unknown settings', () {

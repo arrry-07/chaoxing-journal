@@ -309,91 +309,94 @@ class ManualHomeCard extends StatelessWidget {
       children: [
         Padding(
           padding: contentPadding,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Semantics(
-                button: true,
-                label: [
-                  entry.title,
-                  if (entry.course.trim().isNotEmpty) entry.course.trim(),
-                  typeLabel,
-                  if (clock.isNotEmpty) clock,
-                  if (reminderLabel != null) reminderLabel,
-                  if (entry.attachments.isNotEmpty)
-                    '有${entry.attachments.length}个附件',
-                  if (overdue) overdueLabel,
-                  if (at == null) '无截止日期',
-                ].join('，'),
-                onTap: onTap,
-                excludeSemantics: true,
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: InkWell(
-                    onTap: onTap,
-                    onLongPress: onLongPress,
-                    borderRadius: BorderRadius.circular(10),
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(
-                        vertical: compact ? 5 : 12,
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(width: railWidth, child: buildRail()),
-                          const SizedBox(width: 10),
-                          Expanded(child: body),
-                        ],
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: inlineActions ? 48 : 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Semantics(
+                  button: true,
+                  label: [
+                    entry.title,
+                    if (entry.course.trim().isNotEmpty) entry.course.trim(),
+                    typeLabel,
+                    if (clock.isNotEmpty) clock,
+                    if (reminderLabel != null) reminderLabel,
+                    if (entry.attachments.isNotEmpty)
+                      '有${entry.attachments.length}个附件',
+                    if (overdue) overdueLabel,
+                    if (at == null) '无截止日期',
+                  ].join('，'),
+                  onTap: onTap,
+                  excludeSemantics: true,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: InkWell(
+                      onTap: onTap,
+                      onLongPress: onLongPress,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(
+                          vertical: compact ? 5 : 12,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(width: railWidth, child: buildRail()),
+                            const SizedBox(width: 10),
+                            Expanded(child: body),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              if (largeText)
-                Padding(
-                  padding: EdgeInsets.only(
-                    left: railWidth + 10,
-                    bottom: 8,
+                if (largeText)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      left: railWidth + 10,
+                      bottom: 8,
+                    ),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        OutlinedButton.icon(
+                          key: ValueKey('complete-manual-${entry.id}'),
+                          onPressed: onToggleDone,
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(48, 48),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            backgroundColor: journal.parchment,
+                            side: BorderSide.none,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                          ),
+                          icon: Icon(
+                            Icons.radio_button_unchecked_rounded,
+                            size: 17,
+                            color: journal.muted,
+                          ),
+                          label: Text(
+                            '标记完成',
+                            style: journal.metadata.copyWith(
+                              color: journal.ink,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (dragHandle != null) dragHandle!,
+                      ],
+                    ),
                   ),
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      OutlinedButton.icon(
-                        key: ValueKey('complete-manual-${entry.id}'),
-                        onPressed: onToggleDone,
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(48, 48),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          backgroundColor: journal.parchment,
-                          side: BorderSide.none,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                        ),
-                        icon: Icon(
-                          Icons.radio_button_unchecked_rounded,
-                          size: 17,
-                          color: journal.muted,
-                        ),
-                        label: Text(
-                          '标记完成',
-                          style: journal.metadata.copyWith(
-                            color: journal.ink,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      if (dragHandle != null) dragHandle!,
-                    ],
-                  ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
         if (inlineActions)

@@ -1052,6 +1052,8 @@ void main() {
         required DateTime startAt,
         required DateTime endAt,
         bool noticeOnly = false,
+        DateTime? publishedAt,
+        DateTime? availableFromAt,
       }) =>
           Assignment(
             id: 'cx:exam:901:1:$id',
@@ -1059,6 +1061,8 @@ void main() {
             courseName: '考试归属课',
             title: id,
             deadlineAt: endAt,
+            availableFromAt: availableFromAt,
+            publishedAt: publishedAt,
             requirementsText: '',
             status: 'pending',
             lastSyncedAt: now,
@@ -1087,6 +1091,8 @@ void main() {
             startAt: now.add(const Duration(days: 5)),
             endAt: now.add(const Duration(days: 5)),
             noticeOnly: true,
+            publishedAt: now,
+            availableFromAt: now,
           ),
         ],
         notices: const [],
