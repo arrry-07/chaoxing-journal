@@ -1324,5 +1324,120 @@ void main() {
       await tester.pumpAndSettle();
       expect(overdueCardFinder, findsNothing);
     });
+
+    testWidgets(
+        'rapidly completing two pinned manuals preserves second bounce state and excludes completing key from pinned reorder',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 820);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final m1 = _manual('m-pin-1',
+          title: '置顶待办一', at: now.add(const Duration(hours: 2)));
+      final m2 = _manual('m-pin-2',
+          title: '置顶待办二', at: now.add(const Duration(hours: 4)));
+      final a1 = _work('a-pin-1',
+          title: '置顶作业甲',
+          due: now.add(const Duration(hours: 6)),
+          syncedAt: now);
+      final a2 = _work('a-pin-2',
+          title: '置顶作业乙',
+          due: now.add(const Duration(hours: 8)),
+          syncedAt: now);
+      final store = await _createStore(
+        assignments: [a1, a2],
+        entries: [m1, m2],
+        clock: () => now,
+      );
+      addTearDown(store.dispose);
+      await store.toggleManualPin(m1);
+      await store.toggleManualPin(m2);
+      await store.togglePin(a1);
+      await store.togglePin(a2);
+
+      await _pumpHome(tester, store, now: now);
+
+      // Complete m1 -> while m1 is in 220ms exit window, reorder remaining active pinned assignments via context menu.
+      await tester.tap(find.byKey(const ValueKey('complete-manual-m-pin-1')));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 40));
+      expect(find.byKey(const ValueKey('manual-m-pin-1')), findsOneWidget);
+
+      final reorderable = tester.widget<ReorderableListView>(
+        find.byType(ReorderableListView),
+      );
+      // Invoke onReorderItem swapping a1 (index 2) and a2 (index 3) while m1 placeholder is at index 0.
+      reorderable.onReorderItem!(2, 3);
+      await tester.pump();
+      expect(
+        store.pinnedAssignments.keys,
+        [
+          m2.pinKey,
+          AssignmentStore.pinKeyOf(a2),
+          AssignmentStore.pinKeyOf(a1),
+        ],
+      );
+      await tester.pumpAndSettle();
+
+      // Now test 2-item pinned section rapid completion: unpin a1 & a2, pin m3 alongside m2, then complete both rapidly.
+      await store.togglePin(a1);
+      await store.togglePin(a2);
+      final m3 = _manual('m-pin-3',
+          title: '置顶待办三', at: now.add(const Duration(hours: 5)));
+      await store.saveNotebook(
+        (n) => n.withEntries([...n.entries, m3]),
+        store.accountEpoch,
+      );
+      await store.toggleManualPin(m3);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('complete-manual-m-pin-2')));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+
+      final m3BounceFinder = find.byKey(const ValueKey('manual-m-pin-3'));
+      await tester.tap(find.byKey(const ValueKey('complete-manual-m-pin-3')));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 36));
+      final m3StateDuringBounce = tester.state(
+        find
+            .descendant(
+              of: m3BounceFinder,
+              matching: find.byType(JournalMicroBounce),
+            )
+            .first,
+      );
+      final m3ScaleDuringBounce = tester
+          .widget<Transform>(
+            find
+                .descendant(
+                  of: m3BounceFinder,
+                  matching: find.byType(Transform),
+                )
+                .first,
+          )
+          .transform
+          .storage[0];
+      expect(m3ScaleDuringBounce, greaterThan(1.0));
+      // Advance past m2's 220ms expiry (120 + 36 + 100 = 256ms) while m3 is still mid-bounce (136ms < 220ms).
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(const ValueKey('manual-m-pin-2')), findsNothing);
+      expect(m3BounceFinder, findsOneWidget);
+      final m3StateAfterM2Expires = tester.state(
+        find
+            .descendant(
+              of: m3BounceFinder,
+              matching: find.byType(JournalMicroBounce),
+            )
+            .first,
+      );
+      expect(identical(m3StateDuringBounce, m3StateAfterM2Expires), isTrue);
+      await tester.pumpAndSettle();
+      expect(m3BounceFinder, findsNothing);
+    });
   });
 }

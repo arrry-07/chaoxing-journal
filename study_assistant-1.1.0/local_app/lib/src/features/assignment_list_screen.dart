@@ -1869,14 +1869,24 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             final sectionIndex = index - 1;
             final section = timelineSections[sectionIndex];
             final isEmphasizedSection = section.pinned || section.badge == '今天';
-            final groupCard = section.pinned && section.items.length >= 2
+            final completingPinnedKeys =
+                _completingPinnedKeyById.values.toSet();
+            final useReorderablePinned = section.pinned &&
+                (section.items.length >= 2 ||
+                    (completingPinnedKeys.isNotEmpty &&
+                        (_completingPinnedSnapshot?.keys.length ?? 0) >= 2));
+            final groupCard = useReorderablePinned
                 ? JournalGroupedCard(
                     emphasized: isEmphasizedSection,
                     children: [
                       Builder(
                         builder: (context) {
-                          final visibleKeys = [
+                          final visualKeys = [
                             for (final item in section.items) item.pinKey,
+                          ];
+                          final activePinnedKeys = [
+                            for (final key in visualKeys)
+                              if (!completingPinnedKeys.contains(key)) key,
                           ];
                           return ReorderableListView.builder(
                             shrinkWrap: true,
@@ -1896,31 +1906,43 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                 JournalMotion.selectionTick(store.display),
                             onReorderItem: (oldIndex, newIndex) {
                               if (oldIndex == newIndex) return;
-                              final nextKeys = List<String>.of(visibleKeys);
-                              final moved = nextKeys.removeAt(oldIndex);
-                              nextKeys.insert(newIndex, moved);
-                              unawaited(store.reorderPinned(nextKeys));
+                              final nextVisualKeys =
+                                  List<String>.of(visualKeys);
+                              final moved = nextVisualKeys.removeAt(oldIndex);
+                              nextVisualKeys.insert(newIndex, moved);
+                              final nextActiveKeys = [
+                                for (final key in nextVisualKeys)
+                                  if (!completingPinnedKeys.contains(key)) key,
+                              ];
+                              if (nextActiveKeys.length >= 2) {
+                                unawaited(store.reorderPinned(nextActiveKeys));
+                              }
                             },
                             itemCount: section.items.length,
                             itemBuilder: (context, itemIndex) {
                               final item = section.items[itemIndex];
-                              final dragHandle = ReorderableDragStartListener(
-                                index: itemIndex,
-                                child: Tooltip(
-                                  message: '拖动调整置顶顺序',
-                                  child: SizedBox(
-                                    width: 34,
-                                    height: 48,
-                                    child: Center(
-                                      child: Icon(
-                                        Icons.drag_indicator_rounded,
-                                        size: 18,
-                                        color: journal.muted,
+                              final isCompletingItem =
+                                  completingPinnedKeys.contains(item.pinKey);
+                              final dragHandle = isCompletingItem ||
+                                      activePinnedKeys.length < 2
+                                  ? null
+                                  : ReorderableDragStartListener(
+                                      index: itemIndex,
+                                      child: Tooltip(
+                                        message: '拖动调整置顶顺序',
+                                        child: SizedBox(
+                                          width: 34,
+                                          height: 48,
+                                          child: Center(
+                                            child: Icon(
+                                              Icons.drag_indicator_rounded,
+                                              size: 18,
+                                              color: journal.muted,
+                                            ),
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ),
-                                ),
-                              );
+                                    );
                               return Column(
                                 key: ValueKey('pinned-reorder-${item.pinKey}'),
                                 mainAxisSize: MainAxisSize.min,
@@ -1929,7 +1951,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                     item,
                                     pinned: true,
                                     dragHandle: dragHandle,
-                                    pinnedVisibleKeys: visibleKeys,
+                                    pinnedVisibleKeys: activePinnedKeys,
                                   ),
                                   if (itemIndex < section.items.length - 1)
                                     Padding(

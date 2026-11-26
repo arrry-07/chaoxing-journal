@@ -638,8 +638,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.getTopLeft(handleFinder).dy, closeTo(initialHandleY, 0.01));
 
-      await tester.tap(find.byTooltip('关闭'));
+      // Tapping the transparent 22dp headroom strip directly above the sheet at rest dismisses it.
+      final dismissStrip =
+          find.byKey(const ValueKey('journal-sheet-top-dismiss-strip'));
+      expect(dismissStrip, findsOneWidget);
+      await tester.tapAt(tester.getCenter(dismissStrip));
       await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsNothing);
     });
 
     testWidgets(

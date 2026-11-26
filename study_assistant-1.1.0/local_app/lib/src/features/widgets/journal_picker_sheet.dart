@@ -214,10 +214,23 @@ class _JournalSheetRubberBandState extends State<JournalSheetRubberBand>
         // (~20.16dp) inside the sheet's own layout box so strong upward pulls
         // never shift the drag handle outside ancestor BottomSheet/Padding
         // hit-test bounds. At rest (dy == 0), taps in the transparent headroom
-        // miss child and pass through to ModalBarrier to dismiss.
+        // hit the background dismiss detector and close the modal sheet cleanly,
+        // while during upward pulls the lifted child sits above it and catches
+        // re-grabs.
         return Stack(
           clipBehavior: Clip.none,
           children: [
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: _maxUpwardHeadroom,
+              child: GestureDetector(
+                key: const ValueKey('journal-sheet-top-dismiss-strip'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.of(context).maybePop(),
+              ),
+            ),
             Positioned(
               left: 0,
               right: 0,
