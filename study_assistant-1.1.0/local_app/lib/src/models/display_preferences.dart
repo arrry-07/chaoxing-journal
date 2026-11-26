@@ -22,11 +22,12 @@ class DisplayPreferences {
     this.themeMode = JournalThemeMode.system,
     this.soundEnabled = true,
     this.hapticsEnabled = true,
+    this.showPixelBuddy = true,
   });
   final bool compact, countdown;
   final WidgetRange widgetRange;
   final JournalThemeMode themeMode;
-  final bool soundEnabled, hapticsEnabled;
+  final bool soundEnabled, hapticsEnabled, showPixelBuddy;
 
   DisplayPreferences copyWith({
     bool? compact,
@@ -35,6 +36,7 @@ class DisplayPreferences {
     JournalThemeMode? themeMode,
     bool? soundEnabled,
     bool? hapticsEnabled,
+    bool? showPixelBuddy,
   }) =>
       DisplayPreferences(
         compact: compact ?? this.compact,
@@ -43,6 +45,7 @@ class DisplayPreferences {
         themeMode: themeMode ?? this.themeMode,
         soundEnabled: soundEnabled ?? this.soundEnabled,
         hapticsEnabled: hapticsEnabled ?? this.hapticsEnabled,
+        showPixelBuddy: showPixelBuddy ?? this.showPixelBuddy,
       );
 
   String encode() => jsonEncode({
@@ -52,6 +55,7 @@ class DisplayPreferences {
         'themeMode': themeMode.name,
         'sound': soundEnabled,
         'haptics': hapticsEnabled,
+        'pixelBuddy': showPixelBuddy,
       });
 
   factory DisplayPreferences.decode(String? raw) {
@@ -70,6 +74,7 @@ class DisplayPreferences {
         ),
         soundEnabled: j['sound'] != false,
         hapticsEnabled: j['haptics'] != false,
+        showPixelBuddy: j['pixelBuddy'] != false,
       );
     } catch (_) {
       return const DisplayPreferences();

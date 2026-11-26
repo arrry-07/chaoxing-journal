@@ -1005,13 +1005,15 @@ void main() {
         ));
         await tester.pumpAndSettle();
 
-        final rotationBefore =
-            tester.widget<AnimatedRotation>(find.byType(AnimatedRotation));
-        expect(rotationBefore.turns, 0.0);
-        expect(
-          rotationBefore.duration,
-          reduced ? Duration.zero : const Duration(milliseconds: 200),
-        );
+        Transform chevronTransform() => tester.widget<Transform>(
+              find
+                  .ancestor(
+                    of: find.byIcon(Icons.expand_more_rounded),
+                    matching: find.byType(Transform),
+                  )
+                  .first,
+            );
+        expect(chevronTransform().transform.storage[0], closeTo(1.0, 1e-3));
         if (reduced) {
           expect(find.byType(AnimatedSize), findsNothing);
         } else {
@@ -1022,11 +1024,16 @@ void main() {
         }
 
         await tester.tap(find.byKey(const ValueKey('agenda-completed-toggle')));
+        await tester.pump();
+        if (reduced) {
+          expect(chevronTransform().transform.storage[0], closeTo(-1.0, 1e-3));
+        } else {
+          await tester.pump(const Duration(milliseconds: 50));
+          expect(chevronTransform().transform.storage[0], lessThan(1.0));
+        }
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        final rotationAfter =
-            tester.widget<AnimatedRotation>(find.byType(AnimatedRotation));
-        expect(rotationAfter.turns, 0.5);
+        expect(chevronTransform().transform.storage[0], closeTo(-1.0, 1e-3));
         expect(find.text('已完成测试待办'), findsOneWidget);
       }
     });

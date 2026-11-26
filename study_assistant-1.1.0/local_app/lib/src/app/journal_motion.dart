@@ -23,6 +23,26 @@ class JournalMotion {
     damping: 37.4, // damping ratio ~0.82
   );
 
+  static const criticalSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 420.0,
+    damping: 41.0, // damping ratio ~1.00 (no overshoot)
+  );
+
+  static const pressSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 620.0,
+    damping: 42.0, // damping ratio ~0.84
+  );
+
+  static const popSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 500.0,
+    damping: 28.0, // damping ratio ~0.63
+  );
+
+  static const springTolerance = Tolerance(distance: 1e-3, velocity: 1e-3);
+
   static const Curve easeOut = Cubic(0.23, 1.0, 0.32, 1.0);
   static const Curve easeDrawer = Cubic(0.32, 0.72, 0.0, 1.0);
   static const Curve easeInOut = Cubic(0.77, 0.0, 0.175, 1.0);
@@ -41,13 +61,30 @@ class JournalMotion {
           ? Duration.zero
           : const Duration(milliseconds: 220);
 
+  static AnimationStyle modalSheetAnimationStyle(BuildContext context) =>
+      isReducedMotion(context)
+          ? AnimationStyle.noAnimation
+          : const AnimationStyle(
+              duration: Duration(milliseconds: 280),
+              reverseDuration: Duration(milliseconds: 210),
+            );
+
   static SpringSimulation springFor(
     SpringDescription description, {
     required double start,
     required double end,
     double velocity = 0.0,
+    Tolerance tolerance = springTolerance,
+    bool snapToEnd = true,
   }) =>
-      SpringSimulation(description, start, end, velocity);
+      SpringSimulation(
+        description,
+        start,
+        end,
+        velocity,
+        snapToEnd: snapToEnd,
+        tolerance: tolerance,
+      );
 
   static void tap(DisplayPreferences prefs) {
     InteractionFeedback.trigger(prefs, kind: InteractionSoundKind.tap);

@@ -66,6 +66,22 @@ class DisplaySettingsScreen extends StatelessWidget {
                         store.display.copyWith(countdown: v),
                       ),
                     ),
+                    SwitchListTile(
+                      key: const ValueKey('display-pixel-buddy-toggle'),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 2),
+                      title: Text('顶栏像素伙伴', style: journal.entryTitle),
+                      subtitle: Text(
+                        '在首页标题旁显示像素小伴，轻点互动并播报同步状态',
+                        style: journal.metadata,
+                      ),
+                      value: d.showPixelBuddy,
+                      onChanged: (v) => saveDisplaySetting(
+                        context,
+                        store,
+                        store.display.copyWith(showPixelBuddy: v),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),

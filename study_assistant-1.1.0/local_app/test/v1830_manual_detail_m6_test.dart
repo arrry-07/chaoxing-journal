@@ -454,7 +454,14 @@ void main() {
       messenger.setMockMethodCallHandler(permissions, null);
     });
 
-    final now = DateTime.utc(2026, 11, 25, 15, 10); // 23:10 Beijing
+    final futureBase = DateTime.now().toUtc().add(const Duration(days: 2));
+    final now = DateTime.utc(
+      futureBase.year,
+      futureBase.month,
+      futureBase.day,
+      15,
+      10,
+    ); // 23:10 Beijing
     final service = LocalNotificationService(
       clock: () => now,
       location: tz.getLocation('Asia/Shanghai'),
@@ -463,21 +470,25 @@ void main() {
       id: 'm-quiet-skip',
       kind: ManualEntry.kindTodo,
       title: '凌晨待办',
-      at: DateTime.utc(2026, 11, 25, 16, 10), // 00:10+1 Beijing -> quiet skip
+      at: now.add(const Duration(hours: 1)), // 00:10+1 Beijing -> quiet skip
       remind: true,
     );
     final dayExam = ManualEntry(
       id: 'm-day-exam',
       kind: ManualEntry.kindExam,
       title: '白天考试',
-      at: DateTime.utc(2026, 11, 26, 6, 0), // 14:00+1 Beijing -> scheduled
+      at: now.add(
+        const Duration(hours: 14, minutes: 50),
+      ), // 14:00+1 Beijing -> scheduled
       remind: true,
     );
     final dayTodo = ManualEntry(
       id: 'm-day-todo',
       kind: ManualEntry.kindTodo,
       title: '白天待办',
-      at: DateTime.utc(2026, 11, 26, 7, 0), // 15:00+1 Beijing -> scheduled
+      at: now.add(
+        const Duration(hours: 15, minutes: 50),
+      ), // 15:00+1 Beijing -> scheduled
       remind: true,
     );
 

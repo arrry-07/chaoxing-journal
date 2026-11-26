@@ -28,11 +28,13 @@ class HomeManualActions {
     required this.store,
     required this.feedback,
     required this.isMounted,
+    this.onBouncePulse,
   });
 
   final AssignmentStore store;
   final HomeManualFeedback feedback;
   final bool Function() isMounted;
+  final ValueChanged<String>? onBouncePulse;
 
   Future<void> openDetail(
     BuildContext context,
@@ -111,6 +113,7 @@ class HomeManualActions {
     );
     if (!isMounted() || !ok) return;
     JournalMotion.complete(store.display);
+    onBouncePulse?.call(AssignmentStore.manualPinKeyOf(entry));
     feedback(
       '已完成「${entry.title}」，可在待办列表查看',
       actionLabel: '撤销',
@@ -172,6 +175,7 @@ class HomeManualActions {
     if (!isMounted() || !ok) return;
     final pinned = store.isManualPinned(entry);
     JournalMotion.pin(store.display, pinned: pinned);
+    onBouncePulse?.call(AssignmentStore.manualPinKeyOf(entry));
     feedback(pinned ? '已置顶' : '已取消置顶');
   }
 
@@ -264,6 +268,7 @@ Widget buildHomeManualTile({
   bool pinned = false,
   Widget? dragHandle,
   List<String> pinnedVisibleKeys = const [],
+  int bouncePulse = 0,
 }) {
   final isPinned = store.isManualPinned(entry);
   final canPin = store.canToggleManualPin(entry);
@@ -313,6 +318,7 @@ Widget buildHomeManualTile({
           allowUrgentNightBreakthrough:
               store.allowUrgentDeadlineNightBreakthrough,
           dragHandle: dragHandle,
+          bouncePulse: bouncePulse,
           onTap: () => actions.openDetail(itemContext, entry),
           onToggleDone: () => unawaited(actions.completeWithUndo(entry)),
           onLongPress: () => actions.openContextMenu(

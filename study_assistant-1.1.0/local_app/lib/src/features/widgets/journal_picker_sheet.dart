@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/journal.dart';
 import '../../app/journal_motion.dart';
 import '../../models/display_preferences.dart';
+import 'journal_buttons.dart';
 
 @immutable
 class JournalPickerFilterOption {
@@ -66,6 +67,7 @@ Future<T?> showJournalPickerSheet<T>(
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: Colors.transparent,
+    sheetAnimationStyle: JournalMotion.modalSheetAnimationStyle(context),
     builder: (sheetContext) => _JournalPickerSheetBody<T>(
       title: title,
       options: options,
@@ -117,18 +119,32 @@ class _JournalPickerSheetBody<T> extends StatefulWidget {
       _JournalPickerSheetBodyState<T>();
 }
 
-class _JournalPickerSheetBodyState<T>
-    extends State<_JournalPickerSheetBody<T>> {
+class _JournalPickerSheetBodyState<T> extends State<_JournalPickerSheetBody<T>>
+    with SingleTickerProviderStateMixin {
   final _controller = TextEditingController();
+  late final AnimationController _pullController;
   String _query = '';
   String? _activeFilterId;
   bool _popped = false;
+  int? _activeHandlePointer;
+  double _rawHandleDragDy = 0.0;
 
   @override
   void initState() {
     super.initState();
+    _pullController = AnimationController.unbounded(vsync: this, value: 0.0);
     if (widget.filterOptions.isNotEmpty) {
       _activeFilterId = widget.initialFilterId ?? widget.filterOptions.first.id;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (JournalMotion.isReducedMotion(context) &&
+        (_pullController.isAnimating || _pullController.value != 0.0)) {
+      _pullController.stop();
+      _pullController.value = 0.0;
     }
   }
 
@@ -142,8 +158,65 @@ class _JournalPickerSheetBodyState<T>
 
   @override
   void dispose() {
+    _pullController.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  static double _rubberBandUpOffset(double upwardPull) {
+    if (upwardPull <= 0.0) return 0.0;
+    return -(upwardPull * 0.36) / (1.0 + upwardPull / 56.0);
+  }
+
+  void _handleGrabDown(PointerDownEvent event) {
+    _activeHandlePointer = event.pointer;
+    if (JournalMotion.isReducedMotion(context)) {
+      _rawHandleDragDy = 0.0;
+      _pullController.stop();
+      _pullController.value = 0.0;
+      return;
+    }
+    if (_pullController.value < 0.0) {
+      final u = (-_pullController.value).clamp(0.0, 19.5);
+      final denom = (0.36 - u / 56.0).clamp(0.01, 0.36);
+      _rawHandleDragDy = -(u / denom);
+      _pullController.stop();
+    } else {
+      _rawHandleDragDy = 0.0;
+    }
+  }
+
+  void _handleGrabMove(PointerMoveEvent event) {
+    if (event.pointer != _activeHandlePointer) return;
+    if (JournalMotion.isReducedMotion(context)) return;
+    _rawHandleDragDy += event.delta.dy;
+    if (_rawHandleDragDy < 0.0) {
+      _pullController.stop();
+      _pullController.value = _rubberBandUpOffset(-_rawHandleDragDy);
+    } else if (_pullController.value != 0.0) {
+      _pullController.stop();
+      _pullController.value = 0.0;
+    }
+  }
+
+  void _handleGrabEnd(PointerEvent event) {
+    if (event.pointer != _activeHandlePointer) return;
+    _activeHandlePointer = null;
+    _rawHandleDragDy = 0.0;
+    if (_pullController.value == 0.0 && !_pullController.isAnimating) return;
+    if (JournalMotion.isReducedMotion(context)) {
+      _pullController.stop();
+      _pullController.value = 0.0;
+      return;
+    }
+    _pullController.animateWith(
+      JournalMotion.springFor(
+        JournalMotion.criticalSpring,
+        start: _pullController.value,
+        end: 0.0,
+        velocity: _pullController.velocity,
+      ),
+    );
   }
 
   List<JournalPickerOption<T>> get _filtered {
@@ -226,7 +299,7 @@ class _JournalPickerSheetBodyState<T>
                   shrinkWrap: !useFixedHeight || scrollableFallback,
                   physics: scrollableFallback
                       ? const NeverScrollableScrollPhysics()
-                      : null,
+                      : const BouncingScrollPhysics(),
                   padding: EdgeInsets.zero,
                   itemCount: filtered.length,
                   itemBuilder: (context, index) {
@@ -372,29 +445,44 @@ class _JournalPickerSheetBodyState<T>
     }
 
     final headerWidgets = <Widget>[
-      Center(
-        child: Container(
-          width: 36,
-          height: 4,
-          decoration: BoxDecoration(
-            color: journal.ruleStrong,
-            borderRadius: BorderRadius.circular(2),
-          ),
+      Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: _handleGrabDown,
+        onPointerMove: _handleGrabMove,
+        onPointerUp: _handleGrabEnd,
+        onPointerCancel: _handleGrabEnd,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              key: const ValueKey('journal-picker-drag-handle'),
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: journal.ruleStrong,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(widget.title, style: journal.section),
+                ),
+                IconButton(
+                  tooltip: '关闭',
+                  visualDensity: VisualDensity.compact,
+                  icon:
+                      Icon(Icons.close_rounded, size: 20, color: journal.muted),
+                  onPressed: _close,
+                ),
+              ],
+            ),
+          ],
         ),
-      ),
-      const SizedBox(height: 14),
-      Row(
-        children: [
-          Expanded(
-            child: Text(widget.title, style: journal.section),
-          ),
-          IconButton(
-            tooltip: '关闭',
-            visualDensity: VisualDensity.compact,
-            icon: Icon(Icons.close_rounded, size: 20, color: journal.muted),
-            onPressed: _close,
-          ),
-        ],
       ),
       if (widget.filterOptions.isNotEmpty) ...[
         const SizedBox(height: 10),
@@ -554,14 +642,41 @@ class _JournalPickerSheetBodyState<T>
           ),
         );
 
+        final reduced = JournalMotion.isReducedMotion(context);
+        final sheetBox = useFixedHeight
+            ? SizedBox(height: targetHeight, child: sheetContainer)
+            : ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxHeight),
+                child: sheetContainer,
+              );
+
         return Padding(
           padding: EdgeInsets.only(bottom: bottomInset),
-          child: useFixedHeight
-              ? SizedBox(height: targetHeight, child: sheetContainer)
-              : ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: maxHeight),
-                  child: sheetContainer,
-                ),
+          child: AnimatedBuilder(
+            animation: _pullController,
+            builder: (context, child) {
+              final dy = reduced ? 0.0 : _pullController.value;
+              if (dy == 0.0) return child!;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  if (dy < 0.0)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: (-dy).ceilToDouble() + 1,
+                      child: ColoredBox(color: journal.sheetElevated),
+                    ),
+                  Transform.translate(
+                    offset: Offset(0, dy),
+                    child: child,
+                  ),
+                ],
+              );
+            },
+            child: sheetBox,
+          ),
         );
       },
     );
@@ -589,50 +704,54 @@ class JournalFilterPill extends StatelessWidget {
       constraints: const BoxConstraints(minHeight: 48),
       child: Center(
         widthFactor: 1.0,
-        child: Material(
-          color: active ? journal.sage : journal.parchment,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: BorderSide(
-              color: active ? journal.sageBorder : Colors.transparent,
-              width: 0.9,
+        child: JournalPressableScale(
+          pressScale: 0.97,
+          child: Material(
+            color: active ? journal.sage : journal.parchment,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(
+                color: active ? journal.sageBorder : Colors.transparent,
+                width: 0.9,
+              ),
             ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (icon != null) ...[
-                    Icon(
-                      icon,
-                      size: 16,
-                      color: active ? journal.accent : journal.muted,
-                    ),
-                    const SizedBox(width: 6),
-                  ],
-                  Flexible(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: journal.pillLabel.copyWith(
-                        color: active && journal.isDark
-                            ? journal.accent
-                            : journal.ink,
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (icon != null) ...[
+                      Icon(
+                        icon,
+                        size: 16,
+                        color: active ? journal.accent : journal.muted,
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: journal.pillLabel.copyWith(
+                          color: active && journal.isDark
+                              ? journal.accent
+                              : journal.ink,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 2),
-                  Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    size: 17,
-                    color: active ? journal.accent : journal.muted,
-                  ),
-                ],
+                    const SizedBox(width: 2),
+                    Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      size: 17,
+                      color: active ? journal.accent : journal.muted,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

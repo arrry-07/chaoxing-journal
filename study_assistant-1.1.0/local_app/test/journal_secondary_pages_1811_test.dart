@@ -118,6 +118,7 @@ void main() {
     final widgetInfoBtn = find.byTooltip('查看说明');
     await tester.scrollUntilVisible(widgetInfoBtn, 150);
     await tester.ensureVisible(widgetInfoBtn);
+    await tester.pumpAndSettle();
     await tester.tap(widgetInfoBtn);
     await tester.pumpAndSettle();
     expect(find.textContaining('2、4 或 6 条'), findsOneWidget);

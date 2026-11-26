@@ -9,6 +9,7 @@ import '../../services/home_manual_timeline.dart';
 import '../../services/local_notification_service.dart';
 import 'assignment_card.dart';
 import 'coursework_status_pill.dart';
+import 'journal_buttons.dart';
 
 /// Local manual entry rendered in the same grouped timeline as coursework.
 ///
@@ -28,6 +29,7 @@ class ManualHomeCard extends StatelessWidget {
     this.countdown = false,
     this.allowUrgentNightBreakthrough = false,
     this.contentPadding = const EdgeInsets.symmetric(horizontal: 14),
+    this.bouncePulse = 0,
   });
 
   final ManualEntry entry;
@@ -41,6 +43,7 @@ class ManualHomeCard extends StatelessWidget {
   final bool countdown;
   final bool allowUrgentNightBreakthrough;
   final EdgeInsetsGeometry contentPadding;
+  final int bouncePulse;
 
   static final DateFormat _clockFormat = DateFormat('HH:mm');
 
@@ -227,15 +230,19 @@ class ManualHomeCard extends StatelessWidget {
           excludeSemantics: true,
           child: Tooltip(
             message: '标记完成',
-            child: IconButton(
-              key: ValueKey('complete-manual-${entry.id}'),
-              onPressed: onToggleDone,
-              constraints: const BoxConstraints.tightFor(width: 48, height: 48),
-              padding: EdgeInsets.zero,
-              icon: Icon(
-                Icons.radio_button_unchecked_rounded,
-                size: 20,
-                color: journal.muted,
+            child: JournalPressableScale(
+              pressScale: 0.92,
+              child: IconButton(
+                key: ValueKey('complete-manual-${entry.id}'),
+                onPressed: onToggleDone,
+                constraints:
+                    const BoxConstraints.tightFor(width: 48, height: 48),
+                padding: EdgeInsets.zero,
+                icon: Icon(
+                  Icons.radio_button_unchecked_rounded,
+                  size: 20,
+                  color: journal.muted,
+                ),
               ),
             ),
           ),
@@ -305,113 +312,119 @@ class ManualHomeCard extends StatelessWidget {
       ],
     );
 
-    return Stack(
-      children: [
-        Padding(
-          padding: contentPadding,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: inlineActions ? 48 : 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Semantics(
-                  button: true,
-                  label: [
-                    entry.title,
-                    if (entry.course.trim().isNotEmpty) entry.course.trim(),
-                    typeLabel,
-                    if (clock.isNotEmpty) clock,
-                    if (reminderLabel != null) reminderLabel,
-                    if (entry.attachments.isNotEmpty)
-                      '有${entry.attachments.length}个附件',
-                    if (overdue) overdueLabel,
-                    if (at == null) '无截止日期',
-                  ].join('，'),
-                  onTap: onTap,
-                  excludeSemantics: true,
-                  child: Material(
-                    type: MaterialType.transparency,
-                    child: InkWell(
-                      onTap: onTap,
-                      onLongPress: onLongPress,
-                      borderRadius: BorderRadius.circular(10),
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(
-                          vertical: compact ? 5 : 12,
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(width: railWidth, child: buildRail()),
-                            const SizedBox(width: 10),
-                            Expanded(child: body),
-                          ],
+    return JournalMicroBounce(
+      pulse: bouncePulse,
+      child: Stack(
+        children: [
+          Padding(
+            padding: contentPadding,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: inlineActions ? 48 : 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Semantics(
+                    button: true,
+                    label: [
+                      entry.title,
+                      if (entry.course.trim().isNotEmpty) entry.course.trim(),
+                      typeLabel,
+                      if (clock.isNotEmpty) clock,
+                      if (reminderLabel != null) reminderLabel,
+                      if (entry.attachments.isNotEmpty)
+                        '有${entry.attachments.length}个附件',
+                      if (overdue) overdueLabel,
+                      if (at == null) '无截止日期',
+                    ].join('，'),
+                    onTap: onTap,
+                    excludeSemantics: true,
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: InkWell(
+                        onTap: onTap,
+                        onLongPress: onLongPress,
+                        borderRadius: BorderRadius.circular(10),
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            vertical: compact ? 5 : 12,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(width: railWidth, child: buildRail()),
+                              const SizedBox(width: 10),
+                              Expanded(child: body),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                if (largeText)
-                  Padding(
-                    padding: EdgeInsets.only(
-                      left: railWidth + 10,
-                      bottom: 8,
+                  if (largeText)
+                    Padding(
+                      padding: EdgeInsets.only(
+                        left: railWidth + 10,
+                        bottom: 8,
+                      ),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          JournalPressableScale(
+                            pressScale: 0.92,
+                            child: OutlinedButton.icon(
+                              key: ValueKey('complete-manual-${entry.id}'),
+                              onPressed: onToggleDone,
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(48, 48),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                backgroundColor: journal.parchment,
+                                side: BorderSide.none,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                              ),
+                              icon: Icon(
+                                Icons.radio_button_unchecked_rounded,
+                                size: 17,
+                                color: journal.muted,
+                              ),
+                              label: Text(
+                                '标记完成',
+                                style: journal.metadata.copyWith(
+                                  color: journal.ink,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (dragHandle != null) dragHandle!,
+                        ],
+                      ),
                     ),
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        OutlinedButton.icon(
-                          key: ValueKey('complete-manual-${entry.id}'),
-                          onPressed: onToggleDone,
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(48, 48),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            backgroundColor: journal.parchment,
-                            side: BorderSide.none,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                          ),
-                          icon: Icon(
-                            Icons.radio_button_unchecked_rounded,
-                            size: 17,
-                            color: journal.muted,
-                          ),
-                          label: Text(
-                            '标记完成',
-                            style: journal.metadata.copyWith(
-                              color: journal.ink,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        if (dragHandle != null) dragHandle!,
-                      ],
-                    ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-        if (inlineActions)
-          Positioned(
-            top: compact ? 0 : 2,
-            right: 2,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                completeButton(),
-                if (dragHandle != null) dragHandle!,
-              ],
+          if (inlineActions)
+            Positioned(
+              top: compact ? 0 : 2,
+              right: 2,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  completeButton(),
+                  if (dragHandle != null) dragHandle!,
+                ],
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }

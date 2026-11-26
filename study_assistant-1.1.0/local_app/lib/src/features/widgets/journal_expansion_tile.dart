@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../app/journal.dart';
@@ -55,45 +57,87 @@ class JournalExpansionTile extends StatefulWidget {
 }
 
 class _JournalExpansionTileState extends State<JournalExpansionTile>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
   bool _expanded = false;
   bool _initializedFromStorage = false;
+  late final AnimationController _chevronController;
 
   @override
   void initState() {
     // AutomaticKeepAliveClientMixin.initState reads wantKeepAlive synchronously.
     _expanded = widget.initiallyExpanded;
+    _chevronController = AnimationController.unbounded(
+      vsync: this,
+      value: _isExpanded ? 0.5 : 0.0,
+    );
     super.initState();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (widget.expanded != null) return;
-    if (_initializedFromStorage) return;
-    _initializedFromStorage = true;
-    final bucket = PageStorage.maybeOf(context);
-    final stored = widget.storageKey != null
-        ? bucket?.readState(context, identifier: widget.storageKey)
-        : bucket?.readState(context);
-    if (stored is bool && stored != _expanded) {
-      _expanded = stored;
-      updateKeepAlive();
+    if (widget.expanded == null && !_initializedFromStorage) {
+      _initializedFromStorage = true;
+      final bucket = PageStorage.maybeOf(context);
+      final stored = widget.storageKey != null
+          ? bucket?.readState(context, identifier: widget.storageKey)
+          : bucket?.readState(context);
+      if (stored is bool && stored != _expanded) {
+        _expanded = stored;
+        _chevronController.value = _isExpanded ? 0.5 : 0.0;
+        updateKeepAlive();
+      }
+    }
+    if (JournalMotion.isReducedMotion(context)) {
+      final target = _isExpanded ? 0.5 : 0.0;
+      if (_chevronController.isAnimating ||
+          _chevronController.value != target) {
+        _chevronController.stop();
+        _chevronController.value = target;
+      }
     }
   }
 
   @override
   void didUpdateWidget(covariant JournalExpansionTile oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final prevExpanded = oldWidget.expanded ?? _expanded;
+    final nextExpanded = _isExpanded;
     if (widget.expanded != oldWidget.expanded) {
       updateKeepAlive();
     }
+    if (prevExpanded != nextExpanded) {
+      _animateChevron(nextExpanded);
+    }
+  }
+
+  @override
+  void dispose() {
+    _chevronController.dispose();
+    super.dispose();
   }
 
   bool get _isExpanded => widget.expanded ?? _expanded;
 
   @override
   bool get wantKeepAlive => _isExpanded;
+
+  void _animateChevron(bool expanded) {
+    final target = expanded ? 0.5 : 0.0;
+    if (JournalMotion.isReducedMotion(context)) {
+      _chevronController.stop();
+      _chevronController.value = target;
+      return;
+    }
+    _chevronController.animateWith(
+      JournalMotion.springFor(
+        JournalMotion.criticalSpring,
+        start: _chevronController.value,
+        end: target,
+        velocity: _chevronController.velocity,
+      ),
+    );
+  }
 
   void _toggle() {
     final next = !_isExpanded;
@@ -111,6 +155,7 @@ class _JournalExpansionTileState extends State<JournalExpansionTile>
       }
       updateKeepAlive();
     });
+    _animateChevron(next);
     widget.onExpansionChanged?.call(next);
   }
 
@@ -121,13 +166,16 @@ class _JournalExpansionTileState extends State<JournalExpansionTile>
     final reduced = JournalMotion.isReducedMotion(context);
     final isExpanded = _isExpanded;
 
-    final chevron = AnimatedRotation(
-      turns: isExpanded ? 0.5 : 0.0,
-      duration: JournalMotion.duration(
-        context,
-        const Duration(milliseconds: 200),
-      ),
-      curve: JournalMotion.easeOut,
+    final chevron = AnimatedBuilder(
+      animation: _chevronController,
+      builder: (context, child) {
+        final turns =
+            reduced ? (isExpanded ? 0.5 : 0.0) : _chevronController.value;
+        return Transform.rotate(
+          angle: turns * math.pi * 2,
+          child: child,
+        );
+      },
       child: Icon(
         Icons.expand_more_rounded,
         size: 20,

@@ -998,24 +998,25 @@ void main() {
         ));
         await tester.pumpAndSettle();
 
-        final indicatorFinder = find.descendant(
-          of: find.byType(AnimatedPositioned),
-          matching: find.byType(DecoratedBox),
-        );
+        final indicatorFinder =
+            find.byKey(const ValueKey('stats-term-scope-indicator'));
         expect(indicatorFinder, findsOneWidget);
-        final beforePos =
-            tester.widget<AnimatedPositioned>(find.byType(AnimatedPositioned));
-        expect(
-          beforePos.duration,
-          reduced ? Duration.zero : const Duration(milliseconds: 200),
-        );
+        final beforeLeft = tester.getTopLeft(indicatorFinder).dx;
 
         await tester
             .tap(find.byKey(const ValueKey('stats-term-scope-allTerms')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        final midLeft = tester.getTopLeft(indicatorFinder).dx;
+        expect(midLeft, greaterThan(beforeLeft));
         await tester.pumpAndSettle();
-        final afterPos =
-            tester.widget<AnimatedPositioned>(find.byType(AnimatedPositioned));
-        expect(afterPos.left, isNot(beforePos.left));
+        final afterLeft = tester.getTopLeft(indicatorFinder).dx;
+        expect(afterLeft, greaterThan(beforeLeft));
+        if (reduced) {
+          expect(midLeft, closeTo(afterLeft, 0.01));
+        } else {
+          expect(midLeft, lessThan(afterLeft));
+        }
         expect(tester.takeException(), isNull);
       }
     });
@@ -1044,18 +1045,31 @@ void main() {
           ),
         ));
 
+        double currentScale() {
+          final transform = tester.widget<Transform>(
+            find
+                .descendant(
+                  of: find.byType(JournalPressableScale),
+                  matching: find.byType(Transform),
+                )
+                .first,
+          );
+          return transform.transform.storage[0];
+        }
+
+        expect(currentScale(), 1.0);
         final gesture =
             await tester.startGesture(tester.getCenter(find.text('点按胶囊')));
+        await tester.pump();
         await tester.pump(const Duration(milliseconds: 60));
-        final scale = tester.widget<AnimatedScale>(find.byType(AnimatedScale));
         if (reduced) {
-          expect(scale.scale, 1.0);
-          expect(scale.duration, Duration.zero);
+          expect(currentScale(), 1.0);
         } else {
-          expect(scale.scale, lessThan(1.0));
+          expect(currentScale(), lessThan(1.0));
         }
         await gesture.up();
         await tester.pumpAndSettle();
+        expect(currentScale(), 1.0);
         expect(tapped, isTrue);
       }
     });
@@ -1604,16 +1618,35 @@ void main() {
           expect(size.curve, JournalMotion.easeDrawer);
         }
 
+        Transform chevronTransform() => tester.widget<Transform>(
+              find
+                  .ancestor(
+                    of: find.byIcon(Icons.expand_more_rounded),
+                    matching: find.byType(Transform),
+                  )
+                  .first,
+            );
+
+        expect(chevronTransform().transform.storage[0], closeTo(1.0, 1e-3));
+
         await tester.tap(find.text('折叠分组-$reduced'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 16));
+        if (reduced) {
+          expect(
+            chevronTransform().transform.storage[0],
+            closeTo(-1.0, 1e-3),
+          );
+        } else {
+          expect(
+            chevronTransform().transform.storage[0],
+            greaterThan(-1.0),
+          );
+        }
         await tester.pumpAndSettle();
         expect(find.text('展开子内容'), findsOneWidget);
-        final rot =
-            tester.widget<AnimatedRotation>(find.byType(AnimatedRotation));
-        expect(rot.turns, 0.5);
-        expect(
-          rot.duration,
-          reduced ? Duration.zero : const Duration(milliseconds: 200),
-        );
+        expect(chevronTransform().transform.storage[0], closeTo(-1.0, 1e-3));
+        expect(chevronTransform().transform.storage[1], closeTo(0.0, 1e-3));
 
         await tester.drag(find.byType(ListView), const Offset(0, -1400));
         await tester.pumpAndSettle();

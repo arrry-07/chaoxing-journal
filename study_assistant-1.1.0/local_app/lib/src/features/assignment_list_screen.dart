@@ -35,6 +35,7 @@ import 'widgets/journal_buttons.dart';
 import 'widgets/journal_context_menu.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_picker_sheet.dart';
+import 'widgets/journal_pixel_buddy.dart';
 import 'widgets/journal_sliver_header.dart';
 import 'widgets/journal_swipe_tile.dart';
 
@@ -111,16 +112,88 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   Timer? _clock;
   final _scrollController = ScrollController();
   final ValueNotifier<double> _scrollOffset = ValueNotifier<double>(0.0);
+  final ValueNotifier<int> _syncSpinnerTick = ValueNotifier<int>(0);
   final _feedback = TransientFeedbackController();
+  final Map<String, int> _pinPulseByKey = <String, int>{};
   late int _feedbackEpoch;
   String? _feedbackAccount;
   HomeFilters? _preExamStripFilters;
   int? _preExamStripEpoch;
+  String? _buddyWhisper;
+  Timer? _buddyWhisperTimer;
+  Timer? _syncSpinnerTimer;
+  int _buddyTapCount = 0;
+  bool _appResumed = true;
+  bool _tickerEnabled = true;
+  bool _reducedMotion = false;
+
+  bool get _isBusy =>
+      _refreshing ||
+      store.isLoading ||
+      store.syncReport.phase == SyncPhase.running;
+
+  void _clearBuddyWhisper({bool notify = false}) {
+    _buddyWhisperTimer?.cancel();
+    _buddyWhisperTimer = null;
+    if (_buddyWhisper == null) return;
+    if (notify && mounted) {
+      setState(() => _buddyWhisper = null);
+    } else {
+      _buddyWhisper = null;
+    }
+  }
+
+  void _reconcileSyncSpinner({
+    bool? busyOverride,
+    bool? showBuddyOverride,
+    bool? reducedOverride,
+  }) {
+    final busy = busyOverride ?? _isBusy;
+    final showBuddy = showBuddyOverride ?? store.display.showPixelBuddy;
+    final reduced = reducedOverride ?? _reducedMotion;
+    final shouldRun = mounted &&
+        busy &&
+        showBuddy &&
+        !reduced &&
+        _tickerEnabled &&
+        _appResumed;
+    if (!shouldRun) {
+      _syncSpinnerTimer?.cancel();
+      _syncSpinnerTimer = null;
+      return;
+    }
+    _syncSpinnerTimer ??= Timer.periodic(
+      const Duration(milliseconds: 180),
+      (_) {
+        if (!mounted ||
+            !_isBusy ||
+            !store.display.showPixelBuddy ||
+            _reducedMotion ||
+            !_tickerEnabled ||
+            !_appResumed) {
+          _syncSpinnerTimer?.cancel();
+          _syncSpinnerTimer = null;
+          return;
+        }
+        _syncSpinnerTick.value = (_syncSpinnerTick.value + 1) & 0x3fffffff;
+      },
+    );
+  }
+
+  void _onStoreChanged() {
+    _checkFeedbackAccount();
+    if (_isBusy || !store.display.showPixelBuddy) {
+      _clearBuddyWhisper();
+    }
+    _reconcileSyncSpinner();
+  }
 
   void _checkFeedbackAccount() {
     if (_feedbackEpoch != store.accountEpoch ||
         _feedbackAccount != store.account) {
       _feedback.dismiss();
+      _clearBuddyWhisper();
+      _pinPulseByKey.clear();
       _preExamStripFilters = null;
       _preExamStripEpoch = null;
       _feedbackEpoch = store.accountEpoch;
@@ -130,10 +203,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final next = _scrollController.offset.clamp(0.0, 80.0);
+    final next = _scrollController.offset.clamp(0.0, 120.0);
     if ((next - _scrollOffset.value).abs() >= 1.5 ||
         (next == 0.0 && _scrollOffset.value != 0.0) ||
-        (next == 80.0 && _scrollOffset.value != 80.0)) {
+        (next == 120.0 && _scrollOffset.value != 120.0)) {
       _scrollOffset.value = next;
     }
   }
@@ -142,25 +215,39 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   void didUpdateWidget(covariant AssignmentListScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.store != store) {
-      oldWidget.store.removeListener(_checkFeedbackAccount);
+      oldWidget.store.removeListener(_onStoreChanged);
       _feedback.dismiss();
+      _clearBuddyWhisper();
+      _pinPulseByKey.clear();
       _feedbackEpoch = store.accountEpoch;
       _feedbackAccount = store.account;
-      store.addListener(_checkFeedbackAccount);
+      store.addListener(_onStoreChanged);
+      _reconcileSyncSpinner();
     }
   }
 
   @override
   void initState() {
     super.initState();
+    _appResumed =
+        (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) ==
+            AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onScroll);
     _feedbackEpoch = store.accountEpoch;
     _feedbackAccount = store.account;
-    store.addListener(_checkFeedbackAccount);
+    store.addListener(_onStoreChanged);
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _reducedMotion = JournalMotion.isReducedMotion(context);
+    _reconcileSyncSpinner();
   }
 
   @override
@@ -169,7 +256,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _scrollOffset.dispose();
-    store.removeListener(_checkFeedbackAccount);
+    _syncSpinnerTimer?.cancel();
+    _syncSpinnerTimer = null;
+    _syncSpinnerTick.dispose();
+    _buddyWhisperTimer?.cancel();
+    _buddyWhisperTimer = null;
+    store.removeListener(_onStoreChanged);
     _feedback.dispose();
     _clock?.cancel();
     super.dispose();
@@ -177,7 +269,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) setState(() {});
+    final nextResumed = state == AppLifecycleState.resumed;
+    if (_appResumed != nextResumed) {
+      _appResumed = nextResumed;
+      _reconcileSyncSpinner();
+    }
+    if (nextResumed && mounted) setState(() {});
   }
 
   bool _refreshing = false;
@@ -247,12 +344,24 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     );
   }
 
+  void _triggerCardPulse(String pinKey) {
+    if (!mounted || JournalMotion.isReducedMotion(context)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || JournalMotion.isReducedMotion(context)) return;
+      setState(() {
+        _pinPulseByKey[pinKey] = (_pinPulseByKey[pinKey] ?? 0) + 1;
+      });
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
   Future<void> _togglePin(Assignment assignment) async {
     if (!store.canTogglePin(assignment)) return;
     final ok = await store.togglePin(assignment);
     if (!mounted || !ok) return;
     final pinned = store.isPinned(assignment);
     JournalMotion.pin(store.display, pinned: pinned);
+    _triggerCardPulse(AssignmentStore.pinKeyOf(assignment));
     feedback(pinned ? '已置顶' : '已取消置顶');
   }
 
@@ -261,6 +370,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     feedback: (message, {action, actionLabel}) =>
         feedback(message, action: action, actionLabel: actionLabel),
     isMounted: () => mounted,
+    onBouncePulse: _triggerCardPulse,
   );
 
   /// Per-course item counts for the picker, refreshed on every build so the
@@ -551,6 +661,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         store.syncReport.phase == SyncPhase.running) {
       return;
     }
+    _clearBuddyWhisper();
     setState(() => _refreshing = true);
     final before = store.syncReport;
     final epoch = store.accountEpoch;
@@ -788,6 +899,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ? '${sync.summary} · 显示上次记录'
                 : sync.summary;
         final reduceMotion = MediaQuery.disableAnimationsOf(context);
+        _reducedMotion = reduceMotion;
+        if (busy) {
+          _clearBuddyWhisper();
+        }
+        final showPixelBuddy = store.display.showPixelBuddy;
+        _reconcileSyncSpinner(
+          busyOverride: busy,
+          showBuddyOverride: showPixelBuddy,
+          reducedOverride: reduceMotion,
+        );
         final syncAction = sync.action == HomeSyncAction.login ||
                 sync.action == HomeSyncAction.verify
             ? sync.action
@@ -880,32 +1001,36 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ),
               );
 
-              return JournalSwipeTile(
-                key: ValueKey('swipe-${a.id}'),
-                displayPrefs: store.display,
-                rightAction: a.isCompleted
-                    ? null
-                    : JournalSwipeAction(
-                        label: inTodayPlan ? '移出计划' : '今日计划',
-                        icon: inTodayPlan
-                            ? Icons.playlist_remove_rounded
-                            : Icons.playlist_add_check_rounded,
-                        color: journal.accent,
-                        backgroundColor: journal.sage,
-                        onTrigger: () => unawaited(_toggleTodayPlan(a)),
-                      ),
-                leftAction: !canPin
-                    ? null
-                    : JournalSwipeAction(
-                        label: isPinned ? '取消置顶' : '置顶',
-                        icon: isPinned
-                            ? Icons.push_pin_rounded
-                            : Icons.push_pin_outlined,
-                        color: journal.ink,
-                        backgroundColor: journal.parchment,
-                        onTrigger: () => unawaited(_togglePin(a)),
-                      ),
-                child: interactiveCard,
+              final pinKey = AssignmentStore.pinKeyOf(a);
+              return JournalMicroBounce(
+                pulse: _pinPulseByKey[pinKey] ?? 0,
+                child: JournalSwipeTile(
+                  key: ValueKey('swipe-${a.id}'),
+                  displayPrefs: store.display,
+                  rightAction: a.isCompleted
+                      ? null
+                      : JournalSwipeAction(
+                          label: inTodayPlan ? '移出计划' : '今日计划',
+                          icon: inTodayPlan
+                              ? Icons.playlist_remove_rounded
+                              : Icons.playlist_add_check_rounded,
+                          color: journal.accent,
+                          backgroundColor: journal.sage,
+                          onTrigger: () => unawaited(_toggleTodayPlan(a)),
+                        ),
+                  leftAction: !canPin
+                      ? null
+                      : JournalSwipeAction(
+                          label: isPinned ? '取消置顶' : '置顶',
+                          icon: isPinned
+                              ? Icons.push_pin_rounded
+                              : Icons.push_pin_outlined,
+                          color: journal.ink,
+                          backgroundColor: journal.parchment,
+                          onTrigger: () => unawaited(_togglePin(a)),
+                        ),
+                  child: interactiveCard,
+                ),
               );
             },
           );
@@ -926,6 +1051,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               pinned: pinned,
               dragHandle: dragHandle,
               pinnedVisibleKeys: pinnedVisibleKeys,
+              bouncePulse: _pinPulseByKey[item.pinKey] ?? 0,
             );
           }
           return card(
@@ -953,6 +1079,36 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             ? const <HomeTimelineSection>[]
             : buildTimelineSections(sortedTimelineItems);
         final compactDensity = store.display.compact;
+        final buddyMood = busy
+            ? JournalPixelBuddyMood.syncing
+            : dueSummary.dueToday > 0
+                ? JournalPixelBuddyMood.dueToday
+                : (showDueSummary &&
+                        dueSummary.dueToday == 0 &&
+                        (dueSummary.completedToday > 0 ||
+                            sortedTimelineItems.isEmpty))
+                    ? JournalPixelBuddyMood.allClear
+                    : JournalPixelBuddyMood.idle;
+
+        void onBuddyTap() {
+          _buddyTapCount++;
+          if (busy) return;
+          _buddyWhisperTimer?.cancel();
+          final whisper = journalBuddyTapWhisper(
+            dueToday: dueSummary.dueToday,
+            dueIn3Days: dueSummary.dueIn3Days,
+            completedToday: dueSummary.completedToday,
+            tapCount: _buddyTapCount - 1,
+          );
+          setState(() => _buddyWhisper = whisper);
+          _buddyWhisperTimer = Timer(const Duration(milliseconds: 2000), () {
+            _buddyWhisperTimer = null;
+            if (!mounted) return;
+            if (_buddyWhisper != null) {
+              setState(() => _buddyWhisper = null);
+            }
+          });
+        }
 
         final headerBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1054,8 +1210,29 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final title = Text('课业手记', style: journal.display);
               return LayoutBuilder(
                 builder: (context, constraints) {
-                  if (!JournalLayout.isLargeText(context) &&
-                      constraints.maxWidth >= 300) {
+                  final largeText = JournalLayout.isLargeText(context);
+                  final buddySize = largeText
+                      ? 20.0
+                      : (constraints.maxWidth < 350 ? 22.0 : 26.0);
+                  final Widget titleCluster = showPixelBuddy
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            title,
+                            const SizedBox(width: 4),
+                            JournalPixelBuddy(
+                              key: const ValueKey('home-pixel-buddy'),
+                              mood: buddyMood,
+                              size: buddySize,
+                              onTap: onBuddyTap,
+                              syncTickListenable: _syncSpinnerTick,
+                              displayPrefs: store.display,
+                            ),
+                          ],
+                        )
+                      : title;
+                  if (!largeText && constraints.maxWidth >= 300) {
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
@@ -1065,7 +1242,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             child: FittedBox(
                               fit: BoxFit.scaleDown,
                               alignment: Alignment.centerLeft,
-                              child: title,
+                              child: titleCluster,
                             ),
                           ),
                         ),
@@ -1077,7 +1254,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   return Wrap(
                     alignment: WrapAlignment.spaceBetween,
                     crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [title, actionsRow],
+                    children: [
+                      showPixelBuddy
+                          ? ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: constraints.maxWidth,
+                              ),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: titleCluster,
+                              ),
+                            )
+                          : title,
+                      actionsRow,
+                    ],
                   );
                 },
               );
@@ -1112,6 +1303,24 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final showChevron =
                   sync.action != HomeSyncAction.none && !sync.gentle;
 
+              final syncErrorOrPending = !busy &&
+                  (store.syncReport.phase == SyncPhase.failed ||
+                      store.syncReport.phase == SyncPhase.partial ||
+                      sync.action == HomeSyncAction.login ||
+                      sync.action == HomeSyncAction.verify ||
+                      sync.action == HomeSyncAction.settings);
+              final syncBusyWithBuddy = busy && showPixelBuddy;
+              final activeWhisper =
+                  (!busy && !syncErrorOrPending && showPixelBuddy)
+                      ? _buddyWhisper
+                      : null;
+              final effectiveStatusText = syncBusyWithBuddy
+                  ? journalBuddySyncPhrase(
+                      store.homeSyncProgress?.stage,
+                      _syncSpinnerTick.value,
+                    )
+                  : (activeWhisper ?? statusText);
+
               final scaler = MediaQuery.textScalerOf(context);
               final direction = Directionality.of(context);
               double measureWidth(String text, TextStyle style) {
@@ -1135,7 +1344,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               );
               final leftWidth = 14.5 +
                   5.0 +
-                  measureWidth(statusText, journal.metadata) +
+                  measureWidth(effectiveStatusText, journal.metadata) +
                   (showChevron ? 18.0 : 0.0) +
                   4.0;
               final rightWidth = showDueSummary
@@ -1143,6 +1352,37 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   : 0.0;
               final fitsSingleRow = !showDueSummary ||
                   (leftWidth + rightWidth + 6.0 <= constraints.maxWidth);
+
+              Widget buildStatusContent({
+                required Widget leading,
+                required String text,
+                required TextStyle style,
+              }) {
+                return Semantics(
+                  liveRegion: true,
+                  button: onSyncTap != null,
+                  label: text,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      leading,
+                      const SizedBox(width: 5),
+                      Flexible(
+                        fit: FlexFit.loose,
+                        child: ExcludeSemantics(
+                          child: Text(text, style: style),
+                        ),
+                      ),
+                      if (showChevron)
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          size: 18,
+                          color: journal.muted,
+                        ),
+                    ],
+                  ),
+                );
+              }
 
               final statusControl = Material(
                 type: MaterialType.transparency,
@@ -1157,33 +1397,58 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: Semantics(
-                        liveRegion: true,
-                        button: onSyncTap != null,
-                        label: statusText,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(statusIcon, size: 14.5, color: statusColor),
-                            const SizedBox(width: 5),
-                            Flexible(
-                              fit: FlexFit.loose,
-                              child: ExcludeSemantics(
-                                child: Text(
-                                  statusText,
+                      child: syncBusyWithBuddy
+                          ? ValueListenableBuilder<int>(
+                              valueListenable: _syncSpinnerTick,
+                              builder: (context, tick, _) {
+                                final glyph = reduceMotion
+                                    ? '✻'
+                                    : kJournalSpinnerGlyphs[
+                                        tick % kJournalSpinnerGlyphs.length];
+                                final phrase = journalBuddySyncPhrase(
+                                  store.homeSyncProgress?.stage,
+                                  tick,
+                                );
+                                return buildStatusContent(
+                                  leading: SizedBox(
+                                    width: 14.5,
+                                    child: Center(
+                                      child: Text(
+                                        glyph,
+                                        style: journal.metadata.copyWith(
+                                          color: journal.accent,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1.0,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  text: phrase,
+                                  style: journal.metadata,
+                                );
+                              },
+                            )
+                          : activeWhisper != null
+                              ? buildStatusContent(
+                                  leading: Icon(
+                                    Icons.auto_awesome_rounded,
+                                    size: 14.5,
+                                    color: journal.accent,
+                                  ),
+                                  text: activeWhisper,
+                                  style: journal.metadata.copyWith(
+                                    color: journal.accent,
+                                  ),
+                                )
+                              : buildStatusContent(
+                                  leading: Icon(
+                                    statusIcon,
+                                    size: 14.5,
+                                    color: statusColor,
+                                  ),
+                                  text: statusText,
                                   style: journal.metadata,
                                 ),
-                              ),
-                            ),
-                            if (showChevron)
-                              Icon(
-                                Icons.chevron_right_rounded,
-                                size: 18,
-                                color: journal.muted,
-                              ),
-                          ],
-                        ),
-                      ),
                     ),
                   ),
                 ),
@@ -1501,8 +1766,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             if (timelineSections.isEmpty) return buildEmptyState();
             final sectionIndex = index - 1;
             final section = timelineSections[sectionIndex];
+            final isEmphasizedSection = section.pinned || section.badge == '今天';
             final groupCard = section.pinned && section.items.length >= 2
                 ? JournalGroupedCard(
+                    emphasized: isEmphasizedSection,
                     children: [
                       Builder(
                         builder: (context) {
@@ -1580,6 +1847,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ],
                   )
                 : JournalGroupedCard(
+                    emphasized: isEmphasizedSection,
                     dividerIndent: 70.0,
                     children: [
                       for (final item in section.items)
@@ -1651,8 +1919,39 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             ),
         ];
 
+        final showSliverBuddy = showPixelBuddy &&
+            !JournalLayout.isLargeText(context) &&
+            MediaQuery.sizeOf(context).width >= 330;
+
         return Stack(
           children: [
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 240,
+              child: IgnorePointer(
+                child: RepaintBoundary(
+                  child: ValueListenableBuilder<double>(
+                    valueListenable: _scrollOffset,
+                    builder: (context, offset, _) {
+                      final fade = (1.0 - offset / 110.0).clamp(0.0, 1.0);
+                      if (fade <= 0.01) {
+                        return const SizedBox.shrink();
+                      }
+                      return CustomPaint(
+                        key: const ValueKey('home-ambient-glow'),
+                        painter: _HomeAmbientGlowPainter(
+                          primaryGlow: journal.ambientPrimaryGlow,
+                          warmGlow: journal.ambientWarmGlow,
+                          fade: fade,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
             listView,
             Positioned(
               top: 0,
@@ -1663,6 +1962,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 builder: (context, offset, _) => JournalSliverHeader(
                   title: '课业手记',
                   scrollOffset: offset,
+                  titleTrailing: showSliverBuddy
+                      ? JournalPixelBuddy(
+                          key: const ValueKey('home-sliver-pixel-buddy'),
+                          mood: buddyMood,
+                          mini: true,
+                          onTap: onBuddyTap,
+                          syncTickListenable: _syncSpinnerTick,
+                          displayPrefs: store.display,
+                        )
+                      : null,
                   actions: headerActions,
                 ),
               ),
@@ -2172,49 +2481,53 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         child: ExcludeSemantics(
           child: Tooltip(
             message: message,
-            child: Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: onTap,
-                enableFeedback: false,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: 48,
-                    minWidth: fullWidth ? double.infinity : 0,
-                  ),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: fullWidth ? null : 1,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 11, vertical: 6.5),
-                      decoration: BoxDecoration(
-                        color: filtersActive ? journal.sage : journal.parchment,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: filtersActive
-                              ? journal.sageBorder
-                              : Colors.transparent,
-                          width: 0.8,
+            child: JournalPressableScale(
+              pressScale: 0.97,
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: onTap,
+                  enableFeedback: false,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: 48,
+                      minWidth: fullWidth ? double.infinity : 0,
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: fullWidth ? null : 1,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 11, vertical: 6.5),
+                        decoration: BoxDecoration(
+                          color:
+                              filtersActive ? journal.sage : journal.parchment,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: filtersActive
+                                ? journal.sageBorder
+                                : Colors.transparent,
+                            width: 0.8,
+                          ),
                         ),
-                      ),
-                      child: Row(
-                        mainAxisSize:
-                            fullWidth ? MainAxisSize.max : MainAxisSize.min,
-                        children: [
-                          Icon(
-                            filtersActive
-                                ? Icons.tune_rounded
-                                : Icons.search_rounded,
-                            size: 16,
-                            color: filterColor,
-                          ),
-                          const SizedBox(width: 5),
-                          Flexible(
-                            child: Text(filterLabel, style: filterStyle),
-                          ),
-                        ],
+                        child: Row(
+                          mainAxisSize:
+                              fullWidth ? MainAxisSize.max : MainAxisSize.min,
+                          children: [
+                            Icon(
+                              filtersActive
+                                  ? Icons.tune_rounded
+                                  : Icons.search_rounded,
+                              size: 16,
+                              color: filterColor,
+                            ),
+                            const SizedBox(width: 5),
+                            Flexible(
+                              child: Text(filterLabel, style: filterStyle),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -2237,39 +2550,42 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         child: ExcludeSemantics(
           child: Tooltip(
             message: message,
-            child: Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: onTap,
-                enableFeedback: false,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: Center(
-                    widthFactor: 1,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 11, vertical: 6.5),
-                      decoration: BoxDecoration(
-                        color: journal.parchment,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: Colors.transparent,
-                          width: 0.8,
-                        ),
-                      ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.swap_vert_rounded,
-                            size: 16, color: journal.muted),
-                        const SizedBox(width: 5),
-                        Flexible(
-                          child: Text(
-                            sortLabel,
-                            key: const ValueKey('current-home-sort'),
-                            style: sortStyle,
+            child: JournalPressableScale(
+              pressScale: 0.97,
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: onTap,
+                  enableFeedback: false,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 48),
+                    child: Center(
+                      widthFactor: 1,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 11, vertical: 6.5),
+                        decoration: BoxDecoration(
+                          color: journal.parchment,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Colors.transparent,
+                            width: 0.8,
                           ),
                         ),
-                      ]),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.swap_vert_rounded,
+                              size: 16, color: journal.muted),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              sortLabel,
+                              key: const ValueKey('current-home-sort'),
+                              style: sortStyle,
+                            ),
+                          ),
+                        ]),
+                      ),
                     ),
                   ),
                 ),
@@ -2295,41 +2611,44 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         child: ExcludeSemantics(
           child: Tooltip(
             message: message,
-            child: Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                key: const ValueKey('home-add-manual'),
-                borderRadius: BorderRadius.circular(20),
-                onTap: onTap,
-                enableFeedback: false,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: Center(
-                    widthFactor: 1,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 6.5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: journal.sage,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: journal.sageBorder,
-                          width: 0.8,
+            child: JournalPressableScale(
+              pressScale: 0.97,
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  key: const ValueKey('home-add-manual'),
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: onTap,
+                  enableFeedback: false,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 48),
+                    child: Center(
+                      widthFactor: 1,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 11,
+                          vertical: 6.5,
                         ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.add_rounded,
-                            size: 16,
-                            color: journal.ink,
+                        decoration: BoxDecoration(
+                          color: journal.sage,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: journal.sageBorder,
+                            width: 0.8,
                           ),
-                          const SizedBox(width: 5),
-                          Text(addLabel, style: addStyle),
-                        ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.add_rounded,
+                              size: 16,
+                              color: journal.ink,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(addLabel, style: addStyle),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -2416,6 +2735,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       useRootNavigator: true,
       isScrollControlled: true,
       useSafeArea: true,
+      sheetAnimationStyle: JournalMotion.modalSheetAnimationStyle(context),
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) {
           final journal = Journal.of(context);
@@ -2676,4 +2996,53 @@ class _HomeFilterSelection {
   final AssignmentDeadlineFilter deadline;
   final AssignmentTypeFilter type;
   final HomeSortOrder sortOrder;
+}
+
+class _HomeAmbientGlowPainter extends CustomPainter {
+  const _HomeAmbientGlowPainter({
+    required this.primaryGlow,
+    required this.warmGlow,
+    required this.fade,
+  });
+
+  final Color primaryGlow;
+  final Color warmGlow;
+  final double fade;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty || fade <= 0.01) return;
+
+    final primaryCenter = Offset(size.width * 0.16, -24);
+    final primaryRadius = size.width * 0.72;
+    final primaryPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          primaryGlow.withValues(alpha: primaryGlow.a * fade),
+          primaryGlow.withValues(alpha: 0),
+        ],
+      ).createShader(
+        Rect.fromCircle(center: primaryCenter, radius: primaryRadius),
+      );
+    canvas.drawCircle(primaryCenter, primaryRadius, primaryPaint);
+
+    final warmCenter = Offset(size.width * 0.88, 12);
+    final warmRadius = size.width * 0.56;
+    final warmPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          warmGlow.withValues(alpha: warmGlow.a * fade),
+          warmGlow.withValues(alpha: 0),
+        ],
+      ).createShader(
+        Rect.fromCircle(center: warmCenter, radius: warmRadius),
+      );
+    canvas.drawCircle(warmCenter, warmRadius, warmPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _HomeAmbientGlowPainter oldDelegate) =>
+      oldDelegate.primaryGlow != primaryGlow ||
+      oldDelegate.warmGlow != warmGlow ||
+      oldDelegate.fade != fade;
 }

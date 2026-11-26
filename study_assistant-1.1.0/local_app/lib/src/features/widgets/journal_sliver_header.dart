@@ -11,11 +11,13 @@ class JournalSliverHeader extends StatelessWidget {
     required this.title,
     required this.scrollOffset,
     required this.actions,
+    this.titleTrailing,
   });
 
   final String title;
   final double scrollOffset;
   final List<Widget> actions;
+  final Widget? titleTrailing;
 
   @override
   Widget build(BuildContext context) {
@@ -46,11 +48,22 @@ class JournalSliverHeader extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: journal.pageTitle.copyWith(fontSize: 19.5),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: journal.pageTitle.copyWith(fontSize: 19.5),
+                          ),
+                        ),
+                        if (titleTrailing != null) ...[
+                          const SizedBox(width: 6),
+                          titleTrailing!,
+                        ],
+                      ],
                     ),
                   ),
                   Row(mainAxisSize: MainAxisSize.min, children: actions),

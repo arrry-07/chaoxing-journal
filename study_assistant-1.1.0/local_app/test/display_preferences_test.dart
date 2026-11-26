@@ -60,20 +60,58 @@ void main() {
     expect(legacy.themeMode, JournalThemeMode.system);
     expect(legacy.soundEnabled, isTrue);
     expect(legacy.hapticsEnabled, isTrue);
+    expect(legacy.showPixelBuddy, isTrue);
     final restored = DisplayPreferences.decode(legacy
         .copyWith(
             themeMode: JournalThemeMode.dark,
             soundEnabled: false,
-            hapticsEnabled: false)
+            hapticsEnabled: false,
+            showPixelBuddy: false)
         .encode());
     expect(restored.themeMode, JournalThemeMode.dark);
     expect(restored.soundEnabled, isFalse);
     expect(restored.hapticsEnabled, isFalse);
+    expect(restored.showPixelBuddy, isFalse);
     expect(restored.compact, isTrue);
     expect(restored.countdown, isTrue);
     expect(restored.widgetRange, WidgetRange.week);
     expect(DisplayPreferences.decode('{"themeMode":"future"}').themeMode,
         JournalThemeMode.system);
+    expect(DisplayPreferences.decode('{"pixelBuddy":"yes"}').showPixelBuddy,
+        isTrue);
+  });
+
+  testWidgets('display settings toggles pixel buddy without widget snapshot',
+      (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final s = store();
+    addTearDown(s.dispose);
+    final widgets = s.widgetSnapshotService as _Widgets;
+    expect(s.display.showPixelBuddy, isTrue);
+
+    await t.pumpWidget(MaterialApp(home: DisplaySettingsScreen(store: s)));
+    final toggle = find.byKey(const ValueKey('display-pixel-buddy-toggle'));
+    expect(toggle, findsOneWidget);
+    expect(find.text('顶栏像素伙伴'), findsOneWidget);
+    expect(find.text('在首页标题旁显示像素小伴，轻点互动并播报同步状态'), findsOneWidget);
+
+    await t.ensureVisible(toggle);
+    await t.tap(toggle);
+    await t.pumpAndSettle();
+    expect(s.display.showPixelBuddy, isFalse);
+    expect(widgets.saves, 0);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      DisplayPreferences.decode(prefs.getString('display_preferences_v1'))
+          .showPixelBuddy,
+      isFalse,
+    );
+
+    await t.tap(toggle);
+    await t.pumpAndSettle();
+    expect(s.display.showPixelBuddy, isTrue);
+    expect(widgets.saves, 0);
   });
 
   test('theme updates while journal operations wait', () async {

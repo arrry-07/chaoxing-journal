@@ -275,30 +275,191 @@ class JournalPressableScale extends StatefulWidget {
   State<JournalPressableScale> createState() => _JournalPressableScaleState();
 }
 
-class _JournalPressableScaleState extends State<JournalPressableScale> {
+class _JournalPressableScaleState extends State<JournalPressableScale>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
   bool _pressed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController.unbounded(vsync: this, value: 1.0);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (JournalMotion.isReducedMotion(context)) {
+      _pressed = false;
+      if (_controller.isAnimating || _controller.value != 1.0) {
+        _controller.stop();
+        _controller.value = 1.0;
+      }
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant JournalPressableScale oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.enabled && !widget.enabled) {
+      _pressed = false;
+      if (JournalMotion.isReducedMotion(context)) {
+        _controller.stop();
+        _controller.value = 1.0;
+      } else if (_controller.isAnimating || _controller.value != 1.0) {
+        _controller.animateWith(
+          JournalMotion.springFor(
+            JournalMotion.pressSpring,
+            start: _controller.value,
+            end: 1.0,
+            velocity: _controller.velocity,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handlePointerDown(PointerDownEvent _) {
+    if (!widget.enabled) return;
+    _pressed = true;
+    if (JournalMotion.isReducedMotion(context)) {
+      _controller.stop();
+      _controller.value = 1.0;
+      return;
+    }
+    _controller.animateWith(
+      JournalMotion.springFor(
+        JournalMotion.criticalSpring,
+        start: _controller.value,
+        end: widget.pressScale,
+        velocity: _controller.velocity,
+      ),
+    );
+  }
+
+  void _release() {
+    if (!_pressed && !_controller.isAnimating && _controller.value == 1.0) {
+      return;
+    }
+    _pressed = false;
+    if (JournalMotion.isReducedMotion(context)) {
+      _controller.stop();
+      _controller.value = 1.0;
+      return;
+    }
+    _controller.animateWith(
+      JournalMotion.springFor(
+        JournalMotion.pressSpring,
+        start: _controller.value,
+        end: 1.0,
+        velocity: _controller.velocity,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final reduced = JournalMotion.isReducedMotion(context);
     return Listener(
-      onPointerDown:
-          widget.enabled ? (_) => setState(() => _pressed = true) : null,
-      onPointerUp: (_) {
-        if (_pressed) setState(() => _pressed = false);
-      },
-      onPointerCancel: (_) {
-        if (_pressed) setState(() => _pressed = false);
-      },
-      child: AnimatedScale(
-        scale: _pressed && widget.enabled && !reduced ? widget.pressScale : 1.0,
-        duration: JournalMotion.duration(
-          context,
-          const Duration(milliseconds: 110),
+      onPointerDown: widget.enabled ? _handlePointerDown : null,
+      onPointerUp: (_) => _release(),
+      onPointerCancel: (_) => _release(),
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) => Transform.scale(
+          scale: reduced ? 1.0 : _controller.value,
+          child: child,
         ),
-        curve: JournalMotion.easeOut,
         child: widget.child,
       ),
+    );
+  }
+}
+
+class JournalMicroBounce extends StatefulWidget {
+  const JournalMicroBounce({
+    super.key,
+    required this.pulse,
+    this.peakScale = 1.04,
+    required this.child,
+  });
+
+  final int pulse;
+  final double peakScale;
+  final Widget child;
+
+  @override
+  State<JournalMicroBounce> createState() => _JournalMicroBounceState();
+}
+
+class _JournalMicroBounceState extends State<JournalMicroBounce>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController.unbounded(vsync: this, value: 1.0);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (JournalMotion.isReducedMotion(context) &&
+        (_controller.isAnimating || _controller.value != 1.0)) {
+      _controller.stop();
+      _controller.value = 1.0;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant JournalMicroBounce oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (JournalMotion.isReducedMotion(context)) {
+      if (_controller.isAnimating || _controller.value != 1.0) {
+        _controller.stop();
+        _controller.value = 1.0;
+      }
+      return;
+    }
+    if (widget.pulse > oldWidget.pulse && widget.peakScale > 1.0) {
+      final delta = (widget.peakScale - 1.0).clamp(0.0, 0.25);
+      // For popSpring (m=1, k=500, c=28), peak occurs at t~0.0513s with
+      // displacement/velocity = 0.02181.
+      final impulseVelocity = delta * 45.85;
+      _controller.animateWith(
+        JournalMotion.springFor(
+          JournalMotion.popSpring,
+          start: _controller.value,
+          end: 1.0,
+          velocity: (_controller.velocity + impulseVelocity).clamp(-6.0, 6.0),
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reduced = JournalMotion.isReducedMotion(context);
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) => Transform.scale(
+        scale: reduced ? 1.0 : _controller.value,
+        child: child,
+      ),
+      child: widget.child,
     );
   }
 }
