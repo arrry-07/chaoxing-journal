@@ -140,6 +140,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   ClawdCompanionController? _localClawdController;
   bool _appResumed = true;
   bool _tickerEnabled = true;
+  bool _isCurrentRoute = true;
   bool _reducedMotion = false;
 
   bool get _isBusy =>
@@ -245,11 +246,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   void _syncClawdEnvironment({bool notify = true}) {
     final controller = _clawdController;
     if (controller == null) return;
+    final isSharedController = !identical(controller, _localClawdController);
+    if (isSharedController && !_isCurrentRoute) return;
     final state = _buildHomeClawdState();
     controller.updateEnvironment(
       displayPrefs: store.display,
       appResumed: _appResumed,
-      tickerEnabled: _tickerEnabled,
+      tickerEnabled: isSharedController ? null : _tickerEnabled,
       reducedMotion: _reducedMotion,
       isSyncing: _isBusy,
       hasSyncErrorOrPending: _hasStoreSyncErrorOrPending,
@@ -259,9 +262,20 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     );
   }
 
+  bool _canCheerOnCurrentRoute(ClawdCompanionController controller) {
+    if (identical(controller, _localClawdController)) return true;
+    final routeCurrent = ModalRoute.of(context)?.isCurrent ?? _isCurrentRoute;
+    return routeCurrent &&
+        controller.onPrimaryTab &&
+        controller.lastVisitedTab == ClawdPrimaryTab.home;
+  }
+
   void _triggerBuddyCheer() {
     if (!mounted || _reducedMotion) return;
-    _ensureClawdController().triggerCheer();
+    final controller = _ensureClawdController();
+    if (_canCheerOnCurrentRoute(controller)) {
+      controller.triggerCheer();
+    }
   }
 
   void _clearCompletingManual({String? entryId, bool notify = false}) {
@@ -314,7 +328,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     setState(() {
       _completingManualIds.add(entryId);
     });
-    _ensureClawdController().triggerCheer();
+    final controller = _ensureClawdController();
+    if (_canCheerOnCurrentRoute(controller)) {
+      controller.triggerCheer();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_completingManualIds.contains(entryId)) return;
       _completingManualTimers.remove(entryId)?.cancel();
@@ -345,7 +362,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     if (_feedbackEpoch != store.accountEpoch ||
         _feedbackAccount != store.account) {
       _feedback.dismiss();
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
       _clearCompletingManual();
       _pinPulseByKey.clear();
       _preExamStripFilters = null;
@@ -408,7 +425,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     if (oldWidget.store != store) {
       oldWidget.store.removeListener(_onStoreChanged);
       _feedback.dismiss();
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
       _clearCompletingManual();
       _pinPulseByKey.clear();
       _feedbackEpoch = store.accountEpoch;
@@ -439,6 +456,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? true;
     _tickerEnabled = TickerMode.valuesOf(context).enabled;
     _reducedMotion = JournalMotion.isReducedMotion(context);
     final scoped = ClawdCompanionScope.maybeOf(context);

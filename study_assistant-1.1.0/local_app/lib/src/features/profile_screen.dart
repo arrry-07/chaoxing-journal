@@ -53,6 +53,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       ValueNotifier<Offset>(const Offset(156.0, 48.0));
   bool _appResumed = true;
   bool _tickerEnabled = true;
+  bool _isCurrentRoute = true;
   bool _reducedMotion = false;
   late int _lastAccountEpoch;
   String? _lastAccount;
@@ -128,7 +129,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         _lastAccount != widget.store.account) {
       _lastAccountEpoch = widget.store.accountEpoch;
       _lastAccount = widget.store.account;
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
     }
     _syncClawdEnvironment();
   }
@@ -148,6 +149,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   void _syncClawdEnvironment({bool notify = true}) {
     final controller = _clawdController;
     if (controller == null) return;
+    final isSharedController = !identical(controller, _localClawdController);
+    if (isSharedController && !_isCurrentRoute) return;
     final busy = widget.store.isLoading ||
         widget.store.syncReport.phase == SyncPhase.running;
     final hasError =
@@ -155,7 +158,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     controller.updateEnvironment(
       displayPrefs: widget.store.display,
       appResumed: _appResumed,
-      tickerEnabled: _tickerEnabled,
+      tickerEnabled: isSharedController ? null : _tickerEnabled,
       reducedMotion: _reducedMotion,
       isSyncing: busy,
       hasSyncErrorOrPending: hasError,
@@ -180,6 +183,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? true;
     _tickerEnabled = TickerMode.valuesOf(context).enabled;
     _reducedMotion = JournalMotion.isReducedMotion(context);
     final scoped = ClawdCompanionScope.maybeOf(context);
@@ -196,7 +200,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       _lastAccountEpoch = widget.store.accountEpoch;
       _lastAccount = widget.store.account;
       widget.store.addListener(_onStoreChanged);
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
       _syncClawdEnvironment();
     }
   }

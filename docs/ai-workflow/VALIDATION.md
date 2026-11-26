@@ -4,8 +4,8 @@
 
 ## 先确定本次终点
 
-- **默认按体量在 dev 迭代（分级闭环）**：① ≤3 文件且不碰存储/同步/排序契约的小步快修直接改 → 定向门禁 → 自审 Diff（可按需 `@verifier` 抽检）→ 提交推送 `origin/dev`（自测包可攒批再打）；② 跨模块迭代走 `/clear` 或新对话 `/goal` 闭环：Stage 1 → 独立 Gate 审查与分级返工（执行模型分流、Gate 审查选型与分级返工规则统一见全局 `staged-release-gate` 技能，本文件不重复维护模型清单）→ 升第三位 `Z+1` 和构建号，在现成的 MuMu「学习通」保数据覆盖原签名自测包并截图核验（纯逻辑无 UI 改动可按方案暂缓攒批）→ 阶段收口更新一次 `DEV_STATE.md` 与 `PROJECT_STATE.md`。Gate 通过后直接进入自测打包，不逐轮询问「直接发正式版 / 先打自测包」；仅当积累较多完整改动适合攒批时才在收口汇报中顺带建议正式发布。
-- **正式版低频攒批**：已积累较多经过验收的完整改动时，可以建议正式发布并说明理由。维护者明确发出正式发布指令、通过适用 Gate 后才升第二位并进入 Stage 2。紧急 Hotfix 和指定停止线按当前指令执行。
+- **默认按体量在 dev 迭代并周期性集成到 main（分级闭环）**：① ≤3 文件且不碰存储/同步/排序契约的小步快修直接改 → 定向门禁 → 自审 Diff（可按需 `@verifier` 抽检）→ 提交推送 `origin/dev`（自测包可攒批再打）；② 跨模块迭代走 `/clear` 或新对话 `/goal` 闭环：Stage 1 → 独立 Gate 审查与分级返工（执行模型分流、Gate 审查选型与分级返工规则统一见全局 `staged-release-gate` 技能，本文件不重复维护模型清单）→ 升第三位 `Z+1` 和构建号，在现成的 MuMu「学习通」保数据覆盖原签名自测包并截图核验（纯逻辑无 UI 改动可按方案暂缓攒批）→ 阶段收口更新一次 `DEV_STATE.md` 与 `PROJECT_STATE.md`。Gate 通过后直接进入自测打包，不逐轮询问「直接发正式版 / 先打自测包」。每累积 1–3 个 `dev` 版本（或单个稳定阶段完成后），可先过一次本地全量门禁再提 **日常集成 PR（`dev → main`）** 跑通云端全量 CI 并合入 `main`（不修改 `README.md`/`CHANGELOG.md`/`安装与使用.md`，不打 Tag 或发 Release）；仅当积累较多完整改动适合正式发布时才在收口汇报中顺带建议正式发版。
+- **随时轻量冻结发版（Stage 2）**：由于日常改动已分批通过 PR 合入 `main` 并跑绿 CI，维护者随时下达正式发版指令并通过适用 Gate 后，只需补充一次轻量版本冻结 PR（升 `Y+1` 并归零 `Z`，同步 `CHANGELOG.md`、`README.md` 与安装指南）合入 `main` 后打包验收并打 Tag 发布。紧急 Hotfix 从最新正式版 Tag（而非可能领先正式版的 `main`）起步，发布后同步回 `main` 与 `dev`。
 - **减少真机/模拟器反复刷接口**：涉及学习通请求跳过、归档、降级或解析边界的改动，先在本地用离线合成夹具把所有边界跑绿，最后在 MuMu 上集中做 1 次真实账号端到端刷新验证，避免高频刷接口反复触发 `9010` 验证码。
 - 常规补丁沿现有包名、签名与 GitHub/Gitee 渠道推进，复用已给的授权。仓库可见性、签名迁移、渠道策略调整和凭据或用户数据外传另行授权。
 - 用一句话说明改动影响和准备运行的检查。范围明确时直接执行；只有新增耗时检查或扩大范围才补充理由，不为每条命令写计划。
@@ -13,7 +13,7 @@
 
 ## 开发阶段按影响选检查（本地秒级快检）
 
-开发与施工阶段本地默认执行**秒级定向门禁**：`python scripts/verify_local_gate.py --tests <本次直接涉及的 5–8 个 test/*_test.dart>`（或等价的改动文件 `dart format`、`dart analyze lib test`——**含中文路径时勿在本地直接运行 `flutter analyze`**——与 `flutter --no-version-check test --no-pub <相关测试>`，以及按需执行的受影响脚本/原生单测）。`verify_local_gate.py` 默认为 Flutter 单测注入 `--timeout 30s`（`--test-case-timeout` 可调）与外层进程树超时熔断（`--flutter-timeout` 默认 quick 300s / full 900s），卡死时自动终止子进程树并回显最后卡住的用例。日常局部修改不要每次都重跑 1500+ 全量测试；**但凡改动触及全局基础层（主题/色板、全局路由转场、公共组件、共享 Store 公共契约、更新/提醒策略）的 Stage 1 收口前，或准备冻结版本进入 Stage 2 提 PR 前，须在本地执行一次 `TZ=UTC python scripts/verify_local_gate.py --mode full`（约 2–3 分钟，带超时熔断）提前清零跨模块老测试漂移，避免推上 PR 后在 10+ 分钟云端 CI 才爆红返工**；三时区套件与完整 Android 矩阵继续由 PR/main/Tag 的 GitHub Actions CI 承接。
+开发与施工阶段本地默认执行**秒级定向门禁**：`python scripts/verify_local_gate.py --tests <本次直接涉及的 5–8 个 test/*_test.dart>`（或等价的改动文件 `dart format`、`dart analyze lib test`——**含中文路径时勿在本地直接运行 `flutter analyze`**——与 `flutter --no-version-check test --no-pub <相关测试>`，以及按需执行的受影响脚本/原生单测）。`verify_local_gate.py` 默认为 Flutter 单测注入 `--timeout 30s`（`--test-case-timeout` 可调）与外层进程树超时熔断（`--flutter-timeout` 默认 quick 300s / full 900s），卡死时自动终止子进程树并回显最后卡住的用例。日常局部修改不要每次都重跑 1500+ 全量测试；**但凡改动触及全局基础层（主题/色板、全局路由转场、公共组件、共享 Store 公共契约、更新/提醒策略）的 Stage 1 收口前，或准备冻结版本进入 Stage 2 提 PR 前，须在本地执行一次 `TZ=UTC python scripts/verify_local_gate.py --mode full`（约 2–3 分钟，带超时熔断）提前清零跨模块老测试漂移，避免推上 PR 后在 10+ 分钟云端 CI 才爆红返工**（日常集成 PR 跑默认 `--mode full`，正式冻版 PR 额外加 `--release` 严格核对正式文档）；三时区套件与完整 Android 矩阵继续由 PR/main/Tag 的 GitHub Actions CI 承接。
 
 - **Android/Kotlin 本地一键缓存快检**：凡涉及 `android/`、Kotlin、Manifest 或通知渠道/后台桥接改动，Stage 1 与返工推送前统一执行 `python scripts/run_android_tests.py --local-fast`。脚本自动增量同步 `local_app` 至持久化 ASCII 缓存目录（复用 Gradle/构建缓存，免除重复 5 分钟冷构建）、按需离线 `flutter pub get` 并在其后重写转义 `android/local.properties`（根除 `[PropertyEscape]` 报错），一次性跑通 `:app:testDebugUnitTest`、`:app:compileDebugAndroidTestKotlin` 与 `:app:lintDebug`（可用 `--clean-cache` 重建缓存或 `--gradle-tasks` 指定子集），把 `androidTest` 编译漂移与 Lint 拦截在 Stage 1。
 
@@ -40,7 +40,7 @@
 0. **状态与文档按阶段收口同步**：在每个阶段收口或中断交接提交时更新一次 [dev 本地状态](DEV_STATE.md)（已完成改动、基线或当前状态、下一步待办，只留最近 5 条），里程碑/自测打包/发版收口时同步更新 `PROJECT_STATE.md`；同一阶段内的中间小提交无需反复改写状态文件或为记录自身 SHA 追加空提交。只读调查在结束时留下结论与下一步。
 
 1. **范围与安全检查**：推送前核对 `git status` 与本次提交 Diff，严禁将凭据、Cookie、账号响应、敏感日志、`docs/feedback/`、`scripts/demo-video/`、个人材料或 `.apk` 等大体积二进制产物纳入提交。
-2. **分支与发版边界**：只允许推送当前 `dev` 到 `origin/dev`，严禁顺手合入 `main`、创建正式 PR 或打正式版本 Tag（正式发版须等维护者明确指令）。
+2. **分支与发版边界**：日常开发推送当前 `dev` 到 `origin/dev`；允许按需发起**日常集成 PR（`dev → main`）**触发云端全量 CI 并在全绿后合入 `main`（保持 `README.md`、`CHANGELOG.md` 与 `安装与使用.md` 仍指向当前正式版，不打 Tag、不发 Release），严禁未获授权擅自冻结正式版、打正式 Tag 或公开 Release（正式发版须等维护者明确指令）。
 3. **回复末尾固定附带两行**：
    - 最新 `origin/dev` 提交号（完整 SHA 与简短信息）
    - GitHub 对比链接：`https://github.com/arrry-07/chaoxing-journal/compare/main...dev`（以及本次核心修改文件的 `dev` 分支直达链接）
@@ -53,23 +53,25 @@
 
 | 递增位 | 适用场景与阶段 | 示例 | 同步范围与 Gitee 清单联动 |
 | --- | --- | --- | --- |
-| **修订号 `Z`**（`X.Y.Z → X.Y.(Z+1)`） | **`dev` 阶段自测**：较大阶段完成并准备打 MuMu 自测包时，升 `Z` 和构建号 | `1.8.26+120 → 1.8.27+121 → 1.8.28+122` | 版本字段同步 `pubspec.yaml` 与 `AppVersion`，验收结果写入 dev 状态。正式文档与线上清单随 Stage 2 更新。 |
+| **修订号 `Z`**（`X.Y.Z → X.Y.(Z+1)`） | **`dev` 阶段自测与日常集成 PR**：较大阶段完成准备打 MuMu 自测包时升 `Z` 和构建号；每累积 1–3 个修订版可开日常集成 PR 合入 `main` 跑全量 CI | `1.92.0+132 → 1.92.1+133 → 1.92.2+134` | 版本字段同步 `pubspec.yaml` 与 `AppVersion`，验收结果写入 dev 状态；`README.md`/`CHANGELOG.md`/安装指南与 Gitee 清单维持当前正式版不变（仅在 Stage 2 更新）。CI 与本地默认传入 `--allow-dev` 对 `Z > 0` 豁免正式文档，而 `Z == 0` 仍强制核对正式文档；Tag CI 一律严格运行 `--tag`。 |
 | **次版本号 `Y`**（由 `1.8.x` 跃迁至 `1.90.0`，此后每次正式版 `Y+1` 并归零 `Z`，**上限 `99`**） | **维护者明确授权正式发布后（Stage 2）**：下一正式版自 `1.90.0` 起步，此后升 `Y+1` 并归零 `Z`，在 `dev` 冻结后合入 `main` | `1.8.28 → 1.90.0 → 1.91.0 … → 1.99.0` | 冻结全套正式文档，自动更新 `update-manual.json`；仅大更新或紧急热修显式开启 `--promote-stable` 推进 `update-stable.json` |
 | **主版本号 `X`**（`X.99.* → (X+1).0.0` 或重大跃迁） | **进位或跨代版本**：当 `Y` 已达 `99` 后下一次正式发版进位升 `X` 归零 `Y/Z`，或发生跨代重构/不兼容跃迁 | `1.99.0 → 2.0.0` | 冻结全套正式文档，自动更新 `update-manual.json`，大更新时显式开启 `--promote-stable` 推进 `update-stable.json` |
 
-- **当前切换起点与命名防误解边界**：自 `1.8.26+120` 之后启用本规则；`dev` 上打 MuMu 自测包从 `1.8.27+121` 起每次打包升第三位和构建号。**在收到维护者明确正式发版指令前，`dev` 分支内的计划文件名、标题、交接、提交说明与进度描述一律使用当前/本轮 `dev` 修订号（如 `1.8.27`、`1.8.28`、`1.8.29`），严禁提前命名为下一正式版号（如 `1.90.0`）**，避免 AI 误以为已进入正式发版；仅在维护者明确下达正式发版指令进入 Stage 2 时，才将版本冻结并切换为下一正式版号（如 `1.90.0`，构建号高于已用测试包），发布后下一轮 `dev` 自测包从 `1.90.1` 起步。纯文档变更、只读调研、方案编写、重复跑测或跨提交均不构成升版理由。
+- **当前切换起点与命名防误解边界**：自 `1.8.26+120` 之后启用本规则；`dev` 上打 MuMu 自测包与合入日常集成 PR 均保持修订号 `Z > 0` 递增（`X.Y.Z+build`，严禁在正式发布前改用 `Z == 0` 的下一正式版号）。**在收到维护者明确正式发版指令前，`dev` 分支内的计划文件名、标题、交接、提交说明与进度描述一律使用当前/本轮 `dev` 修订号（如 `1.92.1`、`1.92.2`），严禁提前命名为下一正式版号（如 `1.93.0`）**，避免 AI 误以为已进入正式发版；仅在维护者明确下达正式发版指令进入 Stage 2 时，才将版本冻结并切换为下一正式版号（`Y+1` 归零 `Z`，构建号高于已用测试包），发布后下一轮 `dev` 自测包从该正式版第三位 `+1` 起步。纯文档变更、只读调研、方案编写、重复跑测或跨提交均不构成升版理由。
 
 ## 集成验收与正式发布
 
 - 进入本轮最终集成验收时，重新读取需求、最终差异、调用方、测试和验收标准，并在集成输入上新跑必要的核心检查。代理报告、历史摘要和总测试数不能代替证据。
-- 正式应用发布保留当前完整验收矩阵：全量 Flutter、分析/格式/元数据、既定时区检查、原生检查，以及当前 CI 和项目发布规则要求的检查。其中 **提 PR 前在本地执行一次单时区 `TZ=UTC python scripts/verify_local_gate.py --mode full`（防云端 PR CI 因老 UI/策略测试漂移爆红返工），而三时区核心套件与完整 Gradle JVM/仪器编译/lint 矩阵由 PR/main/Tag 云端 GitHub Actions CI 承接**；同一最终提交已被有效日志或 CI 覆盖的项不机械重复再跑（仅排查失败、CI 不可用或验证 Windows 专项行为时本地补跑对应子集）。分发脚本变化运行对应脚本检查。
+- 正式应用发布保留当前完整验收矩阵：全量 Flutter、分析/格式/元数据、既定时区检查、原生检查，以及当前 CI 和项目发布规则要求的检查。其中 **无论是日常集成 PR 还是正式冻版 PR，提 PR 前均先在本地执行一次单时区 `TZ=UTC python scripts/verify_local_gate.py --mode full`（正式冻版 PR 额外加 `--release` 强制校验正式文档，防云端 PR CI 因老 UI/策略测试或元数据漂移爆红返工），而三时区核心套件与完整 Gradle JVM/仪器编译/lint 矩阵由 PR/main/Tag 云端 GitHub Actions CI 承接**；同一最终提交已被有效日志或 CI 覆盖的项不机械重复再跑（仅排查失败、CI 不可用或验证 Windows 专项行为时本地补跑对应子集）。分发脚本变化运行对应脚本检查。
 - 先检查最终输入已有的原始日志和对应 CI：已覆盖且仍有效的检查不再手工复制一轮。本机与 CI 的平台/工具差异须明确；Linux 结果不能冒称 Windows 专项行为已验证。
-- 必需 PR、main、Tag CI 仍核对各自最终提交的完整结果，不能拿旧提交绿灯替代；CI 因既定触发器运行全套不意味着本地也要再复制一套。完整 CI 由推送 main、正式版本 Tag、目标为 main 的 PR 与手动运行触发；日常 dev 推送不启动全量检查。
-- 版本在范围收口后统一冻结，按[版本号与迭代分级规则](#版本号与迭代分级规则)确定目标版本，小问题按攒批原则合并发布；测试每跑一轮、补一份文档或跨一个 Git 节点都不构成升版理由。
+- 必需 PR、main、Tag CI 仍核对各自最终提交的完整结果，不能拿旧提交绿灯替代；CI 因既定触发器运行全套不意味着本地也要再复制一套。完整 CI 由推送 main、正式版本 Tag、目标为 main 的 PR 与手动运行触发；日常 dev 推送不启动全量检查。其中 PR、`main` 与 `workflow_dispatch` 运行 `check_release_metadata.py --allow-dev`（仅对 `Z > 0` 豁免正式文档，`Z == 0` 仍强制核对正式文档），Tag CI 一律运行 `check_release_metadata.py --tag <tag>` 严格校验 Tag 名与全套正式文档一致。
+- 版本在正式发布前统一冻结，按[版本号与迭代分级规则](#版本号与迭代分级规则)确定目标版本，日常小步集成进 `main` 不触发正式发布；测试每跑一轮、补一份文档或跨一个 Git 节点都不构成升版理由。
 - 正式 APK 必须对应最终 main 的干净构建输入、锁定依赖、正常入口和原签名。打包后统一运行 `python scripts/verify_apk_and_report.py <apk> --expected-version <X.Y.Z+CODE>` 一次性核验大小、SHA-256、包名/版本/SDK、非 debuggable、双 ABI、16 KiB 对齐、ZIP CRC 与 v2 原证书指纹并生成标准 Markdown 验收段落（可附 `--write-sha256sums` 同步生成 `SHA256SUMS.txt`）。随后完成 MuMu 同签名覆盖、数据保留和实际改动验收，以及 GitHub 草稿认证下载与公开匿名下载验证。Gitee 小索引在 GitHub 公开后核验，失败须披露且不能声称双渠道完成，但不追溯阻断已满足门禁的 GitHub 发布。CI 的 Debug APK 不能替代正式 Release APK。
 - 优先从最终 main 构建一次正式包；确需合并前候选来暴露风险时才增加候选。候选只有在全部构建输入（含版本、签名配置、参数和任何提交号派生元数据）与最终 main 一致、原始记录完整且文件哈希未变时才能绑定为最终包；否则从最终 main 重建。候选与最终证据分清，不追逐可复现哈希，也不复用旧版本 APK 冒充新正式包。
 - PR 前检查需求/差异/暂存范围/相关证据；合并前核对最新 head、必需 CI、审查和授权；Tag/上传/公开前核对对应源码、产物、远端对象和阻断项。每道关卡核对当前对象，不重新启动整套验收。
-- 按顺序推进：本地集成验收（含提 PR 前一次本地 `--mode full` 扫雷）→ 提交并推送精确范围 → 创建或更新 PR → 当前 head 的必需 CI 与审查 → 合并并核对最终 main CI → 绑定正式 APK 并通过设备验收 → 推送 Tag 触发 Tag CI（**可在等待 Tag CI 期间并行创建 Draft Release 并完成资产上传与草稿授权回下载，但须待 Tag CI `success` 后才可正式公开并设为 `latest`**）→ GitHub 正式发布 → 公开回下载与分发核验。已有 PR 优先续用。每次外部写入后读回真实对象。
+- **两阶段推进顺序**：
+  - **日常集成 PR（`dev → main`）**：本地 `TZ=UTC python scripts/verify_local_gate.py --mode full` → 推送 `dev` 并创建/更新集成 PR → 核对 PR CI 全绿 → 合入 `main` 并核对 `main` CI `success`（不改正式文档/下载链，不打 Tag 或发 Release）。
+  - **随时轻量冻结发版（Stage 2）**：在已与 `main` 对齐的 `dev` 执行 `freeze_release.py --apply --mode formal` + 补全 `CHANGELOG.md` + 本地 `TZ=UTC python scripts/verify_local_gate.py --mode full --release` → 提交轻量版本冻结 PR → 审查与 PR CI 全绿后合入 `main` 并核对最终 `main` CI → 干净构建正式 APK 并通过 `verify_apk_and_report.py` 与 MuMu 保数据验收 → 推送 Tag `vX.Y.Z` 触发严格 Tag CI（**可在等待 Tag CI 期间并行创建 Draft Release 并完成资产上传与草稿授权回下载，但须待 Tag CI `success` 后才可正式公开并设为 `latest`**）→ GitHub 正式发布 → 公开回下载与 Gitee/官网分发核验。紧急 Hotfix 须从**最新正式版 Tag**（而非可能已含未发布小 PR 的 `main`）切出分支，发布后将修复同步回 `main` 与 `dev`。已有 PR 优先续用。每次外部写入后读回真实对象。
 
 - 正式冻结时在 `dev` 将目标版本设为下一正式版（自 `1.8.x` 跃迁为 `1.90.0+build`，此后按 `X.(Y+1).0+build` 递增，`Y` 已满 `99` 时设为 `(X+1).0.0+build`），同步 `pubspec.yaml`、`AppVersion`、`CHANGELOG.md`、`README.md` 与安装指南，构建号高于此前全部测试包。正式版发布后，下一轮 `dev` 自测包从该正式版的第三位 `+1`（如 `1.90.1+build`）起递增。
 - PR、合并及 Tag／上传／公开前分别给出检查结论和证据位置。正式关闭时更新工程状态、反馈与验收证据，并按[发布收口与归档](../README.md#发布收口与归档)滚动维护。验证规则仅在门禁变化时更新。

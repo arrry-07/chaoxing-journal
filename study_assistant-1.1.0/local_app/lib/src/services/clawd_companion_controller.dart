@@ -220,6 +220,7 @@ class ClawdCompanionController extends ChangeNotifier {
   DisplayPreferences _displayPrefs = const DisplayPreferences();
   bool _appResumed = true;
   bool _tickerEnabled = true;
+  bool _onPrimaryTab = true;
   bool _reducedMotion = false;
   bool _isSyncing = false;
   bool _hasSyncErrorOrPending = false;
@@ -406,8 +407,12 @@ class ClawdCompanionController extends ChangeNotifier {
     _syncTimer = Timer(syncFrameInterval, _onSyncTimerTick);
   }
 
+  bool get onPrimaryTab => _onPrimaryTab;
+
   void _reconcileProactiveSchedule() {
-    final canSchedule = _canInteract &&
+    final canSchedule = _onPrimaryTab &&
+        _lastVisitedTab == ClawdPrimaryTab.home &&
+        _canInteract &&
         !_reducedMotion &&
         _activeBubble == null &&
         _transientPose == ClawdTransientPose.none &&
@@ -429,10 +434,26 @@ class ClawdCompanionController extends ChangeNotifier {
 
   void handleTabChanged(ClawdPrimaryTab tab) {
     if (_disposed) return;
+    _onPrimaryTab = true;
     final tabChanged = _lastVisitedTab != tab;
     _lastVisitedTab = tab;
     if (tabChanged && _activeBubble != null && _activeBubble!.tab != tab) {
       _clearBubbleInternal();
+      notifyListeners();
+    }
+    _reconcileProactiveSchedule();
+  }
+
+  /// Pauses proactive bubbles while a secondary route (e.g. `/agenda`)
+  /// covers the primary tab shell, without touching shared interaction state.
+  void handleSecondaryRouteEntered() {
+    if (_disposed) return;
+    _onPrimaryTab = false;
+    _proactiveDelayTimer?.cancel();
+    _proactiveDelayTimer = null;
+    final clearedBubble = _clearBubbleInternal();
+    final clearedPose = clearTransientPose(notify: false);
+    if (clearedBubble || clearedPose) {
       notifyListeners();
     }
   }
@@ -618,14 +639,18 @@ class ClawdCompanionController extends ChangeNotifier {
     bool notify = true,
   }) {
     final snapshot = _latestSnapshot;
-    if (!_canInteract ||
+    if (!_onPrimaryTab ||
+        !_canInteract ||
         _reducedMotion ||
         snapshot == null ||
         _activeBubble != null ||
         _transientPose != ClawdTransientPose.none) {
       return false;
     }
-    if (snapshot.tab != ClawdPrimaryTab.home) return false;
+    if (_lastVisitedTab != ClawdPrimaryTab.home ||
+        snapshot.tab != ClawdPrimaryTab.home) {
+      return false;
+    }
 
     final current = (now ?? _clock()).toLocal();
     bool cooledDown(ClawdProactiveBucket bucket) {

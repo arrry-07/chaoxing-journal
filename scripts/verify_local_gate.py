@@ -223,19 +223,11 @@ def _changed_dart_files(repo: Path, app_dir: Path) -> list[str]:
 
 
 def _should_allow_dev_metadata(repo: Path, release_flag: bool) -> bool:
-    if release_flag:
-        return False
-    branch_proc = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-    )
-    if branch_proc.returncode == 0:
-        branch = branch_proc.stdout.strip()
-        if branch and branch not in ("main", "HEAD"):
-            return True
-    return False
+    # Continuous-integration PRs can merge Z > 0 commits into main before formal
+    # release freeze; check_release_metadata.py still enforces formal docs for
+    # Z == 0, while --release requires formal docs for all versions (e.g. hotfix Z > 0).
+    del repo
+    return not release_flag
 
 
 def main(argv: list[str] | None = None) -> int:

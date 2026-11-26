@@ -62,7 +62,8 @@ class VerifyLocalGateTests(unittest.TestCase):
             self.assertFalse(mod._should_allow_dev_metadata(repo, release_flag=True))
 
             subprocess.run(["git", "checkout", "-b", "main"], cwd=repo, check=True, capture_output=True)
-            self.assertFalse(mod._should_allow_dev_metadata(repo, release_flag=False))
+            self.assertTrue(mod._should_allow_dev_metadata(repo, release_flag=False))
+            self.assertFalse(mod._should_allow_dev_metadata(repo, release_flag=True))
 
     def test_build_flutter_test_cmd_applies_default_and_custom_timeouts(self) -> None:
         default_cmd = mod._build_flutter_test_cmd("flutter", ["test/a_test.dart"])

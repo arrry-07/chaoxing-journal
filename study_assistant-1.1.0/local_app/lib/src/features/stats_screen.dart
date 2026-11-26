@@ -73,6 +73,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
       ValueNotifier<Offset>(const Offset(156.0, 48.0));
   bool _appResumed = true;
   bool _tickerEnabled = true;
+  bool _isCurrentRoute = true;
   bool _reducedMotion = false;
 
   ClawdCompanionController _ensureClawdController() {
@@ -167,6 +168,8 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
   void _syncClawdEnvironment({bool notify = true}) {
     final controller = _clawdController;
     if (controller == null) return;
+    final isSharedController = !identical(controller, _localClawdController);
+    if (isSharedController && !_isCurrentRoute) return;
     final busy = widget.store.isLoading ||
         widget.store.syncReport.phase == SyncPhase.running;
     final hasError =
@@ -174,7 +177,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
     controller.updateEnvironment(
       displayPrefs: widget.store.display,
       appResumed: _appResumed,
-      tickerEnabled: _tickerEnabled,
+      tickerEnabled: isSharedController ? null : _tickerEnabled,
       reducedMotion: _reducedMotion,
       isSyncing: busy,
       hasSyncErrorOrPending: hasError,
@@ -187,7 +190,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
     if (_feedbackEpoch != widget.store.accountEpoch ||
         _feedbackAccount != widget.store.account) {
       _feedback.dismiss();
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
       _feedbackEpoch = widget.store.accountEpoch;
       _feedbackAccount = widget.store.account;
     }
@@ -217,6 +220,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? true;
     _tickerEnabled = TickerMode.valuesOf(context).enabled;
     _reducedMotion = JournalMotion.isReducedMotion(context);
     final scoped = ClawdCompanionScope.maybeOf(context);
@@ -232,7 +236,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
     if (oldWidget.store != widget.store) {
       oldWidget.store.removeListener(_checkFeedbackAccount);
       _feedback.dismiss();
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
       _feedbackEpoch = widget.store.accountEpoch;
       _feedbackAccount = widget.store.account;
       widget.store.addListener(_checkFeedbackAccount);

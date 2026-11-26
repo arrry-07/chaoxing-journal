@@ -138,7 +138,15 @@ GoRouter _buildShellRouter(
   AssignmentStore store, {
   required DateTime Function() clock,
   ValueChanged<ClawdPageContextSnapshot>? onClawdBubbleTap,
+  bool noTransitionPages = false,
 }) {
+  Page<void> tabPage(GoRouterState state, Widget child) {
+    if (!noTransitionPages) {
+      return MaterialPage<void>(key: state.pageKey, child: child);
+    }
+    return NoTransitionPage<void>(key: state.pageKey, child: child);
+  }
+
   return GoRouter(
     initialLocation: '/assignments',
     routes: [
@@ -152,22 +160,34 @@ GoRouter _buildShellRouter(
         routes: [
           GoRoute(
             path: '/assignments',
-            builder: (_, __) => AssignmentListScreen(
-              store: store,
-              clock: clock,
+            pageBuilder: (_, state) => tabPage(
+              state,
+              AssignmentListScreen(
+                store: store,
+                clock: clock,
+              ),
             ),
           ),
           GoRoute(
             path: '/calendar',
-            builder: (_, __) => CalendarScreen(store: store, clock: clock),
+            pageBuilder: (_, state) => tabPage(
+              state,
+              CalendarScreen(store: store, clock: clock),
+            ),
           ),
           GoRoute(
             path: '/stats',
-            builder: (_, __) => StatsScreen(store: store, clock: clock),
+            pageBuilder: (_, state) => tabPage(
+              state,
+              StatsScreen(store: store, clock: clock),
+            ),
           ),
           GoRoute(
             path: '/profile',
-            builder: (_, __) => ProfileScreen(store: store),
+            pageBuilder: (_, state) => tabPage(
+              state,
+              ProfileScreen(store: store),
+            ),
           ),
           GoRoute(
             path: '/agenda',
@@ -361,6 +381,238 @@ void main() {
       expect(controller.tapCount, 0);
       expect(controller.comboCount, 0);
       expect(controller.activeBubble, isNull);
+    });
+  });
+
+  group(
+      'M1 regression · NoTransitionPage tab switches keep shared Clawd interactive',
+      () {
+    testWidgets(
+        'departing primary tabs do not poison shared tickerEnabled or snapshots',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final store = await _createSeededStore(
+        now: now,
+        assignments: [
+          _work(
+            'today-1',
+            title: '路由切换回归作业',
+            due: now.add(const Duration(hours: 4)),
+            syncedAt: now,
+          ),
+        ],
+      );
+      addTearDown(store.dispose);
+
+      final router = _buildShellRouter(
+        store,
+        clock: () => now,
+        noTransitionPages: true,
+      );
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      const bubbleFinder = ValueKey('clawd-speech-bubble');
+      await tester.tap(find.byKey(const ValueKey('home-pixel-buddy')));
+      await tester.pump();
+      expect(find.byKey(bubbleFinder), findsOneWidget);
+
+      await tester.tap(find.text('日历'));
+      await tester.pump();
+      final calendarBuddy = find.byKey(const ValueKey('calendar-pixel-buddy'));
+      expect(calendarBuddy, findsOneWidget);
+      final calendarController =
+          ClawdCompanionScope.of(tester.element(calendarBuddy));
+      expect(calendarController.tickerEnabled, isTrue);
+      expect(calendarController.latestSnapshot?.tab, ClawdPrimaryTab.calendar);
+
+      await tester.tap(calendarBuddy);
+      await tester.pump();
+      expect(find.byKey(bubbleFinder), findsOneWidget);
+      expect(calendarController.activeBubble?.tab, ClawdPrimaryTab.calendar);
+      final calendarTitleRect = tester.getRect(find.text('课业日历'));
+      final calendarBuddyRect = tester.getRect(calendarBuddy);
+      final calendarBubbleRect = tester.getRect(find.byKey(bubbleFinder));
+      // The keyed rect includes the 6dp upward pointer, so compare the pill
+      // body top against the title to prove the text itself is not covered.
+      final calendarPillTop = calendarBubbleRect.top + 6.0;
+      expect(
+        calendarPillTop,
+        greaterThanOrEqualTo(calendarTitleRect.bottom + 2.0 - 0.1),
+      );
+      expect(
+        calendarPillTop,
+        lessThanOrEqualTo(calendarTitleRect.bottom + 12.0),
+      );
+      expect(
+        calendarPillTop,
+        greaterThanOrEqualTo(calendarBuddyRect.bottom - 0.1),
+      );
+      expect(
+        calendarBubbleRect.top,
+        lessThanOrEqualTo(calendarBuddyRect.bottom + 8.0),
+      );
+      expect(
+        (calendarBubbleRect.center.dx - calendarBuddyRect.center.dx).abs(),
+        lessThanOrEqualTo(4.0),
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(bubbleFinder),
+          matching: find.textContaining('今天'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('统计'));
+      await tester.pump();
+      final statsBuddy = find.byKey(const ValueKey('stats-pixel-buddy'));
+      expect(statsBuddy, findsOneWidget);
+      final statsController =
+          ClawdCompanionScope.of(tester.element(statsBuddy));
+      expect(statsController.tickerEnabled, isTrue);
+      expect(statsController.latestSnapshot?.tab, ClawdPrimaryTab.stats);
+
+      await tester.tap(statsBuddy);
+      await tester.pump();
+      expect(find.byKey(bubbleFinder), findsOneWidget);
+      expect(statsController.activeBubble?.tab, ClawdPrimaryTab.stats);
+      final statsTitleBottom = tester.getRect(find.text('课业统计')).bottom;
+      final statsBuddyBottom = tester.getRect(statsBuddy).bottom;
+      final statsBubbleRect = tester.getRect(find.byKey(bubbleFinder));
+      expect(
+        statsBubbleRect.top,
+        greaterThanOrEqualTo(statsTitleBottom + 2.0 - 0.1),
+      );
+      expect(
+        statsBubbleRect.top,
+        lessThanOrEqualTo(statsBuddyBottom + 8.0),
+      );
+
+      await tester.tap(find.text('我的'));
+      await tester.pump();
+      final profileBuddy = find.byKey(const ValueKey('profile-pixel-buddy'));
+      expect(profileBuddy, findsOneWidget);
+      final profileController =
+          ClawdCompanionScope.of(tester.element(profileBuddy));
+      expect(profileController.tickerEnabled, isTrue);
+      expect(profileController.latestSnapshot?.tab, ClawdPrimaryTab.profile);
+
+      await tester.tap(profileBuddy);
+      await tester.pump();
+      expect(find.byKey(bubbleFinder), findsOneWidget);
+      expect(profileController.activeBubble?.tab, ClawdPrimaryTab.profile);
+      final profileTitleBottom = tester.getRect(find.text('我的手帐')).bottom;
+      final profileBuddyBottom = tester.getRect(profileBuddy).bottom;
+      final profileBubbleRect = tester.getRect(find.byKey(bubbleFinder));
+      expect(
+        profileBubbleRect.top,
+        greaterThanOrEqualTo(profileTitleBottom + 2.0 - 0.1),
+      );
+      expect(
+        profileBubbleRect.top,
+        lessThanOrEqualTo(profileBuddyBottom + 8.0),
+      );
+
+      await tester.tap(find.text('首页'));
+      await tester.pump();
+      final homeBuddy = find.byKey(const ValueKey('home-pixel-buddy'));
+      expect(homeBuddy, findsOneWidget);
+      final homeController = ClawdCompanionScope.of(tester.element(homeBuddy));
+      expect(homeController.tickerEnabled, isTrue);
+      expect(homeController.latestSnapshot?.tab, ClawdPrimaryTab.home);
+
+      await tester.tap(homeBuddy);
+      await tester.pump();
+      expect(find.byKey(bubbleFinder), findsOneWidget);
+      expect(homeController.activeBubble?.tab, ClawdPrimaryTab.home);
+      final homeBubbleRect = tester.getRect(find.byKey(bubbleFinder));
+      final syncStatusRect =
+          tester.getRect(find.byKey(const ValueKey('home-sync-status')));
+      expect(
+        homeBubbleRect.top,
+        greaterThanOrEqualTo(syncStatusRect.bottom + 2.0 - 0.1),
+      );
+    });
+
+    testWidgets(
+        'secondary routes pause proactive bubbles and resume scheduling on pop',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final store = await _createSeededStore(
+        now: now,
+        assignments: [
+          _work(
+            'today-1',
+            title: '主动冒泡暂停回归作业',
+            due: now.add(const Duration(hours: 4)),
+            syncedAt: now,
+          ),
+        ],
+      );
+      addTearDown(store.dispose);
+
+      final router = _buildShellRouter(store, clock: () => now);
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pump();
+
+      final homeBuddy = find.byKey(const ValueKey('home-pixel-buddy'));
+      expect(homeBuddy, findsOneWidget);
+      final controller = ClawdCompanionScope.of(tester.element(homeBuddy));
+      final bubbleIds = <int>{};
+      ClawdSpeechMessage? lastBubble;
+      void recordBubble() {
+        final bubble = controller.activeBubble;
+        if (bubble != null && bubble.id != lastBubble?.id) {
+          lastBubble = bubble;
+          bubbleIds.add(bubble.id);
+        }
+      }
+
+      controller.addListener(recordBubble);
+      addTearDown(() => controller.removeListener(recordBubble));
+
+      // Push a secondary route inside the initial 3.2s proactive window.
+      router.push('/agenda');
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 4));
+      expect(controller.activeBubble, isNull);
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsNothing);
+      expect(bubbleIds, isEmpty);
+
+      // Popping back to home resumes the schedule without a consumed cooldown.
+      router.pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 3300));
+      expect(bubbleIds.length, 1);
+      expect(controller.activeBubble, isNotNull);
+      expect(controller.activeBubble?.tab, ClawdPrimaryTab.home);
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      await tester.pump(const Duration(milliseconds: 2600));
     });
   });
 
