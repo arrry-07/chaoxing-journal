@@ -12,12 +12,14 @@ class JournalSliverHeader extends StatelessWidget {
     required this.scrollOffset,
     required this.actions,
     this.titleTrailing,
+    this.statusContent,
   });
 
   final String title;
   final double scrollOffset;
   final List<Widget> actions;
   final Widget? titleTrailing;
+  final Widget? statusContent;
 
   @override
   Widget build(BuildContext context) {
@@ -26,6 +28,33 @@ class JournalSliverHeader extends StatelessWidget {
     if (progress <= 0.01) {
       return const SizedBox.shrink();
     }
+    final titleBar = SizedBox(
+      height: 52,
+      child: Row(
+        children: [
+          Expanded(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: journal.pageTitle.copyWith(fontSize: 19.5),
+                  ),
+                ),
+                if (titleTrailing != null) ...[
+                  const SizedBox(width: 6),
+                  titleTrailing!,
+                ],
+              ],
+            ),
+          ),
+          Row(mainAxisSize: MainAxisSize.min, children: actions),
+        ],
+      ),
+    );
     return IgnorePointer(
       ignoring: progress < 0.35,
       child: Opacity(
@@ -37,7 +66,7 @@ class JournalSliverHeader extends StatelessWidget {
               sigmaY: JournalMotion.isReducedMotion(context) ? 0 : 14,
             ),
             child: Container(
-              height: 52,
+              height: statusContent == null ? 52 : null,
               padding: const EdgeInsets.symmetric(horizontal: 18),
               decoration: BoxDecoration(
                 color: journal.paper.withValues(alpha: 0.86),
@@ -45,30 +74,19 @@ class JournalSliverHeader extends StatelessWidget {
                   bottom: BorderSide(color: journal.divider, width: 0.6),
                 ),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Row(
+              child: statusContent == null
+                  ? titleBar
+                  : Column(
                       mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Flexible(
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: journal.pageTitle.copyWith(fontSize: 19.5),
-                          ),
+                        titleBar,
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 7),
+                          child: statusContent!,
                         ),
-                        if (titleTrailing != null) ...[
-                          const SizedBox(width: 6),
-                          titleTrailing!,
-                        ],
                       ],
                     ),
-                  ),
-                  Row(mainAxisSize: MainAxisSize.min, children: actions),
-                ],
-              ),
             ),
           ),
         ),

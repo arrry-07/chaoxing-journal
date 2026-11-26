@@ -116,6 +116,16 @@ void main() {
 
       expect(normalStyle.duration, const Duration(milliseconds: 280));
       expect(normalStyle.reverseDuration, const Duration(milliseconds: 210));
+      expect(normalStyle.curve, JournalMotion.criticalCurve);
+      expect(normalStyle.curve!.transform(0.0), 0.0);
+      expect(normalStyle.curve!.transform(1.0), 1.0);
+      var prevCurveValue = 0.0;
+      for (var i = 0; i <= 20; i++) {
+        final v = normalStyle.curve!.transform(i / 20.0);
+        expect(v, inInclusiveRange(0.0, 1.0));
+        expect(v, greaterThanOrEqualTo(prevCurveValue));
+        prevCurveValue = v;
+      }
       expect(reducedStyle, AnimationStyle.noAnimation);
       expect(reducedStyle.duration, Duration.zero);
       expect(reducedStyle.reverseDuration, Duration.zero);
@@ -189,10 +199,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 64));
       expect(readScale(), lessThan(reboundingScale));
 
-      // Disable while pressed -> smoothly converges back to 1.0.
+      // Disable while pressed -> snaps back to 1.0 on the very same frame.
       setHostState(() => enabled = false);
       await tester.pump();
-      await tester.pumpAndSettle();
       expect(readScale(), 1.0);
 
       await g2.up();
@@ -497,6 +506,121 @@ void main() {
         expect(find.text('选择课程'), findsNothing);
         expect(picked, isNull);
       }
+    });
+
+    testWidgets(
+        'showJournalPickerSheet upward rubber-band and mid-rebound regrab preserve search focus, query text, and list scroll offset',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    await showJournalPickerSheet<String>(
+                      context,
+                      title: '选择课程',
+                      searchable: true,
+                      options: [
+                        for (var i = 0; i < 24; i++)
+                          JournalPickerOption(value: 'c-$i', label: '课程 $i'),
+                      ],
+                    );
+                  },
+                  child: const Text('打开可搜索列表'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('打开可搜索列表'));
+      await tester.pumpAndSettle();
+
+      // Scroll the picker ListView first.
+      await tester.drag(find.byType(ListView), const Offset(0, -180));
+      await tester.pumpAndSettle();
+      final listScrollable = Scrollable.of(tester.element(find.text('课程 6')));
+      final scrolledOffset = listScrollable.position.pixels;
+      expect(scrolledOffset, greaterThan(20.0));
+
+      // Focus the search field and type query text matching all items.
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), '课程');
+      await tester.pump();
+
+      bool hasSearchFocus() {
+        final editable = tester.widget<EditableText>(find.byType(EditableText));
+        return editable.focusNode.hasFocus;
+      }
+
+      String readSearchText() => tester
+          .widget<EditableText>(find.byType(EditableText))
+          .controller
+          .text;
+
+      expect(hasSearchFocus(), isTrue);
+      expect(readSearchText(), '课程');
+      expect(
+        Scrollable.of(tester.element(find.text('课程 6'))).position.pixels,
+        closeTo(scrolledOffset, 0.5),
+      );
+
+      final handleFinder =
+          find.byKey(const ValueKey('journal-picker-drag-handle'));
+      final initialHandleY = tester.getTopLeft(handleFinder).dy;
+
+      // Upward pull -> preserves focus, text, and scroll offset.
+      final g1 = await tester.startGesture(tester.getCenter(handleFinder));
+      await g1.moveBy(const Offset(0, -60));
+      await tester.pump();
+      expect(tester.getTopLeft(handleFinder).dy, lessThan(initialHandleY));
+      expect(hasSearchFocus(), isTrue);
+      expect(readSearchText(), '课程');
+      expect(
+        Scrollable.of(tester.element(find.text('课程 6'))).position.pixels,
+        closeTo(scrolledOffset, 0.5),
+      );
+
+      // Release, pump mid-rebound frame, then grab again mid-rebound.
+      await g1.up();
+      await tester.pump(const Duration(milliseconds: 24));
+      final midReboundY = tester.getTopLeft(handleFinder).dy;
+      expect(midReboundY, lessThan(initialHandleY));
+      expect(hasSearchFocus(), isTrue);
+      expect(readSearchText(), '课程');
+      expect(
+        Scrollable.of(tester.element(find.text('课程 6'))).position.pixels,
+        closeTo(scrolledOffset, 0.5),
+      );
+
+      final g2 = await tester.startGesture(tester.getCenter(handleFinder));
+      await g2.moveBy(const Offset(0, -50));
+      await tester.pump();
+      expect(tester.getTopLeft(handleFinder).dy, lessThan(midReboundY));
+      expect(hasSearchFocus(), isTrue);
+      expect(readSearchText(), '课程');
+      expect(
+        Scrollable.of(tester.element(find.text('课程 6'))).position.pixels,
+        closeTo(scrolledOffset, 0.5),
+      );
+
+      await g2.up();
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(handleFinder).dy, closeTo(initialHandleY, 0.01));
+      expect(hasSearchFocus(), isTrue);
+      expect(readSearchText(), '课程');
+      expect(
+        Scrollable.of(tester.element(find.text('课程 6'))).position.pixels,
+        closeTo(scrolledOffset, 0.5),
+      );
+
+      await tester.tap(find.byTooltip('关闭'));
+      await tester.pumpAndSettle();
     });
 
     testWidgets(

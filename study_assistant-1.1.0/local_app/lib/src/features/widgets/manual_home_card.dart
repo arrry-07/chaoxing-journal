@@ -239,9 +239,11 @@ class ManualHomeCard extends StatelessWidget {
                     const BoxConstraints.tightFor(width: 48, height: 48),
                 padding: EdgeInsets.zero,
                 icon: Icon(
-                  Icons.radio_button_unchecked_rounded,
+                  entry.done
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked_rounded,
                   size: 20,
-                  color: journal.muted,
+                  color: entry.done ? journal.accent : journal.muted,
                 ),
               ),
             ),

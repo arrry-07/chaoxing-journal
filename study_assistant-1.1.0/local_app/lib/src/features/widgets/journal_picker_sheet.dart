@@ -84,48 +84,32 @@ Future<T?> showJournalPickerSheet<T>(
   );
 }
 
-class _JournalPickerSheetBody<T> extends StatefulWidget {
-  const _JournalPickerSheetBody({
-    required this.title,
-    required this.options,
-    required this.selectedValue,
-    required this.enableSearch,
-    required this.searchHint,
-    required this.emptyText,
-    this.displayPrefs,
-    this.filterOptions = const [],
-    this.initialFilterId,
-    this.filterPredicate,
-    this.filterNoticeBuilder,
+typedef JournalSheetGrabWrapper = Widget Function(Widget child);
+
+/// Shared upward rubber-band drag and critical-spring rebound wrapper for modal sheets.
+///
+/// Keeps a constant two-child [Stack] structure inside [AnimatedBuilder] so
+/// [dy] crossing 0.0 never unmounts or rebuilds the sheet content subtree.
+class JournalSheetRubberBand extends StatefulWidget {
+  const JournalSheetRubberBand({
+    super.key,
+    required this.fillColor,
+    required this.builder,
   });
 
-  final String title;
-  final List<JournalPickerOption<T>> options;
-  final T? selectedValue;
-  final bool enableSearch;
-  final String searchHint;
-  final String emptyText;
-  final DisplayPreferences? displayPrefs;
-  final List<JournalPickerFilterOption> filterOptions;
-  final String? initialFilterId;
-  final bool Function(JournalPickerOption<T> option, String filterId)?
-      filterPredicate;
-  final String? Function(
-          String? activeFilterId, List<JournalPickerOption<T>> filtered)?
-      filterNoticeBuilder;
+  final Color fillColor;
+  final Widget Function(
+    BuildContext context,
+    JournalSheetGrabWrapper wrapGrabArea,
+  ) builder;
 
   @override
-  State<_JournalPickerSheetBody<T>> createState() =>
-      _JournalPickerSheetBodyState<T>();
+  State<JournalSheetRubberBand> createState() => _JournalSheetRubberBandState();
 }
 
-class _JournalPickerSheetBodyState<T> extends State<_JournalPickerSheetBody<T>>
+class _JournalSheetRubberBandState extends State<JournalSheetRubberBand>
     with SingleTickerProviderStateMixin {
-  final _controller = TextEditingController();
   late final AnimationController _pullController;
-  String _query = '';
-  String? _activeFilterId;
-  bool _popped = false;
   int? _activeHandlePointer;
   double _rawHandleDragDy = 0.0;
 
@@ -133,9 +117,6 @@ class _JournalPickerSheetBodyState<T> extends State<_JournalPickerSheetBody<T>>
   void initState() {
     super.initState();
     _pullController = AnimationController.unbounded(vsync: this, value: 0.0);
-    if (widget.filterOptions.isNotEmpty) {
-      _activeFilterId = widget.initialFilterId ?? widget.filterOptions.first.id;
-    }
   }
 
   @override
@@ -148,18 +129,9 @@ class _JournalPickerSheetBodyState<T> extends State<_JournalPickerSheetBody<T>>
     }
   }
 
-  void _close([T? result]) {
-    if (_popped) return;
-    final route = ModalRoute.of(context);
-    if (route != null && !route.isCurrent) return;
-    _popped = true;
-    Navigator.of(context).pop(result);
-  }
-
   @override
   void dispose() {
     _pullController.dispose();
-    _controller.dispose();
     super.dispose();
   }
 
@@ -217,6 +189,109 @@ class _JournalPickerSheetBodyState<T> extends State<_JournalPickerSheetBody<T>>
         velocity: _pullController.velocity,
       ),
     );
+  }
+
+  Widget _wrapGrabArea(Widget child) => Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: _handleGrabDown,
+        onPointerMove: _handleGrabMove,
+        onPointerUp: _handleGrabEnd,
+        onPointerCancel: _handleGrabEnd,
+        child: child,
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final reduced = JournalMotion.isReducedMotion(context);
+    final content = widget.builder(context, _wrapGrabArea);
+    return AnimatedBuilder(
+      animation: _pullController,
+      builder: (context, child) {
+        final dy = reduced ? 0.0 : _pullController.value;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: dy < 0.0 ? (-dy).ceilToDouble() + 1 : 0.0,
+              child: ColoredBox(color: widget.fillColor),
+            ),
+            Transform.translate(
+              offset: Offset(0, dy),
+              child: child,
+            ),
+          ],
+        );
+      },
+      child: content,
+    );
+  }
+}
+
+class _JournalPickerSheetBody<T> extends StatefulWidget {
+  const _JournalPickerSheetBody({
+    required this.title,
+    required this.options,
+    required this.selectedValue,
+    required this.enableSearch,
+    required this.searchHint,
+    required this.emptyText,
+    this.displayPrefs,
+    this.filterOptions = const [],
+    this.initialFilterId,
+    this.filterPredicate,
+    this.filterNoticeBuilder,
+  });
+
+  final String title;
+  final List<JournalPickerOption<T>> options;
+  final T? selectedValue;
+  final bool enableSearch;
+  final String searchHint;
+  final String emptyText;
+  final DisplayPreferences? displayPrefs;
+  final List<JournalPickerFilterOption> filterOptions;
+  final String? initialFilterId;
+  final bool Function(JournalPickerOption<T> option, String filterId)?
+      filterPredicate;
+  final String? Function(
+          String? activeFilterId, List<JournalPickerOption<T>> filtered)?
+      filterNoticeBuilder;
+
+  @override
+  State<_JournalPickerSheetBody<T>> createState() =>
+      _JournalPickerSheetBodyState<T>();
+}
+
+class _JournalPickerSheetBodyState<T>
+    extends State<_JournalPickerSheetBody<T>> {
+  final _controller = TextEditingController();
+  String _query = '';
+  String? _activeFilterId;
+  bool _popped = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.filterOptions.isNotEmpty) {
+      _activeFilterId = widget.initialFilterId ?? widget.filterOptions.first.id;
+    }
+  }
+
+  void _close([T? result]) {
+    if (_popped) return;
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return;
+    _popped = true;
+    Navigator.of(context).pop(result);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   List<JournalPickerOption<T>> get _filtered {
@@ -444,121 +519,117 @@ class _JournalPickerSheetBodyState<T> extends State<_JournalPickerSheetBody<T>>
       );
     }
 
-    final headerWidgets = <Widget>[
-      Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: _handleGrabDown,
-        onPointerMove: _handleGrabMove,
-        onPointerUp: _handleGrabEnd,
-        onPointerCancel: _handleGrabEnd,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              key: const ValueKey('journal-picker-drag-handle'),
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: journal.ruleStrong,
-                  borderRadius: BorderRadius.circular(2),
+    List<Widget> buildHeaderWidgets(JournalSheetGrabWrapper wrapGrabArea) => [
+          wrapGrabArea(
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  key: const ValueKey('journal-picker-drag-handle'),
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: journal.ruleStrong,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(widget.title, style: journal.section),
+                    ),
+                    IconButton(
+                      tooltip: '关闭',
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.close_rounded,
+                          size: 20, color: journal.muted),
+                      onPressed: _close,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (widget.filterOptions.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < widget.filterOptions.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 8),
+                    ChoiceChip(
+                      key: ValueKey(
+                          'picker-filter-${widget.filterOptions[i].id}'),
+                      selected: _activeFilterId == widget.filterOptions[i].id,
+                      onSelected: (_) {
+                        if (widget.displayPrefs != null) {
+                          JournalMotion.tap(widget.displayPrefs!);
+                        }
+                        setState(() {
+                          _activeFilterId = widget.filterOptions[i].id;
+                        });
+                      },
+                      label: Text(widget.filterOptions[i].label),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+          if (widget.enableSearch) ...[
+            const SizedBox(height: 10),
+            TextField(
+              controller: _controller,
+              onChanged: (value) => setState(() => _query = value),
+              style: journal.entryTitle.copyWith(fontSize: 14.5),
+              decoration: InputDecoration(
+                hintText: widget.searchHint,
+                hintStyle: journal.metadata,
+                filled: true,
+                fillColor: journal.parchment,
+                isDense: true,
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  size: 19,
+                  color: journal.muted,
+                ),
+                suffixIcon: _query.isNotEmpty
+                    ? IconButton(
+                        tooltip: '清空',
+                        icon: Icon(Icons.close_rounded,
+                            size: 17, color: journal.muted),
+                        onPressed: () {
+                          _controller.clear();
+                          setState(() => _query = '');
+                        },
+                      )
+                    : null,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 11,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: journal.accent, width: 1.1),
                 ),
               ),
             ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(widget.title, style: journal.section),
-                ),
-                IconButton(
-                  tooltip: '关闭',
-                  visualDensity: VisualDensity.compact,
-                  icon:
-                      Icon(Icons.close_rounded, size: 20, color: journal.muted),
-                  onPressed: _close,
-                ),
-              ],
-            ),
           ],
-        ),
-      ),
-      if (widget.filterOptions.isNotEmpty) ...[
-        const SizedBox(height: 10),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (var i = 0; i < widget.filterOptions.length; i++) ...[
-                if (i > 0) const SizedBox(width: 8),
-                ChoiceChip(
-                  key: ValueKey('picker-filter-${widget.filterOptions[i].id}'),
-                  selected: _activeFilterId == widget.filterOptions[i].id,
-                  onSelected: (_) {
-                    if (widget.displayPrefs != null) {
-                      JournalMotion.tap(widget.displayPrefs!);
-                    }
-                    setState(() {
-                      _activeFilterId = widget.filterOptions[i].id;
-                    });
-                  },
-                  label: Text(widget.filterOptions[i].label),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
-      if (widget.enableSearch) ...[
-        const SizedBox(height: 10),
-        TextField(
-          controller: _controller,
-          onChanged: (value) => setState(() => _query = value),
-          style: journal.entryTitle.copyWith(fontSize: 14.5),
-          decoration: InputDecoration(
-            hintText: widget.searchHint,
-            hintStyle: journal.metadata,
-            filled: true,
-            fillColor: journal.parchment,
-            isDense: true,
-            prefixIcon: Icon(
-              Icons.search_rounded,
-              size: 19,
-              color: journal.muted,
-            ),
-            suffixIcon: _query.isNotEmpty
-                ? IconButton(
-                    tooltip: '清空',
-                    icon: Icon(Icons.close_rounded,
-                        size: 17, color: journal.muted),
-                    onPressed: () {
-                      _controller.clear();
-                      setState(() => _query = '');
-                    },
-                  )
-                : null,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 11,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide.none,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide.none,
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(color: journal.accent, width: 1.1),
-            ),
-          ),
-        ),
-      ],
-      const SizedBox(height: 12),
-    ];
+          const SizedBox(height: 12),
+        ];
 
     final noticeWidget = hasNotice
         ? Padding(
@@ -577,108 +648,89 @@ class _JournalPickerSheetBodyState<T> extends State<_JournalPickerSheetBody<T>>
         (widget.enableSearch ? 44.0 + 16.0 * scale : 0.0) +
         (hasNotice ? 16.0 + 32.0 * scale : 0.0);
 
-    return LayoutBuilder(
-      builder: (context, outerConstraints) {
-        final effectiveBoundsHeight = outerConstraints.hasBoundedHeight
-            ? outerConstraints.maxHeight
-            : screenHeight - topSafe;
-        final availableHeight = math.max(
-          0.0,
-          effectiveBoundsHeight - bottomInset - 16.0,
-        );
-        final targetHeight = math.min(screenHeight * 0.74, availableHeight);
-        final maxHeight = useFixedHeight
-            ? targetHeight
-            : math.min(screenHeight * 0.78, availableHeight);
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: JournalSheetRubberBand(
+        fillColor: journal.sheetElevated,
+        builder: (context, wrapGrabArea) {
+          final headerWidgets = buildHeaderWidgets(wrapGrabArea);
+          return LayoutBuilder(
+            builder: (context, outerConstraints) {
+              final effectiveBoundsHeight = outerConstraints.hasBoundedHeight
+                  ? outerConstraints.maxHeight
+                  : screenHeight - topSafe;
+              final availableHeight = math.max(
+                0.0,
+                effectiveBoundsHeight - bottomInset - 16.0,
+              );
+              final targetHeight =
+                  math.min(screenHeight * 0.74, availableHeight);
+              final maxHeight = useFixedHeight
+                  ? targetHeight
+                  : math.min(screenHeight * 0.78, availableHeight);
 
-        final sheetContainer = Container(
-          decoration: BoxDecoration(
-            color: journal.sheetElevated,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            border: Border(
-              top: BorderSide(color: journal.cardBorder, width: 0.8),
-            ),
-          ),
-          padding: EdgeInsets.fromLTRB(18, 12, 18, bottomPad),
-          child: LayoutBuilder(
-            builder: (context, innerConstraints) {
-              final scrollableFallback =
-                  innerConstraints.maxHeight < minChromeForFixed;
-              if (scrollableFallback) {
-                return SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      ...headerWidgets,
-                      widget.filterOptions.isNotEmpty
-                          ? buildAnimatedList(scrollableFallback: true)
-                          : buildListBody(scrollableFallback: true),
-                      if (noticeWidget != null) noticeWidget,
-                    ],
+              final sheetContainer = Container(
+                decoration: BoxDecoration(
+                  color: journal.sheetElevated,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
+                  border: Border(
+                    top: BorderSide(color: journal.cardBorder, width: 0.8),
                   ),
-                );
-              }
-              return Column(
-                mainAxisSize:
-                    useFixedHeight ? MainAxisSize.max : MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ...headerWidgets,
-                  if (useFixedHeight)
-                    Expanded(
-                      child: widget.filterOptions.isNotEmpty
-                          ? buildAnimatedList(scrollableFallback: false)
-                          : buildListBody(scrollableFallback: false),
-                    )
-                  else
-                    Flexible(
-                      child: buildListBody(scrollableFallback: false),
-                    ),
-                  if (noticeWidget != null) noticeWidget,
-                ],
+                ),
+                padding: EdgeInsets.fromLTRB(18, 12, 18, bottomPad),
+                child: LayoutBuilder(
+                  builder: (context, innerConstraints) {
+                    final scrollableFallback =
+                        innerConstraints.maxHeight < minChromeForFixed;
+                    if (scrollableFallback) {
+                      return SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            ...headerWidgets,
+                            widget.filterOptions.isNotEmpty
+                                ? buildAnimatedList(scrollableFallback: true)
+                                : buildListBody(scrollableFallback: true),
+                            if (noticeWidget != null) noticeWidget,
+                          ],
+                        ),
+                      );
+                    }
+                    return Column(
+                      mainAxisSize:
+                          useFixedHeight ? MainAxisSize.max : MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ...headerWidgets,
+                        if (useFixedHeight)
+                          Expanded(
+                            child: widget.filterOptions.isNotEmpty
+                                ? buildAnimatedList(scrollableFallback: false)
+                                : buildListBody(scrollableFallback: false),
+                          )
+                        else
+                          Flexible(
+                            child: buildListBody(scrollableFallback: false),
+                          ),
+                        if (noticeWidget != null) noticeWidget,
+                      ],
+                    );
+                  },
+                ),
               );
-            },
-          ),
-        );
 
-        final reduced = JournalMotion.isReducedMotion(context);
-        final sheetBox = useFixedHeight
-            ? SizedBox(height: targetHeight, child: sheetContainer)
-            : ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: maxHeight),
-                child: sheetContainer,
-              );
-
-        return Padding(
-          padding: EdgeInsets.only(bottom: bottomInset),
-          child: AnimatedBuilder(
-            animation: _pullController,
-            builder: (context, child) {
-              final dy = reduced ? 0.0 : _pullController.value;
-              if (dy == 0.0) return child!;
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  if (dy < 0.0)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: (-dy).ceilToDouble() + 1,
-                      child: ColoredBox(color: journal.sheetElevated),
-                    ),
-                  Transform.translate(
-                    offset: Offset(0, dy),
-                    child: child,
-                  ),
-                ],
-              );
+              return useFixedHeight
+                  ? SizedBox(height: targetHeight, child: sheetContainer)
+                  : ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: maxHeight),
+                      child: sheetContainer,
+                    );
             },
-            child: sheetBox,
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }

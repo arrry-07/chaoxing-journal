@@ -300,6 +300,7 @@ void main() {
             scrollOffset: 18.0,
             actions: [Icon(Icons.refresh)],
             titleTrailing: JournalPixelBuddy(mini: true),
+            statusContent: Text('悬浮状态'),
           ),
         ),
       ),
@@ -307,6 +308,7 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('课业手记'), findsNothing);
     expect(find.byType(JournalPixelBuddy), findsNothing);
+    expect(find.text('悬浮状态'), findsNothing);
 
     t.view.physicalSize = const Size(320, 640);
     t.view.devicePixelRatio = 1.0;
@@ -327,6 +329,7 @@ void main() {
                 mini: true,
                 onTap: () {},
               ),
+              statusContent: const Text('今日待办1项，稳步推进'),
             ),
           ),
         ),
@@ -335,6 +338,7 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('课业手记'), findsOneWidget);
     expect(find.byType(JournalPixelBuddy), findsOneWidget);
+    expect(find.text('今日待办1项，稳步推进'), findsOneWidget);
     expect(t.takeException(), isNull);
   });
 }

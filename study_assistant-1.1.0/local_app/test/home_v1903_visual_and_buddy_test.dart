@@ -11,6 +11,7 @@ import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart'
 import 'package:study_assistant_mobile/src/features/widgets/journal_buttons.dart';
 import 'package:study_assistant_mobile/src/features/widgets/journal_grouped_card.dart';
 import 'package:study_assistant_mobile/src/features/widgets/journal_pixel_buddy.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_sliver_header.dart';
 import 'package:study_assistant_mobile/src/features/widgets/manual_home_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
@@ -157,6 +158,7 @@ Future<void> _pumpHome(
   ThemeData? theme,
   double textScale = 1.0,
   bool disableAnimations = false,
+  ValueNotifier<bool>? tickerEnabled,
 }) async {
   final router = GoRouter(
     initialLocation: '/assignments',
@@ -183,13 +185,24 @@ Future<void> _pumpHome(
     MaterialApp.router(
       theme: theme ?? StudyAssistantTheme.light,
       routerConfig: router,
-      builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(context).copyWith(
-          textScaler: TextScaler.linear(textScale),
-          disableAnimations: disableAnimations,
-        ),
-        child: child!,
-      ),
+      builder: (context, child) {
+        final wrapped = MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(textScale),
+            disableAnimations: disableAnimations,
+          ),
+          child: child!,
+        );
+        if (tickerEnabled == null) return wrapped;
+        return ValueListenableBuilder<bool>(
+          valueListenable: tickerEnabled,
+          builder: (_, enabled, inner) => TickerMode(
+            enabled: enabled,
+            child: inner!,
+          ),
+          child: wrapped,
+        );
+      },
     ),
   );
   await tester.pumpAndSettle();
@@ -378,13 +391,17 @@ void main() {
 
       await _pumpHome(tester, store, now: now);
 
-      // Initial render keeps single '课业手记' title Text and 22dp buddy at 360dp.
+      // Initial render keeps single '课业手记' title Text, 22dp buddy, and unscaled 42dp hit target at 360dp.
       expect(find.text('课业手记'), findsOneWidget);
       final titleBuddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
       expect(titleBuddyFinder, findsOneWidget);
       final titleBuddy = tester.widget<JournalPixelBuddy>(titleBuddyFinder);
       expect(titleBuddy.size, 22.0);
       expect(titleBuddy.mood, JournalPixelBuddyMood.dueToday);
+      expect(tester.getSize(titleBuddyFinder).height,
+          inInclusiveRange(40.0, 44.0));
+      expect(tester.getRect(titleBuddyFinder).height,
+          inInclusiveRange(40.0, 44.0));
       expect(
         find.byKey(const ValueKey('home-sliver-pixel-buddy')),
         findsNothing,
@@ -501,15 +518,27 @@ void main() {
         JournalPixelBuddyMood.syncing,
       );
       final statusFinder = find.byKey(const ValueKey('home-sync-status'));
-      expect(
-        find.descendant(
+      final semantics = tester.ensureSemantics();
+      try {
+        await tester.pump(const Duration(milliseconds: 1));
+        final glyphFinder = find.descendant(
           of: statusFinder,
           matching: find.text(kJournalSpinnerGlyphs[0]),
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('翻阅课表中…'), findsOneWidget);
-      expect(find.text('正在读取课程'), findsOneWidget);
+        );
+        expect(glyphFinder, findsOneWidget);
+        expect(
+          find.ancestor(
+            of: glyphFinder,
+            matching: find.byType(ExcludeSemantics),
+          ),
+          findsWidgets,
+        );
+        expect(tester.getSemantics(statusFinder).label, '翻阅课表中…');
+        expect(find.text('翻阅课表中…'), findsOneWidget);
+        expect(find.text('正在读取课程'), findsOneWidget);
+      } finally {
+        semantics.dispose();
+      }
 
       await tester.pump(const Duration(milliseconds: 180));
       expect(
@@ -546,6 +575,162 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('home-pixel-buddy')));
       await tester.pumpAndSettle();
       expect(find.text('更新失败 · 显示上次记录'), findsOneWidget);
+      expect(find.text('今日待办1项，稳步推进'), findsNothing);
+    });
+
+    testWidgets(
+        'scrolled sliver mini buddy shows visible 2s whisper, honors busy/error priority, and cancels timer on background/TickerMode',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final store = await _createStore(
+        assignments: [
+          _work(
+            'today-1',
+            title: '今日急单',
+            due: now.add(const Duration(hours: 4)),
+            syncedAt: now,
+          ),
+          for (var i = 0; i < 12; i++)
+            _work(
+              'scroll-$i',
+              title: '长列表作业 $i',
+              due: now.add(Duration(days: 2 + i, hours: 3)),
+              syncedAt: now,
+            ),
+        ],
+        clock: () => now,
+        initialReport:
+            SyncReport(phase: SyncPhase.success, lastDataSuccessAt: now),
+      );
+      addTearDown(store.dispose);
+
+      final tickerEnabled = ValueNotifier<bool>(true);
+      addTearDown(tickerEnabled.dispose);
+
+      await _pumpHome(
+        tester,
+        store,
+        now: now,
+        tickerEnabled: tickerEnabled,
+      );
+
+      // Scroll far enough so home-sync-status leaves the visible viewport.
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -360));
+      await tester.pumpAndSettle();
+      final homeStatusFinder = find.byKey(const ValueKey('home-sync-status'));
+      if (homeStatusFinder.evaluate().isNotEmpty) {
+        expect(tester.getRect(homeStatusFinder).bottom, lessThanOrEqualTo(0.0));
+      }
+
+      // Tap sliver mini buddy -> visible whisper appears in JournalSliverHeader and auto-restores after 2s.
+      await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
+      await tester.pump();
+      final sliverStatusFinder =
+          find.byKey(const ValueKey('home-sliver-sync-status'));
+      expect(sliverStatusFinder, findsOneWidget);
+      final sliverRect = tester.getRect(sliverStatusFinder);
+      expect(sliverRect.top, greaterThanOrEqualTo(0.0));
+      expect(sliverRect.bottom, lessThan(200.0));
+      expect(
+        find.descendant(
+          of: sliverStatusFinder,
+          matching: find.text('今日待办1项，稳步推进'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.pump(const Duration(milliseconds: 2050));
+      await tester.pumpAndSettle();
+      expect(sliverStatusFinder, findsNothing);
+
+      // Background lifecycle (AppLifecycleState.paused) cancels active whisper timer & clears whisper immediately.
+      await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
+      await tester.pump();
+      expect(sliverStatusFinder, findsOneWidget);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      expect(sliverStatusFinder, findsNothing);
+      await tester.pump(const Duration(milliseconds: 2100));
+      expect(tester.takeException(), isNull);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+
+      // TickerMode(enabled: false) cancels active whisper timer & clears whisper immediately.
+      await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
+      await tester.pump();
+      expect(sliverStatusFinder, findsOneWidget);
+      tickerEnabled.value = false;
+      await tester.pump();
+      expect(sliverStatusFinder, findsNothing);
+      await tester.pump(const Duration(milliseconds: 2100));
+      expect(tester.takeException(), isNull);
+      tickerEnabled.value = true;
+      await tester.pump();
+
+      // Busy state shows sync spinner & phrase in JournalSliverHeader and resists tap overwrite.
+      store.syncGate = Completer<void>();
+      store.mockProgress = AssignmentSyncProgress(
+        stage: AssignmentSyncStage.courses,
+        assignments: const [],
+        pendingDetailIds: const {},
+        resolvedCount: 0,
+        attemptedCount: 0,
+      );
+      final sliverRefresh = find.descendant(
+        of: find.byType(JournalSliverHeader),
+        matching: find.byTooltip('刷新作业'),
+      );
+      await tester.tap(sliverRefresh);
+      await tester.pump();
+      expect(sliverStatusFinder, findsOneWidget);
+      expect(
+        find.descendant(
+          of: sliverStatusFinder,
+          matching: find.text('翻阅课表中…'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: sliverStatusFinder,
+          matching: find.text('翻阅课表中…'),
+        ),
+        findsOneWidget,
+      );
+
+      // Sync error priority prevents whisper in JournalSliverHeader when tapped.
+      store.mockProgress = null;
+      store.nextReport = const SyncReport(
+        phase: SyncPhase.failed,
+        issues: [SyncIssue(SyncIssueKind.authExpired, 'expired')],
+      );
+      store.syncGate!.complete();
+      await tester.pumpAndSettle();
+      expect(sliverStatusFinder, findsNothing);
+      await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
+      await tester.pumpAndSettle();
+      expect(sliverStatusFinder, findsNothing);
+
+      // Foreground disableAnimations: true still displays 2s whisper and auto-restores.
+      store.syncReport =
+          SyncReport(phase: SyncPhase.success, lastDataSuccessAt: now);
+      await _pumpHome(
+        tester,
+        store,
+        now: now,
+        disableAnimations: true,
+      );
+      await tester.tap(find.byKey(const ValueKey('home-pixel-buddy')));
+      await tester.pump();
+      expect(find.text('今日待办1项，稳步推进'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 2050));
+      await tester.pumpAndSettle();
       expect(find.text('今日待办1项，稳步推进'), findsNothing);
     });
 
@@ -694,20 +879,76 @@ void main() {
       );
       expect(transformUp.transform.storage[0], 1.0);
 
-      // Filter modal bottom sheet opens with normal duration and settles cleanly.
+      // Filter modal bottom sheet opens with normal duration, supports upward rubber-band preserving search focus/text, downward dismiss, and reduced motion.
       await tester.tap(find.byKey(const ValueKey('current-home-sort')));
       await tester.pump(const Duration(milliseconds: 120));
       expect(find.text('搜索、筛选与排序'), findsOneWidget);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('取消'));
+
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), '高数');
+      await tester.pump();
+      expect(
+        tester
+            .widget<EditableText>(find.byType(EditableText))
+            .focusNode
+            .hasFocus,
+        isTrue,
+      );
+      expect(
+        tester.widget<EditableText>(find.byType(EditableText)).controller.text,
+        '高数',
+      );
+
+      final filterHandleFinder =
+          find.byKey(const ValueKey('home-filter-drag-handle'));
+      final initialFilterHandleY = tester.getTopLeft(filterHandleFinder).dy;
+      final filterPull =
+          await tester.startGesture(tester.getCenter(filterHandleFinder));
+      await filterPull.moveBy(const Offset(0, -60));
+      await tester.pump();
+      expect(
+        tester.getTopLeft(filterHandleFinder).dy,
+        lessThan(initialFilterHandleY),
+      );
+      expect(
+        tester
+            .widget<EditableText>(find.byType(EditableText))
+            .focusNode
+            .hasFocus,
+        isTrue,
+      );
+      expect(
+        tester.widget<EditableText>(find.byType(EditableText)).controller.text,
+        '高数',
+      );
+      await filterPull.up();
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(filterHandleFinder).dy,
+        closeTo(initialFilterHandleY, 0.01),
+      );
+
+      await tester.drag(filterHandleFinder, const Offset(0, 420));
       await tester.pumpAndSettle();
       expect(find.text('搜索、筛选与排序'), findsNothing);
 
-      // Under reduced motion, modal sheet opens immediately on first frame.
+      // Under reduced motion, modal sheet opens immediately on first frame and handle upward drag produces zero displacement.
       await _pumpHome(tester, store, now: now, disableAnimations: true);
       await tester.tap(find.byKey(const ValueKey('current-home-sort')));
       await tester.pump();
       expect(find.text('搜索、筛选与排序'), findsOneWidget);
+      final reducedHandleY = tester.getTopLeft(filterHandleFinder).dy;
+      final reducedPull =
+          await tester.startGesture(tester.getCenter(filterHandleFinder));
+      await reducedPull.moveBy(const Offset(0, -60));
+      await tester.pump();
+      expect(
+        tester.getTopLeft(filterHandleFinder).dy,
+        closeTo(reducedHandleY, 0.01),
+      );
+      await reducedPull.up();
       await tester.tap(find.text('取消'));
       await tester.pump(const Duration(milliseconds: 360));
       await tester.pumpAndSettle();
@@ -797,11 +1038,48 @@ void main() {
       expect(manualScale.transform.storage[0], greaterThan(1.0));
       await tester.pumpAndSettle();
 
-      // Complete manual entry -> completes cleanly and invokes HomeManualActions.completeWithUndo.
+      // Complete manual entry -> stays visible at 48ms with micro-bounce > 1.0 & done == true, then exits cleanly on pumpAndSettle.
       await tester.tap(find.byKey(const ValueKey('complete-manual-m-pin')));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 48));
+      expect(find.byKey(const ValueKey('manual-m-pin')), findsOneWidget);
+      expect(store.notebook.entries.single.done, isTrue);
+      final completeBounceTransform = tester.widget<Transform>(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('manual-m-pin')),
+              matching: find.byType(Transform),
+            )
+            .first,
+      );
+      expect(completeBounceTransform.transform.storage[0], greaterThan(1.0));
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('manual-m-pin')), findsNothing);
       expect(store.notebook.entries.single.done, isTrue);
       expect(tester.takeException(), isNull);
+
+      // Reduced motion: completing manual entry exits immediately without lingering.
+      final manualReduced = _manual(
+        'm-reduced-done',
+        title: '减弱完成待办',
+        at: now.add(const Duration(hours: 7)),
+      );
+      await store.saveNotebook(
+        (n) => n.withEntries([...n.entries, manualReduced]),
+        store.accountEpoch,
+      );
+      await _pumpHome(tester, store, now: now, disableAnimations: true);
+      await tester.tap(
+        find.byKey(const ValueKey('complete-manual-m-reduced-done')),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('manual-m-reduced-done')),
+        findsNothing,
+      );
+      await tester.pumpAndSettle();
 
       // Reduced motion skips bounce increment on pin.
       final assignment2 = _work(
@@ -826,6 +1104,86 @@ void main() {
             .first,
       );
       expect(reducedBounce.pulse, 0);
+    });
+
+    testWidgets(
+        'pin bounce state is keyed by assignment identity so pinning A never triggers bounce on neighbor B',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final assignmentA = _work(
+        'id-a',
+        title: '同组作业A',
+        due: now.add(const Duration(days: 2, hours: 1)),
+        syncedAt: now,
+      );
+      final assignmentB = _work(
+        'id-b',
+        title: '同组作业B',
+        due: now.add(const Duration(days: 2, hours: 3)),
+        syncedAt: now,
+      );
+      final store = await _createStore(
+        assignments: [assignmentA, assignmentB],
+        clock: () => now,
+      );
+      addTearDown(store.dispose);
+
+      await _pumpHome(tester, store, now: now);
+
+      // Pin B, then unpin B so B returns after A with pulse > 0 while A has pulse == 0.
+      await tester.longPress(find.text('同组作业B'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('置顶'));
+      await tester.pumpAndSettle();
+
+      await tester.longPress(find.text('同组作业B'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('取消置顶'));
+      await tester.pumpAndSettle();
+
+      // Now pin A -> only A must bounce; B's JournalMicroBounce must remain strictly 1.0.
+      await tester.longPress(find.text('同组作业A'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('置顶'));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 48));
+
+      final bounceKeyA = ValueKey(
+          'home-micro-bounce-${AssignmentStore.pinKeyOf(assignmentA)}');
+      final bounceKeyB = ValueKey(
+          'home-micro-bounce-${AssignmentStore.pinKeyOf(assignmentB)}');
+
+      final scaleA = tester
+          .widget<Transform>(
+            find
+                .descendant(
+                  of: find.byKey(bounceKeyA),
+                  matching: find.byType(Transform),
+                )
+                .first,
+          )
+          .transform
+          .storage[0];
+      final scaleB = tester
+          .widget<Transform>(
+            find
+                .descendant(
+                  of: find.byKey(bounceKeyB),
+                  matching: find.byType(Transform),
+                )
+                .first,
+          )
+          .transform
+          .storage[0];
+
+      expect(scaleA, greaterThan(1.0));
+      expect(scaleB, closeTo(1.0, 1e-6));
+      await tester.pumpAndSettle();
     });
   });
 }

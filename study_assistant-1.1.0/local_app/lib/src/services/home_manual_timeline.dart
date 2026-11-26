@@ -89,13 +89,14 @@ class HomeManualTimeline {
     String? selectedCourseName,
     AssignmentDeadlineFilter deadline = AssignmentDeadlineFilter.all,
     AssignmentTypeFilter type = AssignmentTypeFilter.all,
+    Set<String> keepVisibleIds = const {},
     required DateTime now,
   }) {
     final needle = query.trim().toLowerCase();
     final course = selectedCourseName?.trim().toLowerCase();
     return [
       for (final entry in entries)
-        if (!entry.done &&
+        if ((!entry.done || keepVisibleIds.contains(entry.id)) &&
             _matchesType(entry, type) &&
             (course == null ||
                 course.isEmpty ||
@@ -104,7 +105,13 @@ class HomeManualTimeline {
                 entry.title.toLowerCase().contains(needle) ||
                 entry.course.toLowerCase().contains(needle) ||
                 entry.location.toLowerCase().contains(needle)) &&
-            _matchesDeadline(entry, deadline, now))
+            _matchesDeadline(
+              entry.done && keepVisibleIds.contains(entry.id)
+                  ? entry.completed(false)
+                  : entry,
+              deadline,
+              now,
+            ))
           entry,
     ];
   }

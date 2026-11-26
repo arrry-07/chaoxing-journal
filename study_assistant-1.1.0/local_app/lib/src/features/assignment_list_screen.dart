@@ -115,6 +115,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   final ValueNotifier<int> _syncSpinnerTick = ValueNotifier<int>(0);
   final _feedback = TransientFeedbackController();
   final Map<String, int> _pinPulseByKey = <String, int>{};
+  final Set<String> _completingManualIds = <String>{};
+  final Map<String, Timer> _completingManualTimers = <String, Timer>{};
   late int _feedbackEpoch;
   String? _feedbackAccount;
   HomeFilters? _preExamStripFilters;
@@ -141,6 +143,60 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     } else {
       _buddyWhisper = null;
     }
+  }
+
+  void _clearCompletingManual({String? entryId, bool notify = false}) {
+    if (entryId != null) {
+      _completingManualTimers.remove(entryId)?.cancel();
+      final removed = _completingManualIds.remove(entryId);
+      if (removed && notify && mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    for (final timer in _completingManualTimers.values) {
+      timer.cancel();
+    }
+    _completingManualTimers.clear();
+    final hadAny = _completingManualIds.isNotEmpty;
+    _completingManualIds.clear();
+    if (hadAny && notify && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _onManualCompletingStart(String entryId) {
+    if (!mounted || JournalMotion.isReducedMotion(context)) return;
+    _completingManualTimers.remove(entryId)?.cancel();
+    setState(() {
+      _completingManualIds.add(entryId);
+    });
+  }
+
+  void _onManualCompletingCommit(String entryId) {
+    if (!mounted || JournalMotion.isReducedMotion(context)) {
+      _clearCompletingManual(entryId: entryId, notify: true);
+      return;
+    }
+    _completingManualTimers.remove(entryId)?.cancel();
+    setState(() {
+      _completingManualIds.add(entryId);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_completingManualIds.contains(entryId)) return;
+      _completingManualTimers.remove(entryId)?.cancel();
+      _completingManualTimers[entryId] = Timer(
+        const Duration(milliseconds: 220),
+        () {
+          _completingManualTimers.remove(entryId);
+          if (!mounted) return;
+          if (_completingManualIds.remove(entryId)) {
+            setState(() {});
+          }
+        },
+      );
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   void _reconcileSyncSpinner({
@@ -193,6 +249,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         _feedbackAccount != store.account) {
       _feedback.dismiss();
       _clearBuddyWhisper();
+      _clearCompletingManual();
       _pinPulseByKey.clear();
       _preExamStripFilters = null;
       _preExamStripEpoch = null;
@@ -218,6 +275,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       oldWidget.store.removeListener(_onStoreChanged);
       _feedback.dismiss();
       _clearBuddyWhisper();
+      _clearCompletingManual();
       _pinPulseByKey.clear();
       _feedbackEpoch = store.accountEpoch;
       _feedbackAccount = store.account;
@@ -247,6 +305,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     super.didChangeDependencies();
     _tickerEnabled = TickerMode.valuesOf(context).enabled;
     _reducedMotion = JournalMotion.isReducedMotion(context);
+    if (!_tickerEnabled) {
+      _clearBuddyWhisper();
+    }
+    if (_reducedMotion) {
+      _clearCompletingManual();
+    }
     _reconcileSyncSpinner();
   }
 
@@ -261,6 +325,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _syncSpinnerTick.dispose();
     _buddyWhisperTimer?.cancel();
     _buddyWhisperTimer = null;
+    _clearCompletingManual();
     store.removeListener(_onStoreChanged);
     _feedback.dispose();
     _clock?.cancel();
@@ -272,6 +337,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     final nextResumed = state == AppLifecycleState.resumed;
     if (_appResumed != nextResumed) {
       _appResumed = nextResumed;
+      if (!nextResumed) {
+        _clearBuddyWhisper(notify: true);
+      }
       _reconcileSyncSpinner();
     }
     if (nextResumed && mounted) setState(() {});
@@ -371,6 +439,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         feedback(message, action: action, actionLabel: actionLabel),
     isMounted: () => mounted,
     onBouncePulse: _triggerCardPulse,
+    onCompletingStart: _onManualCompletingStart,
+    onCompletingCommit: _onManualCompletingCommit,
+    onCompletingCancel: (id) =>
+        _clearCompletingManual(entryId: id, notify: true),
   );
 
   /// Per-course item counts for the picker, refreshed on every build so the
@@ -818,6 +890,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 selectedCourseName: selectedCourseName,
                 deadline: _deadlineFilter,
                 type: _typeFilter,
+                keepVisibleIds: _completingManualIds,
                 now: now,
               )
             : const <ManualEntry>[];
@@ -985,7 +1058,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           final canPin = store.canTogglePin(a);
           final isPinned = store.isPinned(a);
 
+          final pinKey = AssignmentStore.pinKeyOf(a);
           return Builder(
+            key: ValueKey('home-timeline-item-$pinKey'),
             builder: (itemContext) {
               final interactiveCard = buildCard(
                 a,
@@ -1001,8 +1076,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ),
               );
 
-              final pinKey = AssignmentStore.pinKeyOf(a);
               return JournalMicroBounce(
+                key: ValueKey('home-micro-bounce-$pinKey'),
                 pulse: _pinPulseByKey[pinKey] ?? 0,
                 child: JournalSwipeTile(
                   key: ValueKey('swipe-${a.id}'),
@@ -1090,9 +1165,22 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ? JournalPixelBuddyMood.allClear
                     : JournalPixelBuddyMood.idle;
 
+        final syncErrorOrPending = !busy &&
+            (store.syncReport.phase == SyncPhase.failed ||
+                store.syncReport.phase == SyncPhase.partial ||
+                sync.action == HomeSyncAction.login ||
+                sync.action == HomeSyncAction.verify ||
+                sync.action == HomeSyncAction.settings);
+        final syncBusyWithBuddy = busy && showPixelBuddy;
+        final activeWhisper = (!busy && !syncErrorOrPending && showPixelBuddy)
+            ? _buddyWhisper
+            : null;
+
         void onBuddyTap() {
           _buddyTapCount++;
-          if (busy) return;
+          if (busy || syncErrorOrPending || !_appResumed || !_tickerEnabled) {
+            return;
+          }
           _buddyWhisperTimer?.cancel();
           final whisper = journalBuddyTapWhisper(
             dueToday: dueSummary.dueToday,
@@ -1219,7 +1307,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            title,
+                            Flexible(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: title,
+                              ),
+                            ),
                             const SizedBox(width: 4),
                             JournalPixelBuddy(
                               key: const ValueKey('home-pixel-buddy'),
@@ -1231,7 +1325,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                             ),
                           ],
                         )
-                      : title;
+                      : FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: title,
+                        );
                   if (!largeText && constraints.maxWidth >= 300) {
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1239,11 +1337,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                         Expanded(
                           child: Align(
                             alignment: Alignment.centerLeft,
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: titleCluster,
-                            ),
+                            child: titleCluster,
                           ),
                         ),
                         const SizedBox(width: 4),
@@ -1255,18 +1349,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     alignment: WrapAlignment.spaceBetween,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      showPixelBuddy
-                          ? ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: constraints.maxWidth,
-                              ),
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: titleCluster,
-                              ),
-                            )
-                          : title,
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: constraints.maxWidth,
+                        ),
+                        child: titleCluster,
+                      ),
                       actionsRow,
                     ],
                   );
@@ -1303,17 +1391,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final showChevron =
                   sync.action != HomeSyncAction.none && !sync.gentle;
 
-              final syncErrorOrPending = !busy &&
-                  (store.syncReport.phase == SyncPhase.failed ||
-                      store.syncReport.phase == SyncPhase.partial ||
-                      sync.action == HomeSyncAction.login ||
-                      sync.action == HomeSyncAction.verify ||
-                      sync.action == HomeSyncAction.settings);
-              final syncBusyWithBuddy = busy && showPixelBuddy;
-              final activeWhisper =
-                  (!busy && !syncErrorOrPending && showPixelBuddy)
-                      ? _buddyWhisper
-                      : null;
               final effectiveStatusText = syncBusyWithBuddy
                   ? journalBuddySyncPhrase(
                       store.homeSyncProgress?.stage,
@@ -1413,12 +1490,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                   leading: SizedBox(
                                     width: 14.5,
                                     child: Center(
-                                      child: Text(
-                                        glyph,
-                                        style: journal.metadata.copyWith(
-                                          color: journal.accent,
-                                          fontWeight: FontWeight.w600,
-                                          height: 1.0,
+                                      child: ExcludeSemantics(
+                                        child: Text(
+                                          glyph,
+                                          style: journal.metadata.copyWith(
+                                            color: journal.accent,
+                                            fontWeight: FontWeight.w600,
+                                            height: 1.0,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -1922,6 +2001,86 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         final showSliverBuddy = showPixelBuddy &&
             !JournalLayout.isLargeText(context) &&
             MediaQuery.sizeOf(context).width >= 330;
+        final Widget? sliverStatusContent = syncBusyWithBuddy
+            ? ValueListenableBuilder<int>(
+                key: const ValueKey('home-sliver-sync-status'),
+                valueListenable: _syncSpinnerTick,
+                builder: (context, tick, _) {
+                  final glyph = reduceMotion
+                      ? '✻'
+                      : kJournalSpinnerGlyphs[
+                          tick % kJournalSpinnerGlyphs.length];
+                  final phrase = journalBuddySyncPhrase(
+                    store.homeSyncProgress?.stage,
+                    tick,
+                  );
+                  return Semantics(
+                    liveRegion: true,
+                    label: phrase,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 14.5,
+                          child: Center(
+                            child: ExcludeSemantics(
+                              child: Text(
+                                glyph,
+                                style: journal.metadata.copyWith(
+                                  color: journal.accent,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.0,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: ExcludeSemantics(
+                            child: Text(
+                              phrase,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: journal.metadata,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              )
+            : activeWhisper != null
+                ? Semantics(
+                    key: const ValueKey('home-sliver-sync-status'),
+                    liveRegion: true,
+                    label: activeWhisper,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.auto_awesome_rounded,
+                          size: 14.5,
+                          color: journal.accent,
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: ExcludeSemantics(
+                            child: Text(
+                              activeWhisper,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: journal.metadata.copyWith(
+                                color: journal.accent,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : null;
 
         return Stack(
           children: [
@@ -1972,6 +2131,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                           displayPrefs: store.display,
                         )
                       : null,
+                  statusContent: sliverStatusContent,
                   actions: headerActions,
                 ),
               ),
@@ -2735,6 +2895,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       useRootNavigator: true,
       isScrollControlled: true,
       useSafeArea: true,
+      backgroundColor: Colors.transparent,
       sheetAnimationStyle: JournalMotion.modalSheetAnimationStyle(context),
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) {
@@ -2747,214 +2908,241 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       ?.label ??
                   '全部课程';
           return Padding(
-            padding: EdgeInsets.fromLTRB(
-                20, 14, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 14),
-                      decoration: BoxDecoration(
-                        color: journal.ruleStrong,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Text('搜索、筛选与排序', style: journal.section),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: controller,
-                    autofocus: _query.isNotEmpty,
-                    onChanged: (value) => setSheetState(() => query = value),
-                    textInputAction: TextInputAction.search,
-                    decoration: const InputDecoration(
-                      labelText: '搜索作业、任务、考试或课程',
-                      prefixIcon: Icon(Icons.search_rounded),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text('类型', style: journal.dayHeading),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(context).bottom),
+            child: JournalSheetRubberBand(
+              fillColor: journal.sheetElevated,
+              builder: (context, wrapGrabArea) => Container(
+                decoration: BoxDecoration(
+                  color: journal.sheetElevated,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      for (final option in homeTypeFilterChoices)
-                        ChoiceChip(
-                          key: ValueKey('type-${option.name}'),
-                          selected: type == option,
-                          onSelected: (_) => setSheetState(() => type = option),
-                          label: Text(option.label),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text('期限', style: journal.dayHeading),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final filter in homeDeadlineFilterChoices)
-                        ChoiceChip(
-                          key: ValueKey('deadline-${filter.name}'),
-                          selected: deadline == filter,
-                          onSelected: (_) =>
-                              setSheetState(() => deadline = filter),
-                          label: Text(_deadlineLabel(filter)),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  HomeCourseFilterRow(
-                    key: const ValueKey('home-course-filter'),
-                    tapKey: ValueKey(
-                        'course-${store.accountEpoch}-${courseKey ?? "all"}'),
-                    value: selectedCourseLabel,
-                    selected: courseKey != null,
-                    onClear: () => setSheetState(() => courseKey = null),
-                    onTap: () async {
-                      final counts = _courseCountsFor(type, deadline);
-                      final ordered =
-                          sortHomeCourseOptionsByCount(courseOptions, counts);
-                      final picked = await showJournalPickerSheet<String>(
-                        context,
-                        title: '课程筛选',
-                        selectedValue: courseKey ?? '',
-                        searchable: courseOptions.length > 5 ||
-                            courseOptions.any((o) => o.teacherNames.isNotEmpty),
-                        searchHint: '搜索课程或教师...',
-                        displayPrefs: store.display,
-                        filterOptions: const [
-                          JournalPickerFilterOption(
-                            id: 'currentTerm',
-                            label: '本学期',
-                          ),
-                          JournalPickerFilterOption(
-                            id: 'currentAcademicYear',
-                            label: '本学年',
-                          ),
-                          JournalPickerFilterOption(
-                            id: 'pastTerms',
-                            label: '往期',
-                          ),
-                          JournalPickerFilterOption(
-                            id: 'allTerms',
-                            label: '全部学期',
-                          ),
-                        ],
-                        initialFilterId: 'currentTerm',
-                        filterPredicate: (option, filterId) {
-                          if (option.value.isEmpty) return true;
-                          return store.termCatalog.matchesHomeCoursePicker(
-                            option.value,
-                            filterId,
-                            hasVisibleItems: (counts[option.value] ?? 0) > 0,
-                          );
-                        },
-                        filterNoticeBuilder: (filterId, filtered) =>
-                            filterId == 'currentTerm' &&
-                                    filtered.every((o) => o.value.isEmpty) &&
-                                    courseOptions.isNotEmpty
-                                ? '本学期暂未识别出课程，可切换到「本学年」或「全部学期」查看'
-                                : null,
-                        options: [
-                          const JournalPickerOption<String>(
-                            value: '',
-                            label: '全部课程',
-                          ),
-                          for (final option in ordered)
-                            JournalPickerOption<String>(
-                              key:
-                                  ValueKey('course-option-${option.courseKey}'),
-                              value: option.courseKey,
-                              label: option.name,
-                              subtitle: option.subtitle,
-                              keywords: option.searchKeywords,
-                              icon: courseIconFor(option.name),
-                              trailingText: homeCourseCountLabel(
-                                  counts[option.courseKey] ?? 0),
-                            ),
-                        ],
-                      );
-                      if (picked != null) {
-                        setSheetState(
-                            () => courseKey = picked == '' ? null : picked);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Text('排序', style: journal.dayHeading),
-                  const SizedBox(height: 8),
-                  JournalGroupedCard(
-                    children: [
-                      RadioGroup<HomeSortOrder>(
-                        groupValue: sortOrder,
-                        onChanged: (value) {
-                          if (value != null) {
-                            setSheetState(() => sortOrder = value);
-                          }
-                        },
-                        child: Column(
+                      wrapGrabArea(
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            for (final order in homeSortOrderChoices)
-                              RadioListTile<HomeSortOrder>(
-                                key: ValueKey('sort-${order.name}'),
-                                value: order,
-                                contentPadding:
-                                    const EdgeInsets.symmetric(horizontal: 12),
-                                dense: true,
-                                title: Text(
-                                  _sortLabel(order),
-                                  style: journal.entryTitle
-                                      .copyWith(fontSize: 14.5),
+                            Center(
+                              key: const ValueKey('home-filter-drag-handle'),
+                              child: Container(
+                                width: 36,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: journal.ruleStrong,
+                                  borderRadius: BorderRadius.circular(2),
                                 ),
                               ),
+                            ),
+                            const SizedBox(height: 14),
+                            Text('搜索、筛选与排序', style: journal.section),
                           ],
                         ),
                       ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: controller,
+                        autofocus: _query.isNotEmpty,
+                        onChanged: (value) =>
+                            setSheetState(() => query = value),
+                        textInputAction: TextInputAction.search,
+                        decoration: const InputDecoration(
+                          labelText: '搜索作业、任务、考试或课程',
+                          prefixIcon: Icon(Icons.search_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text('类型', style: journal.dayHeading),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final option in homeTypeFilterChoices)
+                            ChoiceChip(
+                              key: ValueKey('type-${option.name}'),
+                              selected: type == option,
+                              onSelected: (_) =>
+                                  setSheetState(() => type = option),
+                              label: Text(option.label),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Text('期限', style: journal.dayHeading),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final filter in homeDeadlineFilterChoices)
+                            ChoiceChip(
+                              key: ValueKey('deadline-${filter.name}'),
+                              selected: deadline == filter,
+                              onSelected: (_) =>
+                                  setSheetState(() => deadline = filter),
+                              label: Text(_deadlineLabel(filter)),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      HomeCourseFilterRow(
+                        key: const ValueKey('home-course-filter'),
+                        tapKey: ValueKey(
+                            'course-${store.accountEpoch}-${courseKey ?? "all"}'),
+                        value: selectedCourseLabel,
+                        selected: courseKey != null,
+                        onClear: () => setSheetState(() => courseKey = null),
+                        onTap: () async {
+                          final counts = _courseCountsFor(type, deadline);
+                          final ordered = sortHomeCourseOptionsByCount(
+                              courseOptions, counts);
+                          final picked = await showJournalPickerSheet<String>(
+                            context,
+                            title: '课程筛选',
+                            selectedValue: courseKey ?? '',
+                            searchable: courseOptions.length > 5 ||
+                                courseOptions
+                                    .any((o) => o.teacherNames.isNotEmpty),
+                            searchHint: '搜索课程或教师...',
+                            displayPrefs: store.display,
+                            filterOptions: const [
+                              JournalPickerFilterOption(
+                                id: 'currentTerm',
+                                label: '本学期',
+                              ),
+                              JournalPickerFilterOption(
+                                id: 'currentAcademicYear',
+                                label: '本学年',
+                              ),
+                              JournalPickerFilterOption(
+                                id: 'pastTerms',
+                                label: '往期',
+                              ),
+                              JournalPickerFilterOption(
+                                id: 'allTerms',
+                                label: '全部学期',
+                              ),
+                            ],
+                            initialFilterId: 'currentTerm',
+                            filterPredicate: (option, filterId) {
+                              if (option.value.isEmpty) return true;
+                              return store.termCatalog.matchesHomeCoursePicker(
+                                option.value,
+                                filterId,
+                                hasVisibleItems:
+                                    (counts[option.value] ?? 0) > 0,
+                              );
+                            },
+                            filterNoticeBuilder: (filterId, filtered) =>
+                                filterId == 'currentTerm' &&
+                                        filtered
+                                            .every((o) => o.value.isEmpty) &&
+                                        courseOptions.isNotEmpty
+                                    ? '本学期暂未识别出课程，可切换到「本学年」或「全部学期」查看'
+                                    : null,
+                            options: [
+                              const JournalPickerOption<String>(
+                                value: '',
+                                label: '全部课程',
+                              ),
+                              for (final option in ordered)
+                                JournalPickerOption<String>(
+                                  key: ValueKey(
+                                      'course-option-${option.courseKey}'),
+                                  value: option.courseKey,
+                                  label: option.name,
+                                  subtitle: option.subtitle,
+                                  keywords: option.searchKeywords,
+                                  icon: courseIconFor(option.name),
+                                  trailingText: homeCourseCountLabel(
+                                      counts[option.courseKey] ?? 0),
+                                ),
+                            ],
+                          );
+                          if (picked != null) {
+                            setSheetState(
+                                () => courseKey = picked == '' ? null : picked);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      Text('排序', style: journal.dayHeading),
+                      const SizedBox(height: 8),
+                      JournalGroupedCard(
+                        children: [
+                          RadioGroup<HomeSortOrder>(
+                            groupValue: sortOrder,
+                            onChanged: (value) {
+                              if (value != null) {
+                                setSheetState(() => sortOrder = value);
+                              }
+                            },
+                            child: Column(
+                              children: [
+                                for (final order in homeSortOrderChoices)
+                                  RadioListTile<HomeSortOrder>(
+                                    key: ValueKey('sort-${order.name}'),
+                                    value: order,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 12),
+                                    dense: true,
+                                    title: Text(
+                                      _sortLabel(order),
+                                      style: journal.entryTitle
+                                          .copyWith(fontSize: 14.5),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Wrap(
+                        alignment: WrapAlignment.end,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          TextButton(
+                            onPressed: () => setSheetState(() {
+                              query = '';
+                              courseKey = null;
+                              deadline = AssignmentDeadlineFilter.all;
+                              type = AssignmentTypeFilter.all;
+                              controller.clear();
+                            }),
+                            child: const Text('清空筛选'),
+                          ),
+                          TextButton(
+                              onPressed: () => Navigator.pop(sheetContext),
+                              child: const Text('取消')),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(
+                                sheetContext,
+                                _HomeFilterSelection(
+                                    query: query,
+                                    courseKey: courseKey,
+                                    deadline: deadline,
+                                    type: type,
+                                    sortOrder: sortOrder)),
+                            style:
+                                FilledButton.styleFrom(enableFeedback: false),
+                            child: const Text('应用'),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    alignment: WrapAlignment.end,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      TextButton(
-                        onPressed: () => setSheetState(() {
-                          query = '';
-                          courseKey = null;
-                          deadline = AssignmentDeadlineFilter.all;
-                          type = AssignmentTypeFilter.all;
-                          controller.clear();
-                        }),
-                        child: const Text('清空筛选'),
-                      ),
-                      TextButton(
-                          onPressed: () => Navigator.pop(sheetContext),
-                          child: const Text('取消')),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(
-                            sheetContext,
-                            _HomeFilterSelection(
-                                query: query,
-                                courseKey: courseKey,
-                                deadline: deadline,
-                                type: type,
-                                sortOrder: sortOrder)),
-                        style: FilledButton.styleFrom(enableFeedback: false),
-                        child: const Text('应用'),
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
           );

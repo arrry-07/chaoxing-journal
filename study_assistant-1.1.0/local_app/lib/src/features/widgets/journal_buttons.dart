@@ -303,19 +303,8 @@ class _JournalPressableScaleState extends State<JournalPressableScale>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.enabled && !widget.enabled) {
       _pressed = false;
-      if (JournalMotion.isReducedMotion(context)) {
-        _controller.stop();
-        _controller.value = 1.0;
-      } else if (_controller.isAnimating || _controller.value != 1.0) {
-        _controller.animateWith(
-          JournalMotion.springFor(
-            JournalMotion.pressSpring,
-            start: _controller.value,
-            end: 1.0,
-            velocity: _controller.velocity,
-          ),
-        );
-      }
+      _controller.stop();
+      _controller.value = 1.0;
     }
   }
 
