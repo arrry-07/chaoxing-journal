@@ -60,7 +60,7 @@
 - **考试改期、课程身份与时间解析收口**：完善缺年改期锚点透传与二次改期防双套壳，统一全仓 `clazzId`/`classId` 参数提取，课程通知仅采信官方 `sendTime`（停止误信 `completeTime`），每日计划考试按开考时间判断并过滤已结束/取消项，兼容全角时间冒号、跨闰年 `02-29` 及跨天进行中考试。
 - **Android 原生提醒、桌面小组件与交互反馈加固**：白天重启/改时区即时投递待发新作业提醒，8 个原生提醒数据库接口移出主线程并升级 SQLite v7（含索引与定期裁剪），支持精确闹钟撤权自动降级、温启动点通知深链复用与锁屏 `VISIBILITY_PRIVATE` 隐私保护；桌面小组件适配深色暖灰并按系统字号（如 1.5×）动态缩减行数防裁切；补齐详情页/学习中心 `syncDone` 完成反馈与原生音效静音/通话态线程安全保护。
 - **账号并发隔离、网络与备份安全纵深**：补齐登录中断完整回滚防裂脑、写租约 `runScopedWrite` 与 `_SessionSnapshot` 代次守卫、切号/登出清理旧提醒与小组件缓存及文件 URI 授权；加固 `verifyInBrowser` Cookie 父域保护与主帧 `GET` 校验、便携备份拒绝嵌套文件授权、APK 更新下载逐跳校验 HTTPS、官方 Gitee 清单域名白名单、外链 `BrowserPolicy` 及仓库防误提交安全门禁与全仓 UI 静态规范守卫。
-- PR [#62](https://github.com/arrry-07/chaoxing-journal/pull/62) 合入 `233a8b0`，已发布 [v1.8.25](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.25)。[验收与发布记录](docs/reviews/2026-11-23-v1.8.25-八维治理止血统计修复与底盘加固验收与发布记录.md)
+- PR [#62](https://github.com/arrry-07/chaoxing-journal/pull/62) 合入 `233a8b0`，已发布 [v1.8.25](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.8.25)。[验收与发布记录](docs/archive/reviews/2026-11-23-v1.8.25-八维治理止血统计修复与底盘加固验收与发布记录.md)
 
 ## 1.8.24（108） — 全应用视觉与交互升级、详情页精修与可靠性加固（正式发布，2026-11-22）
 
