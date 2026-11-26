@@ -1,5 +1,6 @@
 import '../../models/assignment.dart';
 import '../../models/local_coursework_state.dart';
+import '../../models/pinned_assignments.dart';
 import '../../services/assignment_query.dart';
 import '../../services/assignment_store.dart';
 import '../../services/exam_schedule_presentation.dart';
@@ -27,6 +28,8 @@ List<HomeTimelineSection> buildHomeTimelineSections({
   required LocalCourseworkState coursework,
   required List<Assignment> examSources,
   required AssignmentDisplayIndex? displayIndex,
+  Set<String> keepPinnedKeys = const {},
+  PinnedAssignments? completingPinnedSnapshot,
 }) {
   final sections = <HomeTimelineSection>[];
   var regular = list;
@@ -53,7 +56,8 @@ List<HomeTimelineSection> buildHomeTimelineSections({
     regular = <HomeTimelineItem>[];
     for (final item in list) {
       final isPinned = item.isManual
-          ? store.isManualPinned(item.manual!)
+          ? store.isManualPinned(item.manual!) ||
+              keepPinnedKeys.contains(item.pinKey)
           : store.isPinned(item.assignment!) &&
               !store.isHomeAssignmentPreviewOnly(item.assignment!.id);
       if (isPinned) {
@@ -94,7 +98,18 @@ List<HomeTimelineSection> buildHomeTimelineSections({
         return left.pinKey.compareTo(right.pinKey);
       }
 
-      final orderedPinned = store.pinnedAssignments.orderItems(
+      final effectivePinnedOrdering =
+          keepPinnedKeys.isNotEmpty && completingPinnedSnapshot != null
+              ? PinnedAssignments(
+                  keys: [
+                    ...completingPinnedSnapshot.keys,
+                    ...store.pinnedAssignments.keys,
+                  ],
+                  manuallyOrdered: completingPinnedSnapshot.manuallyOrdered ||
+                      store.pinnedAssignments.manuallyOrdered,
+                )
+              : store.pinnedAssignments;
+      final orderedPinned = effectivePinnedOrdering.orderItems(
         pinned,
         keyOf: (item) => item.pinKey,
         defaultComparator: compareAutoPinned,

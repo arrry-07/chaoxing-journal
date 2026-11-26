@@ -626,9 +626,23 @@ void main() {
         expect(tester.getRect(homeStatusFinder).bottom, lessThanOrEqualTo(0.0));
       }
 
-      // Tap sliver mini buddy -> visible whisper appears in JournalSliverHeader and auto-restores after 2s.
-      await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
+      // Tap sliver mini buddy -> visible whisper appears in JournalSliverHeader AND mini buddy keeps State & jumps without unmount.
+      final sliverBuddyFinder =
+          find.byKey(const ValueKey('home-sliver-pixel-buddy'));
+      final buddyStateBefore = tester.state(sliverBuddyFinder);
+      final buddyPainterBefore = tester
+          .widget<CustomPaint>(
+            find
+                .descendant(
+                  of: sliverBuddyFinder,
+                  matching: find.byType(CustomPaint),
+                )
+                .first,
+          )
+          .painter!;
+      await tester.tap(sliverBuddyFinder);
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 36));
       final sliverStatusFinder =
           find.byKey(const ValueKey('home-sliver-sync-status'));
       expect(sliverStatusFinder, findsOneWidget);
@@ -642,6 +656,21 @@ void main() {
         ),
         findsOneWidget,
       );
+      expect(
+        identical(tester.state(sliverBuddyFinder), buddyStateBefore),
+        isTrue,
+      );
+      final buddyPainterAfter = tester
+          .widget<CustomPaint>(
+            find
+                .descendant(
+                  of: sliverBuddyFinder,
+                  matching: find.byType(CustomPaint),
+                )
+                .first,
+          )
+          .painter!;
+      expect(buddyPainterAfter.shouldRepaint(buddyPainterBefore), isTrue);
 
       await tester.pump(const Duration(milliseconds: 2050));
       await tester.pumpAndSettle();
@@ -1184,6 +1213,116 @@ void main() {
       expect(scaleA, greaterThan(1.0));
       expect(scaleB, closeTo(1.0, 1e-6));
       await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+        'completing an overdue or pinned manual entry keeps it in its original section & viewport during micro-bounce',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 760);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final pinnedManual = _manual(
+        'm-pinned-done',
+        title: '置顶待办完成测试',
+        at: now.add(const Duration(days: 5)),
+      );
+      final overdueManual = _manual(
+        'm-overdue-done',
+        title: '逾期底部待办完成测试',
+        at: now.subtract(const Duration(days: 2)),
+      );
+      final store = await _createStore(
+        assignments: [
+          for (var i = 0; i < 8; i++)
+            _work(
+              'filler-$i',
+              title: '中间填充作业 $i',
+              due: now.add(Duration(days: 1 + i, hours: 2)),
+              syncedAt: now,
+            ),
+        ],
+        entries: [pinnedManual, overdueManual],
+        clock: () => now,
+      );
+      addTearDown(store.dispose);
+      await store.toggleManualPin(pinnedManual);
+
+      await _pumpHome(tester, store, now: now);
+
+      // 1) Complete pinned manual entry: stays inside top '置顶' section at its original Y while bouncing > 1.0.
+      final pinnedCardFinder =
+          find.byKey(const ValueKey('manual-m-pinned-done'));
+      final pinnedRectBefore = tester.getRect(pinnedCardFinder);
+      expect(pinnedRectBefore.top, greaterThanOrEqualTo(0.0));
+      expect(pinnedRectBefore.bottom, lessThanOrEqualTo(760.0));
+
+      await tester.tap(
+        find.byKey(const ValueKey('complete-manual-m-pinned-done')),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 48));
+
+      expect(pinnedCardFinder, findsOneWidget);
+      final pinnedRectDuring = tester.getRect(pinnedCardFinder);
+      expect(pinnedRectDuring.top, closeTo(pinnedRectBefore.top, 2.0));
+      final pinnedBounceScale = tester
+          .widget<Transform>(
+            find
+                .descendant(
+                  of: pinnedCardFinder,
+                  matching: find.byType(Transform),
+                )
+                .first,
+          )
+          .transform
+          .storage[0];
+      expect(pinnedBounceScale, greaterThan(1.0));
+      await tester.pumpAndSettle();
+      expect(pinnedCardFinder, findsNothing);
+
+      // 2) Scroll down to overdue manual entry at bottom of long list & complete it:
+      // stays in overdue group inside visible viewport (does not jump upward to normal date tier).
+      final overdueCardFinder =
+          find.byKey(const ValueKey('manual-m-overdue-done'));
+      await tester.scrollUntilVisible(
+        overdueCardFinder,
+        220,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      final overdueRectBefore = tester.getRect(overdueCardFinder);
+      expect(overdueRectBefore.top, greaterThanOrEqualTo(0.0));
+      expect(overdueRectBefore.bottom, lessThanOrEqualTo(760.0));
+
+      await tester.tap(
+        find.byKey(const ValueKey('complete-manual-m-overdue-done')),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 48));
+
+      expect(overdueCardFinder, findsOneWidget);
+      final overdueRectDuring = tester.getRect(overdueCardFinder);
+      expect(overdueRectDuring.top, closeTo(overdueRectBefore.top, 2.0));
+      expect(overdueRectDuring.top, greaterThanOrEqualTo(0.0));
+      expect(overdueRectDuring.bottom, lessThanOrEqualTo(760.0));
+      final overdueBounceScale = tester
+          .widget<Transform>(
+            find
+                .descendant(
+                  of: overdueCardFinder,
+                  matching: find.byType(Transform),
+                )
+                .first,
+          )
+          .transform
+          .storage[0];
+      expect(overdueBounceScale, greaterThan(1.0));
+      await tester.pumpAndSettle();
+      expect(overdueCardFinder, findsNothing);
     });
   });
 }

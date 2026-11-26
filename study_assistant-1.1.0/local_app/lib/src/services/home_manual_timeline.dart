@@ -19,6 +19,7 @@ class HomeTimelineItem {
     this.preparedDisplayAt,
     this.preparedEndAt,
     this.sortIndex = 0,
+    this.treatAsActiveForSorting = false,
   });
 
   factory HomeTimelineItem.assignment(Assignment assignment) =>
@@ -32,6 +33,7 @@ class HomeTimelineItem {
   final DateTime? preparedDisplayAt;
   final DateTime? preparedEndAt;
   final int sortIndex;
+  final bool treatAsActiveForSorting;
 
   bool get isManual => manual != null;
   bool get isExam => assignment?.isExam ?? manual?.kind == ManualEntry.kindExam;
@@ -60,7 +62,12 @@ class HomeTimelineItem {
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) =>
       assignment == null
-          ? HomeManualTimeline.manualBucketAt(manual!, now)
+          ? HomeManualTimeline.manualBucketAt(
+              treatAsActiveForSorting && manual!.done
+                  ? manual!.completed(false)
+                  : manual!,
+              now,
+            )
           : AssignmentQuery.timelineBucketAt(
               assignment!,
               now,
@@ -125,6 +132,7 @@ class HomeManualTimeline {
     AssignmentDisplayIndex? displayIndex,
     bool prioritizeStartOnly = true,
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+    Set<String> keepVisibleIds = const {},
   }) {
     final sources = sourceRecords.isEmpty ? assignments : sourceRecords;
     final items = <HomeTimelineItem>[
@@ -154,6 +162,8 @@ class HomeManualTimeline {
           manual: manualEntries[index],
           sortIndex: assignments.length + index,
           preparedDisplayAt: manualEntries[index].at,
+          treatAsActiveForSorting:
+              keepVisibleIds.contains(manualEntries[index].id),
         ),
     ];
     if (order == HomeSortOrder.grouped) return items;

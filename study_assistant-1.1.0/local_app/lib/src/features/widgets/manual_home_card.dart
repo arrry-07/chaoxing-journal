@@ -224,17 +224,18 @@ class ManualHomeCard extends StatelessWidget {
 
     Widget completeButton() => Semantics(
           container: true,
-          button: true,
-          label: '标记 ${entry.title} 完成',
-          onTap: onToggleDone,
+          button: !entry.done,
+          label: entry.done ? '${entry.title} 已完成' : '标记 ${entry.title} 完成',
+          onTap: entry.done ? null : onToggleDone,
           excludeSemantics: true,
           child: Tooltip(
-            message: '标记完成',
+            message: entry.done ? '已完成' : '标记完成',
             child: JournalPressableScale(
+              enabled: !entry.done,
               pressScale: 0.92,
               child: IconButton(
                 key: ValueKey('complete-manual-${entry.id}'),
-                onPressed: onToggleDone,
+                onPressed: entry.done ? null : onToggleDone,
                 constraints:
                     const BoxConstraints.tightFor(width: 48, height: 48),
                 padding: EdgeInsets.zero,
@@ -375,10 +376,11 @@ class ManualHomeCard extends StatelessWidget {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           JournalPressableScale(
+                            enabled: !entry.done,
                             pressScale: 0.92,
                             child: OutlinedButton.icon(
                               key: ValueKey('complete-manual-${entry.id}'),
-                              onPressed: onToggleDone,
+                              onPressed: entry.done ? null : onToggleDone,
                               style: OutlinedButton.styleFrom(
                                 minimumSize: const Size(48, 48),
                                 padding: const EdgeInsets.symmetric(
@@ -386,20 +388,25 @@ class ManualHomeCard extends StatelessWidget {
                                   vertical: 8,
                                 ),
                                 backgroundColor: journal.parchment,
+                                disabledBackgroundColor: journal.parchment,
                                 side: BorderSide.none,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                               ),
                               icon: Icon(
-                                Icons.radio_button_unchecked_rounded,
+                                entry.done
+                                    ? Icons.check_circle_rounded
+                                    : Icons.radio_button_unchecked_rounded,
                                 size: 17,
-                                color: journal.muted,
+                                color:
+                                    entry.done ? journal.accent : journal.muted,
                               ),
                               label: Text(
-                                '标记完成',
+                                entry.done ? '已完成' : '标记完成',
                                 style: journal.metadata.copyWith(
-                                  color: journal.ink,
+                                  color:
+                                      entry.done ? journal.accent : journal.ink,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),

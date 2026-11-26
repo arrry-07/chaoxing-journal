@@ -619,6 +619,86 @@ void main() {
         closeTo(scrolledOffset, 0.5),
       );
 
+      // Strong upward pull (250dp -> ~16.5dp offset) followed by immediate re-grab at visible handle center.
+      final g3 = await tester.startGesture(tester.getCenter(handleFinder));
+      await g3.moveBy(const Offset(0, -250));
+      await tester.pump();
+      final strongPullY = tester.getTopLeft(handleFinder).dy;
+      expect(initialHandleY - strongPullY, greaterThan(14.0));
+      await g3.up();
+      await tester.pump(const Duration(milliseconds: 16));
+      final regrabStartY = tester.getTopLeft(handleFinder).dy;
+      expect(regrabStartY, lessThan(initialHandleY - 8.0));
+
+      final g4 = await tester.startGesture(tester.getCenter(handleFinder));
+      await g4.moveBy(const Offset(0, -120));
+      await tester.pump();
+      expect(tester.getTopLeft(handleFinder).dy, lessThan(regrabStartY));
+      await g4.up();
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(handleFinder).dy, closeTo(initialHandleY, 0.01));
+
+      await tester.tap(find.byTooltip('关闭'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+        'showJournalPickerSheet does not double-subtract keyboard viewInsets and keeps search/options interactive',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              padding: const EdgeInsets.only(top: 24),
+              viewInsets: const EdgeInsets.only(bottom: 305),
+            ),
+            child: child!,
+          ),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () {
+                    showJournalPickerSheet<String>(
+                      context,
+                      title: '选择课程',
+                      selectedValue: '',
+                      searchable: true,
+                      options: const [
+                        JournalPickerOption(value: '', label: '全部课程'),
+                        JournalPickerOption(value: 'c1', label: '高等数学'),
+                        JournalPickerOption(value: 'c2', label: '大学物理'),
+                      ],
+                    );
+                  },
+                  child: const Text('打开键盘弹窗'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('打开键盘弹窗'));
+      await tester.pumpAndSettle();
+
+      final searchField = find.byType(TextField);
+      expect(searchField, findsOneWidget);
+      expect(tester.getSize(searchField).height, greaterThan(20.0));
+      expect(find.text('高等数学'), findsOneWidget);
+      expect(
+          tester.getRect(find.text('高等数学')).bottom, lessThanOrEqualTo(335.0));
+
+      await tester.enterText(searchField, '物理');
+      await tester.pumpAndSettle();
+      expect(find.text('大学物理'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
       await tester.tap(find.byTooltip('关闭'));
       await tester.pumpAndSettle();
     });
@@ -731,6 +811,67 @@ void main() {
       expect(readCardBounceScale(), greaterThan(1.005));
       await tester.pumpAndSettle();
       expect(readCardBounceScale(), 1.0);
+    });
+
+    testWidgets(
+        'ManualHomeCard completed state disables complete action consistently in normal and largeText modes',
+        (tester) async {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      final doneEntry = const ManualEntry(
+        id: 'm-done-ui',
+        title: '已完成复习任务',
+        kind: ManualEntry.kindTodo,
+      ).completed(true);
+
+      for (final largeText in [false, true]) {
+        var toggleCalls = 0;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: StudyAssistantTheme.light,
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: TextScaler.linear(largeText ? 2.0 : 1.0),
+              ),
+              child: child!,
+            ),
+            home: Scaffold(
+              body: ManualHomeCard(
+                key: ValueKey('done-card-$largeText'),
+                entry: doneEntry,
+                now: now,
+                onTap: () {},
+                onToggleDone: () => toggleCalls++,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final completeFinder =
+            find.byKey(const ValueKey('complete-manual-m-done-ui'));
+        expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
+        expect(find.byIcon(Icons.radio_button_unchecked_rounded), findsNothing);
+        if (largeText) {
+          expect(find.text('已完成'), findsOneWidget);
+          expect(find.text('标记完成'), findsNothing);
+          final btn = tester.widget<OutlinedButton>(completeFinder);
+          expect(btn.onPressed, isNull);
+        } else {
+          final btn = tester.widget<IconButton>(completeFinder);
+          expect(btn.onPressed, isNull);
+        }
+        final pressable = tester.widget<JournalPressableScale>(
+          find.ancestor(
+            of: completeFinder,
+            matching: find.byType(JournalPressableScale),
+          ),
+        );
+        expect(pressable.enabled, isFalse);
+
+        await tester.tap(completeFinder, warnIfMissed: false);
+        await tester.pumpAndSettle();
+        expect(toggleCalls, 0);
+      }
     });
   });
 }

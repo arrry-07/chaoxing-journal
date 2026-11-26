@@ -14,6 +14,7 @@ import '../models/display_preferences.dart';
 import '../models/home_filters.dart';
 import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
+import '../models/pinned_assignments.dart';
 import '../models/study_notebook.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
@@ -117,6 +118,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   final Map<String, int> _pinPulseByKey = <String, int>{};
   final Set<String> _completingManualIds = <String>{};
   final Map<String, Timer> _completingManualTimers = <String, Timer>{};
+  final Map<String, String> _completingPinnedKeyById = <String, String>{};
+  PinnedAssignments? _completingPinnedSnapshot;
   late int _feedbackEpoch;
   String? _feedbackAccount;
   HomeFilters? _preExamStripFilters;
@@ -149,6 +152,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     if (entryId != null) {
       _completingManualTimers.remove(entryId)?.cancel();
       final removed = _completingManualIds.remove(entryId);
+      _completingPinnedKeyById.remove(entryId);
+      if (_completingPinnedKeyById.isEmpty) {
+        _completingPinnedSnapshot = null;
+      }
       if (removed && notify && mounted) {
         setState(() {});
       }
@@ -160,6 +167,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _completingManualTimers.clear();
     final hadAny = _completingManualIds.isNotEmpty;
     _completingManualIds.clear();
+    _completingPinnedKeyById.clear();
+    _completingPinnedSnapshot = null;
     if (hadAny && notify && mounted) {
       setState(() {});
     }
@@ -168,8 +177,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   void _onManualCompletingStart(String entryId) {
     if (!mounted || JournalMotion.isReducedMotion(context)) return;
     _completingManualTimers.remove(entryId)?.cancel();
+    final entry =
+        store.notebook.entries.where((item) => item.id == entryId).firstOrNull;
+    final wasPinned = entry != null && store.isManualPinned(entry);
     setState(() {
       _completingManualIds.add(entryId);
+      if (wasPinned) {
+        _completingPinnedKeyById[entryId] = entry.pinKey;
+        _completingPinnedSnapshot ??= store.pinnedAssignments;
+      }
     });
   }
 
@@ -191,6 +207,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           _completingManualTimers.remove(entryId);
           if (!mounted) return;
           if (_completingManualIds.remove(entryId)) {
+            _completingPinnedKeyById.remove(entryId);
+            if (_completingPinnedKeyById.isEmpty) {
+              _completingPinnedSnapshot = null;
+            }
             setState(() {});
           }
         },
@@ -932,6 +952,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           displayIndex: displayIndex,
           prioritizeStartOnly: recoveryScope == null,
           coursework: coursework,
+          keepVisibleIds: _completingManualIds,
         );
         final today = PersonalWorkspace.dayKey(now);
         final plans =
@@ -1148,6 +1169,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               coursework: coursework,
               examSources: examSources,
               displayIndex: displayIndex,
+              keepPinnedKeys: _completingPinnedKeyById.values.toSet(),
+              completingPinnedSnapshot: _completingPinnedSnapshot,
             );
 
         final timelineSections = sortedTimelineItems.isEmpty

@@ -200,6 +200,8 @@ class _JournalSheetRubberBandState extends State<JournalSheetRubberBand>
         child: child,
       );
 
+  static const double _maxUpwardHeadroom = 22.0;
+
   @override
   Widget build(BuildContext context) {
     final reduced = JournalMotion.isReducedMotion(context);
@@ -208,6 +210,11 @@ class _JournalSheetRubberBandState extends State<JournalSheetRubberBand>
       animation: _pullController,
       builder: (context, child) {
         final dy = reduced ? 0.0 : _pullController.value;
+        // Reserve transparent top headroom >= max rubber-band displacement
+        // (~20.16dp) inside the sheet's own layout box so strong upward pulls
+        // never shift the drag handle outside ancestor BottomSheet/Padding
+        // hit-test bounds. At rest (dy == 0), taps in the transparent headroom
+        // miss child and pass through to ModalBarrier to dismiss.
         return Stack(
           clipBehavior: Clip.none,
           children: [
@@ -215,12 +222,17 @@ class _JournalSheetRubberBandState extends State<JournalSheetRubberBand>
               left: 0,
               right: 0,
               bottom: 0,
-              height: dy < 0.0 ? (-dy).ceilToDouble() + 1 : 0.0,
-              child: ColoredBox(color: widget.fillColor),
+              height: dy < 0.0 ? (-dy).ceilToDouble() + 1.0 : 0.0,
+              child: IgnorePointer(
+                child: ColoredBox(color: widget.fillColor),
+              ),
             ),
-            Transform.translate(
-              offset: Offset(0, dy),
-              child: child,
+            Padding(
+              padding: const EdgeInsets.only(top: _maxUpwardHeadroom),
+              child: Transform.translate(
+                offset: Offset(0, dy),
+                child: child,
+              ),
             ),
           ],
         );
@@ -656,13 +668,15 @@ class _JournalPickerSheetBodyState<T>
           final headerWidgets = buildHeaderWidgets(wrapGrabArea);
           return LayoutBuilder(
             builder: (context, outerConstraints) {
-              final effectiveBoundsHeight = outerConstraints.hasBoundedHeight
-                  ? outerConstraints.maxHeight
-                  : screenHeight - topSafe;
-              final availableHeight = math.max(
-                0.0,
-                effectiveBoundsHeight - bottomInset - 16.0,
-              );
+              // Outer Padding(bottom: bottomInset) and JournalSheetRubberBand's
+              // 22dp top headroom already bound outerConstraints.maxHeight; only
+              // subtract bottomInset when falling back to full screenHeight.
+              final availableHeight = outerConstraints.hasBoundedHeight
+                  ? math.max(0.0, outerConstraints.maxHeight)
+                  : math.max(
+                      0.0,
+                      screenHeight - topSafe - bottomInset - 22.0,
+                    );
               final targetHeight =
                   math.min(screenHeight * 0.74, availableHeight);
               final maxHeight = useFixedHeight

@@ -66,7 +66,6 @@ class JournalSliverHeader extends StatelessWidget {
               sigmaY: JournalMotion.isReducedMotion(context) ? 0 : 14,
             ),
             child: Container(
-              height: statusContent == null ? 52 : null,
               padding: const EdgeInsets.symmetric(horizontal: 18),
               decoration: BoxDecoration(
                 color: journal.paper.withValues(alpha: 0.86),
@@ -74,19 +73,18 @@ class JournalSliverHeader extends StatelessWidget {
                   bottom: BorderSide(color: journal.divider, width: 0.6),
                 ),
               ),
-              child: statusContent == null
-                  ? titleBar
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        titleBar,
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 7),
-                          child: statusContent!,
-                        ),
-                      ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  titleBar,
+                  if (statusContent != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 7),
+                      child: statusContent!,
                     ),
+                ],
+              ),
             ),
           ),
         ),
