@@ -2,10 +2,10 @@
 
 <a id="dev-当前迭代进度"></a>
 
-## 当前迭代进度（正式版 1.90.0+127；dev 自测至 1.90.2+129）
+## 当前迭代进度（正式版 1.90.0+127；dev 自测至 1.90.3+130）
 
 - **1.90.0+127 正式基线**：PR `#65` 合入 `ea64137`，annotated Tag `v1.90.0`（`733ea66` → `ea64137`），GitHub Release `458482127`（`latest`），Gitee `update-manual.json` 与 `update-stable.json` 双索引均已同步至 `1.90.0+127`，详见[验收与发布记录](../reviews/2026-11-25-v1.90.0-体验重构配色转场与提醒正式发布验收记录.md)。
-- **dev 当前收口（`1.90.2+129` 自测包已通过 MuMu 保数据验收）**：在 `1.90.1+128` 闭环基础上新增无作业/无通知课程的 `backclazzdata` 开课/创建时间补提（禁读模板 `course.createtime`）、`AcademicTerm.fromCourseCreationInstant` 与单调 `clazzId` 同批时段推断（`CourseTermSource.clazzCohort`），通过 `TZ=UTC verify_local_gate.py --mode full`（`+2054 ~1`、`128` Python 单测、`dart analyze` 0 问题）；已构建原签名双 ABI 自测包 `1.90.2+129`（`64,149,178` B，SHA-256 `f950b33b...`）并在 MuMu「学习通」保数据验收通过（`本学期`/`本学年` 15 门、`往期` 23 门、`全部学期` 38 门、`我的课程` 0 未分组、`logcat` 0 崩溃），详见[dev 本地状态](DEV_STATE.md)；未动 `main` / Tag / Release。
+- **dev 当前收口（`1.90.3+130` 自测包已通过 MuMu 保数据浅/深双主题验收）**：在 `1.90.2+129` 基础上围绕[v1.90.3 方案](../plans/2026-11-26-v1.90.3-主页光学质感顶栏像素伙伴与阻尼弹簧方案.md)交付 `M1` 主页光学纸感层次（随滚动淡出双径向氛围光晕、`JournalGroupedCard`/`JournalSliverGroupedCard` 双层柔影与顶边细高光、仅「今天/置顶」钴蓝微染与 3dp 柔光竖条）、`M2` 顶栏暖陶珊瑚橙像素伙伴（纯 `CustomPainter` 5 态、零 `pumpAndSettle()` 超时单次空闲定时器、悬浮顶栏迷你联动、无框状态行旋转星芒与 2 秒互动短语、`DisplayPreferences.showPixelBuddy` 一键开关）及 `M3` 全站高频阻尼弹簧微交互（`criticalSpring`/`pressSpring`/`popSpring`/`criticalCurve`、`JournalPressableScale`、`JournalMicroBounce`、统计 4 档滑块、折叠箭头、弹窗上拉橡皮筋回弹与原位完成微弹）；经三轮跨厂商 `gpt-6.2-sol (high)` 独立审查与两轮返工+最终 2 文件直修，通过 `TZ=UTC verify_local_gate.py --mode full`（`+2092 ~1` 0 超时/0 失败、128 项 Python 单测、`dart analyze` 0 问题）及终版 10 文件 117/117 定向门禁；已构建原签名双 ABI 自测包 `1.90.3+130`（`64,214,866` B，SHA-256 `0eee2067...`）并在 MuMu「学习通」保数据完成 15 张浅/深双主题与单次刷新（`15:09` → `15:44`）目视验收（`logcat` 0 崩溃/0 溢出），详见[dev 本地状态](DEV_STATE.md)；未动 `main` / Tag / Release / Gitee。
 
 ## 最近 2 个正式发布版本
 
