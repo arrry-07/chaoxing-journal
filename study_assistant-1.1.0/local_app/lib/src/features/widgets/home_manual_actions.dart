@@ -28,11 +28,21 @@ class HomeManualActions {
     required this.store,
     required this.feedback,
     required this.isMounted,
+    this.onBouncePulse,
+    this.onPinAdded,
+    this.onCompletingStart,
+    this.onCompletingCommit,
+    this.onCompletingCancel,
   });
 
   final AssignmentStore store;
   final HomeManualFeedback feedback;
   final bool Function() isMounted;
+  final ValueChanged<String>? onBouncePulse;
+  final VoidCallback? onPinAdded;
+  final ValueChanged<String>? onCompletingStart;
+  final ValueChanged<String>? onCompletingCommit;
+  final ValueChanged<String>? onCompletingCancel;
 
   Future<void> openDetail(
     BuildContext context,
@@ -101,7 +111,9 @@ class HomeManualActions {
   }
 
   Future<void> completeWithUndo(ManualEntry entry) async {
+    if (entry.done) return;
     final epoch = store.accountEpoch;
+    onCompletingStart?.call(entry.id);
     final ok = await store.saveNotebook(
       (n) => n.withEntries([
         for (final item in n.entries)
@@ -109,12 +121,18 @@ class HomeManualActions {
       ]),
       epoch,
     );
-    if (!isMounted() || !ok) return;
+    if (!isMounted() || !ok) {
+      onCompletingCancel?.call(entry.id);
+      return;
+    }
     JournalMotion.complete(store.display);
+    onCompletingCommit?.call(entry.id);
+    onBouncePulse?.call(AssignmentStore.manualPinKeyOf(entry));
     feedback(
       '已完成「${entry.title}」，可在待办列表查看',
       actionLabel: '撤销',
       action: () {
+        onCompletingCancel?.call(entry.id);
         if (store.accountEpoch != epoch) return;
         unawaited(store.saveNotebook(
           (n) => n.withEntries([
@@ -172,6 +190,10 @@ class HomeManualActions {
     if (!isMounted() || !ok) return;
     final pinned = store.isManualPinned(entry);
     JournalMotion.pin(store.display, pinned: pinned);
+    onBouncePulse?.call(AssignmentStore.manualPinKeyOf(entry));
+    if (pinned) {
+      onPinAdded?.call();
+    }
     feedback(pinned ? '已置顶' : '已取消置顶');
   }
 
@@ -264,10 +286,13 @@ Widget buildHomeManualTile({
   bool pinned = false,
   Widget? dragHandle,
   List<String> pinnedVisibleKeys = const [],
+  int bouncePulse = 0,
 }) {
   final isPinned = store.isManualPinned(entry);
   final canPin = store.canToggleManualPin(entry);
+  final pinKey = AssignmentStore.manualPinKeyOf(entry);
   return Builder(
+    key: ValueKey('home-timeline-item-$pinKey'),
     builder: (itemContext) {
       final journal = Journal.of(itemContext);
       final preview = IgnorePointer(
@@ -286,13 +311,15 @@ Widget buildHomeManualTile({
       return JournalSwipeTile(
         key: ValueKey('manual-swipe-${entry.id}'),
         displayPrefs: store.display,
-        rightAction: JournalSwipeAction(
-          label: '标记完成',
-          icon: Icons.check_rounded,
-          color: journal.ink,
-          backgroundColor: journal.sage,
-          onTrigger: () => unawaited(actions.completeWithUndo(entry)),
-        ),
+        rightAction: entry.done
+            ? null
+            : JournalSwipeAction(
+                label: '标记完成',
+                icon: Icons.check_rounded,
+                color: journal.ink,
+                backgroundColor: journal.sage,
+                onTrigger: () => unawaited(actions.completeWithUndo(entry)),
+              ),
         leftAction: !canPin
             ? null
             : JournalSwipeAction(
@@ -313,8 +340,11 @@ Widget buildHomeManualTile({
           allowUrgentNightBreakthrough:
               store.allowUrgentDeadlineNightBreakthrough,
           dragHandle: dragHandle,
+          bouncePulse: bouncePulse,
           onTap: () => actions.openDetail(itemContext, entry),
-          onToggleDone: () => unawaited(actions.completeWithUndo(entry)),
+          onToggleDone: entry.done
+              ? () {}
+              : () => unawaited(actions.completeWithUndo(entry)),
           onLongPress: () => actions.openContextMenu(
             itemContext,
             itemContext,

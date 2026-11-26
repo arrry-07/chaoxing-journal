@@ -52,6 +52,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
   bool _healthBusy = false;
   bool _testingNotification = false;
   bool _testingManualNotification = false;
+  bool _previewingChime = false;
   bool? _listenerGranted;
 
   ReminderHealth? _health;
@@ -318,10 +319,15 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     return '打开应用详情后，请进入电池或后台运行设置自行核对';
   }
 
-  String get _deadlineChannelSummaryText =>
-      widget.assignmentStore.isUsingV2DeadlineChannel
-          ? 'v2（${LocalNotificationService.assignmentV2Channel}）'
-          : 'v1（${LocalNotificationService.assignmentChannel}）';
+  String get _deadlineChannelSummaryText {
+    if (widget.assignmentStore.isUsingV3DeadlineChannel) {
+      return 'v3（${LocalNotificationService.assignmentV3Channel}）';
+    }
+    if (widget.assignmentStore.isUsingV2DeadlineChannel) {
+      return 'v2（${LocalNotificationService.assignmentV2Channel}）';
+    }
+    return 'v1（${LocalNotificationService.assignmentChannel}）';
+  }
 
   String get _lockscreenPrivacyText {
     final show = _health?.lockscreenShowNotifications;
@@ -342,20 +348,20 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     return '系统锁屏允许显示通知（按应用隐私设置输出）';
   }
 
-  Future<void> _enableV2DeadlineChannel() async {
+  Future<void> _enableV3DeadlineChannel() async {
     if (_saving || _healthBusy) return;
     setState(() => _saving = true);
     try {
       final saved = await widget.assignmentStore.saveDeadlineChannelId(
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
       if (!mounted) return;
       if (saved) {
         final warnings = widget.assignmentStore.serviceWarnings;
         setState(() {
           _healthMessage = warnings.isNotEmpty
-              ? '已启用新版有声截止渠道（v2），但提醒仍需处理：${warnings.first}'
-              : '已启用新版有声截止渠道（v2），未完成课业提醒已重新安排。';
+              ? '已启用新版有声截止渠道（v3），但提醒仍需处理：${warnings.first}'
+              : '已启用新版有声截止渠道（v3），未完成课业提醒已重新安排。';
         });
         await _loadHealth(force: true);
       } else {
@@ -367,6 +373,43 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     } finally {
       if (mounted) {
         setState(() => _saving = false);
+      }
+    }
+  }
+
+  Future<void> _previewChime() async {
+    if (_previewingChime || _healthBusy) return;
+    setState(() => _previewingChime = true);
+    try {
+      final result = await widget.assignmentStore.notificationService
+          .previewNotificationChime();
+      if (!mounted) return;
+      setState(() {
+        if (!result.supported) {
+          _healthMessage = '当前环境不支持直接试听清铃（请使用“发送测试有声提醒”确认）。';
+        } else if (result.isPhoneMutedOrVibrate) {
+          _healthMessage = '当前手机处于静音或振动模式，无法听到试听铃声；请切换为响铃模式后再试。';
+        } else if (result.isNotificationVolumeZero) {
+          final volText = result.notificationStreamMaxVolume != null &&
+                  result.notificationStreamVolume != null
+              ? '（${result.notificationStreamVolume}/${result.notificationStreamMaxVolume}）'
+              : '';
+          _healthMessage = '当前系统通知音量为 0 或已静音$volText，无法听到试听铃声；请按音量键调高通知音量后再试。';
+        } else if (result.played) {
+          _healthMessage = '已播放内置清铃提示音（如未听到，请调高系统通知音量）。';
+        } else {
+          _healthMessage = '试听清铃未能播放，请检查系统通知音量后重试。';
+        }
+      });
+      await _loadHealth(force: true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _healthMessage = '试听清铃未能播放，请检查系统通知音量后重试。';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _previewingChime = false);
       }
     }
   }
@@ -391,6 +434,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
 
   Widget _buildHealthSummaryCard(JournalPalette journal) {
     final current = _health;
+    final showNotificationVolumeWarning =
+        current?.isNotificationVolumeZero == true &&
+            current?.isPhoneMutedOrVibrate != true;
     final issues = <String>[];
     if (current?.notifications == false) {
       issues.add('系统通知权限未开启');
@@ -432,6 +478,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
     checkChannelAudioAndVibration(current?.assignmentChannel, '截止提醒渠道');
     checkChannelAudioAndVibration(current?.summaryChannel, '每日摘要渠道');
     checkChannelAudioAndVibration(current?.manualChannel, '个人日程渠道');
+    if (showNotificationVolumeWarning) {
+      issues.add('系统通知音量为 0 或已静音');
+    }
     if (current?.scheduleRecoveryPending == true) {
       issues.add('存在待恢复的调度事务');
     }
@@ -486,7 +535,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
       infoItems: const [
         '权限开启与已安排不等于绝对准时送达：厂商省电策略、锁屏限制或应用被强制停止都可能拦截后台提醒。',
         '每日摘要按当前快照预安排未来 7 天，超过 7 天未打开应用将停止摘要，且不会在后台自动拉取新作业。',
-        '全套通知渠道已升级至内置清铃有声 v2（截止提醒、新增作业、每日摘要与待办提醒）；如曾调整系统铃声或静音规则，可点击下方渠道条目核对。',
+        '全套通知渠道已升级至内置清铃有声 v3（截止提醒、新增作业、每日摘要与待办提醒）；如曾调整系统铃声或静音规则，可点击下方渠道条目核对。',
         '若某条课业提醒异常，可在下方查看「提醒记录与原因」。',
       ],
       dividerIndent: 16,
@@ -583,6 +632,48 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                   ),
                 ),
               ],
+              if (showNotificationVolumeWarning) ...[
+                const SizedBox(height: 8),
+                Container(
+                  key: const ValueKey(
+                    'reminder-health-notification-volume-warning',
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: journal.ochreBg.withValues(
+                      alpha: journal.isDark ? 0.65 : 0.72,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: journal.ochreBorder, width: 0.7),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Icon(
+                          Icons.notifications_off_outlined,
+                          size: 16,
+                          color: journal.ochre,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          current?.notificationStreamMaxVolume != null &&
+                                  current?.notificationStreamVolume != null
+                              ? '当前系统通知音量为 ${current!.notificationStreamVolume}/${current.notificationStreamMaxVolume}'
+                                  '${current.notificationStreamMuted == true ? '（已静音）' : ''}，即使处于响铃模式也不会播放提醒铃声；请按音量键调高通知音量。'
+                              : '当前系统通知音量为 0 或已静音，即使处于响铃模式也不会播放提醒铃声；请按音量键调高通知音量。',
+                          style:
+                              journal.metadata.copyWith(color: journal.ochre),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               if (current?.isDndActive == true) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -658,16 +749,26 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                             }
                           },
                   ),
-                  if (!widget.assignmentStore.isUsingV2DeadlineChannel)
+                  if (!widget.assignmentStore.isUsingV3DeadlineChannel)
                     JournalSecondaryButton(
-                      key: const ValueKey('enable-v2-deadline-channel'),
+                      key: const ValueKey('enable-v3-deadline-channel'),
                       expanded: false,
                       height: 42,
-                      label: '启用新版有声截止渠道（v2）',
+                      label: '启用新版有声截止渠道（v3）',
                       onPressed: _saving || _healthBusy
                           ? null
-                          : _enableV2DeadlineChannel,
+                          : _enableV3DeadlineChannel,
                     ),
+                  JournalSecondaryButton(
+                    buttonKey:
+                        const ValueKey('preview-notification-chime-button'),
+                    expanded: false,
+                    height: 42,
+                    icon: Icons.music_note_outlined,
+                    label: _previewingChime ? '试听中…' : '试听清铃',
+                    onPressed:
+                        _healthBusy || _previewingChime ? null : _previewChime,
+                  ),
                   JournalSecondaryButton(
                     expanded: false,
                     height: 42,
@@ -799,7 +900,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                   Text(_channelStateText(_health?.assignmentUpdatesChannel)),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => _openNotificationChannel(
-                LocalNotificationService.assignmentUpdatesV2Channel,
+                LocalNotificationService.assignmentUpdatesV3Channel,
                 '新增作业通知渠道',
               ),
             ),
@@ -810,7 +911,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
               subtitle: Text(_channelStateText(_health?.summaryChannel)),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => _openNotificationChannel(
-                LocalNotificationService.summaryV2Channel,
+                LocalNotificationService.summaryV3Channel,
                 '每日摘要通知渠道',
               ),
             ),
@@ -821,7 +922,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
               subtitle: Text(_channelStateText(_health?.manualChannel)),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => _openNotificationChannel(
-                LocalNotificationService.manualV2Channel,
+                LocalNotificationService.manualV3Channel,
                 '个人日程通知渠道',
               ),
             ),
@@ -871,7 +972,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
                   Text(
                     '技术状态 · 调度事务：$_recoveryText\n'
                     '截止渠道：$_deadlineChannelSummaryText · 静默新作业渠道：${_channelStateText(_health?.silentChannel)}\n'
-                    '锁屏隐私策略：$_lockscreenPrivacyText\n'
+                    '系统通知音量：${_health?.notificationStreamVolume == null ? '未知' : '${_health!.notificationStreamVolume}/${_health?.notificationStreamMaxVolume ?? '?'}'}${_health?.notificationStreamMuted == true ? '（已静音）' : ''} · 锁屏隐私策略：$_lockscreenPrivacyText\n'
                     '原生作业截止事件：${_nativeText((v) => '${v.pendingDeadlineCount} 条')} · 待处理新增作业事件：${_nativeText((v) => '${v.pendingNewCount} 条')}\n'
                     '已安排摘要：${_localCount(_health?.summaryPending)} · 个人提醒：${_localCount(_health?.manualPending)} · 新增基线：$_baselineText\n'
                     '下次后台检查：${_backgroundHealth?.nextCheckAt == null ? widget.assignmentStore.nextBackgroundCheckAt?.toLocal().toString().substring(0, 16) ?? '未安排' : _backgroundHealth!.nextCheckAt!.toLocal().toString().substring(0, 16)}'

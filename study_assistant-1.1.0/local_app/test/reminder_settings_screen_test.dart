@@ -153,7 +153,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(service.channelId, 'assignment_deadlines_v2');
+    expect(service.channelId, 'assignment_deadlines_v3');
     expect(
       find.textContaining('已打开相关系统设置列表'),
       findsOneWidget,
@@ -1212,7 +1212,7 @@ void main() {
   });
 
   testWidgets(
-      'enabling v2 deadline channel hides v2 button and routes channel settings tap to v2',
+      'enabling v3 deadline channel hides v3 button and routes channel settings tap to v3',
       (tester) async {
     SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
     final notif = _DetailedHealthNotificationService(
@@ -1235,7 +1235,7 @@ void main() {
     addTearDown(store.dispose);
     await store.restoreSession();
     await store
-        .saveDeadlineChannelId(LocalNotificationService.assignmentChannel);
+        .saveDeadlineChannelId(LocalNotificationService.assignmentV2Channel);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -1250,22 +1250,153 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final v2Button = find.byKey(const ValueKey('enable-v2-deadline-channel'));
-    expect(v2Button, findsOneWidget);
-    expect(find.text('启用新版有声截止渠道（v2）'), findsOneWidget);
+    expect(find.textContaining('v2（assignment_deadlines_v2）'), findsOneWidget);
+    final v3Button = find.byKey(const ValueKey('enable-v3-deadline-channel'));
+    expect(v3Button, findsOneWidget);
+    expect(find.text('启用新版有声截止渠道（v3）'), findsOneWidget);
 
-    await tester.tap(v2Button);
+    await tester.tap(v3Button);
     await tester.pumpAndSettle();
 
-    expect(store.isUsingV2DeadlineChannel, isTrue);
-    expect(v2Button, findsNothing);
-    expect(find.textContaining('v2（assignment_deadlines_v2）'), findsOneWidget);
+    expect(store.isUsingV3DeadlineChannel, isTrue);
+    expect(v3Button, findsNothing);
+    expect(find.textContaining('v3（assignment_deadlines_v3）'), findsOneWidget);
 
     final channelTile = find.widgetWithText(ListTile, '截止提醒通知渠道').first;
     await scrollTo(tester, channelTile);
     await tester.tap(channelTile);
     await tester.pumpAndSettle();
-    expect(permissions.channelId, LocalNotificationService.assignmentV2Channel);
+    expect(permissions.channelId, LocalNotificationService.assignmentV3Channel);
+  });
+
+  testWidgets(
+      'notification stream volume zero shows warning even in normal ringer mode and preview chime button reports status',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final notif = _DetailedHealthNotificationService(
+      const ReminderHealth(
+        notifications: true,
+        exact: true,
+        ringerMode: 'normal',
+        notificationStreamVolume: 0,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: false,
+        assignmentChannel:
+            ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 4),
+      ),
+    )..chimePreviewResult = const NotificationChimePreviewResult(
+        played: false,
+        supported: true,
+        notificationStreamVolume: 0,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: false,
+        ringerMode: 'normal',
+      );
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: notif,
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            initialExpandHealth: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('reminder-health-notification-volume-warning')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('系统通知音量为 0/7'), findsOneWidget);
+    expect(find.textContaining('系统通知音量为 0 或已静音'), findsOneWidget);
+
+    final previewButton =
+        find.byKey(const ValueKey('preview-notification-chime-button'));
+    expect(previewButton, findsOneWidget);
+    await scrollTo(tester, previewButton);
+    await tester.tap(previewButton);
+    await tester.pumpAndSettle();
+    expect(notif.previewChimeCalls, 1);
+    expect(find.textContaining('无法听到试听铃声'), findsOneWidget);
+  });
+
+  testWidgets(
+      'vibrate ringer suppresses duplicate volume warning and preview asks for ringer mode',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final notif = _DetailedHealthNotificationService(
+      const ReminderHealth(
+        notifications: true,
+        exact: true,
+        ringerMode: 'vibrate',
+        notificationStreamVolume: 0,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: true,
+        assignmentChannel:
+            ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 4),
+      ),
+    )..chimePreviewResult = const NotificationChimePreviewResult(
+        played: false,
+        supported: true,
+        notificationStreamVolume: 0,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: true,
+        ringerMode: 'vibrate',
+      );
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: notif,
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            initialExpandHealth: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('reminder-health-ringer-warning')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('reminder-health-notification-volume-warning')),
+      findsNothing,
+    );
+    expect(find.textContaining('即使处于响铃模式'), findsNothing);
+    expect(find.textContaining('系统通知音量为 0 或已静音'), findsNothing);
+
+    final previewButton =
+        find.byKey(const ValueKey('preview-notification-chime-button'));
+    await scrollTo(tester, previewButton);
+    await tester.tap(previewButton);
+    await tester.pumpAndSettle();
+
+    expect(notif.previewChimeCalls, 1);
+    expect(
+      find.text('当前手机处于静音或振动模式，无法听到试听铃声；请切换为响铃模式后再试。'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('请按音量键调高通知音量'), findsNothing);
   });
 
   testWidgets(
@@ -1559,9 +1690,18 @@ class _DetailedHealthNotificationService extends _NoopNotificationService {
   _DetailedHealthNotificationService(this.nextHealth);
 
   final ReminderHealth nextHealth;
+  NotificationChimePreviewResult chimePreviewResult =
+      const NotificationChimePreviewResult(played: true, supported: true);
+  int previewChimeCalls = 0;
 
   @override
   Future<ReminderHealth> inspectHealth() async => nextHealth;
+
+  @override
+  Future<NotificationChimePreviewResult> previewNotificationChime() async {
+    previewChimeCalls++;
+    return chimePreviewResult;
+  }
 }
 
 class _TestAudibleGateway extends BackgroundReminderGateway {

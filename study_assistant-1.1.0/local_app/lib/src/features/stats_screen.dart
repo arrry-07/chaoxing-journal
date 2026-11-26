@@ -818,7 +818,7 @@ class _CourseStatPill extends StatelessWidget {
   }
 }
 
-class _StatsTermScopeBar extends StatelessWidget {
+class _StatsTermScopeBar extends StatefulWidget {
   const _StatsTermScopeBar({
     required this.selected,
     required this.onChanged,
@@ -826,6 +826,19 @@ class _StatsTermScopeBar extends StatelessWidget {
 
   final CourseTermScope selected;
   final ValueChanged<CourseTermScope> onChanged;
+
+  @override
+  State<_StatsTermScopeBar> createState() => _StatsTermScopeBarState();
+}
+
+class _StatsTermScopeBarState extends State<_StatsTermScopeBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  static int _indexFor(CourseTermScope scope) {
+    const scopes = CourseTermScope.values;
+    return scopes.indexOf(scope).clamp(0, scopes.length - 1);
+  }
 
   static String _shortLabel(CourseTermScope scope) => switch (scope) {
         CourseTermScope.currentTerm => '本学期',
@@ -835,14 +848,59 @@ class _StatsTermScopeBar extends StatelessWidget {
       };
 
   @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController.unbounded(
+      vsync: this,
+      value: _indexFor(widget.selected).toDouble(),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (JournalMotion.isReducedMotion(context)) {
+      final target = _indexFor(widget.selected).toDouble();
+      if (_controller.isAnimating || _controller.value != target) {
+        _controller.stop();
+        _controller.value = target;
+      }
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _StatsTermScopeBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected != widget.selected) {
+      final target = _indexFor(widget.selected).toDouble();
+      if (JournalMotion.isReducedMotion(context)) {
+        _controller.stop();
+        _controller.value = target;
+      } else {
+        _controller.animateWith(
+          JournalMotion.springFor(
+            JournalMotion.interactiveSpring,
+            start: _controller.value,
+            end: target,
+            velocity: _controller.velocity,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
     const scopes = CourseTermScope.values;
-    final selectedIndex = scopes.indexOf(selected).clamp(0, scopes.length - 1);
-    final duration = JournalMotion.duration(
-      context,
-      const Duration(milliseconds: 200),
-    );
+    final selectedIndex = _indexFor(widget.selected);
+    final reduced = JournalMotion.isReducedMotion(context);
     return Container(
       decoration: BoxDecoration(
         border: Border(
@@ -853,8 +911,10 @@ class _StatsTermScopeBar extends StatelessWidget {
         builder: (context, constraints) {
           final tabWidth = constraints.maxWidth / scopes.length;
           const indicatorWidth = 28.0;
-          final indicatorLeft =
-              tabWidth * selectedIndex + (tabWidth - indicatorWidth) / 2;
+          final maxLeft = (constraints.maxWidth - indicatorWidth).clamp(
+            0.0,
+            double.infinity,
+          );
           return Stack(
             clipBehavior: Clip.none,
             children: [
@@ -862,7 +922,7 @@ class _StatsTermScopeBar extends StatelessWidget {
                 children: [
                   for (final scope in scopes)
                     () {
-                      final active = selected == scope;
+                      final active = widget.selected == scope;
                       final label = _shortLabel(scope);
                       return Expanded(
                         child: Semantics(
@@ -871,7 +931,7 @@ class _StatsTermScopeBar extends StatelessWidget {
                           label: label,
                           child: InkWell(
                             key: ValueKey('stats-term-scope-${scope.name}'),
-                            onTap: () => onChanged(scope),
+                            onTap: () => widget.onChanged(scope),
                             child: ConstrainedBox(
                               constraints: const BoxConstraints(minHeight: 44),
                               child: Padding(
@@ -908,20 +968,23 @@ class _StatsTermScopeBar extends StatelessWidget {
                     }(),
                 ],
               ),
-              AnimatedPositioned(
-                duration: duration,
-                curve: JournalMotion.easeOut,
-                left: indicatorLeft.clamp(
-                  0.0,
-                  (constraints.maxWidth - indicatorWidth).clamp(
-                    0.0,
-                    double.infinity,
-                  ),
-                ),
-                bottom: 0,
-                width: indicatorWidth,
-                height: 2.5,
+              AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  final posIndex =
+                      reduced ? selectedIndex.toDouble() : _controller.value;
+                  final indicatorLeft =
+                      tabWidth * posIndex + (tabWidth - indicatorWidth) / 2;
+                  return Positioned(
+                    left: indicatorLeft.clamp(0.0, maxLeft),
+                    bottom: 0,
+                    width: indicatorWidth,
+                    height: 2.5,
+                    child: child!,
+                  );
+                },
                 child: DecoratedBox(
+                  key: const ValueKey('stats-term-scope-indicator'),
                   decoration: BoxDecoration(
                     color: journal.accent,
                     borderRadius: BorderRadius.circular(1.5),

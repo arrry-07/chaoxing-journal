@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../app/journal.dart';
 import '../models/reminder_history.dart';
 import '../services/assignment_store.dart';
+import '../services/daily_summary.dart';
 import '../services/permission_settings_service.dart';
 import 'reminder_history_screen.dart';
 import 'widgets/journal_buttons.dart';
@@ -33,6 +34,7 @@ class ReminderStatusScreen extends StatefulWidget {
 class _ReminderStatusScreenState extends State<ReminderStatusScreen>
     with WidgetsBindingObserver {
   ReminderExplanation? _explanation;
+  ReminderHealth? _health;
   String? _error;
   bool _loading = false;
   bool _retrying = false;
@@ -90,6 +92,7 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
     if (!mounted) return;
     setState(() {
       _explanation = null;
+      _health = null;
       _error = null;
       _message = null;
     });
@@ -109,12 +112,19 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
         kind: widget.kind,
         id: widget.id,
       );
+      ReminderHealth? health;
+      try {
+        health = await widget.store.notificationService.inspectHealth();
+      } catch (_) {}
       if (!mounted ||
           token != _requestToken ||
           startIdentity != _currentIdentity()) {
         return;
       }
-      setState(() => _explanation = value);
+      setState(() {
+        _explanation = value;
+        _health = health;
+      });
     } on ReminderHistoryException catch (error) {
       if (!mounted ||
           token != _requestToken ||
@@ -258,6 +268,42 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
               child: Text(
                 '当前展示已保存事项的提醒状态；编辑页中的未保存修改需保存后才会生效。',
                 style: journal.metadata.copyWith(color: journal.ochre),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (_health?.isNotificationVolumeZero == true ||
+              _health?.isPhoneMutedOrVibrate == true) ...[
+            Container(
+              key:
+                  const ValueKey('reminder-status-notification-volume-warning'),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: journal.ochreBg,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: journal.ochreBorder, width: 0.7),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Icon(
+                      Icons.notifications_off_outlined,
+                      size: 16,
+                      color: journal.ochre,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _health?.isPhoneMutedOrVibrate == true
+                          ? '当前手机处于静音或振动模式，提醒不会播放铃声；如需有声提醒请切换为响铃模式。'
+                          : '当前系统通知音量为 0 或已静音，即使处于响铃模式也不会播放提醒铃声；请调高系统通知音量。',
+                      style: journal.metadata.copyWith(color: journal.ochre),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 12),

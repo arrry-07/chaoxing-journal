@@ -878,7 +878,7 @@ class AssignmentNotificationPublisherTest {
         )
         assertTrue("publish result: $result", result.submitted)
         val active = notificationManager.activeNotifications.single { it.id == id && it.tag == null }
-        assertEquals(AssignmentNotificationPublisher.CHANNEL_UPDATES_V2, active.notification.channelId)
+        assertEquals(AssignmentNotificationPublisher.CHANNEL_UPDATES_V3, active.notification.channelId)
         notificationManager.cancel(id)
     }
 
@@ -1036,7 +1036,8 @@ class AssignmentNotificationPublisherTest {
     }
 
     @Test
-    fun zCreatesV2DeadlineChannelWithoutOverwritingExistingChannel() {
+    fun zCreatesV3DeadlineChannelWithoutOverwritingExistingChannel() {
+        deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES_V3)
         deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2)
         deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES)
         notificationManager.createNotificationChannel(
@@ -1055,24 +1056,25 @@ class AssignmentNotificationPublisherTest {
 
         AssignmentNotificationPublisher.ensureChannels(
             context,
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V3,
         )
 
-        val v2 = notificationManager.getNotificationChannel(
-            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+        val v3 = notificationManager.getNotificationChannel(
+            AssignmentNotificationPublisher.CHANNEL_DEADLINES_V3,
         )
-        assertEquals(NotificationManager.IMPORTANCE_HIGH, v2.importance)
-        assertTrue(v2.sound != null)
-        assertEquals(AudioAttributes.USAGE_NOTIFICATION, v2.audioAttributes?.usage)
-        assertTrue(v2.shouldVibrate())
+        assertEquals(NotificationManager.IMPORTANCE_HIGH, v3.importance)
+        assertTrue(v3.sound != null)
+        assertEquals(AudioAttributes.USAGE_NOTIFICATION, v3.audioAttributes?.usage)
+        assertTrue(v3.shouldVibrate())
         // Some platforms normalize channel-level lock-screen visibility to
         // UNSPECIFIED; the privacy contract only requires it never be PUBLIC.
-        assertTrue(v2.lockscreenVisibility != Notification.VISIBILITY_PUBLIC)
+        assertTrue(v3.lockscreenVisibility != Notification.VISIBILITY_PUBLIC)
 
         val v1 = notificationManager.getNotificationChannel(
             AssignmentNotificationPublisher.CHANNEL_DEADLINES,
         )
         assertEquals(v1Before, v1?.importance)
+        deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES_V3)
         deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2)
         deleteChannelAndWait(AssignmentNotificationPublisher.CHANNEL_DEADLINES)
     }
@@ -1087,7 +1089,7 @@ class AssignmentNotificationPublisherTest {
             context = context,
             database = database,
             accountHash = accountHash,
-            requestedChannelId = AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+            requestedChannelId = AssignmentNotificationPublisher.CHANNEL_DEADLINES_V3,
             now = quietNow.toInstant(),
             zone = shanghai,
             delayMillis = 0L,
@@ -1122,21 +1124,21 @@ class AssignmentNotificationPublisherTest {
                 context = context,
                 database = database,
                 accountHash = accountHash,
-                requestedChannelId = AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+                requestedChannelId = AssignmentNotificationPublisher.CHANNEL_DEADLINES_V3,
                 now = dayNow.toInstant(),
                 zone = shanghai,
                 delayMillis = 0L,
             )
             assertEquals("posted", dayResult.status)
             assertEquals(
-                AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+                AssignmentNotificationPublisher.CHANNEL_DEADLINES_V3,
                 dayResult.channelId,
             )
             val active = notificationManager.activeNotifications.single {
                 it.id == AssignmentNotificationPublisher.TEST_NOTIFICATION_ID
             }
             assertEquals(
-                AssignmentNotificationPublisher.CHANNEL_DEADLINES_V2,
+                AssignmentNotificationPublisher.CHANNEL_DEADLINES_V3,
                 active.notification.channelId,
             )
             assertEquals(

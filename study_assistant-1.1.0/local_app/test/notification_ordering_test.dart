@@ -97,9 +97,9 @@ void main() {
         case 'getNotificationChannels':
           return [
             for (final id in [
-              'assignment_deadlines_v2',
-              'daily_summary_v2',
-              'personal_schedule_v2'
+              'assignment_deadlines_v3',
+              'daily_summary_v3',
+              'personal_schedule_v3'
             ])
               h.channelRow(id, id, 4)
           ];
@@ -134,7 +134,7 @@ void main() {
           // payload. Keep this seam faithful to the shipped native plugin.
           active.add({
             'id': args['id'],
-            'channelId': 'assignment_deadlines_v2',
+            'channelId': 'assignment_deadlines_v3',
             'tag': null
           });
           events.add('show-done');
@@ -238,7 +238,7 @@ void main() {
     ]);
     final id = pending.single['id'];
     pending.clear();
-    active.add({'id': id, 'channelId': 'personal_schedule_v2', 'tag': null});
+    active.add({'id': id, 'channelId': 'personal_schedule_v3', 'tag': null});
     await service.rescheduleManual([]);
     expect(active, isEmpty);
     expect(pending, isEmpty);
@@ -285,7 +285,7 @@ void main() {
         .firstWhere((item) => item['payload'] == 'p:qa-delivered')['id'] as int;
     pending.removeWhere((item) => item['id'] == deliveredId);
     active.add(
-        {'id': deliveredId, 'channelId': 'personal_schedule_v2', 'tag': null});
+        {'id': deliveredId, 'channelId': 'personal_schedule_v3', 'tag': null});
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         'notification_schedule_v2_journal_manual',
@@ -380,7 +380,7 @@ void main() {
   for (final evidence in [
     {'channelId': 'assignment_deadlines', 'tag': null},
     {'channelId': 'unknown-channel', 'tag': null},
-    {'channelId': 'personal_schedule_v2', 'tag': 'foreign-tag'},
+    {'channelId': 'personal_schedule_v3', 'tag': 'foreign-tag'},
     {
       'channelId': 'assignment_deadlines',
       'tag': null,
@@ -416,9 +416,9 @@ void main() {
         {
           'id': 700 + i,
           'channelId': [
-            'assignment_deadlines',
-            'daily_summary',
-            'personal_schedule_v2'
+            'assignment_deadlines_v3',
+            'daily_summary_v3',
+            'personal_schedule_v3'
           ][i],
           'tag': null
         },

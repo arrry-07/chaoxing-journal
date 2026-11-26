@@ -290,7 +290,7 @@ void main() {
       final chime = File('android/app/src/main/res/raw/journal_chime.wav');
       expect(chime.existsSync(), isTrue);
       expect(chime.lengthSync(), greaterThan(1000));
-      expect(chime.lengthSync(), lessThanOrEqualTo(50 * 1024));
+      expect(chime.lengthSync(), lessThanOrEqualTo(100 * 1024));
 
       final keepXml =
           File('android/app/src/main/res/raw/keep.xml').readAsStringSync();

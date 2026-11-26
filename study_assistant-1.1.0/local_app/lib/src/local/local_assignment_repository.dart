@@ -93,6 +93,8 @@ class LocalAssignmentRepository {
       'deadline_notification_channel_v1';
   static const deadlineChannelV2AutoMigratedKey =
       'deadline_channel_v2_auto_migrated_v1';
+  static const deadlineChannelV3AutoMigratedKey =
+      'deadline_channel_v3_auto_migrated_v1';
   static const _maxAcknowledgedDeadlineChanges = 300;
   static const _acknowledgedDeadlineRecoveryWarning =
       '部分时间变更已读状态无法读取，原始数据已保留备份；本次以未确认状态临时显示，请勿覆盖原数据。';
@@ -157,6 +159,7 @@ class LocalAssignmentRepository {
     allowUrgentNightBreakthroughKey,
     deadlineNotificationChannelKey,
     deadlineChannelV2AutoMigratedKey,
+    deadlineChannelV3AutoMigratedKey,
     '${_noticesKey}_recovery_backup',
     '${_noticesKey}_recovery_backups',
     '${_chaptersKey}_recovery_backup',
@@ -479,6 +482,8 @@ class LocalAssignmentRepository {
         return 'assignment_deadlines';
       case 'assignment_deadlines_v2':
         return 'assignment_deadlines_v2';
+      case 'assignment_deadlines_v3':
+        return 'assignment_deadlines_v3';
       default:
         return null;
     }

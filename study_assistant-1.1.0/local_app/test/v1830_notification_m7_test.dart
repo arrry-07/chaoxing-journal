@@ -161,7 +161,7 @@ void main() {
   });
 
   group(
-      'M7 Android personal_schedule_v2 migration, ringer health and test notification',
+      'M7 Android personal_schedule_v3 migration, ringer health and test notification',
       () {
     const notifications =
         MethodChannel('dexterous.com/flutter/local_notifications');
@@ -186,7 +186,7 @@ void main() {
     });
 
     test(
-        'initialize creates personal_schedule_v2 first without dropping legacy alarms, then migrateLegacyManualChannelIfNeeded reschedules onto v2 before retiring personal_schedule and survives errors',
+        'initialize creates personal_schedule_v3 first without dropping legacy alarms, then migrateLegacyManualChannelIfNeeded reschedules onto v3 before retiring personal_schedule and personal_schedule_v2',
         () async {
       SharedPreferences.setMockInitialValues({
         'notification_schedule_v2_active_manual': ['2000000101'],
@@ -199,6 +199,7 @@ void main() {
         lns_fixture.channelRow('assignment_updates_v2', '新增作业提醒', 4),
         lns_fixture.channelRow('daily_summary_v2', '每日课业摘要', 4),
         lns_fixture.channelRow('personal_schedule', '个人待办与考试提醒', 4),
+        lns_fixture.channelRow('personal_schedule_v2', '待办与考试提醒', 4),
       ];
       final pendingRequests = <Map<String, Object?>>[
         {
@@ -257,15 +258,15 @@ void main() {
         calls.where((c) => c.method == 'deleteNotificationChannel'),
         isEmpty,
       );
-      final v2Create = calls
+      final v3Create = calls
           .where((c) => c.method == 'createNotificationChannel')
           .map((c) => Map<String, Object?>.from(c.arguments as Map))
           .firstWhere(
-              (c) => c['id'] == LocalNotificationService.manualV2Channel);
-      expect(v2Create['name'], '待办与考试提醒');
-      expect(v2Create['importance'], 4);
-      expect(v2Create['playSound'], isTrue);
-      expect(v2Create['enableVibration'], isTrue);
+              (c) => c['id'] == LocalNotificationService.manualV3Channel);
+      expect(v3Create['name'], '待办与考试提醒');
+      expect(v3Create['importance'], 4);
+      expect(v3Create['playSound'], isTrue);
+      expect(v3Create['enableVibration'], isTrue);
 
       final entry = ManualEntry(
         id: 'm1',
@@ -278,9 +279,10 @@ void main() {
       expect(
         events,
         containsAllInOrder([
-          'create:personal_schedule_v2',
-          'schedule:p:m1@personal_schedule_v2',
+          'create:personal_schedule_v3',
+          'schedule:p:m1@personal_schedule_v3',
           'delete:personal_schedule',
+          'delete:personal_schedule_v2',
         ]),
       );
 
@@ -288,6 +290,11 @@ void main() {
       await service.migrateLegacyManualChannelIfNeeded([entry]);
       expect(
         channels.any((c) => c['id'] == LocalNotificationService.manualChannel),
+        isFalse,
+      );
+      expect(
+        channels
+            .any((c) => c['id'] == LocalNotificationService.manualV2Channel),
         isFalse,
       );
     });
@@ -309,7 +316,7 @@ void main() {
     });
 
     test(
-        'inspectHealth reads ringerMode & interruptionFilter and showTestManualNotification targets personal_schedule_v2',
+        'inspectHealth reads ringerMode & interruptionFilter and showTestManualNotification targets personal_schedule_v3',
         () async {
       final calls = <MethodCall>[];
       messenger.setMockMethodCallHandler(permissions, (call) async {
@@ -318,7 +325,7 @@ void main() {
           return {
             'channels': {
               'assignment_deadlines': {'exists': true, 'importance': 4},
-              'personal_schedule_v2': {
+              'personal_schedule_v3': {
                 'exists': true,
                 'importance': 4,
                 'soundMuted': false,
@@ -328,6 +335,9 @@ void main() {
             },
             'ringerMode': 'vibrate',
             'interruptionFilter': 'priority',
+            'notificationStreamVolume': 0,
+            'notificationStreamMaxVolume': 7,
+            'notificationStreamMuted': false,
           };
         }
         return null;
@@ -340,7 +350,7 @@ void main() {
             },
           'getNotificationChannels' => [
               lns_fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
-              lns_fixture.channelRow('personal_schedule_v2', '待办与考试提醒', 4),
+              lns_fixture.channelRow('personal_schedule_v3', '待办与考试提醒', 4),
             ],
           'pendingNotificationRequests' || 'getActiveNotifications' => [],
           'areNotificationsEnabled' || 'canScheduleExactNotifications' => true,
@@ -354,8 +364,11 @@ void main() {
       expect(health.interruptionFilter, 'priority');
       expect(health.isPhoneMutedOrVibrate, isTrue);
       expect(health.isDndActive, isTrue);
+      expect(health.isNotificationVolumeZero, isTrue);
+      expect(health.notificationStreamVolume, 0);
+      expect(health.notificationStreamMaxVolume, 7);
       expect(health.manualChannel?.channelId,
-          LocalNotificationService.manualV2Channel);
+          LocalNotificationService.manualV3Channel);
 
       final shown = await service.showTestManualNotification();
       expect(shown, isTrue);
@@ -366,7 +379,7 @@ void main() {
       final platformDetails =
           Map<String, Object?>.from(showArgs['platformSpecifics'] as Map);
       expect(platformDetails['channelId'],
-          LocalNotificationService.manualV2Channel);
+          LocalNotificationService.manualV3Channel);
       expect(platformDetails['channelName'], '待办与考试提醒');
       expect(platformDetails['playSound'], isTrue);
       expect(platformDetails['enableVibration'], isTrue);
@@ -459,7 +472,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(manualTile);
       await tester.pumpAndSettle();
-      expect(events, contains('channel:personal_schedule_v2'));
+      expect(events, contains('channel:personal_schedule_v3'));
     }
   });
 

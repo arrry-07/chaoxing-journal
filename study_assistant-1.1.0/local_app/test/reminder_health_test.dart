@@ -21,6 +21,7 @@ import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/background_reminder_gateway.dart';
 import 'package:study_assistant_mobile/src/services/background_check_settings.dart';
 import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 
 Future<void> showTechnicalInfo(WidgetTester tester) async {
   if (find.textContaining('原生作业截止事件').evaluate().isNotEmpty) return;
@@ -283,7 +284,7 @@ void main() {
         case 'canScheduleExactNotifications':
           return false;
         case 'getNotificationChannels':
-          return [channelRow('assignment_deadlines_v2', '作业截止提醒', 4)];
+          return [channelRow('assignment_deadlines_v3', '作业截止提醒', 4)];
         case 'pendingNotificationRequests':
           return [
             {'id': 11, 'title': 'sample', 'body': '', 'payload': 'a:sample'},
@@ -392,7 +393,7 @@ void main() {
         return [
           channelRow('assignment_deadlines', '作业截止提醒', 4),
           channelRow('daily_summary', '每日课业摘要', 3),
-          channelRow('personal_schedule_v2', '待办与考试提醒', 4),
+          channelRow('personal_schedule_v3', '待办与考试提醒', 4),
         ];
       }
       if (call.method == 'pendingNotificationRequests') return [];
@@ -431,7 +432,7 @@ void main() {
         return [
           channelRow('assignment_deadlines', '作业截止提醒', 4),
           channelRow('daily_summary', '每日课业摘要', 3),
-          channelRow('personal_schedule_v2', '待办与考试提醒', 0),
+          channelRow('personal_schedule_v3', '待办与考试提醒', 0),
         ];
       }
       if (call.method == 'pendingNotificationRequests') return [];
@@ -546,7 +547,7 @@ void main() {
         case 'getNotificationAppLaunchDetails':
           return {'notificationLaunchedApp': false};
         case 'getNotificationChannels':
-          return [channelRow('assignment_deadlines_v2', '作业截止提醒', 4)];
+          return [channelRow('assignment_deadlines_v3', '作业截止提醒', 4)];
         case 'areNotificationsEnabled':
           healthStarted.complete();
           await releaseHealth.future;
@@ -599,9 +600,9 @@ void main() {
       calls.add(c);
       if (c.method == 'getNotificationChannels') {
         return [
-          channelRow('assignment_deadlines_v2', '作业截止提醒', 4),
-          channelRow('daily_summary_v2', '每日课业摘要', 0),
-          channelRow('personal_schedule_v2', '待办与考试提醒', 2)
+          channelRow('assignment_deadlines_v3', '作业截止提醒', 4),
+          channelRow('daily_summary_v3', '每日课业摘要', 0),
+          channelRow('personal_schedule_v3', '待办与考试提醒', 2)
         ];
       }
       if (c.method == 'areNotificationsEnabled') return true;
@@ -638,10 +639,10 @@ void main() {
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
         [
-          'assignment_deadlines_v2',
-          'assignment_updates_v2',
-          'daily_summary_v2',
-          'personal_schedule_v2'
+          'assignment_deadlines_v3',
+          'assignment_updates_v3',
+          'daily_summary_v3',
+          'personal_schedule_v3'
         ]);
     final channels = calls
         .where((call) => call.method == 'createNotificationChannel')
@@ -686,7 +687,7 @@ void main() {
         calls
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
-        ['assignment_deadlines_v2']);
+        ['assignment_deadlines_v3']);
 
     calls.clear();
     await service.rescheduleSummary(
@@ -699,7 +700,7 @@ void main() {
         calls
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
-        ['daily_summary_v2']);
+        ['daily_summary_v3']);
 
     calls.clear();
     await service.rescheduleManual([
@@ -718,7 +719,7 @@ void main() {
         calls
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
-        ['personal_schedule_v2']);
+        ['personal_schedule_v3']);
   });
   test('empty replacement still cancels old reminders without channel creation',
       () async {
@@ -808,10 +809,10 @@ void main() {
       calls.add(call);
       if (call.method == 'getNotificationChannels') {
         return [
-          channelRow('assignment_deadlines_v2', '用户自定义作业名', 0),
-          channelRow('assignment_updates_v2', '用户自定义作业变化名', 1),
-          channelRow('daily_summary_v2', '用户自定义摘要名', 2),
-          channelRow('personal_schedule_v2', '用户自定义日程名', 1),
+          channelRow('assignment_deadlines_v3', '用户自定义作业名', 0),
+          channelRow('assignment_updates_v3', '用户自定义作业变化名', 1),
+          channelRow('daily_summary_v3', '用户自定义摘要名', 2),
+          channelRow('personal_schedule_v3', '用户自定义日程名', 1),
         ];
       }
       if (call.method == 'getNotificationAppLaunchDetails') {
@@ -867,7 +868,7 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       if (call.method == 'createNotificationChannel' &&
-          (call.arguments as Map)['id'] == 'personal_schedule_v2' &&
+          (call.arguments as Map)['id'] == 'personal_schedule_v3' &&
           fail) {
         throw PlatformException(code: 'channel_create_failed');
       }
@@ -897,7 +898,7 @@ void main() {
         calls
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
-        ['personal_schedule_v2', 'personal_schedule_v2']);
+        ['personal_schedule_v3', 'personal_schedule_v3']);
   });
   test('initialization attempts every channel even when one creation fails',
       () async {
@@ -905,7 +906,7 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       if (call.method == 'createNotificationChannel' &&
-          (call.arguments as Map)['id'] == 'daily_summary_v2') {
+          (call.arguments as Map)['id'] == 'daily_summary_v3') {
         throw PlatformException(code: 'summary_channel_failed');
       }
       if (call.method == 'getNotificationAppLaunchDetails') {
@@ -923,10 +924,10 @@ void main() {
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
         [
-          'assignment_deadlines_v2',
-          'assignment_updates_v2',
-          'daily_summary_v2',
-          'personal_schedule_v2'
+          'assignment_deadlines_v3',
+          'assignment_updates_v3',
+          'daily_summary_v3',
+          'personal_schedule_v3'
         ]);
   });
   test('a channel failure does not block other reminder categories', () async {
@@ -934,7 +935,7 @@ void main() {
         .setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       if (call.method == 'createNotificationChannel' &&
-          (call.arguments as Map)['id'] == 'assignment_deadlines_v2') {
+          (call.arguments as Map)['id'] == 'assignment_deadlines_v3') {
         throw PlatformException(code: 'assignment_channel_failed');
       }
       if (call.method == 'getNotificationAppLaunchDetails') {
@@ -967,9 +968,9 @@ void main() {
             .where((call) => call.method == 'createNotificationChannel')
             .map((call) => (call.arguments as Map)['id']),
         [
-          'assignment_deadlines_v2',
-          'daily_summary_v2',
-          'personal_schedule_v2'
+          'assignment_deadlines_v3',
+          'daily_summary_v3',
+          'personal_schedule_v3'
         ]);
     expect(calls.where((call) => call.method == 'zonedSchedule'), hasLength(8));
   });
@@ -1110,9 +1111,9 @@ void main() {
       calls.add(c);
       if (c.method == 'getNotificationChannels') {
         return [
-          channelRow('assignment_deadlines_v2', '作业截止提醒', 4),
-          channelRow('daily_summary_v2', '每日课业摘要', 0),
-          channelRow('personal_schedule_v2', '待办与考试提醒', 2)
+          channelRow('assignment_deadlines_v3', '作业截止提醒', 4),
+          channelRow('daily_summary_v3', '每日课业摘要', 0),
+          channelRow('personal_schedule_v3', '待办与考试提醒', 2)
         ];
       }
       if (c.method == 'areNotificationsEnabled') return true;
@@ -1152,8 +1153,8 @@ void main() {
       calls.add(c);
       if (c.method == 'getNotificationChannels') {
         return [
-          channelRow('assignment_updates_v2', '新增作业提醒', 4),
-          channelRow('assignment_deadlines_v2', '作业截止提醒', 4),
+          channelRow('assignment_updates_v3', '新增作业提醒', 4),
+          channelRow('assignment_deadlines_v3', '作业截止提醒', 4),
         ];
       }
       if (c.method == 'areNotificationsEnabled') return true;
@@ -1189,7 +1190,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(permissions.requestedChannelId, 'assignment_updates_v2');
+    expect(permissions.requestedChannelId, 'assignment_updates_v3');
     expect(find.textContaining('已打开相关系统设置列表'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     debugDefaultTargetPlatformOverride = null;
@@ -1607,7 +1608,7 @@ void main() {
             return {'notificationLaunchedApp': false};
           case 'getNotificationChannels':
             return [
-              channelRow('personal_schedule_v2', '待办与考试提醒', 4),
+              channelRow('personal_schedule_v3', '待办与考试提醒', 4),
             ];
           case 'areNotificationsEnabled':
             return true;
@@ -1700,7 +1701,7 @@ void main() {
           return {'notificationLaunchedApp': false};
         case 'getNotificationChannels':
           return [
-            channelRow('personal_schedule_v2', '待办与考试提醒', 4),
+            channelRow('personal_schedule_v3', '待办与考试提醒', 4),
           ];
         case 'areNotificationsEnabled':
           return true;
@@ -1806,7 +1807,7 @@ void main() {
           return {'notificationLaunchedApp': false};
         case 'getNotificationChannels':
           return [
-            channelRow('personal_schedule_v2', '待办与考试提醒', 4),
+            channelRow('personal_schedule_v3', '待办与考试提醒', 4),
           ];
         case 'areNotificationsEnabled':
           return true;
@@ -3197,23 +3198,24 @@ void main() {
     );
     expect(
       store.activeDeadlineChannelId,
-      LocalNotificationService.assignmentV2Channel,
+      LocalNotificationService.assignmentV3Channel,
     );
 
     expect(
       await store.saveDeadlineChannelId(
-        LocalNotificationService.assignmentChannel,
+        LocalNotificationService.assignmentV2Channel,
       ),
       isTrue,
     );
-    expect(store.isUsingV2DeadlineChannel, isFalse);
+    expect(store.isUsingV3DeadlineChannel, isFalse);
+    expect(store.isUsingV2DeadlineChannel, isTrue);
     expect(
       notifications.activeDeadlineChannelId,
-      LocalNotificationService.assignmentChannel,
+      LocalNotificationService.assignmentV2Channel,
     );
     expect(
       gateway.updatedDeadlineChannels.last,
-      LocalNotificationService.assignmentChannel,
+      LocalNotificationService.assignmentV2Channel,
     );
 
     final restartedA = AssignmentStore(
@@ -3228,7 +3230,8 @@ void main() {
     );
     addTearDown(restartedA.dispose);
     await restartedA.restoreSession();
-    expect(restartedA.isUsingV2DeadlineChannel, isFalse);
+    expect(restartedA.isUsingV3DeadlineChannel, isFalse);
+    expect(restartedA.isUsingV2DeadlineChannel, isTrue);
 
     session.account = 'B';
     final storeB = AssignmentStore(
@@ -3243,17 +3246,118 @@ void main() {
     );
     addTearDown(storeB.dispose);
     await storeB.restoreSession();
-    expect(storeB.isUsingV2DeadlineChannel, isTrue);
+    expect(storeB.isUsingV3DeadlineChannel, isTrue);
     expect(
       storeB.activeDeadlineChannelId,
-      LocalNotificationService.assignmentV2Channel,
+      LocalNotificationService.assignmentV3Channel,
     );
 
     await restartedA.logout();
-    expect(restartedA.isUsingV2DeadlineChannel, isTrue);
+    expect(restartedA.isUsingV3DeadlineChannel, isTrue);
     expect(
       restartedA.activeDeadlineChannelId,
-      LocalNotificationService.assignmentV2Channel,
+      LocalNotificationService.assignmentV3Channel,
+    );
+  });
+
+  test(
+      'AssignmentStore one-time v3 migration upgrades v1/v2 per account without overwriting explicit downgrade',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'auto_sync_interval_minutes': 0,
+      'deadline_notification_channel_v1':
+          LocalNotificationService.assignmentV2Channel,
+    });
+    final session = f.Session()..account = 'A';
+    final gateway = _Channel4CGateway();
+    final storeA = AssignmentStore(
+      sessionStore: session,
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(storeA.dispose);
+    await storeA.restoreSession();
+
+    expect(storeA.isUsingV3DeadlineChannel, isTrue);
+    expect(storeA.isUsingV2DeadlineChannel, isFalse);
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getBool(LocalAssignmentRepository.deadlineChannelV3AutoMigratedKey),
+      isTrue,
+    );
+
+    // Explicit downgrade must be preserved across restarts.
+    expect(
+      await storeA
+          .saveDeadlineChannelId(LocalNotificationService.assignmentV2Channel),
+      isTrue,
+    );
+    final restartedA = AssignmentStore(
+      sessionStore: session,
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(restartedA.dispose);
+    await restartedA.restoreSession();
+    expect(restartedA.isUsingV3DeadlineChannel, isFalse);
+    expect(restartedA.isUsingV2DeadlineChannel, isTrue);
+
+    // Account B retains isolated migration flag & defaults to v3.
+    session.account = 'B';
+    final storeB = AssignmentStore(
+      sessionStore: session,
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      chaoxingClient: f.Client(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(storeB.dispose);
+    await storeB.restoreSession();
+    expect(storeB.isUsingV3DeadlineChannel, isTrue);
+  });
+
+  test(
+      'ReminderHealth.isNotificationVolumeZero detects muted/zero stream even in normal ringer mode',
+      () {
+    expect(
+      const ReminderHealth(
+        ringerMode: 'normal',
+        notificationStreamVolume: 0,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: false,
+      ).isNotificationVolumeZero,
+      isTrue,
+    );
+    expect(
+      const ReminderHealth(
+        ringerMode: 'normal',
+        notificationStreamVolume: 3,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: true,
+      ).isNotificationVolumeZero,
+      isTrue,
+    );
+    expect(
+      const ReminderHealth(
+        ringerMode: 'normal',
+        notificationStreamVolume: 4,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: false,
+      ).isNotificationVolumeZero,
+      isFalse,
     );
   });
 

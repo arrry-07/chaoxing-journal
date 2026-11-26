@@ -451,10 +451,15 @@ def _level_line(level: str, current: ReleaseVersion, mode: str | None = None) ->
             "pubspec.yaml + AppVersion, no Gitee manifests)"
         )
     if level == "patch":
-        return "Update level: patch (formal release; sync update-manual.json)"
+        return (
+            "Update level: patch (formal release; update-manual.json by "
+            "default; update-stable.json only with --promote-stable for an "
+            "urgent hotfix)"
+        )
     return (
-        f"Update level: {level} (formal release; sync update-stable.json "
-        "and update-manual.json)"
+        f"Update level: {level} (formal release; update-manual.json by "
+        "default; update-stable.json only with --promote-stable for a major "
+        "update)"
     )
 
 

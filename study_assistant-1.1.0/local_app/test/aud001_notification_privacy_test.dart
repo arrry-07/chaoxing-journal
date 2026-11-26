@@ -510,8 +510,8 @@ void main() {
               'audioAttributesUsage': 5,
             },
             {
-              'id': 'assignment_deadlines_v2',
-              'name': '作业截止提醒（增强有声）',
+              'id': 'assignment_deadlines_v3',
+              'name': '作业截止提醒',
               'description': '',
               'groupId': null,
               'showBadge': true,
@@ -554,14 +554,14 @@ void main() {
     await store.syncAssignments();
     expect(
       await store
-          .saveDeadlineChannelId(LocalNotificationService.assignmentV2Channel),
+          .saveDeadlineChannelId(LocalNotificationService.assignmentV3Channel),
       isTrue,
     );
-    expect(store.isUsingV2DeadlineChannel, isTrue);
+    expect(store.isUsingV3DeadlineChannel, isTrue);
 
     final outcome = await store.sendTestDeadlineNotification();
     expect(outcome.status, TestDeadlineNotificationStatus.posted);
-    expect(outcome.channelId, LocalNotificationService.assignmentV2Channel);
+    expect(outcome.channelId, LocalNotificationService.assignmentV3Channel);
     expect(shownNotifications, hasLength(1));
     final args = shownNotifications.single;
     expect(args['title'], isNot(contains('高等数学')));
@@ -570,10 +570,10 @@ void main() {
     expect(args['body'], isNot(contains('机密作业')));
 
     await store.logout();
-    expect(store.isUsingV2DeadlineChannel, isTrue);
+    expect(store.isUsingV3DeadlineChannel, isTrue);
     expect(
       store.activeDeadlineChannelId,
-      LocalNotificationService.assignmentV2Channel,
+      LocalNotificationService.assignmentV3Channel,
     );
   });
 }

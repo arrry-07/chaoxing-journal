@@ -2,11 +2,10 @@
 
 <a id="dev-当前迭代进度"></a>
 
-## 当前迭代进度（正式版 1.90.0+127；main 与 dev 已同步）
+## 当前迭代进度（正式版 1.90.0+127；dev 自测至 1.90.3+130）
 
-- **1.90.0+127 已正式发布收口**（PR `#65` 合入 `ea64137`，annotated Tag `v1.90.0` `733ea66` → `ea64137`，GitHub Release `458482127` 于 2026-11-26 公开并设为 `latest`），详见[验收与发布记录](../reviews/2026-11-25-v1.90.0-体验重构配色转场与提醒正式发布验收记录.md)。
-- **验证与分发交付**：`v1.8.32`–`v1.8.34` 均通过多轮异构 Gate PASS（最终 Gate 3 `Carbon high` 0 阻断 / 0 中级 / 0 次要）；PR `#65` / `main` / Tag `v1.90.0` 全量三时区与 Android Gradle/Lint CI、`site-release-dispatch` 及 `gitee-release-sync`（含 `promote_stable=true`）全部 `success`；原签名双 ABI 正式包（`64,054,782` B，SHA-256 `c3a85faa...`）五方回下载一致，在 **MuMu「学习通」**（API 35）保数据覆盖通过全量 5 项浅/深主题检查且 `logcat` 零崩溃；Gitee `update-manual.json` 与 `update-stable.json` 双索引均回读确认为 `1.90.0+127`（未上传 Gitee APK 镜像）。
-- **当前分支基线**：`v1.8.33` / `v1.8.34` 方案与 `v1.8.26` 验收均已随本次发布收口归档，`docs/plans/` 已清空；`main` 与 `dev` 已同步至本收口提交，详见[dev 本地状态](DEV_STATE.md)。
+- **1.90.0+127 正式基线**：PR `#65` 合入 `ea64137`，annotated Tag `v1.90.0`（`733ea66` → `ea64137`），GitHub Release `458482127`（`latest`），Gitee `update-manual.json` 与 `update-stable.json` 双索引均已同步至 `1.90.0+127`，详见[验收与发布记录](../reviews/2026-11-25-v1.90.0-体验重构配色转场与提醒正式发布验收记录.md)。
+- **dev 当前收口（`1.90.3+130` 自测包已通过 MuMu 与真机 `HUAWEI CDY-AN00` 保数据浅/深双主题验收）**：在 `1.90.2+129` 基础上围绕[v1.90.3 方案](../plans/2026-11-26-v1.90.3-主页光学质感顶栏像素伙伴与阻尼弹簧方案.md)交付 `M1` 主页光学纸感层次、`M2` 顶栏暖陶珊瑚橙像素伙伴（5 态、零 `pumpAndSettle()` 超时、悬浮顶栏联动与一键开关）及 `M3` 全站高频阻尼弹簧微交互；经三轮跨厂商 `gpt-6.2-sol (high)` 独立审查、两轮返工+局部直修及真机窄屏悬浮标题/短语同行修复（`b8595aa`），通过全量门禁（`+2092 ~1`、128 项 Python 单测、`dart analyze` 0 问题）与定向回归；已构建原签名双 ABI 自测包 `1.90.3+130`（`64,214,866` B，SHA-256 `9e8aa9c0...`），在 MuMu「学习通」与真机 `HUAWEI CDY-AN00`（`1.8.31+124` → `1.90.3+130` 保数据升级、4 条 `v3` 有声渠道就绪、`logcat` 0 崩溃/0 溢出）双端目视验收 PASS，详见[dev 本地状态](DEV_STATE.md)；未动 `main` / Tag / Release / Gitee。
 
 ## 最近 2 个正式发布版本
 

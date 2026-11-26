@@ -14,6 +14,7 @@ import '../models/display_preferences.dart';
 import '../models/home_filters.dart';
 import '../models/local_coursework_state.dart';
 import '../models/personal_workspace.dart';
+import '../models/pinned_assignments.dart';
 import '../models/study_notebook.dart';
 import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
@@ -35,6 +36,7 @@ import 'widgets/journal_buttons.dart';
 import 'widgets/journal_context_menu.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_picker_sheet.dart';
+import 'widgets/journal_pixel_buddy.dart';
 import 'widgets/journal_sliver_header.dart';
 import 'widgets/journal_swipe_tile.dart';
 
@@ -111,16 +113,194 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   Timer? _clock;
   final _scrollController = ScrollController();
   final ValueNotifier<double> _scrollOffset = ValueNotifier<double>(0.0);
+  final ValueNotifier<int> _syncSpinnerTick = ValueNotifier<int>(0);
   final _feedback = TransientFeedbackController();
+  final Map<String, int> _pinPulseByKey = <String, int>{};
+  final Set<String> _completingManualIds = <String>{};
+  final Map<String, Timer> _completingManualTimers = <String, Timer>{};
+  final Map<String, String> _completingPinnedKeyById = <String, String>{};
+  PinnedAssignments? _completingPinnedSnapshot;
   late int _feedbackEpoch;
   String? _feedbackAccount;
   HomeFilters? _preExamStripFilters;
   int? _preExamStripEpoch;
+  String? _buddyWhisper;
+  Timer? _buddyWhisperTimer;
+  Timer? _buddyComboResetTimer;
+  Timer? _syncSpinnerTimer;
+  int _buddyTapCount = 0;
+  int _buddyComboCount = 0;
+  int _buddyCelebratePulse = 0;
+  bool _appResumed = true;
+  bool _tickerEnabled = true;
+  bool _reducedMotion = false;
+
+  bool get _isBusy =>
+      _refreshing ||
+      store.isLoading ||
+      store.syncReport.phase == SyncPhase.running;
+
+  bool get _hasStoreSyncErrorOrPending {
+    if (_isBusy) return false;
+    final phase = store.syncReport.phase;
+    if (phase == SyncPhase.failed || phase == SyncPhase.partial) return true;
+    return phase == SyncPhase.success &&
+        (store.hasNonQuietServiceWarning ||
+            store.recoveryWarning != null ||
+            store.operationError != null ||
+            store.serviceWarnings.any((w) => w.contains('小组件')));
+  }
+
+  void _clearBuddyCombo() {
+    _buddyComboResetTimer?.cancel();
+    _buddyComboResetTimer = null;
+    _buddyComboCount = 0;
+  }
+
+  void _triggerBuddyCheer() {
+    if (!mounted || _reducedMotion) return;
+    setState(() => _buddyCelebratePulse++);
+  }
+
+  void _clearBuddyWhisper({bool notify = false}) {
+    _buddyWhisperTimer?.cancel();
+    _buddyWhisperTimer = null;
+    if (_buddyWhisper == null) return;
+    if (notify && mounted) {
+      setState(() => _buddyWhisper = null);
+    } else {
+      _buddyWhisper = null;
+    }
+  }
+
+  void _clearCompletingManual({String? entryId, bool notify = false}) {
+    if (entryId != null) {
+      _completingManualTimers.remove(entryId)?.cancel();
+      final removed = _completingManualIds.remove(entryId);
+      _completingPinnedKeyById.remove(entryId);
+      if (_completingPinnedKeyById.isEmpty) {
+        _completingPinnedSnapshot = null;
+      }
+      if (removed && notify && mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    for (final timer in _completingManualTimers.values) {
+      timer.cancel();
+    }
+    _completingManualTimers.clear();
+    final hadAny = _completingManualIds.isNotEmpty;
+    _completingManualIds.clear();
+    _completingPinnedKeyById.clear();
+    _completingPinnedSnapshot = null;
+    if (hadAny && notify && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _onManualCompletingStart(String entryId) {
+    if (!mounted || JournalMotion.isReducedMotion(context)) return;
+    _completingManualTimers.remove(entryId)?.cancel();
+    final entry =
+        store.notebook.entries.where((item) => item.id == entryId).firstOrNull;
+    final wasPinned = entry != null && store.isManualPinned(entry);
+    setState(() {
+      _completingManualIds.add(entryId);
+      if (wasPinned) {
+        _completingPinnedKeyById[entryId] = entry.pinKey;
+        _completingPinnedSnapshot ??= store.pinnedAssignments;
+      }
+    });
+  }
+
+  void _onManualCompletingCommit(String entryId) {
+    if (!mounted || JournalMotion.isReducedMotion(context)) {
+      _clearCompletingManual(entryId: entryId, notify: true);
+      return;
+    }
+    _completingManualTimers.remove(entryId)?.cancel();
+    setState(() {
+      _completingManualIds.add(entryId);
+      _buddyCelebratePulse++;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_completingManualIds.contains(entryId)) return;
+      _completingManualTimers.remove(entryId)?.cancel();
+      _completingManualTimers[entryId] = Timer(
+        const Duration(milliseconds: 220),
+        () {
+          _completingManualTimers.remove(entryId);
+          if (!mounted) return;
+          if (_completingManualIds.remove(entryId)) {
+            _completingPinnedKeyById.remove(entryId);
+            if (_completingPinnedKeyById.isEmpty) {
+              _completingPinnedSnapshot = null;
+            }
+            setState(() {});
+          }
+        },
+      );
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _reconcileSyncSpinner({
+    bool? busyOverride,
+    bool? showBuddyOverride,
+    bool? reducedOverride,
+  }) {
+    final busy = busyOverride ?? _isBusy;
+    final showBuddy = showBuddyOverride ?? store.display.showPixelBuddy;
+    final reduced = reducedOverride ?? _reducedMotion;
+    final shouldRun = mounted &&
+        busy &&
+        showBuddy &&
+        !reduced &&
+        _tickerEnabled &&
+        _appResumed;
+    if (!shouldRun) {
+      _syncSpinnerTimer?.cancel();
+      _syncSpinnerTimer = null;
+      return;
+    }
+    _syncSpinnerTimer ??= Timer.periodic(
+      const Duration(milliseconds: 180),
+      (_) {
+        if (!mounted ||
+            !_isBusy ||
+            !store.display.showPixelBuddy ||
+            _reducedMotion ||
+            !_tickerEnabled ||
+            !_appResumed) {
+          _syncSpinnerTimer?.cancel();
+          _syncSpinnerTimer = null;
+          return;
+        }
+        _syncSpinnerTick.value = (_syncSpinnerTick.value + 1) & 0x3fffffff;
+      },
+    );
+  }
+
+  void _onStoreChanged() {
+    _checkFeedbackAccount();
+    if (_isBusy ||
+        !store.display.showPixelBuddy ||
+        _hasStoreSyncErrorOrPending) {
+      _clearBuddyWhisper();
+      _clearBuddyCombo();
+    }
+    _reconcileSyncSpinner();
+  }
 
   void _checkFeedbackAccount() {
     if (_feedbackEpoch != store.accountEpoch ||
         _feedbackAccount != store.account) {
       _feedback.dismiss();
+      _clearBuddyWhisper();
+      _clearBuddyCombo();
+      _clearCompletingManual();
+      _pinPulseByKey.clear();
       _preExamStripFilters = null;
       _preExamStripEpoch = null;
       _feedbackEpoch = store.accountEpoch;
@@ -130,10 +310,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final next = _scrollController.offset.clamp(0.0, 80.0);
+    final next = _scrollController.offset.clamp(0.0, 120.0);
     if ((next - _scrollOffset.value).abs() >= 1.5 ||
         (next == 0.0 && _scrollOffset.value != 0.0) ||
-        (next == 80.0 && _scrollOffset.value != 80.0)) {
+        (next == 120.0 && _scrollOffset.value != 120.0)) {
       _scrollOffset.value = next;
     }
   }
@@ -142,25 +322,49 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   void didUpdateWidget(covariant AssignmentListScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.store != store) {
-      oldWidget.store.removeListener(_checkFeedbackAccount);
+      oldWidget.store.removeListener(_onStoreChanged);
       _feedback.dismiss();
+      _clearBuddyWhisper();
+      _clearBuddyCombo();
+      _clearCompletingManual();
+      _pinPulseByKey.clear();
       _feedbackEpoch = store.accountEpoch;
       _feedbackAccount = store.account;
-      store.addListener(_checkFeedbackAccount);
+      store.addListener(_onStoreChanged);
+      _reconcileSyncSpinner();
     }
   }
 
   @override
   void initState() {
     super.initState();
+    _appResumed =
+        (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) ==
+            AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onScroll);
     _feedbackEpoch = store.accountEpoch;
     _feedbackAccount = store.account;
-    store.addListener(_checkFeedbackAccount);
+    store.addListener(_onStoreChanged);
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _reducedMotion = JournalMotion.isReducedMotion(context);
+    if (!_tickerEnabled) {
+      _clearBuddyWhisper();
+      _clearBuddyCombo();
+    }
+    if (_reducedMotion) {
+      _clearBuddyCombo();
+      _clearCompletingManual();
+    }
+    _reconcileSyncSpinner();
   }
 
   @override
@@ -169,7 +373,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _scrollOffset.dispose();
-    store.removeListener(_checkFeedbackAccount);
+    _syncSpinnerTimer?.cancel();
+    _syncSpinnerTimer = null;
+    _syncSpinnerTick.dispose();
+    _buddyWhisperTimer?.cancel();
+    _buddyWhisperTimer = null;
+    _buddyComboResetTimer?.cancel();
+    _buddyComboResetTimer = null;
+    _clearCompletingManual();
+    store.removeListener(_onStoreChanged);
     _feedback.dispose();
     _clock?.cancel();
     super.dispose();
@@ -177,7 +389,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) setState(() {});
+    final nextResumed = state == AppLifecycleState.resumed;
+    if (_appResumed != nextResumed) {
+      _appResumed = nextResumed;
+      if (!nextResumed) {
+        _clearBuddyWhisper(notify: true);
+        _clearBuddyCombo();
+      }
+      _reconcileSyncSpinner();
+    }
+    if (nextResumed && mounted) setState(() {});
   }
 
   bool _refreshing = false;
@@ -247,12 +468,27 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     );
   }
 
+  void _triggerCardPulse(String pinKey) {
+    if (!mounted || JournalMotion.isReducedMotion(context)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || JournalMotion.isReducedMotion(context)) return;
+      setState(() {
+        _pinPulseByKey[pinKey] = (_pinPulseByKey[pinKey] ?? 0) + 1;
+      });
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
   Future<void> _togglePin(Assignment assignment) async {
     if (!store.canTogglePin(assignment)) return;
     final ok = await store.togglePin(assignment);
     if (!mounted || !ok) return;
     final pinned = store.isPinned(assignment);
     JournalMotion.pin(store.display, pinned: pinned);
+    _triggerCardPulse(AssignmentStore.pinKeyOf(assignment));
+    if (pinned) {
+      _triggerBuddyCheer();
+    }
     feedback(pinned ? '已置顶' : '已取消置顶');
   }
 
@@ -261,6 +497,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     feedback: (message, {action, actionLabel}) =>
         feedback(message, action: action, actionLabel: actionLabel),
     isMounted: () => mounted,
+    onBouncePulse: _triggerCardPulse,
+    onPinAdded: _triggerBuddyCheer,
+    onCompletingStart: _onManualCompletingStart,
+    onCompletingCommit: _onManualCompletingCommit,
+    onCompletingCancel: (id) =>
+        _clearCompletingManual(entryId: id, notify: true),
   );
 
   /// Per-course item counts for the picker, refreshed on every build so the
@@ -551,6 +793,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         store.syncReport.phase == SyncPhase.running) {
       return;
     }
+    _clearBuddyWhisper();
     setState(() => _refreshing = true);
     final before = store.syncReport;
     final epoch = store.accountEpoch;
@@ -707,6 +950,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 selectedCourseName: selectedCourseName,
                 deadline: _deadlineFilter,
                 type: _typeFilter,
+                keepVisibleIds: _completingManualIds,
                 now: now,
               )
             : const <ManualEntry>[];
@@ -748,6 +992,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           displayIndex: displayIndex,
           prioritizeStartOnly: recoveryScope == null,
           coursework: coursework,
+          keepVisibleIds: _completingManualIds,
         );
         final today = PersonalWorkspace.dayKey(now);
         final plans =
@@ -788,6 +1033,17 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ? '${sync.summary} · 显示上次记录'
                 : sync.summary;
         final reduceMotion = MediaQuery.disableAnimationsOf(context);
+        _reducedMotion = reduceMotion;
+        if (busy) {
+          _clearBuddyWhisper();
+          _clearBuddyCombo();
+        }
+        final showPixelBuddy = store.display.showPixelBuddy;
+        _reconcileSyncSpinner(
+          busyOverride: busy,
+          showBuddyOverride: showPixelBuddy,
+          reducedOverride: reduceMotion,
+        );
         final syncAction = sync.action == HomeSyncAction.login ||
                 sync.action == HomeSyncAction.verify
             ? sync.action
@@ -864,7 +1120,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           final canPin = store.canTogglePin(a);
           final isPinned = store.isPinned(a);
 
+          final pinKey = AssignmentStore.pinKeyOf(a);
           return Builder(
+            key: ValueKey('home-timeline-item-$pinKey'),
             builder: (itemContext) {
               final interactiveCard = buildCard(
                 a,
@@ -880,32 +1138,36 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ),
               );
 
-              return JournalSwipeTile(
-                key: ValueKey('swipe-${a.id}'),
-                displayPrefs: store.display,
-                rightAction: a.isCompleted
-                    ? null
-                    : JournalSwipeAction(
-                        label: inTodayPlan ? '移出计划' : '今日计划',
-                        icon: inTodayPlan
-                            ? Icons.playlist_remove_rounded
-                            : Icons.playlist_add_check_rounded,
-                        color: journal.accent,
-                        backgroundColor: journal.sage,
-                        onTrigger: () => unawaited(_toggleTodayPlan(a)),
-                      ),
-                leftAction: !canPin
-                    ? null
-                    : JournalSwipeAction(
-                        label: isPinned ? '取消置顶' : '置顶',
-                        icon: isPinned
-                            ? Icons.push_pin_rounded
-                            : Icons.push_pin_outlined,
-                        color: journal.ink,
-                        backgroundColor: journal.parchment,
-                        onTrigger: () => unawaited(_togglePin(a)),
-                      ),
-                child: interactiveCard,
+              return JournalMicroBounce(
+                key: ValueKey('home-micro-bounce-$pinKey'),
+                pulse: _pinPulseByKey[pinKey] ?? 0,
+                child: JournalSwipeTile(
+                  key: ValueKey('swipe-${a.id}'),
+                  displayPrefs: store.display,
+                  rightAction: a.isCompleted
+                      ? null
+                      : JournalSwipeAction(
+                          label: inTodayPlan ? '移出计划' : '今日计划',
+                          icon: inTodayPlan
+                              ? Icons.playlist_remove_rounded
+                              : Icons.playlist_add_check_rounded,
+                          color: journal.accent,
+                          backgroundColor: journal.sage,
+                          onTrigger: () => unawaited(_toggleTodayPlan(a)),
+                        ),
+                  leftAction: !canPin
+                      ? null
+                      : JournalSwipeAction(
+                          label: isPinned ? '取消置顶' : '置顶',
+                          icon: isPinned
+                              ? Icons.push_pin_rounded
+                              : Icons.push_pin_outlined,
+                          color: journal.ink,
+                          backgroundColor: journal.parchment,
+                          onTrigger: () => unawaited(_togglePin(a)),
+                        ),
+                  child: interactiveCard,
+                ),
               );
             },
           );
@@ -926,6 +1188,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               pinned: pinned,
               dragHandle: dragHandle,
               pinnedVisibleKeys: pinnedVisibleKeys,
+              bouncePulse: _pinPulseByKey[item.pinKey] ?? 0,
             );
           }
           return card(
@@ -947,11 +1210,78 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               coursework: coursework,
               examSources: examSources,
               displayIndex: displayIndex,
+              keepPinnedKeys: _completingPinnedKeyById.values.toSet(),
+              completingPinnedSnapshot: _completingPinnedSnapshot,
             );
 
         final timelineSections = sortedTimelineItems.isEmpty
             ? const <HomeTimelineSection>[]
             : buildTimelineSections(sortedTimelineItems);
+        final compactDensity = store.display.compact;
+        final buddyMood = busy
+            ? JournalPixelBuddyMood.syncing
+            : dueSummary.dueToday > 0
+                ? JournalPixelBuddyMood.dueToday
+                : (showDueSummary &&
+                        dueSummary.dueToday == 0 &&
+                        (dueSummary.completedToday > 0 ||
+                            sortedTimelineItems.isEmpty))
+                    ? JournalPixelBuddyMood.allClear
+                    : JournalPixelBuddyMood.idle;
+
+        final syncErrorOrPending = !busy &&
+            (store.syncReport.phase == SyncPhase.failed ||
+                store.syncReport.phase == SyncPhase.partial ||
+                sync.action == HomeSyncAction.login ||
+                sync.action == HomeSyncAction.verify ||
+                sync.action == HomeSyncAction.settings);
+        if (syncErrorOrPending || !showPixelBuddy) {
+          _clearBuddyWhisper();
+          _clearBuddyCombo();
+        }
+        final syncBusyWithBuddy = busy && showPixelBuddy;
+        final activeWhisper = (!busy && !syncErrorOrPending && showPixelBuddy)
+            ? _buddyWhisper
+            : null;
+
+        void onBuddyTap() {
+          if (busy || syncErrorOrPending || !_appResumed || !_tickerEnabled) {
+            _clearBuddyCombo();
+            return;
+          }
+          _buddyTapCount++;
+          _buddyWhisperTimer?.cancel();
+          final int effectiveCombo;
+          if (_reducedMotion) {
+            _clearBuddyCombo();
+            effectiveCombo = 1;
+          } else {
+            _buddyComboResetTimer?.cancel();
+            _buddyComboCount++;
+            effectiveCombo = _buddyComboCount;
+            _buddyComboResetTimer =
+                Timer(const Duration(milliseconds: 1200), () {
+              _buddyComboResetTimer = null;
+              if (!mounted) return;
+              _buddyComboCount = 0;
+            });
+          }
+          final whisper = journalBuddyTapWhisper(
+            dueToday: dueSummary.dueToday,
+            dueIn3Days: dueSummary.dueIn3Days,
+            completedToday: dueSummary.completedToday,
+            tapCount: _buddyTapCount - 1,
+            comboCount: effectiveCombo,
+          );
+          setState(() => _buddyWhisper = whisper);
+          _buddyWhisperTimer = Timer(const Duration(milliseconds: 2000), () {
+            _buddyWhisperTimer = null;
+            if (!mounted) return;
+            if (_buddyWhisper != null) {
+              setState(() => _buddyWhisper = null);
+            }
+          });
+        }
 
         final headerBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1053,19 +1383,48 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final title = Text('课业手记', style: journal.display);
               return LayoutBuilder(
                 builder: (context, constraints) {
-                  if (!JournalLayout.isLargeText(context) &&
-                      constraints.maxWidth >= 300) {
+                  final largeText = JournalLayout.isLargeText(context);
+                  final buddySize = largeText
+                      ? 20.0
+                      : (constraints.maxWidth < 350 ? 22.0 : 26.0);
+                  final Widget titleCluster = showPixelBuddy
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Flexible(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: title,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            JournalPixelBuddy(
+                              key: const ValueKey('home-pixel-buddy'),
+                              mood: buddyMood,
+                              size: buddySize,
+                              onTap: onBuddyTap,
+                              syncTickListenable: _syncSpinnerTick,
+                              displayPrefs: store.display,
+                              celebratePulse: _buddyCelebratePulse,
+                              allowTapCombo: !busy && !syncErrorOrPending,
+                            ),
+                          ],
+                        )
+                      : FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: title,
+                        );
+                  if (!largeText && constraints.maxWidth >= 300) {
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Expanded(
                           child: Align(
                             alignment: Alignment.centerLeft,
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: title,
-                            ),
+                            child: titleCluster,
                           ),
                         ),
                         const SizedBox(width: 4),
@@ -1076,7 +1435,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   return Wrap(
                     alignment: WrapAlignment.spaceBetween,
                     crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [title, actionsRow],
+                    children: [
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: constraints.maxWidth,
+                        ),
+                        child: titleCluster,
+                      ),
+                      actionsRow,
+                    ],
                   );
                 },
               );
@@ -1111,6 +1478,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final showChevron =
                   sync.action != HomeSyncAction.none && !sync.gentle;
 
+              final effectiveStatusText = syncBusyWithBuddy
+                  ? journalBuddySyncPhrase(
+                      store.homeSyncProgress?.stage,
+                      _syncSpinnerTick.value,
+                    )
+                  : (activeWhisper ?? statusText);
+
               final scaler = MediaQuery.textScalerOf(context);
               final direction = Directionality.of(context);
               double measureWidth(String text, TextStyle style) {
@@ -1132,16 +1506,68 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ? FontWeight.w600
                     : FontWeight.w400,
               );
-              final leftWidth = 14.5 +
+              final baseLeftWidth = 14.5 +
                   5.0 +
                   measureWidth(statusText, journal.metadata) +
+                  (showChevron ? 18.0 : 0.0) +
+                  4.0;
+              final leftWidth = 14.5 +
+                  5.0 +
+                  measureWidth(effectiveStatusText, journal.metadata) +
                   (showChevron ? 18.0 : 0.0) +
                   4.0;
               final rightWidth = showDueSummary
                   ? measureWidth(summaryLabel, summaryStyle) + 4.0
                   : 0.0;
+              final idleFitsSingleRow = !showDueSummary ||
+                  (baseLeftWidth + rightWidth + 6.0 <= constraints.maxWidth);
               final fitsSingleRow = !showDueSummary ||
-                  (leftWidth + rightWidth + 6.0 <= constraints.maxWidth);
+                  (leftWidth + rightWidth + 6.0 <= constraints.maxWidth) ||
+                  (activeWhisper != null && idleFitsSingleRow);
+
+              Widget buildStatusContent({
+                required Widget leading,
+                required String text,
+                required TextStyle style,
+                bool singleLineScaleDown = false,
+              }) {
+                final textWidget = singleLineScaleDown
+                    ? FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          text,
+                          maxLines: 1,
+                          softWrap: false,
+                          style: style,
+                        ),
+                      )
+                    : Text(text, style: style);
+                return Semantics(
+                  liveRegion: true,
+                  button: onSyncTap != null,
+                  label: text,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      leading,
+                      const SizedBox(width: 5),
+                      Flexible(
+                        fit: FlexFit.loose,
+                        child: ExcludeSemantics(
+                          child: textWidget,
+                        ),
+                      ),
+                      if (showChevron)
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          size: 18,
+                          color: journal.muted,
+                        ),
+                    ],
+                  ),
+                );
+              }
 
               final statusControl = Material(
                 type: MaterialType.transparency,
@@ -1156,33 +1582,61 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: Semantics(
-                        liveRegion: true,
-                        button: onSyncTap != null,
-                        label: statusText,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(statusIcon, size: 14.5, color: statusColor),
-                            const SizedBox(width: 5),
-                            Flexible(
-                              fit: FlexFit.loose,
-                              child: ExcludeSemantics(
-                                child: Text(
-                                  statusText,
+                      child: syncBusyWithBuddy
+                          ? ValueListenableBuilder<int>(
+                              valueListenable: _syncSpinnerTick,
+                              builder: (context, tick, _) {
+                                final glyph = reduceMotion
+                                    ? '✻'
+                                    : kJournalSpinnerGlyphs[
+                                        tick % kJournalSpinnerGlyphs.length];
+                                final phrase = journalBuddySyncPhrase(
+                                  store.homeSyncProgress?.stage,
+                                  tick,
+                                );
+                                return buildStatusContent(
+                                  leading: SizedBox(
+                                    width: 14.5,
+                                    child: Center(
+                                      child: ExcludeSemantics(
+                                        child: Text(
+                                          glyph,
+                                          style: journal.metadata.copyWith(
+                                            color: journal.accent,
+                                            fontWeight: FontWeight.w600,
+                                            height: 1.0,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  text: phrase,
+                                  style: journal.metadata,
+                                );
+                              },
+                            )
+                          : activeWhisper != null
+                              ? buildStatusContent(
+                                  leading: Icon(
+                                    Icons.auto_awesome_rounded,
+                                    size: 14.5,
+                                    color: journal.accent,
+                                  ),
+                                  text: activeWhisper,
+                                  style: journal.metadata.copyWith(
+                                    color: journal.accent,
+                                  ),
+                                  singleLineScaleDown: fitsSingleRow,
+                                )
+                              : buildStatusContent(
+                                  leading: Icon(
+                                    statusIcon,
+                                    size: 14.5,
+                                    color: statusColor,
+                                  ),
+                                  text: statusText,
                                   style: journal.metadata,
                                 ),
-                              ),
-                            ),
-                            if (showChevron)
-                              Icon(
-                                Icons.chevron_right_rounded,
-                                size: 18,
-                                color: journal.muted,
-                              ),
-                          ],
-                        ),
-                      ),
                     ),
                   ),
                 ),
@@ -1351,7 +1805,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ),
               ),
             if (sortedTimelineItems.isNotEmpty && recoveryScope == null)
-              const SizedBox(height: 12),
+              SizedBox(height: compactDensity ? 6 : 12),
           ],
         );
 
@@ -1500,13 +1954,25 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             if (timelineSections.isEmpty) return buildEmptyState();
             final sectionIndex = index - 1;
             final section = timelineSections[sectionIndex];
-            final groupCard = section.pinned && section.items.length >= 2
+            final isEmphasizedSection = section.pinned || section.badge == '今天';
+            final completingPinnedKeys =
+                _completingPinnedKeyById.values.toSet();
+            final useReorderablePinned = section.pinned &&
+                (section.items.length >= 2 ||
+                    (completingPinnedKeys.isNotEmpty &&
+                        (_completingPinnedSnapshot?.keys.length ?? 0) >= 2));
+            final groupCard = useReorderablePinned
                 ? JournalGroupedCard(
+                    emphasized: isEmphasizedSection,
                     children: [
                       Builder(
                         builder: (context) {
-                          final visibleKeys = [
+                          final visualKeys = [
                             for (final item in section.items) item.pinKey,
+                          ];
+                          final activePinnedKeys = [
+                            for (final key in visualKeys)
+                              if (!completingPinnedKeys.contains(key)) key,
                           ];
                           return ReorderableListView.builder(
                             shrinkWrap: true,
@@ -1526,31 +1992,43 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                 JournalMotion.selectionTick(store.display),
                             onReorderItem: (oldIndex, newIndex) {
                               if (oldIndex == newIndex) return;
-                              final nextKeys = List<String>.of(visibleKeys);
-                              final moved = nextKeys.removeAt(oldIndex);
-                              nextKeys.insert(newIndex, moved);
-                              unawaited(store.reorderPinned(nextKeys));
+                              final nextVisualKeys =
+                                  List<String>.of(visualKeys);
+                              final moved = nextVisualKeys.removeAt(oldIndex);
+                              nextVisualKeys.insert(newIndex, moved);
+                              final nextActiveKeys = [
+                                for (final key in nextVisualKeys)
+                                  if (!completingPinnedKeys.contains(key)) key,
+                              ];
+                              if (nextActiveKeys.length >= 2) {
+                                unawaited(store.reorderPinned(nextActiveKeys));
+                              }
                             },
                             itemCount: section.items.length,
                             itemBuilder: (context, itemIndex) {
                               final item = section.items[itemIndex];
-                              final dragHandle = ReorderableDragStartListener(
-                                index: itemIndex,
-                                child: Tooltip(
-                                  message: '拖动调整置顶顺序',
-                                  child: SizedBox(
-                                    width: 34,
-                                    height: 48,
-                                    child: Center(
-                                      child: Icon(
-                                        Icons.drag_indicator_rounded,
-                                        size: 18,
-                                        color: journal.muted,
+                              final isCompletingItem =
+                                  completingPinnedKeys.contains(item.pinKey);
+                              final dragHandle = isCompletingItem ||
+                                      activePinnedKeys.length < 2
+                                  ? null
+                                  : ReorderableDragStartListener(
+                                      index: itemIndex,
+                                      child: Tooltip(
+                                        message: '拖动调整置顶顺序',
+                                        child: SizedBox(
+                                          width: 34,
+                                          height: 48,
+                                          child: Center(
+                                            child: Icon(
+                                              Icons.drag_indicator_rounded,
+                                              size: 18,
+                                              color: journal.muted,
+                                            ),
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                  ),
-                                ),
-                              );
+                                    );
                               return Column(
                                 key: ValueKey('pinned-reorder-${item.pinKey}'),
                                 mainAxisSize: MainAxisSize.min,
@@ -1559,7 +2037,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                     item,
                                     pinned: true,
                                     dragHandle: dragHandle,
-                                    pinnedVisibleKeys: visibleKeys,
+                                    pinnedVisibleKeys: activePinnedKeys,
                                   ),
                                   if (itemIndex < section.items.length - 1)
                                     Padding(
@@ -1579,6 +2057,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ],
                   )
                 : JournalGroupedCard(
+                    emphasized: isEmphasizedSection,
                     dividerIndent: 70.0,
                     children: [
                       for (final item in section.items)
@@ -1591,7 +2070,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               children: [
                 dayHeading(
                   section.heading!,
-                  top: sectionIndex == 0 ? 8 : 18,
+                  top: compactDensity
+                      ? (sectionIndex == 0 ? 4 : 10)
+                      : (sectionIndex == 0 ? 8 : 18),
+                  bottom: compactDensity ? 4 : 8,
                   tone: section.tone,
                   badge: section.badge,
                 ),
@@ -1647,8 +2129,119 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             ),
         ];
 
+        final showSliverBuddy = showPixelBuddy &&
+            !JournalLayout.isLargeText(context) &&
+            MediaQuery.sizeOf(context).width >= 330;
+        final Widget? sliverStatusContent = syncBusyWithBuddy
+            ? ValueListenableBuilder<int>(
+                key: const ValueKey('home-sliver-sync-status'),
+                valueListenable: _syncSpinnerTick,
+                builder: (context, tick, _) {
+                  final glyph = reduceMotion
+                      ? '✻'
+                      : kJournalSpinnerGlyphs[
+                          tick % kJournalSpinnerGlyphs.length];
+                  final phrase = journalBuddySyncPhrase(
+                    store.homeSyncProgress?.stage,
+                    tick,
+                  );
+                  return Semantics(
+                    liveRegion: true,
+                    label: phrase,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 14.5,
+                          child: Center(
+                            child: ExcludeSemantics(
+                              child: Text(
+                                glyph,
+                                style: journal.metadata.copyWith(
+                                  color: journal.accent,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.0,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: ExcludeSemantics(
+                            child: Text(
+                              phrase,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: journal.metadata,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              )
+            : activeWhisper != null
+                ? Semantics(
+                    key: const ValueKey('home-sliver-sync-status'),
+                    liveRegion: true,
+                    label: activeWhisper,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.auto_awesome_rounded,
+                          size: 14.5,
+                          color: journal.accent,
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: ExcludeSemantics(
+                            child: Text(
+                              activeWhisper,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: journal.metadata.copyWith(
+                                color: journal.accent,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : null;
+
         return Stack(
           children: [
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 240,
+              child: IgnorePointer(
+                child: RepaintBoundary(
+                  child: ValueListenableBuilder<double>(
+                    valueListenable: _scrollOffset,
+                    builder: (context, offset, _) {
+                      final fade = (1.0 - offset / 110.0).clamp(0.0, 1.0);
+                      if (fade <= 0.01) {
+                        return const SizedBox.shrink();
+                      }
+                      return CustomPaint(
+                        key: const ValueKey('home-ambient-glow'),
+                        painter: _HomeAmbientGlowPainter(
+                          primaryGlow: journal.ambientPrimaryGlow,
+                          warmGlow: journal.ambientWarmGlow,
+                          fade: fade,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
             listView,
             Positioned(
               top: 0,
@@ -1659,6 +2252,19 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 builder: (context, offset, _) => JournalSliverHeader(
                   title: '课业手记',
                   scrollOffset: offset,
+                  titleTrailing: showSliverBuddy
+                      ? JournalPixelBuddy(
+                          key: const ValueKey('home-sliver-pixel-buddy'),
+                          mood: buddyMood,
+                          mini: true,
+                          onTap: onBuddyTap,
+                          syncTickListenable: _syncSpinnerTick,
+                          displayPrefs: store.display,
+                          celebratePulse: _buddyCelebratePulse,
+                          allowTapCombo: !busy && !syncErrorOrPending,
+                        )
+                      : null,
+                  statusContent: sliverStatusContent,
                   actions: headerActions,
                 ),
               ),
@@ -1864,6 +2470,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   Widget dayHeading(
     String label, {
     double top = 12,
+    double bottom = 8,
     HomeDayHeadingTone tone = HomeDayHeadingTone.normal,
     String? badge,
   }) {
@@ -1900,7 +2507,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             style: baseStyle,
           );
     return Padding(
-      padding: EdgeInsets.only(top: top, bottom: 8, left: 2),
+      padding: EdgeInsets.only(top: top, bottom: bottom, left: 2),
       child: Row(
         children: [
           Flexible(child: labelWidget),
@@ -2167,49 +2774,53 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         child: ExcludeSemantics(
           child: Tooltip(
             message: message,
-            child: Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: onTap,
-                enableFeedback: false,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: 48,
-                    minWidth: fullWidth ? double.infinity : 0,
-                  ),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: fullWidth ? null : 1,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 11, vertical: 6.5),
-                      decoration: BoxDecoration(
-                        color: filtersActive ? journal.sage : journal.parchment,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: filtersActive
-                              ? journal.sageBorder
-                              : Colors.transparent,
-                          width: 0.8,
+            child: JournalPressableScale(
+              pressScale: 0.97,
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: onTap,
+                  enableFeedback: false,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: 48,
+                      minWidth: fullWidth ? double.infinity : 0,
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: fullWidth ? null : 1,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 11, vertical: 6.5),
+                        decoration: BoxDecoration(
+                          color:
+                              filtersActive ? journal.sage : journal.parchment,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: filtersActive
+                                ? journal.sageBorder
+                                : Colors.transparent,
+                            width: 0.8,
+                          ),
                         ),
-                      ),
-                      child: Row(
-                        mainAxisSize:
-                            fullWidth ? MainAxisSize.max : MainAxisSize.min,
-                        children: [
-                          Icon(
-                            filtersActive
-                                ? Icons.tune_rounded
-                                : Icons.search_rounded,
-                            size: 16,
-                            color: filterColor,
-                          ),
-                          const SizedBox(width: 5),
-                          Flexible(
-                            child: Text(filterLabel, style: filterStyle),
-                          ),
-                        ],
+                        child: Row(
+                          mainAxisSize:
+                              fullWidth ? MainAxisSize.max : MainAxisSize.min,
+                          children: [
+                            Icon(
+                              filtersActive
+                                  ? Icons.tune_rounded
+                                  : Icons.search_rounded,
+                              size: 16,
+                              color: filterColor,
+                            ),
+                            const SizedBox(width: 5),
+                            Flexible(
+                              child: Text(filterLabel, style: filterStyle),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -2232,39 +2843,42 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         child: ExcludeSemantics(
           child: Tooltip(
             message: message,
-            child: Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: onTap,
-                enableFeedback: false,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: Center(
-                    widthFactor: 1,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 11, vertical: 6.5),
-                      decoration: BoxDecoration(
-                        color: journal.parchment,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: Colors.transparent,
-                          width: 0.8,
-                        ),
-                      ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.swap_vert_rounded,
-                            size: 16, color: journal.muted),
-                        const SizedBox(width: 5),
-                        Flexible(
-                          child: Text(
-                            sortLabel,
-                            key: const ValueKey('current-home-sort'),
-                            style: sortStyle,
+            child: JournalPressableScale(
+              pressScale: 0.97,
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: onTap,
+                  enableFeedback: false,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 48),
+                    child: Center(
+                      widthFactor: 1,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 11, vertical: 6.5),
+                        decoration: BoxDecoration(
+                          color: journal.parchment,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Colors.transparent,
+                            width: 0.8,
                           ),
                         ),
-                      ]),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.swap_vert_rounded,
+                              size: 16, color: journal.muted),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              sortLabel,
+                              key: const ValueKey('current-home-sort'),
+                              style: sortStyle,
+                            ),
+                          ),
+                        ]),
+                      ),
                     ),
                   ),
                 ),
@@ -2290,41 +2904,44 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         child: ExcludeSemantics(
           child: Tooltip(
             message: message,
-            child: Material(
-              type: MaterialType.transparency,
-              child: InkWell(
-                key: const ValueKey('home-add-manual'),
-                borderRadius: BorderRadius.circular(20),
-                onTap: onTap,
-                enableFeedback: false,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: Center(
-                    widthFactor: 1,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 11,
-                        vertical: 6.5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: journal.sage,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: journal.sageBorder,
-                          width: 0.8,
+            child: JournalPressableScale(
+              pressScale: 0.97,
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  key: const ValueKey('home-add-manual'),
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: onTap,
+                  enableFeedback: false,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 48),
+                    child: Center(
+                      widthFactor: 1,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 11,
+                          vertical: 6.5,
                         ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.add_rounded,
-                            size: 16,
-                            color: journal.ink,
+                        decoration: BoxDecoration(
+                          color: journal.sage,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: journal.sageBorder,
+                            width: 0.8,
                           ),
-                          const SizedBox(width: 5),
-                          Text(addLabel, style: addStyle),
-                        ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.add_rounded,
+                              size: 16,
+                              color: journal.ink,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(addLabel, style: addStyle),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -2411,6 +3028,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       useRootNavigator: true,
       isScrollControlled: true,
       useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      sheetAnimationStyle: JournalMotion.modalSheetAnimationStyle(context),
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) {
           final journal = Journal.of(context);
@@ -2422,214 +3041,241 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       ?.label ??
                   '全部课程';
           return Padding(
-            padding: EdgeInsets.fromLTRB(
-                20, 14, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 14),
-                      decoration: BoxDecoration(
-                        color: journal.ruleStrong,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Text('搜索、筛选与排序', style: journal.section),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: controller,
-                    autofocus: _query.isNotEmpty,
-                    onChanged: (value) => setSheetState(() => query = value),
-                    textInputAction: TextInputAction.search,
-                    decoration: const InputDecoration(
-                      labelText: '搜索作业、任务、考试或课程',
-                      prefixIcon: Icon(Icons.search_rounded),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text('类型', style: journal.dayHeading),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(context).bottom),
+            child: JournalSheetRubberBand(
+              fillColor: journal.sheetElevated,
+              builder: (context, wrapGrabArea) => Container(
+                decoration: BoxDecoration(
+                  color: journal.sheetElevated,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      for (final option in homeTypeFilterChoices)
-                        ChoiceChip(
-                          key: ValueKey('type-${option.name}'),
-                          selected: type == option,
-                          onSelected: (_) => setSheetState(() => type = option),
-                          label: Text(option.label),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text('期限', style: journal.dayHeading),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final filter in homeDeadlineFilterChoices)
-                        ChoiceChip(
-                          key: ValueKey('deadline-${filter.name}'),
-                          selected: deadline == filter,
-                          onSelected: (_) =>
-                              setSheetState(() => deadline = filter),
-                          label: Text(_deadlineLabel(filter)),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  HomeCourseFilterRow(
-                    key: const ValueKey('home-course-filter'),
-                    tapKey: ValueKey(
-                        'course-${store.accountEpoch}-${courseKey ?? "all"}'),
-                    value: selectedCourseLabel,
-                    selected: courseKey != null,
-                    onClear: () => setSheetState(() => courseKey = null),
-                    onTap: () async {
-                      final counts = _courseCountsFor(type, deadline);
-                      final ordered =
-                          sortHomeCourseOptionsByCount(courseOptions, counts);
-                      final picked = await showJournalPickerSheet<String>(
-                        context,
-                        title: '课程筛选',
-                        selectedValue: courseKey ?? '',
-                        searchable: courseOptions.length > 5 ||
-                            courseOptions.any((o) => o.teacherNames.isNotEmpty),
-                        searchHint: '搜索课程或教师...',
-                        displayPrefs: store.display,
-                        filterOptions: const [
-                          JournalPickerFilterOption(
-                            id: 'currentTerm',
-                            label: '本学期',
-                          ),
-                          JournalPickerFilterOption(
-                            id: 'currentAcademicYear',
-                            label: '本学年',
-                          ),
-                          JournalPickerFilterOption(
-                            id: 'pastTerms',
-                            label: '往期',
-                          ),
-                          JournalPickerFilterOption(
-                            id: 'allTerms',
-                            label: '全部学期',
-                          ),
-                        ],
-                        initialFilterId: 'currentTerm',
-                        filterPredicate: (option, filterId) {
-                          if (option.value.isEmpty) return true;
-                          return store.termCatalog.matchesHomeCoursePicker(
-                            option.value,
-                            filterId,
-                            hasVisibleItems: (counts[option.value] ?? 0) > 0,
-                          );
-                        },
-                        filterNoticeBuilder: (filterId, filtered) =>
-                            filterId == 'currentTerm' &&
-                                    filtered.every((o) => o.value.isEmpty) &&
-                                    courseOptions.isNotEmpty
-                                ? '本学期暂未识别出课程，可切换到「本学年」或「全部学期」查看'
-                                : null,
-                        options: [
-                          const JournalPickerOption<String>(
-                            value: '',
-                            label: '全部课程',
-                          ),
-                          for (final option in ordered)
-                            JournalPickerOption<String>(
-                              key:
-                                  ValueKey('course-option-${option.courseKey}'),
-                              value: option.courseKey,
-                              label: option.name,
-                              subtitle: option.subtitle,
-                              keywords: option.searchKeywords,
-                              icon: courseIconFor(option.name),
-                              trailingText: homeCourseCountLabel(
-                                  counts[option.courseKey] ?? 0),
-                            ),
-                        ],
-                      );
-                      if (picked != null) {
-                        setSheetState(
-                            () => courseKey = picked == '' ? null : picked);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Text('排序', style: journal.dayHeading),
-                  const SizedBox(height: 8),
-                  JournalGroupedCard(
-                    children: [
-                      RadioGroup<HomeSortOrder>(
-                        groupValue: sortOrder,
-                        onChanged: (value) {
-                          if (value != null) {
-                            setSheetState(() => sortOrder = value);
-                          }
-                        },
-                        child: Column(
+                      wrapGrabArea(
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            for (final order in homeSortOrderChoices)
-                              RadioListTile<HomeSortOrder>(
-                                key: ValueKey('sort-${order.name}'),
-                                value: order,
-                                contentPadding:
-                                    const EdgeInsets.symmetric(horizontal: 12),
-                                dense: true,
-                                title: Text(
-                                  _sortLabel(order),
-                                  style: journal.entryTitle
-                                      .copyWith(fontSize: 14.5),
+                            Center(
+                              key: const ValueKey('home-filter-drag-handle'),
+                              child: Container(
+                                width: 36,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: journal.ruleStrong,
+                                  borderRadius: BorderRadius.circular(2),
                                 ),
                               ),
+                            ),
+                            const SizedBox(height: 14),
+                            Text('搜索、筛选与排序', style: journal.section),
                           ],
                         ),
                       ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: controller,
+                        autofocus: _query.isNotEmpty,
+                        onChanged: (value) =>
+                            setSheetState(() => query = value),
+                        textInputAction: TextInputAction.search,
+                        decoration: const InputDecoration(
+                          labelText: '搜索作业、任务、考试或课程',
+                          prefixIcon: Icon(Icons.search_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text('类型', style: journal.dayHeading),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final option in homeTypeFilterChoices)
+                            ChoiceChip(
+                              key: ValueKey('type-${option.name}'),
+                              selected: type == option,
+                              onSelected: (_) =>
+                                  setSheetState(() => type = option),
+                              label: Text(option.label),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Text('期限', style: journal.dayHeading),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final filter in homeDeadlineFilterChoices)
+                            ChoiceChip(
+                              key: ValueKey('deadline-${filter.name}'),
+                              selected: deadline == filter,
+                              onSelected: (_) =>
+                                  setSheetState(() => deadline = filter),
+                              label: Text(_deadlineLabel(filter)),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      HomeCourseFilterRow(
+                        key: const ValueKey('home-course-filter'),
+                        tapKey: ValueKey(
+                            'course-${store.accountEpoch}-${courseKey ?? "all"}'),
+                        value: selectedCourseLabel,
+                        selected: courseKey != null,
+                        onClear: () => setSheetState(() => courseKey = null),
+                        onTap: () async {
+                          final counts = _courseCountsFor(type, deadline);
+                          final ordered = sortHomeCourseOptionsByCount(
+                              courseOptions, counts);
+                          final picked = await showJournalPickerSheet<String>(
+                            context,
+                            title: '课程筛选',
+                            selectedValue: courseKey ?? '',
+                            searchable: courseOptions.length > 5 ||
+                                courseOptions
+                                    .any((o) => o.teacherNames.isNotEmpty),
+                            searchHint: '搜索课程或教师...',
+                            displayPrefs: store.display,
+                            filterOptions: const [
+                              JournalPickerFilterOption(
+                                id: 'currentTerm',
+                                label: '本学期',
+                              ),
+                              JournalPickerFilterOption(
+                                id: 'currentAcademicYear',
+                                label: '本学年',
+                              ),
+                              JournalPickerFilterOption(
+                                id: 'pastTerms',
+                                label: '往期',
+                              ),
+                              JournalPickerFilterOption(
+                                id: 'allTerms',
+                                label: '全部学期',
+                              ),
+                            ],
+                            initialFilterId: 'currentTerm',
+                            filterPredicate: (option, filterId) {
+                              if (option.value.isEmpty) return true;
+                              return store.termCatalog.matchesHomeCoursePicker(
+                                option.value,
+                                filterId,
+                                hasVisibleItems:
+                                    (counts[option.value] ?? 0) > 0,
+                              );
+                            },
+                            filterNoticeBuilder: (filterId, filtered) =>
+                                filterId == 'currentTerm' &&
+                                        filtered
+                                            .every((o) => o.value.isEmpty) &&
+                                        courseOptions.isNotEmpty
+                                    ? '本学期暂未识别出课程，可切换到「本学年」或「全部学期」查看'
+                                    : null,
+                            options: [
+                              const JournalPickerOption<String>(
+                                value: '',
+                                label: '全部课程',
+                              ),
+                              for (final option in ordered)
+                                JournalPickerOption<String>(
+                                  key: ValueKey(
+                                      'course-option-${option.courseKey}'),
+                                  value: option.courseKey,
+                                  label: option.name,
+                                  subtitle: option.subtitle,
+                                  keywords: option.searchKeywords,
+                                  icon: courseIconFor(option.name),
+                                  trailingText: homeCourseCountLabel(
+                                      counts[option.courseKey] ?? 0),
+                                ),
+                            ],
+                          );
+                          if (picked != null) {
+                            setSheetState(
+                                () => courseKey = picked == '' ? null : picked);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      Text('排序', style: journal.dayHeading),
+                      const SizedBox(height: 8),
+                      JournalGroupedCard(
+                        children: [
+                          RadioGroup<HomeSortOrder>(
+                            groupValue: sortOrder,
+                            onChanged: (value) {
+                              if (value != null) {
+                                setSheetState(() => sortOrder = value);
+                              }
+                            },
+                            child: Column(
+                              children: [
+                                for (final order in homeSortOrderChoices)
+                                  RadioListTile<HomeSortOrder>(
+                                    key: ValueKey('sort-${order.name}'),
+                                    value: order,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 12),
+                                    dense: true,
+                                    title: Text(
+                                      _sortLabel(order),
+                                      style: journal.entryTitle
+                                          .copyWith(fontSize: 14.5),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Wrap(
+                        alignment: WrapAlignment.end,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          TextButton(
+                            onPressed: () => setSheetState(() {
+                              query = '';
+                              courseKey = null;
+                              deadline = AssignmentDeadlineFilter.all;
+                              type = AssignmentTypeFilter.all;
+                              controller.clear();
+                            }),
+                            child: const Text('清空筛选'),
+                          ),
+                          TextButton(
+                              onPressed: () => Navigator.pop(sheetContext),
+                              child: const Text('取消')),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(
+                                sheetContext,
+                                _HomeFilterSelection(
+                                    query: query,
+                                    courseKey: courseKey,
+                                    deadline: deadline,
+                                    type: type,
+                                    sortOrder: sortOrder)),
+                            style:
+                                FilledButton.styleFrom(enableFeedback: false),
+                            child: const Text('应用'),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    alignment: WrapAlignment.end,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      TextButton(
-                        onPressed: () => setSheetState(() {
-                          query = '';
-                          courseKey = null;
-                          deadline = AssignmentDeadlineFilter.all;
-                          type = AssignmentTypeFilter.all;
-                          controller.clear();
-                        }),
-                        child: const Text('清空筛选'),
-                      ),
-                      TextButton(
-                          onPressed: () => Navigator.pop(sheetContext),
-                          child: const Text('取消')),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(
-                            sheetContext,
-                            _HomeFilterSelection(
-                                query: query,
-                                courseKey: courseKey,
-                                deadline: deadline,
-                                type: type,
-                                sortOrder: sortOrder)),
-                        style: FilledButton.styleFrom(enableFeedback: false),
-                        child: const Text('应用'),
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
           );
@@ -2671,4 +3317,53 @@ class _HomeFilterSelection {
   final AssignmentDeadlineFilter deadline;
   final AssignmentTypeFilter type;
   final HomeSortOrder sortOrder;
+}
+
+class _HomeAmbientGlowPainter extends CustomPainter {
+  const _HomeAmbientGlowPainter({
+    required this.primaryGlow,
+    required this.warmGlow,
+    required this.fade,
+  });
+
+  final Color primaryGlow;
+  final Color warmGlow;
+  final double fade;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty || fade <= 0.01) return;
+
+    final primaryCenter = Offset(size.width * 0.16, -24);
+    final primaryRadius = size.width * 0.72;
+    final primaryPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          primaryGlow.withValues(alpha: primaryGlow.a * fade),
+          primaryGlow.withValues(alpha: 0),
+        ],
+      ).createShader(
+        Rect.fromCircle(center: primaryCenter, radius: primaryRadius),
+      );
+    canvas.drawCircle(primaryCenter, primaryRadius, primaryPaint);
+
+    final warmCenter = Offset(size.width * 0.88, 12);
+    final warmRadius = size.width * 0.56;
+    final warmPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          warmGlow.withValues(alpha: warmGlow.a * fade),
+          warmGlow.withValues(alpha: 0),
+        ],
+      ).createShader(
+        Rect.fromCircle(center: warmCenter, radius: warmRadius),
+      );
+    canvas.drawCircle(warmCenter, warmRadius, warmPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _HomeAmbientGlowPainter oldDelegate) =>
+      oldDelegate.primaryGlow != primaryGlow ||
+      oldDelegate.warmGlow != warmGlow ||
+      oldDelegate.fade != fade;
 }

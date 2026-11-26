@@ -41,6 +41,7 @@ import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
+import 'package:study_assistant_mobile/src/services/daily_summary.dart';
 import 'package:study_assistant_mobile/src/services/home_course_filter.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -120,6 +121,14 @@ class _NoopNotif extends LocalNotificationService {
     List<Assignment> assignments, {
     List<int>? offsetsMinutes,
   }) async {}
+  @override
+  Future<ReminderHealth> inspectHealth() async => const ReminderHealth(
+        notifications: true,
+        assignmentChannel: ReminderChannelHealth(ReminderChannelStatus.enabled),
+        manualChannel: ReminderChannelHealth(ReminderChannelStatus.enabled),
+        summaryChannel: ReminderChannelHealth(ReminderChannelStatus.enabled),
+        scheduleRecoveryPending: false,
+      );
 }
 
 class _NoopWidget extends WidgetSnapshotService {
@@ -916,7 +925,7 @@ void main() {
     });
 
     test(
-        'deadline_channel_v2_auto_migrated_v1 is account-scoped so secondary legacy accounts still migrate to v2',
+        'deadline_channel_v3_auto_migrated_v1 is account-scoped so secondary legacy accounts still migrate to v3',
         () async {
       SharedPreferences.setMockInitialValues({
         'auto_sync_interval_minutes': 0,
@@ -939,15 +948,15 @@ void main() {
       await storeA.restoreSession();
       expect(
         storeA.activeDeadlineChannelId,
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
       expect(
         prefs.getBool(
-            LocalAssignmentRepository.deadlineChannelV2AutoMigratedKey),
+            LocalAssignmentRepository.deadlineChannelV3AutoMigratedKey),
         isTrue,
       );
 
-      // Switching back to Account B must isolate the marker and migrate B from v1 -> v2.
+      // Switching back to Account B must isolate the marker and migrate B from v1 -> v3.
       final storeB = _FakeStore(
         session: _Session('student-b'),
         repository: repo,
@@ -956,11 +965,11 @@ void main() {
       await storeB.restoreSession();
       expect(
         storeB.activeDeadlineChannelId,
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
       expect(
         await repo.loadDeadlineChannelId('student-b'),
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
     });
 
@@ -989,24 +998,25 @@ void main() {
         ));
         await tester.pumpAndSettle();
 
-        final indicatorFinder = find.descendant(
-          of: find.byType(AnimatedPositioned),
-          matching: find.byType(DecoratedBox),
-        );
+        final indicatorFinder =
+            find.byKey(const ValueKey('stats-term-scope-indicator'));
         expect(indicatorFinder, findsOneWidget);
-        final beforePos =
-            tester.widget<AnimatedPositioned>(find.byType(AnimatedPositioned));
-        expect(
-          beforePos.duration,
-          reduced ? Duration.zero : const Duration(milliseconds: 200),
-        );
+        final beforeLeft = tester.getTopLeft(indicatorFinder).dx;
 
         await tester
             .tap(find.byKey(const ValueKey('stats-term-scope-allTerms')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        final midLeft = tester.getTopLeft(indicatorFinder).dx;
+        expect(midLeft, greaterThan(beforeLeft));
         await tester.pumpAndSettle();
-        final afterPos =
-            tester.widget<AnimatedPositioned>(find.byType(AnimatedPositioned));
-        expect(afterPos.left, isNot(beforePos.left));
+        final afterLeft = tester.getTopLeft(indicatorFinder).dx;
+        expect(afterLeft, greaterThan(beforeLeft));
+        if (reduced) {
+          expect(midLeft, closeTo(afterLeft, 0.01));
+        } else {
+          expect(midLeft, lessThan(afterLeft));
+        }
         expect(tester.takeException(), isNull);
       }
     });
@@ -1035,18 +1045,31 @@ void main() {
           ),
         ));
 
+        double currentScale() {
+          final transform = tester.widget<Transform>(
+            find
+                .descendant(
+                  of: find.byType(JournalPressableScale),
+                  matching: find.byType(Transform),
+                )
+                .first,
+          );
+          return transform.transform.storage[0];
+        }
+
+        expect(currentScale(), 1.0);
         final gesture =
             await tester.startGesture(tester.getCenter(find.text('点按胶囊')));
+        await tester.pump();
         await tester.pump(const Duration(milliseconds: 60));
-        final scale = tester.widget<AnimatedScale>(find.byType(AnimatedScale));
         if (reduced) {
-          expect(scale.scale, 1.0);
-          expect(scale.duration, Duration.zero);
+          expect(currentScale(), 1.0);
         } else {
-          expect(scale.scale, lessThan(1.0));
+          expect(currentScale(), lessThan(1.0));
         }
         await gesture.up();
         await tester.pumpAndSettle();
+        expect(currentScale(), 1.0);
         expect(tapped, isTrue);
       }
     });
@@ -1280,9 +1303,9 @@ void main() {
       expect(clzEntry.source, CourseTermSource.clazzName);
 
       final tmEntry = catalog.entryFor(timeOnlyPast.key)!;
-      expect(tmEntry.term, const AcademicTerm(2024, AcademicSemester.fall));
-      expect(tmEntry.source, CourseTermSource.courseTime);
-      expect(tmEntry.state, CourseCatalogState.archived);
+      expect(tmEntry.term, isNull);
+      expect(tmEntry.source, CourseTermSource.ungrouped);
+      expect(tmEntry.state, CourseCatalogState.active);
 
       final ungEntry = catalog.entryFor(ungroupedGradeClass.key)!;
       expect(ungEntry.isUngrouped, isTrue);
@@ -1595,16 +1618,35 @@ void main() {
           expect(size.curve, JournalMotion.easeDrawer);
         }
 
+        Transform chevronTransform() => tester.widget<Transform>(
+              find
+                  .ancestor(
+                    of: find.byIcon(Icons.expand_more_rounded),
+                    matching: find.byType(Transform),
+                  )
+                  .first,
+            );
+
+        expect(chevronTransform().transform.storage[0], closeTo(1.0, 1e-3));
+
         await tester.tap(find.text('折叠分组-$reduced'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 16));
+        if (reduced) {
+          expect(
+            chevronTransform().transform.storage[0],
+            closeTo(-1.0, 1e-3),
+          );
+        } else {
+          expect(
+            chevronTransform().transform.storage[0],
+            greaterThan(-1.0),
+          );
+        }
         await tester.pumpAndSettle();
         expect(find.text('展开子内容'), findsOneWidget);
-        final rot =
-            tester.widget<AnimatedRotation>(find.byType(AnimatedRotation));
-        expect(rot.turns, 0.5);
-        expect(
-          rot.duration,
-          reduced ? Duration.zero : const Duration(milliseconds: 200),
-        );
+        expect(chevronTransform().transform.storage[0], closeTo(-1.0, 1e-3));
+        expect(chevronTransform().transform.storage[1], closeTo(0.0, 1e-3));
 
         await tester.drag(find.byType(ListView), const Offset(0, -1400));
         await tester.pumpAndSettle();

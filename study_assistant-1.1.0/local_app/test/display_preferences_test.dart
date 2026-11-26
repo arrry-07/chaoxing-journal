@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -13,9 +14,11 @@ import 'package:study_assistant_mobile/src/services/local_notification_service.d
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 import 'package:flutter/material.dart';
 import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
+import 'package:study_assistant_mobile/src/features/widgets/manual_home_card.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/models/widget_snapshot.dart';
 
@@ -57,20 +60,58 @@ void main() {
     expect(legacy.themeMode, JournalThemeMode.system);
     expect(legacy.soundEnabled, isTrue);
     expect(legacy.hapticsEnabled, isTrue);
+    expect(legacy.showPixelBuddy, isTrue);
     final restored = DisplayPreferences.decode(legacy
         .copyWith(
             themeMode: JournalThemeMode.dark,
             soundEnabled: false,
-            hapticsEnabled: false)
+            hapticsEnabled: false,
+            showPixelBuddy: false)
         .encode());
     expect(restored.themeMode, JournalThemeMode.dark);
     expect(restored.soundEnabled, isFalse);
     expect(restored.hapticsEnabled, isFalse);
+    expect(restored.showPixelBuddy, isFalse);
     expect(restored.compact, isTrue);
     expect(restored.countdown, isTrue);
     expect(restored.widgetRange, WidgetRange.week);
     expect(DisplayPreferences.decode('{"themeMode":"future"}').themeMode,
         JournalThemeMode.system);
+    expect(DisplayPreferences.decode('{"pixelBuddy":"yes"}').showPixelBuddy,
+        isTrue);
+  });
+
+  testWidgets('display settings toggles pixel buddy without widget snapshot',
+      (t) async {
+    SharedPreferences.setMockInitialValues({});
+    final s = store();
+    addTearDown(s.dispose);
+    final widgets = s.widgetSnapshotService as _Widgets;
+    expect(s.display.showPixelBuddy, isTrue);
+
+    await t.pumpWidget(MaterialApp(home: DisplaySettingsScreen(store: s)));
+    final toggle = find.byKey(const ValueKey('display-pixel-buddy-toggle'));
+    expect(toggle, findsOneWidget);
+    expect(find.text('顶栏像素伙伴'), findsOneWidget);
+    expect(find.text('在首页标题旁显示像素小伴，轻点互动并播报同步状态'), findsOneWidget);
+
+    await t.ensureVisible(toggle);
+    await t.tap(toggle);
+    await t.pumpAndSettle();
+    expect(s.display.showPixelBuddy, isFalse);
+    expect(widgets.saves, 0);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      DisplayPreferences.decode(prefs.getString('display_preferences_v1'))
+          .showPixelBuddy,
+      isFalse,
+    );
+
+    await t.tap(toggle);
+    await t.pumpAndSettle();
+    expect(s.display.showPixelBuddy, isTrue);
+    expect(widgets.saves, 0);
   });
 
   test('theme updates while journal operations wait', () async {
@@ -377,6 +418,9 @@ void main() {
     await t.tap(find.text('紧凑密度'));
     await t.pumpAndSettle();
     expect(s.display.compact, true);
+    expect(
+        find.byKey(const ValueKey('compact-density-preview')), findsOneWidget);
+    expect(find.text('紧凑'), findsOneWidget);
     final prefs = await SharedPreferences.getInstance();
     expect(
         DisplayPreferences.decode(prefs.getString('display_preferences_v1'))
@@ -465,6 +509,196 @@ void main() {
     expect(find.text('剩余2小时'), findsOneWidget);
     expect(t.takeException(), isNull);
   });
+
+  testWidgets(
+      'compact density cuts single and stacked card height by at least 15%',
+      (t) async {
+    t.view.physicalSize = const Size(390, 1200);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+    final now = DateTime.utc(2026, 11, 26, 2);
+
+    Assignment item(String id) => Assignment(
+          id: 'cx:work:9:2:$id',
+          title: '综合实验与分析报告及课程项目复盘总结材料（样例）',
+          courseName: '计算方法与实践专题研讨课程',
+          requirementsText: '',
+          status: 'pending',
+          deadlineAt: DateTime.utc(2026, 11, 27, 7, 23),
+          deadlineTrusted: true,
+          lastSyncedAt: now,
+        );
+
+    Future<double> measure({
+      required String key,
+      required bool compact,
+      required int count,
+    }) async {
+      await t.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              key: ValueKey(key),
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < count; i++)
+                  AssignmentCard(
+                    assignment: item('$key-$i'),
+                    now: now,
+                    compact: compact,
+                    onTap: () {},
+                    onOpenAssignment: () {},
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ));
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull, reason: '$key/$compact/$count');
+      return t.getSize(find.byKey(ValueKey(key))).height;
+    }
+
+    final singleNormal =
+        await measure(key: 'single-normal', compact: false, count: 1);
+    final singleCompact =
+        await measure(key: 'single-compact', compact: true, count: 1);
+    final stackedNormal =
+        await measure(key: 'stacked-normal', compact: false, count: 2);
+    final stackedCompact =
+        await measure(key: 'stacked-compact', compact: true, count: 2);
+
+    expect(singleCompact, lessThanOrEqualTo(singleNormal * 0.85));
+    expect(stackedCompact, lessThanOrEqualTo(stackedNormal * 0.85));
+  });
+
+  testWidgets(
+      'compact cards keep 48x48 actions and zero overflow at 320dp double text',
+      (t) async {
+    t.view.physicalSize = const Size(320, 1200);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+    final now = DateTime.utc(2026, 11, 26, 2);
+    final items = [
+      Assignment(
+        id: 'cx:work:320:2:1',
+        title: '三百二十像素双倍字体下的紧凑课业标题一',
+        courseName: '计算方法与实践专题研讨课程',
+        requirementsText: '',
+        status: 'pending',
+        deadlineAt: DateTime.utc(2026, 11, 26, 7, 23),
+        deadlineTrusted: true,
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:work:320:2:2',
+        title: '三百二十像素双倍字体下的紧凑课业标题二',
+        courseName: '大学物理B（下）',
+        requirementsText: '',
+        status: 'pending',
+        deadlineAt: DateTime.utc(2026, 11, 26, 8, 23),
+        deadlineTrusted: true,
+        lastSyncedAt: now,
+      ),
+    ];
+
+    await t.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context)
+            .copyWith(textScaler: const TextScaler.linear(2)),
+        child: child!,
+      ),
+      home: Scaffold(
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            key: const ValueKey('compact-double-text-stack'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < items.length; i++)
+                AssignmentCard(
+                  key: ValueKey('compact-double-card-$i'),
+                  assignment: items[i],
+                  now: now,
+                  compact: true,
+                  onTap: () {},
+                  onOpenAssignment: () {},
+                ),
+            ],
+          ),
+        ),
+      ),
+    ));
+    await t.pumpAndSettle();
+
+    expect(t.takeException(), isNull);
+    for (var i = 0; i < items.length; i++) {
+      expect(
+        t.getSize(find.byKey(ValueKey('compact-double-card-$i'))).width,
+        lessThanOrEqualTo(288),
+      );
+      final action = find.byKey(ValueKey('open-assignment-${items[i].id}'));
+      expect(action, findsOneWidget);
+      expect(t.getSize(action).width, greaterThanOrEqualTo(48));
+      expect(t.getSize(action).height, greaterThanOrEqualTo(48));
+    }
+  });
+
+  testWidgets(
+      'compact manual card keeps 48dp height and touch target at 0.85x text',
+      (t) async {
+    t.view.physicalSize = const Size(360, 800);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.resetPhysicalSize);
+    addTearDown(t.view.resetDevicePixelRatio);
+    final now = DateTime.utc(2026, 11, 26, 2);
+    final entry = ManualEntry(
+      id: 'm-compact',
+      title: '无备注待办',
+      kind: ManualEntry.kindTodo,
+      at: now.add(const Duration(hours: 2)),
+    );
+
+    await t.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context)
+            .copyWith(textScaler: const TextScaler.linear(0.85)),
+        child: child!,
+      ),
+      home: Scaffold(
+        body: SizedBox(
+          width: 360,
+          child: ManualHomeCard(
+            entry: entry,
+            now: now,
+            compact: true,
+            onTap: () {},
+            onToggleDone: () {},
+          ),
+        ),
+      ),
+    ));
+    await t.pumpAndSettle();
+
+    expect(t.takeException(), isNull);
+    expect(
+      t.getSize(find.byType(ManualHomeCard)).height,
+      greaterThanOrEqualTo(48),
+    );
+    final complete = find.byKey(ValueKey('complete-manual-${entry.id}'));
+    expect(complete, findsOneWidget);
+    expect(t.getSize(complete).width, greaterThanOrEqualTo(48));
+    expect(t.getSize(complete).height, greaterThanOrEqualTo(48));
+  });
+
   test('preferences round trip and recover malformed/unknown settings', () {
     final d = DisplayPreferences.decode(const DisplayPreferences(
             compact: true, countdown: true, widgetRange: WidgetRange.week)

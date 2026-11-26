@@ -19,6 +19,7 @@ class HomeTimelineItem {
     this.preparedDisplayAt,
     this.preparedEndAt,
     this.sortIndex = 0,
+    this.treatAsActiveForSorting = false,
   });
 
   factory HomeTimelineItem.assignment(Assignment assignment) =>
@@ -32,6 +33,7 @@ class HomeTimelineItem {
   final DateTime? preparedDisplayAt;
   final DateTime? preparedEndAt;
   final int sortIndex;
+  final bool treatAsActiveForSorting;
 
   bool get isManual => manual != null;
   bool get isExam => assignment?.isExam ?? manual?.kind == ManualEntry.kindExam;
@@ -60,7 +62,12 @@ class HomeTimelineItem {
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) =>
       assignment == null
-          ? HomeManualTimeline.manualBucketAt(manual!, now)
+          ? HomeManualTimeline.manualBucketAt(
+              treatAsActiveForSorting && manual!.done
+                  ? manual!.completed(false)
+                  : manual!,
+              now,
+            )
           : AssignmentQuery.timelineBucketAt(
               assignment!,
               now,
@@ -89,13 +96,14 @@ class HomeManualTimeline {
     String? selectedCourseName,
     AssignmentDeadlineFilter deadline = AssignmentDeadlineFilter.all,
     AssignmentTypeFilter type = AssignmentTypeFilter.all,
+    Set<String> keepVisibleIds = const {},
     required DateTime now,
   }) {
     final needle = query.trim().toLowerCase();
     final course = selectedCourseName?.trim().toLowerCase();
     return [
       for (final entry in entries)
-        if (!entry.done &&
+        if ((!entry.done || keepVisibleIds.contains(entry.id)) &&
             _matchesType(entry, type) &&
             (course == null ||
                 course.isEmpty ||
@@ -104,7 +112,13 @@ class HomeManualTimeline {
                 entry.title.toLowerCase().contains(needle) ||
                 entry.course.toLowerCase().contains(needle) ||
                 entry.location.toLowerCase().contains(needle)) &&
-            _matchesDeadline(entry, deadline, now))
+            _matchesDeadline(
+              entry.done && keepVisibleIds.contains(entry.id)
+                  ? entry.completed(false)
+                  : entry,
+              deadline,
+              now,
+            ))
           entry,
     ];
   }
@@ -118,6 +132,7 @@ class HomeManualTimeline {
     AssignmentDisplayIndex? displayIndex,
     bool prioritizeStartOnly = true,
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+    Set<String> keepVisibleIds = const {},
   }) {
     final sources = sourceRecords.isEmpty ? assignments : sourceRecords;
     final items = <HomeTimelineItem>[
@@ -147,6 +162,8 @@ class HomeManualTimeline {
           manual: manualEntries[index],
           sortIndex: assignments.length + index,
           preparedDisplayAt: manualEntries[index].at,
+          treatAsActiveForSorting:
+              keepVisibleIds.contains(manualEntries[index].id),
         ),
     ];
     if (order == HomeSortOrder.grouped) return items;

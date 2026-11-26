@@ -18,6 +18,7 @@ import 'widgets/coursework_status_pill.dart';
 import 'widgets/data_recovery_warning.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_context_menu.dart';
+import 'widgets/journal_expansion_tile.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_picker_sheet.dart';
 import 'widgets/journal_swipe_tile.dart';
@@ -378,103 +379,30 @@ class _AgendaState extends State<ManualAgendaScreen> {
                         key: const ValueKey('agenda-completed-card'),
                         dividerIndent: 52,
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            mainAxisSize: MainAxisSize.min,
+                          JournalExpansionTile(
+                            toggleKey:
+                                const ValueKey('agenda-completed-toggle'),
+                            expanded: _completedExpanded,
+                            title: Text(
+                              '已完成（${doneRows.length}）',
+                              style: journal.section.copyWith(fontSize: 15),
+                            ),
+                            leading: Icon(
+                              Icons.check_circle_outline_rounded,
+                              size: 18,
+                              color: journal.todoGreen,
+                            ),
+                            tilePadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            dividerIndent: 52,
+                            dividerEndIndent: 16,
+                            onExpansionChanged: (value) {
+                              JournalMotion.tap(widget.store.display);
+                              setState(() => _completedExpanded = value);
+                            },
                             children: [
-                              InkWell(
-                                key: const ValueKey('agenda-completed-toggle'),
-                                onTap: () {
-                                  JournalMotion.tap(widget.store.display);
-                                  setState(() {
-                                    _completedExpanded = !_completedExpanded;
-                                  });
-                                },
-                                child: ConstrainedBox(
-                                  constraints:
-                                      const BoxConstraints(minHeight: 48),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 16, vertical: 12),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          Icons.check_circle_outline_rounded,
-                                          size: 18,
-                                          color: journal.todoGreen,
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: Text(
-                                            '已完成（${doneRows.length}）',
-                                            style: journal.section
-                                                .copyWith(fontSize: 15),
-                                          ),
-                                        ),
-                                        AnimatedRotation(
-                                          turns: _completedExpanded ? 0.5 : 0.0,
-                                          duration: JournalMotion.duration(
-                                            context,
-                                            const Duration(milliseconds: 200),
-                                          ),
-                                          curve: JournalMotion.easeOut,
-                                          child: Icon(
-                                            Icons.expand_more_rounded,
-                                            size: 20,
-                                            color: journal.muted,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              if (JournalMotion.isReducedMotion(context))
-                                (_completedExpanded
-                                    ? Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          for (final e in doneRows) ...[
-                                            Divider(
-                                              height: 0.6,
-                                              thickness: 0.6,
-                                              indent: 52,
-                                              endIndent: 16,
-                                              color: journal.divider,
-                                            ),
-                                            _buildSwipeableRow(e, now, journal),
-                                          ],
-                                        ],
-                                      )
-                                    : const SizedBox.shrink())
-                              else
-                                AnimatedSize(
-                                  duration: const Duration(milliseconds: 220),
-                                  curve: JournalMotion.easeDrawer,
-                                  alignment: Alignment.topCenter,
-                                  child: _completedExpanded
-                                      ? Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.stretch,
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            for (final e in doneRows) ...[
-                                              Divider(
-                                                height: 0.6,
-                                                thickness: 0.6,
-                                                indent: 52,
-                                                endIndent: 16,
-                                                color: journal.divider,
-                                              ),
-                                              _buildSwipeableRow(
-                                                  e, now, journal),
-                                            ],
-                                          ],
-                                        )
-                                      : const SizedBox.shrink(),
-                                ),
+                              for (final e in doneRows)
+                                _buildSwipeableRow(e, now, journal),
                             ],
                           ),
                         ],

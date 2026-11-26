@@ -22,6 +22,31 @@ import '../models/study_notebook.dart';
 
 typedef NotificationPayloadHandler = void Function(String payload);
 
+class NotificationChimePreviewResult {
+  const NotificationChimePreviewResult({
+    required this.played,
+    this.supported = true,
+    this.notificationStreamVolume,
+    this.notificationStreamMaxVolume,
+    this.notificationStreamMuted,
+    this.ringerMode,
+    this.interruptionFilter,
+  });
+
+  final bool played;
+  final bool supported;
+  final int? notificationStreamVolume;
+  final int? notificationStreamMaxVolume;
+  final bool? notificationStreamMuted;
+  final String? ringerMode;
+  final String? interruptionFilter;
+
+  bool get isNotificationVolumeZero =>
+      notificationStreamMuted == true || notificationStreamVolume == 0;
+  bool get isPhoneMutedOrVibrate =>
+      ringerMode == 'silent' || ringerMode == 'vibrate';
+}
+
 class LocalNotificationService {
   LocalNotificationService({
     NotificationPayloadHandler? onPayload,
@@ -44,16 +69,20 @@ class LocalNotificationService {
   bool showDetails = false;
   bool allowUrgentNightBreakthrough = false;
   LocalCourseworkState courseworkState = const LocalCourseworkState.empty();
-  String activeDeadlineChannelId = assignmentV2Channel;
+  String activeDeadlineChannelId = assignmentV3Channel;
   static const assignmentChannel = 'assignment_deadlines';
   static const assignmentV2Channel = 'assignment_deadlines_v2';
+  static const assignmentV3Channel = 'assignment_deadlines_v3';
   static const assignmentSilentChannel = 'assignment_silent';
   static const assignmentUpdatesChannel = 'assignment_updates';
   static const assignmentUpdatesV2Channel = 'assignment_updates_v2';
+  static const assignmentUpdatesV3Channel = 'assignment_updates_v3';
   static const summaryChannel = 'daily_summary';
   static const summaryV2Channel = 'daily_summary_v2';
+  static const summaryV3Channel = 'daily_summary_v3';
   static const manualChannel = 'personal_schedule';
   static const manualV2Channel = 'personal_schedule_v2';
+  static const manualV3Channel = 'personal_schedule_v3';
   static const chimeSound =
       RawResourceAndroidNotificationSound('journal_chime');
   static final Int64List defaultVibrationPattern =
@@ -64,82 +93,93 @@ class LocalNotificationService {
       MethodChannel('study_assistant/permissions');
   static const _legacyMigrationChannel =
       MethodChannel('study_assistant/legacy_assignment_migration');
+
+  static AndroidNotificationChannel _buildAudibleChannel(
+    String id,
+    String name,
+    String description,
+  ) =>
+      AndroidNotificationChannel(
+        id,
+        name,
+        description: description,
+        importance: Importance.high,
+        playSound: true,
+        sound: chimeSound,
+        audioAttributesUsage: AudioAttributesUsage.notification,
+        enableVibration: true,
+        vibrationPattern: defaultVibrationPattern,
+        showBadge: true,
+      );
+
   static final _androidChannels = <AndroidNotificationChannel>[
-    AndroidNotificationChannel(
-      assignmentV2Channel,
+    _buildAudibleChannel(
+      assignmentV3Channel,
       '作业截止提醒',
-      description: '学习通作业截止与考试开考提醒',
-      importance: Importance.high,
-      playSound: true,
-      sound: chimeSound,
-      audioAttributesUsage: AudioAttributesUsage.notification,
-      enableVibration: true,
-      vibrationPattern: defaultVibrationPattern,
-      showBadge: true,
+      '学习通作业截止与考试开考提醒',
     ),
-    AndroidNotificationChannel(
-      assignmentUpdatesV2Channel,
+    _buildAudibleChannel(
+      assignmentUpdatesV3Channel,
       '新增作业提醒',
-      description: '学习通新增作业与考试有声提醒',
-      importance: Importance.high,
-      playSound: true,
-      sound: chimeSound,
-      audioAttributesUsage: AudioAttributesUsage.notification,
-      enableVibration: true,
-      vibrationPattern: defaultVibrationPattern,
-      showBadge: true,
+      '学习通新增作业与考试有声提醒',
     ),
-    AndroidNotificationChannel(
-      summaryV2Channel,
+    _buildAudibleChannel(
+      summaryV3Channel,
       '每日课业摘要',
-      description: '基于最近一次本机快照的课业摘要',
-      importance: Importance.high,
-      playSound: true,
-      sound: chimeSound,
-      audioAttributesUsage: AudioAttributesUsage.notification,
-      enableVibration: true,
-      vibrationPattern: defaultVibrationPattern,
-      showBadge: true,
+      '基于最近一次本机快照的课业摘要',
     ),
-    AndroidNotificationChannel(
-      manualV2Channel,
+    _buildAudibleChannel(
+      manualV3Channel,
       '待办与考试提醒',
-      description: '待办和考试开始前提醒',
-      importance: Importance.high,
-      playSound: true,
-      sound: chimeSound,
-      audioAttributesUsage: AudioAttributesUsage.notification,
-      enableVibration: true,
-      vibrationPattern: defaultVibrationPattern,
-      showBadge: true,
+      '待办和考试开始前提醒',
     ),
   ];
-  static const _extraChannels = <String, AndroidNotificationChannel>{
-    assignmentChannel: AndroidNotificationChannel(
+  static final _extraChannels = <String, AndroidNotificationChannel>{
+    assignmentChannel: const AndroidNotificationChannel(
       assignmentChannel,
       '作业截止提醒',
       description: '学习通作业截止前提醒',
       importance: Importance.high,
     ),
-    assignmentUpdatesChannel: AndroidNotificationChannel(
+    assignmentV2Channel: _buildAudibleChannel(
+      assignmentV2Channel,
+      '作业截止提醒',
+      '学习通作业截止与考试开考提醒',
+    ),
+    assignmentUpdatesChannel: const AndroidNotificationChannel(
       assignmentUpdatesChannel,
       '作业变化提醒',
       description: '学习通正式作业新增提醒',
       importance: Importance.defaultImportance,
     ),
-    summaryChannel: AndroidNotificationChannel(
+    assignmentUpdatesV2Channel: _buildAudibleChannel(
+      assignmentUpdatesV2Channel,
+      '新增作业提醒',
+      '学习通新增作业与考试有声提醒',
+    ),
+    summaryChannel: const AndroidNotificationChannel(
       summaryChannel,
       '每日课业摘要',
       description: '基于最近一次本机快照的课业摘要',
       importance: Importance.defaultImportance,
     ),
-    manualChannel: AndroidNotificationChannel(
+    summaryV2Channel: _buildAudibleChannel(
+      summaryV2Channel,
+      '每日课业摘要',
+      '基于最近一次本机快照的课业摘要',
+    ),
+    manualChannel: const AndroidNotificationChannel(
       manualChannel,
       '待办与考试提醒',
       description: '待办和考试开始前提醒',
       importance: Importance.high,
     ),
-    assignmentSilentChannel: AndroidNotificationChannel(
+    manualV2Channel: _buildAudibleChannel(
+      manualV2Channel,
+      '待办与考试提醒',
+      '待办和考试开始前提醒',
+    ),
+    assignmentSilentChannel: const AndroidNotificationChannel(
       assignmentSilentChannel,
       '静默作业通知',
       description: '未知截止时间的新增作业静默提示',
@@ -173,10 +213,10 @@ class LocalNotificationService {
       );
 
   static String _channelNameForId(String channelId) => switch (channelId) {
-        manualV2Channel || manualChannel => '待办与考试提醒',
-        assignmentUpdatesV2Channel => '新增作业提醒',
+        manualV3Channel || manualV2Channel || manualChannel => '待办与考试提醒',
+        assignmentUpdatesV3Channel || assignmentUpdatesV2Channel => '新增作业提醒',
         assignmentUpdatesChannel => '作业变化提醒',
-        summaryV2Channel || summaryChannel => '每日课业摘要',
+        summaryV3Channel || summaryV2Channel || summaryChannel => '每日课业摘要',
         _ => '作业截止提醒',
       };
 
@@ -186,6 +226,8 @@ class LocalNotificationService {
         return assignmentChannel;
       case assignmentV2Channel:
         return assignmentV2Channel;
+      case assignmentV3Channel:
+        return assignmentV3Channel;
       default:
         return null;
     }
@@ -490,7 +532,7 @@ class LocalNotificationService {
       lastManualNotice = '部分个人安排的提前30分钟提醒时间已过，本次未安排提醒；请调整时间或关闭提醒';
     }
     if (schedules.isNotEmpty) {
-      await _ensureAndroidChannel(manualV2Channel);
+      await _ensureAndroidChannel(manualV3Channel);
       if (defaultTargetPlatform == TargetPlatform.android) {
         // Scheduling can succeed even while Android suppresses delivery due
         // to the app permission or the user's channel setting. Surface that
@@ -530,7 +572,7 @@ class LocalNotificationService {
               entry.at!.difference(at).inMinutes.clamp(1, 525600);
           return _zonedSchedule(
               id: id,
-              channelId: manualV2Channel,
+              channelId: manualV3Channel,
               title: entry.kind == 'exam' ? '考试提醒' : '待办提醒',
               body: showDetails
                   ? '${entry.title} · $remainingMinutes分钟后到时，请核对个人安排'
@@ -580,7 +622,52 @@ class LocalNotificationService {
       {String? storedChannelId}) async {
     final explicit = normalizeDeadlineChannelId(storedChannelId);
     if (explicit != null) return explicit;
-    return assignmentV2Channel;
+    return assignmentV3Channel;
+  }
+
+  Future<NotificationChimePreviewResult> previewNotificationChime() async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return const NotificationChimePreviewResult(
+        played: false,
+        supported: false,
+      );
+    }
+    try {
+      final raw = await _permissionsChannel
+          .invokeMethod<Object?>('previewNotificationChime');
+      if (raw is! Map<Object?, Object?>) {
+        return const NotificationChimePreviewResult(
+          played: false,
+          supported: false,
+        );
+      }
+      return NotificationChimePreviewResult(
+        played: raw['played'] == true,
+        supported: true,
+        notificationStreamVolume:
+            (raw['notificationStreamVolume'] as num?)?.toInt(),
+        notificationStreamMaxVolume:
+            (raw['notificationStreamMaxVolume'] as num?)?.toInt(),
+        notificationStreamMuted: raw['notificationStreamMuted'] as bool?,
+        ringerMode: raw['ringerMode'] as String?,
+        interruptionFilter: raw['interruptionFilter'] as String?,
+      );
+    } on MissingPluginException {
+      return const NotificationChimePreviewResult(
+        played: false,
+        supported: false,
+      );
+    } on PlatformException {
+      return const NotificationChimePreviewResult(
+        played: false,
+        supported: false,
+      );
+    } on TypeError {
+      return const NotificationChimePreviewResult(
+        played: false,
+        supported: false,
+      );
+    }
   }
 
   Future<ReminderHealth> inspectHealth() async {
@@ -618,6 +705,7 @@ class LocalNotificationService {
         activeDeadlineChannelId: activeDeadlineChannelId,
         legacyDeadlineChannel: channels.legacyV1,
         v2DeadlineChannel: channels.v2,
+        v3DeadlineChannel: channels.v3,
         silentChannel: channels.silent,
         ignoringBatteryOptimizations:
             nativeDetails?['ignoringBatteryOptimizations'] as bool?,
@@ -625,6 +713,12 @@ class LocalNotificationService {
             nativeDetails?['lockscreenShowNotifications'] as bool?,
         ringerMode: nativeDetails?['ringerMode'] as String?,
         interruptionFilter: nativeDetails?['interruptionFilter'] as String?,
+        notificationStreamVolume:
+            (nativeDetails?['notificationStreamVolume'] as num?)?.toInt(),
+        notificationStreamMaxVolume:
+            (nativeDetails?['notificationStreamMaxVolume'] as num?)?.toInt(),
+        notificationStreamMuted:
+            nativeDetails?['notificationStreamMuted'] as bool?,
         lockscreenAllowPrivateNotifications:
             nativeDetails?['lockscreenAllowPrivateNotifications'] as bool?,
         pending:
@@ -718,7 +812,7 @@ class LocalNotificationService {
         _pendingManualTestTimer?.cancel();
         _pendingManualTestTimer = null;
         try {
-          await _ensureReadyForScheduling(manualV2Channel);
+          await _ensureReadyForScheduling(manualV3Channel);
           final health = await inspectHealth();
           final channelStatus = health.manualChannel?.status;
           if (health.notifications != true ||
@@ -728,7 +822,7 @@ class LocalNotificationService {
           }
           final details = NotificationDetails(
             android: _audibleAndroidDetails(
-              channelId: manualV2Channel,
+              channelId: manualV3Channel,
               channelName: '待办与考试提醒',
               channelDescription: '待办和考试开始前提醒',
               ticker: '待办测试提醒',
@@ -781,7 +875,7 @@ class LocalNotificationService {
         try {
           final targetChannel =
               normalizeDeadlineChannelId(activeDeadlineChannelId) ??
-                  assignmentV2Channel;
+                  assignmentV3Channel;
           await _ensureReadyForScheduling(targetChannel);
           final health = await inspectHealth();
           final channelStatus = health.assignmentChannel?.status;
@@ -819,14 +913,17 @@ class LocalNotificationService {
   ) async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     final (:android, :existingIds) = await _readExistingAndroidChannelIds();
-    if (android == null ||
-        existingIds == null ||
-        !existingIds.contains(manualChannel)) {
-      return;
-    }
-    await _ensureAndroidChannel(manualV2Channel);
+    if (android == null || existingIds == null) return;
+    final legacyIds = [
+      if (existingIds.contains(manualChannel)) manualChannel,
+      if (existingIds.contains(manualV2Channel)) manualV2Channel,
+    ];
+    if (legacyIds.isEmpty) return;
+    await _ensureAndroidChannel(manualV3Channel);
     await rescheduleManual(entries);
-    await _retireLegacyChannel(android, manualChannel);
+    for (final legacyId in legacyIds) {
+      await _retireLegacyChannel(android, legacyId);
+    }
   }
 
   Future<void> migrateLegacySummaryChannelIfNeeded(
@@ -836,14 +933,17 @@ class LocalNotificationService {
   ) async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     final (:android, :existingIds) = await _readExistingAndroidChannelIds();
-    if (android == null ||
-        existingIds == null ||
-        !existingIds.contains(summaryChannel)) {
-      return;
-    }
-    await _ensureAndroidChannel(summaryV2Channel);
+    if (android == null || existingIds == null) return;
+    final legacyIds = [
+      if (existingIds.contains(summaryChannel)) summaryChannel,
+      if (existingIds.contains(summaryV2Channel)) summaryV2Channel,
+    ];
+    if (legacyIds.isEmpty) return;
+    await _ensureAndroidChannel(summaryV3Channel);
     await rescheduleSummary(assignments, personal, lastSync);
-    await _retireLegacyChannel(android, summaryChannel);
+    for (final legacyId in legacyIds) {
+      await _retireLegacyChannel(android, legacyId);
+    }
   }
 
   Future<void> retireLegacyUpdatesAndDeadlineChannelsIfNeeded({
@@ -853,17 +953,31 @@ class LocalNotificationService {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     final (:android, :existingIds) = await _readExistingAndroidChannelIds();
     if (android == null || existingIds == null) return;
-    if (existingIds.contains(assignmentUpdatesChannel)) {
-      await _ensureAndroidChannel(assignmentUpdatesV2Channel);
-      await _retireLegacyChannel(android, assignmentUpdatesChannel);
+    final legacyUpdateIds = [
+      if (existingIds.contains(assignmentUpdatesChannel))
+        assignmentUpdatesChannel,
+      if (existingIds.contains(assignmentUpdatesV2Channel))
+        assignmentUpdatesV2Channel,
+    ];
+    if (legacyUpdateIds.isNotEmpty) {
+      await _ensureAndroidChannel(assignmentUpdatesV3Channel);
+      for (final legacyId in legacyUpdateIds) {
+        await _retireLegacyChannel(android, legacyId);
+      }
     }
-    if (retireDeadlineV1 && existingIds.contains(assignmentChannel)) {
-      await _ensureAndroidChannel(assignmentV2Channel);
+    final legacyDeadlineIds = [
+      if (existingIds.contains(assignmentChannel)) assignmentChannel,
+      if (existingIds.contains(assignmentV2Channel)) assignmentV2Channel,
+    ];
+    if (retireDeadlineV1 && legacyDeadlineIds.isNotEmpty) {
+      await _ensureAndroidChannel(assignmentV3Channel);
       if (beforeRetireDeadlineV1 != null) {
         final readyToRetire = await beforeRetireDeadlineV1();
         if (!readyToRetire) return;
       }
-      await _retireLegacyChannel(android, assignmentChannel);
+      for (final legacyId in legacyDeadlineIds) {
+        await _retireLegacyChannel(android, legacyId);
+      }
     }
   }
 
@@ -918,7 +1032,7 @@ class LocalNotificationService {
       lastSync,
       coursework: courseworkState,
     );
-    if (desired.isNotEmpty) await _ensureAndroidChannel(summaryV2Channel);
+    if (desired.isNotEmpty) await _ensureAndroidChannel(summaryV3Channel);
     try {
       final prefs = await SharedPreferences.getInstance();
       final prior = _readSummaryEvidence(prefs);
@@ -935,7 +1049,7 @@ class LocalNotificationService {
               tz.TZDateTime.from(notice.at, tz.local),
               NotificationDetails(
                   android: _audibleAndroidDetails(
-                channelId: summaryV2Channel,
+                channelId: summaryV3Channel,
                 channelName: '每日课业摘要',
                 channelDescription: '基于最近一次本机快照的课业摘要',
                 ticker: '今日课业摘要',
@@ -1230,6 +1344,11 @@ class LocalNotificationService {
       final prefs = await SharedPreferences.getInstance();
       if (prefs.containsKey(_installDeadlineChannelDefaultKey)) return;
       final existingIds = {for (final item in existing) item.id};
+      if (existingIds.contains(assignmentV3Channel)) {
+        await prefs.setString(
+            _installDeadlineChannelDefaultKey, assignmentV3Channel);
+        return;
+      }
       if (existingIds.contains(assignmentV2Channel)) {
         await prefs.setString(
             _installDeadlineChannelDefaultKey, assignmentV2Channel);
@@ -1242,7 +1361,7 @@ class LocalNotificationService {
       }
       await prefs.setString(
         _installDeadlineChannelDefaultKey,
-        assignmentV2Channel,
+        assignmentV3Channel,
       );
     } catch (_) {
       // Never block initialization on preference write failures.
@@ -1989,13 +2108,17 @@ class LocalNotificationService {
             const {
               assignmentChannel,
               assignmentV2Channel,
+              assignmentV3Channel,
               assignmentSilentChannel,
               assignmentUpdatesChannel,
               assignmentUpdatesV2Channel,
+              assignmentUpdatesV3Channel,
               summaryChannel,
               summaryV2Channel,
+              summaryV3Channel,
               manualChannel,
               manualV2Channel,
+              manualV3Channel,
             }.contains(item.channelId));
   }
 
@@ -2018,13 +2141,17 @@ class LocalNotificationService {
       switch (channel) {
         assignmentChannel => 'assignments',
         assignmentV2Channel => 'assignments',
+        assignmentV3Channel => 'assignments',
         assignmentSilentChannel => 'assignments',
         assignmentUpdatesChannel => 'assignments',
         assignmentUpdatesV2Channel => 'assignments',
+        assignmentUpdatesV3Channel => 'assignments',
         manualChannel => 'manual',
         manualV2Channel => 'manual',
+        manualV3Channel => 'manual',
         summaryChannel => 'summary',
         summaryV2Channel => 'summary',
+        summaryV3Channel => 'summary',
         _ => null,
       };
 
@@ -2067,6 +2194,7 @@ class LocalNotificationService {
         ReminderChannelHealth manual,
         ReminderChannelHealth legacyV1,
         ReminderChannelHealth v2,
+        ReminderChannelHealth v3,
         ReminderChannelHealth silent,
       })> _inspectChannelHealth(
     List<String> errors,
@@ -2083,6 +2211,7 @@ class LocalNotificationService {
         manual: unsupported,
         legacyV1: unsupported,
         v2: unsupported,
+        v3: unsupported,
         silent: unsupported,
       );
     }
@@ -2100,6 +2229,7 @@ class LocalNotificationService {
         manual: failed,
         legacyV1: failed,
         v2: failed,
+        v3: failed,
         silent: failed,
       );
     }
@@ -2111,6 +2241,7 @@ class LocalNotificationService {
         manual: unsupported,
         legacyV1: unsupported,
         v2: unsupported,
+        v3: unsupported,
         silent: unsupported,
       );
     }
@@ -2126,6 +2257,7 @@ class LocalNotificationService {
         manual: failed,
         legacyV1: failed,
         v2: failed,
+        v3: failed,
         silent: failed,
       );
     }
@@ -2142,6 +2274,7 @@ class LocalNotificationService {
         manual: failed,
         legacyV1: failed,
         v2: failed,
+        v3: failed,
         silent: failed,
       );
     }
@@ -2171,14 +2304,15 @@ class LocalNotificationService {
 
     final targetDeadlineId =
         normalizeDeadlineChannelId(activeDeadlineChannelId) ??
-            assignmentV2Channel;
+            assignmentV3Channel;
     return (
       activeDeadline: status(targetDeadlineId),
-      updates: status(assignmentUpdatesV2Channel),
-      summary: status(summaryV2Channel),
-      manual: status(manualV2Channel),
+      updates: status(assignmentUpdatesV3Channel),
+      summary: status(summaryV3Channel),
+      manual: status(manualV3Channel),
       legacyV1: status(assignmentChannel),
       v2: status(assignmentV2Channel),
+      v3: status(assignmentV3Channel),
       silent: status(assignmentSilentChannel),
     );
   }
@@ -2232,7 +2366,7 @@ class LocalNotificationService {
       }
       final targetDeadlineChannel =
           normalizeDeadlineChannelId(activeDeadlineChannelId) ??
-              assignmentV2Channel;
+              assignmentV3Channel;
       if (schedules.isNotEmpty) {
         await _ensureAndroidChannel(targetDeadlineChannel);
       }
@@ -2264,7 +2398,7 @@ class LocalNotificationService {
     DateTime notifyAt,
     int remainingMinutes,
     int notificationId, {
-    String channelId = assignmentV2Channel,
+    String channelId = assignmentV3Channel,
   }) async {
     if (!notifyAt.toUtc().isAfter(_clock().toUtc())) {
       return;

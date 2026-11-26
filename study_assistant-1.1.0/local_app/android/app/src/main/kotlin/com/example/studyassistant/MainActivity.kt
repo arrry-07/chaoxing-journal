@@ -2,7 +2,9 @@ package com.example.studyassistant
 
 import android.app.NotificationManager
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.MediaPlayer
 import java.util.zip.ZipFile
 import android.content.Intent
 import android.content.ComponentName
@@ -31,6 +33,7 @@ class MainActivity : FlutterActivity() {
     private var backupBridge: BackupBridge? = null
     private var personalFileBridge: PersonalFileBridge? = null
     private var verificationBrowser: VerificationBrowser? = null
+    private var previewChimePlayer: MediaPlayer? = null
     private var webSessionGeneration = 0L
     private var lastUiNightMode = Configuration.UI_MODE_NIGHT_UNDEFINED
     private var lastFontScale = 0f
@@ -59,10 +62,12 @@ class MainActivity : FlutterActivity() {
 
     override fun onStop() {
         interactionSoundBridge?.onPause()
+        releasePreviewChimePlayer()
         super.onStop()
     }
 
     override fun onDestroy() {
+        releasePreviewChimePlayer()
         personalFileBridge?.close()
         personalFileBridge = null
         backupBridge?.close()
@@ -149,6 +154,10 @@ class MainActivity : FlutterActivity() {
             }
             if (call.method == "inspectNotificationHealthDetails") {
                 result.success(inspectNotificationHealthDetails())
+                return@setMethodCallHandler
+            }
+            if (call.method == "previewNotificationChime") {
+                result.success(previewNotificationChime())
                 return@setMethodCallHandler
             }
             val outcome = when (call.method) {
@@ -430,13 +439,17 @@ class MainActivity : FlutterActivity() {
         val channelIds = listOf(
             DeadlineChannelPolicy.CHANNEL_DEADLINES,
             DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V3,
             DeadlineChannelPolicy.CHANNEL_UPDATES,
             DeadlineChannelPolicy.CHANNEL_UPDATES_V2,
+            DeadlineChannelPolicy.CHANNEL_UPDATES_V3,
             DeadlineChannelPolicy.CHANNEL_SILENT,
             "daily_summary",
             DeadlineChannelPolicy.CHANNEL_SUMMARY_V2,
+            DeadlineChannelPolicy.CHANNEL_SUMMARY_V3,
             "personal_schedule",
             DeadlineChannelPolicy.CHANNEL_MANUAL_V2,
+            DeadlineChannelPolicy.CHANNEL_MANUAL_V3,
         )
         val channelMap = buildMap<String, Any?> {
             for (id in channelIds) {
@@ -473,8 +486,34 @@ class MainActivity : FlutterActivity() {
         val lockscreenAllowPrivate = runCatching {
             Settings.Secure.getInt(contentResolver, "lock_screen_allow_private_notifications") == 1
         }.getOrNull()
+        val audioState = readNotificationAudioState(manager)
+        return mapOf(
+            "channels" to channelMap,
+            "ignoringBatteryOptimizations" to ignoringBattery,
+            "lockscreenShowNotifications" to lockscreenShow,
+            "lockscreenAllowPrivateNotifications" to lockscreenAllowPrivate,
+            "ringerMode" to audioState.ringerMode,
+            "interruptionFilter" to audioState.interruptionFilter,
+            "notificationStreamVolume" to audioState.volume,
+            "notificationStreamMaxVolume" to audioState.maxVolume,
+            "notificationStreamMuted" to audioState.muted,
+        )
+    }
+
+    private data class NotificationAudioState(
+        val ringerMode: String,
+        val interruptionFilter: String,
+        val volume: Int?,
+        val maxVolume: Int?,
+        val muted: Boolean?,
+    )
+
+    private fun readNotificationAudioState(manager: NotificationManager?): NotificationAudioState {
+        val audioManager = runCatching {
+            getSystemService(AudioManager::class.java)
+        }.getOrNull()
         val ringerMode = runCatching {
-            when (getSystemService(AudioManager::class.java)?.ringerMode) {
+            when (audioManager?.ringerMode) {
                 AudioManager.RINGER_MODE_SILENT -> "silent"
                 AudioManager.RINGER_MODE_VIBRATE -> "vibrate"
                 AudioManager.RINGER_MODE_NORMAL -> "normal"
@@ -494,17 +533,95 @@ class MainActivity : FlutterActivity() {
                 "unknown"
             }
         }.getOrDefault("unknown")
-        return mapOf(
-            "channels" to channelMap,
-            "ignoringBatteryOptimizations" to ignoringBattery,
-            "lockscreenShowNotifications" to lockscreenShow,
-            "lockscreenAllowPrivateNotifications" to lockscreenAllowPrivate,
-            "ringerMode" to ringerMode,
-            "interruptionFilter" to interruptionFilter,
+        val volume = runCatching {
+            audioManager?.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
+        }.getOrNull()
+        val maxVolume = runCatching {
+            audioManager?.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
+        }.getOrNull()
+        val muted = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                audioManager?.isStreamMute(AudioManager.STREAM_NOTIFICATION)
+            } else {
+                volume?.let { it == 0 }
+            }
+        }.getOrNull()
+        return NotificationAudioState(
+            ringerMode = ringerMode,
+            interruptionFilter = interruptionFilter,
+            volume = volume,
+            maxVolume = maxVolume,
+            muted = muted,
         )
     }
 
+    private fun previewNotificationChime(): Map<String, Any?> {
+        val manager = runCatching {
+            getSystemService(NotificationManager::class.java)
+        }.getOrNull()
+        val audioState = readNotificationAudioState(manager)
+        val blockedByMute = (audioState.volume != null && audioState.volume <= 0) ||
+            audioState.muted == true ||
+            audioState.ringerMode == "silent" ||
+            audioState.ringerMode == "vibrate"
+        var played = false
+        if (!blockedByMute) {
+            played = runCatching {
+                releasePreviewChimePlayer()
+                val afd = resources.openRawResourceFd(R.raw.journal_chime)
+                    ?: return@runCatching false
+                val player = MediaPlayer()
+                previewChimePlayer = player
+                afd.use {
+                    player.setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build(),
+                    )
+                    player.setDataSource(it.fileDescriptor, it.startOffset, it.length)
+                    player.setOnCompletionListener { mp ->
+                        if (previewChimePlayer === mp) {
+                            previewChimePlayer = null
+                        }
+                        runCatching { mp.release() }
+                    }
+                    player.setOnErrorListener { mp, _, _ ->
+                        if (previewChimePlayer === mp) {
+                            previewChimePlayer = null
+                        }
+                        runCatching { mp.release() }
+                        true
+                    }
+                    player.prepare()
+                    player.start()
+                    true
+                }
+            }.getOrElse {
+                releasePreviewChimePlayer()
+                false
+            }
+        }
+        return mapOf(
+            "played" to played,
+            "notificationStreamVolume" to audioState.volume,
+            "notificationStreamMaxVolume" to audioState.maxVolume,
+            "notificationStreamMuted" to audioState.muted,
+            "ringerMode" to audioState.ringerMode,
+            "interruptionFilter" to audioState.interruptionFilter,
+        )
+    }
+
+    private fun releasePreviewChimePlayer() {
+        val current = previewChimePlayer ?: return
+        previewChimePlayer = null
+        runCatching {
+            if (current.isPlaying) current.stop()
+        }
+        runCatching { current.release() }
+    }
+
     private companion object {
-        const val ASSIGNMENT_DEADLINE_CHANNEL_ID = DeadlineChannelPolicy.CHANNEL_DEADLINES_V2
+        const val ASSIGNMENT_DEADLINE_CHANNEL_ID = DeadlineChannelPolicy.CHANNEL_DEADLINES_V3
     }
 }

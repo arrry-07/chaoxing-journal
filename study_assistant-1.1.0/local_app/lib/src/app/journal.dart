@@ -163,6 +163,15 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     required this.navGlassFill,
     required this.navGlassBorder,
     required this.navGlassHighlight,
+    required this.ambientPrimaryGlow,
+    required this.ambientWarmGlow,
+    required this.cardShadowContact,
+    required this.cardShadowAmbient,
+    required this.cardTopHighlight,
+    required this.cardEmphasisTintStart,
+    required this.cardEmphasisTintEnd,
+    required this.cardEmphasisBar,
+    required this.cardEmphasisBarGlow,
   });
 
   static const light = JournalPalette(
@@ -200,6 +209,15 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     navGlassFill: Color(0xD9FFFFFF),
     navGlassBorder: Color(0xB3E5E5E0),
     navGlassHighlight: Color(0x80FFFFFF),
+    ambientPrimaryGlow: Color(0x163D63DD),
+    ambientWarmGlow: Color(0x12D97757),
+    cardShadowContact: Color(0x071F2328),
+    cardShadowAmbient: Color(0x0A1F2328),
+    cardTopHighlight: Color(0xB8FFFFFF),
+    cardEmphasisTintStart: Color(0x0F3D63DD),
+    cardEmphasisTintEnd: Color(0x003D63DD),
+    cardEmphasisBar: Color(0xCC3D63DD),
+    cardEmphasisBarGlow: Color(0x2E3D63DD),
   );
 
   // "深夜台灯纸感" warm charcoal paper palette: avoids pure #000/#FFF glare.
@@ -238,6 +256,15 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     navGlassFill: Color(0xCC242320),
     navGlassBorder: Color(0x16FFF8EB),
     navGlassHighlight: Color(0x26FFF8EB),
+    ambientPrimaryGlow: Color(0x1C88A8F8),
+    ambientWarmGlow: Color(0x1AE5896B),
+    cardShadowContact: Color(0x24000000),
+    cardShadowAmbient: Color(0x38000000),
+    cardTopHighlight: Color(0x18FFF8EB),
+    cardEmphasisTintStart: Color(0x1888A8F8),
+    cardEmphasisTintEnd: Color(0x0488A8F8),
+    cardEmphasisBar: Color(0xCC88A8F8),
+    cardEmphasisBarGlow: Color(0x3688A8F8),
   );
 
   final bool isDark;
@@ -274,6 +301,15 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
   final Color navGlassFill;
   final Color navGlassBorder;
   final Color navGlassHighlight;
+  final Color ambientPrimaryGlow;
+  final Color ambientWarmGlow;
+  final Color cardShadowContact;
+  final Color cardShadowAmbient;
+  final Color cardTopHighlight;
+  final Color cardEmphasisTintStart;
+  final Color cardEmphasisTintEnd;
+  final Color cardEmphasisBar;
+  final Color cardEmphasisBarGlow;
 
   Color get accent => slate;
 
@@ -339,6 +375,15 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     Color? navGlassFill,
     Color? navGlassBorder,
     Color? navGlassHighlight,
+    Color? ambientPrimaryGlow,
+    Color? ambientWarmGlow,
+    Color? cardShadowContact,
+    Color? cardShadowAmbient,
+    Color? cardTopHighlight,
+    Color? cardEmphasisTintStart,
+    Color? cardEmphasisTintEnd,
+    Color? cardEmphasisBar,
+    Color? cardEmphasisBarGlow,
   }) =>
       JournalPalette(
         isDark: isDark ?? this.isDark,
@@ -375,6 +420,16 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         navGlassFill: navGlassFill ?? this.navGlassFill,
         navGlassBorder: navGlassBorder ?? this.navGlassBorder,
         navGlassHighlight: navGlassHighlight ?? this.navGlassHighlight,
+        ambientPrimaryGlow: ambientPrimaryGlow ?? this.ambientPrimaryGlow,
+        ambientWarmGlow: ambientWarmGlow ?? this.ambientWarmGlow,
+        cardShadowContact: cardShadowContact ?? this.cardShadowContact,
+        cardShadowAmbient: cardShadowAmbient ?? this.cardShadowAmbient,
+        cardTopHighlight: cardTopHighlight ?? this.cardTopHighlight,
+        cardEmphasisTintStart:
+            cardEmphasisTintStart ?? this.cardEmphasisTintStart,
+        cardEmphasisTintEnd: cardEmphasisTintEnd ?? this.cardEmphasisTintEnd,
+        cardEmphasisBar: cardEmphasisBar ?? this.cardEmphasisBar,
+        cardEmphasisBarGlow: cardEmphasisBarGlow ?? this.cardEmphasisBarGlow,
       );
 
   @override
@@ -419,6 +474,22 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
       navGlassBorder: Color.lerp(navGlassBorder, other.navGlassBorder, t)!,
       navGlassHighlight:
           Color.lerp(navGlassHighlight, other.navGlassHighlight, t)!,
+      ambientPrimaryGlow:
+          Color.lerp(ambientPrimaryGlow, other.ambientPrimaryGlow, t)!,
+      ambientWarmGlow: Color.lerp(ambientWarmGlow, other.ambientWarmGlow, t)!,
+      cardShadowContact:
+          Color.lerp(cardShadowContact, other.cardShadowContact, t)!,
+      cardShadowAmbient:
+          Color.lerp(cardShadowAmbient, other.cardShadowAmbient, t)!,
+      cardTopHighlight:
+          Color.lerp(cardTopHighlight, other.cardTopHighlight, t)!,
+      cardEmphasisTintStart:
+          Color.lerp(cardEmphasisTintStart, other.cardEmphasisTintStart, t)!,
+      cardEmphasisTintEnd:
+          Color.lerp(cardEmphasisTintEnd, other.cardEmphasisTintEnd, t)!,
+      cardEmphasisBar: Color.lerp(cardEmphasisBar, other.cardEmphasisBar, t)!,
+      cardEmphasisBarGlow:
+          Color.lerp(cardEmphasisBarGlow, other.cardEmphasisBarGlow, t)!,
     );
   }
 
@@ -459,7 +530,16 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
           slateBg == other.slateBg &&
           navGlassFill == other.navGlassFill &&
           navGlassBorder == other.navGlassBorder &&
-          navGlassHighlight == other.navGlassHighlight;
+          navGlassHighlight == other.navGlassHighlight &&
+          ambientPrimaryGlow == other.ambientPrimaryGlow &&
+          ambientWarmGlow == other.ambientWarmGlow &&
+          cardShadowContact == other.cardShadowContact &&
+          cardShadowAmbient == other.cardShadowAmbient &&
+          cardTopHighlight == other.cardTopHighlight &&
+          cardEmphasisTintStart == other.cardEmphasisTintStart &&
+          cardEmphasisTintEnd == other.cardEmphasisTintEnd &&
+          cardEmphasisBar == other.cardEmphasisBar &&
+          cardEmphasisBarGlow == other.cardEmphasisBarGlow;
 
   @override
   int get hashCode => Object.hashAll([
@@ -497,6 +577,15 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         navGlassFill,
         navGlassBorder,
         navGlassHighlight,
+        ambientPrimaryGlow,
+        ambientWarmGlow,
+        cardShadowContact,
+        cardShadowAmbient,
+        cardTopHighlight,
+        cardEmphasisTintStart,
+        cardEmphasisTintEnd,
+        cardEmphasisBar,
+        cardEmphasisBarGlow,
       ]);
 }
 

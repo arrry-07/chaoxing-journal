@@ -555,10 +555,11 @@ class AssignmentStore extends ChangeNotifier {
     ManualEntry? created;
     await _run(() async {
       if (account == null ||
-          !_authenticated ||
-          _disposed ||
-          _generation != epoch ||
-          account != _account) {
+          !_isSessionStateCurrent(
+            epoch: epoch,
+            account: account,
+            checkAccount: true,
+          )) {
         return;
       }
       final existing = notice.linkedManualEntryId == null
@@ -600,10 +601,11 @@ class AssignmentStore extends ChangeNotifier {
       );
       final nextNotebook = notebook.withEntries([...notebook.entries, entry]);
       await repository.saveNotebook(nextNotebook, account);
-      if (_disposed ||
-          _generation != epoch ||
-          !_authenticated ||
-          account != _account) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       final previous = notebook;
@@ -615,18 +617,20 @@ class AssignmentStore extends ChangeNotifier {
         notebook,
         rescheduleSucceeded: manualSucceeded,
       );
-      if (_disposed ||
-          _generation != epoch ||
-          !_authenticated ||
-          account != _account) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       final nextNotices = _courseNotices.bindManualEntry(notice.id, entry.id);
       await repository.saveCourseNotices(nextNotices, account);
-      if (_disposed ||
-          _generation != epoch ||
-          !_authenticated ||
-          account != _account) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       _courseNotices = nextNotices;
@@ -648,10 +652,11 @@ class AssignmentStore extends ChangeNotifier {
     ManualEntry? created;
     await _run(() async {
       if (account == null ||
-          !_authenticated ||
-          _disposed ||
-          _generation != epoch ||
-          account != _account) {
+          !_isSessionStateCurrent(
+            epoch: epoch,
+            account: account,
+            checkAccount: true,
+          )) {
         return;
       }
       final existing = node.linkedManualEntryId == null
@@ -696,10 +701,11 @@ class AssignmentStore extends ChangeNotifier {
       );
       final nextNotebook = notebook.withEntries([...notebook.entries, entry]);
       await repository.saveNotebook(nextNotebook, account);
-      if (_disposed ||
-          _generation != epoch ||
-          !_authenticated ||
-          account != _account) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       final previous = notebook;
@@ -711,10 +717,11 @@ class AssignmentStore extends ChangeNotifier {
         notebook,
         rescheduleSucceeded: manualSucceeded,
       );
-      if (_disposed ||
-          _generation != epoch ||
-          !_authenticated ||
-          account != _account) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       final nextCatalog = _courseChapters.bindManualEntry(
@@ -723,10 +730,11 @@ class AssignmentStore extends ChangeNotifier {
         entry.id,
       );
       await repository.saveCourseChapters(nextCatalog, account);
-      if (_disposed ||
-          _generation != epoch ||
-          !_authenticated ||
-          account != _account) {
+      if (!_isSessionStateCurrent(
+        epoch: epoch,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       _courseChapters = nextCatalog;
@@ -984,10 +992,10 @@ class AssignmentStore extends ChangeNotifier {
   DateTime? _lastSyncAt;
   List<int> _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
   bool _allowUrgentDeadlineNightBreakthrough = false;
-  static const _deadlineChannelV2AutoMigratedKey =
-      LocalAssignmentRepository.deadlineChannelV2AutoMigratedKey;
-  String _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
-  bool _migratedDeadlineChannelToV2ThisRestore = false;
+  static const _deadlineChannelV3AutoMigratedKey =
+      LocalAssignmentRepository.deadlineChannelV3AutoMigratedKey;
+  String _deadlineChannelId = LocalNotificationService.assignmentV3Channel;
+  bool _migratedDeadlineChannelToV3ThisRestore = false;
   BackgroundCheckSettings _backgroundCheckSettings =
       const BackgroundCheckSettings(
     enabled: true,
@@ -1086,6 +1094,8 @@ class AssignmentStore extends ChangeNotifier {
   bool get allowUrgentDeadlineNightBreakthrough =>
       _allowUrgentDeadlineNightBreakthrough;
   String get activeDeadlineChannelId => _deadlineChannelId;
+  bool get isUsingV3DeadlineChannel =>
+      _deadlineChannelId == LocalNotificationService.assignmentV3Channel;
   bool get isUsingV2DeadlineChannel =>
       _deadlineChannelId == LocalNotificationService.assignmentV2Channel;
   String? get backgroundWarning => _backgroundWarning;
@@ -2380,10 +2390,10 @@ class AssignmentStore extends ChangeNotifier {
     _journalRestoreFailed = false;
     _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
     _allowUrgentDeadlineNightBreakthrough = false;
-    _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
-    _migratedDeadlineChannelToV2ThisRestore = false;
+    _deadlineChannelId = LocalNotificationService.assignmentV3Channel;
+    _migratedDeadlineChannelToV3ThisRestore = false;
     notificationService.activeDeadlineChannelId =
-        LocalNotificationService.assignmentV2Channel;
+        LocalNotificationService.assignmentV3Channel;
     _lastSyncAt = null;
     _lastSyncAttemptAt = null;
     _serverBackoffUntil = null;
@@ -2468,10 +2478,12 @@ class AssignmentStore extends ChangeNotifier {
       if (_authenticated && account != null) {
         final prefs = await SharedPreferences.getInstance();
         final alreadyAutoMigrated =
-            prefs.getBool(_deadlineChannelV2AutoMigratedKey) ?? false;
-        if (savedDeadlineChannel ==
-                LocalNotificationService.assignmentChannel &&
-            !alreadyAutoMigrated) {
+            prefs.getBool(_deadlineChannelV3AutoMigratedKey) ?? false;
+        final isLegacyChannel = savedDeadlineChannel ==
+                LocalNotificationService.assignmentChannel ||
+            savedDeadlineChannel ==
+                LocalNotificationService.assignmentV2Channel;
+        if (isLegacyChannel && !alreadyAutoMigrated) {
           final snap = _captureSession();
           try {
             await _runScopedWrite(
@@ -2479,35 +2491,35 @@ class AssignmentStore extends ChangeNotifier {
               (scopedPrefs) async {
                 await repository.writeDeadlineChannelIdInPrefs(
                   scopedPrefs,
-                  LocalNotificationService.assignmentV2Channel,
+                  LocalNotificationService.assignmentV3Channel,
                 );
                 await scopedPrefs.setBool(
-                  _deadlineChannelV2AutoMigratedKey,
+                  _deadlineChannelV3AutoMigratedKey,
                   true,
                 );
               },
             );
-            _migratedDeadlineChannelToV2ThisRestore = true;
+            _migratedDeadlineChannelToV3ThisRestore = true;
           } on StaleSessionWriteException {
             // Session changed mid-restore; leave persisted state untouched.
           } catch (_) {
             // Keep running restore using the upgraded in-memory default below.
           }
-          _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+          _deadlineChannelId = LocalNotificationService.assignmentV3Channel;
         } else {
           _deadlineChannelId =
               await notificationService.resolveDefaultDeadlineChannel(
             storedChannelId: savedDeadlineChannel,
           );
           if (_deadlineChannelId ==
-                  LocalNotificationService.assignmentV2Channel &&
+                  LocalNotificationService.assignmentV3Channel &&
               !alreadyAutoMigrated) {
             final snap = _captureSession();
             try {
               await _runScopedWrite(
                 snap,
                 (scopedPrefs) => scopedPrefs.setBool(
-                  _deadlineChannelV2AutoMigratedKey,
+                  _deadlineChannelV3AutoMigratedKey,
                   true,
                 ),
               );
@@ -2519,11 +2531,11 @@ class AssignmentStore extends ChangeNotifier {
           }
         }
       } else {
-        _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+        _deadlineChannelId = LocalNotificationService.assignmentV3Channel;
       }
       notificationService.activeDeadlineChannelId = _authenticated
           ? _deadlineChannelId
-          : LocalNotificationService.assignmentV2Channel;
+          : LocalNotificationService.assignmentV3Channel;
     });
     await stage('自动同步设置', () async {
       final snap = _captureSession();
@@ -3565,7 +3577,7 @@ class AssignmentStore extends ChangeNotifier {
               prefs,
               normalized,
             );
-            await prefs.setBool(_deadlineChannelV2AutoMigratedKey, true);
+            await prefs.setBool(_deadlineChannelV3AutoMigratedKey, true);
           },
         );
       } on StaleSessionWriteException {
@@ -3575,7 +3587,7 @@ class AssignmentStore extends ChangeNotifier {
       _deadlineChannelId = normalized;
       notificationService.activeDeadlineChannelId = snap.authenticated
           ? normalized
-          : LocalNotificationService.assignmentV2Channel;
+          : LocalNotificationService.assignmentV3Channel;
       saved = true;
       await _afterAssignmentsChanged(updateSummary: false);
     });
@@ -3599,7 +3611,7 @@ class AssignmentStore extends ChangeNotifier {
     }
     final targetChannel = _authenticated
         ? _deadlineChannelId
-        : LocalNotificationService.assignmentV2Channel;
+        : LocalNotificationService.assignmentV3Channel;
     notificationService.activeDeadlineChannelId = targetChannel;
     if (_nativeReminderAvailable) {
       try {
@@ -4169,9 +4181,9 @@ class AssignmentStore extends ChangeNotifier {
       _needsProfileRecovery = false;
       _reminderOffsetsMinutes = ReminderRuleStore.defaultOffsetsMinutes;
       _allowUrgentDeadlineNightBreakthrough = false;
-      _deadlineChannelId = LocalNotificationService.assignmentV2Channel;
+      _deadlineChannelId = LocalNotificationService.assignmentV3Channel;
       notificationService.activeDeadlineChannelId =
-          LocalNotificationService.assignmentV2Channel;
+          LocalNotificationService.assignmentV3Channel;
       _chaoxingDisplayName = null;
       _chaoxingAvatarUrl = null;
       _error = null;
@@ -4331,7 +4343,7 @@ class AssignmentStore extends ChangeNotifier {
         snap.authenticated && _allowUrgentDeadlineNightBreakthrough;
     notificationService.activeDeadlineChannelId = snap.authenticated
         ? _deadlineChannelId
-        : LocalNotificationService.assignmentV2Channel;
+        : LocalNotificationService.assignmentV3Channel;
     if (!_privacyCleanupPending) {
       if (updateAssignmentReminders) {
         if (_nativeReminderAvailable && _authenticated) {
@@ -4824,9 +4836,11 @@ class AssignmentStore extends ChangeNotifier {
   }) async {
     if (!_authenticated ||
         !_manageBackgroundSchedule ||
-        _privacyCleanupPending) {
+        _privacyCleanupPending ||
+        _disposed) {
       return;
     }
+    final snap = _captureSession();
     notificationService.allowUrgentNightBreakthrough =
         _allowUrgentDeadlineNightBreakthrough;
     notificationService.courseworkState = _courseworkState;
@@ -4834,9 +4848,11 @@ class AssignmentStore extends ChangeNotifier {
       await notificationService
           .migrateLegacyManualChannelIfNeeded(notebook.entries);
     } catch (error) {
+      if (!_isSessionCurrent(snap)) return;
       _manualWarnings.add('个人日程提醒渠道迁移未完成：$error');
       _serviceWarnings.add('个人日程提醒渠道迁移未完成：$error');
     }
+    if (!_isSessionCurrent(snap)) return;
     try {
       await notificationService.migrateLegacySummaryChannelIfNeeded(
         courseAssignments,
@@ -4844,34 +4860,39 @@ class AssignmentStore extends ChangeNotifier {
         _lastSyncAt,
       );
     } catch (error) {
+      if (!_isSessionCurrent(snap)) return;
       _summaryWarnings.add('每日摘要提醒渠道迁移未完成：$error');
       _serviceWarnings.add('每日摘要提醒渠道迁移未完成：$error');
     }
-    var canRetireDeadlineV1 =
-        _deadlineChannelId == LocalNotificationService.assignmentV2Channel;
-    if (canRetireDeadlineV1 && _nativeReminderAvailable) {
+    if (!_isSessionCurrent(snap)) return;
+    var canRetireLegacyDeadline =
+        _deadlineChannelId == LocalNotificationService.assignmentV3Channel;
+    if (canRetireLegacyDeadline && _nativeReminderAvailable) {
       if (legacyAssignmentVerified != null) {
-        canRetireDeadlineV1 = legacyAssignmentVerified;
+        canRetireLegacyDeadline = legacyAssignmentVerified;
       } else {
         try {
-          canRetireDeadlineV1 =
+          canRetireLegacyDeadline =
               await notificationService.isLegacyAssignmentMigrationComplete();
         } catch (_) {
-          canRetireDeadlineV1 = false;
+          canRetireLegacyDeadline = false;
         }
       }
     }
-    var deadlineRescheduledForV2 = false;
+    if (!_isSessionCurrent(snap)) return;
+    var deadlineRescheduledForV3 = false;
     try {
       await notificationService.retireLegacyUpdatesAndDeadlineChannelsIfNeeded(
-        retireDeadlineV1: canRetireDeadlineV1,
+        retireDeadlineV1: canRetireLegacyDeadline,
         beforeRetireDeadlineV1: !_nativeReminderAvailable
             ? () async {
-                deadlineRescheduledForV2 = true;
+                if (!_isSessionCurrent(snap)) return false;
+                deadlineRescheduledForV3 = true;
                 await notificationService.rescheduleAssignments(
                   courseAssignments,
                   offsetsMinutes: _reminderOffsetsMinutes,
                 );
+                if (!_isSessionCurrent(snap)) return false;
                 if (notificationService.lastDeadlineScheduleFailed) {
                   final reason = notificationService.lastWarning ?? '截止提醒重排未完成';
                   _deadlineWarnings.add('截止提醒渠道升级重排未完成：$reason');
@@ -4883,21 +4904,24 @@ class AssignmentStore extends ChangeNotifier {
             : null,
       );
     } catch (error) {
-      if (deadlineRescheduledForV2) {
+      if (!_isSessionCurrent(snap)) return;
+      if (deadlineRescheduledForV3) {
         _deadlineWarnings.add('截止提醒渠道升级重排未完成：$error');
         _serviceWarnings.add('截止提醒渠道升级重排未完成：$error');
       }
-      // Best-effort legacy v1 channel cleanup.
+      // Best-effort legacy v1/v2 channel cleanup.
     }
-    if (_migratedDeadlineChannelToV2ThisRestore && !_nativeReminderAvailable) {
-      _migratedDeadlineChannelToV2ThisRestore = false;
-      if (!deadlineRescheduledForV2) {
+    if (!_isSessionCurrent(snap)) return;
+    if (_migratedDeadlineChannelToV3ThisRestore && !_nativeReminderAvailable) {
+      _migratedDeadlineChannelToV3ThisRestore = false;
+      if (!deadlineRescheduledForV3) {
         try {
           await notificationService.rescheduleAssignments(
             courseAssignments,
             offsetsMinutes: _reminderOffsetsMinutes,
           );
         } catch (error) {
+          if (!_isSessionCurrent(snap)) return;
           _deadlineWarnings.add('截止提醒渠道升级重排未完成：$error');
           _serviceWarnings.add('截止提醒渠道升级重排未完成：$error');
         }

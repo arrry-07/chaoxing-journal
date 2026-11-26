@@ -65,7 +65,7 @@ void main() {
     });
   });
 
-  group('M6 v2 audible notification channels & auto migration', () {
+  group('M6 v3 audible notification channels & auto migration', () {
     const channel = MethodChannel('dexterous.com/flutter/local_notifications');
     const permissions = MethodChannel('study_assistant/permissions');
 
@@ -78,7 +78,7 @@ void main() {
     });
 
     test(
-        'all four v2 channels register with high importance, chimeSound, and vibration pattern',
+        'all four v3 channels register with high importance, chimeSound, and vibration pattern',
         () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       FlutterLocalNotificationsPlatform.instance =
@@ -110,10 +110,10 @@ void main() {
       await service.initialize();
 
       expect(createdChannels.map((c) => c['id']).toList(), [
-        'assignment_deadlines_v2',
-        'assignment_updates_v2',
-        'daily_summary_v2',
-        'personal_schedule_v2',
+        'assignment_deadlines_v3',
+        'assignment_updates_v3',
+        'daily_summary_v3',
+        'personal_schedule_v3',
       ]);
       for (final ch in createdChannels) {
         expect(ch['importance'], 4, reason: 'channel ${ch['id']}');
@@ -124,7 +124,7 @@ void main() {
     });
 
     test(
-        'restoreSession auto-migrates legacy v1 deadline channel once while allowing explicit opt-out afterward',
+        'restoreSession auto-migrates legacy v1/v2 deadline channel once while allowing explicit opt-out afterward',
         () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       FlutterLocalNotificationsPlatform.instance =
@@ -153,7 +153,7 @@ void main() {
       await repo.activateAccount('legacy-user');
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
-          'deadline_notification_channel_v1', 'assignment_deadlines');
+          'deadline_notification_channel_v1', 'assignment_deadlines_v2');
       final store = AssignmentStore(
         repository: repo,
         sessionStore: _LegacySession('legacy-user'),
@@ -166,9 +166,9 @@ void main() {
 
       await store.restoreSession();
       expect(store.activeDeadlineChannelId,
-          LocalNotificationService.assignmentV2Channel);
+          LocalNotificationService.assignmentV3Channel);
       expect(await repo.loadDeadlineChannelId('legacy-user'),
-          LocalNotificationService.assignmentV2Channel);
+          LocalNotificationService.assignmentV3Channel);
 
       // Subsequent explicit downgrade stays respected because one-time marker is recorded.
       await store
@@ -188,8 +188,11 @@ void main() {
       final log = <String>[];
       final existing = <String>{
         'daily_summary',
+        'daily_summary_v2',
         'assignment_updates',
+        'assignment_updates_v2',
         'assignment_deadlines',
+        'assignment_deadlines_v2',
       };
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(permissions, (call) async => 35);
@@ -250,18 +253,24 @@ void main() {
         retireDeadlineV1: true,
       );
 
-      expect(log.indexOf('create:daily_summary_v2'),
+      expect(log.indexOf('create:daily_summary_v3'),
           lessThan(log.indexOf('schedule:d:summary')));
       expect(log.indexOf('schedule:d:summary'),
           lessThan(log.indexOf('delete:daily_summary')));
-      expect(log.indexOf('create:assignment_updates_v2'),
+      expect(log.indexOf('schedule:d:summary'),
+          lessThan(log.indexOf('delete:daily_summary_v2')));
+      expect(log.indexOf('create:assignment_updates_v3'),
           lessThan(log.indexOf('delete:assignment_updates')));
-      expect(log.indexOf('create:assignment_deadlines_v2'),
+      expect(log.indexOf('create:assignment_updates_v3'),
+          lessThan(log.indexOf('delete:assignment_updates_v2')));
+      expect(log.indexOf('create:assignment_deadlines_v3'),
           lessThan(log.indexOf('delete:assignment_deadlines')));
+      expect(log.indexOf('create:assignment_deadlines_v3'),
+          lessThan(log.indexOf('delete:assignment_deadlines_v2')));
     });
 
     test(
-        'null savedDeadlineChannel on non-native path creates v2, reschedules future assignments onto v2, then retires v1 and preserves v1 on reschedule failure',
+        'null savedDeadlineChannel on non-native path creates v3, reschedules future assignments onto v3, then retires v1/v2 and preserves legacy on reschedule failure',
         () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       FlutterLocalNotificationsPlatform.instance =
@@ -367,14 +376,14 @@ void main() {
           expect(
             events,
             containsAllInOrder([
-              'create:assignment_deadlines_v2',
-              'schedule:a:studyassistant:///assignments/cx%3Awork%3A1%3A1%3Aw1@assignment_deadlines_v2',
+              'create:assignment_deadlines_v3',
+              'schedule:a:studyassistant:///assignments/cx%3Awork%3A1%3A1%3Aw1@assignment_deadlines_v3',
               'delete:assignment_deadlines',
             ]),
           );
           expect(existing.contains('assignment_deadlines'), isFalse);
         } else {
-          expect(events, contains('create:assignment_deadlines_v2'));
+          expect(events, contains('create:assignment_deadlines_v3'));
           expect(
             events.contains('delete:assignment_deadlines'),
             isFalse,
@@ -386,7 +395,7 @@ void main() {
     });
 
     test(
-        'unauthenticated sendTestDeadlineNotification targets assignment_deadlines_v2',
+        'unauthenticated sendTestDeadlineNotification targets assignment_deadlines_v3',
         () async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       FlutterLocalNotificationsPlatform.instance =
@@ -411,7 +420,7 @@ void main() {
             },
           'getNotificationChannels' => [
               {
-                'id': LocalNotificationService.assignmentV2Channel,
+                'id': LocalNotificationService.assignmentV3Channel,
                 'name': '作业截止提醒',
                 'description': '',
                 'groupId': null,
@@ -448,8 +457,8 @@ void main() {
 
       final outcome = await store.sendTestDeadlineNotification();
       expect(outcome.status, TestDeadlineNotificationStatus.posted);
-      expect(outcome.channelId, LocalNotificationService.assignmentV2Channel);
-      expect(shownChannels, [LocalNotificationService.assignmentV2Channel]);
+      expect(outcome.channelId, LocalNotificationService.assignmentV3Channel);
+      expect(shownChannels, [LocalNotificationService.assignmentV3Channel]);
     });
 
     test(
@@ -474,7 +483,7 @@ void main() {
             },
           'getNotificationChannels' => [
               {
-                'id': LocalNotificationService.manualV2Channel,
+                'id': LocalNotificationService.manualV3Channel,
                 'name': '待办与考试提醒',
                 'description': '',
                 'groupId': null,
@@ -556,7 +565,7 @@ void main() {
             },
           'getNotificationChannels' => [
               {
-                'id': LocalNotificationService.manualV2Channel,
+                'id': LocalNotificationService.manualV3Channel,
                 'name': '待办与考试提醒',
                 'description': '',
                 'groupId': null,
@@ -996,13 +1005,15 @@ void main() {
         ));
         await tester.pumpAndSettle();
 
-        final rotationBefore =
-            tester.widget<AnimatedRotation>(find.byType(AnimatedRotation));
-        expect(rotationBefore.turns, 0.0);
-        expect(
-          rotationBefore.duration,
-          reduced ? Duration.zero : const Duration(milliseconds: 200),
-        );
+        Transform chevronTransform() => tester.widget<Transform>(
+              find
+                  .ancestor(
+                    of: find.byIcon(Icons.expand_more_rounded),
+                    matching: find.byType(Transform),
+                  )
+                  .first,
+            );
+        expect(chevronTransform().transform.storage[0], closeTo(1.0, 1e-3));
         if (reduced) {
           expect(find.byType(AnimatedSize), findsNothing);
         } else {
@@ -1013,11 +1024,16 @@ void main() {
         }
 
         await tester.tap(find.byKey(const ValueKey('agenda-completed-toggle')));
+        await tester.pump();
+        if (reduced) {
+          expect(chevronTransform().transform.storage[0], closeTo(-1.0, 1e-3));
+        } else {
+          await tester.pump(const Duration(milliseconds: 50));
+          expect(chevronTransform().transform.storage[0], lessThan(1.0));
+        }
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        final rotationAfter =
-            tester.widget<AnimatedRotation>(find.byType(AnimatedRotation));
-        expect(rotationAfter.turns, 0.5);
+        expect(chevronTransform().transform.storage[0], closeTo(-1.0, 1e-3));
         expect(find.text('已完成测试待办'), findsOneWidget);
       }
     });

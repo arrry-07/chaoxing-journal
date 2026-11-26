@@ -204,8 +204,10 @@ object LegacyAssignmentNotificationMigrator {
     private val assignmentChannels = setOf(
         DeadlineChannelPolicy.CHANNEL_DEADLINES,
         DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+        DeadlineChannelPolicy.CHANNEL_DEADLINES_V3,
         DeadlineChannelPolicy.CHANNEL_UPDATES,
         DeadlineChannelPolicy.CHANNEL_UPDATES_V2,
+        DeadlineChannelPolicy.CHANNEL_UPDATES_V3,
         DeadlineChannelPolicy.CHANNEL_SILENT,
     )
 

@@ -23,10 +23,14 @@ import java.util.concurrent.TimeUnit
 object AssignmentNotificationPublisher {
     const val CHANNEL_DEADLINES = DeadlineChannelPolicy.CHANNEL_DEADLINES
     const val CHANNEL_DEADLINES_V2 = DeadlineChannelPolicy.CHANNEL_DEADLINES_V2
+    const val CHANNEL_DEADLINES_V3 = DeadlineChannelPolicy.CHANNEL_DEADLINES_V3
     const val CHANNEL_UPDATES = DeadlineChannelPolicy.CHANNEL_UPDATES
     const val CHANNEL_UPDATES_V2 = DeadlineChannelPolicy.CHANNEL_UPDATES_V2
+    const val CHANNEL_UPDATES_V3 = DeadlineChannelPolicy.CHANNEL_UPDATES_V3
     const val CHANNEL_SUMMARY_V2 = DeadlineChannelPolicy.CHANNEL_SUMMARY_V2
+    const val CHANNEL_SUMMARY_V3 = DeadlineChannelPolicy.CHANNEL_SUMMARY_V3
     const val CHANNEL_MANUAL_V2 = DeadlineChannelPolicy.CHANNEL_MANUAL_V2
+    const val CHANNEL_MANUAL_V3 = DeadlineChannelPolicy.CHANNEL_MANUAL_V3
     const val CHANNEL_SILENT = DeadlineChannelPolicy.CHANNEL_SILENT
     const val TEST_NOTIFICATION_ID = DeadlineChannelPolicy.TEST_NOTIFICATION_ID
     private const val EXTRA_DELIVERY_TOKEN = "com.example.studyassistant.DELIVERY_TOKEN"
@@ -90,13 +94,13 @@ object AssignmentNotificationPublisher {
 
     fun ensureDeadlineChannel(context: Context, channelId: String) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        val normalized = DeadlineChannelPolicy.normalizeChannelId(channelId) ?: CHANNEL_DEADLINES_V2
+        val normalized = DeadlineChannelPolicy.normalizeChannelId(channelId) ?: CHANNEL_DEADLINES_V3
         if (manager.getNotificationChannel(normalized) != null) return
-        if (normalized == CHANNEL_DEADLINES_V2) {
+        if (normalized == CHANNEL_DEADLINES_V3 || normalized == CHANNEL_DEADLINES_V2) {
             manager.createNotificationChannel(
                 buildAudibleChannel(
                     context = context,
-                    channelId = CHANNEL_DEADLINES_V2,
+                    channelId = normalized,
                     name = "作业截止提醒",
                     channelDescription = "学习通作业截止与考试开考提醒",
                 ),
@@ -116,37 +120,37 @@ object AssignmentNotificationPublisher {
 
     fun ensureChannels(context: Context, activeDeadlineChannelId: String? = null) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        ensureDeadlineChannel(context, CHANNEL_DEADLINES_V2)
+        ensureDeadlineChannel(context, CHANNEL_DEADLINES_V3)
         val deadlineChannel = DeadlineChannelPolicy.normalizeChannelId(activeDeadlineChannelId)
             ?: DeadlineChannelPolicy.resolveFromSystem(context)
-        if (deadlineChannel != CHANNEL_DEADLINES_V2) {
+        if (deadlineChannel != CHANNEL_DEADLINES_V3) {
             ensureDeadlineChannel(context, deadlineChannel)
         }
-        if (manager.getNotificationChannel(CHANNEL_UPDATES_V2) == null) {
+        if (manager.getNotificationChannel(CHANNEL_UPDATES_V3) == null) {
             manager.createNotificationChannel(
                 buildAudibleChannel(
                     context = context,
-                    channelId = CHANNEL_UPDATES_V2,
+                    channelId = CHANNEL_UPDATES_V3,
                     name = "新增作业提醒",
                     channelDescription = "学习通新增作业与考试有声提醒",
                 ),
             )
         }
-        if (manager.getNotificationChannel(CHANNEL_SUMMARY_V2) == null) {
+        if (manager.getNotificationChannel(CHANNEL_SUMMARY_V3) == null) {
             manager.createNotificationChannel(
                 buildAudibleChannel(
                     context = context,
-                    channelId = CHANNEL_SUMMARY_V2,
+                    channelId = CHANNEL_SUMMARY_V3,
                     name = "每日课业摘要",
                     channelDescription = "基于最近一次本机快照的课业摘要",
                 ),
             )
         }
-        if (manager.getNotificationChannel(CHANNEL_MANUAL_V2) == null) {
+        if (manager.getNotificationChannel(CHANNEL_MANUAL_V3) == null) {
             manager.createNotificationChannel(
                 buildAudibleChannel(
                     context = context,
-                    channelId = CHANNEL_MANUAL_V2,
+                    channelId = CHANNEL_MANUAL_V3,
                     name = "待办与考试提醒",
                     channelDescription = "待办和考试开始前提醒",
                 ),
@@ -293,7 +297,7 @@ object AssignmentNotificationPublisher {
             }
         }
         val activeChannel = DeadlineChannelPolicy.normalizeChannelId(account.deadlineChannelId)
-            ?: CHANNEL_DEADLINES_V2
+            ?: CHANNEL_DEADLINES_V3
         ensureDeadlineChannel(context, activeChannel)
         notificationWarning(context, activeChannel)?.let {
             return blocked(
@@ -352,7 +356,7 @@ object AssignmentNotificationPublisher {
         database: ReminderDatabase,
         accountHash: String,
         now: Instant = Instant.now(),
-    ): PublishResult = publishPendingNewAssignments(context, database, accountHash, now, CHANNEL_UPDATES_V2)
+    ): PublishResult = publishPendingNewAssignments(context, database, accountHash, now, CHANNEL_UPDATES_V3)
 
     internal fun publishPendingNewAssignments(
         context: Context,
@@ -1129,9 +1133,9 @@ object AssignmentNotificationPublisher {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return "notificationPermissionOff"
         val channelId = channelIdOverride ?: if (category == "newAssignment") {
-            CHANNEL_UPDATES_V2
+            CHANNEL_UPDATES_V3
         } else {
-            CHANNEL_DEADLINES_V2
+            CHANNEL_DEADLINES_V3
         }
         val channel = context.getSystemService(NotificationManager::class.java)
             .getNotificationChannel(channelId)

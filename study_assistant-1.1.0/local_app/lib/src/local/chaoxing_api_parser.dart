@@ -278,12 +278,21 @@ class ChaoxingApiParser {
                   ? rawClazzCandidate.substring(0, 120)
                   : rawClazzCandidate);
       final courseStartAt = _firstCourseBoundaryUtc([
+        clazzData?['begindate'],
+        clazzData?['startTime'],
+        clazzData?['startdate'],
         courseData?['begindate'],
         courseData?['startTime'],
         courseData?['startdate'],
         content['begindate'],
         content['startTime'],
         content['startdate'],
+        clazzData?['createtime'],
+        clazzData?['createTime'],
+        content['createtime'],
+        content['createTime'],
+        channel['createtime'],
+        channel['createTime'],
       ]);
       final courseEndAt = _firstCourseBoundaryUtc([
         courseData?['enddate'],
