@@ -167,6 +167,36 @@ class LegacyAssignmentNotificationMigratorTest {
         assertFalse(activeIds().contains(legacyV2Id))
     }
 
+    @Test
+    fun retiresPluginDeliveredNotificationOnV3Channel() {
+        manager.createNotificationChannel(
+            NotificationChannel(
+                AssignmentNotificationPublisher.CHANNEL_DEADLINES_V3,
+                "迁移测试v3",
+                NotificationManager.IMPORTANCE_HIGH,
+            ),
+        )
+        val legacyV3Id = ReminderDatabase.stableNotificationId("legacy-v3:$accountHash")
+        postPlugin(
+            legacyV3Id,
+            channelId = AssignmentNotificationPublisher.CHANNEL_DEADLINES_V3,
+        )
+
+        val outcome = LegacyAssignmentNotificationMigrator.retireNow(
+            context,
+            database,
+            database.notificationIds() + legacyV3Id,
+        )
+
+        assertTrue(outcome.completed)
+        assertEquals(listOf(legacyV3Id), outcome.retiredIds)
+        val deadline = SystemClock.elapsedRealtime() + 3_000
+        while (legacyV3Id in activeIds() && SystemClock.elapsedRealtime() < deadline) {
+            SystemClock.sleep(50)
+        }
+        assertFalse(activeIds().contains(legacyV3Id))
+    }
+
     private fun activeIds(): Set<Int> =
         NotificationManagerCompat.from(context).activeNotifications.map { it.id }.toSet()
 

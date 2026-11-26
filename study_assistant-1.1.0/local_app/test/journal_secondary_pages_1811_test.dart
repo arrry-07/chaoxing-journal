@@ -115,7 +115,10 @@ void main() {
     await tester.pumpWidget(wrap(DisplaySettingsScreen(store: store)));
     await tester.pumpAndSettle();
     expect(find.text('显示与小组件'), findsOneWidget);
-    await tester.tap(find.byTooltip('查看说明'));
+    final widgetInfoBtn = find.byTooltip('查看说明');
+    await tester.scrollUntilVisible(widgetInfoBtn, 150);
+    await tester.ensureVisible(widgetInfoBtn);
+    await tester.tap(widgetInfoBtn);
     await tester.pumpAndSettle();
     expect(find.textContaining('2、4 或 6 条'), findsOneWidget);
     expect(tester.takeException(), isNull);

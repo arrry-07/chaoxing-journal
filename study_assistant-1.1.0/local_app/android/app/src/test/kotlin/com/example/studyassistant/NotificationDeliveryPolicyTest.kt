@@ -65,11 +65,15 @@ class NotificationDeliveryPolicyTest {
             DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
             DeadlineChannelPolicy.normalizeChannelId("assignment_deadlines_v2"),
         )
+        assertEquals(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V3,
+            DeadlineChannelPolicy.normalizeChannelId("assignment_deadlines_v3"),
+        )
         assertNull(DeadlineChannelPolicy.normalizeChannelId("assignment_updates"))
         assertNull(DeadlineChannelPolicy.normalizeChannelId(null))
 
         assertEquals(
-            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V3,
             DeadlineChannelPolicy.resolveDefaultChannelId(
                 explicitSelection = null,
                 channelQuerySucceeded = true,
@@ -77,7 +81,7 @@ class NotificationDeliveryPolicyTest {
             ),
         )
         assertEquals(
-            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V3,
             DeadlineChannelPolicy.resolveDefaultChannelId(
                 explicitSelection = null,
                 channelQuerySucceeded = true,
@@ -85,7 +89,7 @@ class NotificationDeliveryPolicyTest {
             ),
         )
         assertEquals(
-            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V3,
             DeadlineChannelPolicy.resolveDefaultChannelId(
                 explicitSelection = null,
                 channelQuerySucceeded = true,
@@ -96,7 +100,7 @@ class NotificationDeliveryPolicyTest {
             ),
         )
         assertEquals(
-            DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V3,
             DeadlineChannelPolicy.resolveDefaultChannelId(
                 explicitSelection = null,
                 channelQuerySucceeded = false,
@@ -104,11 +108,19 @@ class NotificationDeliveryPolicyTest {
             ),
         )
         assertEquals(
+            DeadlineChannelPolicy.CHANNEL_DEADLINES_V3,
+            DeadlineChannelPolicy.resolveDefaultChannelId(
+                explicitSelection = DeadlineChannelPolicy.CHANNEL_DEADLINES_V3,
+                channelQuerySucceeded = false,
+                existingChannelIds = setOf(DeadlineChannelPolicy.CHANNEL_DEADLINES_V2),
+            ),
+        )
+        assertEquals(
             DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
             DeadlineChannelPolicy.resolveDefaultChannelId(
                 explicitSelection = DeadlineChannelPolicy.CHANNEL_DEADLINES_V2,
-                channelQuerySucceeded = false,
-                existingChannelIds = setOf(DeadlineChannelPolicy.CHANNEL_DEADLINES),
+                channelQuerySucceeded = true,
+                existingChannelIds = setOf(DeadlineChannelPolicy.CHANNEL_DEADLINES_V3),
             ),
         )
         assertEquals(
@@ -116,16 +128,20 @@ class NotificationDeliveryPolicyTest {
             DeadlineChannelPolicy.resolveDefaultChannelId(
                 explicitSelection = DeadlineChannelPolicy.CHANNEL_DEADLINES,
                 channelQuerySucceeded = true,
-                existingChannelIds = setOf(DeadlineChannelPolicy.CHANNEL_DEADLINES_V2),
+                existingChannelIds = setOf(DeadlineChannelPolicy.CHANNEL_DEADLINES_V3),
             ),
         )
     }
 
     @Test
-    fun v2ChannelIdsAndChimeResourceConstantStayAligned() {
+    fun v3ChannelIdsAndChimeResourceConstantStayAligned() {
         assertEquals("assignment_updates_v2", DeadlineChannelPolicy.CHANNEL_UPDATES_V2)
         assertEquals("daily_summary_v2", DeadlineChannelPolicy.CHANNEL_SUMMARY_V2)
         assertEquals("personal_schedule_v2", DeadlineChannelPolicy.CHANNEL_MANUAL_V2)
+        assertEquals("assignment_deadlines_v3", DeadlineChannelPolicy.CHANNEL_DEADLINES_V3)
+        assertEquals("assignment_updates_v3", DeadlineChannelPolicy.CHANNEL_UPDATES_V3)
+        assertEquals("daily_summary_v3", DeadlineChannelPolicy.CHANNEL_SUMMARY_V3)
+        assertEquals("personal_schedule_v3", DeadlineChannelPolicy.CHANNEL_MANUAL_V3)
         assertEquals("journal_chime", DeadlineChannelPolicy.CHIME_RAW_NAME)
     }
 

@@ -125,12 +125,16 @@ class ReminderHealth {
       this.activeDeadlineChannelId,
       this.legacyDeadlineChannel,
       this.v2DeadlineChannel,
+      this.v3DeadlineChannel,
       this.silentChannel,
       this.ignoringBatteryOptimizations,
       this.lockscreenShowNotifications,
       this.lockscreenAllowPrivateNotifications,
       this.ringerMode,
       this.interruptionFilter,
+      this.notificationStreamVolume,
+      this.notificationStreamMaxVolume,
+      this.notificationStreamMuted,
       this.pending,
       this.summaryPending,
       this.manualPending,
@@ -144,18 +148,23 @@ class ReminderHealth {
       manualChannel,
       legacyDeadlineChannel,
       v2DeadlineChannel,
+      v3DeadlineChannel,
       silentChannel;
   final String? activeDeadlineChannelId;
   final bool? ignoringBatteryOptimizations,
       lockscreenShowNotifications,
-      lockscreenAllowPrivateNotifications;
+      lockscreenAllowPrivateNotifications,
+      notificationStreamMuted;
   final String? ringerMode, interruptionFilter;
+  final int? notificationStreamVolume, notificationStreamMaxVolume;
   final int? pending, summaryPending, manualPending;
   final bool scheduleRecoveryPending;
   final List<String> queryErrors;
 
   bool get isPhoneMutedOrVibrate =>
       ringerMode == 'silent' || ringerMode == 'vibrate';
+  bool get isNotificationVolumeZero =>
+      notificationStreamMuted == true || notificationStreamVolume == 0;
   bool get isDndActive =>
       interruptionFilter == 'priority' ||
       interruptionFilter == 'none' ||

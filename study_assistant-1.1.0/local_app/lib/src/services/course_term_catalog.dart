@@ -529,6 +529,121 @@ class CourseTermCatalog {
   static bool isSystemReminderNotice(CourseNotice notice) =>
       notice.isSystemReminder;
 
+  static const Duration maxFutureActivityVoteHorizon = Duration(days: 365);
+
+  static AcademicTerm? _courseStartTerm(
+    CourseRef? course,
+    DateTime maxRecallUtc,
+  ) {
+    final startAt = course?.courseStartAt;
+    if (startAt == null) return null;
+    if (startAt.toUtc().isAfter(maxRecallUtc)) return null;
+    return AcademicTerm.fromInstant(startAt);
+  }
+
+  /// Picks the single timestamp an assignment may vote with.
+  ///
+  /// Deadline or trusted exam time wins over live-sync publication metadata so a
+  /// single record cannot vote twice across semesters. Implausibly far future
+  /// timestamps are dropped instead of falling through to weaker evidence.
+  static DateTime? _representativeAssignmentTimestampUtc(
+    Assignment a, {
+    required DateTime nowUtc,
+  }) {
+    final maxVoteUtc = nowUtc.add(maxFutureActivityVoteHorizon);
+    DateTime? candidate;
+    if (a.isExam) {
+      final exam = a.exam;
+      if (exam != null && !exam.noticeOnly) {
+        if (exam.startTrusted && exam.startAt != null) {
+          candidate = exam.startAt!.toUtc();
+        } else if (exam.endTrusted && exam.endAt != null) {
+          candidate = exam.endAt!.toUtc();
+        }
+      }
+    } else if (a.deadlineTrusted &&
+        !a.deadlineReadFailed &&
+        a.deadlineAt != null) {
+      candidate = a.deadlineAt!.toUtc();
+    }
+    final hasLiveSync = a.lastSyncedAt.millisecondsSinceEpoch > 0;
+    if (candidate == null && hasLiveSync && a.availableFromAt != null) {
+      candidate = a.availableFromAt!.toUtc();
+    }
+    if (candidate == null && hasLiveSync && a.publishedAt != null) {
+      candidate = a.publishedAt!.toUtc();
+    }
+    if (candidate == null || candidate.isAfter(maxVoteUtc)) return null;
+    return candidate;
+  }
+
+  static int _compareVotePreference(
+    AcademicTerm candidate,
+    AcademicTerm current,
+    AcademicTerm currentTerm,
+  ) {
+    final candidateAtOrBefore = candidate <= currentTerm;
+    final currentAtOrBefore = current <= currentTerm;
+    if (candidateAtOrBefore != currentAtOrBefore) {
+      return candidateAtOrBefore ? -1 : 1;
+    }
+    if (candidateAtOrBefore) {
+      return current.compareTo(candidate);
+    }
+    return candidate.compareTo(current);
+  }
+
+  /// Votes every non-hidden record at most once and returns the majority term.
+  ///
+  /// Notices only vote when no assignment provides usable evidence, so system
+  /// broadcasts and sync-day change timestamps never decide a course term.
+  static AcademicTerm? _resolveActivityTermByVote({
+    required Iterable<Assignment> assignments,
+    required Iterable<CourseNotice> notices,
+    required DateTime nowUtc,
+    required AcademicTerm currentTerm,
+    required Set<String> hiddenAssignmentIds,
+  }) {
+    final votes = <AcademicTerm, int>{};
+    for (final a in assignments) {
+      if (hiddenAssignmentIds.contains(a.id)) continue;
+      final at = _representativeAssignmentTimestampUtc(a, nowUtc: nowUtc);
+      if (at == null) continue;
+      final term = AcademicTerm.fromInstant(at);
+      votes[term] = (votes[term] ?? 0) + 1;
+    }
+    if (votes.isEmpty) {
+      final maxVoteUtc = nowUtc.add(maxFutureActivityVoteHorizon);
+      for (final n in notices) {
+        if (!n.publishedTrusted ||
+            n.publishedAt == null ||
+            isSystemReminderNotice(n)) {
+          continue;
+        }
+        final at = n.publishedAt!.toUtc();
+        if (at.isAfter(maxVoteUtc)) continue;
+        final term = AcademicTerm.fromInstant(at);
+        votes[term] = (votes[term] ?? 0) + 1;
+      }
+    }
+    AcademicTerm? best;
+    var bestCount = 0;
+    for (final vote in votes.entries) {
+      final term = vote.key;
+      final count = vote.value;
+      if (best == null || count > bestCount) {
+        best = term;
+        bestCount = count;
+        continue;
+      }
+      if (count < bestCount) continue;
+      if (_compareVotePreference(term, best, currentTerm) < 0) {
+        best = term;
+      }
+    }
+    return best;
+  }
+
   static List<DateTime> _trustedAssignmentTimestampsUtc(Assignment a) {
     final times = <DateTime>[];
     final hasLiveSync = a.lastSyncedAt.millisecondsSinceEpoch > 0;
@@ -708,14 +823,13 @@ class CourseTermCatalog {
       final courseRecords = assignmentsByCourse[key] ?? const <Assignment>[];
       final courseNotices = noticesByCourse[key] ?? const <CourseNotice>[];
       final override = preferences.entryFor(key) ?? const CourseTermOverride();
-      final baseActivityUtc = _maxUtc([
-        for (final a in courseRecords) ..._trustedAssignmentTimestampsUtc(a),
-        for (final n in courseNotices)
-          if (n.publishedTrusted &&
-              n.publishedAt != null &&
-              !isSystemReminderNotice(n))
-            n.publishedAt!.toUtc(),
-      ]);
+      final activityTerm = _resolveActivityTermByVote(
+        assignments: courseRecords,
+        notices: courseNotices,
+        nowUtc: nowUtc,
+        currentTerm: currentTerm,
+        hiddenAssignmentIds: hiddenAssignmentIds,
+      );
       final resolvedCourseName = course?.name ??
           courseRecords.firstOrNull?.courseName ??
           courseNotices.firstOrNull?.courseName;
@@ -725,17 +839,13 @@ class CourseTermCatalog {
           AcademicTerm.tryParseCourseName(resolvedCourseName);
       final clazzNameTerm =
           AcademicTerm.tryParseCourseName(course?.normalizedClazzName);
-      final courseTimeInstant = course?.courseEndAt ?? course?.courseStartAt;
-      final courseTimeTerm = courseTimeInstant != null
-          ? AcademicTerm.fromInstant(courseTimeInstant)
-          : null;
+      final courseTimeTerm = _courseStartTerm(course, maxRecallUtc);
       final baseTerm = manualTerm ??
           folderTerm ??
+          activityTerm ??
           courseNameTerm ??
           clazzNameTerm ??
-          (baseActivityUtc != null
-              ? AcademicTerm.fromInstant(baseActivityUtc)
-              : courseTimeTerm);
+          courseTimeTerm;
       baseIsPastByCourse[key] = baseTerm != null && baseTerm < currentTerm;
     }
 
@@ -792,10 +902,14 @@ class CourseTermCatalog {
           AcademicTerm.tryParseCourseName(resolvedCourseName);
       final clazzNameTerm =
           AcademicTerm.tryParseCourseName(course?.normalizedClazzName);
-      final courseTimeInstant = course?.courseEndAt ?? course?.courseStartAt;
-      final courseTimeTerm = courseTimeInstant != null
-          ? AcademicTerm.fromInstant(courseTimeInstant)
-          : null;
+      final courseTimeTerm = _courseStartTerm(course, maxRecallUtc);
+      final activityTerm = _resolveActivityTermByVote(
+        assignments: courseRecords,
+        notices: courseNotices,
+        nowUtc: nowUtc,
+        currentTerm: currentTerm,
+        hiddenAssignmentIds: hiddenAssignmentIds,
+      );
 
       late final AcademicTerm? term;
       late final CourseTermSource source;
@@ -808,6 +922,10 @@ class CourseTermCatalog {
         term = folderTerm;
         source = CourseTermSource.folder;
         explanation = '目录「${course!.folderName!.trim()}」';
+      } else if (activityTerm != null) {
+        term = activityTerm;
+        source = CourseTermSource.activity;
+        explanation = '按课业时间分布识别（${activityTerm.label}）';
       } else if (courseNameTerm != null) {
         term = courseNameTerm;
         source = CourseTermSource.courseName;
@@ -816,10 +934,6 @@ class CourseTermCatalog {
         term = clazzNameTerm;
         source = CourseTermSource.clazzName;
         explanation = '按班级名识别（${clazzNameTerm.label}）';
-      } else if (latestActivityUtc != null) {
-        term = AcademicTerm.fromInstant(latestActivityUtc);
-        source = CourseTermSource.activity;
-        explanation = '按可信活动推断（${term.label}）';
       } else if (courseTimeTerm != null) {
         term = courseTimeTerm;
         source = CourseTermSource.courseTime;
@@ -831,7 +945,9 @@ class CourseTermCatalog {
       }
 
       DateTime? latestRecallEventUtc;
-      final recallSignals = <DateTime>[...publishedChangeTimes];
+      final recallSignals = <DateTime>[
+        if (term != null && term < currentTerm) ...publishedChangeTimes,
+      ];
       for (final a in courseRecords) {
         if (hiddenAssignmentIds.contains(a.id)) continue;
         final completed = CourseworkDeadline.isEffectivelyCompleted(

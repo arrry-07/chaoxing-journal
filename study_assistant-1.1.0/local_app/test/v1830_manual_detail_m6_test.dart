@@ -423,7 +423,7 @@ void main() {
         case 'getNotificationChannels':
           return <Map<String, Object?>>[
             {
-              'id': LocalNotificationService.manualV2Channel,
+              'id': LocalNotificationService.manualV3Channel,
               'name': '待办与考试提醒',
               'description': '',
               'groupId': null,

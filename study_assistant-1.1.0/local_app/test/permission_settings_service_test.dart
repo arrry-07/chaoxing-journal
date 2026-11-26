@@ -99,7 +99,7 @@ void main() {
     );
     expect(
       calls.single.arguments,
-      {'channelId': 'assignment_deadlines_v2'},
+      {'channelId': 'assignment_deadlines_v3'},
     );
   });
 
@@ -250,7 +250,7 @@ void main() {
     );
   });
 
-  test('openNotificationChannelSettingsResult forwards v2 channel id',
+  test('openNotificationChannelSettingsResult forwards v3 channel id',
       () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
@@ -261,7 +261,7 @@ void main() {
 
     expect(
       await service.openNotificationChannelSettingsResult(
-        'assignment_deadlines_v2',
+        'assignment_deadlines_v3',
       ),
       SettingsOpenResult.direct,
     );
@@ -271,7 +271,7 @@ void main() {
     );
     expect(
       calls.single.arguments,
-      {'channelId': 'assignment_deadlines_v2'},
+      {'channelId': 'assignment_deadlines_v3'},
     );
   });
 }

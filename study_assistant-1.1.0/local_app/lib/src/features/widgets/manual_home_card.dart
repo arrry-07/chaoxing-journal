@@ -51,6 +51,14 @@ class ManualHomeCard extends StatelessWidget {
     final bucket = HomeManualTimeline.manualBucketAt(entry, now);
     final overdue = bucket == AssignmentDeadlineBucket.overdue;
     final largeText = JournalLayout.isLargeText(context);
+    final compactLayout = compact && !largeText;
+    final titleStyle = compactLayout
+        ? journal.entryTitle.copyWith(fontSize: 14.5)
+        : journal.entryTitle;
+    final metaStyle = compactLayout
+        ? journal.metadata.copyWith(fontSize: 12.5)
+        : journal.metadata;
+    final bodyGap = compactLayout ? 2.0 : 4.0;
     final railWidth = AssignmentCard.measureRailWidth(
       context,
       inPinnedSection: inPinnedSection,
@@ -240,19 +248,19 @@ class ManualHomeCard extends StatelessWidget {
           padding: titlePadding,
           child: Text(
             entry.title.trim(),
-            maxLines: largeText ? null : 2,
+            maxLines: largeText ? null : (compactLayout ? 1 : 2),
             overflow: largeText ? null : TextOverflow.ellipsis,
-            style: journal.entryTitle,
+            style: titleStyle,
           ),
         ),
-        const SizedBox(height: 4),
+        SizedBox(height: bodyGap),
         Wrap(
           spacing: 6,
-          runSpacing: 4,
+          runSpacing: compactLayout ? 2 : 4,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             if (entry.course.trim().isNotEmpty)
-              Text(entry.course.trim(), style: journal.metadata),
+              Text(entry.course.trim(), style: metaStyle),
             typePill,
             sourcePill,
             if (overdue)
@@ -263,17 +271,17 @@ class ManualHomeCard extends StatelessWidget {
           ],
         ),
         if (auxiliary.isNotEmpty) ...[
-          const SizedBox(height: 4),
+          SizedBox(height: bodyGap),
           Text(
             auxiliary.join(' · '),
             maxLines: largeText ? null : 2,
             overflow: largeText ? null : TextOverflow.ellipsis,
-            style: journal.metadata,
+            style: metaStyle,
           ),
         ],
         if (entry.note.trim().isNotEmpty)
           Container(
-            margin: const EdgeInsets.only(top: 5),
+            margin: EdgeInsets.only(top: compactLayout ? 2 : 5),
             padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
             decoration: BoxDecoration(
               color: Color.lerp(
@@ -328,7 +336,7 @@ class ManualHomeCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                     child: Padding(
                       padding: EdgeInsets.symmetric(
-                        vertical: compact ? 8.5 : 12,
+                        vertical: compact ? 5 : 12,
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,

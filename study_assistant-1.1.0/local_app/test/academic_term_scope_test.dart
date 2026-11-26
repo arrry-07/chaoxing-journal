@@ -782,7 +782,7 @@ void main() {
     });
 
     test(
-        'incremental published change elevates ungrouped course without letting syncAllTerms past-course old work pollute currentTerm',
+        'sync-day published change never decides the base term while syncAllTerms past work stays archived',
         () {
       final now = DateTime.utc(2026, 11, 20, 4);
       const ungrouped = CourseRef(courseId: '101', clazzId: '1', name: '新开选修');
@@ -878,11 +878,17 @@ void main() {
         ],
       );
 
+      final ungroupedEntry = catalog.entryFor(ungrouped.key)!;
+      expect(ungroupedEntry.term, isNull);
+      expect(ungroupedEntry.source, CourseTermSource.ungrouped);
+      expect(ungroupedEntry.state, CourseCatalogState.active);
+      expect(ungroupedEntry.hasCurrentTermEvidence, isFalse);
+      expect(catalog.matchesHomeCoursePicker(ungrouped.key, 'currentTerm'),
+          isFalse);
       expect(
-        catalog.entryFor(ungrouped.key)!.term,
-        const AcademicTerm(2026, AcademicSemester.fall),
-      );
-      expect(catalog.entryFor(ungrouped.key)!.hasCurrentTermEvidence, isTrue);
+          catalog.matchesHomeCoursePicker(ungrouped.key, 'currentTerm',
+              hasVisibleItems: true),
+          isTrue);
       expect(
           catalog.entryFor(pastCourse.key)!.state, CourseCatalogState.archived);
       expect(catalog.matchesHomeCoursePicker(pastCourse.key, 'currentTerm'),
@@ -892,6 +898,283 @@ void main() {
       expect(
           catalog.matchesHomeCoursePicker(farFutureCourse.key, 'currentTerm'),
           isFalse);
+    });
+
+    test(
+        'dirty courseEndAt is ignored and only a plausible courseStartAt falls back to courseTime',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      final dirtyEndOnly = CourseRef(
+        courseId: '401',
+        clazzId: '1',
+        name: '无学期线索课',
+        courseEndAt: DateTime.utc(2027, 6, 30),
+      );
+      final legacyStart = CourseRef(
+        courseId: '402',
+        clazzId: '2',
+        name: '有开课时间的往期课',
+        courseStartAt: DateTime.utc(2025, 9, 1),
+      );
+      final farFutureStart = CourseRef(
+        courseId: '403',
+        clazzId: '3',
+        name: '远期开课时间课',
+        courseStartAt: now.add(const Duration(days: 200)),
+      );
+
+      final catalog = CourseTermCatalog.build(
+        courses: [dirtyEndOnly, legacyStart, farFutureStart],
+        assignments: const [],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      final dirtyEndEntry = catalog.entryFor(dirtyEndOnly.key)!;
+      expect(dirtyEndEntry.term, isNull);
+      expect(dirtyEndEntry.source, CourseTermSource.ungrouped);
+      expect(catalog.isUngroupedCourse(dirtyEndOnly.key), isTrue);
+      expect(catalog.matchesHomeCoursePicker(dirtyEndOnly.key, 'pastTerms'),
+          isFalse);
+
+      final legacyStartEntry = catalog.entryFor(legacyStart.key)!;
+      expect(legacyStartEntry.term,
+          const AcademicTerm(2025, AcademicSemester.fall));
+      expect(legacyStartEntry.source, CourseTermSource.courseTime);
+      expect(legacyStartEntry.state, CourseCatalogState.archived);
+
+      final farFutureStartEntry = catalog.entryFor(farFutureStart.key)!;
+      expect(farFutureStartEntry.term, isNull);
+      expect(farFutureStartEntry.source, CourseTermSource.ungrouped);
+    });
+
+    test(
+        'majority vote ignores a single deadline beyond one year and beats a dirty courseEndAt',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      final course = CourseRef(
+        courseId: '501',
+        clazzId: '1',
+        name: '学期分布投票课',
+        courseEndAt: now,
+      );
+      final pastWork = [
+        for (var i = 0; i < 8; i++)
+          Assignment(
+            id: 'cx:work:501:1:$i',
+            courseName: '学期分布投票课',
+            title: '往期作业$i',
+            deadlineAt: DateTime.utc(2025, 10, 10 + i),
+            requirementsText: '',
+            status: 'submitted',
+            lastSyncedAt: now,
+          ),
+      ];
+      final absurdFuture = Assignment(
+        id: 'cx:work:501:1:99',
+        courseName: '学期分布投票课',
+        title: '超一年远期作业',
+        deadlineAt: now.add(const Duration(days: 400)),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      );
+
+      final catalog = CourseTermCatalog.build(
+        courses: [course],
+        assignments: [...pastWork, absurdFuture],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      final entry = catalog.entryFor(course.key)!;
+      expect(entry.term, const AcademicTerm(2025, AcademicSemester.fall));
+      expect(entry.source, CourseTermSource.activity);
+      expect(entry.state, CourseCatalogState.archived);
+      expect(
+          catalog.matchesCoursePickerScope(
+              course.key, CourseTermScope.pastTerms),
+          isTrue);
+    });
+
+    test(
+        'activity falls back to trusted human notices only when no assignment votes',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      const course = CourseRef(courseId: '701', clazzId: '1', name: '通知推课');
+
+      final catalog = CourseTermCatalog.build(
+        courses: const [course],
+        assignments: const [],
+        notices: [
+          CourseNotice(
+            id: 'cx:notice:${'7' * 64}',
+            courseId: '701',
+            clazzId: '1',
+            courseName: '通知推课',
+            senderName: '张老师',
+            title: '期末安排说明',
+            publishedAt: DateTime.utc(2025, 10, 2),
+            publishedTrusted: true,
+            lastSyncedAt: now,
+          ),
+          CourseNotice(
+            id: 'cx:notice:${'8' * 64}',
+            courseId: '701',
+            clazzId: '1',
+            courseName: '通知推课',
+            senderName: '学习通知',
+            title: '作业:《通知推课》自动汇总',
+            publishedAt: now,
+            publishedTrusted: true,
+            lastSyncedAt: now,
+          ),
+        ],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      final entry = catalog.entryFor(course.key)!;
+      expect(entry.term, const AcademicTerm(2025, AcademicSemester.fall));
+      expect(entry.source, CourseTermSource.activity);
+    });
+
+    test('exams vote by trusted start or end and notice-only exams never vote',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      const course = CourseRef(courseId: '901', clazzId: '1', name: '考试归属课');
+
+      Assignment exam(
+        String id, {
+        required DateTime startAt,
+        required DateTime endAt,
+        bool noticeOnly = false,
+      }) =>
+          Assignment(
+            id: 'cx:exam:901:1:$id',
+            source: AssignmentSource.exam,
+            courseName: '考试归属课',
+            title: id,
+            deadlineAt: endAt,
+            requirementsText: '',
+            status: 'pending',
+            lastSyncedAt: now,
+            exam: ExamInfo(
+              examId: id,
+              courseId: '901',
+              clazzId: '1',
+              startAt: startAt,
+              endAt: endAt,
+              startTrusted: true,
+              endTrusted: true,
+              noticeOnly: noticeOnly,
+            ),
+          );
+
+      final catalog = CourseTermCatalog.build(
+        courses: const [course],
+        assignments: [
+          exam(
+            'ended',
+            startAt: DateTime.utc(2025, 10, 9, 8),
+            endAt: DateTime.utc(2025, 10, 9, 10),
+          ),
+          exam(
+            'notice-only',
+            startAt: now.add(const Duration(days: 5)),
+            endAt: now.add(const Duration(days: 5)),
+            noticeOnly: true,
+          ),
+        ],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      final entry = catalog.entryFor(course.key)!;
+      expect(entry.term, const AcademicTerm(2025, AcademicSemester.fall));
+      expect(entry.source, CourseTermSource.activity);
+    });
+
+    test(
+        'vote ties prefer the nearest past-or-current term and otherwise the earliest future term',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      const tieCourse = CourseRef(courseId: '601', clazzId: '1', name: '平票课程');
+      const futureTieCourse =
+          CourseRef(courseId: '602', clazzId: '1', name: '未来平票课程');
+
+      Assignment work(String courseId, String courseName, String tag,
+              DateTime deadlineAt) =>
+          Assignment(
+            id: 'cx:work:$courseId:1:$tag',
+            courseName: courseName,
+            title: tag,
+            deadlineAt: deadlineAt,
+            requirementsText: '',
+            status: 'pending',
+            lastSyncedAt: now,
+          );
+
+      final catalog = CourseTermCatalog.build(
+        courses: const [tieCourse, futureTieCourse],
+        assignments: [
+          work('601', '平票课程', 'current', now.add(const Duration(days: 5))),
+          work('601', '平票课程', 'past', DateTime.utc(2025, 10, 10)),
+          work('602', '未来平票课程', 'near-future',
+              now.add(const Duration(days: 200))),
+          work('602', '未来平票课程', 'far-future',
+              now.add(const Duration(days: 330))),
+        ],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      final currentTie = catalog.entryFor(tieCourse.key)!;
+      expect(currentTie.term, const AcademicTerm(2026, AcademicSemester.fall));
+      expect(currentTie.source, CourseTermSource.activity);
+
+      final futureTie = catalog.entryFor(futureTieCourse.key)!;
+      expect(futureTie.term, const AcademicTerm(2026, AcademicSemester.spring));
+      expect(futureTie.source, CourseTermSource.activity);
+    });
+
+    test(
+        'old template course name yields to the current-term coursework distribution',
+        () {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      const course = CourseRef(
+        courseId: '801',
+        clazzId: '1',
+        name: '2025-2026(1) 大学物理实验',
+      );
+
+      final catalog = CourseTermCatalog.build(
+        courses: const [course],
+        assignments: [
+          Assignment(
+            id: 'cx:work:801:1:1',
+            courseName: course.name,
+            title: '本学期实验报告',
+            deadlineAt: now.add(const Duration(days: 5)),
+            requirementsText: '',
+            status: 'pending',
+            lastSyncedAt: now,
+          ),
+        ],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      final entry = catalog.entryFor(course.key)!;
+      expect(entry.term, const AcademicTerm(2026, AcademicSemester.fall));
+      expect(entry.source, CourseTermSource.activity);
+      expect(entry.state, CourseCatalogState.active);
     });
 
     test(

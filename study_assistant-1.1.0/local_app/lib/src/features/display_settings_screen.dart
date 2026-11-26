@@ -41,7 +41,7 @@ class DisplaySettingsScreen extends StatelessWidget {
                           horizontal: 16, vertical: 2),
                       title: Text('紧凑密度', style: journal.entryTitle),
                       subtitle: Text(
-                        '缩小作业间距，保留文字与操作大小',
+                        '单行标题并收紧卡片与分组间距，一屏展示更多课业',
                         style: journal.metadata,
                       ),
                       value: d.compact,
@@ -68,6 +68,8 @@ class DisplaySettingsScreen extends StatelessWidget {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                _DensityPreview(compact: d.compact),
                 const SizedBox(height: 14),
                 JournalGroupedCard(
                   title: '桌面小组件',
@@ -125,4 +127,106 @@ class DisplaySettingsScreen extends StatelessWidget {
           );
         },
       );
+}
+
+class _DensityPreview extends StatelessWidget {
+  const _DensityPreview({required this.compact});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    final titleStyle = journal.entryTitle.copyWith(
+      fontSize: compact ? 14.5 : 15.5,
+      height: compact ? 1.25 : 1.38,
+    );
+    final metaStyle = journal.metadata.copyWith(
+      fontSize: compact ? 11 : 12,
+      height: compact ? 1.3 : 1.4,
+    );
+
+    Widget previewRow(String clock, String title) => Padding(
+          padding: EdgeInsets.symmetric(vertical: compact ? 3 : 7),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                clock,
+                style: metaStyle.copyWith(
+                  color: journal.ink,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: compact ? 1 : 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: titleStyle,
+                    ),
+                    SizedBox(height: compact ? 1 : 3),
+                    Text(
+                      compact ? '今天 23:59' : '今天 23:59 · 课程作业',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: metaStyle,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: compact ? '紧凑密度示意：单行标题，间距更紧' : '标准密度示意：标题最多两行',
+      child: Container(
+        key: const ValueKey('compact-density-preview'),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(
+          color: Color.lerp(journal.sheet, journal.parchment, 0.28),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: journal.cardBorder, width: 0.8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '密度示意',
+                    style: journal.metadata.copyWith(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  compact ? '紧凑' : '标准',
+                  style: journal.metadata.copyWith(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: compact ? journal.accent : journal.muted,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: compact ? 3 : 6),
+            previewRow('09:00', '高等数学 · 第三章习题与课堂笔记'),
+            previewRow('14:30', '大学物理 · 实验报告'),
+          ],
+        ),
+      ),
+    );
+  }
 }

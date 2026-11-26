@@ -70,8 +70,8 @@ void main() {
               'notificationLaunchedApp': false
             },
           'getNotificationChannels' => [
-              fixture.channelRow('assignment_deadlines_v2', '作业截止提醒', 4),
-              fixture.channelRow('personal_schedule_v2', '待办与考试提醒', 4),
+              fixture.channelRow('assignment_deadlines_v3', '作业截止提醒', 4),
+              fixture.channelRow('personal_schedule_v3', '待办与考试提醒', 4),
             ],
           'pendingNotificationRequests' || 'getActiveNotifications' => [],
           _ => true,
@@ -226,7 +226,7 @@ void main() {
     });
 
     test(
-        'resolveDefaultDeadlineChannel defaults to v2 and honors explicit stored selection',
+        'resolveDefaultDeadlineChannel defaults to v3 and honors explicit stored selection',
         () async {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -257,7 +257,7 @@ void main() {
       ];
       expect(
         await freshService.resolveDefaultDeadlineChannel(),
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
 
       SharedPreferences.setMockInitialValues({});
@@ -268,7 +268,7 @@ void main() {
       await upgradeByChannel.initializeSafely();
       expect(
         await upgradeByChannel.resolveDefaultDeadlineChannel(),
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
       expect(
         await upgradeByChannel.resolveDefaultDeadlineChannel(
@@ -282,6 +282,12 @@ void main() {
         ),
         LocalNotificationService.assignmentV2Channel,
       );
+      expect(
+        await upgradeByChannel.resolveDefaultDeadlineChannel(
+          storedChannelId: LocalNotificationService.assignmentV3Channel,
+        ),
+        LocalNotificationService.assignmentV3Channel,
+      );
 
       SharedPreferences.setMockInitialValues(
           {'notification_details_v1': false});
@@ -290,34 +296,34 @@ void main() {
       await upgradeByLegacyKey.initializeSafely();
       expect(
         await upgradeByLegacyKey.resolveDefaultDeadlineChannel(),
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
 
       SharedPreferences.setMockInitialValues({});
       failChannelQuery = true;
       expect(
         await LocalNotificationService().resolveDefaultDeadlineChannel(),
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
 
       final failedInit = LocalNotificationService();
       await failedInit.initializeSafely();
       expect(
         await failedInit.resolveDefaultDeadlineChannel(),
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
 
       failChannelQuery = false;
       SharedPreferences.setMockInitialValues({
         'deadline_channel_install_default_v1':
-            LocalNotificationService.assignmentV2Channel,
+            LocalNotificationService.assignmentV3Channel,
       });
       messenger.setMockMethodCallHandler(permissions, (call) async {
         throw MissingPluginException('missing permissions in worker');
       });
       expect(
         await LocalNotificationService().resolveDefaultDeadlineChannel(),
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
       messenger.setMockMethodCallHandler(permissions, (call) async => 35);
     });
@@ -340,7 +346,7 @@ void main() {
                 'vibrationEnabled': false,
                 'lockscreenVisibility': 0,
               },
-              'assignment_deadlines_v2': {
+              'assignment_deadlines_v3': {
                 'exists': true,
                 'importance': 4,
                 'soundMuted': false,
@@ -360,6 +366,10 @@ void main() {
             'ignoringBatteryOptimizations': false,
             'lockscreenShowNotifications': true,
             'lockscreenAllowPrivateNotifications': false,
+            'ringerMode': 'normal',
+            'notificationStreamVolume': 0,
+            'notificationStreamMaxVolume': 7,
+            'notificationStreamMuted': false,
           };
         }
         return null;
@@ -369,11 +379,11 @@ void main() {
         return switch (call.method) {
           'getNotificationChannels' => [
               fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
-              fixture.channelRow('assignment_deadlines_v2', '作业截止提醒（增强有声）', 4),
+              fixture.channelRow('assignment_deadlines_v3', '作业截止提醒', 4),
               fixture.channelRow('assignment_silent', '静默作业通知', 2),
-              fixture.channelRow('assignment_updates_v2', '新增作业提醒', 4),
-              fixture.channelRow('daily_summary_v2', '每日课业摘要', 4),
-              fixture.channelRow('personal_schedule_v2', '待办与考试提醒', 4),
+              fixture.channelRow('assignment_updates_v3', '新增作业提醒', 4),
+              fixture.channelRow('daily_summary_v3', '每日课业摘要', 4),
+              fixture.channelRow('personal_schedule_v3', '待办与考试提醒', 4),
             ],
           'areNotificationsEnabled' || 'canScheduleExactNotifications' => true,
           'pendingNotificationRequests' || 'getActiveNotifications' => [],
@@ -383,13 +393,13 @@ void main() {
 
       final service = LocalNotificationService()
         ..activeDeadlineChannelId =
-            LocalNotificationService.assignmentV2Channel;
+            LocalNotificationService.assignmentV3Channel;
       final health = await service.inspectHealth();
       expect(health.queryErrors, isEmpty);
       expect(health.activeDeadlineChannelId,
-          LocalNotificationService.assignmentV2Channel);
+          LocalNotificationService.assignmentV3Channel);
       expect(health.assignmentChannel?.channelId,
-          LocalNotificationService.assignmentV2Channel);
+          LocalNotificationService.assignmentV3Channel);
       expect(health.assignmentChannel?.customSound, isTrue);
       expect(health.legacyDeadlineChannel?.soundMuted, isTrue);
       expect(health.legacyDeadlineChannel?.vibrationEnabled, isFalse);
@@ -397,6 +407,10 @@ void main() {
       expect(health.ignoringBatteryOptimizations, isFalse);
       expect(health.lockscreenShowNotifications, isTrue);
       expect(health.lockscreenAllowPrivateNotifications, isFalse);
+      expect(health.isPhoneMutedOrVibrate, isFalse);
+      expect(health.isNotificationVolumeZero, isTrue);
+      expect(health.notificationStreamVolume, 0);
+      expect(health.notificationStreamMaxVolume, 7);
 
       messenger.setMockMethodCallHandler(permissions, (call) async {
         if (call.method == 'getAndroidSdkInt') return 35;
@@ -412,13 +426,51 @@ void main() {
     });
 
     test(
+        'previewNotificationChime returns volume/mute state and degrades cleanly when unsupported',
+        () async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(permissions, (call) async {
+        if (call.method == 'previewNotificationChime') {
+          return {
+            'played': false,
+            'notificationStreamVolume': 0,
+            'notificationStreamMaxVolume': 7,
+            'notificationStreamMuted': false,
+            'ringerMode': 'normal',
+            'interruptionFilter': 'all',
+          };
+        }
+        return 35;
+      });
+      final zeroResult =
+          await LocalNotificationService().previewNotificationChime();
+      expect(zeroResult.supported, isTrue);
+      expect(zeroResult.played, isFalse);
+      expect(zeroResult.isNotificationVolumeZero, isTrue);
+      expect(zeroResult.isPhoneMutedOrVibrate, isFalse);
+
+      messenger.setMockMethodCallHandler(permissions, (call) async {
+        if (call.method == 'previewNotificationChime') {
+          throw MissingPluginException('not available');
+        }
+        return 35;
+      });
+      final unsupported =
+          await LocalNotificationService().previewNotificationChime();
+      expect(unsupported.supported, isFalse);
+      expect(unsupported.played, isFalse);
+      messenger.setMockMethodCallHandler(permissions, (call) async => 35);
+    });
+
+    test(
         'showTestNotification uses activeDeadlineChannelId and keeps private visibility',
         () async {
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       final channelList = <Map<String, Object?>>[
         fixture.channelRow('assignment_deadlines', '作业截止提醒', 4),
-        fixture.channelRow('personal_schedule_v2', '待办与考试提醒', 4),
+        fixture.channelRow('personal_schedule_v3', '待办与考试提醒', 4),
       ];
       messenger.setMockMethodCallHandler(notifications, (call) async {
         calls.add(call);
@@ -448,7 +500,7 @@ void main() {
 
       final service = LocalNotificationService()
         ..activeDeadlineChannelId =
-            LocalNotificationService.assignmentV2Channel;
+            LocalNotificationService.assignmentV3Channel;
       expect(await service.showTestNotification(), isTrue);
 
       final createdChannels = calls
@@ -456,12 +508,12 @@ void main() {
           .map((call) => (call.arguments as Map)['id'])
           .toList();
       expect(createdChannels,
-          contains(LocalNotificationService.assignmentV2Channel));
+          contains(LocalNotificationService.assignmentV3Channel));
       final showArgs =
           calls.singleWhere((call) => call.method == 'show').arguments as Map;
       final specifics = showArgs['platformSpecifics'] as Map;
       expect(
-          specifics['channelId'], LocalNotificationService.assignmentV2Channel);
+          specifics['channelId'], LocalNotificationService.assignmentV3Channel);
       expect(specifics['visibility'], NotificationVisibility.private.index);
     });
   });

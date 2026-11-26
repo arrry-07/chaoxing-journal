@@ -8,6 +8,7 @@ import '../models/course_term_preferences.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import '../services/course_term_catalog.dart';
+import 'widgets/journal_expansion_tile.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_picker_sheet.dart';
 
@@ -605,7 +606,6 @@ class _CourseListScreenState extends State<CourseListScreen> {
                   if (autoPromoEntries.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _buildBlockedSectionCard(
-                      context: context,
                       journal: journal,
                       store: store,
                       toggleKey: const ValueKey('course-auto-promo-toggle'),
@@ -626,7 +626,6 @@ class _CourseListScreenState extends State<CourseListScreen> {
                   if (manualBlockedEntries.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _buildBlockedSectionCard(
-                      context: context,
                       journal: journal,
                       store: store,
                       toggleKey: const ValueKey('course-manual-blocked-toggle'),
@@ -761,7 +760,6 @@ class _CourseListScreenState extends State<CourseListScreen> {
       );
 
   Widget _buildBlockedSectionCard({
-    required BuildContext context,
     required JournalPalette journal,
     required AssignmentStore store,
     required Key toggleKey,
@@ -774,180 +772,66 @@ class _CourseListScreenState extends State<CourseListScreen> {
     required Future<bool> Function(CourseTermEntry entry) onRestore,
   }) {
     final coursesByKey = {for (final c in store.courses) c.key: c};
-    return JournalGroupedCard(
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
+    Widget buildEntryRow(CourseTermEntry entry) {
+      final course = coursesByKey[entry.courseKey];
+      final teachers = course?.teacherLabel ?? '';
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+        child: Row(
           children: [
-            InkWell(
-              key: toggleKey,
-              onTap: () {
-                JournalMotion.tap(store.display);
-                onToggle();
-              },
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 48),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  child: Row(
-                    children: [
-                      Icon(icon, size: 18, color: journal.muted),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: journal.section.copyWith(fontSize: 15),
-                        ),
-                      ),
-                      AnimatedRotation(
-                        turns: expanded ? 0.5 : 0.0,
-                        duration: JournalMotion.duration(
-                          context,
-                          const Duration(milliseconds: 200),
-                        ),
-                        curve: JournalMotion.easeOut,
-                        child: Icon(
-                          Icons.expand_more_rounded,
-                          size: 20,
-                          color: journal.muted,
-                        ),
-                      ),
-                    ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    entry.courseName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: journal.entryTitle,
                   ),
-                ),
+                  if (teachers.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      teachers,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: journal.metadata,
+                    ),
+                  ],
+                ],
               ),
             ),
-            if (JournalMotion.isReducedMotion(context))
-              (expanded
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (final entry in entries) ...[
-                          Divider(
-                            height: 0.6,
-                            thickness: 0.6,
-                            indent: 14,
-                            endIndent: 14,
-                            color: journal.divider,
-                          ),
-                          () {
-                            final course = coursesByKey[entry.courseKey];
-                            final teachers = course?.teacherLabel ?? '';
-                            return Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(14, 10, 10, 10),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          entry.courseName,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: journal.entryTitle,
-                                        ),
-                                        if (teachers.isNotEmpty) ...[
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            teachers,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: journal.metadata,
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  TextButton(
-                                    key: restoreKeyBuilder(entry.courseKey),
-                                    onPressed: store.isLoading
-                                        ? null
-                                        : () => onRestore(entry),
-                                    child: const Text('恢复'),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }(),
-                        ],
-                      ],
-                    )
-                  : const SizedBox.shrink())
-            else
-              AnimatedSize(
-                duration: const Duration(milliseconds: 220),
-                curve: JournalMotion.easeDrawer,
-                alignment: Alignment.topCenter,
-                child: expanded
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          for (final entry in entries) ...[
-                            Divider(
-                              height: 0.6,
-                              thickness: 0.6,
-                              indent: 14,
-                              endIndent: 14,
-                              color: journal.divider,
-                            ),
-                            () {
-                              final course = coursesByKey[entry.courseKey];
-                              final teachers = course?.teacherLabel ?? '';
-                              return Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(14, 10, 10, 10),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            entry.courseName,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: journal.entryTitle,
-                                          ),
-                                          if (teachers.isNotEmpty) ...[
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              teachers,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: journal.metadata,
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    TextButton(
-                                      key: restoreKeyBuilder(entry.courseKey),
-                                      onPressed: store.isLoading
-                                          ? null
-                                          : () => onRestore(entry),
-                                      child: const Text('恢复'),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }(),
-                          ],
-                        ],
-                      )
-                    : const SizedBox.shrink(),
-              ),
+            const SizedBox(width: 8),
+            TextButton(
+              key: restoreKeyBuilder(entry.courseKey),
+              onPressed: store.isLoading ? null : () => onRestore(entry),
+              child: const Text('恢复'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return JournalGroupedCard(
+      children: [
+        JournalExpansionTile(
+          toggleKey: toggleKey,
+          expanded: expanded,
+          title: Text(
+            title,
+            style: journal.section.copyWith(fontSize: 15),
+          ),
+          leading: Icon(icon, size: 18, color: journal.muted),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          dividerIndent: 14,
+          dividerEndIndent: 14,
+          onExpansionChanged: (_) {
+            JournalMotion.tap(store.display);
+            onToggle();
+          },
+          children: [
+            for (final entry in entries) buildEntryRow(entry),
           ],
         ),
       ],

@@ -304,6 +304,15 @@ class AssignmentCard extends StatelessWidget {
     );
     final largeText = JournalLayout.isLargeText(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final compactLayout = compact && !largeText;
+    final titleStyle = compactLayout
+        ? journal.entryTitle.copyWith(fontSize: 14.5)
+        : journal.entryTitle;
+    final metaStyle = compactLayout
+        ? journal.metadata.copyWith(fontSize: 12.5)
+        : journal.metadata;
+    final bodyGap = compactLayout ? 2.0 : 4.0;
+    final pillRunGap = compactLayout ? 2.0 : 5.0;
 
     final stateTone =
         _stateTone(a, bucket, hasManualDeadline: isManualDeadline);
@@ -361,10 +370,10 @@ class AssignmentCard extends StatelessWidget {
       if (a.isExam) ...[
         if (clock.isEmpty || inPinnedSection)
           for (final line in examSchedule?.cardTimeLines ?? const <String>[])
-            Text(line, style: journal.metadata),
+            Text(line, style: metaStyle),
         if (examSchedule?.yearUnconfirmed == true)
-          Text('年份待确认', style: journal.metadata),
-        for (final line in examLines) Text(line, style: journal.metadata),
+          Text('年份待确认', style: metaStyle),
+        for (final line in examLines) Text(line, style: metaStyle),
       ] else if (showFullDeadline ||
           inPinnedSection ||
           !hasTime ||
@@ -374,11 +383,11 @@ class AssignmentCard extends StatelessWidget {
               ? '$deadline · ${DisplayPreferences.remaining(d, now)}'
               : deadline,
           style: !hasTime && railLabel == '待定'
-              ? journal.metadata.copyWith(
+              ? metaStyle.copyWith(
                   color: journal.ochre,
                   fontWeight: FontWeight.w600,
                 )
-              : journal.metadata,
+              : metaStyle,
         ),
     ];
 
@@ -477,7 +486,7 @@ class AssignmentCard extends StatelessWidget {
       );
     }
 
-    final verticalPad = compact ? 8.5 : 12.0;
+    final verticalPad = compact ? 5.0 : 12.0;
     const railGap = 10.0;
     final contentLeftInset = railWidth + railGap;
     final contentRight =
@@ -563,48 +572,53 @@ class AssignmentCard extends StatelessWidget {
             padding: titlePadding,
             child: Text(
               a.title.trim(),
-              maxLines: largeText ? null : 2,
+              maxLines: largeText ? null : (compactLayout ? 1 : 2),
               overflow: largeText ? null : TextOverflow.ellipsis,
-              style: journal.entryTitle,
+              style: titleStyle,
             ),
           )
         else if (hasCourse)
           Padding(
             padding: titlePadding,
-            child: Text(a.courseName.trim(), style: journal.entryTitle),
+            child: Text(
+              a.courseName.trim(),
+              maxLines: largeText ? null : (compactLayout ? 1 : 2),
+              overflow: largeText ? null : TextOverflow.ellipsis,
+              style: titleStyle,
+            ),
           ),
         if (!largeText && hasTitle && hasCourse && showPlainInlineState) ...[
-          const SizedBox(height: 4),
+          SizedBox(height: bodyGap),
           _CourseStateLine(
             course: a.courseName.trim(),
             state: state,
-            journal: journal,
+            style: metaStyle,
           ),
           if (highlightPills.isNotEmpty) ...[
-            const SizedBox(height: 5),
+            SizedBox(height: pillRunGap),
             Wrap(
               spacing: 6,
-              runSpacing: 5,
+              runSpacing: pillRunGap,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: highlightPills,
             ),
           ],
         ] else ...[
           if ((hasTitle && hasCourse) || showPlainInlineState) ...[
-            const SizedBox(height: 4),
+            SizedBox(height: bodyGap),
             Wrap(
               spacing: 5,
-              runSpacing: 3,
+              runSpacing: compactLayout ? 2 : 3,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 if (hasTitle && hasCourse)
-                  Text(a.courseName.trim(), style: journal.metadata),
+                  Text(a.courseName.trim(), style: metaStyle),
                 if (hasTitle && hasCourse && showPlainInlineState)
                   Text(
                     '·',
-                    style: journal.metadata,
+                    style: metaStyle,
                   ),
-                if (showPlainInlineState) Text(state, style: journal.metadata),
+                if (showPlainInlineState) Text(state, style: metaStyle),
                 if (highlightPills.isNotEmpty && !hasSpecialStatePill)
                   ...highlightPills,
               ],
@@ -613,17 +627,17 @@ class AssignmentCard extends StatelessWidget {
           if (highlightPills.isNotEmpty &&
               (hasSpecialStatePill ||
                   (!hasCourse && !showPlainInlineState))) ...[
-            const SizedBox(height: 5),
+            SizedBox(height: pillRunGap),
             Wrap(
               spacing: 6,
-              runSpacing: 5,
+              runSpacing: pillRunGap,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: highlightPills,
             ),
           ],
         ],
         if (extraLines.isNotEmpty) ...[
-          const SizedBox(height: 4),
+          SizedBox(height: bodyGap),
           ...extraLines,
         ],
       ],
@@ -634,7 +648,7 @@ class AssignmentCard extends StatelessWidget {
         Padding(
           padding: contentPadding,
           child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: hasInlineLaunch ? 52 : 0),
+            constraints: BoxConstraints(minHeight: hasInlineLaunch ? 48 : 0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -744,7 +758,7 @@ class AssignmentCard extends StatelessWidget {
                 if (showDivider) ...[
                   SizedBox(
                     key: ValueKey('assignment-card-gap-${a.id}'),
-                    height: 4,
+                    height: compact ? 0 : 4,
                   ),
                   Padding(
                     padding: EdgeInsets.only(left: contentLeftInset),
@@ -780,18 +794,17 @@ class _CourseStateLine extends StatelessWidget {
   const _CourseStateLine({
     required this.course,
     required this.state,
-    required this.journal,
+    required this.style,
   });
 
   static final RegExp _trailingPunctuation = RegExp(r'[（(\[【《「『·\-—\s]+$');
 
   final String course;
   final String state;
-  final JournalPalette journal;
+  final TextStyle style;
 
   @override
   Widget build(BuildContext context) {
-    final style = journal.metadata;
     final scaler = MediaQuery.textScalerOf(context);
     final direction = Directionality.of(context);
 

@@ -177,6 +177,9 @@ class FreezeReleaseTests(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("Update level: patch (formal release", result.stdout)
+        self.assertIn("update-manual.json by default", result.stdout)
+        self.assertIn("--promote-stable", result.stdout)
+        self.assertNotIn("sync update-stable.json", result.stdout)
         check = _run(
             FREEZE,
             "--check",
@@ -279,6 +282,8 @@ class FreezeReleaseTests(unittest.TestCase):
         )
         self.assertEqual(0, check.returncode, check.stderr)
         self.assertIn("Update level: minor", check.stdout)
+        self.assertIn("update-manual.json by default", check.stdout)
+        self.assertIn("only with --promote-stable", check.stdout)
 
     def test_formal_apply_detects_previous_release_from_docs(self) -> None:
         repo = self._repo(

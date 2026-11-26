@@ -952,6 +952,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         final timelineSections = sortedTimelineItems.isEmpty
             ? const <HomeTimelineSection>[]
             : buildTimelineSections(sortedTimelineItems);
+        final compactDensity = store.display.compact;
 
         final headerBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1351,7 +1352,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ),
               ),
             if (sortedTimelineItems.isNotEmpty && recoveryScope == null)
-              const SizedBox(height: 12),
+              SizedBox(height: compactDensity ? 6 : 12),
           ],
         );
 
@@ -1591,7 +1592,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               children: [
                 dayHeading(
                   section.heading!,
-                  top: sectionIndex == 0 ? 8 : 18,
+                  top: compactDensity
+                      ? (sectionIndex == 0 ? 4 : 10)
+                      : (sectionIndex == 0 ? 8 : 18),
+                  bottom: compactDensity ? 4 : 8,
                   tone: section.tone,
                   badge: section.badge,
                 ),
@@ -1864,6 +1868,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   Widget dayHeading(
     String label, {
     double top = 12,
+    double bottom = 8,
     HomeDayHeadingTone tone = HomeDayHeadingTone.normal,
     String? badge,
   }) {
@@ -1900,7 +1905,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             style: baseStyle,
           );
     return Padding(
-      padding: EdgeInsets.only(top: top, bottom: 8, left: 2),
+      padding: EdgeInsets.only(top: top, bottom: bottom, left: 2),
       child: Row(
         children: [
           Flexible(child: labelWidget),

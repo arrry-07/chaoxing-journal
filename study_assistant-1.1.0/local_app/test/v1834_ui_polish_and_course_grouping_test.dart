@@ -41,6 +41,7 @@ import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
+import 'package:study_assistant_mobile/src/services/daily_summary.dart';
 import 'package:study_assistant_mobile/src/services/home_course_filter.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
 import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
@@ -120,6 +121,14 @@ class _NoopNotif extends LocalNotificationService {
     List<Assignment> assignments, {
     List<int>? offsetsMinutes,
   }) async {}
+  @override
+  Future<ReminderHealth> inspectHealth() async => const ReminderHealth(
+        notifications: true,
+        assignmentChannel: ReminderChannelHealth(ReminderChannelStatus.enabled),
+        manualChannel: ReminderChannelHealth(ReminderChannelStatus.enabled),
+        summaryChannel: ReminderChannelHealth(ReminderChannelStatus.enabled),
+        scheduleRecoveryPending: false,
+      );
 }
 
 class _NoopWidget extends WidgetSnapshotService {
@@ -916,7 +925,7 @@ void main() {
     });
 
     test(
-        'deadline_channel_v2_auto_migrated_v1 is account-scoped so secondary legacy accounts still migrate to v2',
+        'deadline_channel_v3_auto_migrated_v1 is account-scoped so secondary legacy accounts still migrate to v3',
         () async {
       SharedPreferences.setMockInitialValues({
         'auto_sync_interval_minutes': 0,
@@ -939,15 +948,15 @@ void main() {
       await storeA.restoreSession();
       expect(
         storeA.activeDeadlineChannelId,
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
       expect(
         prefs.getBool(
-            LocalAssignmentRepository.deadlineChannelV2AutoMigratedKey),
+            LocalAssignmentRepository.deadlineChannelV3AutoMigratedKey),
         isTrue,
       );
 
-      // Switching back to Account B must isolate the marker and migrate B from v1 -> v2.
+      // Switching back to Account B must isolate the marker and migrate B from v1 -> v3.
       final storeB = _FakeStore(
         session: _Session('student-b'),
         repository: repo,
@@ -956,11 +965,11 @@ void main() {
       await storeB.restoreSession();
       expect(
         storeB.activeDeadlineChannelId,
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
       expect(
         await repo.loadDeadlineChannelId('student-b'),
-        LocalNotificationService.assignmentV2Channel,
+        LocalNotificationService.assignmentV3Channel,
       );
     });
 
@@ -1280,9 +1289,9 @@ void main() {
       expect(clzEntry.source, CourseTermSource.clazzName);
 
       final tmEntry = catalog.entryFor(timeOnlyPast.key)!;
-      expect(tmEntry.term, const AcademicTerm(2024, AcademicSemester.fall));
-      expect(tmEntry.source, CourseTermSource.courseTime);
-      expect(tmEntry.state, CourseCatalogState.archived);
+      expect(tmEntry.term, isNull);
+      expect(tmEntry.source, CourseTermSource.ungrouped);
+      expect(tmEntry.state, CourseCatalogState.active);
 
       final ungEntry = catalog.entryFor(ungroupedGradeClass.key)!;
       expect(ungEntry.isUngrouped, isTrue);
