@@ -98,10 +98,11 @@ jobs:
         run: flutter pub get --enforce-lockfile
       - name: Check release metadata and changed Dart formatting
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/dev ]]; then
-            python3 tool/check_release_metadata.py --allow-dev
+          if [[ "$GITHUB_REF_TYPE" == "tag" || "$GITHUB_REF" == refs/tags/* ]]; then
+            tag_name="${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}"
+            python3 tool/check_release_metadata.py --tag "$tag_name"
           else
-            python3 tool/check_release_metadata.py
+            python3 tool/check_release_metadata.py --allow-dev
           fi
           python3 tool/check_changed_format.py
       - name: Check repo safety, scripts and L0 doc budget

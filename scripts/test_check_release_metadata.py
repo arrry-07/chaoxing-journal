@@ -20,12 +20,18 @@ REAL_METADATA = (
 )
 
 
-def _make_repo(raw_version: str, *, newline: str = "\n") -> tuple[Path, Path]:
+def _make_repo(
+    raw_version: str,
+    *,
+    formal_version: str | None = None,
+    newline: str = "\n",
+) -> tuple[Path, Path]:
     repo = Path(tempfile.mkdtemp(prefix="release-meta-"))
     app = repo / "study_assistant-1.1.0" / "local_app"
     (app / "tool").mkdir(parents=True)
     (app / "lib" / "src" / "app").mkdir(parents=True)
     name, code = raw_version.split("+")
+    formal_name, formal_code = (formal_version or raw_version).split("+")
     files = {
         app / "pubspec.yaml": (
             f"name: study_assistant_mobile{newline}version: {raw_version}{newline}"
@@ -36,10 +42,10 @@ def _make_repo(raw_version: str, *, newline: str = "\n") -> tuple[Path, Path]:
             + f"  static const code = {code};" + newline
             + "}" + newline
         ),
-        repo / "CHANGELOG.md": f"## {name}（{code}）{newline}",
-        repo / "README.md": f"当前正式包为 {name}（{code}）{newline}",
+        repo / "CHANGELOG.md": f"## {formal_name}（{formal_code}）{newline}",
+        repo / "README.md": f"当前正式包为 {formal_name}（{formal_code}）{newline}",
         repo / "docs" / "guides" / "安装与使用.md": (
-            f"当前正式版本为 `{name}+{code}`{newline}"
+            f"当前正式版本为 `{formal_name}+{formal_code}`{newline}"
         ),
     }
     for path, text in files.items():
@@ -65,8 +71,18 @@ class ReleaseMetadataTests(unittest.TestCase):
         for path in self.temp_dirs:
             shutil.rmtree(path, ignore_errors=True)
 
-    def _repo(self, version: str, *, newline: str = "\n") -> Path:
-        repo, script = _make_repo(version, newline=newline)
+    def _repo(
+        self,
+        version: str,
+        *,
+        formal_version: str | None = None,
+        newline: str = "\n",
+    ) -> Path:
+        repo, script = _make_repo(
+            version,
+            formal_version=formal_version,
+            newline=newline,
+        )
         self.temp_dirs.append(repo)
         return script
 
@@ -113,6 +129,55 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_crlf_pubspec_is_accepted(self) -> None:
         result = _run(self._repo("1.90.0+123", newline="\r\n"))
         self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_dev_version_with_allow_dev_passes_when_formal_docs_stay_on_last_release(self) -> None:
+        script = self._repo("1.92.1+133", formal_version="1.92.0+132")
+        allowed = _run(script, "--allow-dev")
+        self.assertEqual(0, allowed.returncode, allowed.stderr)
+        self.assertIn("1.92.1+133", allowed.stdout)
+
+        strict = _run(script)
+        self.assertNotEqual(0, strict.returncode)
+
+    def test_formal_zero_patch_requires_docs_even_with_allow_dev(self) -> None:
+        script = self._repo("1.93.0+134", formal_version="1.92.0+132")
+        result = _run(script, "--allow-dev")
+        self.assertNotEqual(0, result.returncode)
+
+    def test_tag_option_validates_tag_identity_and_strict_formal_docs(self) -> None:
+        formal_script = self._repo("1.92.0+132")
+        ok = _run(formal_script, "--tag", "v1.92.0")
+        self.assertEqual(0, ok.returncode, ok.stderr)
+        self.assertIn("1.92.0+132", ok.stdout)
+
+        mismatch = _run(formal_script, "--tag", "v1.93.0")
+        self.assertEqual(1, mismatch.returncode)
+        self.assertIn("Tag mismatch", mismatch.stderr)
+
+        unfrozen_hotfix = self._repo("1.92.1+133", formal_version="1.92.0+132")
+        strict_fail = _run(unfrozen_hotfix, "--tag", "v1.92.1")
+        self.assertNotEqual(0, strict_fail.returncode)
+
+        frozen_hotfix = self._repo("1.92.1+133")
+        strict_ok = _run(frozen_hotfix, "--tag", "v1.92.1")
+        self.assertEqual(0, strict_ok.returncode, strict_ok.stderr)
+
+        conflict = _run(frozen_hotfix, "--tag", "v1.92.1", "--allow-dev")
+        self.assertNotEqual(0, conflict.returncode)
+
+    def test_flutter_checks_workflow_metadata_gate_contract(self) -> None:
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github"
+            / "workflows"
+            / "flutter-checks.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("python3 tool/check_release_metadata.py --tag", workflow)
+        self.assertIn("python3 tool/check_release_metadata.py --allow-dev", workflow)
+        self.assertNotIn(
+            'GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/dev',
+            workflow,
+        )
 
 
 if __name__ == "__main__":
