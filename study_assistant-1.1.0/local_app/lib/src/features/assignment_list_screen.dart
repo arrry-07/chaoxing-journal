@@ -2290,8 +2290,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     return const SizedBox.shrink();
                   }
                   final offset = _scrollOffset.value;
+                  final actualOffset = _bubbleScrollOffset.value;
+                  final anchor = _stageAnchor.value;
+                  final fallbackBottomAtZero =
+                      math.max(114.0, 14.0 + anchor.bottomY + 58.0);
+                  final statusBottom =
+                      (_syncStatusBottomAtZero.value ?? fallbackBottomAtZero) -
+                          actualOffset;
+                  final sliverVisible = showSliverBuddy && offset >= 30.6;
                   final sliverShowing =
-                      showSliverBuddy && (bubble.fromSliver || offset >= 36.0);
+                      sliverVisible && (bubble.fromSliver || offset >= 54.0);
                   final screenWidth = MediaQuery.sizeOf(context).width;
                   final double top;
                   final double minLeft;
@@ -2328,10 +2336,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       minLeft + 13.0,
                       math.max(minLeft + 13.0, safeRight),
                     );
-                    top = 50.0;
+                    top = math.max(50.0, statusBottom + 2.0);
                   } else {
-                    final actualOffset = _bubbleScrollOffset.value;
-                    final anchor = _stageAnchor.value;
                     minLeft = 16.0;
                     safeRight = 16.0 + anchor.safeWidth;
                     maxWidth = math.min(
@@ -2339,11 +2345,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       math.max(36.0, anchor.safeWidth),
                     );
                     anchorX = 16.0 + anchor.centerX;
-                    final fallbackBottomAtZero =
-                        math.max(114.0, 14.0 + anchor.bottomY + 58.0);
-                    final statusBottom = (_syncStatusBottomAtZero.value ??
-                            fallbackBottomAtZero) -
-                        actualOffset;
                     final stageBottom = 14.0 - actualOffset + anchor.bottomY;
                     top = math.max(
                       8.0,

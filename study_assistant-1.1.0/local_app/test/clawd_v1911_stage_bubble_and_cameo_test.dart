@@ -1441,7 +1441,13 @@ void main() {
         JournalPixelBuddyPose.petSquint,
       );
 
-      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(
+        tester.widget<JournalPixelBuddy>(buddyFinder).poseOverride,
+        JournalPixelBuddyPose.petSquint,
+      );
+
+      await tester.pump(const Duration(milliseconds: 100));
       expect(
         tester.widget<JournalPixelBuddy>(buddyFinder).poseOverride,
         JournalPixelBuddyPose.normal,
@@ -1506,6 +1512,44 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('clawd-speech-bubble')));
       await tester.pumpAndSettle();
 
+      // Home sliver tap in transition band (~34dp) and immediate scroll back to top both keep bubble clear of home-sync-status.
+      homeScroll.jumpTo(34.0);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
+      await tester.pump();
+      final sliverTransitionBubble =
+          tester.getRect(find.byKey(const ValueKey('clawd-speech-bubble')));
+      final sliverTransitionStatus =
+          tester.getRect(find.byKey(const ValueKey('home-sync-status')));
+      expect(
+        sliverTransitionBubble.overlaps(sliverTransitionStatus),
+        isFalse,
+        reason:
+            'sliver transition bubble=$sliverTransitionBubble overlaps status=$sliverTransitionStatus',
+      );
+      expect(
+        sliverTransitionBubble.top,
+        greaterThanOrEqualTo(sliverTransitionStatus.bottom),
+      );
+      homeScroll.jumpTo(0.0);
+      await tester.pump();
+      final backToTopBubble =
+          tester.getRect(find.byKey(const ValueKey('clawd-speech-bubble')));
+      final backToTopStatus =
+          tester.getRect(find.byKey(const ValueKey('home-sync-status')));
+      expect(
+        backToTopBubble.overlaps(backToTopStatus),
+        isFalse,
+        reason:
+            'sliver-to-top bubble=$backToTopBubble overlaps status=$backToTopStatus',
+      );
+      expect(
+        backToTopBubble.top,
+        greaterThanOrEqualTo(backToTopStatus.bottom),
+      );
+      await tester.tap(find.byKey(const ValueKey('clawd-speech-bubble')));
+      await tester.pumpAndSettle();
+
       Future<void> verifyCameoAndTitleBounds(
         String label, {
         required Finder titleFinder,
@@ -1516,11 +1560,20 @@ void main() {
         final bubbleRect = tester.getRect(bubbleFinder);
         final titleRect = tester.getRect(titleFinder);
         final cameoRect = tester.getRect(cameoFinder);
+        final anchorFloor = cameoRect.bottom > titleRect.bottom
+            ? cameoRect.bottom
+            : titleRect.bottom;
         expect(
           bubbleRect.top,
           greaterThanOrEqualTo(cameoRect.bottom + 2.0),
           reason:
               '$label: bubble top=${bubbleRect.top} < cameo bottom=${cameoRect.bottom}',
+        );
+        expect(
+          bubbleRect.top,
+          lessThanOrEqualTo(anchorFloor + 12.0),
+          reason:
+              '$label: bubble top=${bubbleRect.top} drifted too far below anchorFloor=$anchorFloor',
         );
         expect(
           bubbleRect.overlaps(titleRect),
