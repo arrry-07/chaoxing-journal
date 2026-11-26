@@ -407,8 +407,11 @@ class ClawdCompanionController extends ChangeNotifier {
     _syncTimer = Timer(syncFrameInterval, _onSyncTimerTick);
   }
 
+  bool get onPrimaryTab => _onPrimaryTab;
+
   void _reconcileProactiveSchedule() {
     final canSchedule = _onPrimaryTab &&
+        _lastVisitedTab == ClawdPrimaryTab.home &&
         _canInteract &&
         !_reducedMotion &&
         _activeBubble == null &&
@@ -644,7 +647,10 @@ class ClawdCompanionController extends ChangeNotifier {
         _transientPose != ClawdTransientPose.none) {
       return false;
     }
-    if (snapshot.tab != ClawdPrimaryTab.home) return false;
+    if (_lastVisitedTab != ClawdPrimaryTab.home ||
+        snapshot.tab != ClawdPrimaryTab.home) {
+      return false;
+    }
 
     final current = (now ?? _clock()).toLocal();
     bool cooledDown(ClawdProactiveBucket bucket) {

@@ -262,9 +262,20 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     );
   }
 
+  bool _canCheerOnCurrentRoute(ClawdCompanionController controller) {
+    if (identical(controller, _localClawdController)) return true;
+    final routeCurrent = ModalRoute.of(context)?.isCurrent ?? _isCurrentRoute;
+    return routeCurrent &&
+        controller.onPrimaryTab &&
+        controller.lastVisitedTab == ClawdPrimaryTab.home;
+  }
+
   void _triggerBuddyCheer() {
     if (!mounted || _reducedMotion) return;
-    _ensureClawdController().triggerCheer();
+    final controller = _ensureClawdController();
+    if (_canCheerOnCurrentRoute(controller)) {
+      controller.triggerCheer();
+    }
   }
 
   void _clearCompletingManual({String? entryId, bool notify = false}) {
@@ -318,7 +329,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       _completingManualIds.add(entryId);
     });
     final controller = _ensureClawdController();
-    if (identical(controller, _localClawdController) || _isCurrentRoute) {
+    if (_canCheerOnCurrentRoute(controller)) {
       controller.triggerCheer();
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
