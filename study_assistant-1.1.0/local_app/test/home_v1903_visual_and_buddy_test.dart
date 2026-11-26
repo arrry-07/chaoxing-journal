@@ -998,6 +998,114 @@ void main() {
       expect(
           tester.widget<JournalPixelBuddy>(titleBuddyFinder).celebratePulse, 3);
     });
+
+    testWidgets(
+        'syncErrorOrPending and busy sync allowTapCombo:false across title & sliver buddies and reset combo cleanly on recovery',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final store = await _createStore(
+        assignments: [
+          _work(
+            'today-1',
+            title: '今日急单',
+            due: now.add(const Duration(hours: 4)),
+            syncedAt: now,
+          ),
+          for (var i = 0; i < 12; i++)
+            _work(
+              'scroll-$i',
+              title: '长列表作业 $i',
+              due: now.add(Duration(days: 2 + i, hours: 3)),
+              syncedAt: now,
+            ),
+        ],
+        clock: () => now,
+        initialReport:
+            SyncReport(phase: SyncPhase.success, lastDataSuccessAt: now),
+      );
+      addTearDown(store.dispose);
+
+      await _pumpHome(tester, store, now: now);
+
+      final titleBuddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
+      expect(tester.widget<JournalPixelBuddy>(titleBuddyFinder).allowTapCombo,
+          isTrue);
+
+      // Build combo to 2 in healthy state.
+      final combo2Whisper = journalBuddyTapWhisper(
+        dueToday: 1,
+        dueIn3Days: 2,
+        completedToday: 0,
+        tapCount: 1,
+        comboCount: 2,
+      );
+      await tester.tap(titleBuddyFinder);
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.tap(titleBuddyFinder);
+      await tester.pump();
+      expect(find.text(combo2Whisper), findsOneWidget);
+
+      // Transition into syncErrorOrPending (authExpired -> failed) -> allowTapCombo:false and combo cleared.
+      store.syncReport = const SyncReport(
+        phase: SyncPhase.failed,
+        issues: [SyncIssue(SyncIssueKind.authExpired, 'expired')],
+      );
+      store.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(tester.widget<JournalPixelBuddy>(titleBuddyFinder).allowTapCombo,
+          isFalse);
+      expect(find.text(combo2Whisper), findsNothing);
+
+      // Scroll down to verify sliver buddy also gets allowTapCombo:false.
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -360));
+      await tester.pumpAndSettle();
+      final sliverBuddyFinder =
+          find.byKey(const ValueKey('home-sliver-pixel-buddy'));
+      expect(tester.widget<JournalPixelBuddy>(sliverBuddyFinder).allowTapCombo,
+          isFalse);
+
+      // Tap 3 times during syncErrorOrPending -> no whisper, no combo accumulation.
+      await tester.tap(sliverBuddyFinder);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(sliverBuddyFinder);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(sliverBuddyFinder);
+      await tester.pumpAndSettle();
+      expect(
+          find.byKey(const ValueKey('home-sliver-sync-status')), findsNothing);
+
+      // Recover to SyncPhase.success -> allowTapCombo returns to true and first tap emits combo 1 phrase.
+      store.syncReport =
+          SyncReport(phase: SyncPhase.success, lastDataSuccessAt: now);
+      store.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(tester.widget<JournalPixelBuddy>(sliverBuddyFinder).allowTapCombo,
+          isTrue);
+
+      await tester.tap(sliverBuddyFinder);
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('home-sliver-sync-status')),
+          matching: find.text(
+            journalBuddyTapWhisper(
+              dueToday: 1,
+              dueIn3Days: 2,
+              completedToday: 0,
+              tapCount: 2,
+              comboCount: 1,
+            ),
+          ),
+        ),
+        findsOneWidget,
+      );
+      await tester.pump(const Duration(milliseconds: 2050));
+      await tester.pumpAndSettle();
+    });
   });
 
   group(

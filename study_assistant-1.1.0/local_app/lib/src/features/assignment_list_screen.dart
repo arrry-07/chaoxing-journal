@@ -140,6 +140,17 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       store.isLoading ||
       store.syncReport.phase == SyncPhase.running;
 
+  bool get _hasStoreSyncErrorOrPending {
+    if (_isBusy) return false;
+    final phase = store.syncReport.phase;
+    if (phase == SyncPhase.failed || phase == SyncPhase.partial) return true;
+    return phase == SyncPhase.success &&
+        (store.hasNonQuietServiceWarning ||
+            store.recoveryWarning != null ||
+            store.operationError != null ||
+            store.serviceWarnings.any((w) => w.contains('小组件')));
+  }
+
   void _clearBuddyCombo() {
     _buddyComboResetTimer?.cancel();
     _buddyComboResetTimer = null;
@@ -273,7 +284,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
   void _onStoreChanged() {
     _checkFeedbackAccount();
-    if (_isBusy || !store.display.showPixelBuddy) {
+    if (_isBusy ||
+        !store.display.showPixelBuddy ||
+        _hasStoreSyncErrorOrPending) {
       _clearBuddyWhisper();
       _clearBuddyCombo();
     }
@@ -1222,16 +1235,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 sync.action == HomeSyncAction.login ||
                 sync.action == HomeSyncAction.verify ||
                 sync.action == HomeSyncAction.settings);
+        if (syncErrorOrPending || !showPixelBuddy) {
+          _clearBuddyWhisper();
+          _clearBuddyCombo();
+        }
         final syncBusyWithBuddy = busy && showPixelBuddy;
         final activeWhisper = (!busy && !syncErrorOrPending && showPixelBuddy)
             ? _buddyWhisper
             : null;
 
         void onBuddyTap() {
-          _buddyTapCount++;
           if (busy || syncErrorOrPending || !_appResumed || !_tickerEnabled) {
+            _clearBuddyCombo();
             return;
           }
+          _buddyTapCount++;
           _buddyWhisperTimer?.cancel();
           final int effectiveCombo;
           if (_reducedMotion) {
@@ -1390,6 +1408,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                               syncTickListenable: _syncSpinnerTick,
                               displayPrefs: store.display,
                               celebratePulse: _buddyCelebratePulse,
+                              allowTapCombo: !busy && !syncErrorOrPending,
                             ),
                           ],
                         )
@@ -2242,6 +2261,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                           syncTickListenable: _syncSpinnerTick,
                           displayPrefs: store.display,
                           celebratePulse: _buddyCelebratePulse,
+                          allowTapCombo: !busy && !syncErrorOrPending,
                         )
                       : null,
                   statusContent: sliverStatusContent,

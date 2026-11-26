@@ -407,15 +407,36 @@ void main() {
       );
     }
 
-    for (final entry in <({ThemeData theme, double expectedBaseAlpha})>[
-      (theme: StudyAssistantTheme.light, expectedBaseAlpha: 0.84),
-      (theme: StudyAssistantTheme.dark, expectedBaseAlpha: 0.86),
+    for (final entry in <({
+      ThemeData theme,
+      double topAlpha,
+      double midAlpha,
+      double baseAlpha,
+    })>[
+      (
+        theme: StudyAssistantTheme.light,
+        topAlpha: 0.95,
+        midAlpha: 0.90,
+        baseAlpha: 0.84,
+      ),
+      (
+        theme: StudyAssistantTheme.dark,
+        topAlpha: 0.95,
+        midAlpha: 0.91,
+        baseAlpha: 0.86,
+      ),
     ]) {
       await pumpHeader(entry.theme);
       await t.pumpAndSettle();
 
       final expectedPaper = entry.theme.extension<JournalPalette>()!.paper;
-      expect(find.byType(BackdropFilter), findsOneWidget);
+      final backdropFinder = find.byType(BackdropFilter);
+      expect(backdropFinder, findsOneWidget);
+      final backdrop = t.widget<BackdropFilter>(backdropFinder);
+      expect(
+        backdrop.filter,
+        ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
+      );
 
       final featherFinder =
           find.byKey(const ValueKey('journal-sliver-header-feather'));
@@ -436,14 +457,23 @@ void main() {
       final featherGradient =
           (featherBox.decoration as BoxDecoration).gradient! as LinearGradient;
       expect(featherGradient.stops, [0.0, 0.22, 0.50, 0.78, 1.0]);
+      final expectedFeatherAlphas = [
+        entry.baseAlpha,
+        entry.baseAlpha * 0.78,
+        entry.baseAlpha * 0.42,
+        entry.baseAlpha * 0.14,
+        0.0,
+      ];
       expect(featherGradient.colors.length, 5);
-      expect(featherGradient.colors.first.a,
-          closeTo(entry.expectedBaseAlpha, 1e-3));
-      expect(featherGradient.colors.last.a, closeTo(0.0, 1e-6));
-      expect(
-        featherGradient.colors.first.toARGB32() & 0x00FFFFFF,
-        expectedPaper.toARGB32() & 0x00FFFFFF,
-      );
+      for (var i = 0; i < 5; i++) {
+        expect(featherGradient.colors[i].a,
+            closeTo(expectedFeatherAlphas[i], 1e-3),
+            reason: 'feather stop[$i] alpha mismatch');
+        expect(
+          featherGradient.colors[i].toARGB32() & 0x00FFFFFF,
+          expectedPaper.toARGB32() & 0x00FFFFFF,
+        );
+      }
 
       final bodyContainers = t
           .widgetList<Container>(
@@ -454,24 +484,99 @@ void main() {
           )
           .where((c) => c.decoration is BoxDecoration)
           .toList();
-      expect(bodyContainers, isNotEmpty);
-      for (final container in bodyContainers) {
-        final dec = container.decoration! as BoxDecoration;
-        expect(dec.border, isNull);
-      }
+      expect(bodyContainers.length, 1);
+      final bodyDec = bodyContainers.single.decoration! as BoxDecoration;
+      expect(bodyDec.border, isNull);
+      final bodyGradient = bodyDec.gradient! as LinearGradient;
+      expect(bodyGradient.stops, [0.0, 0.68, 1.0]);
+      expect(bodyGradient.colors.length, 3);
+      expect(bodyGradient.colors[0].a, closeTo(entry.topAlpha, 1e-3));
+      expect(bodyGradient.colors[1].a, closeTo(entry.midAlpha, 1e-3));
+      expect(bodyGradient.colors[2].a, closeTo(entry.baseAlpha, 1e-3));
     }
 
-    // Reduced motion skips BackdropFilter but keeps 5-stop feather skirt.
+    // Reduced motion skips BackdropFilter, uses 0.97/0.93/0.90 body alphas, and keeps 5-stop feather skirt.
     await pumpHeader(StudyAssistantTheme.light, disableAnimations: true);
     await t.pumpAndSettle();
     expect(find.byType(BackdropFilter), findsNothing);
+    final reducedBodyContainer = t
+        .widgetList<Container>(
+          find.descendant(
+            of: find.byType(JournalSliverHeader),
+            matching: find.byType(Container),
+          ),
+        )
+        .where((c) => c.decoration is BoxDecoration)
+        .single;
+    final reducedBodyGradient =
+        (reducedBodyContainer.decoration! as BoxDecoration).gradient!
+            as LinearGradient;
+    expect(reducedBodyGradient.stops, [0.0, 0.68, 1.0]);
+    expect(reducedBodyGradient.colors[0].a, closeTo(0.97, 1e-3));
+    expect(reducedBodyGradient.colors[1].a, closeTo(0.93, 1e-3));
+    expect(reducedBodyGradient.colors[2].a, closeTo(0.90, 1e-3));
+
     final reducedFeather = t.widget<DecoratedBox>(
       find.byKey(const ValueKey('journal-sliver-header-feather')),
     );
     final reducedGradient = (reducedFeather.decoration as BoxDecoration)
         .gradient! as LinearGradient;
-    expect(reducedGradient.colors.first.a, closeTo(0.90, 1e-3));
-    expect(reducedGradient.colors.last.a, closeTo(0.0, 1e-6));
+    expect(reducedGradient.stops, [0.0, 0.22, 0.50, 0.78, 1.0]);
+    final expectedReducedAlphas = [
+      0.90,
+      0.90 * 0.78,
+      0.90 * 0.42,
+      0.90 * 0.14,
+      0.0,
+    ];
+    for (var i = 0; i < 5; i++) {
+      expect(
+          reducedGradient.colors[i].a, closeTo(expectedReducedAlphas[i], 1e-3));
+    }
+
+    // Real Stack hit-test: tapping button directly under 18dp feather skirt passes through.
+    var buttonTapped = false;
+    await t.pumpWidget(
+      MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: Stack(
+            children: [
+              Positioned(
+                top: 52.0,
+                left: 0,
+                right: 0,
+                height: 24.0,
+                child: TextButton(
+                  key: const ValueKey('under-feather-button'),
+                  onPressed: () => buttonTapped = true,
+                  child: const Text('under-feather'),
+                ),
+              ),
+              const Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: JournalSliverHeader(
+                  title: '课业手记',
+                  scrollOffset: 72.0,
+                  actions: [Icon(Icons.refresh)],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    final featherRect =
+        t.getRect(find.byKey(const ValueKey('journal-sliver-header-feather')));
+    final buttonRect =
+        t.getRect(find.byKey(const ValueKey('under-feather-button')));
+    expect(featherRect.overlaps(buttonRect), isTrue);
+    await t.tapAt(featherRect.center);
+    await t.pump();
+    expect(buttonTapped, isTrue);
   });
 
   testWidgets(
@@ -724,5 +829,341 @@ void main() {
     // Top-right Row 0..1 has restrained sparkle.
     expect(opaqueRunsOnRow(allClearImg!, 6), isNotEmpty);
     expect(opaqueRunsOnRow(allClearImg, 10), isNotEmpty);
+  });
+
+  testWidgets(
+      'syncing mood and allowTapCombo:false isolate combo/particles and reset to tap 1 on recovery',
+      (t) async {
+    Future<({Uint8List rgba, int width, int height})> rasterize(
+      CustomPainter painter,
+      Size logicalSize,
+    ) async {
+      final w = logicalSize.width.round();
+      final h = logicalSize.height.round();
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      painter.paint(canvas, logicalSize);
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(w, h);
+      final byteData =
+          await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      image.dispose();
+      picture.dispose();
+      return (rgba: byteData!.buffer.asUint8List(), width: w, height: h);
+    }
+
+    int countOpaquePixelsInRect(
+      ({Uint8List rgba, int width, int height}) img,
+      Rect rect,
+    ) {
+      var count = 0;
+      for (var y = rect.top.toInt(); y < rect.bottom.toInt(); y++) {
+        for (var x = rect.left.toInt(); x < rect.right.toInt(); x++) {
+          if (img.rgba[(y * img.width + x) * 4 + 3] > 0) {
+            count++;
+          }
+        }
+      }
+      return count;
+    }
+
+    InteractionFeedback.debugReset();
+    addTearDown(InteractionFeedback.debugReset);
+    var fakeNow = DateTime(2026, 11, 26, 10, 0);
+    InteractionFeedback.now = () => fakeNow;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    final messenger = t.binding.defaultBinaryMessenger;
+    const soundChannel = MethodChannel('study_assistant/interaction_sound');
+    final feedbackKinds = <String>[];
+    messenger.setMockMethodCallHandler(soundChannel, (call) async {
+      feedbackKinds.add((call.arguments as Map)['kind'] as String);
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(soundChannel, null));
+
+    try {
+      var mood = JournalPixelBuddyMood.idle;
+      var allowTapCombo = true;
+      var taps = 0;
+      late StateSetter updateWidget;
+
+      await t.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: Scaffold(
+            body: Center(
+              child: StatefulBuilder(
+                builder: (context, setState) {
+                  updateWidget = setState;
+                  return JournalPixelBuddy(
+                    mood: mood,
+                    allowTapCombo: allowTapCombo,
+                    size: 56,
+                    displayPrefs: const DisplayPreferences(),
+                    onTap: () => taps++,
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      final buddyFinder = find.byType(JournalPixelBuddy);
+      CustomPainter currentPainter() => t
+          .widget<CustomPaint>(
+            find.descendant(
+              of: buddyFinder,
+              matching: find.byType(CustomPaint),
+            ),
+          )
+          .painter!;
+
+      // Build combo to 2 in idle, then transition into syncing.
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 50));
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 50));
+      updateWidget(() => mood = JournalPixelBuddyMood.syncing);
+      await t.pump();
+
+      // Tap 3 times during syncing: onTap & feedback still fire, zero particles/combo.
+      final tapsBeforeSyncing = taps;
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 55));
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 55));
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 115));
+      expect(taps - tapsBeforeSyncing, 3);
+      expect(feedbackKinds.length, 5);
+
+      final syncingImg = await t.runAsync(
+        () => rasterize(currentPainter(), const Size(56, 56)),
+      );
+      expect(
+        countOpaquePixelsInRect(syncingImg!, const Rect.fromLTWH(0, 0, 56, 12)),
+        0,
+        reason: 'syncing mood must never emit floating sky particles',
+      );
+
+      // Exit syncing -> next tap must start fresh from tap 1 (tapWave: no particles, right arm raised).
+      updateWidget(() => mood = JournalPixelBuddyMood.idle);
+      await t.pump();
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 120));
+      final recoveredImg = await t.runAsync(
+        () => rasterize(currentPainter(), const Size(56, 56)),
+      );
+      expect(
+        countOpaquePixelsInRect(
+            recoveredImg!, const Rect.fromLTWH(0, 0, 56, 12)),
+        0,
+        reason: 'first tap after syncing must be tap 1 tapWave (no star/heart)',
+      );
+      await t.pumpAndSettle();
+
+      // allowTapCombo: false clears combo and ignores tap combo/particles while preserving onTap.
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 50));
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 50));
+      updateWidget(() => allowTapCombo = false);
+      await t.pumpAndSettle();
+
+      final tapsBeforeDisabled = taps;
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 50));
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 115));
+      expect(taps - tapsBeforeDisabled, 2);
+      final disabledImg = await t.runAsync(
+        () => rasterize(currentPainter(), const Size(56, 56)),
+      );
+      expect(
+        countOpaquePixelsInRect(
+            disabledImg!, const Rect.fromLTWH(0, 0, 56, 16)),
+        0,
+        reason: 'allowTapCombo:false must not render tap combo particles',
+      );
+
+      // Re-enable allowTapCombo -> first tap starts from tap 1 (no star/heart particles).
+      updateWidget(() => allowTapCombo = true);
+      await t.pump();
+      fakeNow = fakeNow.add(const Duration(milliseconds: 100));
+      await t.tap(buddyFinder);
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 120));
+      final reenabledImg = await t.runAsync(
+        () => rasterize(currentPainter(), const Size(56, 56)),
+      );
+      expect(
+        countOpaquePixelsInRect(
+            reenabledImg!, const Rect.fromLTWH(0, 0, 56, 12)),
+        0,
+        reason: 'first tap after allowTapCombo recovery must be tap 1 tapWave',
+      );
+      await t.pumpAndSettle();
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets(
+      'tapDoubleStar and tapDoubleHeart peak frames (t=0.25) keep particles strictly above Clawd forehead and eyes',
+      (t) async {
+    Future<({Uint8List rgba, int width, int height})> rasterize(
+      CustomPainter painter,
+      Size logicalSize,
+    ) async {
+      final w = logicalSize.width.round();
+      final h = logicalSize.height.round();
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      painter.paint(canvas, logicalSize);
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(w, h);
+      final byteData =
+          await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      image.dispose();
+      picture.dispose();
+      return (rgba: byteData!.buffer.asUint8List(), width: w, height: h);
+    }
+
+    int pixelArgb(
+      ({Uint8List rgba, int width, int height}) img,
+      int x,
+      int y,
+    ) {
+      final i = (y * img.width + x) * 4;
+      final r = img.rgba[i];
+      final g = img.rgba[i + 1];
+      final b = img.rgba[i + 2];
+      final a = img.rgba[i + 3];
+      return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    int countOpaqueInSky(
+      ({Uint8List rgba, int width, int height}) img, {
+      required int maxY,
+    }) {
+      var count = 0;
+      for (var y = 0; y < maxY; y++) {
+        for (var x = 0; x < img.width; x++) {
+          if (img.rgba[(y * img.width + x) * 4 + 3] > 0) {
+            count++;
+          }
+        }
+      }
+      return count;
+    }
+
+    void expectCleanForeheadAndEyes(
+      ({Uint8List rgba, int width, int height}) img, {
+      required String phase,
+    }) {
+      // At 56x56 @ 1x, cell=4, originY=4; at t=0.25 hopPx=-7 -> effectiveOriginY=-3.
+      // Clawd torso top edge (row 3) is at y=9: forehead cols 3..10 (x 12..44, y 9..13)
+      // must be pure highlight (#FFEDA083), and eyes (x 16..20 & 36..40, y 13..21)
+      // must be pure eye (#FF1F2328) with zero particle overlap.
+      for (var y = 9; y < 13; y++) {
+        for (var x = 12; x < 44; x++) {
+          expect(
+            pixelArgb(img, x, y),
+            0xFFEDA083,
+            reason: '$phase forehead pixel at ($x,$y) overwritten by particle',
+          );
+        }
+      }
+      for (var y = 13; y < 21; y++) {
+        for (final eyeXStart in [16, 36]) {
+          for (var x = eyeXStart; x < eyeXStart + 4; x++) {
+            expect(
+              pixelArgb(img, x, y),
+              0xFF1F2328,
+              reason: '$phase eye pixel at ($x,$y) overwritten by particle',
+            );
+          }
+        }
+      }
+    }
+
+    await t.pumpWidget(
+      MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: Center(
+            child: JournalPixelBuddy(
+              mood: JournalPixelBuddyMood.idle,
+              size: 56,
+              onTap: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    final buddyFinder = find.byType(JournalPixelBuddy);
+    CustomPainter currentPainter() => t
+        .widget<CustomPaint>(
+          find.descendant(
+            of: buddyFinder,
+            matching: find.byType(CustomPaint),
+          ),
+        )
+        .painter!;
+
+    // Tap 1 -> Tap 2 (tapDoubleStar, 460ms): start ticker via pump(), then advance 115ms -> t=0.25 peak frame.
+    await t.tap(buddyFinder);
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 50));
+    await t.tap(buddyFinder);
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 115));
+
+    final starPeakImg = await t.runAsync(
+      () => rasterize(currentPainter(), const Size(56, 56)),
+    );
+    expect(
+      countOpaqueInSky(starPeakImg!, maxY: 9),
+      greaterThan(0),
+      reason: 'tapDoubleStar t=0.25 must render star pixels above y=9',
+    );
+    expectCleanForeheadAndEyes(starPeakImg, phase: 'tapDoubleStar');
+
+    // Tap 3 (tapDoubleHeart, 480ms): start ticker via pump(), then advance 120ms -> t=0.25 peak frame.
+    await t.tap(buddyFinder);
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 120));
+
+    final heartPeakImg = await t.runAsync(
+      () => rasterize(currentPainter(), const Size(56, 56)),
+    );
+    expect(
+      countOpaqueInSky(heartPeakImg!, maxY: 9),
+      greaterThan(0),
+      reason: 'tapDoubleHeart t=0.25 must render heart pixels above y=9',
+    );
+    expectCleanForeheadAndEyes(heartPeakImg, phase: 'tapDoubleHeart');
+
+    await t.pumpAndSettle();
   });
 }

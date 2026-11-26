@@ -121,6 +121,7 @@ class JournalPixelBuddy extends StatefulWidget {
     this.syncTickListenable,
     this.displayPrefs,
     this.celebratePulse = 0,
+    this.allowTapCombo = true,
   });
 
   final JournalPixelBuddyMood mood;
@@ -130,6 +131,7 @@ class JournalPixelBuddy extends StatefulWidget {
   final ValueListenable<int>? syncTickListenable;
   final DisplayPreferences? displayPrefs;
   final int celebratePulse;
+  final bool allowTapCombo;
 
   @override
   State<JournalPixelBuddy> createState() => _JournalPixelBuddyState();
@@ -205,7 +207,11 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
         _internalSyncTick = 0;
       } else {
         _resetActionAndJump();
+        _clearTapCombo();
       }
+    }
+    if (!widget.allowTapCombo) {
+      _clearTapCombo();
     }
     final celebrated = widget.celebratePulse > oldWidget.celebratePulse;
     _reconcileTimers();
@@ -256,6 +262,12 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     _activeAction = _BuddyActionKind.none;
   }
 
+  void _clearTapCombo() {
+    _comboResetTimer?.cancel();
+    _comboResetTimer = null;
+    _tapComboCount = 0;
+  }
+
   void _reconcileTimers() {
     if (!mounted) return;
     if (!_isActive || _reducedMotion) {
@@ -265,9 +277,14 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
       return;
     }
 
+    if (!widget.allowTapCombo) {
+      _clearTapCombo();
+    }
+
     if (widget.mood == JournalPixelBuddyMood.syncing) {
       _idleTimer?.cancel();
       _idleTimer = null;
+      _clearTapCombo();
       if (widget.syncTickListenable == null) {
         _syncTimer ??= Timer.periodic(
           const Duration(milliseconds: 180),
@@ -380,7 +397,10 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     if (prefs != null) {
       JournalMotion.tap(prefs);
     }
-    if (_isActive && !_reducedMotion) {
+    if (_isActive &&
+        !_reducedMotion &&
+        widget.mood != JournalPixelBuddyMood.syncing &&
+        widget.allowTapCombo) {
       _comboResetTimer?.cancel();
       _tapComboCount++;
       _comboResetTimer = Timer(const Duration(milliseconds: 1200), () {
@@ -765,14 +785,19 @@ class _JournalPixelBuddyPainter extends CustomPainter {
     }
 
     // Rising & fading floating particles for combos, cheer, and allClear idle sparkle.
-    if (t > 0.0 && t < 1.0) {
+    if (mood != JournalPixelBuddyMood.syncing && t > 0.0 && t < 1.0) {
       final alpha = math.sin(math.pi * t).clamp(0.0, 1.0);
+      final maxParticleBottom = py(3) - math.max(1.0 / dpr, snap(cell * 0.25));
       if (actionKind == _BuddyActionKind.tapDoubleStar ||
           actionKind == _BuddyActionKind.cheer ||
           actionKind == _BuddyActionKind.idleAllClearStar) {
-        final floatY = snap(originY + (2.0 - 2.0 * t) * cell);
-        final floatX = snap(originX + 10.5 * cell);
         final sCell = math.max(1.0 / dpr, snap(cell * 0.72));
+        final starBottomY = math.min(
+          maxParticleBottom,
+          snap(effectiveOriginY + (2.75 - 1.4 * t) * cell),
+        );
+        final floatY = snap(starBottomY - 2 * sCell);
+        final floatX = snap(originX + 10.5 * cell);
         paint.color = accent.withValues(alpha: alpha);
         canvas.drawRect(
           Rect.fromLTWH(floatX, floatY, sCell, sCell),
@@ -791,8 +816,12 @@ class _JournalPixelBuddyPainter extends CustomPainter {
         );
       } else if (actionKind == _BuddyActionKind.tapDoubleHeart) {
         final sub = math.max(1.0 / dpr, snap(cell * 0.55));
+        final heartBottomY = math.min(
+          maxParticleBottom,
+          snap(effectiveOriginY + (2.75 - 1.4 * t) * cell),
+        );
         final baseX = snap(originX + 7.0 * cell - sub * 2.5);
-        final baseY = snap(originY + (2.0 - 2.1 * t) * cell - sub * 2.0);
+        final baseY = snap(heartBottomY - 4 * sub);
         paint.color = heartColor.withValues(alpha: alpha);
         const heartOffsets = <(int, int)>[
           (1, 0),
