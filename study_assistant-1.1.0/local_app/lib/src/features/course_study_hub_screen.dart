@@ -1019,60 +1019,22 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
   ) {
     return JournalGroupedCard(
       key: const ValueKey('notice-system-reminders-card'),
-      dividerIndent: 16,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: InkWell(
-                  key: const ValueKey('notice-system-reminders-toggle'),
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: () {
-                    JournalMotion.tap(widget.store.display);
-                    setState(() {
-                      _systemRemindersExpanded = !_systemRemindersExpanded;
-                    });
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.notifications_none_rounded,
-                          size: 19,
-                          color: journal.muted,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '系统提醒（${systemFiltered.length}）',
-                                style: journal.entryTitle,
-                              ),
-                              Text(
-                                '${systemUnreadCount > 0 ? '$systemUnreadCount 条未读 · ' : ''}已自动折叠，不计入通知未读徽标',
-                                style: journal.metadata,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(
-                          _systemRemindersExpanded
-                              ? Icons.expand_less_rounded
-                              : Icons.expand_more_rounded,
-                          color: journal.muted,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              if (systemUnreadCount > 0)
-                TextButton(
+        JournalExpansionTile(
+          toggleKey: const ValueKey('notice-system-reminders-toggle'),
+          expanded: _systemRemindersExpanded,
+          dividerIndent: 16,
+          leading: Icon(
+            Icons.notifications_none_rounded,
+            size: 19,
+            color: journal.muted,
+          ),
+          title: Text('系统提醒（${systemFiltered.length}）'),
+          subtitle: Text(
+            '${systemUnreadCount > 0 ? '$systemUnreadCount 条未读 · ' : ''}已自动折叠，不计入通知未读徽标',
+          ),
+          trailing: systemUnreadCount > 0
+              ? TextButton(
                   key: const ValueKey('notice-system-reminders-mark-read'),
                   onPressed: widget.store.isLoading
                       ? null
@@ -1082,13 +1044,19 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
                                 .map((n) => n.id),
                           ),
                   child: const Text('全部已读'),
-                ),
-            ],
-          ),
+                )
+              : null,
+          onExpansionChanged: (expanded) {
+            JournalMotion.tap(widget.store.display);
+            setState(() {
+              _systemRemindersExpanded = expanded;
+            });
+          },
+          children: [
+            for (final notice in systemFiltered)
+              _buildNoticeTile(context, notice, journal),
+          ],
         ),
-        if (_systemRemindersExpanded)
-          for (final notice in systemFiltered)
-            _buildNoticeTile(context, notice, journal),
       ],
     );
   }

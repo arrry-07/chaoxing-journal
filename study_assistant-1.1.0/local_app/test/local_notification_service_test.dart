@@ -314,10 +314,7 @@ void main() {
       );
 
       failChannelQuery = false;
-      SharedPreferences.setMockInitialValues({
-        'deadline_channel_install_default_v1':
-            LocalNotificationService.assignmentV3Channel,
-      });
+      SharedPreferences.setMockInitialValues({});
       messenger.setMockMethodCallHandler(permissions, (call) async {
         throw MissingPluginException('missing permissions in worker');
       });
@@ -449,6 +446,29 @@ void main() {
       expect(zeroResult.played, isFalse);
       expect(zeroResult.isNotificationVolumeZero, isTrue);
       expect(zeroResult.isPhoneMutedOrVibrate, isFalse);
+      expect(zeroResult.isDoNotDisturbActive, isFalse);
+
+      for (final dndFilter in ['none', 'alarms', 'priority']) {
+        messenger.setMockMethodCallHandler(permissions, (call) async {
+          if (call.method == 'previewNotificationChime') {
+            return {
+              'played': false,
+              'notificationStreamVolume': 5,
+              'notificationStreamMaxVolume': 7,
+              'notificationStreamMuted': false,
+              'ringerMode': 'normal',
+              'interruptionFilter': dndFilter,
+            };
+          }
+          return 35;
+        });
+        final dndResult =
+            await LocalNotificationService().previewNotificationChime();
+        expect(dndResult.supported, isTrue);
+        expect(dndResult.played, isFalse);
+        expect(dndResult.interruptionFilter, dndFilter);
+        expect(dndResult.isDoNotDisturbActive, isTrue);
+      }
 
       messenger.setMockMethodCallHandler(permissions, (call) async {
         if (call.method == 'previewNotificationChime') {

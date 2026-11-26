@@ -6,7 +6,21 @@ import 'package:flutter/services.dart';
 import '../models/display_preferences.dart';
 import '../models/sync_report.dart';
 
-enum InteractionSoundKind { tap, pin, unpin, syncDone, complete }
+enum InteractionSoundKind {
+  tap,
+  pin,
+  unpin,
+  syncDone,
+  complete,
+  clawdJump,
+  clawdCombo2,
+  clawdCombo3,
+  clawdPet,
+  clawdGrab,
+  clawdLand,
+  clawdCheer,
+  clawdSyncTick,
+}
 
 class InteractionFeedback {
   InteractionFeedback._();
@@ -17,11 +31,13 @@ class InteractionFeedback {
 
   @visibleForTesting
   static DateTime Function() now = DateTime.now;
-  static DateTime? _last;
+  static DateTime? _lastTap;
+  static DateTime? _lastSyncTick;
 
   @visibleForTesting
   static void debugReset() {
-    _last = null;
+    _lastTap = null;
+    _lastSyncTick = null;
     now = DateTime.now;
   }
 
@@ -53,39 +69,66 @@ class InteractionFeedback {
     InteractionSoundKind kind = InteractionSoundKind.tap,
     bool preview = false,
   }) {
+    final allowHaptics =
+        prefs.hapticsEnabled && kind != InteractionSoundKind.clawdSyncTick;
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      if (!prefs.soundEnabled && !prefs.hapticsEnabled) return;
+      if (!prefs.soundEnabled && !allowHaptics) return;
       if (!_shouldEmit(kind, preview)) return;
       unawaited(_optional(_channel.invokeMethod<void>('feedback', {
         'kind': kind.name,
         'sound': prefs.soundEnabled,
-        'haptics': prefs.hapticsEnabled,
+        'haptics': allowHaptics,
       })));
       return;
     }
-    if (!prefs.hapticsEnabled) return;
+    if (!allowHaptics) return;
     if (!_shouldEmit(kind, preview)) return;
-    final vibration = switch (kind) {
+    final Future<void>? vibration = switch (kind) {
       InteractionSoundKind.tap => HapticFeedback.selectionClick(),
       InteractionSoundKind.pin ||
       InteractionSoundKind.unpin ||
-      InteractionSoundKind.syncDone =>
+      InteractionSoundKind.syncDone ||
+      InteractionSoundKind.clawdJump ||
+      InteractionSoundKind.clawdCombo2 ||
+      InteractionSoundKind.clawdPet =>
         HapticFeedback.lightImpact(),
-      InteractionSoundKind.complete => HapticFeedback.mediumImpact(),
+      InteractionSoundKind.complete ||
+      InteractionSoundKind.clawdCombo3 ||
+      InteractionSoundKind.clawdGrab ||
+      InteractionSoundKind.clawdLand ||
+      InteractionSoundKind.clawdCheer =>
+        HapticFeedback.mediumImpact(),
+      InteractionSoundKind.clawdSyncTick => null,
     };
-    unawaited(_optional(vibration));
+    if (vibration != null) {
+      unawaited(_optional(vibration));
+    }
   }
 
   static bool _shouldEmit(InteractionSoundKind kind, bool preview) {
     if (preview) return true;
     final current = now();
-    if (kind == InteractionSoundKind.tap && _last != null) {
-      final elapsed = current.difference(_last!);
-      if (!elapsed.isNegative && elapsed < const Duration(milliseconds: 90)) {
-        return false;
+    if (kind == InteractionSoundKind.tap) {
+      if (_lastTap != null) {
+        final elapsed = current.difference(_lastTap!);
+        if (!elapsed.isNegative && elapsed < const Duration(milliseconds: 90)) {
+          return false;
+        }
       }
+      _lastTap = current;
+      return true;
     }
-    _last = current;
+    if (kind == InteractionSoundKind.clawdSyncTick) {
+      if (_lastSyncTick != null) {
+        final elapsed = current.difference(_lastSyncTick!);
+        if (!elapsed.isNegative &&
+            elapsed < const Duration(milliseconds: 320)) {
+          return false;
+        }
+      }
+      _lastSyncTick = current;
+      return true;
+    }
     return true;
   }
 

@@ -19,6 +19,14 @@ class InteractionSoundPolicyTest {
             "unpin" to 6_480,
             "syncDone" to 12_000,
             "complete" to 8_640,
+            "clawdJump" to 3_600,
+            "clawdCombo2" to 5_280,
+            "clawdCombo3" to 7_440,
+            "clawdPet" to 7_200,
+            "clawdGrab" to 4_080,
+            "clawdLand" to 3_360,
+            "clawdCheer" to 10_080,
+            "clawdSyncTick" to 1_344,
         )
         assertEquals(expectedCounts.keys.toList(), InteractionSoundPolicy.PRESET_KINDS)
 
@@ -28,13 +36,19 @@ class InteractionSoundPolicyTest {
             assertEquals("zero-cross start for $kind", 0, pcm.first().toInt())
             assertEquals("zero-cross end for $kind", 0, pcm.last().toInt())
             val maxAmplitude = pcm.maxOf { abs(it.toInt()) }
-            assertTrue("audible signal for $kind", maxAmplitude > 5_000)
-            assertTrue("bounded peak for $kind", maxAmplitude <= 9_200)
+            if (kind == "clawdSyncTick") {
+                assertTrue("soft audible signal for $kind", maxAmplitude in 2_500..5_000)
+            } else {
+                assertTrue("audible signal for $kind", maxAmplitude > 5_000)
+                assertTrue("bounded peak for $kind", maxAmplitude <= 9_200)
+            }
         }
 
         assertNull(InteractionSoundPolicy.presetPcm("unknown"))
         assertEquals(0, InteractionSoundPolicy.tone(0, 440.0, 440.0, 10.0, 0.25).size)
         assertEquals(0, InteractionSoundPolicy.tone(-5, 440.0, 440.0, 10.0, 0.25).size)
+        assertEquals(0, InteractionSoundPolicy.chipNote(0, 440.0, 880.0, 0.24).size)
+        assertEquals(0, InteractionSoundPolicy.chipNote(-5, 440.0, 880.0, 0.24).size)
     }
 
     @Test
@@ -116,8 +130,42 @@ class InteractionSoundPolicyTest {
             InteractionSoundPolicy.VibrationSpec.Waveform(longArrayOf(0, 30, 60, 30), -1),
             InteractionSoundPolicy.vibrationSpec("syncDone"),
         )
+        assertEquals(
+            InteractionSoundPolicy.VibrationSpec.OneShot(22L, 130),
+            InteractionSoundPolicy.vibrationSpec("clawdJump"),
+        )
+        assertEquals(
+            InteractionSoundPolicy.VibrationSpec.OneShot(26L, 150),
+            InteractionSoundPolicy.vibrationSpec("clawdCombo2"),
+        )
+        assertEquals(
+            InteractionSoundPolicy.VibrationSpec.Waveform(longArrayOf(0, 20, 35, 28), -1),
+            InteractionSoundPolicy.vibrationSpec("clawdCombo3"),
+        )
+        assertEquals(
+            InteractionSoundPolicy.VibrationSpec.OneShot(32L, 110),
+            InteractionSoundPolicy.vibrationSpec("clawdPet"),
+        )
+        assertEquals(
+            InteractionSoundPolicy.VibrationSpec.OneShot(28L, 160),
+            InteractionSoundPolicy.vibrationSpec("clawdGrab"),
+        )
+        assertEquals(
+            InteractionSoundPolicy.VibrationSpec.OneShot(30L, 175),
+            InteractionSoundPolicy.vibrationSpec("clawdLand"),
+        )
+        assertEquals(
+            InteractionSoundPolicy.VibrationSpec.OneShot(40L, 185),
+            InteractionSoundPolicy.vibrationSpec("clawdCheer"),
+        )
+        assertNull(InteractionSoundPolicy.vibrationSpec("clawdSyncTick"))
         assertNull(InteractionSoundPolicy.vibrationSpec("unknown"))
         assertNull(InteractionSoundPolicy.vibrationSpec(null))
+
+        assertEquals(0.55f, InteractionSoundPolicy.playVolume("tap"), 0.0001f)
+        assertEquals(0.48f, InteractionSoundPolicy.playVolume("clawdJump"), 0.0001f)
+        assertEquals(0.48f, InteractionSoundPolicy.playVolume("clawdCheer"), 0.0001f)
+        assertEquals(0.22f, InteractionSoundPolicy.playVolume("clawdSyncTick"), 0.0001f)
 
         assertEquals(160, InteractionSoundPolicy.effectiveAmplitude(160, true, -1))
         assertEquals(-1, InteractionSoundPolicy.effectiveAmplitude(160, false, -1))

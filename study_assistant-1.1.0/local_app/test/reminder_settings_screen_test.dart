@@ -1399,6 +1399,64 @@ void main() {
     expect(find.textContaining('请按音量键调高通知音量'), findsNothing);
   });
 
+  testWidgets('do not disturb blocks chime preview with explicit guidance',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final notif = _DetailedHealthNotificationService(
+      const ReminderHealth(
+        notifications: true,
+        exact: true,
+        ringerMode: 'normal',
+        interruptionFilter: 'priority',
+        notificationStreamVolume: 5,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: false,
+        assignmentChannel:
+            ReminderChannelHealth(ReminderChannelStatus.enabled, importance: 4),
+      ),
+    )..chimePreviewResult = const NotificationChimePreviewResult(
+        played: false,
+        supported: true,
+        notificationStreamVolume: 5,
+        notificationStreamMaxVolume: 7,
+        notificationStreamMuted: false,
+        ringerMode: 'normal',
+        interruptionFilter: 'priority',
+      );
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: notif,
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      clock: () => DateTime(2030, 11, 20, 10, 0),
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReminderSettingsScreen(
+            assignmentStore: store,
+            initialExpandHealth: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final previewButton =
+        find.byKey(const ValueKey('preview-notification-chime-button'));
+    await scrollTo(tester, previewButton);
+    await tester.tap(previewButton);
+    await tester.pumpAndSettle();
+
+    expect(notif.previewChimeCalls, 1);
+    expect(
+      find.text('当前已开启系统勿扰模式，已暂停试听铃声；请关闭勿扰模式后再试。'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets(
       'send test audible notification button reports daytime schedule and nighttime quiet block',
       (tester) async {

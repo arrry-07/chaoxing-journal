@@ -31,7 +31,7 @@ internal class InteractionSoundBridge(
     }
     private val channel = MethodChannel(messenger, "study_assistant/interaction_sound")
     private val pool = SoundPool.Builder()
-        .setMaxStreams(4)
+        .setMaxStreams(6)
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
@@ -88,7 +88,8 @@ internal class InteractionSoundBridge(
         ) {
             return
         }
-        pool.play(id!!, 0.55f, 0.55f, 1, 0, 1.0f)
+        val volume = InteractionSoundPolicy.playVolume(kind)
+        pool.play(id!!, volume, volume, 1, 0, 1.0f)
     }
 
     @Suppress("DEPRECATION")

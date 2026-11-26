@@ -45,6 +45,10 @@ class NotificationChimePreviewResult {
       notificationStreamMuted == true || notificationStreamVolume == 0;
   bool get isPhoneMutedOrVibrate =>
       ringerMode == 'silent' || ringerMode == 'vibrate';
+  bool get isDoNotDisturbActive =>
+      interruptionFilter == 'none' ||
+      interruptionFilter == 'alarms' ||
+      interruptionFilter == 'priority';
 }
 
 class LocalNotificationService {
@@ -87,8 +91,6 @@ class LocalNotificationService {
       RawResourceAndroidNotificationSound('journal_chime');
   static final Int64List defaultVibrationPattern =
       Int64List.fromList(const [0, 180, 90, 180]);
-  static const _installDeadlineChannelDefaultKey =
-      'deadline_channel_install_default_v1';
   static const _permissionsChannel =
       MethodChannel('study_assistant/permissions');
   static const _legacyMigrationChannel =
@@ -1310,20 +1312,6 @@ class LocalNotificationService {
   }
 
   Future<void> _ensureAllAndroidChannels() async {
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      final android = _plugin.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>();
-      if (android != null) {
-        try {
-          final existing = await android.getNotificationChannels();
-          if (existing != null) {
-            await _recordInstallDeadlineChannelDefault(existing);
-          }
-        } catch (_) {
-          // Let explicit per-channel creation surface channel failures below.
-        }
-      }
-    }
     final failures = <String>[];
     for (final channel in _androidChannels) {
       try {
@@ -1334,37 +1322,6 @@ class LocalNotificationService {
     }
     if (failures.isNotEmpty) {
       throw StateError('通知渠道初始化失败：${failures.join('；')}');
-    }
-  }
-
-  Future<void> _recordInstallDeadlineChannelDefault(
-    List<AndroidNotificationChannel> existing,
-  ) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs.containsKey(_installDeadlineChannelDefaultKey)) return;
-      final existingIds = {for (final item in existing) item.id};
-      if (existingIds.contains(assignmentV3Channel)) {
-        await prefs.setString(
-            _installDeadlineChannelDefaultKey, assignmentV3Channel);
-        return;
-      }
-      if (existingIds.contains(assignmentV2Channel)) {
-        await prefs.setString(
-            _installDeadlineChannelDefaultKey, assignmentV2Channel);
-        return;
-      }
-      if (existingIds.contains(assignmentChannel)) {
-        await prefs.setString(
-            _installDeadlineChannelDefaultKey, assignmentChannel);
-        return;
-      }
-      await prefs.setString(
-        _installDeadlineChannelDefaultKey,
-        assignmentV3Channel,
-      );
-    } catch (_) {
-      // Never block initialization on preference write failures.
     }
   }
 
