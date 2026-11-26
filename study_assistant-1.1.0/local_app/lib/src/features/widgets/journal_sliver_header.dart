@@ -37,15 +37,19 @@ class JournalSliverHeader extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Flexible(
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: journal.pageTitle.copyWith(fontSize: 19.5),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: journal.pageTitle.copyWith(fontSize: 19.5),
+                    ),
                   ),
                 ),
                 if (titleTrailing != null) ...[
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 5),
                   titleTrailing!,
                 ],
               ],

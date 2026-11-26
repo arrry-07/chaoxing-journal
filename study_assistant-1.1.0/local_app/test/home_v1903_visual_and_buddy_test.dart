@@ -407,9 +407,30 @@ void main() {
         findsNothing,
       );
 
-      // Scrolling down reveals the floating mini buddy.
+      // Tapping buddy at 360dp keeps whisper single-row without pushing due-summary vertically.
+      final summaryBeforeY =
+          tester.getTopLeft(find.byKey(const ValueKey('home-due-summary'))).dy;
+      await tester.tap(titleBuddyFinder);
+      await tester.pump();
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('home-due-summary'))).dy,
+        closeTo(summaryBeforeY, 0.5),
+      );
+      await tester.pump(const Duration(milliseconds: 2050));
+      await tester.pumpAndSettle();
+
+      // Scrolling down reveals the floating mini buddy and scales down '课业手记' without ellipsis truncation.
       await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
       await tester.pumpAndSettle();
+      final sliverTitleFitted = find.descendant(
+        of: find.byType(JournalSliverHeader),
+        matching: find.byType(FittedBox),
+      );
+      expect(sliverTitleFitted, findsOneWidget);
+      final sliverTitleText = tester.widget<Text>(
+        find.descendant(of: sliverTitleFitted, matching: find.text('课业手记')),
+      );
+      expect(sliverTitleText.overflow, isNull);
       final sliverBuddyFinder =
           find.byKey(const ValueKey('home-sliver-pixel-buddy'));
       expect(sliverBuddyFinder, findsOneWidget);

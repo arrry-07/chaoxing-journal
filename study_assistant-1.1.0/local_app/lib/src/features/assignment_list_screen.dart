@@ -1442,6 +1442,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ? FontWeight.w600
                     : FontWeight.w400,
               );
+              final baseLeftWidth = 14.5 +
+                  5.0 +
+                  measureWidth(statusText, journal.metadata) +
+                  (showChevron ? 18.0 : 0.0) +
+                  4.0;
               final leftWidth = 14.5 +
                   5.0 +
                   measureWidth(effectiveStatusText, journal.metadata) +
@@ -1450,14 +1455,30 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final rightWidth = showDueSummary
                   ? measureWidth(summaryLabel, summaryStyle) + 4.0
                   : 0.0;
+              final idleFitsSingleRow = !showDueSummary ||
+                  (baseLeftWidth + rightWidth + 6.0 <= constraints.maxWidth);
               final fitsSingleRow = !showDueSummary ||
-                  (leftWidth + rightWidth + 6.0 <= constraints.maxWidth);
+                  (leftWidth + rightWidth + 6.0 <= constraints.maxWidth) ||
+                  (activeWhisper != null && idleFitsSingleRow);
 
               Widget buildStatusContent({
                 required Widget leading,
                 required String text,
                 required TextStyle style,
+                bool singleLineScaleDown = false,
               }) {
+                final textWidget = singleLineScaleDown
+                    ? FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          text,
+                          maxLines: 1,
+                          softWrap: false,
+                          style: style,
+                        ),
+                      )
+                    : Text(text, style: style);
                 return Semantics(
                   liveRegion: true,
                   button: onSyncTap != null,
@@ -1470,7 +1491,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       Flexible(
                         fit: FlexFit.loose,
                         child: ExcludeSemantics(
-                          child: Text(text, style: style),
+                          child: textWidget,
                         ),
                       ),
                       if (showChevron)
@@ -1541,6 +1562,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                   style: journal.metadata.copyWith(
                                     color: journal.accent,
                                   ),
+                                  singleLineScaleDown: fitsSingleRow,
                                 )
                               : buildStatusContent(
                                   leading: Icon(
