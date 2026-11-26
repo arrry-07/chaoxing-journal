@@ -29,6 +29,7 @@ class HomeManualActions {
     required this.feedback,
     required this.isMounted,
     this.onBouncePulse,
+    this.onPinAdded,
     this.onCompletingStart,
     this.onCompletingCommit,
     this.onCompletingCancel,
@@ -38,6 +39,7 @@ class HomeManualActions {
   final HomeManualFeedback feedback;
   final bool Function() isMounted;
   final ValueChanged<String>? onBouncePulse;
+  final VoidCallback? onPinAdded;
   final ValueChanged<String>? onCompletingStart;
   final ValueChanged<String>? onCompletingCommit;
   final ValueChanged<String>? onCompletingCancel;
@@ -189,6 +191,9 @@ class HomeManualActions {
     final pinned = store.isManualPinned(entry);
     JournalMotion.pin(store.display, pinned: pinned);
     onBouncePulse?.call(AssignmentStore.manualPinKeyOf(entry));
+    if (pinned) {
+      onPinAdded?.call();
+    }
     feedback(pinned ? '已置顶' : '已取消置顶');
   }
 

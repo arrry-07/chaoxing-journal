@@ -43,31 +43,72 @@ String journalBuddyTapWhisper({
   required int dueIn3Days,
   required int completedToday,
   required int tapCount,
+  int comboCount = 1,
 }) {
-  final options = <String>[
-    if (dueToday > 0) ...[
-      dueToday > 99 ? '今日待办较多，先挑急的' : '今日待办$dueToday项，稳步推进',
-      dueToday > 99 ? '先清今日要紧事项吧' : '先清今日这$dueToday项吧',
-      if (dueIn3Days > dueToday && dueIn3Days <= 99) '三日内共$dueIn3Days项，提前看',
-      '我在盯着截止时间呢',
-    ] else if (completedToday > 0) ...[
-      '今日已清空，喝口水歇会儿',
-      completedToday > 99 ? '今日打卡满满，真棒' : '今日已打卡$completedToday项，真棒',
-      if (dueIn3Days > 0)
+  final List<String> options;
+  if (comboCount >= 3) {
+    options = const <String>[
+      '满格元气发射给你！',
+      '比个小心心，超级棒！',
+      '连击啦，今天状态拉满',
+      '贴贴打气，万事顺意！',
+    ];
+  } else if (comboCount == 2) {
+    options = <String>[
+      if (dueToday > 0) ...[
+        '嘿咻，一起清空待办！',
+        '双击加满今日干劲啦',
+        '小爪给你打气，冲呀',
+      ] else if (completedToday > 0 || dueIn3Days == 0) ...[
+        '好耶，节奏超稳的！',
+        '双击收下今日小红花',
+        '开心蹦两下，继续保持',
+      ] else ...[
+        '趁现在偷闲充个电！',
+        '提前准备超省心的呀',
+        '双击打气，稳稳拿捏',
+      ],
+    ];
+  } else {
+    options = <String>[
+      if (dueToday > 0) ...[
+        dueToday > 99 ? '今日待办较多，先挑急的' : '今日待办$dueToday项，稳步推进',
+        dueToday > 99 ? '先清今日要紧事项吧' : '先清今日这$dueToday项吧',
+        if (dueIn3Days > dueToday && dueIn3Days <= 99) '三日内共$dueIn3Days项，提前看',
+        '我在盯着截止时间呢',
+      ] else if (completedToday > 0) ...[
+        '今日已清空，喝口水歇会儿',
+        completedToday > 99 ? '今日打卡满满，真棒' : '今日已打卡$completedToday项，真棒',
+        if (dueIn3Days > 0)
+          dueIn3Days > 99 ? '三日内有多项，提前瞄一眼' : '三日内还有$dueIn3Days项，瞄一眼',
+        '今天轻松啦，保持节奏',
+      ] else if (dueIn3Days > 0) ...[
         dueIn3Days > 99 ? '三日内有多项，提前瞄一眼' : '三日内还有$dueIn3Days项，瞄一眼',
-      '今天轻松啦，保持节奏',
-    ] else if (dueIn3Days > 0) ...[
-      dueIn3Days > 99 ? '三日内有多项，提前瞄一眼' : '三日内还有$dueIn3Days项，瞄一眼',
-      '今日暂无急单，先备后续',
-      '我在盯着截止时间呢',
-    ] else ...[
-      '眼前清清爽爽，真好',
-      '暂无急单，喝口水歇会儿',
-      '有新课业我会盯紧的',
-    ],
-  ];
+        '今日暂无急单，先备后续',
+        '我在盯着截止时间呢',
+      ] else ...[
+        '眼前清清爽爽，真好',
+        '暂无急单，喝口水歇会儿',
+        '有新课业我会盯紧的',
+      ],
+    ];
+  }
   final index = (tapCount < 0 ? -tapCount : tapCount) % options.length;
   return options[index];
+}
+
+enum _BuddyActionKind {
+  none,
+  idleBreathe,
+  idleDoubleBlink,
+  idlePeek,
+  idleSteps,
+  idleWave,
+  idleAllClearStar,
+  tapWave,
+  tapDoubleStar,
+  tapDoubleHeart,
+  cheer,
 }
 
 class JournalPixelBuddy extends StatefulWidget {
@@ -79,6 +120,7 @@ class JournalPixelBuddy extends StatefulWidget {
     this.onTap,
     this.syncTickListenable,
     this.displayPrefs,
+    this.celebratePulse = 0,
   });
 
   final JournalPixelBuddyMood mood;
@@ -87,13 +129,14 @@ class JournalPixelBuddy extends StatefulWidget {
   final VoidCallback? onTap;
   final ValueListenable<int>? syncTickListenable;
   final DisplayPreferences? displayPrefs;
+  final int celebratePulse;
 
   @override
   State<JournalPixelBuddy> createState() => _JournalPixelBuddyState();
 }
 
 class _JournalPixelBuddyState extends State<JournalPixelBuddy>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   static const SpringDescription _jumpSpring = SpringDescription(
     mass: 1.0,
     stiffness: 500.0,
@@ -105,19 +148,19 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
   );
 
   late final AnimationController _jumpController;
+  late final AnimationController _actionController;
   Timer? _idleTimer;
-  Timer? _blinkTimer;
   Timer? _syncTimer;
-  Timer? _waveTimer;
+  Timer? _comboResetTimer;
 
   bool _appResumed = true;
   bool _tickerEnabled = true;
   bool _reducedMotion = false;
   int _idleStep = 0;
-  int _idlePose = 0;
-  bool _isBlinking = false;
-  bool _isWaving = false;
+  int _peekSign = 1;
+  int _tapComboCount = 0;
   int _internalSyncTick = 0;
+  _BuddyActionKind _activeAction = _BuddyActionKind.none;
 
   bool get _isActive => mounted && _appResumed && _tickerEnabled;
 
@@ -132,6 +175,11 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
             AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
     _jumpController = AnimationController.unbounded(vsync: this, value: 0.0);
+    _actionController = AnimationController(
+      vsync: this,
+      value: 0.0,
+      duration: const Duration(milliseconds: 440),
+    )..addStatusListener(_onActionStatusChanged);
     _internalSyncTick = widget.syncTickListenable?.value ?? 0;
     widget.syncTickListenable?.addListener(_onExternalSyncTick);
   }
@@ -152,11 +200,21 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
       widget.syncTickListenable?.addListener(_onExternalSyncTick);
       _internalSyncTick = widget.syncTickListenable?.value ?? 0;
     }
-    if (oldWidget.mood != widget.mood &&
-        widget.mood != JournalPixelBuddyMood.syncing) {
-      _internalSyncTick = 0;
+    if (oldWidget.mood != widget.mood) {
+      if (widget.mood != JournalPixelBuddyMood.syncing) {
+        _internalSyncTick = 0;
+      } else {
+        _resetActionAndJump();
+      }
     }
+    final celebrated = widget.celebratePulse > oldWidget.celebratePulse;
     _reconcileTimers();
+    if (celebrated &&
+        _isActive &&
+        !_reducedMotion &&
+        widget.mood != JournalPixelBuddyMood.syncing) {
+      _triggerCheer();
+    }
   }
 
   @override
@@ -177,25 +235,39 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     });
   }
 
+  void _onActionStatusChanged(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
+    if (!mounted) return;
+    if (_activeAction != _BuddyActionKind.none) {
+      setState(() => _activeAction = _BuddyActionKind.none);
+    }
+    _scheduleIdleTimerIfNeeded();
+  }
+
+  void _resetActionAndJump() {
+    if (_jumpController.isAnimating || _jumpController.value != 0.0) {
+      _jumpController.stop();
+      _jumpController.value = 0.0;
+    }
+    if (_actionController.isAnimating || _actionController.value != 0.0) {
+      _actionController.stop();
+      _actionController.value = 0.0;
+    }
+    _activeAction = _BuddyActionKind.none;
+  }
+
   void _reconcileTimers() {
     if (!mounted) return;
     if (!_isActive || _reducedMotion) {
       _cancelAllTimers();
-      if (_jumpController.isAnimating || _jumpController.value != 0.0) {
-        _jumpController.stop();
-        _jumpController.value = 0.0;
-      }
-      _isBlinking = false;
-      _isWaving = false;
+      _resetActionAndJump();
+      _tapComboCount = 0;
       return;
     }
 
     if (widget.mood == JournalPixelBuddyMood.syncing) {
       _idleTimer?.cancel();
       _idleTimer = null;
-      _blinkTimer?.cancel();
-      _blinkTimer = null;
-      _isBlinking = false;
       if (widget.syncTickListenable == null) {
         _syncTimer ??= Timer.periodic(
           const Duration(milliseconds: 180),
@@ -221,10 +293,12 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     if (_idleTimer != null ||
         !_isActive ||
         _reducedMotion ||
-        widget.mood == JournalPixelBuddyMood.syncing) {
+        widget.mood == JournalPixelBuddyMood.syncing ||
+        _actionController.isAnimating ||
+        _activeAction != _BuddyActionKind.none) {
       return;
     }
-    final delayMs = 2200 + (_idleStep * 317) % 1201;
+    final delayMs = 1800 + (_idleStep * 373) % 1401;
     _idleTimer = Timer(Duration(milliseconds: delayMs), _onIdleTick);
   }
 
@@ -236,34 +310,69 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
         widget.mood == JournalPixelBuddyMood.syncing) {
       return;
     }
-    _idleStep++;
-    final shouldBlink = _idleStep % 3 == 1;
-    setState(() {
-      _idlePose = _idleStep % 4;
-      if (shouldBlink) {
-        _isBlinking = true;
-      }
-    });
-    if (shouldBlink) {
-      _blinkTimer?.cancel();
-      _blinkTimer = Timer(const Duration(milliseconds: 160), () {
-        _blinkTimer = null;
-        if (!mounted || !_isActive || _reducedMotion) return;
-        setState(() => _isBlinking = false);
-      });
+    final pool = widget.mood == JournalPixelBuddyMood.allClear
+        ? const <_BuddyActionKind>[
+            _BuddyActionKind.idleBreathe,
+            _BuddyActionKind.idleDoubleBlink,
+            _BuddyActionKind.idlePeek,
+            _BuddyActionKind.idleSteps,
+            _BuddyActionKind.idleWave,
+            _BuddyActionKind.idleAllClearStar,
+          ]
+        : const <_BuddyActionKind>[
+            _BuddyActionKind.idleBreathe,
+            _BuddyActionKind.idleDoubleBlink,
+            _BuddyActionKind.idlePeek,
+            _BuddyActionKind.idleSteps,
+            _BuddyActionKind.idleWave,
+          ];
+    final kind = pool[_idleStep % pool.length];
+    _idleStep = (_idleStep + 1) & 0x3fffffff;
+    if (kind == _BuddyActionKind.idlePeek ||
+        kind == _BuddyActionKind.idleSteps) {
+      _peekSign = -_peekSign;
     }
-    _scheduleIdleTimerIfNeeded();
+    _startAction(kind, _durationForAction(kind));
+  }
+
+  Duration _durationForAction(_BuddyActionKind kind) => switch (kind) {
+        _BuddyActionKind.none => const Duration(milliseconds: 420),
+        _BuddyActionKind.idleBreathe => const Duration(milliseconds: 420),
+        _BuddyActionKind.idleDoubleBlink => const Duration(milliseconds: 440),
+        _BuddyActionKind.idlePeek => const Duration(milliseconds: 460),
+        _BuddyActionKind.idleSteps => const Duration(milliseconds: 440),
+        _BuddyActionKind.idleWave => const Duration(milliseconds: 460),
+        _BuddyActionKind.idleAllClearStar => const Duration(milliseconds: 460),
+        _BuddyActionKind.tapWave => const Duration(milliseconds: 420),
+        _BuddyActionKind.tapDoubleStar => const Duration(milliseconds: 460),
+        _BuddyActionKind.tapDoubleHeart => const Duration(milliseconds: 480),
+        _BuddyActionKind.cheer => const Duration(milliseconds: 440),
+      };
+
+  void _startAction(_BuddyActionKind kind, Duration duration) {
+    _idleTimer?.cancel();
+    _idleTimer = null;
+    _activeAction = kind;
+    _actionController.duration = duration;
+    _actionController.forward(from: 0.0);
+  }
+
+  void _triggerCheer() {
+    if (_jumpController.isAnimating || _jumpController.value != 0.0) {
+      _jumpController.stop();
+      _jumpController.value = 0.0;
+    }
+    _startAction(
+        _BuddyActionKind.cheer, _durationForAction(_BuddyActionKind.cheer));
   }
 
   void _cancelAllTimers() {
     _idleTimer?.cancel();
     _idleTimer = null;
-    _blinkTimer?.cancel();
-    _blinkTimer = null;
     _syncTimer?.cancel();
     _syncTimer = null;
-    _waveTimer?.cancel();
-    _waveTimer = null;
+    _comboResetTimer?.cancel();
+    _comboResetTimer = null;
   }
 
   void _handleTap() {
@@ -272,22 +381,46 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
       JournalMotion.tap(prefs);
     }
     if (_isActive && !_reducedMotion) {
-      _waveTimer?.cancel();
-      setState(() => _isWaving = true);
-      _waveTimer = Timer(const Duration(milliseconds: 450), () {
-        _waveTimer = null;
-        if (!mounted || !_isActive || _reducedMotion) return;
-        setState(() => _isWaving = false);
+      _comboResetTimer?.cancel();
+      _tapComboCount++;
+      _comboResetTimer = Timer(const Duration(milliseconds: 1200), () {
+        _comboResetTimer = null;
+        if (!mounted) return;
+        _tapComboCount = 0;
       });
-      _jumpController.animateWith(
-        SpringSimulation(
-          _jumpSpring,
-          _jumpController.value,
-          0.0,
-          -320.0,
-          tolerance: _jumpTolerance,
-        ),
-      );
+      if (_tapComboCount == 1) {
+        _startAction(
+          _BuddyActionKind.tapWave,
+          _durationForAction(_BuddyActionKind.tapWave),
+        );
+        _jumpController.animateWith(
+          SpringSimulation(
+            _jumpSpring,
+            _jumpController.value,
+            0.0,
+            -320.0,
+            tolerance: _jumpTolerance,
+          ),
+        );
+      } else if (_tapComboCount == 2) {
+        if (_jumpController.isAnimating || _jumpController.value != 0.0) {
+          _jumpController.stop();
+          _jumpController.value = 0.0;
+        }
+        _startAction(
+          _BuddyActionKind.tapDoubleStar,
+          _durationForAction(_BuddyActionKind.tapDoubleStar),
+        );
+      } else {
+        if (_jumpController.isAnimating || _jumpController.value != 0.0) {
+          _jumpController.stop();
+          _jumpController.value = 0.0;
+        }
+        _startAction(
+          _BuddyActionKind.tapDoubleHeart,
+          _durationForAction(_BuddyActionKind.tapDoubleHeart),
+        );
+      }
     }
     widget.onTap?.call();
   }
@@ -297,6 +430,8 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     WidgetsBinding.instance.removeObserver(this);
     widget.syncTickListenable?.removeListener(_onExternalSyncTick);
     _cancelAllTimers();
+    _actionController.removeStatusListener(_onActionStatusChanged);
+    _actionController.dispose();
     _jumpController.dispose();
     super.dispose();
   }
@@ -304,6 +439,7 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
+    final dpr = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1.0;
     final effectiveSize = widget.size ?? (widget.mini ? 19.0 : 26.0);
     final minHitWidth = widget.mini
         ? math.max(effectiveSize + 6.0, 26.0)
@@ -330,16 +466,20 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
             child: SizedBox.square(
               dimension: effectiveSize,
               child: AnimatedBuilder(
-                animation: _jumpController,
+                animation:
+                    Listenable.merge([_jumpController, _actionController]),
                 builder: (context, _) => CustomPaint(
                   painter: _JournalPixelBuddyPainter(
                     mood: widget.mood,
                     isDark: journal.isDark,
                     accent: journal.accent,
-                    idlePose: _reducedMotion ? 0 : _idlePose,
-                    isBlinking: !_reducedMotion && _isBlinking,
+                    devicePixelRatio: dpr,
+                    actionKind:
+                        _reducedMotion ? _BuddyActionKind.none : _activeAction,
+                    actionProgress:
+                        _reducedMotion ? 0.0 : _actionController.value,
+                    peekSign: _peekSign,
                     syncTick: _reducedMotion ? 0 : _effectiveSyncTick,
-                    isWaving: !_reducedMotion && _isWaving,
                     jumpOffset: _reducedMotion ? 0.0 : _jumpController.value,
                   ),
                 ),
@@ -357,10 +497,11 @@ class _JournalPixelBuddyPainter extends CustomPainter {
     required this.mood,
     required this.isDark,
     required this.accent,
-    required this.idlePose,
-    required this.isBlinking,
+    required this.devicePixelRatio,
+    required this.actionKind,
+    required this.actionProgress,
+    required this.peekSign,
     required this.syncTick,
-    required this.isWaving,
     required this.jumpOffset,
   });
 
@@ -371,38 +512,146 @@ class _JournalPixelBuddyPainter extends CustomPainter {
   static const Color _lightShadow = Color(0xFFB85D40);
   static const Color _lightHighlight = Color(0xFFEDA083);
   static const Color _lightEye = Color(0xFF1F2328);
+  static const Color _lightHeart = Color(0xFFE25B4B);
 
   static const Color _darkBody = Color(0xFFE5896B);
   static const Color _darkShadow = Color(0xFFC46B4E);
   static const Color _darkHighlight = Color(0xFFF3AD94);
   static const Color _darkEye = Color(0xFF191816);
+  static const Color _darkHeart = Color(0xFFF27B6D);
 
   final JournalPixelBuddyMood mood;
   final bool isDark;
   final Color accent;
-  final int idlePose;
-  final bool isBlinking;
+  final double devicePixelRatio;
+  final _BuddyActionKind actionKind;
+  final double actionProgress;
+  final int peekSign;
   final int syncTick;
-  final bool isWaving;
   final double jumpOffset;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final cell = math.min(size.width / _gridCols, size.height / _gridRows);
-    if (cell <= 0) return;
+    final rawCell = math.min(size.width / _gridCols, size.height / _gridRows);
+    if (rawCell <= 0) return;
+    final dpr = devicePixelRatio > 0 ? devicePixelRatio : 1.0;
+    final physicalCell = (rawCell * dpr).floorToDouble();
+    final cell = physicalCell >= 1.0 ? physicalCell / dpr : rawCell;
 
-    final originX = (size.width - cell * _gridCols) * 0.5;
-    final originY = (size.height - cell * _gridRows) * 0.5 + jumpOffset;
+    double snap(double value) => (value * dpr).roundToDouble() / dpr;
+
+    final originX = snap((size.width - cell * _gridCols) * 0.5);
+    final originY = snap((size.height - cell * _gridRows) * 0.5 + jumpOffset);
 
     final bodyColor = isDark ? _darkBody : _lightBody;
     final shadowColor = isDark ? _darkShadow : _lightShadow;
     final highlightColor = isDark ? _darkHighlight : _lightHighlight;
     final eyeColor = isDark ? _darkEye : _lightEye;
+    final heartColor = isDark ? _darkHeart : _lightHeart;
 
     final paint = Paint()..isAntiAlias = false;
 
-    double px(int col) => (originX + col * cell).roundToDouble();
-    double py(int row) => (originY + row * cell).roundToDouble();
+    final t = actionProgress.clamp(0.0, 1.0);
+    var dx = 0;
+    var dy = 0;
+    var eyeDx = 0;
+    var leftArmRow = 5;
+    var rightArmRow = 5;
+    var leg1Row = 9; // col 3
+    var leg2Row = 9; // col 5
+    var leg3Row = 9; // col 8
+    var leg4Row = 9; // col 10
+    var bothEyesSquint = false;
+    var rightEyeSquint = false;
+    var scaleX = 1.0;
+    var scaleY = 1.0;
+    var hopPx = 0.0;
+    var leanSkew = 0.0;
+
+    if (mood == JournalPixelBuddyMood.syncing) {
+      leanSkew = -0.07;
+      switch (syncTick % 4) {
+        case 0:
+          // Diagonal pair (3, 8) lifted; opposite arm swing.
+          leg1Row = 8;
+          leg3Row = 8;
+          leftArmRow = 4;
+          rightArmRow = 6;
+        case 1:
+          dy = -1;
+        case 2:
+          // Diagonal pair (5, 10) lifted; opposite arm swing.
+          leg2Row = 8;
+          leg4Row = 8;
+          leftArmRow = 6;
+          rightArmRow = 4;
+        default:
+          break;
+      }
+    } else if (actionKind != _BuddyActionKind.none && t > 0.0 && t < 1.0) {
+      switch (actionKind) {
+        case _BuddyActionKind.idleBreathe:
+          final s = math.sin(math.pi * t);
+          scaleX = 1.0 + 0.055 * s;
+          scaleY = 1.0 - 0.065 * s;
+        case _BuddyActionKind.idleDoubleBlink:
+          bothEyesSquint = (t >= 0.0 && t <= 0.22) || (t >= 0.44 && t <= 0.68);
+        case _BuddyActionKind.idlePeek:
+          if (t >= 0.18 && t <= 0.78) {
+            eyeDx = peekSign;
+          }
+        case _BuddyActionKind.idleSteps:
+          if (t < 0.50) {
+            dx = peekSign;
+            leg1Row = 8;
+            leg3Row = 8;
+          } else {
+            dx = 0;
+            leg2Row = 8;
+            leg4Row = 8;
+          }
+        case _BuddyActionKind.idleWave:
+          if (t >= 0.12 && t <= 0.88) {
+            rightArmRow = (t >= 0.40 && t <= 0.62) ? 4 : 3;
+          }
+          if (t >= 0.18 && t <= 0.82) {
+            rightEyeSquint = true;
+          }
+        case _BuddyActionKind.idleAllClearStar:
+          hopPx = -0.45 * cell * math.sin(math.pi * t);
+        case _BuddyActionKind.tapWave:
+          if (t >= 0.10 && t <= 0.88) {
+            rightArmRow = (t >= 0.40 && t <= 0.62) ? 4 : 3;
+          }
+          if (t >= 0.16 && t <= 0.82) {
+            rightEyeSquint = true;
+          }
+        case _BuddyActionKind.tapDoubleStar:
+        case _BuddyActionKind.tapDoubleHeart:
+          if (t < 0.48) {
+            hopPx = -1.75 * cell * math.sin(math.pi * (t / 0.48));
+          } else {
+            hopPx = -1.25 * cell * math.sin(math.pi * ((t - 0.48) / 0.52));
+          }
+          if (t >= 0.08 && t <= 0.90) {
+            leftArmRow = 3;
+            rightArmRow = 3;
+          }
+        case _BuddyActionKind.cheer:
+          hopPx = -1.35 * cell * math.sin(math.pi * t);
+          if (t >= 0.12 && t <= 0.88) {
+            leftArmRow = 3;
+            rightArmRow = 3;
+          }
+        case _BuddyActionKind.none:
+          break;
+      }
+    }
+
+    final effectiveOriginY = snap(originY + hopPx);
+
+    double px(int col) => snap(originX + col * cell);
+    double py(int row) => snap(effectiveOriginY + row * cell);
 
     void drawCell(int col, int row, Color color) {
       paint.color = color;
@@ -414,144 +663,162 @@ class _JournalPixelBuddyPainter extends CustomPainter {
 
     void drawSquintEye(int col, int row) {
       paint.color = eyeColor;
-      final top = py(row) + math.max(1.0, cell * 0.55);
-      final bottom = math.min(py(row + 1), top + math.max(1.0, cell * 0.38));
-      canvas.drawRect(Rect.fromLTRB(px(col), top, px(col + 1), bottom), paint);
+      final lineTop = snap(py(row) + math.max(1.0 / dpr, cell * 0.25));
+      final lineBottom = math.min(
+        py(row + 1),
+        snap(lineTop + math.max(1.0 / dpr, cell * 0.42)),
+      );
+      canvas.drawRect(
+        Rect.fromLTRB(px(col), lineTop, px(col + 1), lineBottom),
+        paint,
+      );
     }
 
-    var dx = 0;
-    var dy = 0;
-    var torsoBreath = 0;
-    var leftArmRow = 5;
-    var rightArmRow = 5;
-    var leftLegRow = 9;
-    var rightLegRow = 9;
-
-    if (mood == JournalPixelBuddyMood.syncing) {
-      switch (syncTick % 4) {
-        case 0:
-          leftArmRow = 4;
-          rightArmRow = 6;
-          leftLegRow = 9;
-          rightLegRow = 8;
-        case 1:
-          dy = -1;
-          leftArmRow = 5;
-          rightArmRow = 5;
-        case 2:
-          leftArmRow = 6;
-          rightArmRow = 4;
-          leftLegRow = 8;
-          rightLegRow = 9;
-        default:
-          leftArmRow = 5;
-          rightArmRow = 5;
+    final hasCanvasTransform =
+        leanSkew != 0.0 || scaleX != 1.0 || scaleY != 1.0;
+    if (hasCanvasTransform) {
+      canvas.save();
+      final pivotX = originX + _gridCols * cell * 0.5;
+      final pivotY = effectiveOriginY + 11 * cell;
+      canvas.translate(pivotX, pivotY);
+      if (leanSkew != 0.0) {
+        canvas.skew(leanSkew, 0.0);
       }
-    } else if (mood == JournalPixelBuddyMood.allClear) {
-      if (!isWaving) {
-        dy = -1;
+      if (scaleX != 1.0 || scaleY != 1.0) {
+        canvas.scale(scaleX, scaleY);
       }
-      leftArmRow = 3;
-      rightArmRow = 3;
-    } else {
-      switch (idlePose % 4) {
-        case 1:
-          torsoBreath = 1;
-        case 2:
-          dx = -1;
-        case 3:
-          dx = 1;
-        default:
-          break;
-      }
+      canvas.translate(-pivotX, -pivotY);
     }
 
-    if (isWaving) {
-      rightArmRow = 3;
-    }
-
-    // Top rounded cap (cols 3..10, row 2).
-    final topRow = 2 + dy + torsoBreath;
+    // Clawd 10x6 boxy torso (cols 2..11, rows 3..8) with subtle top highlight & bottom edge.
+    final topRow = 3 + dy;
+    drawCell(2 + dx, topRow, bodyColor);
     for (var col = 3; col <= 10; col++) {
       drawCell(col + dx, topRow, highlightColor);
     }
+    drawCell(11 + dx, topRow, bodyColor);
 
-    // Upper & middle torso (cols 2..11).
-    for (var row = 3 + dy + torsoBreath; row <= 6 + dy; row++) {
+    for (var row = 4 + dy; row <= 7 + dy; row++) {
       for (var col = 2; col <= 11; col++) {
-        final isTopLeftEdge = row == 3 + dy + torsoBreath && col == 2;
-        final isRightShade = col == 11 && row >= 5 + dy;
-        final color = isTopLeftEdge
-            ? highlightColor
-            : isRightShade
-                ? shadowColor
-                : bodyColor;
-        drawCell(col + dx, row, color);
+        drawCell(col + dx, row, bodyColor);
       }
     }
-
-    // Lower torso & bottom shadow edge.
     for (var col = 2; col <= 11; col++) {
-      drawCell(
-        col + dx,
-        7 + dy,
-        col == 11 ? shadowColor : bodyColor,
-      );
-    }
-    for (var col = 3; col <= 10; col++) {
       drawCell(col + dx, 8 + dy, shadowColor);
     }
 
-    // Left arm (col 1).
+    // Side horizontal square ears / arms (col 1 & col 12, resting at rows 5..6).
     drawCell(1 + dx, leftArmRow + dy, highlightColor);
     drawCell(1 + dx, leftArmRow + 1 + dy, bodyColor);
 
-    // Right arm (col 12).
-    if (isWaving) {
-      drawCell(12 + dx, rightArmRow - 1 + dy, highlightColor);
-      drawCell(12 + dx, rightArmRow + dy, bodyColor);
+    drawCell(12 + dx, rightArmRow + dy, bodyColor);
+    drawCell(12 + dx, rightArmRow + 1 + dy, shadowColor);
+
+    // 4 symmetrical discrete short legs: left pair (3, 5) + center gap (6, 7) + right pair (8, 10).
+    void drawLeg(int col, int legRow) {
+      if (legRow < 9) {
+        // Lifted 1 row: leave Row 10 clear and tint Row 9 shadow.
+        drawCell(col + dx, legRow + 1 + dy, shadowColor);
+      } else {
+        drawCell(col + dx, legRow + dy, bodyColor);
+        drawCell(col + dx, legRow + 1 + dy, shadowColor);
+      }
+    }
+
+    drawLeg(3, leg1Row);
+    drawLeg(5, leg2Row);
+    drawLeg(8, leg3Row);
+    drawLeg(10, leg4Row);
+
+    // Symmetrical 1x2 eyes at cols 4 and 9, rows 4..5 (shifted by eyeDx on peek).
+    final leftEyeCol = 4 + dx + eyeDx;
+    final rightEyeCol = 9 + dx + eyeDx;
+    final eyeTopRow = 4 + dy;
+    final eyeBottomRow = 5 + dy;
+
+    if (bothEyesSquint) {
+      drawSquintEye(leftEyeCol, eyeBottomRow);
+      drawSquintEye(rightEyeCol, eyeBottomRow);
+    } else if (rightEyeSquint) {
+      drawCell(leftEyeCol, eyeTopRow, eyeColor);
+      drawCell(leftEyeCol, eyeBottomRow, eyeColor);
+      drawSquintEye(rightEyeCol, eyeBottomRow);
     } else {
-      drawCell(12 + dx, rightArmRow + dy, bodyColor);
-      drawCell(12 + dx, rightArmRow + 1 + dy, shadowColor);
+      drawCell(leftEyeCol, eyeTopRow, eyeColor);
+      drawCell(leftEyeCol, eyeBottomRow, eyeColor);
+      drawCell(rightEyeCol, eyeTopRow, eyeColor);
+      drawCell(rightEyeCol, eyeBottomRow, eyeColor);
     }
 
-    // Legs (pair at 3..4 and 9..10).
-    for (final col in const [3, 4]) {
-      drawCell(col + dx, leftLegRow + dy, bodyColor);
-      drawCell(col + dx, leftLegRow + 1 + dy, shadowColor);
-    }
-    for (final col in const [9, 10]) {
-      drawCell(col + dx, rightLegRow + dy, bodyColor);
-      drawCell(col + dx, rightLegRow + 1 + dy, shadowColor);
+    if (hasCanvasTransform) {
+      canvas.restore();
     }
 
-    // Eyes (cols 4 and 9, row 4 + dy + torsoBreath).
-    final eyeRow = 4 + dy + torsoBreath;
-    if (isBlinking) {
-      drawSquintEye(4 + dx, eyeRow);
-      drawSquintEye(9 + dx, eyeRow);
-    } else if (isWaving) {
-      drawCell(4 + dx, eyeRow, eyeColor);
-      drawSquintEye(9 + dx, eyeRow);
-    } else {
-      drawCell(4 + dx, eyeRow, eyeColor);
-      drawCell(9 + dx, eyeRow, eyeColor);
-    }
-
-    // Mood-specific accents using Journal.of(context).accent.
+    // Floating sky accents in Row 0..1 (Row 2 completely empty above Row 3 head).
     if (mood == JournalPixelBuddyMood.dueToday) {
       drawCell(12, 0, accent);
-      drawCell(11, 1, accent);
       drawCell(12, 1, accent);
-      drawCell(13, 1, accent);
-      drawCell(12, 2, accent);
     } else if (mood == JournalPixelBuddyMood.allClear) {
-      drawCell(1, 0, accent);
-      drawCell(0, 1, highlightColor);
-      drawCell(1, 1, accent);
-      drawCell(12, 0, accent);
-      drawCell(12, 1, accent);
-      drawCell(13, 1, highlightColor);
+      drawCell(12, 0, highlightColor);
+      drawCell(11, 1, accent);
+      drawCell(12, 1, highlightColor);
+    }
+
+    // Rising & fading floating particles for combos, cheer, and allClear idle sparkle.
+    if (t > 0.0 && t < 1.0) {
+      final alpha = math.sin(math.pi * t).clamp(0.0, 1.0);
+      if (actionKind == _BuddyActionKind.tapDoubleStar ||
+          actionKind == _BuddyActionKind.cheer ||
+          actionKind == _BuddyActionKind.idleAllClearStar) {
+        final floatY = snap(originY + (2.0 - 2.0 * t) * cell);
+        final floatX = snap(originX + 10.5 * cell);
+        final sCell = math.max(1.0 / dpr, snap(cell * 0.72));
+        paint.color = accent.withValues(alpha: alpha);
+        canvas.drawRect(
+          Rect.fromLTWH(floatX, floatY, sCell, sCell),
+          paint,
+        );
+        paint.color = highlightColor.withValues(alpha: alpha);
+        canvas.drawRect(
+          Rect.fromLTWH(
+              snap(floatX + sCell), snap(floatY - sCell), sCell, sCell),
+          paint,
+        );
+        canvas.drawRect(
+          Rect.fromLTWH(
+              snap(floatX - sCell), snap(floatY + sCell), sCell, sCell),
+          paint,
+        );
+      } else if (actionKind == _BuddyActionKind.tapDoubleHeart) {
+        final sub = math.max(1.0 / dpr, snap(cell * 0.55));
+        final baseX = snap(originX + 7.0 * cell - sub * 2.5);
+        final baseY = snap(originY + (2.0 - 2.1 * t) * cell - sub * 2.0);
+        paint.color = heartColor.withValues(alpha: alpha);
+        const heartOffsets = <(int, int)>[
+          (1, 0),
+          (3, 0),
+          (0, 1),
+          (1, 1),
+          (2, 1),
+          (3, 1),
+          (4, 1),
+          (1, 2),
+          (2, 2),
+          (3, 2),
+          (2, 3),
+        ];
+        for (final (hx, hy) in heartOffsets) {
+          canvas.drawRect(
+            Rect.fromLTWH(
+              snap(baseX + hx * sub),
+              snap(baseY + hy * sub),
+              sub,
+              sub,
+            ),
+            paint,
+          );
+        }
+      }
     }
   }
 
@@ -560,9 +827,10 @@ class _JournalPixelBuddyPainter extends CustomPainter {
       oldDelegate.mood != mood ||
       oldDelegate.isDark != isDark ||
       oldDelegate.accent != accent ||
-      oldDelegate.idlePose != idlePose ||
-      oldDelegate.isBlinking != isBlinking ||
+      oldDelegate.devicePixelRatio != devicePixelRatio ||
+      oldDelegate.actionKind != actionKind ||
+      oldDelegate.actionProgress != actionProgress ||
+      oldDelegate.peekSign != peekSign ||
       oldDelegate.syncTick != syncTick ||
-      oldDelegate.isWaving != isWaving ||
       oldDelegate.jumpOffset != jumpOffset;
 }

@@ -852,6 +852,152 @@ void main() {
       store.syncGate!.complete();
       await tester.pumpAndSettle();
     });
+
+    testWidgets(
+        'combo taps cycle combo whispers at 360dp without jump, reset after 1.2s, and manual complete/pin increment celebratePulse',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final assignment = _work(
+        'pin-cheer',
+        title: '欢呼置顶作业',
+        due: now.add(const Duration(days: 2)),
+        syncedAt: now,
+      );
+      final manual = _manual(
+        'm-cheer',
+        title: '欢呼完成待办',
+        at: now.add(const Duration(hours: 4)),
+      );
+      final manualPin = _manual(
+        'm-pin-cheer',
+        title: '欢呼置顶待办',
+        at: now.add(const Duration(hours: 6)),
+      );
+      final store = await _createStore(
+        assignments: [assignment],
+        entries: [manual, manualPin],
+        clock: () => now,
+        initialReport:
+            SyncReport(phase: SyncPhase.success, lastDataSuccessAt: now),
+      );
+      addTearDown(store.dispose);
+
+      await _pumpHome(tester, store, now: now);
+
+      final titleBuddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
+      final dueSummaryFinder = find.byKey(const ValueKey('home-due-summary'));
+      final summaryY = tester.getTopLeft(dueSummaryFinder).dy;
+
+      // Tap 1 -> baseline whisper.
+      await tester.tap(titleBuddyFinder);
+      await tester.pump();
+      expect(find.text('今日待办2项，稳步推进'), findsOneWidget);
+      expect(tester.getTopLeft(dueSummaryFinder).dy, closeTo(summaryY, 0.5));
+
+      // Tap 2 within 1.2s -> combo 2 whisper, single-row without pushing due-summary.
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(titleBuddyFinder);
+      await tester.pump();
+      expect(
+        find.text(
+          journalBuddyTapWhisper(
+            dueToday: 2,
+            dueIn3Days: 3,
+            completedToday: 0,
+            tapCount: 1,
+            comboCount: 2,
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.getTopLeft(dueSummaryFinder).dy, closeTo(summaryY, 0.5));
+
+      // Tap 3 within 1.2s -> combo 3+ whisper, single-row without pushing due-summary.
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(titleBuddyFinder);
+      await tester.pump();
+      expect(
+        find.text(
+          journalBuddyTapWhisper(
+            dueToday: 2,
+            dueIn3Days: 3,
+            completedToday: 0,
+            tapCount: 2,
+            comboCount: 3,
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.getTopLeft(dueSummaryFinder).dy, closeTo(summaryY, 0.5));
+
+      // Wait past 1.2s combo window & 2s whisper window -> combo resets to 1.
+      await tester.pump(const Duration(milliseconds: 2100));
+      await tester.pumpAndSettle();
+      await tester.tap(titleBuddyFinder);
+      await tester.pump();
+      expect(
+        find.text(
+          journalBuddyTapWhisper(
+            dueToday: 2,
+            dueIn3Days: 3,
+            completedToday: 0,
+            tapCount: 3,
+            comboCount: 1,
+          ),
+        ),
+        findsOneWidget,
+      );
+      await tester.pump(const Duration(milliseconds: 2100));
+      await tester.pumpAndSettle();
+
+      // Completing manual entry increments celebratePulse on buddy.
+      expect(
+          tester.widget<JournalPixelBuddy>(titleBuddyFinder).celebratePulse, 0);
+      await tester.tap(find.byKey(const ValueKey('complete-manual-m-cheer')));
+      await tester.pump();
+      await tester.pump();
+      expect(
+          tester.widget<JournalPixelBuddy>(titleBuddyFinder).celebratePulse, 1);
+      await tester.pumpAndSettle();
+
+      // Pinning assignment increments celebratePulse; unpinning does not.
+      await tester.longPress(find.text('欢呼置顶作业'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('置顶'));
+      await tester.pump();
+      await tester.pump();
+      expect(
+          tester.widget<JournalPixelBuddy>(titleBuddyFinder).celebratePulse, 2);
+      await tester.pumpAndSettle();
+
+      await tester.longPress(find.text('欢呼置顶作业'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('取消置顶'));
+      await tester.pumpAndSettle();
+      expect(
+          tester.widget<JournalPixelBuddy>(titleBuddyFinder).celebratePulse, 2);
+
+      // Pinning manual entry increments celebratePulse; unpinning does not.
+      await tester.longPress(find.text('欢呼置顶待办'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('置顶').last);
+      await tester.pump();
+      await tester.pump();
+      expect(
+          tester.widget<JournalPixelBuddy>(titleBuddyFinder).celebratePulse, 3);
+      await tester.pumpAndSettle();
+
+      await tester.longPress(find.text('欢呼置顶待办'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('取消置顶').last);
+      await tester.pumpAndSettle();
+      expect(
+          tester.widget<JournalPixelBuddy>(titleBuddyFinder).celebratePulse, 3);
+    });
   });
 
   group(

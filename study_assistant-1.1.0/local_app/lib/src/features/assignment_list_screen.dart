@@ -126,8 +126,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   int? _preExamStripEpoch;
   String? _buddyWhisper;
   Timer? _buddyWhisperTimer;
+  Timer? _buddyComboResetTimer;
   Timer? _syncSpinnerTimer;
   int _buddyTapCount = 0;
+  int _buddyComboCount = 0;
+  int _buddyCelebratePulse = 0;
   bool _appResumed = true;
   bool _tickerEnabled = true;
   bool _reducedMotion = false;
@@ -136,6 +139,17 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       _refreshing ||
       store.isLoading ||
       store.syncReport.phase == SyncPhase.running;
+
+  void _clearBuddyCombo() {
+    _buddyComboResetTimer?.cancel();
+    _buddyComboResetTimer = null;
+    _buddyComboCount = 0;
+  }
+
+  void _triggerBuddyCheer() {
+    if (!mounted || _reducedMotion) return;
+    setState(() => _buddyCelebratePulse++);
+  }
 
   void _clearBuddyWhisper({bool notify = false}) {
     _buddyWhisperTimer?.cancel();
@@ -197,6 +211,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _completingManualTimers.remove(entryId)?.cancel();
     setState(() {
       _completingManualIds.add(entryId);
+      _buddyCelebratePulse++;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_completingManualIds.contains(entryId)) return;
@@ -260,6 +275,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _checkFeedbackAccount();
     if (_isBusy || !store.display.showPixelBuddy) {
       _clearBuddyWhisper();
+      _clearBuddyCombo();
     }
     _reconcileSyncSpinner();
   }
@@ -269,6 +285,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         _feedbackAccount != store.account) {
       _feedback.dismiss();
       _clearBuddyWhisper();
+      _clearBuddyCombo();
       _clearCompletingManual();
       _pinPulseByKey.clear();
       _preExamStripFilters = null;
@@ -295,6 +312,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       oldWidget.store.removeListener(_onStoreChanged);
       _feedback.dismiss();
       _clearBuddyWhisper();
+      _clearBuddyCombo();
       _clearCompletingManual();
       _pinPulseByKey.clear();
       _feedbackEpoch = store.accountEpoch;
@@ -327,8 +345,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _reducedMotion = JournalMotion.isReducedMotion(context);
     if (!_tickerEnabled) {
       _clearBuddyWhisper();
+      _clearBuddyCombo();
     }
     if (_reducedMotion) {
+      _clearBuddyCombo();
       _clearCompletingManual();
     }
     _reconcileSyncSpinner();
@@ -345,6 +365,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _syncSpinnerTick.dispose();
     _buddyWhisperTimer?.cancel();
     _buddyWhisperTimer = null;
+    _buddyComboResetTimer?.cancel();
+    _buddyComboResetTimer = null;
     _clearCompletingManual();
     store.removeListener(_onStoreChanged);
     _feedback.dispose();
@@ -359,6 +381,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       _appResumed = nextResumed;
       if (!nextResumed) {
         _clearBuddyWhisper(notify: true);
+        _clearBuddyCombo();
       }
       _reconcileSyncSpinner();
     }
@@ -450,6 +473,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     final pinned = store.isPinned(assignment);
     JournalMotion.pin(store.display, pinned: pinned);
     _triggerCardPulse(AssignmentStore.pinKeyOf(assignment));
+    if (pinned) {
+      _triggerBuddyCheer();
+    }
     feedback(pinned ? '已置顶' : '已取消置顶');
   }
 
@@ -459,6 +485,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         feedback(message, action: action, actionLabel: actionLabel),
     isMounted: () => mounted,
     onBouncePulse: _triggerCardPulse,
+    onPinAdded: _triggerBuddyCheer,
     onCompletingStart: _onManualCompletingStart,
     onCompletingCommit: _onManualCompletingCommit,
     onCompletingCancel: (id) =>
@@ -996,6 +1023,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         _reducedMotion = reduceMotion;
         if (busy) {
           _clearBuddyWhisper();
+          _clearBuddyCombo();
         }
         final showPixelBuddy = store.display.showPixelBuddy;
         _reconcileSyncSpinner(
@@ -1205,11 +1233,27 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             return;
           }
           _buddyWhisperTimer?.cancel();
+          final int effectiveCombo;
+          if (_reducedMotion) {
+            _clearBuddyCombo();
+            effectiveCombo = 1;
+          } else {
+            _buddyComboResetTimer?.cancel();
+            _buddyComboCount++;
+            effectiveCombo = _buddyComboCount;
+            _buddyComboResetTimer =
+                Timer(const Duration(milliseconds: 1200), () {
+              _buddyComboResetTimer = null;
+              if (!mounted) return;
+              _buddyComboCount = 0;
+            });
+          }
           final whisper = journalBuddyTapWhisper(
             dueToday: dueSummary.dueToday,
             dueIn3Days: dueSummary.dueIn3Days,
             completedToday: dueSummary.completedToday,
             tapCount: _buddyTapCount - 1,
+            comboCount: effectiveCombo,
           );
           setState(() => _buddyWhisper = whisper);
           _buddyWhisperTimer = Timer(const Duration(milliseconds: 2000), () {
@@ -1345,6 +1389,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                               onTap: onBuddyTap,
                               syncTickListenable: _syncSpinnerTick,
                               displayPrefs: store.display,
+                              celebratePulse: _buddyCelebratePulse,
                             ),
                           ],
                         )
@@ -2196,6 +2241,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                           onTap: onBuddyTap,
                           syncTickListenable: _syncSpinnerTick,
                           displayPrefs: store.display,
+                          celebratePulse: _buddyCelebratePulse,
                         )
                       : null,
                   statusContent: sliverStatusContent,
