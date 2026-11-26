@@ -708,5 +708,115 @@ void main() {
       expect(c4.courseStartAt, DateTime.utc(2025, 9, 1));
       expect(c4.courseEndAt, DateTime.utc(2026, 1, 20));
     });
+
+    test(
+        'extracts clazz/content/channel createtime, prioritizes clazz.begindate, and never reads template course.createtime',
+        () {
+      final result = ChaoxingApiParser.parseCourseRefsDetailed({
+        'channelList': [
+          {
+            'createtime': '2025-08-25T08:00:00Z',
+            'content': {
+              'clazz': {
+                'data': [
+                  {'id': 501, 'name': '频道创建时间回落班'},
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 601,
+                    'name': '无begindate回落channel创建时间',
+                    // Old template creation time must be ignored.
+                    'createtime': '2021-02-01T00:00:00Z',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            'content': {
+              'createtime': '2026-08-20T00:00:00Z',
+              'clazz': {
+                'data': [
+                  {
+                    'id': 502,
+                    'name': 'clazz创建时间优于content',
+                    'createtime': '2026-02-20T00:00:00Z',
+                  },
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 602,
+                    'name': 'clazz.createtime优先生效',
+                    'createtime': '2020-01-01T00:00:00Z',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            'content': {
+              'createtime': '2025-02-15T00:00:00Z',
+              'clazz': {
+                'data': [
+                  {
+                    'id': 503,
+                    'name': 'clazz明确开课时间班',
+                    'begindate': '2026-09-01',
+                    'createtime': '2026-08-18T00:00:00Z',
+                  },
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 603,
+                    'name': 'clazz.begindate优先于course.begindate',
+                    'begindate': '2024-09-01',
+                    'createTime': '2019-09-01T00:00:00Z',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            'content': {
+              'clazz': {
+                'data': [
+                  {'id': 504, 'name': '仅模板course.createtime班'},
+                ],
+              },
+              'course': {
+                'data': [
+                  {
+                    'id': 604,
+                    'name': '老模板复用课不应误用course.createtime',
+                    'createtime': 1577836800000,
+                    'createTime': '2020-03-01T00:00:00Z',
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      });
+
+      expect(result.refs, hasLength(4));
+
+      final c1 = result.refs.singleWhere((c) => c.courseId == '601');
+      expect(c1.courseStartAt, DateTime.utc(2025, 8, 25, 8));
+
+      final c2 = result.refs.singleWhere((c) => c.courseId == '602');
+      expect(c2.courseStartAt, DateTime.utc(2026, 2, 20));
+
+      final c3 = result.refs.singleWhere((c) => c.courseId == '603');
+      expect(c3.courseStartAt, DateTime.utc(2026, 9, 1));
+
+      final c4 = result.refs.singleWhere((c) => c.courseId == '604');
+      expect(c4.courseStartAt, isNull);
+    });
   });
 }

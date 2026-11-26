@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/course_list_screen.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
@@ -13,6 +14,7 @@ import 'package:study_assistant_mobile/src/models/course_notice.dart';
 import 'package:study_assistant_mobile/src/models/course_term_preferences.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
+import 'package:study_assistant_mobile/src/models/sync_scope.dart';
 import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'package:study_assistant_mobile/src/services/assignment_reminder_planner.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
@@ -1303,6 +1305,445 @@ void main() {
           CourseTermScope.currentTerm,
         ),
         isFalse,
+      );
+    });
+
+    test(
+        'fromCourseCreationInstant maps Aug pre-creation to fall and Feb to spring without altering fromInstant',
+        () {
+      expect(
+        AcademicTerm.fromCourseCreationInstant(_beijing(2026, 8, 25, 10)),
+        const AcademicTerm(2026, AcademicSemester.fall),
+      );
+      expect(
+        AcademicTerm.fromCourseCreationInstant(_beijing(2026, 2, 18, 10)),
+        const AcademicTerm(2025, AcademicSemester.spring),
+      );
+      expect(
+        AcademicTerm.fromCourseCreationInstant(_beijing(2026, 1, 15, 10)),
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
+      // AcademicTerm.fromInstant keeps strict Mar 1 / Sep 1 cutoff for homework/exams.
+      expect(
+        AcademicTerm.fromInstant(_beijing(2026, 8, 25, 10)),
+        const AcademicTerm(2025, AcademicSemester.spring),
+      );
+      expect(
+        AcademicTerm.fromInstant(_beijing(2026, 2, 18, 10)),
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
+    });
+
+    test(
+        'clazzId cohort infers zero-activity courses across 3 semesters accurately while blocking promo noise',
+        () {
+      final now = _beijing(2026, 11, 26, 10);
+      const currentFall = AcademicTerm(2026, AcademicSemester.fall);
+      const pastSpring = AcademicTerm(2025, AcademicSemester.spring);
+      const pastFall = AcademicTerm(2025, AcademicSemester.fall);
+
+      const courses = <CourseRef>[
+        // 2026-2027 秋季（15 门：5 有线索 + 10 零作业零通知）
+        CourseRef(courseId: '267575898', clazzId: '155943935', name: '离散结构'),
+        CourseRef(courseId: '266993156', clazzId: '154422405', name: '大学物理实验B'),
+        CourseRef(courseId: '266855292', clazzId: '154055965', name: '习概课外实践'),
+        CourseRef(courseId: '266855253', clazzId: '154055842', name: '习概'),
+        CourseRef(
+            courseId: '266780803', clazzId: '153853883', name: '算法设计与分析实验'),
+        CourseRef(courseId: '266780722', clazzId: '153853649', name: '算法设计与分析'),
+        CourseRef(
+            courseId: '266779539', clazzId: '153850877', name: '实用工程英语写作'),
+        CourseRef(courseId: '247179431', clazzId: '153847614', name: '英语应用文写作'),
+        CourseRef(courseId: '266640727', clazzId: '153484971', name: '信息安全基础'),
+        CourseRef(
+            courseId: '266547622', clazzId: '153224530', name: '概率论与数理统计'),
+        CourseRef(courseId: '266534181', clazzId: '153183681', name: '毛概课外实践'),
+        CourseRef(courseId: '266514411', clazzId: '153121275', name: '毛概'),
+        CourseRef(
+            courseId: '266499402', clazzId: '153074707', name: '大学物理B（下）'),
+        CourseRef(courseId: '266276698', clazzId: '152467590', name: '体育(三)'),
+        CourseRef(courseId: '266271672', clazzId: '152453179', name: '影视鉴赏'),
+        // 2025-2026 春季（11 门：2 有线索 + 9 零作业零通知）
+        CourseRef(
+            courseId: '240994784', clazzId: '141297385', name: '中国近现代史纲要'),
+        CourseRef(courseId: '260381513', clazzId: '138963634', name: '体育(二)'),
+        CourseRef(courseId: '260380570', clazzId: '138962100', name: '程序设计二'),
+        CourseRef(courseId: '260379066', clazzId: '138959958', name: '线性代数'),
+        CourseRef(
+            courseId: '260379065', clazzId: '138959954', name: '高等数学A（二）'),
+        CourseRef(courseId: '260379063', clazzId: '138959952', name: '人工智能基础B'),
+        CourseRef(courseId: '260379061', clazzId: '138959949', name: '大学生心理健康'),
+        CourseRef(
+            courseId: '260378806', clazzId: '138959515', name: '大学物理B（上）'),
+        CourseRef(courseId: '260378719', clazzId: '138959279', name: '军事理论'),
+        CourseRef(courseId: '260377998', clazzId: '138958078', name: '心理健康实践'),
+        CourseRef(
+            courseId: '260377681', clazzId: '138957382', name: '通用工程英语听说'),
+        // 2025-2026 秋季（12 门 + 2 官方竞赛课）
+        CourseRef(
+            courseId: '259004218',
+            clazzId: '136054762',
+            name: '2026全国大学生AI答题实践竞赛',
+            teacherNames: ['超星小助手']),
+        CourseRef(
+            courseId: '258750250',
+            clazzId: '135623072',
+            name: '2025年12月6日1-4节《形势与政策》'),
+        CourseRef(
+            courseId: '257920901',
+            clazzId: '133807271',
+            name: '2026全国大学生AI答题实践竞赛',
+            teacherNames: ['超星小助手']),
+        CourseRef(
+            courseId: '256727781', clazzId: '131143331', name: '2025级分班级'),
+        CourseRef(courseId: '256045042', clazzId: '130351455', name: '体育(一)'),
+        CourseRef(
+            courseId: '255971922', clazzId: '129355129', name: '大学生卫生与健康'),
+        CourseRef(courseId: '255752174', clazzId: '128814165', name: '信息类专业导论'),
+        CourseRef(courseId: '255751307', clazzId: '128812823', name: '程序设计一'),
+        CourseRef(courseId: '255750796', clazzId: '128811945', name: '写作与沟通'),
+        CourseRef(
+            courseId: '255750140', clazzId: '128810598', name: '高等数学A(一)'),
+        CourseRef(courseId: '255396471', clazzId: '128810584', name: '大学英语'),
+        CourseRef(courseId: '255750045', clazzId: '128810360', name: '思政实践'),
+        CourseRef(courseId: '255750018', clazzId: '128810262', name: '思想道德与法治'),
+        CourseRef(courseId: '255396478', clazzId: '128810038', name: '军训'),
+      ];
+
+      Assignment courseWork(String courseId, String clazzId, DateTime at) =>
+          Assignment(
+            id: 'cx:work:$courseId:$clazzId:1',
+            courseName: '课业课程',
+            title: '阶段作业',
+            deadlineAt: at,
+            deadlineTrusted: true,
+            requirementsText: '',
+            status: 'pending',
+            lastSyncedAt: now,
+          );
+
+      final catalog = CourseTermCatalog.build(
+        courses: courses,
+        assignments: [
+          courseWork('266780803', '153853883', _beijing(2026, 11, 28)),
+          courseWork('266779539', '153850877', _beijing(2026, 10, 31)),
+          courseWork('266640727', '153484971', _beijing(2026, 12, 8)),
+          courseWork('266499402', '153074707', _beijing(2027, 1, 24)),
+          courseWork('240994784', '141297385', _beijing(2026, 7, 7)),
+          courseWork('260379066', '138959958', _beijing(2026, 7, 4)),
+          // Official promo course's homework must not corrupt cohort anchors.
+          courseWork('259004218', '136054762', _beijing(2026, 11, 30)),
+        ],
+        notices: [
+          CourseNotice(
+            id: 'cx:notice:${'1' * 64}',
+            courseId: '266547622',
+            clazzId: '153224530',
+            courseName: '概率论与数理统计',
+            senderName: '任课教师',
+            title: '上课通知',
+            publishedAt: _beijing(2026, 10, 13),
+            publishedTrusted: true,
+            lastSyncedAt: now,
+          ),
+        ],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      final fallCount = courses
+          .where((c) => catalog.matchesHomeCoursePicker(c.key, 'currentTerm'))
+          .length;
+      final yearCount = courses
+          .where((c) =>
+              catalog.matchesHomeCoursePicker(c.key, 'currentAcademicYear'))
+          .length;
+      final pastCount = courses
+          .where((c) => catalog.matchesHomeCoursePicker(c.key, 'pastTerms'))
+          .length;
+      final allCount = courses
+          .where((c) => catalog.matchesHomeCoursePicker(c.key, 'allTerms'))
+          .length;
+      final ungroupedCount = courses
+          .where((c) =>
+              !catalog.isBlocked(c.key) && catalog.isUngroupedCourse(c.key))
+          .length;
+
+      expect(fallCount, 15);
+      expect(yearCount, 15);
+      expect(pastCount, 23);
+      expect(allCount, 38);
+      expect(ungroupedCount, 0);
+
+      for (final key in const [
+        '266271672:152453179',
+        '247179431:153847614',
+        '266514411:153121275',
+        '267575898:155943935',
+      ]) {
+        final e = catalog.entryFor(key)!;
+        expect(e.term, currentFall, reason: key);
+        expect(e.source, CourseTermSource.clazzCohort, reason: key);
+        expect(e.state, CourseCatalogState.active, reason: key);
+      }
+
+      for (final key in const [
+        '260377681:138957382',
+        '260381513:138963634',
+      ]) {
+        final e = catalog.entryFor(key)!;
+        expect(e.term, pastSpring, reason: key);
+        expect(e.source, CourseTermSource.clazzCohort, reason: key);
+        expect(e.state, CourseCatalogState.archived, reason: key);
+      }
+
+      for (final key in const [
+        '255396478:128810038',
+        '256727781:131143331',
+      ]) {
+        final e = catalog.entryFor(key)!;
+        expect(e.term, pastFall, reason: key);
+        expect(e.source, CourseTermSource.clazzCohort, reason: key);
+        expect(e.state, CourseCatalogState.archived, reason: key);
+      }
+
+      expect(catalog.isBlocked('259004218:136054762'), isTrue);
+      expect(catalog.isBlocked('257920901:133807271'), isTrue);
+
+      final rawRefs = [
+        for (final c in courses)
+          ChaoxingCourseRef(
+            courseId: c.courseId,
+            clazzId: c.clazzId,
+            courseName: c.name,
+            teacherNames: c.teacherNames,
+          ),
+      ];
+      final selCurrent = SyncScopeSelection.select(
+        catalog: rawRefs,
+        scope: AssignmentSyncScope.current,
+        termCatalog: catalog,
+      );
+      expect(selCurrent.targetCourses, hasLength(15));
+    });
+
+    test(
+        'clazzId cohort extrapolates past terms from single current-term anchor and week-1 forward courses with conservative deadzone',
+        () {
+      final now = _beijing(2026, 11, 20, 10);
+      const currentAnchor = CourseRef(
+        courseId: '1',
+        clazzId: '153500000',
+        name: '本学期锚点课',
+        folderName: '2026年秋',
+      );
+      const sameTermEarly = CourseRef(
+        courseId: '2',
+        clazzId: '150500000', // delta = 3.0M <= 3.8M -> currentTerm
+        name: '同批早建无作业课',
+      );
+      const deadzoneCourse = CourseRef(
+        courseId: '3',
+        clazzId: '148500000', // delta = 5.0M in (3.8M, 7.5M) -> ungrouped
+        name: '过渡死区课',
+      );
+      const prevSpringCourse = CourseRef(
+        courseId: '4',
+        clazzId: '141000000', // delta = 12.5M -> -1 term (2025-spring)
+        name: '上学期无作业课',
+      );
+      const prevFallCourse = CourseRef(
+        courseId: '5',
+        clazzId: '130000000', // delta = 23.5M -> -2 terms (2025-fall)
+        name: '上学年秋课',
+      );
+
+      final singleCurrentCatalog = CourseTermCatalog.build(
+        courses: const [
+          currentAnchor,
+          sameTermEarly,
+          deadzoneCourse,
+          prevSpringCourse,
+          prevFallCourse,
+        ],
+        assignments: const [],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+
+      expect(
+        singleCurrentCatalog.entryFor(sameTermEarly.key)!.term,
+        const AcademicTerm(2026, AcademicSemester.fall),
+      );
+      expect(
+        singleCurrentCatalog.entryFor(deadzoneCourse.key)!.source,
+        CourseTermSource.ungrouped,
+      );
+      expect(
+        singleCurrentCatalog.entryFor(prevSpringCourse.key)!.term,
+        const AcademicTerm(2025, AcademicSemester.spring),
+      );
+      expect(
+        singleCurrentCatalog.entryFor(prevFallCourse.key)!.term,
+        const AcademicTerm(2025, AcademicSemester.fall),
+      );
+
+      // Week-1 scenario: only past anchors exist yet, plus a brand-new current-term course.
+      const pastSpringAnchor = CourseRef(
+        courseId: '10',
+        clazzId: '140000000',
+        name: '上学期有作业课',
+        folderName: '2026年春',
+      );
+      const week1Current = CourseRef(
+        courseId: '11',
+        clazzId: '153000000', // +13M -> +1 step = currentTerm
+        name: '开学第一周新课',
+      );
+      final week1Catalog = CourseTermCatalog.build(
+        courses: const [pastSpringAnchor, week1Current],
+        assignments: const [],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+      expect(
+        week1Catalog.entryFor(week1Current.key)!.term,
+        const AcademicTerm(2026, AcademicSemester.fall),
+      );
+      expect(
+        week1Catalog.entryFor(week1Current.key)!.source,
+        CourseTermSource.clazzCohort,
+      );
+    });
+
+    test(
+        'clazzId cohort interpolates skipped middle term (termGap == 2) accurately',
+        () {
+      final now = _beijing(2026, 11, 20, 10);
+      const fall25 = CourseRef(
+        courseId: '21',
+        clazzId: '130000000',
+        name: '2025秋锚点',
+        folderName: '2025年秋',
+      );
+      const spring26Unanchored = CourseRef(
+        courseId: '22',
+        clazzId: '141500000',
+        name: '夹在中间的无作业课',
+      );
+      const fall26 = CourseRef(
+        courseId: '23',
+        clazzId: '153500000',
+        name: '2026秋锚点',
+        folderName: '2026年秋',
+      );
+
+      final catalog = CourseTermCatalog.build(
+        courses: const [fall25, spring26Unanchored, fall26],
+        assignments: const [],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+      final e = catalog.entryFor(spring26Unanchored.key)!;
+      expect(e.term, const AcademicTerm(2025, AcademicSemester.spring));
+      expect(e.source, CourseTermSource.clazzCohort);
+    });
+
+    test(
+        'clazzId cohort ignores small synthetic IDs, trims single outlier, and aborts on 1v1 inverted anchors',
+        () {
+      final now = _beijing(2026, 11, 20, 10);
+
+      // 1. Small/alphanumeric synthetic IDs never trigger cohort inference.
+      const smallAnchor = CourseRef(
+        courseId: '1',
+        clazzId: '100',
+        name: '小号锚点',
+        folderName: '2026年秋',
+      );
+      const smallBlank = CourseRef(
+        courseId: '2',
+        clazzId: '105',
+        name: '小号无归属',
+      );
+      final smallCatalog = CourseTermCatalog.build(
+        courses: const [smallAnchor, smallBlank],
+        assignments: const [],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+      expect(smallCatalog.entryFor(smallBlank.key)!.source,
+          CourseTermSource.ungrouped);
+
+      // 2. Intra-term outlier (1 stale old class at 80M among 5 classes at 153M) is trimmed.
+      final trimmedCourses = <CourseRef>[
+        for (var i = 0; i < 5; i++)
+          CourseRef(
+            courseId: '${30 + i}',
+            clazzId: '${153000000 + i * 100000}',
+            name: '本学期主簇$i',
+            folderName: '2026年秋',
+          ),
+        const CourseRef(
+          courseId: '39',
+          clazzId: '80000000',
+          name: '复用老班的本学期课',
+          folderName: '2026年秋',
+        ),
+        const CourseRef(
+          courseId: '40',
+          clazzId: '153250000',
+          name: '主簇内无作业课',
+        ),
+      ];
+      final trimmedCatalog = CourseTermCatalog.build(
+        courses: trimmedCourses,
+        assignments: const [],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+      expect(
+        trimmedCatalog.entryFor('40:153250000')!.term,
+        const AcademicTerm(2026, AcademicSemester.fall),
+      );
+      expect(
+        trimmedCatalog.entryFor('40:153250000')!.source,
+        CourseTermSource.clazzCohort,
+      );
+
+      // 3. 1v1 inverted anchors (past > current) abort cleanly back to ungrouped.
+      const invertedPast = CourseRef(
+        courseId: '50',
+        clazzId: '155000000',
+        name: '倒挂往期课',
+        folderName: '2025年秋',
+      );
+      const invertedCurrent = CourseRef(
+        courseId: '51',
+        clazzId: '130000000',
+        name: '倒挂当前课',
+        folderName: '2026年秋',
+      );
+      const targetCourse = CourseRef(
+        courseId: '52',
+        clazzId: '140000000',
+        name: '待推断课',
+      );
+      final invertedCatalog = CourseTermCatalog.build(
+        courses: const [invertedPast, invertedCurrent, targetCourse],
+        assignments: const [],
+        notices: const [],
+        preferences: const CourseTermPreferences.empty(),
+        now: now,
+      );
+      expect(
+        invertedCatalog.entryFor(targetCourse.key)!.source,
+        CourseTermSource.ungrouped,
       );
     });
   });

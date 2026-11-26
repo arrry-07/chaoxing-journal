@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../models/assignment.dart';
 import '../models/assignment_change.dart';
 import '../models/course.dart';
@@ -16,6 +18,7 @@ enum CourseTermSource {
   clazzName,
   activity,
   courseTime,
+  clazzCohort,
   ungrouped,
 }
 
@@ -52,12 +55,35 @@ class AcademicTerm implements Comparable<AcademicTerm> {
       ? AcademicTerm(academicYearStart, AcademicSemester.fall)
       : AcademicTerm(academicYearStart - 1, AcademicSemester.spring);
 
+  int get _ordinal =>
+      academicYearStart * 2 + (semester == AcademicSemester.spring ? 1 : 0);
+
+  AcademicTerm? _shift(int deltaTerms) {
+    final target = _ordinal + deltaTerms;
+    if (target < 4000 || target > 4201) return null;
+    return AcademicTerm(
+      target ~/ 2,
+      target.isOdd ? AcademicSemester.spring : AcademicSemester.fall,
+    );
+  }
+
   static AcademicTerm fromInstant(DateTime instant) {
     final beijing = AssignmentQuery.beijing(instant);
     if (beijing.month >= 9) {
       return AcademicTerm(beijing.year, AcademicSemester.fall);
     }
     if (beijing.month <= 2) {
+      return AcademicTerm(beijing.year - 1, AcademicSemester.fall);
+    }
+    return AcademicTerm(beijing.year - 1, AcademicSemester.spring);
+  }
+
+  static AcademicTerm fromCourseCreationInstant(DateTime instant) {
+    final beijing = AssignmentQuery.beijing(instant);
+    if (beijing.month >= 8) {
+      return AcademicTerm(beijing.year, AcademicSemester.fall);
+    }
+    if (beijing.month == 1) {
       return AcademicTerm(beijing.year - 1, AcademicSemester.fall);
     }
     return AcademicTerm(beijing.year - 1, AcademicSemester.spring);
@@ -454,6 +480,38 @@ class CourseTermEntry {
       };
 }
 
+class _ClazzIdCluster {
+  const _ClazzIdCluster({
+    required this.term,
+    required this.minId,
+    required this.maxId,
+    required this.medianId,
+    required this.count,
+  });
+
+  final AcademicTerm term;
+  final int minId;
+  final int maxId;
+  final int medianId;
+  final int count;
+}
+
+class _BaseCourseResolution {
+  const _BaseCourseResolution({
+    required this.term,
+    required this.source,
+    required this.explanation,
+    required this.isBlocked,
+    required this.isAutoPromo,
+  });
+
+  final AcademicTerm? term;
+  final CourseTermSource source;
+  final String explanation;
+  final bool isBlocked;
+  final bool isAutoPromo;
+}
+
 class CourseTermCatalog {
   const CourseTermCatalog._({
     required this.currentTerm,
@@ -531,6 +589,271 @@ class CourseTermCatalog {
 
   static const Duration maxFutureActivityVoteHorizon = Duration(days: 365);
 
+  static const int _minChaoxingCohortClazzId = 10000000;
+  static const int _maxIntraTermClazzIdSpan = 9000000;
+  static const int _tightSameTermClazzIdDelta = 3800000;
+  static const int _currentTermForwardClazzIdDelta = 6000000;
+  static const int _earliestPastSameTermClazzIdDelta = 7500000;
+  static const int _pastStepBoundaryClazzIdDelta = 7500000;
+  static const int _defaultSemesterClazzIdStep = 11500000;
+  static const int _minCalibratedSemesterClazzIdStep = 9000000;
+  static const int _maxCalibratedSemesterClazzIdStep = 15000000;
+  static const int _maxExtrapolatedTermSteps = 12;
+
+  static int? _parseCohortClazzId(CourseRef? course) {
+    if (course == null) return null;
+    final trimmed = course.clazzId.trim();
+    if (trimmed.isEmpty || !RegExp(r'^\d+$').hasMatch(trimmed)) return null;
+    final parsed = int.tryParse(trimmed);
+    if (parsed == null || parsed < _minChaoxingCohortClazzId) return null;
+    return parsed;
+  }
+
+  static int _sortedMedian(List<int> sorted) {
+    final mid = sorted.length ~/ 2;
+    return sorted.length.isOdd
+        ? sorted[mid]
+        : (sorted[mid - 1] + sorted[mid]) ~/ 2;
+  }
+
+  static Map<String, AcademicTerm> _inferTermsByClazzIdCohort({
+    required Iterable<String> catalogKeys,
+    required Map<String, CourseRef> coursesByKey,
+    required Map<String, _BaseCourseResolution> baseByKey,
+    required AcademicTerm currentTerm,
+  }) {
+    final idsByTerm = <AcademicTerm, List<int>>{};
+    for (final key in catalogKeys) {
+      final base = baseByKey[key]!;
+      if (base.isBlocked) continue;
+      final term = base.term;
+      if (term == null || term > currentTerm) continue;
+      final clazzId = _parseCohortClazzId(coursesByKey[key]);
+      if (clazzId == null) continue;
+      (idsByTerm[term] ??= []).add(clazzId);
+    }
+    if (idsByTerm.isEmpty) return const {};
+
+    final candidates = <_ClazzIdCluster>[];
+    for (final entry in idsByTerm.entries) {
+      final ids = entry.value..sort();
+      late final List<int> kept;
+      if (ids.last - ids.first <= _maxIntraTermClazzIdSpan) {
+        kept = ids;
+      } else {
+        var left = 0;
+        var bestStart = 0;
+        var bestEnd = -1;
+        for (var right = 0; right < ids.length; right++) {
+          while (ids[right] - ids[left] > _maxIntraTermClazzIdSpan) {
+            left++;
+          }
+          final count = right - left + 1;
+          final bestCount = bestEnd - bestStart + 1;
+          if (count > bestCount || (count == bestCount && left > bestStart)) {
+            bestStart = left;
+            bestEnd = right;
+          }
+        }
+        final bestCount = bestEnd - bestStart + 1;
+        if (bestCount * 2 <= ids.length) continue;
+        kept = ids.sublist(bestStart, bestEnd + 1);
+      }
+      candidates.add(
+        _ClazzIdCluster(
+          term: entry.key,
+          minId: kept.first,
+          maxId: kept.last,
+          medianId: _sortedMedian(kept),
+          count: kept.length,
+        ),
+      );
+    }
+    if (candidates.isEmpty) return const {};
+    candidates.sort((a, b) => a.term.compareTo(b.term));
+
+    var isStrictlyMonotonic = true;
+    for (var i = 0; i < candidates.length - 1; i++) {
+      if (candidates[i].maxId >= candidates[i + 1].minId) {
+        isStrictlyMonotonic = false;
+        break;
+      }
+    }
+
+    late final List<_ClazzIdCluster> clusters;
+    if (isStrictlyMonotonic) {
+      clusters = candidates;
+    } else {
+      final n = candidates.length;
+      final dp = List<int>.generate(n, (i) => candidates[i].count);
+      final ways = List<int>.filled(n, 1);
+      final prev = List<int>.filled(n, -1);
+      var totalWeight = 0;
+      for (var i = 0; i < n; i++) {
+        totalWeight += candidates[i].count;
+        for (var j = 0; j < i; j++) {
+          if (candidates[j].maxId < candidates[i].minId) {
+            final weight = dp[j] + candidates[i].count;
+            if (weight > dp[i]) {
+              dp[i] = weight;
+              ways[i] = ways[j];
+              prev[i] = j;
+            } else if (weight == dp[i]) {
+              ways[i] = math.min(2, ways[i] + ways[j]);
+            }
+          }
+        }
+      }
+      var bestWeight = 0;
+      for (final w in dp) {
+        if (w > bestWeight) bestWeight = w;
+      }
+      var bestEnd = -1;
+      var totalBestWays = 0;
+      for (var i = 0; i < n; i++) {
+        if (dp[i] == bestWeight) {
+          bestEnd = i;
+          totalBestWays = math.min(2, totalBestWays + ways[i]);
+        }
+      }
+      if (totalBestWays != 1 || bestWeight * 2 <= totalWeight || bestEnd < 0) {
+        return const {};
+      }
+      final chosen = <_ClazzIdCluster>[];
+      var cursor = bestEnd;
+      while (cursor != -1) {
+        chosen.add(candidates[cursor]);
+        cursor = prev[cursor];
+      }
+      clusters = chosen.reversed.toList(growable: false);
+    }
+
+    final slopes = <int>[];
+    for (var i = 0; i < clusters.length; i++) {
+      for (var j = i + 1; j < clusters.length; j++) {
+        final termDiff = clusters[j].term._ordinal - clusters[i].term._ordinal;
+        if (termDiff <= 0) continue;
+        final slope = (clusters[j].medianId - clusters[i].medianId) ~/ termDiff;
+        if (slope >= 7500000 && slope <= 18000000) {
+          slopes.add(slope);
+        }
+      }
+    }
+    late final int step;
+    if (slopes.isEmpty) {
+      step = _defaultSemesterClazzIdStep;
+    } else {
+      slopes.sort();
+      step = _sortedMedian(slopes).clamp(
+        _minCalibratedSemesterClazzIdStep,
+        _maxCalibratedSemesterClazzIdStep,
+      );
+    }
+
+    AcademicTerm? inferForId(int id) {
+      for (final cluster in clusters) {
+        if (id >= cluster.minId && id <= cluster.maxId) {
+          return cluster.term;
+        }
+      }
+      final first = clusters.first;
+      if (id < first.minId) {
+        final delta = first.minId - id;
+        if (first.term < currentTerm) {
+          if (delta <= _earliestPastSameTermClazzIdDelta) {
+            return first.term;
+          }
+          final steps = math.max(1, (delta / step).round());
+          if (steps > _maxExtrapolatedTermSteps) return null;
+          return first.term._shift(-steps);
+        }
+        if (delta <= _tightSameTermClazzIdDelta) {
+          return currentTerm;
+        }
+        if (delta >= _pastStepBoundaryClazzIdDelta) {
+          final steps = math.max(1, (delta / step).round());
+          if (steps > _maxExtrapolatedTermSteps) return null;
+          return currentTerm._shift(-steps);
+        }
+        return null;
+      }
+
+      final last = clusters.last;
+      if (id > last.maxId) {
+        final delta = id - last.maxId;
+        if (last.term == currentTerm) {
+          return delta <= _currentTermForwardClazzIdDelta ? currentTerm : null;
+        }
+        if (delta <= _tightSameTermClazzIdDelta) {
+          return last.term;
+        }
+        if (delta >= _pastStepBoundaryClazzIdDelta) {
+          final steps = math.max(1, (delta / step).round());
+          final maxForward = currentTerm._ordinal - last.term._ordinal;
+          if (steps <= maxForward) {
+            return last.term._shift(steps);
+          }
+          if (id <=
+              last.maxId +
+                  maxForward * step +
+                  _currentTermForwardClazzIdDelta) {
+            return currentTerm;
+          }
+          return null;
+        }
+        return null;
+      }
+
+      for (var i = 0; i < clusters.length - 1; i++) {
+        final low = clusters[i];
+        final high = clusters[i + 1];
+        if (id > low.maxId && id < high.minId) {
+          final dLow = id - low.maxId;
+          final dHigh = high.minId - id;
+          final termGap = high.term._ordinal - low.term._ordinal;
+          if (dHigh <= _tightSameTermClazzIdDelta && dHigh * 2 <= dLow) {
+            return high.term;
+          }
+          if (dLow <= _tightSameTermClazzIdDelta && dLow * 2 <= dHigh) {
+            return low.term;
+          }
+          if (termGap == 1) {
+            if (low.term < currentTerm && high.term < currentTerm) {
+              return dLow <= dHigh ? low.term : high.term;
+            }
+            return null;
+          }
+          if (termGap >= 2) {
+            final span = high.medianId - low.medianId;
+            if (span <= 0) return null;
+            final offset = (((id - low.medianId) / span) * termGap)
+                .round()
+                .clamp(0, termGap);
+            if (offset == termGap && high.term == currentTerm) {
+              return null;
+            }
+            return low.term._shift(offset);
+          }
+          return null;
+        }
+      }
+      return null;
+    }
+
+    final inferred = <String, AcademicTerm>{};
+    for (final key in catalogKeys) {
+      final base = baseByKey[key]!;
+      if (base.isBlocked || base.term != null) continue;
+      final clazzId = _parseCohortClazzId(coursesByKey[key]);
+      if (clazzId == null) continue;
+      final guessed = inferForId(clazzId);
+      if (guessed != null) {
+        inferred[key] = guessed;
+      }
+    }
+    return inferred;
+  }
+
   static AcademicTerm? _courseStartTerm(
     CourseRef? course,
     DateTime maxRecallUtc,
@@ -538,7 +861,7 @@ class CourseTermCatalog {
     final startAt = course?.courseStartAt;
     if (startAt == null) return null;
     if (startAt.toUtc().isAfter(maxRecallUtc)) return null;
-    return AcademicTerm.fromInstant(startAt);
+    return AcademicTerm.fromCourseCreationInstant(startAt);
   }
 
   /// Picks the single timestamp an assignment may vote with.
@@ -816,7 +1139,7 @@ class CourseTermCatalog {
       (noticesByCourse[key] ??= []).add(n);
     }
 
-    final baseIsPastByCourse = <String, bool>{};
+    final baseByKey = <String, _BaseCourseResolution>{};
     for (final key in catalogKeys) {
       final course = coursesByKey[key];
       final courseRecords = assignmentsByCourse[key] ?? const <Assignment>[];
@@ -832,6 +1155,12 @@ class CourseTermCatalog {
       final resolvedCourseName = course?.name ??
           courseRecords.firstOrNull?.courseName ??
           courseNotices.firstOrNull?.courseName;
+      final isAutoPromo = isOfficialPromoCourse(
+        resolvedCourseName,
+        course?.teacherNames ?? const [],
+      );
+      final isBlocked = override.blockMode == CourseBlockMode.blocked ||
+          (isAutoPromo && override.blockMode == CourseBlockMode.auto);
       final manualTerm = AcademicTerm.tryParseKey(override.manualTermKey);
       final folderTerm = AcademicTerm.tryParseFolderLabel(course?.folderName);
       final courseNameTerm =
@@ -839,14 +1168,62 @@ class CourseTermCatalog {
       final clazzNameTerm =
           AcademicTerm.tryParseCourseName(course?.normalizedClazzName);
       final courseTimeTerm = _courseStartTerm(course, maxRecallUtc);
-      final baseTerm = manualTerm ??
-          folderTerm ??
-          activityTerm ??
-          courseNameTerm ??
-          clazzNameTerm ??
-          courseTimeTerm;
-      baseIsPastByCourse[key] = baseTerm != null && baseTerm < currentTerm;
+
+      late final AcademicTerm? term;
+      late final CourseTermSource source;
+      late final String explanation;
+      if (manualTerm != null) {
+        term = manualTerm;
+        source = CourseTermSource.manual;
+        explanation = '手动归属（${manualTerm.label}）';
+      } else if (folderTerm != null) {
+        term = folderTerm;
+        source = CourseTermSource.folder;
+        explanation = '目录「${course!.folderName!.trim()}」';
+      } else if (activityTerm != null) {
+        term = activityTerm;
+        source = CourseTermSource.activity;
+        explanation = '按课业时间分布识别（${activityTerm.label}）';
+      } else if (courseNameTerm != null) {
+        term = courseNameTerm;
+        source = CourseTermSource.courseName;
+        explanation = '按课程名识别（${courseNameTerm.label}）';
+      } else if (clazzNameTerm != null) {
+        term = clazzNameTerm;
+        source = CourseTermSource.clazzName;
+        explanation = '按班级名识别（${clazzNameTerm.label}）';
+      } else if (courseTimeTerm != null) {
+        term = courseTimeTerm;
+        source = CourseTermSource.courseTime;
+        explanation = '按课程时间识别（${courseTimeTerm.label}）';
+      } else {
+        term = null;
+        source = CourseTermSource.ungrouped;
+        explanation = '未分组（保守保留在学）';
+      }
+      baseByKey[key] = _BaseCourseResolution(
+        term: term,
+        source: source,
+        explanation: explanation,
+        isBlocked: isBlocked,
+        isAutoPromo: isAutoPromo,
+      );
     }
+
+    final cohortByKey = _inferTermsByClazzIdCohort(
+      catalogKeys: catalogKeys,
+      coursesByKey: coursesByKey,
+      baseByKey: baseByKey,
+      currentTerm: currentTerm,
+    );
+
+    final baseIsPastByCourse = <String, bool>{
+      for (final key in catalogKeys)
+        key: () {
+          final resolved = baseByKey[key]!.term ?? cohortByKey[key];
+          return resolved != null && resolved < currentTerm;
+        }(),
+    };
 
     final publishedChangeTimesByCourse = <String, List<DateTime>>{};
     for (final change in changes) {
@@ -878,6 +1255,7 @@ class CourseTermCatalog {
       final courseRecords = assignmentsByCourse[key] ?? const <Assignment>[];
       final courseNotices = noticesByCourse[key] ?? const <CourseNotice>[];
       final override = preferences.entryFor(key) ?? const CourseTermOverride();
+      final base = baseByKey[key]!;
       final publishedChangeTimes =
           publishedChangeTimesByCourse[key] ?? const <DateTime>[];
 
@@ -895,53 +1273,18 @@ class CourseTermCatalog {
       final resolvedCourseName = course?.name ??
           courseRecords.firstOrNull?.courseName ??
           courseNotices.firstOrNull?.courseName;
-      final manualTerm = AcademicTerm.tryParseKey(override.manualTermKey);
-      final folderTerm = AcademicTerm.tryParseFolderLabel(course?.folderName);
-      final courseNameTerm =
-          AcademicTerm.tryParseCourseName(resolvedCourseName);
-      final clazzNameTerm =
-          AcademicTerm.tryParseCourseName(course?.normalizedClazzName);
-      final courseTimeTerm = _courseStartTerm(course, maxRecallUtc);
-      final activityTerm = _resolveActivityTermByVote(
-        assignments: courseRecords,
-        notices: courseNotices,
-        nowUtc: nowUtc,
-        currentTerm: currentTerm,
-        hiddenAssignmentIds: hiddenAssignmentIds,
-      );
-
-      late final AcademicTerm? term;
-      late final CourseTermSource source;
-      late final String explanation;
-      if (manualTerm != null) {
-        term = manualTerm;
-        source = CourseTermSource.manual;
-        explanation = '手动归属（${manualTerm.label}）';
-      } else if (folderTerm != null) {
-        term = folderTerm;
-        source = CourseTermSource.folder;
-        explanation = '目录「${course!.folderName!.trim()}」';
-      } else if (activityTerm != null) {
-        term = activityTerm;
-        source = CourseTermSource.activity;
-        explanation = '按课业时间分布识别（${activityTerm.label}）';
-      } else if (courseNameTerm != null) {
-        term = courseNameTerm;
-        source = CourseTermSource.courseName;
-        explanation = '按课程名识别（${courseNameTerm.label}）';
-      } else if (clazzNameTerm != null) {
-        term = clazzNameTerm;
-        source = CourseTermSource.clazzName;
-        explanation = '按班级名识别（${clazzNameTerm.label}）';
-      } else if (courseTimeTerm != null) {
-        term = courseTimeTerm;
-        source = CourseTermSource.courseTime;
-        explanation = '按课程时间识别（${term.label}）';
-      } else {
-        term = null;
-        source = CourseTermSource.ungrouped;
-        explanation = '未分组（保守保留在学）';
-      }
+      final cohortTerm = cohortByKey[key];
+      final term = base.term ?? cohortTerm;
+      final source = base.term != null
+          ? base.source
+          : cohortTerm != null
+              ? CourseTermSource.clazzCohort
+              : CourseTermSource.ungrouped;
+      final explanation = base.term != null
+          ? base.explanation
+          : cohortTerm != null
+              ? '按同批班级时段推测（${cohortTerm.label}）'
+              : base.explanation;
 
       DateTime? latestRecallEventUtc;
       final recallSignals = <DateTime>[
@@ -1025,10 +1368,6 @@ class CourseTermCatalog {
           }
       }
 
-      final isAutoPromo = isOfficialPromoCourse(
-        resolvedCourseName,
-        course?.teacherNames ?? const [],
-      );
       entries[key] = CourseTermEntry(
         courseKey: key,
         courseName: resolvedCourseName ?? key,
@@ -1040,7 +1379,7 @@ class CourseTermCatalog {
         latestTrustedActivityUtc: latestActivityUtc,
         latestRecallEventUtc: latestRecallEventUtc,
         isFollowed: !unfollowedCourseKeys.contains(key),
-        isAutoPromo: isAutoPromo,
+        isAutoPromo: base.isAutoPromo,
       );
     }
 
