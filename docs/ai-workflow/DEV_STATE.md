@@ -4,6 +4,12 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
+## 2026-11-26 · v1.90.2 (1.90.2+129) 课程学期同批 clazzId 推断修复与 MuMu 保数据验收
+
+- 已完成改动：围绕 MuMu 真实账号 40 门课（30 门零作业/零通知且 `folderName`/`begindate`/`enddate` 均空）漏入「未分组」问题，完成两处根治：`chaoxing_api_parser.dart` 在无显式开课日时按 `clazzData`/`content`/`channel` 提取 `createtime`/`createTime` 并严禁误读老模板 `courseData['createtime']`；`course_term_catalog.dart` 新增 `AcademicTerm.fromCourseCreationInstant`（8 月预建归秋、2 月预建归春，保留 `fromInstant` 不变）与 `CourseTermSource.clazzCohort`（仅对纯数字 `clazzId >= 10_000_000` 启用，含单学期 9M 滑窗过半去噪、跨学期严格单调 DP 子链校验、斜率标定及区间/外推/跳学期插值）。补齐 [chaoxing_api_parser_test.dart](../../study_assistant-1.1.0/local_app/test/chaoxing_api_parser_test.dart) 与 [academic_term_scope_test.dart](../../study_assistant-1.1.0/local_app/test/academic_term_scope_test.dart) 回归并通过 `TZ=UTC verify_local_gate.py --mode full`（`dart analyze` 0 问题、128 项 Python 单测 OK、Flutter `+2054 ~1` 全过）；升至 `1.90.2+129`（`79a07dc`），在 `D:\campus-tools\build-work\cx1902-129-20261126` 编出原签名双 ABI 自测包 `D:\campus-tools\artifacts\cx1902-preview\chaoxing-journal-1.90.2+129.apk`（`64,149,178` B，SHA-256 `f950b33b69e3659d5361620a5143e6fa35a6b29e6998179119ee372e287c84e4`），通过 `verify_apk_and_report.py` 并在 MuMu `emulator-5558` 保数据覆盖验收（`本学期` 15 门、`本学年` 15 门、`往期` 23 门、`全部学期` 38 门、2 门活动课屏蔽、`我的课程` 0 未分组、`统计` 往期切换正常、`logcat` 0 崩溃/0 溢出，截图存 `D:\campus-tools\artifacts\cx1902-preview\screenshots`）。
+- 当前 commit 与状态：代码修改与升版 `79a07dc0dc89c2e8d03dbcce1b5b6a893a707d93` 及本状态收口提交已推至 `origin/dev`（未动 `main` / Tag / Release / Gitee），L0 行数 `<= 80`；未重复触发学习通线上请求。
+- 下一步待办：由维护者按需在 MuMu 或真机复核「本学期 / 本学年 / 往期」及「我的课程」，随后按需继续第二波迭代或授权 `v1.91.0` 正式发版。
+
 ## 2026-11-26 · v1.90.1 (1.90.1+128) dev 闭环：课程学期投票、有声 v3 全渠道、紧凑密度修复、1.90.0 收口与 MuMu 保数据验收
 
 - 已完成改动：围绕 [v1.90.1 方案](../plans/2026-11-26-v1.90.1-课程学期分组有声通知v3紧凑密度与1900收口方案.md)（基线 `8260461`）分 3 组互斥完成 `M1–M4` Stage 1 实现（组 1/3 `DeepSeek V4.1 Flash high` + 组 2 `Gemini 4 Hydrogen high` + 集成共享测试，提交 `7646720`，通过 `TZ=UTC verify_local_gate.py --mode full` 2042+39 项、128 项 Python 单测与 `run_android_tests.py --local-fast`）。独立 `Gemini 4 Neon (high)` Gate 1 初审报出 3 中级 + 2 次要问题（`noticeOnly` 考试漏用 `publishedAt` 投票、试听清铃静音/零音量分支顺序、`ManualHomeCard` 紧凑 0.85x 缺 `minHeight: 48` 兜底、静音态重复横幅、旧 mock 残留），经 `DeepSeek V4.1 Flash high` 返工修复（`ab7fd77`，7 组 195/195 绿）并由新独立 `Neon (high)` Gate 2 复审返回 **`PASS`（0 阻断 / 0 中级 / 1 次要）**；总控直修 `reminder_status_screen.dart` 静音文案并升至 `1.90.1+128`（`65fae7d`）。在 `D:\campus-tools\build-work\cx1901-128-20261126` 用 JDK 17 原签名构建双 ABI 自测包 `D:\campus-tools\artifacts\cx1901-preview\chaoxing-journal-1.90.1+128.apk`（`64,083,642` B，SHA-256 `ce09e0c79022f654c76eda09bd90f68cd5f3425940b8b6cd588d3fc813d0c8a4`，`verify_apk_and_report.py` 全过），在 MuMu「学习通」（`emulator-5558`，API 35）保数据覆盖通过（`firstInstallTime=2026-11-04 19:05:10` 保留、`base.apk` 哈希一致，4 条 `v3` 渠道生效且旧 `v1`/`v2` 全退役、`STREAM_NOTIFICATION=0` 告警、清铃试听、3 秒切桌面测试待办提醒横幅、紧凑/标准对比、课程/待办折叠区与深色模式均正常，`logcat` 0 崩溃/0 溢出，截图存 `D:\campus-tools\artifacts\cx1901-preview\screenshots`）。
@@ -26,10 +32,4 @@
 
 - 已完成改动：通过 `acp-mcp-call delegate_task` 跑完 [v1.8.33 方案](../archive/plans/2026-11-25-v1.8.33-课程过滤更新收敛通知有声与交互精修方案.md) 全部 `M1–M8` 实现（`Gemini 4 Hydrogen high`，`0f6c513`）；经只读 `Gemini 4 Neon (high)` Gate 1 初审报出 5 中级 + 2 次要问题，派新 `Hydrogen (high)` 完成第 1 轮返工并补齐 428 项 Flutter / Python / Gradle 验证（`c510df8`）；经异构 `Gemini 4 Carbon (high)` Gate 2 双锚点复审核销前序 7 项并新捕获 2 中级 + 2 次要问题，由总控直接第 2 轮攻坚修复（`fb2d5b6`），再由新 `Carbon (high)` Gate 3 双锚点终审返回 **`PASS`（0 阻断 / 0 中级 / 0 次要）**；随后升至 `1.8.33+126`（`abff61e`），构建原签名双 ABI 自测包 `D:\campus-tools\artifacts\cx1833-preview\chaoxing-journal-1.8.33+126.apk`（`63,989,286` B，SHA-256 `74036130e03d60ca791fc6d3d9a1c87f520f7c7eea5b48ae38e0ec8290be2f0d`），在 MuMu「学习通」（`emulator-5558`，API 35）保数据覆盖完成 M1–M8、浅/深双主题、自动迁 v2 渠道与后台测试通知送达及 `logcat` 零崩溃核验，截图存 `D:\campus-tools\artifacts\cx1833-preview\screenshots`。
 - 当前 commit 与状态：Stage 1 `0f6c513`、两轮 Gate 修复 `c510df8` / `fb2d5b6`、自测升版 `abff61e` 已整合交付至 `v1.90.0`。
-- 下一步待办：已随 `1.90.0+127` 正式发布。
-
-## 2026-11-25 · v1.8.32 (1.8.32+125) Gate 审查通过与 MuMu 保数据自测收口
-
-- 已完成改动：经零父历史只读 `research (pro)`（`47b126e1`）初审 + 规划模型复核查出 6 项局部问题并一次性修复，通过 11 项定向门禁（`91` 项测试全绿、`dart analyze` 0 问题）推 `origin/dev`（`2d88084`），并由新只读 `research (pro)`（`af207197`）双锚点复审返回 `PASS`（0 阻断 / 0 中级 / 0 次要）；随后升至 `1.8.32+125`（`fab514f`），构建原签名双 ABI 自测包 `D:\campus-tools\artifacts\cx1832-preview\chaoxing-journal-1.8.32+125.apk`（`63,748,670` B，SHA-256 `2d4feaa52fe95c30dc0b8eb0bf3bb239fb3d37c909b88a22f9f805cbfd7fa184`），在 MuMu「学习通」（`emulator-5558`，API 35）保数据覆盖完成 M1–M5 与浅/深双主题目视及全交互验收（`logcat` 0 崩溃），截图存 `D:\campus-tools\artifacts\cx1832-preview\screenshots`。
-- 当前 commit 与状态：Stage 1 与 6 项 Gate 修复（`2d88084`）及自测升版（`fab514f`）已整合交付至 `v1.90.0`。
 - 下一步待办：已随 `1.90.0+127` 正式发布。
