@@ -16,7 +16,6 @@ import '../app/app_version.dart';
 import '../app/journal.dart';
 import '../app/journal_motion.dart';
 import '../app/transient_feedback.dart';
-import '../models/sync_report.dart';
 import '../services/app_update_service.dart';
 import '../services/assignment_store.dart';
 import '../services/clawd_companion_controller.dart';
@@ -65,14 +64,24 @@ class _ProfileScreenState extends State<ProfileScreen>
     _syncClawdEnvironment();
   }
 
+  ClawdPageContextSnapshot _buildProfileSnapshot() {
+    final activeAgendaCount =
+        store.notebook.entries.where((e) => !e.done).length;
+    final followedCourses =
+        store.courses.where((c) => store.follows(c.key)).length;
+    return ClawdPageContextSnapshot(
+      tab: ClawdPrimaryTab.profile,
+      followedCourseCount: followedCourses,
+      activeAgendaCount: activeAgendaCount,
+    );
+  }
+
   void _syncClawdEnvironment({bool notify = true}) {
     final controller = _clawdController;
     if (controller == null) return;
     final busy = widget.store.isLoading;
-    final hasError = !busy &&
-        (widget.store.syncReport.phase == SyncPhase.failed ||
-            widget.store.syncReport.phase == SyncPhase.partial ||
-            widget.store.operationError != null);
+    final hasError =
+        ClawdCompanionController.resolveHasBlockingSyncNotice(widget.store);
     controller.updateEnvironment(
       displayPrefs: widget.store.display,
       appResumed: _appResumed,
@@ -80,6 +89,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       reducedMotion: _reducedMotion,
       isSyncing: busy,
       hasSyncErrorOrPending: hasError,
+      snapshot: _buildProfileSnapshot(),
       notify: notify,
     );
   }
@@ -160,18 +170,6 @@ class _ProfileScreenState extends State<ProfileScreen>
           tab: ClawdPrimaryTab.profile,
           followedCourseCount: followedCourses,
           activeAgendaCount: activeAgendaCount,
-        );
-        controller.syncContextQuietly(
-          displayPrefs: store.display,
-          appResumed: _appResumed,
-          tickerEnabled: _tickerEnabled,
-          reducedMotion: _reducedMotion,
-          isSyncing: store.isLoading,
-          hasSyncErrorOrPending: !store.isLoading &&
-              (store.syncReport.phase == SyncPhase.failed ||
-                  store.syncReport.phase == SyncPhase.partial ||
-                  store.operationError != null),
-          snapshot: profileSnapshot,
         );
 
         return Stack(
@@ -420,7 +418,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   }
                   final maxW = math.min(
                     220.0,
-                    math.max(110.0, MediaQuery.sizeOf(context).width - 48.0),
+                    math.max(96.0, MediaQuery.sizeOf(context).width - 36.0),
                   );
                   return Align(
                     alignment: Alignment.topRight,
@@ -431,7 +429,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                         message: bubble,
                         maxWidth: maxW,
                         pointerDirection: ClawdBubblePointerDirection.up,
-                        pointerOffsetFromLeft: maxW - 22.0,
+                        pointerOffsetFromRight: 20.0,
                         onTap: controller.onBubbleTapped,
                       ),
                     ),

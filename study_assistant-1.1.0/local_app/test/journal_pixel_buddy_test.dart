@@ -11,6 +11,7 @@ import 'package:study_assistant_mobile/src/features/widgets/journal_pixel_buddy.
 import 'package:study_assistant_mobile/src/features/widgets/journal_sliver_header.dart';
 import 'package:study_assistant_mobile/src/models/assignment_sync_progress.dart';
 import 'package:study_assistant_mobile/src/models/display_preferences.dart';
+import 'package:study_assistant_mobile/src/services/clawd_companion_controller.dart';
 import 'package:study_assistant_mobile/src/services/interaction_feedback_service.dart';
 
 void main() {
@@ -639,18 +640,7 @@ void main() {
       expect(t.takeException(), isNull);
     }
 
-    // 1 / 2 / 3+ tap combo settles cleanly under pumpAndSettle.
-    await t.tap(buddyFinder);
-    await t.pump(const Duration(milliseconds: 120));
-    await t.tap(buddyFinder);
-    await t.pump(const Duration(milliseconds: 120));
-    await t.tap(buddyFinder);
-    await t.pump(const Duration(milliseconds: 120));
-    await t.pumpAndSettle();
-    expect(t.takeException(), isNull);
-
-    // Wait past 1200ms combo window, then trigger celebratePulse cheer.
-    await t.pump(const Duration(milliseconds: 1300));
+    // Trigger celebratePulse cheer while original widget is mounted.
     final beforeCheerPainter = t
         .widget<CustomPaint>(
           find.descendant(
@@ -671,6 +661,67 @@ void main() {
         )
         .painter!;
     expect(duringCheerPainter.shouldRepaint(beforeCheerPainter), isTrue);
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+
+    // Single-source controller drives combo (1/2/3+ -> tsundere) cleanly under pumpAndSettle.
+    final comboController = ClawdCompanionController();
+    addTearDown(comboController.dispose);
+    comboController.updateEnvironment(
+      displayPrefs: const DisplayPreferences(),
+      appResumed: true,
+      tickerEnabled: true,
+      reducedMotion: false,
+      isSyncing: false,
+      hasSyncErrorOrPending: false,
+      snapshot: const ClawdPageContextSnapshot(tab: ClawdPrimaryTab.home),
+    );
+    await t.pumpWidget(
+      MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: Center(
+            child: AnimatedBuilder(
+              animation: comboController,
+              builder: (context, _) => JournalPixelBuddy(
+                mood: JournalPixelBuddyMood.allClear,
+                poseOverride: switch (comboController.transientPose) {
+                  ClawdTransientPose.none => JournalPixelBuddyPose.normal,
+                  ClawdTransientPose.wave => JournalPixelBuddyPose.wave,
+                  ClawdTransientPose.doubleStar =>
+                    JournalPixelBuddyPose.doubleStar,
+                  ClawdTransientPose.tsundere =>
+                    JournalPixelBuddyPose.tsunderePuff,
+                  ClawdTransientPose.petting => JournalPixelBuddyPose.petSquint,
+                  ClawdTransientPose.grabbed =>
+                    JournalPixelBuddyPose.grabbedFlail,
+                  ClawdTransientPose.landing => JournalPixelBuddyPose.landing,
+                  ClawdTransientPose.cheer => JournalPixelBuddyPose.cheer,
+                },
+                posePulse: comboController.transientPulse,
+                enableIdleActions: false,
+                onTap: () => comboController.registerTap(
+                  snapshot: const ClawdPageContextSnapshot(
+                    tab: ClawdPrimaryTab.home,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await t.tap(buddyFinder);
+    await t.pump(const Duration(milliseconds: 120));
+    await t.tap(buddyFinder);
+    await t.pump(const Duration(milliseconds: 120));
+    await t.tap(buddyFinder);
+    await t.pump(const Duration(milliseconds: 120));
+    await t.tap(buddyFinder);
+    await t.pump(const Duration(milliseconds: 120));
+    expect(comboController.comboCount, 4);
+    expect(comboController.transientPose, ClawdTransientPose.tsundere);
+    await t.pump(const Duration(milliseconds: 2600));
     await t.pumpAndSettle();
     expect(t.takeException(), isNull);
   });
@@ -882,25 +933,58 @@ void main() {
     addTearDown(() => messenger.setMockMethodCallHandler(soundChannel, null));
 
     try {
-      var mood = JournalPixelBuddyMood.idle;
-      var allowTapCombo = true;
       var taps = 0;
-      late StateSetter updateWidget;
+      final controller = ClawdCompanionController();
+      addTearDown(controller.dispose);
+      const snapshot = ClawdPageContextSnapshot(tab: ClawdPrimaryTab.home);
+      controller.updateEnvironment(
+        displayPrefs: const DisplayPreferences(),
+        appResumed: true,
+        tickerEnabled: true,
+        reducedMotion: false,
+        isSyncing: false,
+        hasSyncErrorOrPending: false,
+        snapshot: snapshot,
+      );
 
       await t.pumpWidget(
         MaterialApp(
           theme: StudyAssistantTheme.light,
           home: Scaffold(
             body: Center(
-              child: StatefulBuilder(
-                builder: (context, setState) {
-                  updateWidget = setState;
+              child: AnimatedBuilder(
+                animation: controller,
+                builder: (context, _) {
+                  final pose = switch (controller.transientPose) {
+                    ClawdTransientPose.none => JournalPixelBuddyPose.normal,
+                    ClawdTransientPose.wave => JournalPixelBuddyPose.wave,
+                    ClawdTransientPose.doubleStar =>
+                      JournalPixelBuddyPose.doubleStar,
+                    ClawdTransientPose.tsundere =>
+                      JournalPixelBuddyPose.tsunderePuff,
+                    ClawdTransientPose.petting =>
+                      JournalPixelBuddyPose.petSquint,
+                    ClawdTransientPose.grabbed =>
+                      JournalPixelBuddyPose.grabbedFlail,
+                    ClawdTransientPose.landing => JournalPixelBuddyPose.landing,
+                    ClawdTransientPose.cheer => JournalPixelBuddyPose.cheer,
+                  };
                   return JournalPixelBuddy(
-                    mood: mood,
-                    allowTapCombo: allowTapCombo,
+                    mood: controller.isSyncing
+                        ? JournalPixelBuddyMood.syncing
+                        : JournalPixelBuddyMood.idle,
+                    allowTapCombo: !controller.isSyncing &&
+                        !controller.hasSyncErrorOrPending,
+                    poseOverride: pose,
+                    posePulse: controller.transientPulse,
+                    syncTickListenable: controller.syncTick,
                     size: 56,
                     displayPrefs: const DisplayPreferences(),
-                    onTap: () => taps++,
+                    enableIdleActions: false,
+                    onTap: () {
+                      taps++;
+                      controller.registerTap(snapshot: snapshot);
+                    },
                   );
                 },
               ),
@@ -918,7 +1002,7 @@ void main() {
           )
           .painter!;
 
-      // Build combo to 2 in idle, then transition into syncing.
+      // Build combo to 2 in idle via single-source controller, then transition into syncing.
       fakeNow = fakeNow.add(const Duration(milliseconds: 100));
       await t.tap(buddyFinder);
       await t.pump();
@@ -927,7 +1011,8 @@ void main() {
       await t.tap(buddyFinder);
       await t.pump();
       await t.pump(const Duration(milliseconds: 50));
-      updateWidget(() => mood = JournalPixelBuddyMood.syncing);
+      expect(controller.comboCount, 2);
+      controller.updateEnvironment(isSyncing: true);
       await t.pump();
 
       // Tap 3 times during syncing: onTap & feedback still fire, zero particles/combo.
@@ -945,7 +1030,14 @@ void main() {
       await t.pump();
       await t.pump(const Duration(milliseconds: 115));
       expect(taps - tapsBeforeSyncing, 3);
-      expect(feedbackKinds.length, 5);
+      expect(controller.comboCount, 0);
+      expect(feedbackKinds.where((k) => k == 'tap').length, 5);
+      expect(
+        feedbackKinds
+            .skip(4)
+            .where((k) => k == 'clawdJump' || k == 'clawdCombo2'),
+        isEmpty,
+      );
 
       final syncingImg = await t.runAsync(
         () => rasterize(currentPainter(), const Size(56, 56)),
@@ -957,12 +1049,13 @@ void main() {
       );
 
       // Exit syncing -> next tap must start fresh from tap 1 (tapWave: no particles, right arm raised).
-      updateWidget(() => mood = JournalPixelBuddyMood.idle);
+      controller.updateEnvironment(isSyncing: false);
       await t.pump();
       fakeNow = fakeNow.add(const Duration(milliseconds: 100));
       await t.tap(buddyFinder);
       await t.pump();
       await t.pump(const Duration(milliseconds: 120));
+      expect(controller.comboCount, 1);
       final recoveredImg = await t.runAsync(
         () => rasterize(currentPainter(), const Size(56, 56)),
       );
@@ -972,9 +1065,10 @@ void main() {
         0,
         reason: 'first tap after syncing must be tap 1 tapWave (no star/heart)',
       );
+      await t.pump(const Duration(milliseconds: 2600));
       await t.pumpAndSettle();
 
-      // allowTapCombo: false clears combo and ignores tap combo/particles while preserving onTap.
+      // hasSyncErrorOrPending: true (allowTapCombo: false) clears combo and ignores tap combo/particles while preserving onTap.
       fakeNow = fakeNow.add(const Duration(milliseconds: 100));
       await t.tap(buddyFinder);
       await t.pump();
@@ -983,7 +1077,8 @@ void main() {
       await t.tap(buddyFinder);
       await t.pump();
       await t.pump(const Duration(milliseconds: 50));
-      updateWidget(() => allowTapCombo = false);
+      expect(controller.comboCount, 2);
+      controller.updateEnvironment(hasSyncErrorOrPending: true);
       await t.pumpAndSettle();
 
       final tapsBeforeDisabled = taps;
@@ -996,6 +1091,7 @@ void main() {
       await t.pump();
       await t.pump(const Duration(milliseconds: 115));
       expect(taps - tapsBeforeDisabled, 2);
+      expect(controller.comboCount, 0);
       final disabledImg = await t.runAsync(
         () => rasterize(currentPainter(), const Size(56, 56)),
       );
@@ -1006,13 +1102,14 @@ void main() {
         reason: 'allowTapCombo:false must not render tap combo particles',
       );
 
-      // Re-enable allowTapCombo -> first tap starts from tap 1 (no star/heart particles).
-      updateWidget(() => allowTapCombo = true);
+      // Re-enable -> first tap starts from tap 1 (no star/heart particles).
+      controller.updateEnvironment(hasSyncErrorOrPending: false);
       await t.pump();
       fakeNow = fakeNow.add(const Duration(milliseconds: 100));
       await t.tap(buddyFinder);
       await t.pump();
       await t.pump(const Duration(milliseconds: 120));
+      expect(controller.comboCount, 1);
       final reenabledImg = await t.runAsync(
         () => rasterize(currentPainter(), const Size(56, 56)),
       );
@@ -1022,6 +1119,7 @@ void main() {
         0,
         reason: 'first tap after allowTapCombo recovery must be tap 1 tapWave',
       );
+      await t.pump(const Duration(milliseconds: 2600));
       await t.pumpAndSettle();
     } finally {
       debugDefaultTargetPlatformOverride = null;
@@ -1107,15 +1205,27 @@ void main() {
       }
     }
 
+    var pose = JournalPixelBuddyPose.normal;
+    var posePulse = 0;
+    late StateSetter updatePose;
+
     await t.pumpWidget(
       MaterialApp(
         theme: StudyAssistantTheme.light,
         home: Scaffold(
           body: Center(
-            child: JournalPixelBuddy(
-              mood: JournalPixelBuddyMood.idle,
-              size: 56,
-              onTap: () {},
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                updatePose = setState;
+                return JournalPixelBuddy(
+                  mood: JournalPixelBuddyMood.idle,
+                  poseOverride: pose,
+                  posePulse: posePulse,
+                  enableIdleActions: false,
+                  size: 56,
+                  onTap: () {},
+                );
+              },
             ),
           ),
         ),
@@ -1131,11 +1241,11 @@ void main() {
         )
         .painter!;
 
-    // Tap 1 -> Tap 2 (tapDoubleStar, 460ms): start ticker via pump(), then advance 115ms -> t=0.25 peak frame.
-    await t.tap(buddyFinder);
-    await t.pump();
-    await t.pump(const Duration(milliseconds: 50));
-    await t.tap(buddyFinder);
+    // Trigger tapDoubleStar via poseOverride + posePulse -> advance 115ms (t=0.25 peak frame).
+    updatePose(() {
+      pose = JournalPixelBuddyPose.doubleStar;
+      posePulse = 1;
+    });
     await t.pump();
     await t.pump(const Duration(milliseconds: 115));
 
@@ -1149,8 +1259,11 @@ void main() {
     );
     expectCleanForeheadAndEyes(starPeakImg, phase: 'tapDoubleStar');
 
-    // Tap 3 (tapDoubleHeart, 480ms): start ticker via pump(), then advance 120ms -> t=0.25 peak frame.
-    await t.tap(buddyFinder);
+    // Trigger tapDoubleHeart via poseOverride + posePulse -> advance 120ms (t=0.25 peak frame).
+    updatePose(() {
+      pose = JournalPixelBuddyPose.doubleHeart;
+      posePulse = 2;
+    });
     await t.pump();
     await t.pump(const Duration(milliseconds: 120));
 
@@ -1168,6 +1281,70 @@ void main() {
   });
 
   testWidgets(
+      'incrementing posePulse replays identical tsunderePuff pose and landing squash settles cleanly',
+      (t) async {
+    var pose = JournalPixelBuddyPose.tsunderePuff;
+    var pulse = 1;
+    late StateSetter updatePose;
+
+    await t.pumpWidget(
+      MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: Center(
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                updatePose = setState;
+                return JournalPixelBuddy(
+                  size: 38.0,
+                  poseOverride: pose,
+                  posePulse: pulse,
+                  enableIdleActions: false,
+                  handleGestures: false,
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+    final beforeReplay = t
+        .widget<CustomPaint>(
+          find.descendant(
+            of: find.byType(JournalPixelBuddy),
+            matching: find.byType(CustomPaint),
+          ),
+        )
+        .painter!;
+
+    // 4th+ tap keeps tsunderePuff while incrementing posePulse -> must replay animation from 0.
+    updatePose(() => pulse = 2);
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 120));
+    final duringReplay = t
+        .widget<CustomPaint>(
+          find.descendant(
+            of: find.byType(JournalPixelBuddy),
+            matching: find.byType(CustomPaint),
+          ),
+        )
+        .painter!;
+    expect(duringReplay.shouldRepaint(beforeReplay), isTrue);
+    await t.pumpAndSettle();
+
+    // Landing squash-and-recover settles cleanly.
+    updatePose(() {
+      pose = JournalPixelBuddyPose.landing;
+      pulse = 3;
+    });
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 140));
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets(
       'Clawd 2.0 Shimeji poses render crisply in light & dark themes and settle cleanly',
       (t) async {
     for (final theme in [StudyAssistantTheme.light, StudyAssistantTheme.dark]) {
@@ -1179,6 +1356,7 @@ void main() {
         JournalPixelBuddyPose.petSquint,
         JournalPixelBuddyPose.grabbedFlail,
         JournalPixelBuddyPose.tsunderePuff,
+        JournalPixelBuddyPose.landing,
       ]) {
         await t.pumpWidget(
           MaterialApp(

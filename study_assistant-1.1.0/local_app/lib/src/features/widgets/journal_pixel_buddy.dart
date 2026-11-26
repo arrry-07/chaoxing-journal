@@ -44,6 +44,7 @@ enum JournalPixelBuddyPose {
   petSquint,
   grabbedFlail,
   tsunderePuff,
+  landing,
   wave,
   doubleStar,
   doubleHeart,
@@ -69,6 +70,7 @@ enum _BuddyActionKind {
   petSquint,
   grabbedFlail,
   tsunderePuff,
+  landing,
 }
 
 class JournalPixelBuddy extends StatefulWidget {
@@ -83,6 +85,7 @@ class JournalPixelBuddy extends StatefulWidget {
     this.celebratePulse = 0,
     this.allowTapCombo = true,
     this.poseOverride,
+    this.posePulse = 0,
     this.poseProgress,
     this.facingSign = 1,
     this.enableIdleActions = true,
@@ -98,6 +101,7 @@ class JournalPixelBuddy extends StatefulWidget {
   final int celebratePulse;
   final bool allowTapCombo;
   final JournalPixelBuddyPose? poseOverride;
+  final int posePulse;
   final double? poseProgress;
   final int facingSign;
   final bool enableIdleActions;
@@ -123,14 +127,12 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
   late final AnimationController _actionController;
   Timer? _idleTimer;
   Timer? _syncTimer;
-  Timer? _comboResetTimer;
 
   bool _appResumed = true;
   bool _tickerEnabled = true;
   bool _reducedMotion = false;
   int _idleStep = 0;
   int _peekSign = 1;
-  int _tapComboCount = 0;
   int _internalSyncTick = 0;
   _BuddyActionKind _activeAction = _BuddyActionKind.none;
 
@@ -181,23 +183,39 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
         _internalSyncTick = 0;
       } else {
         _resetActionAndJump();
-        _clearTapCombo();
       }
     }
-    if (!widget.allowTapCombo) {
-      _clearTapCombo();
-    }
-    if (widget.poseOverride != oldWidget.poseOverride &&
+    final poseChanged = widget.poseOverride != oldWidget.poseOverride ||
+        widget.posePulse != oldWidget.posePulse;
+    if (poseChanged &&
         _hasPoseOverride &&
         widget.poseProgress == null &&
         _isActive &&
         !_reducedMotion) {
       final mapped = _mapPoseOverride(widget.poseOverride!);
       _startAction(mapped, _durationForAction(mapped));
+      if (mapped == _BuddyActionKind.tapWave) {
+        _jumpController.animateWith(
+          SpringSimulation(
+            _jumpSpring,
+            _jumpController.value,
+            0.0,
+            -320.0,
+            tolerance: _jumpTolerance,
+          ),
+        );
+      } else if (_jumpController.isAnimating || _jumpController.value != 0.0) {
+        _jumpController.stop();
+        _jumpController.value = 0.0;
+      }
+    } else if (oldWidget.poseOverride != widget.poseOverride &&
+        !_hasPoseOverride) {
+      _resetActionAndJump();
     }
     final celebrated = widget.celebratePulse > oldWidget.celebratePulse;
     _reconcileTimers();
     if (celebrated &&
+        !poseChanged &&
         _isActive &&
         !_reducedMotion &&
         widget.mood != JournalPixelBuddyMood.syncing) {
@@ -244,29 +262,17 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     _activeAction = _BuddyActionKind.none;
   }
 
-  void _clearTapCombo() {
-    _comboResetTimer?.cancel();
-    _comboResetTimer = null;
-    _tapComboCount = 0;
-  }
-
   void _reconcileTimers() {
     if (!mounted) return;
     if (!_isActive || _reducedMotion) {
       _cancelAllTimers();
       _resetActionAndJump();
-      _tapComboCount = 0;
       return;
-    }
-
-    if (!widget.allowTapCombo) {
-      _clearTapCombo();
     }
 
     if (widget.mood == JournalPixelBuddyMood.syncing) {
       _idleTimer?.cancel();
       _idleTimer = null;
-      _clearTapCombo();
       if (widget.syncTickListenable == null) {
         _syncTimer ??= Timer(
           const Duration(milliseconds: 180),
@@ -363,6 +369,7 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
         JournalPixelBuddyPose.petSquint => _BuddyActionKind.petSquint,
         JournalPixelBuddyPose.grabbedFlail => _BuddyActionKind.grabbedFlail,
         JournalPixelBuddyPose.tsunderePuff => _BuddyActionKind.tsunderePuff,
+        JournalPixelBuddyPose.landing => _BuddyActionKind.landing,
         JournalPixelBuddyPose.wave => _BuddyActionKind.tapWave,
         JournalPixelBuddyPose.doubleStar => _BuddyActionKind.tapDoubleStar,
         JournalPixelBuddyPose.doubleHeart => _BuddyActionKind.tapDoubleHeart,
@@ -388,6 +395,7 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
         _BuddyActionKind.petSquint => const Duration(milliseconds: 620),
         _BuddyActionKind.grabbedFlail => const Duration(milliseconds: 560),
         _BuddyActionKind.tsunderePuff => const Duration(milliseconds: 520),
+        _BuddyActionKind.landing => const Duration(milliseconds: 280),
       };
 
   void _startAction(_BuddyActionKind kind, Duration duration) {
@@ -412,8 +420,6 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     _idleTimer = null;
     _syncTimer?.cancel();
     _syncTimer = null;
-    _comboResetTimer?.cancel();
-    _comboResetTimer = null;
   }
 
   void _handleTap() {
@@ -421,50 +427,24 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     if (prefs != null) {
       JournalMotion.tap(prefs);
     }
-    if (_isActive &&
+    if (widget.poseOverride == null &&
+        _isActive &&
         !_reducedMotion &&
         widget.mood != JournalPixelBuddyMood.syncing &&
         widget.allowTapCombo) {
-      _comboResetTimer?.cancel();
-      _tapComboCount++;
-      _comboResetTimer = Timer(const Duration(milliseconds: 1200), () {
-        _comboResetTimer = null;
-        if (!mounted) return;
-        _tapComboCount = 0;
-      });
-      if (_tapComboCount == 1) {
-        _startAction(
-          _BuddyActionKind.tapWave,
-          _durationForAction(_BuddyActionKind.tapWave),
-        );
-        _jumpController.animateWith(
-          SpringSimulation(
-            _jumpSpring,
-            _jumpController.value,
-            0.0,
-            -320.0,
-            tolerance: _jumpTolerance,
-          ),
-        );
-      } else if (_tapComboCount == 2) {
-        if (_jumpController.isAnimating || _jumpController.value != 0.0) {
-          _jumpController.stop();
-          _jumpController.value = 0.0;
-        }
-        _startAction(
-          _BuddyActionKind.tapDoubleStar,
-          _durationForAction(_BuddyActionKind.tapDoubleStar),
-        );
-      } else {
-        if (_jumpController.isAnimating || _jumpController.value != 0.0) {
-          _jumpController.stop();
-          _jumpController.value = 0.0;
-        }
-        _startAction(
-          _BuddyActionKind.tapDoubleHeart,
-          _durationForAction(_BuddyActionKind.tapDoubleHeart),
-        );
-      }
+      _startAction(
+        _BuddyActionKind.tapWave,
+        _durationForAction(_BuddyActionKind.tapWave),
+      );
+      _jumpController.animateWith(
+        SpringSimulation(
+          _jumpSpring,
+          _jumpController.value,
+          0.0,
+          -320.0,
+          tolerance: _jumpTolerance,
+        ),
+      );
     }
     widget.onTap?.call();
   }
@@ -820,6 +800,10 @@ class _JournalPixelBuddyPainter extends CustomPainter {
           rightArmRow = 4;
           blushCheeks = true;
           eyeDx = -1;
+        case _BuddyActionKind.landing:
+          final s = math.sin(math.pi * t);
+          scaleX = 1.0 + 0.12 * s;
+          scaleY = 1.0 - 0.12 * s;
         case _BuddyActionKind.none:
           break;
       }

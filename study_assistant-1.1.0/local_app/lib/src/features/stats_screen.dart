@@ -8,7 +8,6 @@ import '../app/journal.dart';
 import '../app/journal_motion.dart';
 import '../app/transient_feedback.dart';
 import '../models/assignment.dart';
-import '../models/sync_report.dart';
 import '../services/assignment_statistics.dart';
 import '../services/assignment_store.dart';
 import '../services/clawd_companion_controller.dart';
@@ -74,14 +73,34 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
         ClawdCompanionController(clock: widget.clock);
   }
 
+  ClawdPageContextSnapshot _buildStatsSnapshot() {
+    final store = widget.store;
+    final now = _now;
+    final rangeResult = LocalRecordQuery.filterStatsRecords(
+      store.statsAssignmentsForScope(_termScope, now: now),
+      _range,
+      now,
+    );
+    final stats = AssignmentStatistics(
+      rangeResult.records,
+      now: now,
+      coursework: store.courseworkState,
+    );
+    final allUnknown = stats.total > 0 && stats.unknown == stats.total;
+    return ClawdPageContextSnapshot(
+      tab: ClawdPrimaryTab.stats,
+      statsCompletionPercent: allUnknown ? 0 : stats.percentages[0],
+      statsTotalCount: stats.total,
+      statsPendingCount: stats.pending + stats.expired + stats.unknown,
+    );
+  }
+
   void _syncClawdEnvironment({bool notify = true}) {
     final controller = _clawdController;
     if (controller == null) return;
     final busy = widget.store.isLoading;
-    final hasError = !busy &&
-        (widget.store.syncReport.phase == SyncPhase.failed ||
-            widget.store.syncReport.phase == SyncPhase.partial ||
-            widget.store.operationError != null);
+    final hasError =
+        ClawdCompanionController.resolveHasBlockingSyncNotice(widget.store);
     controller.updateEnvironment(
       displayPrefs: widget.store.display,
       appResumed: _appResumed,
@@ -89,6 +108,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
       reducedMotion: _reducedMotion,
       isSyncing: busy,
       hasSyncErrorOrPending: hasError,
+      snapshot: _buildStatsSnapshot(),
       notify: notify,
     );
   }
@@ -118,6 +138,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) {
         setState(() => _now = widget.clock?.call() ?? DateTime.now());
+        _syncClawdEnvironment(notify: false);
       }
     });
   }
@@ -333,18 +354,6 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
             statsTotalCount: stats.total,
             statsPendingCount: stats.pending + stats.expired + stats.unknown,
           );
-          controller.syncContextQuietly(
-            displayPrefs: store.display,
-            appResumed: _appResumed,
-            tickerEnabled: _tickerEnabled,
-            reducedMotion: _reducedMotion,
-            isSyncing: store.isLoading,
-            hasSyncErrorOrPending: !store.isLoading &&
-                (store.syncReport.phase == SyncPhase.failed ||
-                    store.syncReport.phase == SyncPhase.partial ||
-                    store.operationError != null),
-            snapshot: statsSnapshot,
-          );
 
           return Material(
             type: MaterialType.transparency,
@@ -378,6 +387,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                         if (_termScope == scope) return;
                         JournalMotion.tap(store.display);
                         setState(() => _termScope = scope);
+                        _syncClawdEnvironment(notify: false);
                       },
                     ),
                     const SizedBox(height: 10),
@@ -386,6 +396,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                       onChanged: (next) {
                         JournalMotion.tap(store.display);
                         setState(() => _range = next);
+                        _syncClawdEnvironment(notify: false);
                       },
                     ),
                     if (_range != StatsTimeRange.all &&
@@ -553,8 +564,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                       }
                       final maxW = math.min(
                         220.0,
-                        math.max(
-                            110.0, MediaQuery.sizeOf(context).width - 48.0),
+                        math.max(96.0, MediaQuery.sizeOf(context).width - 36.0),
                       );
                       return Align(
                         alignment: Alignment.topRight,
@@ -565,7 +575,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                             message: bubble,
                             maxWidth: maxW,
                             pointerDirection: ClawdBubblePointerDirection.up,
-                            pointerOffsetFromLeft: maxW - 22.0,
+                            pointerOffsetFromRight: 20.0,
                             onTap: controller.onBubbleTapped,
                           ),
                         ),

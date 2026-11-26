@@ -118,12 +118,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final store = widget.assignmentStore;
     final isSyncing =
         store.isLoading || store.syncReport.phase == SyncPhase.running;
-    final hasError = !isSyncing &&
-        (store.syncReport.phase == SyncPhase.failed ||
-            store.syncReport.phase == SyncPhase.partial ||
-            store.hasNonQuietServiceWarning ||
-            store.recoveryWarning != null ||
-            store.operationError != null);
+    final hasError =
+        ClawdCompanionController.resolveHasBlockingSyncNotice(store);
     _clawdController.updateEnvironment(
       displayPrefs: store.display,
       appResumed: _appResumed,

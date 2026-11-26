@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../models/display_preferences.dart';
+import '../models/sync_report.dart';
+import 'assignment_store.dart';
 import 'interaction_feedback_service.dart';
 
 enum JournalPixelBuddyMood {
@@ -164,6 +166,24 @@ class ClawdCompanionController extends ChangeNotifier {
   static const Duration defaultBubbleDuration = Duration(milliseconds: 2500);
   static const Duration proactiveCooldown = Duration(minutes: 15);
   static const Duration syncFrameInterval = Duration(milliseconds: 180);
+
+  /// Single source of truth for whether store sync/warning state should block
+  /// interactive Clawd combos/bubbles across AppShell and primary tabs.
+  static bool resolveHasBlockingSyncNotice(
+    AssignmentStore store, {
+    bool localBusy = false,
+  }) {
+    final isSyncing = localBusy ||
+        store.isLoading ||
+        store.syncReport.phase == SyncPhase.running;
+    if (isSyncing) return false;
+    final phase = store.syncReport.phase;
+    return phase == SyncPhase.failed ||
+        phase == SyncPhase.partial ||
+        store.hasNonQuietServiceWarning ||
+        store.recoveryWarning != null ||
+        store.operationError != null;
+  }
 
   static const List<String> _tsundereLines = <String>[
     '别戳啦，像素脑瓜要扁掉啦！',
@@ -503,7 +523,7 @@ class ClawdCompanionController extends ChangeNotifier {
       _latestSnapshot = snapshot;
       _lastVisitedTab = snapshot.tab;
     }
-    if (!_canInteract) return;
+    if (!_canInteract || _reducedMotion) return;
     _proactiveDelayTimer?.cancel();
     _proactiveDelayTimer = null;
     _clearComboInternal();

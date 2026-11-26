@@ -138,9 +138,9 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
     )
       ..addListener(_onChoreoTick)
       ..addStatusListener(_onChoreoStatus);
-    _dropController = AnimationController(
+    _dropController = AnimationController.unbounded(
       vsync: this,
-      duration: const Duration(milliseconds: 420),
+      value: 0.0,
     )
       ..addListener(_onDropTick)
       ..addStatusListener(_onDropStatus);
@@ -323,7 +323,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
 
   void _onDropTick() {
     if (!mounted) return;
-    final t = _dropController.value.clamp(0.0, 1.0);
+    final t = _dropController.value;
     final maxX = math.max(0.0, _stageWidth - widget.buddySize);
     setState(() {
       _currentPos = Offset(
@@ -350,7 +350,12 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
   }
 
   void _handleLongPressStart(LongPressStartDetails _) {
-    if (!widget.showBuddy || !widget.interactive) return;
+    if (!widget.showBuddy ||
+        !widget.interactive ||
+        !widget.allowStageMotion ||
+        _reducedMotion) {
+      return;
+    }
     _patrolTimer?.cancel();
     _patrolTimer = null;
     _choreoController.stop();
@@ -445,7 +450,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
         ClawdTransientPose.tsundere => JournalPixelBuddyPose.tsunderePuff,
         ClawdTransientPose.petting => JournalPixelBuddyPose.petSquint,
         ClawdTransientPose.grabbed => JournalPixelBuddyPose.grabbedFlail,
-        ClawdTransientPose.landing => JournalPixelBuddyPose.normal,
+        ClawdTransientPose.landing => JournalPixelBuddyPose.landing,
         ClawdTransientPose.cheer => JournalPixelBuddyPose.cheer,
       };
     }
@@ -578,7 +583,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
         final pose = _resolvePose();
         final poseProgress =
             _choreoController.isAnimating ? _choreoController.value : null;
-        final enableDrag = widget.interactive &&
+        final enableStageGestures = widget.interactive &&
             widget.allowStageMotion &&
             !_reducedMotion &&
             _appResumed &&
@@ -624,17 +629,20 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
                       behavior: HitTestBehavior.opaque,
                       onTap: widget.interactive ? _handleTap : null,
                       onLongPressStart:
-                          widget.interactive ? _handleLongPressStart : null,
-                      onLongPressEnd: widget.interactive
+                          enableStageGestures ? _handleLongPressStart : null,
+                      onLongPressEnd: enableStageGestures
                           ? (_) => _handleLongPressEnd()
                           : null,
                       onLongPressCancel:
-                          widget.interactive ? _handleLongPressEnd : null,
-                      onPanStart: enableDrag ? _handlePanStart : null,
-                      onPanUpdate: enableDrag ? _handlePanUpdate : null,
-                      onPanEnd:
-                          enableDrag ? (_) => _handlePanEndOrCancel() : null,
-                      onPanCancel: enableDrag ? _handlePanEndOrCancel : null,
+                          enableStageGestures ? _handleLongPressEnd : null,
+                      onPanStart: enableStageGestures ? _handlePanStart : null,
+                      onPanUpdate:
+                          enableStageGestures ? _handlePanUpdate : null,
+                      onPanEnd: enableStageGestures
+                          ? (_) => _handlePanEndOrCancel()
+                          : null,
+                      onPanCancel:
+                          enableStageGestures ? _handlePanEndOrCancel : null,
                       child: Center(
                         child: JournalPixelBuddy(
                           key: const ValueKey('home-pixel-buddy'),
@@ -645,6 +653,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
                           celebratePulse: widget.controller.celebratePulse,
                           allowTapCombo: widget.interactive,
                           poseOverride: pose,
+                          posePulse: widget.controller.transientPulse,
                           poseProgress: poseProgress,
                           facingSign: _activeFacing,
                           enableIdleActions: false,
@@ -656,12 +665,17 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
                 ),
               if (showInlineBubble)
                 Positioned(
-                  left: (_currentPos.dx + widget.buddySize * 0.5 - 60.0)
-                      .clamp(0.0, math.max(0.0, maxW - 140.0)),
+                  left: 0.0,
+                  right: 0.0,
                   top: _currentPos.dy + widget.buddySize + 4.0,
-                  child: ClawdSpeechBubble(
-                    key: const ValueKey('clawd-speech-bubble'),
+                  height: 120.0,
+                  child: ClawdAnchoredSpeechBubble(
+                    bubbleKey: const ValueKey('clawd-speech-bubble'),
                     message: bubble,
+                    anchorX: _currentPos.dx + widget.buddySize * 0.5,
+                    top: 0.0,
+                    minLeft: 0.0,
+                    safeRight: maxW,
                     maxWidth: math.min(200.0, maxW),
                     pointerDirection: ClawdBubblePointerDirection.up,
                     onTap: widget.controller.onBubbleTapped,
@@ -701,7 +715,7 @@ class ClawdTabCameo extends StatelessWidget {
           ClawdTransientPose.tsundere => JournalPixelBuddyPose.tsunderePuff,
           ClawdTransientPose.petting => JournalPixelBuddyPose.petSquint,
           ClawdTransientPose.grabbed => JournalPixelBuddyPose.grabbedFlail,
-          ClawdTransientPose.landing => JournalPixelBuddyPose.normal,
+          ClawdTransientPose.landing => JournalPixelBuddyPose.landing,
           ClawdTransientPose.cheer => JournalPixelBuddyPose.cheer,
         };
         final interactive =
@@ -713,6 +727,7 @@ class ClawdTabCameo extends StatelessWidget {
           celebratePulse: controller.celebratePulse,
           allowTapCombo: interactive,
           poseOverride: pose,
+          posePulse: controller.transientPulse,
           enableIdleActions: true,
           onTap: () => controller.registerTap(snapshot: snapshotBuilder()),
         );

@@ -51,22 +51,35 @@ class _Notifications extends LocalNotificationService {
 class _Snapshot extends WidgetSnapshotService {
   @override
   Future<void> saveAssignments(List<Assignment> assignments) async {}
+
+  @override
+  Future<void> saveAssignmentsForContext(
+    List<Assignment> assignments, {
+    bool authenticated = true,
+    dynamic range,
+  }) async {}
 }
 
 class _Session extends SecureSessionStore {
-  String account = 'student-clawd-v1911';
+  String? account = 'student-clawd-v1911';
 
   @override
   Future<String?> readChaoxingAccount() async => account;
 
   @override
-  Future<String?> readChaoxingPassword() async => 'secret';
+  Future<String?> readChaoxingPassword() async =>
+      account == null ? null : 'secret';
 
   @override
   Future<String?> readChaoxingDisplayName() async => '手记同学';
 
   @override
   Future<String?> readChaoxingAvatarUrl() async => null;
+
+  @override
+  Future<void> clear() async {
+    account = null;
+  }
 }
 
 Assignment _work(
@@ -617,4 +630,359 @@ void main() {
       }
     });
   });
+
+  group(
+      'Gate 1 regressions · bubble bounds, shared pulse, standalone calendar, reduced motion, unified warning',
+      () {
+    testWidgets(
+        'ClawdSpeechBubble pointer stays inside actual pill width on Stats, Profile, short home landing bubble, and 330dp sliver',
+        (tester) async {
+      // 1) Unit geometry check on short text with right-anchored & oversized left offsets.
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: Scaffold(
+            body: Center(
+              child: ClawdSpeechBubble(
+                key: const ValueKey('short-right-bubble'),
+                message: ClawdSpeechMessage(
+                  id: 1,
+                  text: '嗨！',
+                  tab: ClawdPrimaryTab.stats,
+                  createdAt: now,
+                ),
+                maxWidth: 220.0,
+                pointerOffsetFromRight: 20.0,
+                onTap: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final shortRect =
+          tester.getRect(find.byKey(const ValueKey('short-right-bubble')));
+      expect(shortRect.width, lessThan(100.0));
+      final shortPainter = tester
+          .widget<CustomPaint>(
+            find.descendant(
+              of: find.byKey(const ValueKey('short-right-bubble')),
+              matching: find.byType(CustomPaint),
+            ),
+          )
+          .painter!;
+      final clampedRightCenter = ClawdSpeechBubble.clampPointerCenterX(
+        actualWidth: shortRect.width,
+        pointerOffsetFromRight: 20.0,
+      );
+      expect(clampedRightCenter, greaterThanOrEqualTo(14.0));
+      expect(clampedRightCenter, lessThanOrEqualTo(shortRect.width - 14.0));
+      expect(shortPainter.shouldRepaint(shortPainter), isFalse);
+
+      // 2) Stats & Profile pages keep short bubble + pointer strictly inside screen and bubble outline.
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final store = await _createSeededStore(now: now);
+      addTearDown(store.dispose);
+      final router = _buildShellRouter(store, clock: () => now);
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('统计'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('stats-pixel-buddy')));
+      await tester.pumpAndSettle();
+      final statsBubbleRect =
+          tester.getRect(find.byKey(const ValueKey('clawd-speech-bubble')));
+      expect(statsBubbleRect.left, greaterThanOrEqualTo(0.0));
+      expect(statsBubbleRect.right, lessThanOrEqualTo(360.0));
+      final statsPtrX = statsBubbleRect.left +
+          ClawdSpeechBubble.clampPointerCenterX(
+            actualWidth: statsBubbleRect.width,
+            pointerOffsetFromRight: 20.0,
+          );
+      expect(statsPtrX, greaterThanOrEqualTo(statsBubbleRect.left + 14.0));
+      expect(statsPtrX, lessThanOrEqualTo(statsBubbleRect.right - 14.0));
+
+      await tester.tap(find.text('我的'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('profile-pixel-buddy')));
+      await tester.pumpAndSettle();
+      final profileBubbleRect =
+          tester.getRect(find.byKey(const ValueKey('clawd-speech-bubble')));
+      expect(profileBubbleRect.left, greaterThanOrEqualTo(0.0));
+      expect(profileBubbleRect.right, lessThanOrEqualTo(360.0));
+      final profilePtrX = profileBubbleRect.left +
+          ClawdSpeechBubble.clampPointerCenterX(
+            actualWidth: profileBubbleRect.width,
+            pointerOffsetFromRight: 20.0,
+          );
+      expect(profilePtrX, greaterThanOrEqualTo(profileBubbleRect.left + 14.0));
+      expect(profilePtrX, lessThanOrEqualTo(profileBubbleRect.right - 14.0));
+
+      // 3) Home right-side landing short bubble ('噗咚，安全着陆！') stays inside stage & avoids 4 action buttons.
+      final seededListStore = await _createSeededStore(
+        now: now,
+        assignments: [
+          for (var i = 0; i < 14; i++)
+            _work(
+              'narrow-$i',
+              title: '窄屏列表作业 $i',
+              due: now.add(Duration(days: 1 + i)),
+              syncedAt: now,
+            ),
+        ],
+      );
+      addTearDown(seededListStore.dispose);
+      final narrowRouter = _buildShellRouter(seededListStore, clock: () => now);
+      addTearDown(narrowRouter.dispose);
+
+      tester.view.physicalSize = const Size(412, 915);
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: narrowRouter,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final homeBuddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
+      final drag = await tester.startGesture(tester.getCenter(homeBuddyFinder));
+      await drag.moveBy(const Offset(180, -4));
+      await tester.pump();
+      await drag.up();
+      await tester.pumpAndSettle();
+      expect(find.text('噗咚，安全着陆！'), findsOneWidget);
+      final landingBubble =
+          tester.getRect(find.byKey(const ValueKey('clawd-speech-bubble')));
+      final agendaRect =
+          tester.getRect(find.byKey(const ValueKey('home-agenda-entry')));
+      expect(landingBubble.left, greaterThanOrEqualTo(16.0 - 0.1));
+      expect(landingBubble.right, lessThanOrEqualTo(agendaRect.left - 7.5));
+      await tester.pump(const Duration(milliseconds: 2000));
+      await tester.pumpAndSettle();
+
+      // 4) 330dp narrow screen sliver bubble stays strictly <= safeRight (330 - 18 - 4*48 - 8 = 112.0).
+      tester.view.physicalSize = const Size(330, 720);
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: narrowRouter,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -320));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
+      await tester.pump();
+      final sliverBubbleRect =
+          tester.getRect(find.byKey(const ValueKey('clawd-speech-bubble')));
+      expect(sliverBubbleRect.left, greaterThanOrEqualTo(18.0 - 0.1));
+      expect(sliverBubbleRect.right, lessThanOrEqualTo(112.0 + 0.1));
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(milliseconds: 2600));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+        'cross-tab taps share single 1200ms combo and 4th rapid tap increments transientPulse to replay tsunderePuff',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final store = await _createSeededStore(now: now);
+      addTearDown(store.dispose);
+      final router = _buildShellRouter(store, clock: () => now);
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('home-pixel-buddy')));
+      await tester.pump();
+      await tester.tap(find.text('日历'));
+      await tester.pumpAndSettle();
+
+      final calendarBuddy = find.byKey(const ValueKey('calendar-pixel-buddy'));
+      final controller = ClawdCompanionScope.of(tester.element(calendarBuddy));
+      expect(controller.comboCount, 1);
+
+      await tester.tap(calendarBuddy);
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(controller.comboCount, 2);
+
+      await tester.tap(calendarBuddy);
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(controller.comboCount, 3);
+      expect(controller.transientPose, ClawdTransientPose.tsundere);
+      final pulseAt3 = controller.transientPulse;
+
+      await tester.tap(calendarBuddy);
+      await tester.pump();
+      expect(controller.comboCount, 4);
+      expect(controller.transientPose, ClawdTransientPose.tsundere);
+      expect(controller.transientPulse, pulseAt3 + 1);
+      final buddyWidget = tester.widget<JournalPixelBuddy>(
+        find.descendant(
+          of: calendarBuddy,
+          matching: find.byType(JournalPixelBuddy),
+        ),
+      );
+      expect(buddyWidget.poseOverride, JournalPixelBuddyPose.tsunderePuff);
+      expect(buddyWidget.posePulse, controller.transientPulse);
+
+      await tester.pump(const Duration(milliseconds: 2600));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+        'standalone CalendarScreen resets local controller on account switch and logout',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final session = _Session();
+      final store = await _createSeededStore(now: now, session: session);
+      addTearDown(store.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: Scaffold(body: CalendarScreen(store: store, clock: () => now)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final cameo = find.byKey(const ValueKey('calendar-pixel-buddy'));
+      await tester.tap(cameo);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsOneWidget);
+
+      session.account = 'student-calendar-switched';
+      await store.restoreSession();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsNothing);
+
+      // Re-tap then logout -> clears local bubble & state.
+      await tester.tap(cameo);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsOneWidget);
+      await store.logout();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsNothing);
+    });
+
+    testWidgets(
+        'disableAnimations skips long-press petting transient pose on stage and controller',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final store = await _createSeededStore(now: now);
+      addTearDown(store.dispose);
+      final router = _buildShellRouter(store, clock: () => now);
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: child!,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final homeBuddy = find.byKey(const ValueKey('home-pixel-buddy'));
+      final controller = ClawdCompanionScope.of(tester.element(homeBuddy));
+      await tester.longPress(homeBuddy);
+      await tester.pumpAndSettle();
+      expect(controller.transientPose, ClawdTransientPose.none);
+      expect(controller.petCount, 0);
+
+      controller.startPet(
+        snapshot: const ClawdPageContextSnapshot(tab: ClawdPrimaryTab.home),
+      );
+      expect(controller.transientPose, ClawdTransientPose.none);
+      expect(controller.petCount, 0);
+    });
+
+    testWidgets(
+        'AppShell and all 4 primary tabs agree on hasSyncErrorOrPending under non-quiet warning without overwriting',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+      FlutterSecureStorage.setMockInitialValues({});
+      final store = _WarningStore(clock: () => now);
+      await store.restoreSession();
+      store.syncReport =
+          SyncReport(phase: SyncPhase.success, lastDataSuccessAt: now);
+      addTearDown(store.dispose);
+
+      final router = _buildShellRouter(store, clock: () => now);
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final controller = ClawdCompanionScope.of(
+        tester.element(find.byKey(const ValueKey('home-pixel-buddy'))),
+      );
+      expect(controller.hasSyncErrorOrPending, isTrue);
+
+      for (final tab in ['日历', '统计', '我的', '首页']) {
+        await tester.tap(find.text(tab));
+        await tester.pumpAndSettle();
+        expect(controller.hasSyncErrorOrPending, isTrue,
+            reason: 'tab=$tab overwrote hasSyncErrorOrPending');
+      }
+    });
+  });
+}
+
+class _WarningStore extends AssignmentStore {
+  _WarningStore({super.clock})
+      : super(
+          sessionStore: _Session(),
+          notificationService: _Notifications(),
+          widgetSnapshotService: _Snapshot(),
+        );
+
+  @override
+  bool get hasNonQuietServiceWarning => true;
+
+  @override
+  String? get recoveryWarning => '本机记录恢复提示';
 }
