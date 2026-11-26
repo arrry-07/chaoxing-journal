@@ -4,6 +4,12 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
+## 2026-11-26 · v1.91.1 Stage 1 开发与独立 Gate 审查闭环 PASS（跳过自测包，就绪进入 v1.92.0 Stage 2）
+
+- 已完成改动：围绕 [v1.91.1 方案](../plans/2026-11-26-v1.91.1-Clawd2.0文字舞台8bit音效与轻量收口方案.md)（业务基线 `2005beb`，方案提交 `d7e3e1f`）按两波次完成 `M1–M5` 全部 29 个白名单文件实现：Wave 1A-a（`243661e`，`DeepSeek V4.1 Flash high`，`assignment_store.dart` 6 处会话守卫收口与 3 份文档校准）、Wave 1A-b（`3a980e1`，`Gemini 4 Hydrogen high`，8 项 8-bit 芯片音效合成与 `SoundPool` 桥接、`MainActivity.previewNotificationChime` `prepareAsync()` 异步化与勿扰拦截、死键清理及 `CourseStudyHubScreen` 折叠统一；`run_android_tests.py --local-fast` 与 5 份定向测试 `+82` 全绿）、Wave 1B（`6a8af33`，`Gemini 4 Hydrogen high`，`ClawdCompanionController` 单一真源、三档显示、`ClawdTitleStage` 等高文字舞台、`ClawdSpeechBubble` 暖纸气泡、去蓝星图标与 4 主页轻客串；全量 `+2108 ~1`）。独立 Gate 1 初审（纯 `Gemini 4 Neon high`）拦截 1 阻断 + 2 中级 + 2 次要后，由 Rework 1（`ac5acca`，`Gemini 4 Hydrogen high`，11 文件，全量 `+2114 ~1`）全数修复并补齐回归测试；独立 Gate 2 复审（纯 `Gemini 4 Neon high`）返回 **`PASS`（0 阻断 / 0 中级 / 2 次要）**；随后总控 1 文件直修 `ClawdTabCameo` 同步小跑 `mood` 联动（`d8b7f47`），在最终代码 `HEAD` 重跑 `TZ=UTC python scripts/verify_local_gate.py --mode full` 全绿（`+2114 ~1`、128 项 Python 单测、格式/静态分析/安全扫描与 L0 行数预算均通过）。
+- 当前 commit 与状态：最终业务代码提交固定在 `d8b7f47`，本条状态随文档提交同步推送至 `origin/dev`；按维护者授权跳过 `1.91.1+132` 中间自测包，版本号维持 `1.91.0+131` 未改动，未触碰 `main` / Tag / Release。未实测项：MuMu/物理真机 6 项目视像素、拖拽手感及原生 8-bit 芯片发声与免打扰试听（留待 Stage 2 正式包上机核验）。
+- 下一步待办：新开干净对话直接进入方案第 5 节 **Stage 2 正式发布 `v1.92.0`（`1.92.0+132`）**——在 `dev` 冻结版本并提汇总 PR 合入 `main`、干净 ASCII 目录原签名打包并在 MuMu「学习通」保数据完成 6 项目视/听觉验收、打 Tag `v1.92.0` 公开 GitHub Release 与推进 Gitee `update-manual.json` + `update-stable.json`（`--promote-stable`），最后 `[skip ci]` 收口归档。
+
 ## 2026-11-26 · v1.91.0 (1.91.0+131) 正式发布收口（PR #66 / Tag v1.91.0 / Gitee 双索引同步）
 
 - 已完成改动：围绕 [v1.90.4 归档方案](../archive/plans/2026-11-26-v1.90.4-悬浮顶栏渐隐过渡与Clawd像素伙伴精修方案.md)（基线 `3da48eb`）完成 `M1–M2` 实现（`7135629`，`Gemini 4 Hydrogen high`，6 文件白名单，全量 `+2098 ~1`）、Gate 1 独立审查（`Gemini 4 Neon high`）拦截 2 中级 + 1 次要后的第 1 轮返工（`714eac0`，4 文件白名单，全量 `+2101 ~1`）及 Gate 2 独立复审（`Gemini 4 Neon high`，**`PASS` 0 阻断 / 0 中级 / 0 次要**）；随后在 `dev` 冻结 `1.91.0+131`（`ecc2346`），PR `#66` 汇总 `1.90.1–1.90.4` 合入 `main`（`5ab698b`），annotated Tag `v1.91.0`（`662616aa` → `5ab698b`）与 PR/main/Tag 全量 CI（`45794750429` / `45796462441` / `45798321017`）、`site-release-dispatch`（`45800488770`）及 `gitee-release-sync`（`45800488689` + `promote_stable=true` `45800592922`）全部 `success`。在干净 ASCII 目录 `D:\campus-tools\build-work\cx1910-131-20261126` 用 JDK `17.0.21` 原签名构建双 ABI 正式包 `D:\campus-tools\artifacts\cx1910-131\chaoxing-journal-1.91.0.apk`（`64,280,402` B，SHA-256 `a9a1fdf14434a5246f5d5a1800a7898d2f4aeb69425bfd80f1779deda635c8ae`，`verify_apk_and_report.py` 与 `check_apk_abis.py` 全过），完成 MuMu「学习通」（`emulator-5558`，API 35）保数据覆盖 7/7 项浅/深双主题视觉审计 PASS（截图存 `D:\campus-tools\artifacts\cx1910-131\screenshots`，`logcat` 0 崩溃/0 溢出，4 条 `v3` 渠道就绪）、GitHub Release `459234902` 公开设 `latest` 与五方回下载校验、Gitee `update-manual.json` / `update-stable.json` 双索引公网回读核验（未上传 Gitee APK 镜像），并归档 `v1.90.1`/`v1.90.3`/`v1.90.4` 方案与 `v1.8.31` 验收记录。
@@ -27,9 +33,3 @@
 - 已完成改动：围绕 [v1.90.1 归档方案](../archive/plans/2026-11-26-v1.90.1-课程学期分组有声通知v3紧凑密度与1900收口方案.md)（基线 `8260461`）完成 `M1–M4` 实现、两轮独立 `Neon (high)` Gate 审查与返工收口，构建自测包 `1.90.1+128`（SHA-256 `ce09e0c7...`）并在 MuMu「学习通」完成 4 条 `v3` 有声渠道、通知音量归零告警、清铃试听、3 秒测试待办提醒与紧凑密度验收。
 - 当前 commit 与状态：已汇总合入 `v1.91.0` 正式发布（`5ab698b`）。
 - 下一步待办：已随 `1.91.0+131` 正式发布。
-
-## 2026-11-26 · v1.90.0 (1.90.0+127) 正式发布收口（PR #65 / Tag v1.90.0 / Gitee 双索引同步）
-
-- 已完成改动：跑完 [v1.8.34 归档方案](../archive/plans/2026-11-25-v1.8.34-配色统一无重叠转场悬浮详情顶栏与体验精修方案.md) 闭环并冻结正式版 `1.90.0+127`（`60ea569`）；PR `#65` 合入 `main`（`ea64137`），annotated Tag `v1.90.0`（`733ea66` → `ea64137`），构建原签名正式包 `1.90.0+127`（`64,054,782` B，SHA-256 `c3a85faa...`），完成 MuMu 保数据验收、GitHub Release `458482127` 公开与 Gitee 双索引同步。
-- 当前 commit 与状态：发布代码与 Tag `v1.90.0` 固定在 `ea64137b98312f2fe20d4cc529fb5573067da369`。
-- 下一步待办：后续优化已随 `1.91.0+131` 交付。
