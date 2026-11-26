@@ -721,7 +721,9 @@ class ClawdTabCameo extends StatelessWidget {
         final interactive =
             !controller.isSyncing && !controller.hasSyncErrorOrPending;
         return JournalPixelBuddy(
-          mood: controller.mood,
+          mood: controller.isSyncing
+              ? JournalPixelBuddyMood.syncing
+              : controller.mood,
           size: effectiveSize,
           syncTickListenable: controller.syncTick,
           celebratePulse: controller.celebratePulse,
