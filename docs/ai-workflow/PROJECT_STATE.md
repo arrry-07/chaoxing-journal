@@ -2,11 +2,10 @@
 
 <a id="dev-当前迭代进度"></a>
 
-## 当前迭代进度（正式版 1.90.0+127；main 与 dev 已同步）
+## 当前迭代进度（正式版 1.90.0+127；dev 自测至 1.90.1+128）
 
-- **1.90.0+127 已正式发布收口**（PR `#65` 合入 `ea64137`，annotated Tag `v1.90.0` `733ea66` → `ea64137`，GitHub Release `458482127` 于 2026-11-26 公开并设为 `latest`），详见[验收与发布记录](../reviews/2026-11-25-v1.90.0-体验重构配色转场与提醒正式发布验收记录.md)。
-- **验证与分发交付**：`v1.8.32`–`v1.8.34` 均通过多轮异构 Gate PASS（最终 Gate 3 `Carbon high` 0 阻断 / 0 中级 / 0 次要）；PR `#65` / `main` / Tag `v1.90.0` 全量三时区与 Android Gradle/Lint CI、`site-release-dispatch` 及 `gitee-release-sync`（含 `promote_stable=true`）全部 `success`；原签名双 ABI 正式包（`64,054,782` B，SHA-256 `c3a85faa...`）五方回下载一致，在 **MuMu「学习通」**（API 35）保数据覆盖通过全量 5 项浅/深主题检查且 `logcat` 零崩溃；Gitee `update-manual.json` 与 `update-stable.json` 双索引均回读确认为 `1.90.0+127`（未上传 Gitee APK 镜像）。
-- **当前分支基线**：`v1.8.33` / `v1.8.34` 方案与 `v1.8.26` 验收均已随本次发布收口归档，`docs/plans/` 已清空；`main` 与 `dev` 已同步至本收口提交，详见[dev 本地状态](DEV_STATE.md)。
+- **1.90.0+127 正式基线**：PR `#65` 合入 `ea64137`，annotated Tag `v1.90.0`（`733ea66` → `ea64137`），GitHub Release `458482127`（`latest`），Gitee `update-manual.json` 与 `update-stable.json` 双索引均已同步至 `1.90.0+127`，详见[验收与发布记录](../reviews/2026-11-25-v1.90.0-体验重构配色转场与提醒正式发布验收记录.md)。
+- **dev 当前收口（`1.90.1+128` 自测包已通过 MuMu 保数据验收）**：围绕 [v1.90.1 方案](../plans/2026-11-26-v1.90.1-课程学期分组有声通知v3紧凑密度与1900收口方案.md) 完成 `M1–M4`（课程课业时间分布投票分组、4 渠道有声 `v3` + `SQLite v10` + 通知音量零值诊断与清铃试听、紧凑密度生效修复及 `1.90.0` 3 项收口），经独立 `Neon (high)` Gate 2 复审 `PASS`（0 阻断 / 0 中级），已构建原签名双 ABI 自测包 `1.90.1+128`（`64,083,642` B，SHA-256 `ce09e0c7...`）并在 MuMu「学习通」保数据验收通过（`logcat` 0 崩溃），详见[dev 本地状态](DEV_STATE.md)；未动 `main` / Tag / Release。
 
 ## 最近 2 个正式发布版本
 
