@@ -17,6 +17,7 @@ import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
@@ -34,6 +35,7 @@ class MainActivity : FlutterActivity() {
     private var personalFileBridge: PersonalFileBridge? = null
     private var verificationBrowser: VerificationBrowser? = null
     private var previewChimePlayer: MediaPlayer? = null
+    private var pendingPreviewChimeCancel: (() -> Unit)? = null
     private var webSessionGeneration = 0L
     private var lastUiNightMode = Configuration.UI_MODE_NIGHT_UNDEFINED
     private var lastFontScale = 0f
@@ -157,7 +159,7 @@ class MainActivity : FlutterActivity() {
                 return@setMethodCallHandler
             }
             if (call.method == "previewNotificationChime") {
-                result.success(previewNotificationChime())
+                previewNotificationChime(result)
                 return@setMethodCallHandler
             }
             val outcome = when (call.method) {
@@ -555,7 +557,20 @@ class MainActivity : FlutterActivity() {
         )
     }
 
-    private fun previewNotificationChime(): Map<String, Any?> {
+    private fun previewChimePayload(
+        played: Boolean,
+        audioState: NotificationAudioState,
+    ): Map<String, Any?> = mapOf(
+        "played" to played,
+        "notificationStreamVolume" to audioState.volume,
+        "notificationStreamMaxVolume" to audioState.maxVolume,
+        "notificationStreamMuted" to audioState.muted,
+        "ringerMode" to audioState.ringerMode,
+        "interruptionFilter" to audioState.interruptionFilter,
+    )
+
+    private fun previewNotificationChime(result: MethodChannel.Result) {
+        releasePreviewChimePlayer()
         val manager = runCatching {
             getSystemService(NotificationManager::class.java)
         }.getOrNull()
@@ -564,55 +579,91 @@ class MainActivity : FlutterActivity() {
             audioState.muted == true ||
             audioState.ringerMode == "silent" ||
             audioState.ringerMode == "vibrate"
-        var played = false
-        if (!blockedByMute) {
-            played = runCatching {
-                releasePreviewChimePlayer()
-                val afd = resources.openRawResourceFd(R.raw.journal_chime)
-                    ?: return@runCatching false
-                val player = MediaPlayer()
-                previewChimePlayer = player
-                afd.use {
-                    player.setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build(),
-                    )
-                    player.setDataSource(it.fileDescriptor, it.startOffset, it.length)
-                    player.setOnCompletionListener { mp ->
-                        if (previewChimePlayer === mp) {
-                            previewChimePlayer = null
-                        }
-                        runCatching { mp.release() }
-                    }
-                    player.setOnErrorListener { mp, _, _ ->
-                        if (previewChimePlayer === mp) {
-                            previewChimePlayer = null
-                        }
-                        runCatching { mp.release() }
-                        true
-                    }
-                    player.prepare()
-                    player.start()
-                    true
-                }
-            }.getOrElse {
-                releasePreviewChimePlayer()
-                false
+        val blockedByDnd = audioState.interruptionFilter == "none" ||
+            audioState.interruptionFilter == "alarms" ||
+            audioState.interruptionFilter == "priority"
+        if (blockedByMute || blockedByDnd) {
+            result.success(previewChimePayload(played = false, audioState = audioState))
+            return
+        }
+
+        val settled = AtomicBoolean(false)
+        lateinit var cancelPending: () -> Unit
+        fun complete(played: Boolean) {
+            if (!settled.compareAndSet(false, true)) return
+            if (pendingPreviewChimeCancel === cancelPending) {
+                pendingPreviewChimeCancel = null
+            }
+            runCatching {
+                result.success(previewChimePayload(played = played, audioState = audioState))
             }
         }
-        return mapOf(
-            "played" to played,
-            "notificationStreamVolume" to audioState.volume,
-            "notificationStreamMaxVolume" to audioState.maxVolume,
-            "notificationStreamMuted" to audioState.muted,
-            "ringerMode" to audioState.ringerMode,
-            "interruptionFilter" to audioState.interruptionFilter,
-        )
+        cancelPending = { complete(false) }
+        pendingPreviewChimeCancel = cancelPending
+
+        try {
+            val afd = resources.openRawResourceFd(R.raw.journal_chime)
+            if (afd == null) {
+                complete(false)
+                return
+            }
+            val player = MediaPlayer()
+            previewChimePlayer = player
+            afd.use {
+                player.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
+                player.setDataSource(it.fileDescriptor, it.startOffset, it.length)
+            }
+            player.setOnPreparedListener { mp ->
+                if (previewChimePlayer !== mp || isFinishing || isDestroyed) {
+                    if (previewChimePlayer === mp) {
+                        previewChimePlayer = null
+                    }
+                    runCatching { mp.release() }
+                    complete(false)
+                    return@setOnPreparedListener
+                }
+                val started = runCatching {
+                    mp.start()
+                    true
+                }.getOrElse {
+                    if (previewChimePlayer === mp) {
+                        previewChimePlayer = null
+                    }
+                    runCatching { mp.release() }
+                    false
+                }
+                complete(started)
+            }
+            player.setOnCompletionListener { mp ->
+                if (previewChimePlayer === mp) {
+                    previewChimePlayer = null
+                }
+                runCatching { mp.release() }
+            }
+            player.setOnErrorListener { mp, _, _ ->
+                if (previewChimePlayer === mp) {
+                    previewChimePlayer = null
+                }
+                runCatching { mp.release() }
+                complete(false)
+                true
+            }
+            player.prepareAsync()
+        } catch (_: Throwable) {
+            releasePreviewChimePlayer()
+            complete(false)
+        }
     }
 
     private fun releasePreviewChimePlayer() {
+        val cancel = pendingPreviewChimeCancel
+        pendingPreviewChimeCancel = null
+        cancel?.invoke()
         val current = previewChimePlayer ?: return
         previewChimePlayer = null
         runCatching {

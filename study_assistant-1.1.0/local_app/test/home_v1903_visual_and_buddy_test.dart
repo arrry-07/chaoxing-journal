@@ -391,33 +391,35 @@ void main() {
 
       await _pumpHome(tester, store, now: now);
 
-      // Initial render keeps single '课业手记' title Text, 22dp buddy, and unscaled 42dp hit target at 360dp.
+      // Initial render keeps single '课业手记' title Text, equal-height 32dp buddy at 360dp, and >=44dp hit target.
       expect(find.text('课业手记'), findsOneWidget);
       final titleBuddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
       expect(titleBuddyFinder, findsOneWidget);
       final titleBuddy = tester.widget<JournalPixelBuddy>(titleBuddyFinder);
-      expect(titleBuddy.size, 22.0);
+      expect(titleBuddy.size, 32.0);
       expect(titleBuddy.mood, JournalPixelBuddyMood.dueToday);
-      expect(tester.getSize(titleBuddyFinder).height,
-          inInclusiveRange(40.0, 44.0));
-      expect(tester.getRect(titleBuddyFinder).height,
-          inInclusiveRange(40.0, 44.0));
+      expect(
+          tester.getSize(titleBuddyFinder).height, greaterThanOrEqualTo(44.0));
+      expect(
+          tester.getRect(titleBuddyFinder).height, greaterThanOrEqualTo(44.0));
       expect(
         find.byKey(const ValueKey('home-sliver-pixel-buddy')),
         findsNothing,
       );
 
-      // Tapping buddy at 360dp keeps whisper single-row without pushing due-summary vertically.
+      // Tapping buddy at 360dp shows ClawdSpeechBubble without pushing due-summary vertically.
       final summaryBeforeY =
           tester.getTopLeft(find.byKey(const ValueKey('home-due-summary'))).dy;
       await tester.tap(titleBuddyFinder);
       await tester.pump();
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsOneWidget);
       expect(
         tester.getTopLeft(find.byKey(const ValueKey('home-due-summary'))).dy,
         closeTo(summaryBeforeY, 0.5),
       );
-      await tester.pump(const Duration(milliseconds: 2050));
+      await tester.pump(const Duration(milliseconds: 2600));
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsNothing);
 
       // Scrolling down reveals the floating mini buddy and scales down '课业手记' without ellipsis truncation.
       await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
@@ -509,15 +511,24 @@ void main() {
       await _pumpHome(tester, store, now: now);
       expect(find.text('刚刚更新'), findsOneWidget);
 
-      // Tap buddy -> whisper appears in home-sync-status, restores after 2s.
+      // Tap buddy -> bubble appears without overwriting home-sync-status, auto-dismisses after 2.5s.
       await tester.tap(find.byKey(const ValueKey('home-pixel-buddy')));
       await tester.pump();
-      expect(find.text('刚刚更新'), findsNothing);
-      expect(find.text('今日待办1项，稳步推进'), findsOneWidget);
+      expect(find.text('刚刚更新'), findsOneWidget);
+      final bubbleFinder = find.byKey(const ValueKey('clawd-speech-bubble'));
+      expect(bubbleFinder, findsOneWidget);
+      expect(
+        find.descendant(
+          of: bubbleFinder,
+          matching: find.text('今日待办1项，稳步推进'),
+        ),
+        findsOneWidget,
+      );
 
-      await tester.pump(const Duration(milliseconds: 2050));
+      await tester.pump(const Duration(milliseconds: 2600));
       await tester.pumpAndSettle();
       expect(find.text('刚刚更新'), findsOneWidget);
+      expect(bubbleFinder, findsNothing);
       expect(find.text('今日待办1项，稳步推进'), findsNothing);
 
       // Busy state drives rotating spinner glyph + sync phrase + preserves _syncProgressLabel.
@@ -647,9 +658,10 @@ void main() {
         expect(tester.getRect(homeStatusFinder).bottom, lessThanOrEqualTo(0.0));
       }
 
-      // Tap sliver mini buddy -> visible whisper appears in JournalSliverHeader AND mini buddy keeps State & jumps without unmount.
+      // Tap sliver mini buddy -> bubble appears cleanly AND mini buddy keeps State & jumps without unmount.
       final sliverBuddyFinder =
           find.byKey(const ValueKey('home-sliver-pixel-buddy'));
+      final bubbleFinder = find.byKey(const ValueKey('clawd-speech-bubble'));
       final buddyStateBefore = tester.state(sliverBuddyFinder);
       final buddyPainterBefore = tester
           .widget<CustomPaint>(
@@ -666,13 +678,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 36));
       final sliverStatusFinder =
           find.byKey(const ValueKey('home-sliver-sync-status'));
-      expect(sliverStatusFinder, findsOneWidget);
-      final sliverRect = tester.getRect(sliverStatusFinder);
-      expect(sliverRect.top, greaterThanOrEqualTo(0.0));
-      expect(sliverRect.bottom, lessThan(200.0));
+      expect(sliverStatusFinder, findsNothing);
+      expect(bubbleFinder, findsOneWidget);
+      final bubbleRect = tester.getRect(bubbleFinder);
+      expect(bubbleRect.top, greaterThanOrEqualTo(0.0));
+      expect(bubbleRect.bottom, lessThan(200.0));
       expect(
         find.descendant(
-          of: sliverStatusFinder,
+          of: bubbleFinder,
           matching: find.text('今日待办1项，稳步推进'),
         ),
         findsOneWidget,
@@ -693,30 +706,30 @@ void main() {
           .painter!;
       expect(buddyPainterAfter.shouldRepaint(buddyPainterBefore), isTrue);
 
-      await tester.pump(const Duration(milliseconds: 2050));
+      await tester.pump(const Duration(milliseconds: 2600));
       await tester.pumpAndSettle();
-      expect(sliverStatusFinder, findsNothing);
+      expect(bubbleFinder, findsNothing);
 
-      // Background lifecycle (AppLifecycleState.paused) cancels active whisper timer & clears whisper immediately.
+      // Background lifecycle (AppLifecycleState.paused) cancels active bubble timer & clears bubble immediately.
       await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
       await tester.pump();
-      expect(sliverStatusFinder, findsOneWidget);
+      expect(bubbleFinder, findsOneWidget);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await tester.pump();
-      expect(sliverStatusFinder, findsNothing);
-      await tester.pump(const Duration(milliseconds: 2100));
+      expect(bubbleFinder, findsNothing);
+      await tester.pump(const Duration(milliseconds: 2600));
       expect(tester.takeException(), isNull);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
 
-      // TickerMode(enabled: false) cancels active whisper timer & clears whisper immediately.
+      // TickerMode(enabled: false) cancels active bubble timer & clears bubble immediately.
       await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
       await tester.pump();
-      expect(sliverStatusFinder, findsOneWidget);
+      expect(bubbleFinder, findsOneWidget);
       tickerEnabled.value = false;
       await tester.pump();
-      expect(sliverStatusFinder, findsNothing);
-      await tester.pump(const Duration(milliseconds: 2100));
+      expect(bubbleFinder, findsNothing);
+      await tester.pump(const Duration(milliseconds: 2600));
       expect(tester.takeException(), isNull);
       tickerEnabled.value = true;
       await tester.pump();
@@ -746,6 +759,7 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
       await tester.pump();
+      expect(bubbleFinder, findsNothing);
       expect(
         find.descendant(
           of: sliverStatusFinder,
@@ -754,7 +768,7 @@ void main() {
         findsOneWidget,
       );
 
-      // Sync error priority prevents whisper in JournalSliverHeader when tapped.
+      // Sync error priority prevents bubble when tapped.
       store.mockProgress = null;
       store.nextReport = const SyncReport(
         phase: SyncPhase.failed,
@@ -766,8 +780,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
       await tester.pumpAndSettle();
       expect(sliverStatusFinder, findsNothing);
+      expect(bubbleFinder, findsNothing);
 
-      // Foreground disableAnimations: true still displays 2s whisper and auto-restores.
+      // Foreground disableAnimations: true still displays 2.5s bubble and auto-dismisses.
       store.syncReport =
           SyncReport(phase: SyncPhase.success, lastDataSuccessAt: now);
       await _pumpHome(
@@ -778,9 +793,11 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('home-pixel-buddy')));
       await tester.pump();
+      expect(bubbleFinder, findsOneWidget);
       expect(find.text('今日待办1项，稳步推进'), findsOneWidget);
-      await tester.pump(const Duration(milliseconds: 2050));
+      await tester.pump(const Duration(milliseconds: 2600));
       await tester.pumpAndSettle();
+      expect(bubbleFinder, findsNothing);
       expect(find.text('今日待办1项，稳步推进'), findsNothing);
     });
 
@@ -823,7 +840,7 @@ void main() {
         final buddy = tester.widget<JournalPixelBuddy>(
           find.byKey(const ValueKey('home-pixel-buddy')),
         );
-        expect(buddy.size, 20.0);
+        expect(buddy.size, 24.0);
 
         await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
         await tester.pumpAndSettle();
@@ -916,26 +933,15 @@ void main() {
       );
       expect(tester.getTopLeft(dueSummaryFinder).dy, closeTo(summaryY, 0.5));
 
-      // Tap 3 within 1.2s -> combo 3+ whisper, single-row without pushing due-summary.
+      // Tap 3 within 1.2s -> tsundere bubble, single-row without pushing due-summary.
       await tester.pump(const Duration(milliseconds: 200));
       await tester.tap(titleBuddyFinder);
       await tester.pump();
-      expect(
-        find.text(
-          journalBuddyTapWhisper(
-            dueToday: 2,
-            dueIn3Days: 3,
-            completedToday: 0,
-            tapCount: 2,
-            comboCount: 3,
-          ),
-        ),
-        findsOneWidget,
-      );
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsOneWidget);
       expect(tester.getTopLeft(dueSummaryFinder).dy, closeTo(summaryY, 0.5));
 
-      // Wait past 1.2s combo window & 2s whisper window -> combo resets to 1.
-      await tester.pump(const Duration(milliseconds: 2100));
+      // Wait past 1.2s combo window & 2.5s bubble window -> combo resets to 1.
+      await tester.pump(const Duration(milliseconds: 2600));
       await tester.pumpAndSettle();
       await tester.tap(titleBuddyFinder);
       await tester.pump();
@@ -951,7 +957,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      await tester.pump(const Duration(milliseconds: 2100));
+      await tester.pump(const Duration(milliseconds: 2600));
       await tester.pumpAndSettle();
 
       // Completing manual entry increments celebratePulse on buddy.
@@ -1090,7 +1096,7 @@ void main() {
       await tester.pump();
       expect(
         find.descendant(
-          of: find.byKey(const ValueKey('home-sliver-sync-status')),
+          of: find.byKey(const ValueKey('clawd-speech-bubble')),
           matching: find.text(
             journalBuddyTapWhisper(
               dueToday: 1,
@@ -1103,7 +1109,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      await tester.pump(const Duration(milliseconds: 2050));
+      await tester.pump(const Duration(milliseconds: 2600));
       await tester.pumpAndSettle();
     });
   });

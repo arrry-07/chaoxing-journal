@@ -389,6 +389,8 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen>
           _healthMessage = '当前环境不支持直接试听清铃（请使用“发送测试有声提醒”确认）。';
         } else if (result.isPhoneMutedOrVibrate) {
           _healthMessage = '当前手机处于静音或振动模式，无法听到试听铃声；请切换为响铃模式后再试。';
+        } else if (result.isDoNotDisturbActive) {
+          _healthMessage = '当前已开启系统勿扰模式，已暂停试听铃声；请关闭勿扰模式后再试。';
         } else if (result.isNotificationVolumeZero) {
           final volText = result.notificationStreamMaxVolume != null &&
                   result.notificationStreamVolume != null

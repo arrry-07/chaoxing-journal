@@ -801,7 +801,9 @@ class AssignmentStore extends ChangeNotifier {
     _activeVisitTicket = null;
     _visitLeftApp = false;
     _pendingReturnConfirmation = null;
-    if (generation != _generation || !_authenticated || _disposed) return;
+    if (generation == null || !_isSessionStateCurrent(epoch: generation)) {
+      return;
+    }
     final target = findAssignment(id);
     if (target == null ||
         (!target.isExam &&
@@ -812,7 +814,7 @@ class AssignmentStore extends ChangeNotifier {
     notifyListeners();
     var confirmed = false;
     await _run(() async {
-      if (generation != _generation || !_authenticated || _disposed) return;
+      if (!_isSessionStateCurrent(epoch: generation)) return;
       if (chaoxingClient.needsSessionInitialization) {
         await _refreshChaoxingSession();
       }
@@ -843,7 +845,7 @@ class AssignmentStore extends ChangeNotifier {
         }
         incoming = single == null ? const <Assignment>[] : [single];
       }
-      if (generation != _generation || !_authenticated || _disposed) return;
+      if (!_isSessionStateCurrent(epoch: generation)) return;
       final observed = incoming
           .where((a) =>
               a.id == id ||
@@ -861,13 +863,12 @@ class AssignmentStore extends ChangeNotifier {
       await _markReminderMutationPending();
       await repository.mergeAndSave(accepted,
           completeSync: false,
-          canCommit: () async =>
-              generation == _generation && _authenticated && !_disposed);
-      if (generation != _generation || !_authenticated || _disposed) return;
+          canCommit: () async => _isSessionStateCurrent(epoch: generation));
+      if (!_isSessionStateCurrent(epoch: generation)) return;
       await _reloadJournal();
-      if (generation != _generation || !_authenticated || _disposed) return;
+      if (!_isSessionStateCurrent(epoch: generation)) return;
       await _recordChanges(before, accepted);
-      if (generation != _generation || !_authenticated || _disposed) return;
+      if (!_isSessionStateCurrent(epoch: generation)) return;
       if (repository.identityConflictCount > 0) {
         returnCheckMessage = '已读取最新状态，部分旧记录存在重复关联，已暂停其提醒；请查看本地记录。';
         confirmed = true;
@@ -910,7 +911,7 @@ class AssignmentStore extends ChangeNotifier {
       }
       confirmed = true;
     });
-    if (generation != _generation || !_authenticated || _disposed) return;
+    if (!_isSessionStateCurrent(epoch: generation)) return;
     if (!confirmed) returnCheckMessage = '本次未能确认提交状态，已保留原记录和提醒；请稍后重试。';
     notifyListeners();
   }
@@ -2152,7 +2153,7 @@ class AssignmentStore extends ChangeNotifier {
           .toList();
 
   void _handleHomeProgress(int generation, AssignmentSyncProgress progress) {
-    if (generation != _generation || !_authenticated || _disposed) return;
+    if (!_isSessionStateCurrent(epoch: generation)) return;
     _queuedHomeProgress = progress;
     final firstBatch =
         _homePreviewAssignments.isEmpty && progress.assignments.isNotEmpty;
@@ -2167,14 +2168,14 @@ class AssignmentStore extends ChangeNotifier {
     }
     _homeProgressTimer ??= Timer(const Duration(milliseconds: 100), () {
       _homeProgressTimer = null;
-      if (generation != _generation || !_authenticated || _disposed) return;
+      if (!_isSessionStateCurrent(epoch: generation)) return;
       final latest = _queuedHomeProgress;
       if (latest != null) _publishHomeProgress(generation, latest);
     });
   }
 
   void _publishHomeProgress(int generation, AssignmentSyncProgress progress) {
-    if (_disposed || !_authenticated || generation != _generation) return;
+    if (!_isSessionStateCurrent(epoch: generation)) return;
     _homeProgressTimer?.cancel();
     _homeProgressTimer = null;
     _queuedHomeProgress = null;
@@ -2186,7 +2187,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   void _markHomePreviewSaving(int generation) {
-    if (_disposed || !_authenticated || generation != _generation) return;
+    if (!_isSessionStateCurrent(epoch: generation)) return;
     // A retraction may still be waiting in the 100ms merge queue. Saving must
     // publish the newest snapshot, otherwise the failed course's temporary
     // rows reappear until the whole sync clears the preview.
@@ -3001,9 +3002,9 @@ class AssignmentStore extends ChangeNotifier {
     if (!chaoxingClient.canHydrateProfile) return;
     try {
       final profile = await chaoxingClient.loadProfile();
-      if (generation != _generation || _disposed || !_authenticated) return;
+      if (!_isSessionStateCurrent(epoch: generation)) return;
       final pending = (_operations ?? Future<void>.value()).then((_) async {
-        if (generation != _generation || _disposed || !_authenticated) return;
+        if (!_isSessionStateCurrent(epoch: generation)) return;
         final password = await sessionStore.readChaoxingPassword();
         if (password == null || generation != _generation) return;
         final name = profile.displayName ?? _chaoxingDisplayName;
@@ -3147,10 +3148,11 @@ class AssignmentStore extends ChangeNotifier {
       }
     }
     try {
-      if (generation != _generation ||
-          _disposed ||
-          _syncCancelled ||
-          operation != _syncOperation) {
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        expectedAuthenticated: null,
+        syncOperation: operation,
+      )) {
         return null;
       }
       if (lease != null &&
@@ -3170,11 +3172,10 @@ class AssignmentStore extends ChangeNotifier {
         return BackgroundCheckResult.outsideWindowSkipReason;
       }
       await _run(() async {
-        if (!_authenticated ||
-            generation != _generation ||
-            _disposed ||
-            _syncCancelled ||
-            operation != _syncOperation) {
+        if (!_isSessionStateCurrent(
+          epoch: generation,
+          syncOperation: operation,
+        )) {
           return;
         }
         if (_nativeReminderAvailable &&
@@ -3185,11 +3186,10 @@ class AssignmentStore extends ChangeNotifier {
             )) {
           return;
         }
-        if (!_authenticated ||
-            generation != _generation ||
-            _disposed ||
-            _syncCancelled ||
-            operation != _syncOperation) {
+        if (!_isSessionStateCurrent(
+          epoch: generation,
+          syncOperation: operation,
+        )) {
           return;
         }
         await _syncAssignmentsBody(
@@ -3336,12 +3336,20 @@ class AssignmentStore extends ChangeNotifier {
     if (account == null || !_authenticated) return false;
     var restored = false;
     await _run(() async {
-      if (generation != _generation || account != _account || !_authenticated) {
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+      )) {
         return;
       }
       await _markReminderMutationPending();
       restored = await repository.restoreBackupSnapshot(snapshot, account);
-      if (generation != _generation || account != _account || !_authenticated) {
+      if (!_isSessionStateCurrent(
+        epoch: generation,
+        account: account,
+        checkAccount: true,
+      )) {
         restored = false;
         return;
       }
@@ -5494,13 +5502,21 @@ class AssignmentStore extends ChangeNotifier {
             s.source == 'courseNotice' && s.phase != SyncSourcePhase.failed)) {
       final account = syncAccount;
       if (account != null &&
-          generation == _generation &&
-          _account == account &&
-          !_disposed) {
+          _isSessionStateCurrent(
+            epoch: generation,
+            account: account,
+            checkAccount: true,
+            expectedAuthenticated: null,
+          )) {
         try {
           final mergedNotices = _courseNotices.mergeIncoming(capturedNotices);
           await repository.saveCourseNotices(mergedNotices, account);
-          if (generation == _generation && _account == account && !_disposed) {
+          if (_isSessionStateCurrent(
+            epoch: generation,
+            account: account,
+            checkAccount: true,
+            expectedAuthenticated: null,
+          )) {
             _courseNotices = mergedNotices;
             _invalidateHomeDisplayIndex();
           }

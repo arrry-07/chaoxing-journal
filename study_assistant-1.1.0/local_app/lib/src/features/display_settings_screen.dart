@@ -17,6 +17,12 @@ class DisplaySettingsScreen extends StatelessWidget {
         WidgetRange.week => '未来7天（含今天）',
       };
 
+  String _clawdVisibilitySubtitle(ClawdVisibilityMode mode) => switch (mode) {
+        ClawdVisibilityMode.allPrimaryTabs => '在首页文字舞台与日历、统计、我的顶栏展示 Clawd',
+        ClawdVisibilityMode.homeOnly => '仅在首页「课业手记」文字舞台展示 Clawd',
+        ClawdVisibilityMode.off => '隐藏全部主页面与顶栏的像素伙伴',
+      };
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: store,
@@ -66,21 +72,45 @@ class DisplaySettingsScreen extends StatelessWidget {
                         store.display.copyWith(countdown: v),
                       ),
                     ),
-                    SwitchListTile(
-                      key: const ValueKey('display-pixel-buddy-toggle'),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 2),
-                      title: Text('顶栏像素伙伴', style: journal.entryTitle),
-                      subtitle: Text(
-                        '在首页标题旁显示像素小伴，轻点互动并播报同步状态',
-                        style: journal.metadata,
-                      ),
-                      value: d.showPixelBuddy,
-                      onChanged: (v) => saveDisplaySetting(
-                        context,
-                        store,
-                        store.display.copyWith(showPixelBuddy: v),
-                      ),
+                    JournalGroupTile(
+                      key: const ValueKey('display-pixel-buddy-mode'),
+                      title: '像素伙伴 Clawd',
+                      subtitle: _clawdVisibilitySubtitle(d.clawdVisibility),
+                      trailingText: d.clawdVisibility.label,
+                      onTap: () async {
+                        final picked =
+                            await showJournalPickerSheet<ClawdVisibilityMode>(
+                          context,
+                          title: '像素伙伴显示范围',
+                          selectedValue: d.clawdVisibility,
+                          searchable: false,
+                          displayPrefs: d,
+                          options: const [
+                            JournalPickerOption(
+                              value: ClawdVisibilityMode.allPrimaryTabs,
+                              label: '全部主页面',
+                              subtitle: '在首页文字舞台与日历、统计、我的顶栏轻客串',
+                            ),
+                            JournalPickerOption(
+                              value: ClawdVisibilityMode.homeOnly,
+                              label: '仅首页',
+                              subtitle: '仅在首页「课业手记」文字舞台与悬浮顶栏展示',
+                            ),
+                            JournalPickerOption(
+                              value: ClawdVisibilityMode.off,
+                              label: '关闭',
+                              subtitle: '隐藏全部主页面与顶栏的像素伙伴',
+                            ),
+                          ],
+                        );
+                        if (picked != null && context.mounted) {
+                          await saveDisplaySetting(
+                            context,
+                            store,
+                            store.display.copyWith(clawdVisibility: picked),
+                          );
+                        }
+                      },
                     ),
                   ],
                 ),

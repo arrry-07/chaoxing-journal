@@ -6,11 +6,11 @@
 [![Release](https://img.shields.io/github/v/release/arrry-07/chaoxing-journal)](https://github.com/arrry-07/chaoxing-journal/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-243e34.svg)](LICENSE)
 
-**[下载 Android 安装包：1.91.0+131](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.91.0/chaoxing-journal-1.91.0.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.91.0) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
+**[下载 Android 安装包：1.92.0+132](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.92.0/chaoxing-journal-1.92.0.apk)** · [发布说明](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.92.0) · [安装与使用](docs/guides/安装与使用.md) · [反馈问题](https://github.com/arrry-07/chaoxing-journal/issues/new/choose) · [开发与贡献](CONTRIBUTING.md)
 
 这是社区维护的第三方工具，与学习通官方没有隶属关系。作业作答与提交仍需在学习通完成。
 
-**1.91.0+131 已正式发布。**汇总交付 `v1.90.1`–`v1.90.4`：主页宣纸光学纸感层次与全站阻尼弹簧微交互、首页悬浮顶栏（`JournalSliverHeader`）浅/深双主题纵向柔和渐变毛玻璃与 `18dp` 5 色标渐隐羽化裙边、顶栏暖陶 Clawd 像素伙伴（`14×12` 物理像素对齐、6 套有限空闲动作、3 档连击、完成/置顶欢呼与同步 4 腿小跑，可一键开关）、课程活动投票与同批 `clazzId` 队列学期精准归类、全套 4 渠道内置提示音高优有声 `v3` 通知（`SQLite v10` 安全迁移与通知音量归零告警）及紧凑密度触控热区修复。历次变更见[版本记录](CHANGELOG.md)。
+**1.92.0+132 已正式发布。**全面升级 Clawd 2.0 像素伙伴与原生交互体验：首页「课业手记」旁新增等高物理像素对齐 `ClawdTitleStage` Shimeji 文字舞台（支持字顶巡逻、坐姿晃腿、打盹 `zZz`、扒字边攀爬、挂底翻跟头、长按摸头呼噜、拎起乱蹬弹簧落回及同步四腿小跑），彻底删除蓝色星星图标并改为暖纸细边带尖角反差萌气泡；支持「全部主页面 / 仅首页 / 关闭」三档显示与四主页轻量客串；零体积增量新增 8 项原生 `48 kHz` 8-bit 芯片音效（遵守静音与通话免打扰），同步加固提示音异步试听与系统勿扰拦截，并完成全仓折叠动效统一与会话守卫轻量收口。历次变更见[版本记录](CHANGELOG.md)。
 
 ## 功能
 
@@ -36,20 +36,20 @@
 
 ## 下载安装
 
-**当前正式包为 1.91.0（131）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
+**当前正式包为 1.92.0（132）；已安装用户直接覆盖安装，勿先卸载。** 需要 Android 8.0 或以上，支持 ARM64 / x86_64。
 
-1. [下载 chaoxing-journal-1.91.0.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.91.0/chaoxing-journal-1.91.0.apk)。发布说明及校验文件见 [1.91.0 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.91.0)。
+1. [下载 chaoxing-journal-1.92.0.apk](https://github.com/arrry-07/chaoxing-journal/releases/download/v1.92.0/chaoxing-journal-1.92.0.apk)。发布说明及校验文件见 [1.92.0 发布页](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.92.0)。
 2. 按[安装指南](docs/guides/安装与使用.md#下载安装)核对 SHA-256，在手机上打开 APK 并按系统提示安装。
 3. 使用自己的学习通账号登录，点击首页右上角刷新；遇到验证提示时按应用指引处理。
 
 <details>
-<summary>已经安装：如何升级到 1.91.0？</summary>
+<summary>已经安装：如何升级到 1.92.0？</summary>
 
-1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；`1.91.0+131` 作为重大体验更新，发布时同步推进 `update-manual.json` 与 `update-stable.json` 小索引（APK 批量镜像点由维护者单独选择）。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
+1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；`1.92.0+132` 作为重大体验更新，发布时同步推进 `update-manual.json` 与 `update-stable.json` 小索引（APK 批量镜像点由维护者单独选择）。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 
-正式包使用 `com.example.studyassistant.journal` 包名，是非 debuggable 的 Release 构建，但证书沿用维护者既有的 Android Debug 体验证书（证书主题仍为 Android Debug）；这不是生产或应用商店签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.91.0 继续沿用既有包名与体验证书。
+正式包使用 `com.example.studyassistant.journal` 包名，是非 debuggable 的 Release 构建，但证书沿用维护者既有的 Android Debug 体验证书（证书主题仍为 Android Debug）；这不是生产或应用商店签名。**升级直接覆盖安装，勿先卸载**；自行编译的 Debug 包默认使用本机 debug keystore，不能保证与体验包签名相同。支持在“我的 → 加密备份与恢复”导出本机课业备份；不导出登录凭据、签名链接和说明正文。1.92.0 继续沿用既有包名与体验证书。
 
 ## 使用边界
 
