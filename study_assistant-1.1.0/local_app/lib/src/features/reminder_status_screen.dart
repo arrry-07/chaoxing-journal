@@ -272,7 +272,8 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
             ),
             const SizedBox(height: 12),
           ],
-          if (_health?.isNotificationVolumeZero == true) ...[
+          if (_health?.isNotificationVolumeZero == true ||
+              _health?.isPhoneMutedOrVibrate == true) ...[
             Container(
               key:
                   const ValueKey('reminder-status-notification-volume-warning'),
@@ -296,7 +297,9 @@ class _ReminderStatusScreenState extends State<ReminderStatusScreen>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '当前系统通知音量为 0 或已静音，即使处于响铃模式也不会播放提醒铃声；请调高系统通知音量。',
+                      _health?.isPhoneMutedOrVibrate == true
+                          ? '当前手机处于静音或振动模式，提醒不会播放铃声；如需有声提醒请切换为响铃模式。'
+                          : '当前系统通知音量为 0 或已静音，即使处于响铃模式也不会播放提醒铃声；请调高系统通知音量。',
                       style: journal.metadata.copyWith(color: journal.ochre),
                     ),
                   ),
